@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -168,5 +169,97 @@ func TestThreadJSONKeepsLegacySessionFieldNames(t *testing.T) {
 	if !strings.Contains(got, `"parent_session_id":"thread-parent"`) ||
 		strings.Contains(got, "parent_thread_id") || strings.Contains(got, "visibility") {
 		t.Fatalf("JSON = %s", got)
+	}
+}
+
+// TestValidateACPMetadata restores coverage lost in the domains restructure.
+// ACP threads carry the agent id, project path, and runtime owner that the
+// runtime later trusts, so a missing field must fail at creation rather than
+// surface as a broken session.
+func TestValidateACPMetadata(t *testing.T) {
+	tests := []struct {
+		name    string
+		meta    map[string]any
+		wantErr error
+	}{
+		{
+			name: "complete metadata",
+			meta: map[string]any{"acp_agent_id": "codex", "project_path": "/data", "runtime_owner_account_id": "owner-1"},
+		},
+		{
+			name:    "missing agent id",
+			meta:    map[string]any{"project_path": "/data", "runtime_owner_account_id": "owner-1"},
+			wantErr: ErrACPAgentIDRequired,
+		},
+		{
+			name:    "missing project path",
+			meta:    map[string]any{"acp_agent_id": "codex", "runtime_owner_account_id": "owner-1"},
+			wantErr: ErrACPProjectPathMissing,
+		},
+		{
+			name:    "missing runtime owner",
+			meta:    map[string]any{"acp_agent_id": "codex", "project_path": "/data"},
+			wantErr: ErrACPRuntimeOwnerMissing,
+		},
+		{
+			name: "explicit project mode is accepted",
+			meta: map[string]any{
+				"acp_agent_id": "codex", "project_path": "/data",
+				"runtime_owner_account_id": "owner-1", "acp_project_mode": DefaultACPProjectMode,
+			},
+		},
+		{
+			name: "none project mode is accepted",
+			meta: map[string]any{
+				"acp_agent_id": "codex", "project_path": "/data",
+				"runtime_owner_account_id": "owner-1", "acp_project_mode": "none",
+			},
+		},
+		{
+			name: "unknown project mode is rejected",
+			meta: map[string]any{
+				"acp_agent_id": "codex", "project_path": "/data",
+				"runtime_owner_account_id": "owner-1", "acp_project_mode": "sandbox",
+			},
+			wantErr: ErrACPProjectModeInvalid,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateACPMetadata(tc.meta)
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("validateACPMetadata() error = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("validateACPMetadata() error = %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestUpdateTypeAndMetadataACPAgentRunsPolicy restores coverage lost in the
+// restructure: promoting a thread to acp_agent must run the same metadata
+// policy as creation, otherwise the validation is trivially bypassed by
+// creating a chat thread and updating its type afterwards.
+func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
+	store := &fakeThreadStore{thread: Thread{
+		ID:          "00000000-0000-0000-0000-000000000002",
+		BotID:       "00000000-0000-0000-0000-000000000001",
+		Type:        TypeChat,
+		ChannelType: "web",
+	}}
+
+	_, err := NewService(nil, store, nil, nil).UpdateTypeAndMetadata(
+		t.Context(),
+		"00000000-0000-0000-0000-000000000002",
+		TypeACPAgent,
+		map[string]any{"project_path": "/data", "runtime_owner_account_id": "owner-1"},
+	)
+	if !errors.Is(err, ErrACPAgentIDRequired) {
+		t.Fatalf("UpdateTypeAndMetadata() error = %v, want %v", err, ErrACPAgentIDRequired)
 	}
 }
