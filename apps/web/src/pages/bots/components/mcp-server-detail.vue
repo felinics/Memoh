@@ -88,6 +88,7 @@
         </ConfirmPopover>
         <Switch
           :model-value="form.active"
+          :disabled="saving || activeSaving"
           :aria-label="$t('common.enabled')"
           @update:model-value="(v) => handleToggleActive(!!v)"
         />
@@ -210,22 +211,10 @@
                   v-if="probing"
                   class="size-4"
                 />
-                <svg
+                <CheckDrawIcon
                   v-else-if="sessionProbeResult === 'ok'"
-                  class="check-draw size-4 text-success"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M4 12.5 9 17.5 20 6.5"
-                    pathLength="1"
-                  />
-                </svg>
+                  class="size-4 text-success"
+                />
                 <AlertCircle
                   v-else-if="sessionProbeResult === 'error'"
                   class="size-4 text-destructive"
@@ -246,7 +235,7 @@
           </HoverCardContent>
         </HoverCard>
         <Button
-          :disabled="probing || (!!serverId && !hasChanges)"
+          :disabled="probing || activeSaving || (!!serverId && !hasChanges)"
           :loading="saving"
           @click="handleSave"
         >
@@ -275,8 +264,7 @@
           <DialogTitle>{{ $t('mcp.advancedSettings') }}</DialogTitle>
         </DialogHeader>
         <DialogBody class="space-y-5">
-          <!-- stdio: process environment. remote: HTTP headers (+ env vars only when
-               a migrated config already carries ${VAR} substitutions). -->
+          <!-- stdio: process environment. remote: HTTP headers. -->
           <div
             v-if="connectionType === 'stdio'"
             class="space-y-2"
@@ -289,17 +277,6 @@
             />
           </div>
           <template v-else>
-            <div
-              v-if="envPairs.length > 0"
-              class="space-y-2"
-            >
-              <Label>{{ $t('mcp.envVars') }}</Label>
-              <KeyValueEditor
-                v-model="envPairs"
-                :key-placeholder="$t('mcp.placeholders.envKey')"
-                :value-placeholder="$t('mcp.placeholders.envValue')"
-              />
-            </div>
             <div class="space-y-2">
               <Label>{{ $t('mcp.httpHeaders') }}</Label>
               <KeyValueEditor
@@ -436,6 +413,7 @@ import {
 import { client } from '@memohai/sdk/client'
 import type { McpUpsertRequest, McpToolDescriptor, McpOAuthStatus } from '@memohai/sdk'
 import SettingsSection from '@/components/settings/section.vue'
+import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import KeyValueEditor from '@/components/key-value-editor/index.vue'
 import type { KeyValuePair } from '@/components/key-value-editor/index.vue'
@@ -547,8 +525,24 @@ function captureDraft(): DraftState {
   }
 }
 
+// env/headers compare key-by-key: re-adding an identical pair in a different
+// order is not a change, and JSON.stringify would call it one (phantom dirty).
+function recordEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  return aKeys.every((k) => a[k] === b[k])
+}
+
 function draftEqual(a: DraftState, b: DraftState): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
+  return a.connectionType === b.connectionType
+    && a.name === b.name
+    && a.command === b.command
+    && a.url === b.url
+    && a.cwd === b.cwd
+    && a.transport === b.transport
+    && JSON.stringify(a.args) === JSON.stringify(b.args)
+    && recordEqual(a.env, b.env)
+    && recordEqual(a.headers, b.headers)
 }
 
 // A never-saved server counts as dirty once it carries any content worth
@@ -578,21 +572,18 @@ function connectionFieldsChanged(a: DraftState, b: DraftState): boolean {
     || a.cwd !== b.cwd
     || a.transport !== b.transport
     || JSON.stringify(a.args) !== JSON.stringify(b.args)
-    || JSON.stringify(a.env) !== JSON.stringify(b.env)
-    || JSON.stringify(a.headers) !== JSON.stringify(b.headers)
+    || !recordEqual(a.env, b.env)
+    || !recordEqual(a.headers, b.headers)
 }
 
 function handleTransportChange(v: string) {
   const next = v === 'remote' ? 'remote' : 'stdio'
   if (next === connectionType.value) return
   if (next === 'remote') {
-    // stdio env means process env — meaningless on HTTP. Exception: a server
-    // born remote may carry ${VAR} template vars that the remote writer still
-    // substitutes into url/headers; those stay.
-    if (savedSnapshot.value?.connectionType !== 'remote') {
-      envStash.value = envPairs.value
-      envPairs.value = []
-    }
+    // stdio env means process env — meaningless on HTTP (the backend never
+    // stores env for remote configs, so there is no remote env editor).
+    envStash.value = envPairs.value
+    envPairs.value = []
     if (headerPairs.value.length === 0 && headerStash.value.length > 0) {
       headerPairs.value = headerStash.value
     }
@@ -770,21 +761,19 @@ function buildBody(draft: DraftState, active: boolean): McpUpsertRequest {
     if (Object.keys(draft.env).length > 0) body.env = draft.env
     if (draft.cwd.trim()) body.cwd = draft.cwd.trim()
   } else {
-    body.url = substituteTemplateVars(draft.url.trim(), draft.env)
-    const resolvedHeaders = Object.fromEntries(
-      Object.entries(draft.headers).map(([key, value]) => [key, substituteTemplateVars(value, draft.env)]),
-    )
-    if (Object.keys(resolvedHeaders).length > 0) body.headers = resolvedHeaders
+    body.url = draft.url.trim()
+    if (Object.keys(draft.headers).length > 0) body.headers = draft.headers
     if (draft.transport === 'sse') body.transport = 'sse'
   }
   return body
 }
 
-function substituteTemplateVars(value: string, vars: Record<string, string>) {
-  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, key: string) => vars[key] ?? match)
-}
-
 async function handleSave() {
+  // A save must not overlap the switch's own commit: the toggle PUT carries the
+  // pre-edit snapshot, and the save PUT carries the toggle's optimistic active —
+  // letting both fly lets whichever lands last silently revert the other. The
+  // UI disables the pair during either flight; this is the belt-and-suspenders.
+  if (activeSaving.value) return
   // Validate at submit rather than disabling the button: a stdio server needs a
   // command, a remote one needs an endpoint — anything else can't connect.
   const wasNew = !serverId.value
@@ -845,7 +834,7 @@ async function handleToggleActive(value: boolean) {
     form.value.active = value
     return
   }
-  if (activeSaving.value) return
+  if (activeSaving.value || saving.value) return
   const snap = savedSnapshot.value
   if (!snap) return
   const prev = form.value.active

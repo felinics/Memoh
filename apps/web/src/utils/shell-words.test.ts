@@ -63,6 +63,14 @@ describe('joinShellWords', () => {
     expect(joinShellWords('npx -y pkg', [])).toBe('npx -y pkg')
   })
 
+  it('quotes an executable path that contains whitespace', () => {
+    expect(joinShellWords('/opt/my server/bin/mcp', ['--flag'])).toBe('\'/opt/my server/bin/mcp\' --flag')
+  })
+
+  it('quotes a token containing a comment char', () => {
+    expect(joinShellWords('cmd', ['#notacomment'])).toBe('cmd \'#notacomment\'')
+  })
+
   it('drops empty pieces but preserves an explicit empty arg', () => {
     expect(joinShellWords('', [])).toBe('')
     expect(joinShellWords('cmd', [''])).toBe('cmd \'\'')

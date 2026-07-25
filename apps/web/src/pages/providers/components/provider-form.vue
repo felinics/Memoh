@@ -160,22 +160,10 @@
                 v-if="testLoading"
                 class="size-4"
               />
-              <svg
+              <CheckDrawIcon
                 v-else-if="testStatus === 'ok'"
-                class="check-draw size-4 text-success"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path
-                  d="M4 12.5 9 17.5 20 6.5"
-                  pathLength="1"
-                />
-              </svg>
+                class="size-4 text-success"
+              />
               <AlertCircle
                 v-else-if="testStatus === 'error'"
                 class="size-4 text-destructive"
@@ -346,6 +334,7 @@ import {
 } from '@felinic/ui'
 import { AlertCircle, KeyRound, RefreshCw } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import DeviceCodePanel from '@/components/device-code-panel/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsRow from '@/components/settings/row.vue'
@@ -785,27 +774,3 @@ async function handleRevoke() {
   }
 }
 </script>
-
-<style scoped>
-/* pathLength="1" normalizes the stroke so the dash math is length-agnostic: the
-   check is fully hidden (offset 1) then drawn on (offset 0). Stroke only — no
-   scale — so the glyph appears by being drawn, not by popping in. */
-.check-draw path {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: check-draw 0.3s cubic-bezier(0.65, 0, 0.35, 1) forwards;
-}
-
-@keyframes check-draw {
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .check-draw path {
-    animation: none;
-    stroke-dashoffset: 0;
-  }
-}
-</style>

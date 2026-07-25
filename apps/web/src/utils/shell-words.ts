@@ -53,17 +53,29 @@ export function splitShellWords(input: string): string[] {
 // quoteShellWord is the display-side inverse of splitShellWords: a stored arg
 // that contains whitespace or shell metacharacters gets single-quoted so the
 // joined line round-trips through the lexer. Kept in sync with the backend's
-// escapeShellArg (internal/handlers/mcp_stdio.go).
+// escapeShellArg (internal/handlers/mcp_stdio.go) — including '#', which starts
+// a comment at the beginning of a bare word.
 export function quoteShellWord(value: string): string {
   if (value === '') return '\'\''
-  if (!/[\s'"\\$&;|<>*?()[\]{}!`]/.test(value)) return value
+  if (!/[\s'"\\$&;|<>*?()[\]{}!`#]/.test(value)) return value
   return `'${value.replace(/'/g, '\'\\\'\'')}'`
 }
 
 // joinShellWords renders a stored command+args pair as the single line a user
-// edits. The command token is NOT quoted: a legit executable never contains
-// whitespace, and a legacy config that stored a whole line as one token must
-// re-display as that line so the next save parses it back into shape.
+// edits. Args are always quoted as needed; the command token needs judgment:
+// - a REAL executable whose path contains whitespace ("/opt/my server/bin/mcp")
+//   must be quoted, or re-parsing the line splits the path into a bogus
+//   command + phantom args (the draft then diffs dirty against the untouched
+//   snapshot, and a save would persist the corruption);
+// - a LEGACY config that stored a whole pasted line as one token ("npx -y pkg")
+//   must re-display raw, so the parsed draft differs from the stored shape and
+//   the repair surfaces as unsaved changes (the next save writes the clean
+//   split). Heuristic: a multi-word token whose first word is a bare name (no
+//   path separator) is a pasted line, not a spaced path.
 export function joinShellWords(command: string, args: string[]): string {
-  return [command.trim(), ...args.map(quoteShellWord)].filter((s) => s !== '').join(' ')
+  const token = command.trim()
+  const words = token === '' ? [] : splitShellWords(token)
+  const isLegacyWholeLine = words.length > 1 && !/[/\\]/.test(words[0] ?? '')
+  const rendered = token === '' || isLegacyWholeLine ? token : quoteShellWord(token)
+  return [rendered, ...args.map(quoteShellWord)].filter((s) => s !== '').join(' ')
 }

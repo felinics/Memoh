@@ -146,7 +146,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PencilLine, RotateCcw } from 'lucide-vue-next'
 import CopyConnectedIcon from './copy-connected-icon.vue'
-import CheckDrawIcon from './check-draw-icon.vue'
+import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import DotsIcon from './dots-icon.vue'
 import ForkSplitIcon from './fork-split-icon.vue'
 import {
