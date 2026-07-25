@@ -17,6 +17,13 @@ import (
 
 const bridgeRoot = "legacy/v1/upgrade/to_v2"
 
+// finalV1SchemaVersion is the last golang-migrate version in the frozen
+// legacy/v1 archive. The bridge refuses any source database that is not
+// recorded at exactly this version, so bumping it means archiving the new
+// v1 migration, refreshing migrations.sha256, and regenerating the
+// v1_<version>_schema.sql snapshot in the same change.
+const finalV1SchemaVersion = 120
+
 var bridgeStepIDs = []string{
 	"preflight",
 	"create_schemas",
@@ -217,8 +224,11 @@ func loadBridgePlan(fsys fs.FS) (bridgePlan, error) {
 			CurrentEpoch,
 		)
 	}
-	if plan.Requires.SchemaMigrationsVersion != 119 || plan.Requires.Dirty {
-		return bridgePlan{}, errors.New("plan requires public.schema_migrations version 119 and dirty=false")
+	if plan.Requires.SchemaMigrationsVersion != finalV1SchemaVersion || plan.Requires.Dirty {
+		return bridgePlan{}, fmt.Errorf(
+			"plan requires public.schema_migrations version %d and dirty=false",
+			finalV1SchemaVersion,
+		)
 	}
 	if len(plan.Steps) != len(bridgeStepIDs) {
 		return bridgePlan{}, fmt.Errorf("plan must contain exactly %d steps", len(bridgeStepIDs))

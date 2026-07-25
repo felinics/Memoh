@@ -74,6 +74,7 @@ type ConversationMeta struct {
 type MessageEvent struct {
 	SessionID        string           `json:"session_id"`
 	EventID          string           `json:"event_id,omitempty"`
+	EventCursor      int64            `json:"event_cursor,omitempty"`
 	MessageID        string           `json:"message_id"`
 	Sender           *CanonicalUser   `json:"sender,omitempty"`
 	ReceivedAtMs     int64            `json:"received_at_ms"`
@@ -99,6 +100,7 @@ func (e MessageEvent) GetReceivedAtMs() int64 { return e.ReceivedAtMs }
 type EditEvent struct {
 	SessionID    string         `json:"session_id"`
 	EventID      string         `json:"event_id,omitempty"`
+	EventCursor  int64          `json:"event_cursor,omitempty"`
 	MessageID    string         `json:"message_id"`
 	Sender       *CanonicalUser `json:"sender,omitempty"`
 	ReceivedAtMs int64          `json:"received_at_ms"`
@@ -116,6 +118,7 @@ func (e EditEvent) GetReceivedAtMs() int64 { return e.ReceivedAtMs }
 type DeleteEvent struct {
 	SessionID    string   `json:"session_id"`
 	EventID      string   `json:"event_id,omitempty"`
+	EventCursor  int64    `json:"event_cursor,omitempty"`
 	MessageIDs   []string `json:"message_ids"`
 	ReceivedAtMs int64    `json:"received_at_ms"`
 	TimestampSec int64    `json:"timestamp_sec"`
@@ -142,6 +145,7 @@ const (
 type ServiceEvent struct {
 	SessionID    string         `json:"session_id"`
 	EventID      string         `json:"event_id,omitempty"`
+	EventCursor  int64          `json:"event_cursor,omitempty"`
 	Action       ServiceAction  `json:"action"`
 	Actor        *CanonicalUser `json:"actor,omitempty"`
 	ReceivedAtMs int64          `json:"received_at_ms"`

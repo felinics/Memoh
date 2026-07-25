@@ -12,36 +12,40 @@ type discussCursorTracker struct {
 	store DiscussCursorStore
 }
 
-func (t discussCursorTracker) Load(ctx context.Context, cfg DiscussSessionConfig, log *slog.Logger) int64 {
+func (t discussCursorTracker) Load(ctx context.Context, cfg DiscussSessionConfig, log *slog.Logger) timeline.DiscussCursorPosition {
 	if t.store == nil {
-		return 0
+		return timeline.DiscussCursorPosition{}
 	}
-	cursor, err := t.store.GetDiscussConsumedCursor(ctx, cfg.ThreadID, discussCursorScope(cfg))
+	position, err := t.store.GetDiscussCursor(ctx, cfg.ThreadID, discussCursorScope(cfg))
 	if err != nil {
 		log.WarnContext(ctx, "discuss cursor load failed", slog.Any("error", err))
-		return 0
+		return timeline.DiscussCursorPosition{}
 	}
-	return cursor
+	return position
 }
 
-func (t discussCursorTracker) Advance(ctx context.Context, sess *discussSession, cfg DiscussSessionConfig, cursor int64, log *slog.Logger) {
-	if cursor <= sess.lastProcessedMs {
+func (t discussCursorTracker) Advance(ctx context.Context, sess *discussSession, cfg DiscussSessionConfig, position timeline.DiscussCursorPosition, log *slog.Logger) {
+	merged := sess.lastProcessed.Merge(position)
+	if merged == sess.lastProcessed {
 		return
 	}
-	sess.lastProcessedMs = cursor
+	sess.lastProcessed = merged
 	if t.store == nil {
 		return
 	}
-	if err := t.store.UpsertDiscussConsumedCursor(
+	if err := t.store.UpsertDiscussCursor(
 		ctx,
 		cfg.BotID,
 		cfg.ThreadID,
 		discussCursorScope(cfg),
 		strings.TrimSpace(cfg.RouteID),
 		strings.TrimSpace(cfg.CurrentPlatform),
-		cursor,
+		merged,
 	); err != nil {
-		log.WarnContext(ctx, "discuss cursor persist failed", slog.Any("error", err), slog.Int64("cursor", cursor))
+		log.WarnContext(ctx, "discuss cursor persist failed",
+			slog.Any("error", err),
+			slog.Int64("cursor", merged.EventCursor),
+			slog.Int64("source_cursor", merged.SourceCursor))
 	}
 }
 
@@ -59,13 +63,6 @@ func discussCursorScope(cfg DiscussSessionConfig) string {
 	default:
 		return "default"
 	}
-}
-
-func maxInt64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // anchorFromTRs returns the latest persisted turn request timestamp used to

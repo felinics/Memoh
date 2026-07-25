@@ -10,6 +10,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/agent/chat/compaction"
 	"github.com/memohai/memoh/domains/agent/chat/timeline"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 )
@@ -29,13 +30,15 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 	}
 
 	trs := s.loadTurnResponses(ctx, sessionID)
+	artifacts := s.loadTimelineArtifacts(ctx, req.BotID, sessionID)
 
-	composed := timeline.ComposeContext(rc, trs, "")
+	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
 		return nil
 	}
 
 	messages := make([]agentdomain.ModelMessage, 0, len(composed.Messages))
+	pinned := make([]bool, 0, len(composed.Messages))
 	for _, m := range composed.Messages {
 		contentJSON := m.RawContent
 		if len(contentJSON) == 0 {
@@ -49,19 +52,35 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 			Role:    m.Role,
 			Content: contentJSON,
 		})
+		pinned = append(pinned, m.CompactionArtifactID != "")
 	}
 
 	// Apply context token budget trimming to pipeline path as well.
 	if contextTokenBudget > 0 && len(messages) > 0 {
-		messages = trimPipelineMessagesByTokens(s.logger, messages, contextTokenBudget)
+		messages = trimPipelineMessagesByTokens(s.logger, messages, pinned, contextTokenBudget)
 	}
 
 	return messages
 }
 
+// loadTimelineArtifacts projects the session's active compaction frontier for
+// timeline composition. Failures degrade to uncompacted context.
+func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID string) []timeline.CompactionArtifact {
+	if s.compactionArtifacts == nil {
+		return nil
+	}
+	artifacts, err := compaction.NewTimelineArtifactSource(s.compactionArtifacts).ActiveCompactionArtifacts(ctx, botID, sessionID)
+	if err != nil {
+		s.logger.Warn("load compaction artifacts failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		return nil
+	}
+	return artifacts
+}
+
 // trimPipelineMessagesByTokens trims pipeline-assembled messages to fit within
-// the context token budget using character-based estimation.
-func trimPipelineMessagesByTokens(log *slog.Logger, messages []agentdomain.ModelMessage, maxTokens int) []agentdomain.ModelMessage {
+// the context token budget using character-based estimation. Pinned messages
+// (compaction summaries) survive the dropped prefix.
+func trimPipelineMessagesByTokens(log *slog.Logger, messages []agentdomain.ModelMessage, pinned []bool, maxTokens int) []agentdomain.ModelMessage {
 	totalTokens := 0
 	cutoff := 0
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -77,16 +96,28 @@ func trimPipelineMessagesByTokens(log *slog.Logger, messages []agentdomain.Model
 		cutoff++
 	}
 
-	if cutoff > 0 && log != nil {
+	if cutoff == 0 {
+		return messages
+	}
+
+	kept := make([]agentdomain.ModelMessage, 0, len(messages)-cutoff)
+	for i := 0; i < cutoff; i++ {
+		if i < len(pinned) && pinned[i] {
+			kept = append(kept, messages[i])
+		}
+	}
+	kept = append(kept, messages[cutoff:]...)
+
+	if log != nil {
 		log.Info("trimPipelineMessagesByTokens: context trimmed",
 			slog.Int("total_messages", len(messages)),
 			slog.Int("estimated_tokens", totalTokens),
 			slog.Int("max_tokens", maxTokens),
-			slog.Int("kept_messages", len(messages)-cutoff),
+			slog.Int("kept_messages", len(kept)),
 		)
 	}
 
-	return messages[cutoff:]
+	return kept
 }
 
 // loadTurnResponses loads recent assistant/tool messages from bot_history_messages

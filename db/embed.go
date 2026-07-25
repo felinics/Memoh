@@ -16,7 +16,7 @@ import "embed"
 //go:embed postgres/media/migrations/*.sql
 //go:embed postgres/legacy/v1/migrations/*.sql
 //go:embed postgres/legacy/v1/migrations.sha256
-//go:embed postgres/legacy/v1/v1_119_schema.sql
+//go:embed postgres/legacy/v1/v1_120_schema.sql
 //go:embed postgres/legacy/v1/upgrade/to_v2/plan.yaml
 //go:embed postgres/legacy/v1/upgrade/to_v2/cross_owner_fks.json
 //go:embed postgres/legacy/v1/upgrade/to_v2/sql/*.sql

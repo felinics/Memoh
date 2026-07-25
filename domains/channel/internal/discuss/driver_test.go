@@ -21,7 +21,7 @@ func TestExtractNewImageRefs(t *testing.T) {
 		{ReceivedAtMs: 400, ImageRefs: nil},
 	}
 
-	refs := extractNewImageRefs(rc, 150)
+	refs := extractNewImageRefs(rc, timeline.DiscussCursorPosition{SourceCursor: 150})
 	if len(refs) != 1 {
 		t.Fatalf("expected 1 ref, got %d", len(refs))
 	}
@@ -42,7 +42,7 @@ func TestExtractNewImageRefs_IncludesMultiple(t *testing.T) {
 		}},
 		{ReceivedAtMs: 300, ImageRefs: []timeline.ImageAttachmentRef{{ContentHash: "c"}}},
 	}
-	refs := extractNewImageRefs(rc, 50)
+	refs := extractNewImageRefs(rc, timeline.DiscussCursorPosition{SourceCursor: 50})
 	if len(refs) != 3 {
 		t.Fatalf("expected 3 refs, got %d", len(refs))
 	}
@@ -59,8 +59,7 @@ func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config:          DiscussSessionConfig{TeamID: "team-1", BotID: "bot-1", ThreadID: "sess-1"},
-		lastProcessedMs: 0,
+		config: DiscussSessionConfig{TeamID: "team-1", BotID: "bot-1", ThreadID: "sess-1"},
 	}
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
@@ -123,8 +122,8 @@ func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 	if !cmd.DiscussAddressed {
 		t.Fatal("mentioned message must be addressed")
 	}
-	if sess.lastProcessedMs != 200 {
-		t.Fatalf("lastProcessedMs = %d, want 200", sess.lastProcessedMs)
+	if sess.lastProcessed.SourceCursor != 200 {
+		t.Fatalf("lastProcessed = %+v, want source 200", sess.lastProcessed)
 	}
 }
 
@@ -228,8 +227,8 @@ func TestHandleReplyWithTurn_NoCursorAdvanceOnStartError(t *testing.T) {
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
 
-	if sess.lastProcessedMs != 0 {
-		t.Fatalf("lastProcessedMs = %d, want 0 when the turn cannot start", sess.lastProcessedMs)
+	if sess.lastProcessed != (timeline.DiscussCursorPosition{}) {
+		t.Fatalf("lastProcessed = %+v, want zero when the turn cannot start", sess.lastProcessed)
 	}
 }
 
@@ -252,8 +251,8 @@ func TestHandleReplyWithTurn_ACPDoesNotAdvanceCursorOnRuntimeError(t *testing.T)
 	if svc.calls != 1 {
 		t.Fatalf("StartTurn calls = %d, want 1", svc.calls)
 	}
-	if sess.lastProcessedMs != 0 {
-		t.Fatalf("lastProcessedMs = %d, want 0 when ACP runtime stream fails", sess.lastProcessedMs)
+	if sess.lastProcessed != (timeline.DiscussCursorPosition{}) {
+		t.Fatalf("lastProcessed = %+v, want zero when ACP runtime stream fails", sess.lastProcessed)
 	}
 }
 
@@ -284,8 +283,8 @@ func TestHandleReplyWithTurn_ACPSkipsRuntimeForPassiveMessage(t *testing.T) {
 	if svc.lastCmd.DiscussAddressed {
 		t.Fatal("passive group message must not be addressed")
 	}
-	if sess.lastProcessedMs != 200 {
-		t.Fatalf("lastProcessedMs = %d, want 200 (cursor advanced on silent path)", sess.lastProcessedMs)
+	if sess.lastProcessed.SourceCursor != 200 {
+		t.Fatalf("lastProcessed = %+v, want source 200 (cursor advanced on silent path)", sess.lastProcessed)
 	}
 }
 
@@ -315,8 +314,8 @@ func TestHandleReplyWithTurn_ACPRepliesInDirectConversation(t *testing.T) {
 	if !svc.lastCmd.DiscussAddressed {
 		t.Fatal("direct (1:1) message must be addressed even without a mention")
 	}
-	if sess.lastProcessedMs != 200 {
-		t.Fatalf("lastProcessedMs = %d, want 200 (cursor advanced after direct reply)", sess.lastProcessedMs)
+	if sess.lastProcessed.SourceCursor != 200 {
+		t.Fatalf("lastProcessed = %+v, want source 200 (cursor advanced after direct reply)", sess.lastProcessed)
 	}
 	// A direct conversation is "addressed" without being mentioned; the ACP
 	// runtime uses this to render the addressed-directly nudge.
@@ -341,24 +340,8 @@ func TestAnchorFromTRs(t *testing.T) {
 	}
 }
 
-func TestLatestRCReceivedAtMs(t *testing.T) {
-	t.Parallel()
-
-	if got := latestRCReceivedAtMs(nil); got != 0 {
-		t.Fatalf("empty RC = %d, want 0", got)
-	}
-	got := latestRCReceivedAtMs(timeline.RenderedContext{
-		{ReceivedAtMs: 100},
-		{ReceivedAtMs: 900},
-		{ReceivedAtMs: 500, IsMyself: true},
-	})
-	if got != 900 {
-		t.Fatalf("latest = %d, want 900", got)
-	}
-}
-
 // TestHandleReplyWithTurn_ColdStartAnchoredByTR simulates idle-timeout
-// restart: the session's in-memory lastProcessedMs is 0, but RC replay has
+// restart: the session's in-memory lastProcessedCursor is 0, but RC replay has
 // brought back old user messages that were already answered in prior
 // LLM rounds (represented by TRs). The driver MUST NOT re-answer them.
 func TestHandleReplyWithTurn_ColdStartAnchoredByTR(t *testing.T) {
@@ -373,24 +356,23 @@ func TestHandleReplyWithTurn_ColdStartAnchoredByTR(t *testing.T) {
 		MessageService: nil,
 	})
 	sess := &discussSession{
-		config:          DiscussSessionConfig{BotID: "b", ThreadID: "s"},
-		lastProcessedMs: 0,
+		config: DiscussSessionConfig{BotID: "b", ThreadID: "s"},
 	}
 
 	// Simulate a previously answered round by pre-stuffing a TR newer than
 	// the RC segment's ReceivedAtMs. Since we cannot inject MessageService
-	// easily, we instead pre-set lastProcessedMs as the anchor would.
-	sess.lastProcessedMs = 200 // mimic anchorFromTRs result
+	// easily, we instead pre-set lastProcessed as the anchor would.
+	sess.lastProcessed = timeline.DiscussCursorPosition{SourceCursor: 200} // mimic anchorFromTRs result
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
 
 	if svc.calls != 0 {
-		t.Fatal("turn must not start when all RC segments predate lastProcessedMs")
+		t.Fatal("turn must not start when all RC segments predate lastProcessedCursor")
 	}
 }
 
 // TestHandleReplyWithTurn_CursorAdvancesToRCNotWallClock ensures that after
-// a turn we set lastProcessedMs to the max ReceivedAtMs actually consumed in
+// a turn we set lastProcessedCursor to the max ReceivedAtMs actually consumed in
 // the RC snapshot, not time.Now(). This matters for messages that arrive
 // mid-turn: they end up in a fresher RC with ReceivedAtMs > cursor, which
 // correctly triggers the next round.
@@ -404,8 +386,7 @@ func TestHandleReplyWithTurn_CursorAdvancesToRCNotWallClock(t *testing.T) {
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config:          DiscussSessionConfig{BotID: "b", ThreadID: "s"},
-		lastProcessedMs: 0,
+		config: DiscussSessionConfig{BotID: "b", ThreadID: "s"},
 	}
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
@@ -413,13 +394,13 @@ func TestHandleReplyWithTurn_CursorAdvancesToRCNotWallClock(t *testing.T) {
 	if svc.calls != 1 {
 		t.Fatal("expected turn to start")
 	}
-	if sess.lastProcessedMs != 777 {
-		t.Fatalf("lastProcessedMs = %d, want 777 (max RC ReceivedAtMs)", sess.lastProcessedMs)
+	if sess.lastProcessed.SourceCursor != 777 {
+		t.Fatalf("lastProcessed = %+v, want source 777 (max RC ReceivedAtMs)", sess.lastProcessed)
 	}
 }
 
 func TestHandleReplyWithTurn_UsesPersistedDiscussCursor(t *testing.T) {
-	store := &fakeDiscussCursorStore{cursor: 500}
+	store := &fakeDiscussCursorStore{position: timeline.DiscussCursorPosition{SourceCursor: 500}}
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{
 		CursorStore: store,
@@ -440,8 +421,8 @@ func TestHandleReplyWithTurn_UsesPersistedDiscussCursor(t *testing.T) {
 	if svc.calls != 0 {
 		t.Fatal("turn must not start for RC covered by persisted cursor")
 	}
-	if sess.lastProcessedMs != 500 {
-		t.Fatalf("lastProcessedMs = %d, want persisted cursor 500", sess.lastProcessedMs)
+	if sess.lastProcessed.SourceCursor != 500 {
+		t.Fatalf("lastProcessed = %+v, want persisted source 500", sess.lastProcessed)
 	}
 
 	driver.handleReplyWithTurn(context.Background(), sess, timeline.RenderedContext{
@@ -451,8 +432,8 @@ func TestHandleReplyWithTurn_UsesPersistedDiscussCursor(t *testing.T) {
 	if svc.calls != 1 {
 		t.Fatal("expected turn to start for RC past persisted cursor")
 	}
-	if store.upsertCursor != 700 {
-		t.Fatalf("persisted cursor = %d, want 700", store.upsertCursor)
+	if store.upsertPosition.SourceCursor != 700 {
+		t.Fatalf("persisted cursor = %+v, want source 700", store.upsertPosition)
 	}
 	if store.upsertScope != "route:route-1" {
 		t.Fatalf("scope = %q, want route:route-1", store.upsertScope)
@@ -577,21 +558,58 @@ func (*fakeRunHandle) AddOutboundAssets([]agentdomain.OutboundAssetRef)        {
 func (*fakeRunHandle) Cancel()                                                 {}
 
 type fakeDiscussCursorStore struct {
-	cursor        int64
-	upsertCursor  int64
-	upsertBotID   string
-	upsertScope   string
-	upsertRouteID string
+	position       timeline.DiscussCursorPosition
+	upsertPosition timeline.DiscussCursorPosition
+	upsertBotID    string
+	upsertScope    string
+	upsertRouteID  string
 }
 
-func (f *fakeDiscussCursorStore) GetDiscussConsumedCursor(_ context.Context, _, _ string) (int64, error) {
-	return f.cursor, nil
+func (f *fakeDiscussCursorStore) GetDiscussCursor(_ context.Context, _, _ string) (timeline.DiscussCursorPosition, error) {
+	return f.position, nil
 }
 
-func (f *fakeDiscussCursorStore) UpsertDiscussConsumedCursor(_ context.Context, botID, _, scopeKey, routeID, _ string, cursor int64) error {
+func (f *fakeDiscussCursorStore) UpsertDiscussCursor(_ context.Context, botID, _, scopeKey, routeID, _ string, position timeline.DiscussCursorPosition) error {
 	f.upsertBotID = botID
 	f.upsertScope = scopeKey
 	f.upsertRouteID = routeID
-	f.upsertCursor = cursor
+	f.upsertPosition = position
 	return nil
+}
+
+func TestHandleReplyWithTurn_TrustsPersistedEventCursor(t *testing.T) {
+	store := &fakeDiscussCursorStore{position: timeline.DiscussCursorPosition{EventCursor: 9000, SourceCursor: 500}}
+	svc := &fakeTurnService{}
+	driver := NewDiscussDriver(DiscussDriverDeps{CursorStore: store})
+	sess := &discussSession{
+		config: DiscussSessionConfig{BotID: "b", ThreadID: "s", CurrentPlatform: "telegram"},
+	}
+
+	covered := timeline.RenderedSegment{
+		ReceivedAtMs:    400,
+		LastEventCursor: 8500,
+		Content:         []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="old">old</message>`}},
+	}
+	driver.handleReplyWithTurn(context.Background(), sess, timeline.RenderedContext{covered}, driver.logger, svc)
+
+	if svc.calls != 0 {
+		t.Fatal("turn must not start for segments at or below the persisted event cursor")
+	}
+	if sess.lastProcessed.EventCursor != 9000 {
+		t.Fatalf("lastProcessed = %+v, want persisted event cursor 9000", sess.lastProcessed)
+	}
+
+	fresh := timeline.RenderedSegment{
+		ReceivedAtMs:    700,
+		LastEventCursor: 9100,
+		Content:         []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="new">new</message>`}},
+	}
+	driver.handleReplyWithTurn(context.Background(), sess, timeline.RenderedContext{covered, fresh}, driver.logger, svc)
+
+	if svc.calls != 1 {
+		t.Fatal("expected turn for segment past the persisted event cursor")
+	}
+	if store.upsertPosition.EventCursor != 9100 || store.upsertPosition.SourceCursor != 700 {
+		t.Fatalf("persisted position = %+v, want cursor 9100 source 700", store.upsertPosition)
+	}
 }

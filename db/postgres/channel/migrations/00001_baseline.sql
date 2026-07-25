@@ -97,10 +97,19 @@ CREATE TABLE channel.bot_session_discuss_cursors (
     source text DEFAULT ''::text NOT NULL,
     consumed_cursor bigint DEFAULT 0 NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    team_id uuid DEFAULT iam.memoh_current_team_id() NOT NULL
+    team_id uuid DEFAULT iam.memoh_current_team_id() NOT NULL,
+    consumed_event_cursor bigint DEFAULT 0 NOT NULL
 );
 
 ALTER TABLE ONLY channel.bot_session_discuss_cursors FORCE ROW LEVEL SECURITY;
+
+CREATE SEQUENCE channel.bot_session_event_cursor_seq
+    AS bigint
+    START WITH 1
+    INCREMENT BY 1
+    MINVALUE 1
+    MAXVALUE 9007199254740991
+    CACHE 1;
 
 CREATE TABLE channel.bot_session_events (
     id uuid DEFAULT gen_random_uuid() NOT NULL,

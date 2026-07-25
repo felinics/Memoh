@@ -25,6 +25,12 @@ type Snapshot struct {
 	RouteActiveSessions []RouteActiveSession
 }
 
+// DiscussCursor carries only the source-time watermark. The event-cursor
+// watermark is deliberately absent: it is a coordinate in the source
+// deployment's sequence and cannot be compared against this one's, so a
+// restored history must gate in the source-time domain. Adding an event-cursor
+// field here would reintroduce that bug; TestDiscussCursorCarriesNoEventCursor
+// guards the omission.
 type DiscussCursor struct {
 	SessionID      string    `json:"session_id"`
 	ScopeKey       string    `json:"scope_key"`

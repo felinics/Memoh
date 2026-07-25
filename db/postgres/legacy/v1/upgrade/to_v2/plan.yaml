@@ -2,7 +2,7 @@
 from_epoch: 1
 to_epoch: 2
 requires:
-  schema_migrations_version: 119
+  schema_migrations_version: 120
   dirty: false
 steps:
   - id: preflight

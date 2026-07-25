@@ -66,6 +66,10 @@ func ServerLocalModule() fx.Option {
 func RuntimeModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
+			// Split mode runs Channel in its own process, so it binds the
+			// agent-owned artifact store itself. Embedded mode gets this from
+			// the server composition root instead.
+			provideCompactionArtifacts,
 			provideLocalMediaService,
 			provideRemoteCommandHandler,
 			provideRemoteSkillResolver,

@@ -23,7 +23,7 @@ func (q *Queries) DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pg
 }
 
 const getSessionDiscussCursor = `-- name: GetSessionDiscussCursor :one
-SELECT session_id, bot_id, scope_key, route_id, source, consumed_cursor, updated_at, team_id
+SELECT session_id, bot_id, scope_key, route_id, source, consumed_cursor, updated_at, team_id, consumed_event_cursor
 FROM channel.bot_session_discuss_cursors
 WHERE team_id = iam.memoh_current_team_id()
   AND session_id = $1
@@ -47,12 +47,13 @@ func (q *Queries) GetSessionDiscussCursor(ctx context.Context, arg GetSessionDis
 		&i.ConsumedCursor,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.ConsumedEventCursor,
 	)
 	return i, err
 }
 
 const listSessionDiscussCursorsByBot = `-- name: ListSessionDiscussCursorsByBot :many
-SELECT session_id, bot_id, scope_key, route_id, source, consumed_cursor, updated_at, team_id
+SELECT session_id, bot_id, scope_key, route_id, source, consumed_cursor, updated_at, team_id, consumed_event_cursor
 FROM channel.bot_session_discuss_cursors
 WHERE team_id = iam.memoh_current_team_id()
   AND bot_id = $1
@@ -77,6 +78,7 @@ func (q *Queries) ListSessionDiscussCursorsByBot(ctx context.Context, botID pgty
 			&i.ConsumedCursor,
 			&i.UpdatedAt,
 			&i.TeamID,
+			&i.ConsumedEventCursor,
 		); err != nil {
 			return nil, err
 		}
@@ -90,7 +92,7 @@ func (q *Queries) ListSessionDiscussCursorsByBot(ctx context.Context, botID pgty
 
 const upsertSessionDiscussCursor = `-- name: UpsertSessionDiscussCursor :one
 INSERT INTO channel.bot_session_discuss_cursors (
-  session_id, bot_id, scope_key, route_id, source, consumed_cursor
+  session_id, bot_id, scope_key, route_id, source, consumed_cursor, consumed_event_cursor
 )
 VALUES (
   $1,
@@ -98,23 +100,26 @@ VALUES (
   $3,
   $4::uuid,
   $5,
-  $6
+  $6,
+  $7
 )
 ON CONFLICT (team_id, session_id, scope_key) DO UPDATE
 SET route_id = COALESCE(EXCLUDED.route_id, channel.bot_session_discuss_cursors.route_id),
     source = EXCLUDED.source,
     consumed_cursor = GREATEST(channel.bot_session_discuss_cursors.consumed_cursor, EXCLUDED.consumed_cursor),
+    consumed_event_cursor = GREATEST(channel.bot_session_discuss_cursors.consumed_event_cursor, EXCLUDED.consumed_event_cursor),
     updated_at = now()
-RETURNING session_id, bot_id, scope_key, route_id, source, consumed_cursor, updated_at, team_id
+RETURNING session_id, bot_id, scope_key, route_id, source, consumed_cursor, updated_at, team_id, consumed_event_cursor
 `
 
 type UpsertSessionDiscussCursorParams struct {
-	SessionID      pgtype.UUID `json:"session_id"`
-	BotID          pgtype.UUID `json:"bot_id"`
-	ScopeKey       string      `json:"scope_key"`
-	RouteID        pgtype.UUID `json:"route_id"`
-	Source         string      `json:"source"`
-	ConsumedCursor int64       `json:"consumed_cursor"`
+	SessionID           pgtype.UUID `json:"session_id"`
+	BotID               pgtype.UUID `json:"bot_id"`
+	ScopeKey            string      `json:"scope_key"`
+	RouteID             pgtype.UUID `json:"route_id"`
+	Source              string      `json:"source"`
+	ConsumedCursor      int64       `json:"consumed_cursor"`
+	ConsumedEventCursor int64       `json:"consumed_event_cursor"`
 }
 
 func (q *Queries) UpsertSessionDiscussCursor(ctx context.Context, arg UpsertSessionDiscussCursorParams) (ChannelBotSessionDiscussCursor, error) {
@@ -125,6 +130,7 @@ func (q *Queries) UpsertSessionDiscussCursor(ctx context.Context, arg UpsertSess
 		arg.RouteID,
 		arg.Source,
 		arg.ConsumedCursor,
+		arg.ConsumedEventCursor,
 	)
 	var i ChannelBotSessionDiscussCursor
 	err := row.Scan(
@@ -136,6 +142,7 @@ func (q *Queries) UpsertSessionDiscussCursor(ctx context.Context, arg UpsertSess
 		&i.ConsumedCursor,
 		&i.UpdatedAt,
 		&i.TeamID,
+		&i.ConsumedEventCursor,
 	)
 	return i, err
 }

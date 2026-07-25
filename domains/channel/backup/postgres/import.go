@@ -3,6 +3,7 @@ package postgres
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -184,6 +185,7 @@ func importSessionEvents(
 		newID := deterministicID(request.BotID, "event", item.ID)
 		senderID := mappedPointer(item.SenderChannelIdentityID, request.ChannelIdentityIDs)
 		createdAt := optionalTime(item.CreatedAt)
+		eventData := sanitizeRestoredEventData(item.EventData)
 		tag, err := tx.Exec(ctx, `
 			INSERT INTO channel.bot_session_events (
 				id, bot_id, session_id, event_kind, event_data,
@@ -194,7 +196,7 @@ func importSessionEvents(
 				COALESCE($9::timestamptz, now())
 			)
 			ON CONFLICT DO NOTHING
-		`, newID, request.BotID, sessionID, item.EventKind, item.EventData,
+		`, newID, request.BotID, sessionID, item.EventKind, eventData,
 			item.ExternalMessageID, senderID, item.ReceivedAtMS, createdAt)
 		if err != nil {
 			return nil, nil, fmt.Errorf("restore session event: %w", err)
@@ -296,4 +298,25 @@ func optionalTime(value time.Time) *time.Time {
 		return nil
 	}
 	return &value
+}
+
+// sanitizeRestoredEventData strips instance-local event cursors from restored
+// payloads. Cursors are coordinates in the source deployment's sequence and
+// cannot be compared against this one's, so keeping them would poison local
+// discuss watermarks. Cursor-less events gate correctly in the source-time
+// domain, which is what a restored history falls back to.
+func sanitizeRestoredEventData(eventData []byte) []byte {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(eventData, &payload); err != nil {
+		return eventData
+	}
+	if _, ok := payload["event_cursor"]; !ok {
+		return eventData
+	}
+	delete(payload, "event_cursor")
+	sanitized, err := json.Marshal(payload)
+	if err != nil {
+		return eventData
+	}
+	return sanitized
 }

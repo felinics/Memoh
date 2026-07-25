@@ -82,10 +82,11 @@ func provideEventStore(log *slog.Logger, store timeline.Store) *timeline.EventSt
 	return timeline.NewEventStore(log, store)
 }
 
-func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService) *discuss.DiscussDriver {
+func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, artifacts compaction.ArtifactStore) *discuss.DiscussDriver {
 	return discuss.NewDiscussDriver(discuss.DiscussDriverDeps{
 		MessageService: msgService,
 		CursorStore:    eventStore,
+		Artifacts:      compaction.NewTimelineArtifactSource(artifacts),
 		Logger:         log,
 	})
 }

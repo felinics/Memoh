@@ -46,3 +46,45 @@ func TestRenderMessage_NoImageRefs(t *testing.T) {
 		t.Fatalf("expected 0 image refs, got %d", len(seg.ImageRefs))
 	}
 }
+
+func TestRenderMessagePopulatesSlotIdentityAndEditTime(t *testing.T) {
+	msg := &ICMessage{
+		MessageID:       "msg-slot",
+		ReceivedAtMs:    1000,
+		TimestampSec:    1,
+		EditedAtSec:     7,
+		LastEventCursor: 4242,
+		Content:         []ContentNode{{Type: "text", Text: "edited body"}},
+		Conversation:    ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	}
+
+	seg := renderMessage(msg, RenderParams{})
+
+	if seg.MessageID != "msg-slot" {
+		t.Fatalf("MessageID = %q, want msg-slot (coverage matching depends on it)", seg.MessageID)
+	}
+	if seg.EditedAtMs != 7000 {
+		t.Fatalf("EditedAtMs = %d, want 7000 (EditedAtSec converted to ms)", seg.EditedAtMs)
+	}
+	if seg.LastEventCursor != 4242 {
+		t.Fatalf("LastEventCursor = %d, want 4242", seg.LastEventCursor)
+	}
+}
+
+func TestRenderDeletedMessagePopulatesSlotIdentityAndEditTime(t *testing.T) {
+	msg := &ICMessage{
+		MessageID:       "msg-deleted",
+		ReceivedAtMs:    2000,
+		TimestampSec:    2,
+		EditedAtSec:     9,
+		LastEventCursor: 5150,
+		Deleted:         true,
+		Conversation:    ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	}
+
+	seg := renderMessage(msg, RenderParams{})
+
+	if seg.MessageID != "msg-deleted" || seg.EditedAtMs != 9000 || seg.LastEventCursor != 5150 {
+		t.Fatalf("deleted segment lost slot metadata: %+v", seg)
+	}
+}

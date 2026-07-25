@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/memohai/memoh/domains/agent/chat/compaction"
+	compactionpostgres "github.com/memohai/memoh/domains/agent/chat/compaction/postgres"
 	"github.com/memohai/memoh/domains/agent/chat/timeline"
 	channelsqlc "github.com/memohai/memoh/domains/channel/internal/postgres/sqlc"
 	"github.com/memohai/memoh/internal/db"
@@ -82,22 +84,29 @@ func (s *timelineStore) CountEvents(ctx context.Context, sessionID string) (int6
 	return s.queries.CountSessionEvents(ctx, id)
 }
 
-func (s *timelineStore) GetDiscussCursor(ctx context.Context, sessionID, scopeKey string) (int64, error) {
+func (s *timelineStore) NextEventCursor(ctx context.Context) (int64, error) {
+	return s.queries.NextSessionEventCursor(ctx)
+}
+
+func (s *timelineStore) GetDiscussCursor(ctx context.Context, sessionID, scopeKey string) (timeline.DiscussCursorPosition, error) {
 	id, err := db.ParseUUID(sessionID)
 	if err != nil {
-		return 0, fmt.Errorf("invalid session id: %w", err)
+		return timeline.DiscussCursorPosition{}, fmt.Errorf("invalid session id: %w", err)
 	}
 	row, err := s.queries.GetSessionDiscussCursor(ctx, channelsqlc.GetSessionDiscussCursorParams{
 		SessionID: id,
 		ScopeKey:  scopeKey,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, nil
+		return timeline.DiscussCursorPosition{}, nil
 	}
 	if err != nil {
-		return 0, err
+		return timeline.DiscussCursorPosition{}, err
 	}
-	return row.ConsumedCursor, nil
+	return timeline.DiscussCursorPosition{
+		SourceCursor: row.ConsumedCursor,
+		EventCursor:  row.ConsumedEventCursor,
+	}, nil
 }
 
 func (s *timelineStore) UpsertDiscussCursor(ctx context.Context, record timeline.DiscussCursorRecord) error {
@@ -114,12 +123,13 @@ func (s *timelineStore) UpsertDiscussCursor(ctx context.Context, record timeline
 		return fmt.Errorf("invalid route id: %w", err)
 	}
 	_, err = s.queries.UpsertSessionDiscussCursor(ctx, channelsqlc.UpsertSessionDiscussCursorParams{
-		BotID:          botID,
-		SessionID:      sessionID,
-		ScopeKey:       record.ScopeKey,
-		RouteID:        routeID,
-		Source:         strings.TrimSpace(record.Source),
-		ConsumedCursor: record.ConsumedCursor,
+		BotID:               botID,
+		SessionID:           sessionID,
+		ScopeKey:            record.ScopeKey,
+		RouteID:             routeID,
+		Source:              strings.TrimSpace(record.Source),
+		ConsumedCursor:      record.ConsumedCursor,
+		ConsumedEventCursor: record.ConsumedEventCursor,
 	})
 	return err
 }
@@ -144,4 +154,11 @@ func timelineUUIDString(value pgtype.UUID) string {
 		return ""
 	}
 	return value.String()
+}
+
+// provideCompactionArtifacts exposes the agent-owned artifact frontier to the
+// discuss driver. Split-mode channel runs in its own process, so it binds the
+// store directly instead of reaching through the server's composition root.
+func provideCompactionArtifacts(pool *pgxpool.Pool) compaction.ArtifactStore {
+	return compactionpostgres.NewStoreFromDB(pool)
 }

@@ -84,7 +84,7 @@ func TestLoadBridgePlanRejectsInvalidPlan(t *testing.T) {
 		{
 			name: "wrong source version",
 			mutate: func(plan string) string {
-				return strings.Replace(plan, "schema_migrations_version: 119", "schema_migrations_version: 118", 1)
+				return strings.Replace(plan, fmt.Sprintf("schema_migrations_version: %d", finalV1SchemaVersion), "schema_migrations_version: 118", 1)
 			},
 		},
 	}
@@ -103,7 +103,7 @@ func TestLoadBridgePlanRejectsInvalidPlan(t *testing.T) {
 func TestValidateBridgeSource(t *testing.T) {
 	plan := bridgePlan{
 		Requires: bridgeRequires{
-			SchemaMigrationsVersion: 119,
+			SchemaMigrationsVersion: finalV1SchemaVersion,
 			Dirty:                   false,
 		},
 	}
@@ -116,7 +116,7 @@ func TestValidateBridgeSource(t *testing.T) {
 		{
 			name:   "approved v1",
 			state:  StateV1,
-			legacy: LegacyStatus{Exists: true, Version: 119},
+			legacy: LegacyStatus{Exists: true, Version: finalV1SchemaVersion},
 			wantOK: true,
 		},
 		{
@@ -127,7 +127,7 @@ func TestValidateBridgeSource(t *testing.T) {
 		{
 			name:   "dirty",
 			state:  StateV1,
-			legacy: LegacyStatus{Exists: true, Version: 119, Dirty: true},
+			legacy: LegacyStatus{Exists: true, Version: finalV1SchemaVersion, Dirty: true},
 		},
 		{name: "empty", state: StateEmpty},
 		{name: "partial", state: StatePartial},
@@ -163,7 +163,7 @@ func validBridgeFS() fstest.MapFS {
 	plan := "from_epoch: 1\n" +
 		"to_epoch: 2\n" +
 		"requires:\n" +
-		"  schema_migrations_version: 119\n" +
+		fmt.Sprintf("  schema_migrations_version: %d\n", finalV1SchemaVersion) +
 		"  dirty: false\n" +
 		"steps:\n" +
 		steps.String()

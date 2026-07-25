@@ -25,11 +25,24 @@ func NewEventStore(log *slog.Logger, store Store) *EventStore {
 	}
 }
 
-// PersistEvent writes a CanonicalEvent. Duplicate events return an empty ID.
-func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, event CanonicalEvent) (string, error) {
+// PersistEvent writes a CanonicalEvent with a freshly allocated monotonic
+// event cursor stamped into its payload. It returns the persisted row ID
+// (empty for ON CONFLICT duplicates) and the stamped event, which the caller
+// must project instead of the input. Cursor allocation is best effort: a
+// failure degrades to source-time ordering rather than dropping the event.
+func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, event CanonicalEvent) (string, CanonicalEvent, error) {
+	original := event
+	if cursor, cursorErr := s.store.NextEventCursor(ctx); cursorErr != nil {
+		s.logger.WarnContext(ctx, "allocate session event cursor failed", slog.Any("error", cursorErr))
+	} else if stamped, stampErr := assignEventCursor(event, cursor); stampErr != nil {
+		s.logger.WarnContext(ctx, "stamp session event cursor failed", slog.Any("error", stampErr))
+	} else {
+		event = stamped
+	}
+
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		return "", fmt.Errorf("marshal event data: %w", err)
+		return "", event, fmt.Errorf("marshal event data: %w", err)
 	}
 	id, err := s.store.CreateEvent(ctx, EventRecord{
 		BotID:                   botID,
@@ -41,9 +54,14 @@ func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, 
 		ReceivedAtMS:            event.GetReceivedAtMs(),
 	})
 	if err != nil {
-		return "", fmt.Errorf("persist session event: %w", err)
+		return "", event, fmt.Errorf("persist session event: %w", err)
 	}
-	return id, nil
+	// A deduplicated insert never stored the freshly allocated cursor, so the
+	// caller must keep projecting the original event.
+	if id == "" {
+		return "", original, nil
+	}
+	return id, event, nil
 }
 
 // LoadEvents loads all events for a session in persistence order.
@@ -76,28 +94,29 @@ func (s *EventStore) HasEvents(ctx context.Context, sessionID string) (bool, err
 	return count > 0, nil
 }
 
-func (s *EventStore) GetDiscussConsumedCursor(ctx context.Context, sessionID, scopeKey string) (int64, error) {
+func (s *EventStore) GetDiscussCursor(ctx context.Context, sessionID, scopeKey string) (DiscussCursorPosition, error) {
 	if s == nil || s.store == nil {
-		return 0, nil
+		return DiscussCursorPosition{}, nil
 	}
-	cursor, err := s.store.GetDiscussCursor(ctx, sessionID, normalizeDiscussCursorScope(scopeKey))
+	position, err := s.store.GetDiscussCursor(ctx, sessionID, normalizeDiscussCursorScope(scopeKey))
 	if err != nil {
-		return 0, fmt.Errorf("get discuss cursor: %w", err)
+		return DiscussCursorPosition{}, fmt.Errorf("get discuss cursor: %w", err)
 	}
-	return cursor, nil
+	return position, nil
 }
 
-func (s *EventStore) UpsertDiscussConsumedCursor(ctx context.Context, botID, sessionID, scopeKey, routeID, source string, cursor int64) error {
-	if s == nil || s.store == nil || cursor <= 0 {
+func (s *EventStore) UpsertDiscussCursor(ctx context.Context, botID, sessionID, scopeKey, routeID, source string, position DiscussCursorPosition) error {
+	if s == nil || s.store == nil || (position.SourceCursor <= 0 && position.EventCursor <= 0) {
 		return nil
 	}
 	err := s.store.UpsertDiscussCursor(ctx, DiscussCursorRecord{
-		BotID:          botID,
-		SessionID:      sessionID,
-		ScopeKey:       normalizeDiscussCursorScope(scopeKey),
-		RouteID:        routeID,
-		Source:         strings.TrimSpace(source),
-		ConsumedCursor: cursor,
+		BotID:               botID,
+		SessionID:           sessionID,
+		ScopeKey:            normalizeDiscussCursorScope(scopeKey),
+		RouteID:             routeID,
+		Source:              strings.TrimSpace(source),
+		ConsumedCursor:      position.SourceCursor,
+		ConsumedEventCursor: position.EventCursor,
 	})
 	if err != nil {
 		return fmt.Errorf("upsert discuss cursor: %w", err)

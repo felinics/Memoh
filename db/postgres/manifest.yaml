@@ -79,7 +79,7 @@ owners:
     files:
       - path: channel/migrations/00001_baseline.sql
         version: 1
-        checksum: sha256:0296150e2988da35b2ed780f4aa95dfa0905c0b581279eb6638553a3ed74afd1
+        checksum: sha256:3a02cd7b5f14b35cf9ce72f97c10708aaa07db48dbd13427f3c4587aef63e980
   - name: memory
     schema: memory
     version_table: memory.goose_db_version
