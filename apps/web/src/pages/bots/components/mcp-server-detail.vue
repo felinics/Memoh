@@ -334,6 +334,7 @@
               <Button
                 v-if="!oauthStatus?.has_token"
                 :loading="oauthDiscovering || oauthAuthorizing"
+                :disabled="oauthDiscovering || oauthAuthorizing"
                 loading-mode="manual"
                 @click="handleOAuthFlow"
               >
@@ -938,6 +939,10 @@ async function handleOAuthDiscover(): Promise<boolean> {
 
 async function handleOAuthFlow() {
   if (!serverId.value) return
+  // One flow at a time: restarting re-navigates the same named popup, which
+  // aborts any in-flight callback — and a mid-exchange abort used to burn the
+  // single-use auth code. The button is disabled too; this is the guard.
+  if (oauthDiscovering.value || oauthAuthorizing.value) return
   if (!oauthDiscovered.value) {
     const discovered = await handleOAuthDiscover()
     if (!discovered) return
@@ -970,6 +975,10 @@ async function handleOAuthFlow() {
       oauthAuthorizing.value = false
       await loadOAuthStatus()
       if (result === 'success') {
+        // The flow is done — close the authorization popup if it is still
+        // around (poll-based completion can win the race against the
+        // callback page's own postMessage + self-close).
+        popup?.close()
         toast.success(t('mcp.oauth.authSuccess'))
         void handleProbe(serverId.value)
       } else {
@@ -995,7 +1004,11 @@ async function handleOAuthFlow() {
       getBotsByBotIdMcpByIdOauthStatus({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
         .then(async ({ data: next }) => {
           if (completed) return
-          if (next?.configured) {
+          // Completion means the TOKEN LANDED — `configured` is already true
+          // once authorization starts (the endpoint is stored up front), so
+          // polling it fires a false success seconds after the user clicks
+          // Authorize, before they have even consented.
+          if (next?.has_token) {
             oauthStatus.value = next
             await finishOAuth('success')
             return
