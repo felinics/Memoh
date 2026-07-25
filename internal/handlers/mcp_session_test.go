@@ -28,8 +28,10 @@ type echoToolArgs struct {
 	Text string `json:"text"`
 }
 
-// serveTestMCPServer runs a real go-sdk MCP server with one echo tool over the
-// given pipes — the server half of the stdio seam.
+// serveTestMCPServer runs a real go-sdk MCP server with one echo tool, one
+// prompt, and one resource over the given pipes — the server half of the stdio
+// seam. All three capability families are registered so the proxy dispatch can
+// be exercised across everything the initialize result advertises.
 func serveTestMCPServer(t *testing.T, stdin io.ReadCloser, stdout io.WriteCloser) {
 	t.Helper()
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-mcp", Version: "v0"}, nil)
@@ -38,6 +40,20 @@ func serveTestMCPServer(t *testing.T, stdin io.ReadCloser, stdout io.WriteCloser
 			return &sdkmcp.CallToolResult{
 				Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: in.Text}},
 			}, nil, nil
+		})
+	server.AddPrompt(&sdkmcp.Prompt{Name: "greet", Description: "greets by name"},
+		func(_ context.Context, req *sdkmcp.GetPromptRequest) (*sdkmcp.GetPromptResult, error) {
+			return &sdkmcp.GetPromptResult{
+				Messages: []*sdkmcp.PromptMessage{
+					{Role: "user", Content: &sdkmcp.TextContent{Text: "hello " + req.Params.Arguments["name"]}},
+				},
+			}, nil
+		})
+	server.AddResource(&sdkmcp.Resource{URI: "test://doc", Name: "doc"},
+		func(_ context.Context, _ *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
+			return &sdkmcp.ReadResourceResult{
+				Contents: []*sdkmcp.ResourceContents{{URI: "test://doc", MIMEType: "text/plain", Text: "doc-body"}},
+			}, nil
 		})
 	sess, err := server.Connect(context.Background(), &sdkmcp.IOTransport{Reader: stdin, Writer: stdout}, nil)
 	if err != nil {
@@ -178,8 +194,82 @@ func TestMCPStdioClientDispatch(t *testing.T) {
 		}
 	})
 
+	t.Run("prompts/list", func(t *testing.T) {
+		payload, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "prompts/list", ID: mcptools.RawStringID("pl1")})
+		if err != nil {
+			t.Fatalf("dispatch prompts/list: %v", err)
+		}
+		result, ok := payload["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing prompts/list result: %+v", payload)
+		}
+		prompts, ok := result["prompts"].([]any)
+		if !ok || len(prompts) != 1 {
+			t.Fatalf("unexpected prompts: %+v", result)
+		}
+	})
+
+	t.Run("prompts/get", func(t *testing.T) {
+		params, _ := json.Marshal(map[string]any{
+			"name":      "greet",
+			"arguments": map[string]any{"name": "world"},
+		})
+		payload, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "prompts/get", ID: mcptools.RawStringID("pg1"), Params: params})
+		if err != nil {
+			t.Fatalf("dispatch prompts/get: %v", err)
+		}
+		result, ok := payload["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing prompts/get result: %+v", payload)
+		}
+		messages, ok := result["messages"].([]any)
+		if !ok || len(messages) != 1 {
+			t.Fatalf("unexpected messages: %+v", result)
+		}
+		first, _ := messages[0].(map[string]any)
+		content, _ := first["content"].(map[string]any)
+		if content["text"] != "hello world" {
+			t.Fatalf("unexpected prompt message: %+v", first)
+		}
+	})
+
+	t.Run("resources/list", func(t *testing.T) {
+		payload, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "resources/list", ID: mcptools.RawStringID("rl1")})
+		if err != nil {
+			t.Fatalf("dispatch resources/list: %v", err)
+		}
+		result, ok := payload["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing resources/list result: %+v", payload)
+		}
+		resources, ok := result["resources"].([]any)
+		if !ok || len(resources) != 1 {
+			t.Fatalf("unexpected resources: %+v", result)
+		}
+	})
+
+	t.Run("resources/read", func(t *testing.T) {
+		params, _ := json.Marshal(map[string]any{"uri": "test://doc"})
+		payload, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "resources/read", ID: mcptools.RawStringID("rr1"), Params: params})
+		if err != nil {
+			t.Fatalf("dispatch resources/read: %v", err)
+		}
+		result, ok := payload["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing resources/read result: %+v", payload)
+		}
+		contents, ok := result["contents"].([]any)
+		if !ok || len(contents) != 1 {
+			t.Fatalf("unexpected contents: %+v", result)
+		}
+		first, _ := contents[0].(map[string]any)
+		if first["text"] != "doc-body" {
+			t.Fatalf("unexpected resource contents: %+v", first)
+		}
+	})
+
 	t.Run("unknown method is method-not-found", func(t *testing.T) {
-		_, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "resources/read", ID: mcptools.RawStringID("u1")})
+		_, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "experimental/custom", ID: mcptools.RawStringID("u1")})
 		if !errors.Is(err, errMCPMethodNotFound) {
 			t.Fatalf("expected errMCPMethodNotFound, got %v", err)
 		}

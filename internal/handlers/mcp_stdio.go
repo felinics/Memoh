@@ -111,15 +111,19 @@ func (c *mcpStdioClient) enrichError(err error) error {
 var errMCPMethodNotFound = errors.New("method not found")
 
 // dispatch answers a raw JSON-RPC request from the external proxy endpoint using
-// the typed SDK session. The go-sdk client offers no raw passthrough, so the
-// surface is a bounded method table instead of arbitrary forwarding.
+// the typed SDK session. The go-sdk client offers no raw passthrough (its read
+// loop owns the transport, so interleaving hand-correlated frames is unsafe),
+// so the surface is a method table instead of arbitrary forwarding. It covers
+// the FULL standard MCP client surface the SDK speaks — anything the replayed
+// initialize can advertise (tools, prompts, resources, completion, logging,
+// subscriptions) is callable here; -32601 is reserved for genuinely unknown
+// (experimental/custom) methods.
 func (c *mcpStdioClient) dispatch(ctx context.Context, req mcptools.JSONRPCRequest) (map[string]any, error) {
 	switch strings.TrimSpace(req.Method) {
 	case "ping":
-		if err := c.session.Ping(ctx, &sdkmcp.PingParams{}); err != nil {
-			return nil, c.enrichError(err)
-		}
-		return jsonrpcResultPayload(req.ID, map[string]any{}), nil
+		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
+			return map[string]any{}, c.session.Ping(ctx, &sdkmcp.PingParams{})
+		})
 	case "initialize":
 		// The session already handshook at connect; replay the stored result.
 		result := c.session.InitializeResult()
@@ -128,32 +132,79 @@ func (c *mcpStdioClient) dispatch(ctx context.Context, req mcptools.JSONRPCReque
 		}
 		return jsonrpcResultPayload(req.ID, result), nil
 	case "tools/list":
-		result, err := c.session.ListTools(ctx, &sdkmcp.ListToolsParams{})
-		if err != nil {
-			return nil, c.enrichError(err)
-		}
-		return jsonrpcResultPayload(req.ID, result), nil
-	case "tools/call":
-		var params struct {
-			Name      string         `json:"name"`
-			Arguments map[string]any `json:"arguments"`
-		}
-		if len(req.Params) > 0 {
-			if err := json.Unmarshal(req.Params, &params); err != nil {
-				return nil, fmt.Errorf("invalid tools/call params: %w", err)
-			}
-		}
-		result, err := c.session.CallTool(ctx, &sdkmcp.CallToolParams{
-			Name:      strings.TrimSpace(params.Name),
-			Arguments: params.Arguments,
+		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
+			return c.session.ListTools(ctx, &sdkmcp.ListToolsParams{})
 		})
-		if err != nil {
-			return nil, c.enrichError(err)
-		}
-		return jsonrpcResultPayload(req.ID, result), nil
+	case "tools/call":
+		params := &sdkmcp.CallToolParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			params.Name = strings.TrimSpace(params.Name)
+			return c.session.CallTool(ctx, params)
+		})
+	case "prompts/list":
+		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
+			return c.session.ListPrompts(ctx, &sdkmcp.ListPromptsParams{})
+		})
+	case "prompts/get":
+		params := &sdkmcp.GetPromptParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.GetPrompt(ctx, params)
+		})
+	case "resources/list":
+		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
+			return c.session.ListResources(ctx, &sdkmcp.ListResourcesParams{})
+		})
+	case "resources/templates/list":
+		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
+			return c.session.ListResourceTemplates(ctx, &sdkmcp.ListResourceTemplatesParams{})
+		})
+	case "resources/read":
+		params := &sdkmcp.ReadResourceParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ReadResource(ctx, params)
+		})
+	case "resources/subscribe":
+		params := &sdkmcp.SubscribeParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return map[string]any{}, c.session.Subscribe(ctx, params)
+		})
+	case "resources/unsubscribe":
+		params := &sdkmcp.UnsubscribeParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return map[string]any{}, c.session.Unsubscribe(ctx, params)
+		})
+	case "completion/complete":
+		params := &sdkmcp.CompleteParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.Complete(ctx, params)
+		})
+	case "logging/setLevel":
+		params := &sdkmcp.SetLoggingLevelParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return map[string]any{}, c.session.SetLoggingLevel(ctx, params)
+		})
 	default:
 		return nil, errMCPMethodNotFound
 	}
+}
+
+// sdkCall runs one dispatch case: decode the raw JSON-RPC params into the typed
+// SDK params (nil for parameterless methods), invoke, then wrap the result —
+// or enrich the failure with process diagnostics (exit code + stderr tail).
+func (c *mcpStdioClient) sdkCall(ctx context.Context, req mcptools.JSONRPCRequest, params any, invoke func(context.Context) (any, error)) (map[string]any, error) {
+	if params != nil && len(req.Params) > 0 {
+		if err := json.Unmarshal(req.Params, params); err != nil {
+			return nil, fmt.Errorf("invalid %s params: %w", req.Method, err)
+		}
+	}
+	result, err := invoke(ctx)
+	if err != nil {
+		return nil, c.enrichError(err)
+	}
+	if result == nil {
+		result = map[string]any{}
+	}
+	return jsonrpcResultPayload(req.ID, result), nil
 }
 
 // jsonrpcResultPayload wraps a typed SDK result into a standard JSON-RPC
