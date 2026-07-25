@@ -229,6 +229,48 @@ func (q *Queries) GetChatRouteByID(ctx context.Context, id pgtype.UUID) (GetChat
 	return i, err
 }
 
+const listChatRouteThreadProjectionsByIDs = `-- name: ListChatRouteThreadProjectionsByIDs :many
+SELECT
+  id,
+  conversation_type,
+  metadata
+FROM channel.bot_channel_routes
+WHERE team_id = iam.memoh_current_team_id()
+  AND bot_id = $1
+  AND id = ANY($2::uuid[])
+`
+
+type ListChatRouteThreadProjectionsByIDsParams struct {
+	BotID    pgtype.UUID   `json:"bot_id"`
+	RouteIds []pgtype.UUID `json:"route_ids"`
+}
+
+type ListChatRouteThreadProjectionsByIDsRow struct {
+	ID               pgtype.UUID `json:"id"`
+	ConversationType pgtype.Text `json:"conversation_type"`
+	Metadata         []byte      `json:"metadata"`
+}
+
+func (q *Queries) ListChatRouteThreadProjectionsByIDs(ctx context.Context, arg ListChatRouteThreadProjectionsByIDsParams) ([]ListChatRouteThreadProjectionsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listChatRouteThreadProjectionsByIDs, arg.BotID, arg.RouteIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChatRouteThreadProjectionsByIDsRow
+	for rows.Next() {
+		var i ListChatRouteThreadProjectionsByIDsRow
+		if err := rows.Scan(&i.ID, &i.ConversationType, &i.Metadata); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChatRoutes = `-- name: ListChatRoutes :many
 SELECT
   id,

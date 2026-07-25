@@ -17,6 +17,10 @@ type routeStoreFake struct {
 	touchedBotID   string
 	ensuredBotID   string
 	activeThreadID string
+
+	projectionCalls    int
+	projectionBotID    string
+	projectionRouteIDs []string
 }
 
 func (s *routeStoreFake) CreateRoute(context.Context, CreateInput) (Route, error) {
@@ -38,6 +42,25 @@ func (s *routeStoreFake) FindRouteByID(_ context.Context, routeID string) (Route
 
 func (s *routeStoreFake) ListRoutes(context.Context, string) ([]Route, error) {
 	return s.routes, nil
+}
+
+func (s *routeStoreFake) ListRouteThreadProjections(_ context.Context, botID string, routeIDs []string) ([]ThreadProjection, error) {
+	s.projectionCalls++
+	s.projectionBotID = botID
+	s.projectionRouteIDs = append([]string(nil), routeIDs...)
+	out := make([]ThreadProjection, 0, len(routeIDs))
+	for _, id := range routeIDs {
+		for _, r := range s.routes {
+			if r.ID == id {
+				out = append(out, ThreadProjection{
+					RouteID:          r.ID,
+					ConversationType: r.ConversationType,
+					Metadata:         r.Metadata,
+				})
+			}
+		}
+	}
+	return out, nil
 }
 
 func (*routeStoreFake) DeleteRoute(context.Context, string) error { return nil }

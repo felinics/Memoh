@@ -71,11 +71,19 @@ type ResolveInput struct {
 }
 
 // Store is the route persistence surface consumed by the route service.
+// ThreadProjection is the minimal route view Thread listings need.
+type ThreadProjection struct {
+	RouteID          string
+	ConversationType string
+	Metadata         map[string]any
+}
+
 type Store interface {
 	CreateRoute(context.Context, CreateInput) (Route, error)
 	FindRoute(context.Context, string, string, string, string) (Route, error)
 	FindRouteByID(context.Context, string) (Route, error)
 	ListRoutes(context.Context, string) ([]Route, error)
+	ListRouteThreadProjections(context.Context, string, []string) ([]ThreadProjection, error)
 	DeleteRoute(context.Context, string) error
 	SetReplyTarget(context.Context, string, string) error
 	SetMetadata(context.Context, string, map[string]any) error

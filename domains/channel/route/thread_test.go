@@ -144,3 +144,57 @@ func TestEnrichThreadsPreservesRouteProjection(t *testing.T) {
 		t.Fatalf("RouteMetadata = %#v", got[0].RouteMetadata)
 	}
 }
+
+// TestEnrichThreadsQueriesOnlyUniqueReferencedRoutes and the skip case below
+// preserve the #856 review behaviour: a bot can own far more routes than a
+// single Thread page references, so enrichment must project by referenced id
+// rather than listing every route for the bot.
+func TestEnrichThreadsQueriesOnlyUniqueReferencedRoutes(t *testing.T) {
+	store := &routeStoreFake{routes: []Route{
+		{ID: "route-1", ConversationType: "group"},
+		{ID: "route-2", ConversationType: "private"},
+	}}
+	service := NewService(nil, store)
+
+	threads := []session.Thread{
+		{ID: "thread-1", RouteID: "route-1"},
+		{ID: "thread-2", RouteID: "route-1"},
+		{ID: "thread-3", RouteID: "route-2"},
+		{ID: "thread-4"},
+	}
+	got, err := service.EnrichThreads(context.Background(), "bot-1", threads)
+	if err != nil {
+		t.Fatalf("EnrichThreads() error = %v", err)
+	}
+	if len(got) != len(threads) {
+		t.Fatalf("EnrichThreads() returned %d threads, want %d", len(got), len(threads))
+	}
+	if store.projectionCalls != 1 {
+		t.Fatalf("projection query calls = %d, want 1", store.projectionCalls)
+	}
+	if store.projectionBotID != "bot-1" {
+		t.Fatalf("projection bot id = %q, want bot-1", store.projectionBotID)
+	}
+	if len(store.projectionRouteIDs) != 2 ||
+		store.projectionRouteIDs[0] != "route-1" ||
+		store.projectionRouteIDs[1] != "route-2" {
+		t.Fatalf("projection route ids = %#v, want deduplicated [route-1 route-2]", store.projectionRouteIDs)
+	}
+}
+
+func TestEnrichThreadsSkipsProjectionQueryWithoutRouteIDs(t *testing.T) {
+	store := &routeStoreFake{}
+	service := NewService(nil, store)
+	threads := []session.Thread{{ID: "thread-1"}, {ID: "thread-2", RouteID: "   "}}
+
+	got, err := service.EnrichThreads(context.Background(), "bot-1", threads)
+	if err != nil {
+		t.Fatalf("EnrichThreads() error = %v", err)
+	}
+	if store.projectionCalls != 0 {
+		t.Fatalf("projection query calls = %d, want 0", store.projectionCalls)
+	}
+	if len(got) != len(threads) || got[0].ID != "thread-1" || got[1].ID != "thread-2" {
+		t.Fatalf("EnrichThreads() = %#v", got)
+	}
+}

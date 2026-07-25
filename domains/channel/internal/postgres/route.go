@@ -19,6 +19,7 @@ type routeQueries interface {
 	FindChatRoute(context.Context, channelsqlc.FindChatRouteParams) (channelsqlc.FindChatRouteRow, error)
 	GetChatRouteByID(context.Context, pgtype.UUID) (channelsqlc.GetChatRouteByIDRow, error)
 	ListChatRoutes(context.Context, pgtype.UUID) ([]channelsqlc.ListChatRoutesRow, error)
+	ListChatRouteThreadProjectionsByIDs(context.Context, channelsqlc.ListChatRouteThreadProjectionsByIDsParams) ([]channelsqlc.ListChatRouteThreadProjectionsByIDsRow, error)
 	UpdateChatRouteReplyTarget(context.Context, channelsqlc.UpdateChatRouteReplyTargetParams) error
 	UpdateChatRouteMetadata(context.Context, channelsqlc.UpdateChatRouteMetadataParams) error
 }
@@ -213,4 +214,44 @@ func routeRecord(
 		CreatedAt:              timestamp(createdAt),
 		UpdatedAt:              timestamp(updatedAt),
 	}
+}
+
+// ListRouteThreadProjections fetches only the routes the caller references.
+// Thread listings bind a handful of routes out of a bot's full set, so
+// projecting by id keeps the query proportional to the page instead of the bot.
+func (s *Store) ListRouteThreadProjections(ctx context.Context, botID string, routeIDs []string) ([]route.ThreadProjection, error) {
+	if len(routeIDs) == 0 {
+		return nil, nil
+	}
+	bot, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]pgtype.UUID, 0, len(routeIDs))
+	for _, id := range routeIDs {
+		parsed, parseErr := db.ParseUUID(id)
+		if parseErr != nil {
+			continue
+		}
+		ids = append(ids, parsed)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.routes.ListChatRouteThreadProjectionsByIDs(ctx, channelsqlc.ListChatRouteThreadProjectionsByIDsParams{
+		BotID:    bot,
+		RouteIds: ids,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]route.ThreadProjection, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, route.ThreadProjection{
+			RouteID:          uuidString(row.ID),
+			ConversationType: row.ConversationType.String,
+			Metadata:         decodeMap(row.Metadata),
+		})
+	}
+	return items, nil
 }

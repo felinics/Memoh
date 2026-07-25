@@ -104,3 +104,13 @@ WHERE team_id = iam.memoh_current_team_id()
 DELETE FROM channel.bot_channel_routes
 WHERE team_id = iam.memoh_current_team_id()
   AND id = sqlc.arg(id);
+
+-- name: ListChatRouteThreadProjectionsByIDs :many
+SELECT
+  id,
+  conversation_type,
+  metadata
+FROM channel.bot_channel_routes
+WHERE team_id = iam.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND id = ANY(sqlc.arg(route_ids)::uuid[]);

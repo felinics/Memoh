@@ -122,19 +122,36 @@ func (s *Manager) SetActiveThread(ctx context.Context, routeID, threadID string)
 }
 
 // EnrichThreads projects Channel-owned route metadata onto Thread view
-// records. It performs one route query for the bot and leaves unbound Threads
-// unchanged.
+// records. It queries only the routes this page actually references — a bot can
+// own far more routes than one listing shows — and skips the query entirely
+// when no Thread is route-bound. Unbound Threads are left unchanged.
 func (s *Manager) EnrichThreads(ctx context.Context, botID string, threads []session.Thread) ([]session.Thread, error) {
 	if len(threads) == 0 {
 		return []session.Thread{}, nil
 	}
-	routes, err := s.List(ctx, botID)
+	seen := make(map[string]struct{}, len(threads))
+	routeIDs := make([]string, 0, len(threads))
+	for _, thread := range threads {
+		id := strings.TrimSpace(thread.RouteID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		routeIDs = append(routeIDs, id)
+	}
+	if len(routeIDs) == 0 {
+		return append([]session.Thread(nil), threads...), nil
+	}
+	projections, err := s.store.ListRouteThreadProjections(ctx, botID, routeIDs)
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[string]Route, len(routes))
-	for _, route := range routes {
-		byID[route.ID] = route
+	byID := make(map[string]ThreadProjection, len(projections))
+	for _, projection := range projections {
+		byID[projection.RouteID] = projection
 	}
 	out := append([]session.Thread(nil), threads...)
 	for i := range out {
