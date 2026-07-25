@@ -92,7 +92,7 @@ func (c *mcpStdioClient) enrichError(err error) error {
 		// protocol error that races the process death (server answers "tool not
 		// found", then crashes) must not be swallowed by the exit code. io.EOF
 		// itself adds nothing beyond "the process died", so it stays out.
-		fmt.Fprintf(&b, "process exited with code %d", code)
+		fmt.Fprintf(&b, "process exited with code %d", code) //nolint:gosec // G705: goes out as a JSON-RPC result via c.JSON — JSON-encoded, never HTML
 		if !errors.Is(err, io.EOF) {
 			b.WriteString(": ")
 			b.WriteString(err.Error())
