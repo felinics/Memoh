@@ -291,6 +291,14 @@ func (s *OAuthService) HandleCallback(ctx context.Context, state, code string) (
 		return "", errors.New("state and code are required")
 	}
 
+	// The auth code is single-use, but the browser may abort this request
+	// mid-flight (popup closed, or re-navigated by a retry). Everything after
+	// the state lookup runs on a detached context so an abort cannot burn the
+	// code — the frontend polls status and completes the flow regardless of
+	// what this HTTP response does.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+
 	token, err := s.queries.GetMCPOAuthTokenByState(ctx, state)
 	if err != nil {
 		return "", fmt.Errorf("invalid or expired state parameter: %w", err)
