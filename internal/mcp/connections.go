@@ -290,6 +290,15 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	}
 	authType := strings.TrimSpace(req.AuthType)
 	if authType == "" {
+		// Upsert payloads never carry auth_type — that field is owned by the
+		// OAuth flow. Defaulting an omitted value to "none" would silently
+		// strip OAuth from the connection on every save/toggle and leave the
+		// stored token permanently unattached, so preserve the stored value.
+		if existing, getErr := s.Get(ctx, botID, id); getErr == nil {
+			authType = strings.TrimSpace(existing.AuthType)
+		}
+	}
+	if authType == "" {
 		authType = "none"
 	}
 	configPayload, err := json.Marshal(config)

@@ -86,8 +86,17 @@ func (c *mcpStdioClient) enrichError(err error) error {
 		return nil
 	}
 	var b strings.Builder
-	if code := c.exitCode.Load(); code >= 0 {
+	code := c.exitCode.Load()
+	if code >= 0 {
+		// Keep the original failure alongside the exit diagnostics: a real
+		// protocol error that races the process death (server answers "tool not
+		// found", then crashes) must not be swallowed by the exit code. io.EOF
+		// itself adds nothing beyond "the process died", so it stays out.
 		fmt.Fprintf(&b, "process exited with code %d", code)
+		if !errors.Is(err, io.EOF) {
+			b.WriteString(": ")
+			b.WriteString(err.Error())
+		}
 	} else {
 		b.WriteString(err.Error())
 	}
@@ -97,10 +106,7 @@ func (c *mcpStdioClient) enrichError(err error) error {
 	}
 	// No diagnostics captured → hand the original error back untouched so
 	// errors.Is/As chains keep working.
-	if code := c.exitCode.Load(); code < 0 && b.String() == err.Error() {
-		return err
-	}
-	if b.Len() == 0 {
+	if b.String() == err.Error() {
 		return err
 	}
 	return errors.New(b.String())
@@ -132,8 +138,9 @@ func (c *mcpStdioClient) dispatch(ctx context.Context, req mcptools.JSONRPCReque
 		}
 		return jsonrpcResultPayload(req.ID, result), nil
 	case "tools/list":
-		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
-			return c.session.ListTools(ctx, &sdkmcp.ListToolsParams{})
+		params := &sdkmcp.ListToolsParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ListTools(ctx, params)
 		})
 	case "tools/call":
 		params := &sdkmcp.CallToolParams{}
@@ -142,8 +149,9 @@ func (c *mcpStdioClient) dispatch(ctx context.Context, req mcptools.JSONRPCReque
 			return c.session.CallTool(ctx, params)
 		})
 	case "prompts/list":
-		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
-			return c.session.ListPrompts(ctx, &sdkmcp.ListPromptsParams{})
+		params := &sdkmcp.ListPromptsParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ListPrompts(ctx, params)
 		})
 	case "prompts/get":
 		params := &sdkmcp.GetPromptParams{}
@@ -151,12 +159,14 @@ func (c *mcpStdioClient) dispatch(ctx context.Context, req mcptools.JSONRPCReque
 			return c.session.GetPrompt(ctx, params)
 		})
 	case "resources/list":
-		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
-			return c.session.ListResources(ctx, &sdkmcp.ListResourcesParams{})
+		params := &sdkmcp.ListResourcesParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ListResources(ctx, params)
 		})
 	case "resources/templates/list":
-		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
-			return c.session.ListResourceTemplates(ctx, &sdkmcp.ListResourceTemplatesParams{})
+		params := &sdkmcp.ListResourceTemplatesParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ListResourceTemplates(ctx, params)
 		})
 	case "resources/read":
 		params := &sdkmcp.ReadResourceParams{}
@@ -296,7 +306,11 @@ func buildShellCommand(req MCPStdioRequest) string {
 
 	assignments := []string{}
 	for _, pair := range buildEnvPairs(req.Env) {
-		assignments = append(assignments, escapeShellArg(pair))
+		// Quote KEY and VALUE separately: quoting the whole "KEY=value" pair
+		// makes sh see a quoted word, not an assignment prefix, and the launch
+		// dies with "KEY=value: command not found" (exit 127).
+		key, value, _ := strings.Cut(pair, "=")
+		assignments = append(assignments, key+"="+escapeShellArg(value))
 	}
 	if len(assignments) > 0 {
 		command = strings.Join(assignments, " ") + " " + command
@@ -311,7 +325,9 @@ func escapeShellArg(value string) string {
 	if value == "" {
 		return "''"
 	}
-	if !strings.ContainsAny(value, " \t\n'\"\\$&;|<>*?()[]{}!`") {
+	// '#' must force quoting too: as the first char of a bare word it starts a
+	// shell comment and silently eats the rest of the line.
+	if !strings.ContainsAny(value, " \t\n'\"\\$&;|<>*?()[]{}!`#") {
 		return value
 	}
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
@@ -343,7 +359,6 @@ type mcpStdioSession struct {
 	containerID string
 	name        string
 	createdAt   time.Time
-	lastUsedAt  time.Time
 	session     *mcpStdioClient
 }
 
@@ -379,11 +394,6 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "workspace runtime not found for bot")
 	}
 
-	sess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	tools := h.probeMCPTools(ctx, sess, botID, strings.TrimSpace(req.Name))
 	connectionID := uuid.NewString()
 	record := &mcpStdioSession{
 		id:          connectionID,
@@ -391,19 +401,34 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 		containerID: containerID,
 		name:        strings.TrimSpace(req.Name),
 		createdAt:   time.Now().UTC(),
-		lastUsedAt:  time.Now().UTC(),
-		session:     sess,
 	}
-	sess.onClose = func() {
+	sess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req, func() {
 		h.mcpStdioMu.Lock()
 		if current, ok := h.mcpStdioSess[connectionID]; ok && current == record {
 			delete(h.mcpStdioSess, connectionID)
 		}
 		h.mcpStdioMu.Unlock()
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	record.session = sess
+	tools := h.probeMCPTools(ctx, sess, botID, strings.TrimSpace(req.Name))
 	h.mcpStdioMu.Lock()
 	h.mcpStdioSess[connectionID] = record
 	h.mcpStdioMu.Unlock()
+	// The process may already have died before the record landed (onClose then
+	// ran as a no-op against the not-yet-inserted entry). Reap that case here —
+	// after this point every close happens with the entry visible to onClose.
+	select {
+	case <-sess.done:
+		h.mcpStdioMu.Lock()
+		if current, ok := h.mcpStdioSess[connectionID]; ok && current == record {
+			delete(h.mcpStdioSess, connectionID)
+		}
+		h.mcpStdioMu.Unlock()
+	default:
+	}
 
 	return c.JSON(http.StatusOK, MCPStdioResponse{
 		ConnectionID: connectionID,
@@ -455,10 +480,15 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	if strings.TrimSpace(req.Method) == "" {
 		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, -32601, "method not found"))
 	}
-	session.lastUsedAt = time.Now().UTC()
 	if mcptools.IsNotification(req) {
 		// The SDK client owns the protocol and offers no generic notify to
-		// forward. Notifications carry no response, so acknowledge and drop.
+		// forward (the old hand-rolled client could; this is a known fidelity
+		// gap — e.g. notifications/cancelled no longer reaches the server).
+		// Notifications carry no response, so acknowledge, log, and drop.
+		h.logger.Debug("mcp stdio notification dropped",
+			slog.String("connection_id", connectionID),
+			slog.String("method", req.Method),
+		)
 		return c.NoContent(http.StatusAccepted)
 	}
 	payload, err := session.session.dispatch(c.Request().Context(), req)
@@ -481,7 +511,10 @@ func connectStdioClient(ctx context.Context, stdin io.WriteCloser, stdout io.Rea
 	return client.Connect(ctx, &sdkmcp.IOTransport{Reader: stdout, Writer: stdin}, nil)
 }
 
-func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, botID, containerID string, req MCPStdioRequest) (*mcpStdioClient, error) {
+// onClose is registered on the client BEFORE connect/Wait can fire Close: a
+// process that dies during the handshake must still run the registry cleanup,
+// otherwise closeOnce is consumed with a nil callback and the entry leaks.
+func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, botID, containerID string, req MCPStdioRequest, onClose func()) (*mcpStdioClient, error) {
 	// Get gRPC client for the bot container via manager
 	client, err := h.manager.MCPClient(ctx, botID)
 	if err != nil {
@@ -507,6 +540,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 		stderrTail:  &mcpStderrTail{},
 		done:        make(chan struct{}),
 		streamClose: func() { _ = execStream.Close() },
+		onClose:     onClose,
 	}
 	sess.exitCode.Store(-1)
 

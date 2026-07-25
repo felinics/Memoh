@@ -268,6 +268,16 @@ func TestMCPStdioClientDispatch(t *testing.T) {
 		}
 	})
 
+	t.Run("list methods decode params (pagination cursor surface)", func(t *testing.T) {
+		// A cursor with the wrong JSON type must be rejected by params decoding,
+		// proving list params are forwarded instead of silently dropped.
+		params, _ := json.Marshal(map[string]any{"cursor": 123})
+		_, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "tools/list", ID: mcptools.RawStringID("tc1"), Params: params})
+		if err == nil || !strings.Contains(err.Error(), "invalid tools/list params") {
+			t.Fatalf("expected params decode error, got %v", err)
+		}
+	})
+
 	t.Run("unknown method is method-not-found", func(t *testing.T) {
 		_, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "experimental/custom", ID: mcptools.RawStringID("u1")})
 		if !errors.Is(err, errMCPMethodNotFound) {
@@ -364,9 +374,14 @@ func TestBuildShellCommand(t *testing.T) {
 			want: "'npx -y pkg'",
 		},
 		{
-			name: "env pairs are sorted and escaped",
+			name: "env pairs are sorted and values escaped",
 			req:  MCPStdioRequest{Command: "srv", Env: map[string]string{"B_KEY": "2", "A_KEY": "a b"}},
-			want: "'A_KEY=a b' B_KEY=2 srv",
+			want: "A_KEY='a b' B_KEY=2 srv",
+		},
+		{
+			name: "env value with comment char is quoted",
+			req:  MCPStdioRequest{Command: "srv", Env: map[string]string{"TOKEN": "#abc"}},
+			want: "TOKEN='#abc' srv",
 		},
 		{
 			name: "cwd wraps the command",

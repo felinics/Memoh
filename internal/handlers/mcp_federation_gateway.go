@@ -286,7 +286,8 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 		Env:     normalizeStringMap(connection.Config["env"]),
 		Cwd:     strings.TrimSpace(anyToString(connection.Config["cwd"])),
 	}
-	return g.handler.startContainerdMCPCommandSession(ctx, botID, containerID, request)
+	// Federation sessions are short-lived and unregistered — no onClose.
+	return g.handler.startContainerdMCPCommandSession(ctx, botID, containerID, request, nil)
 }
 
 func convertSDKTools(items []*sdkmcp.Tool) []mcpgw.ToolDescriptor {
