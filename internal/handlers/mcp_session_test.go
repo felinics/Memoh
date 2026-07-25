@@ -3,383 +3,313 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
-	"sync"
+	"strings"
 	"testing"
 	"time"
 
-	sdkjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcptools "github.com/memohai/memoh/internal/mcp"
 )
 
-// fakeMCPConnection implements sdkmcp.Connection for testing.
-// onWrite is called synchronously when Write is called; if it returns a
-// non-nil Response the response is queued to be returned by Read.
-type fakeMCPConnection struct {
-	mu      sync.Mutex
-	writes  []*sdkjsonrpc.Request
-	readCh  chan sdkjsonrpc.Message
-	closed  chan struct{}
-	closeMu sync.Once
-	onWrite func(req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error)
+// newStdioPipePair returns the two pipe ends an in-container process would
+// present to the client (stdin writer, stdout reader) plus the ends a test
+// server listens on. Production gets the same shape from the bridge exec
+// stream; tests skip the container entirely.
+func newStdioPipePair() (clientStdin io.WriteCloser, clientStdout io.ReadCloser, serverStdin io.ReadCloser, serverStdout io.WriteCloser) {
+	serverStdin, clientStdin = io.Pipe()
+	clientStdout, serverStdout = io.Pipe()
+	return clientStdin, clientStdout, serverStdin, serverStdout
 }
 
-func newFakeMCPConnection(onWrite func(req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error)) *fakeMCPConnection {
-	return &fakeMCPConnection{
-		writes:  make([]*sdkjsonrpc.Request, 0, 16),
-		readCh:  make(chan sdkjsonrpc.Message, 32),
-		closed:  make(chan struct{}),
-		onWrite: onWrite,
-	}
+type echoToolArgs struct {
+	Text string `json:"text"`
 }
 
-func (c *fakeMCPConnection) Read(ctx context.Context) (sdkjsonrpc.Message, error) {
-	select {
-	case <-c.closed:
-		return nil, io.EOF
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case msg, ok := <-c.readCh:
-		if !ok {
-			return nil, io.EOF
-		}
-		return msg, nil
-	}
-}
-
-func (c *fakeMCPConnection) Write(ctx context.Context, msg sdkjsonrpc.Message) error {
-	req, ok := msg.(*sdkjsonrpc.Request)
-	if !ok {
-		return fmt.Errorf("unsupported message type: %T", msg)
-	}
-	cloned := cloneJSONRPCRequest(req)
-	c.mu.Lock()
-	c.writes = append(c.writes, cloned)
-	c.mu.Unlock()
-
-	if c.onWrite == nil {
-		return nil
-	}
-	resp, err := c.onWrite(cloned)
-	if err != nil {
-		return err
-	}
-	if resp == nil {
-		return nil
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-c.closed:
-		return io.EOF
-	case c.readCh <- resp:
-		return nil
-	}
-}
-
-func (c *fakeMCPConnection) Close() error {
-	c.closeMu.Do(func() {
-		close(c.closed)
-		close(c.readCh)
-	})
-	return nil
-}
-
-func (*fakeMCPConnection) SessionID() string { return "test-session" }
-
-func cloneJSONRPCRequest(req *sdkjsonrpc.Request) *sdkjsonrpc.Request {
-	if req == nil {
-		return nil
-	}
-	params := append([]byte(nil), req.Params...)
-	return &sdkjsonrpc.Request{
-		ID:     req.ID,
-		Method: req.Method,
-		Params: params,
-		Extra:  req.Extra,
-	}
-}
-
-func jsonRPCSuccessResponse(id sdkjsonrpc.ID, payload map[string]any) *sdkjsonrpc.Response {
-	body, _ := json.Marshal(payload)
-	return &sdkjsonrpc.Response{ID: id, Result: body}
-}
-
-func newTestMCPSession(conn *fakeMCPConnection) *mcpSession {
-	readCtx, cancelRead := context.WithCancel(context.Background()) //nolint:gosec // G118: cancelRead is stored in mcpSession.cancelRead
-	return &mcpSession{
-		pending:    map[string]chan *sdkjsonrpc.Response{},
-		conn:       conn,
-		closed:     make(chan struct{}),
-		readCtx:    readCtx,
-		cancelRead: cancelRead,
-	}
-}
-
-// --- Tests ---
-
-// TestMCPSession_CallRaw_ResponseEnvelope verifies that callRaw returns a
-// standard JSON-RPC envelope {"jsonrpc","id","result"}.
-func TestMCPSession_CallRaw_ResponseEnvelope(t *testing.T) {
-	conn := newFakeMCPConnection(func(req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
-		return jsonRPCSuccessResponse(req.ID, map[string]any{"tools": []any{}}), nil
-	})
-	sess := newTestMCPSession(conn)
-	sess.initState = mcpSessionInitStateReady
-	go sess.readLoop()
-	defer sess.closeWithError(io.EOF)
-
-	payload, err := sess.call(context.Background(), mcptools.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcptools.RawStringID("1"),
-		Method:  "tools/list",
-	})
-	if err != nil {
-		t.Fatalf("call failed: %v", err)
-	}
-
-	// Verify standard JSON-RPC envelope.
-	if payload["jsonrpc"] != "2.0" {
-		t.Errorf("expected jsonrpc=2.0, got %v", payload["jsonrpc"])
-	}
-	if _, ok := payload["id"]; !ok {
-		t.Errorf("expected 'id' field in envelope, got %v", payload)
-	}
-	if _, ok := payload["result"]; !ok {
-		t.Errorf("expected 'result' field in envelope, got %v", payload)
-	}
-	if _, ok := payload["error"]; ok {
-		t.Errorf("unexpected 'error' field in success envelope")
-	}
-}
-
-// TestMCPSession_CallRaw_ErrorEnvelope verifies that server-side errors are
-// returned as {"jsonrpc","id","error"} envelope, not a Go error.
-func TestMCPSession_CallRaw_ErrorEnvelope(t *testing.T) {
-	conn := newFakeMCPConnection(func(req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
-		return &sdkjsonrpc.Response{
-			ID:    req.ID,
-			Error: &sdkjsonrpc.Error{Code: -32601, Message: "Method not found"},
-		}, nil
-	})
-	sess := newTestMCPSession(conn)
-	sess.initState = mcpSessionInitStateReady
-	go sess.readLoop()
-	defer sess.closeWithError(io.EOF)
-
-	payload, err := sess.call(context.Background(), mcptools.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcptools.RawStringID("2"),
-		Method:  "unknown/method",
-	})
-	if err != nil {
-		t.Fatalf("unexpected Go error (server errors should be in envelope): %v", err)
-	}
-	errField, ok := payload["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected 'error' field in envelope, got %v", payload)
-	}
-	if errField["code"] != int64(-32601) {
-		t.Errorf("unexpected error code: %v", errField["code"])
-	}
-	if _, ok := payload["result"]; ok {
-		t.Errorf("unexpected 'result' field in error envelope")
-	}
-}
-
-// TestMCPSession_InitializeRetryAfterFailure tests that the session retries
-// the initialize handshake after the first attempt fails.
-func TestMCPSession_InitializeRetryAfterFailure(t *testing.T) {
-	initCalls := 0
-	conn := newFakeMCPConnection(func(req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
-		switch req.Method {
-		case "initialize":
-			initCalls++
-			if initCalls == 1 {
-				return &sdkjsonrpc.Response{
-					ID:    req.ID,
-					Error: &sdkjsonrpc.Error{Code: -32603, Message: "temporary init failure"},
-				}, nil
-			}
-			return jsonRPCSuccessResponse(req.ID, map[string]any{"protocolVersion": "2025-06-18"}), nil
-		case "tools/list":
-			return jsonRPCSuccessResponse(req.ID, map[string]any{"tools": []any{}}), nil
-		default:
-			return nil, nil
-		}
-	})
-	sess := newTestMCPSession(conn)
-	go sess.readLoop()
-	defer sess.closeWithError(io.EOF)
-
-	_, firstErr := sess.call(context.Background(), mcptools.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcptools.RawStringID("1"),
-		Method:  "tools/list",
-	})
-	if firstErr == nil {
-		t.Fatal("first call should fail when initialize fails")
-	}
-
-	secondPayload, secondErr := sess.call(context.Background(), mcptools.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcptools.RawStringID("2"),
-		Method:  "tools/list",
-	})
-	if secondErr != nil {
-		t.Fatalf("second call should recover by retrying initialize: %v", secondErr)
-	}
-	if initCalls != 2 {
-		t.Fatalf("initialize should be retried once, got calls: %d", initCalls)
-	}
-	result, ok := secondPayload["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing tools/list result in envelope: %#v", secondPayload)
-	}
-	if _, ok := result["tools"].([]any); !ok {
-		t.Fatalf("missing tools field: %#v", result)
-	}
-}
-
-// TestMCPSession_ExplicitInitializeNoDoubling tests that sending an explicit
-// "initialize" call does not cause the session to auto-initialize again.
-func TestMCPSession_ExplicitInitializeNoDoubling(t *testing.T) {
-	initializeCalls := 0
-	initializedNotifications := 0
-	conn := newFakeMCPConnection(func(req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
-		switch req.Method {
-		case "initialize":
-			initializeCalls++
-			return jsonRPCSuccessResponse(req.ID, map[string]any{"protocolVersion": "2025-06-18"}), nil
-		case "notifications/initialized":
-			initializedNotifications++
-			return nil, nil
-		case "tools/list":
-			return jsonRPCSuccessResponse(req.ID, map[string]any{"tools": []any{}}), nil
-		default:
-			return nil, nil
-		}
-	})
-	sess := newTestMCPSession(conn)
-	go sess.readLoop()
-	defer sess.closeWithError(io.EOF)
-
-	_, initErr := sess.call(context.Background(), mcptools.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcptools.RawStringID("100"),
-		Method:  "initialize",
-		Params:  json.RawMessage(`{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"v1"}}`),
-	})
-	if initErr != nil {
-		t.Fatalf("explicit initialize should succeed: %v", initErr)
-	}
-
-	_, listErr := sess.call(context.Background(), mcptools.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcptools.RawStringID("101"),
-		Method:  "tools/list",
-	})
-	if listErr != nil {
-		t.Fatalf("tools/list after initialize should succeed: %v", listErr)
-	}
-	if initializeCalls != 1 {
-		t.Fatalf("initialize should not be duplicated, got: %d", initializeCalls)
-	}
-	if initializedNotifications != 1 {
-		t.Fatalf("should send exactly one notifications/initialized, got: %d", initializedNotifications)
-	}
-}
-
-// TestMCPSession_PendingCleanupOnContextCancel tests that cancelling a request
-// context removes it from the pending map.
-func TestMCPSession_PendingCleanupOnContextCancel(t *testing.T) {
-	conn := newFakeMCPConnection(func(_ *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
-		// Never reply — caller should time out.
-		return nil, nil
-	})
-	sess := newTestMCPSession(conn)
-	sess.initState = mcpSessionInitStateReady
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	defer cancel()
-	_, err := sess.call(ctx, mcptools.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcptools.RawStringID("200"),
-		Method:  "tools/list",
-	})
-	if err == nil {
-		t.Fatal("call should fail on context timeout")
-	}
-
-	sess.pendingMu.Lock()
-	pendingCount := len(sess.pending)
-	sess.pendingMu.Unlock()
-	if pendingCount != 0 {
-		t.Fatalf("pending map should be empty after cancellation, got: %d", pendingCount)
-	}
-}
-
-// TestMCPSession_PendingCleanupOnClose tests that closing the session drains
-// all pending channels (callers unblock).
-func TestMCPSession_PendingCleanupOnClose(t *testing.T) {
-	conn := newFakeMCPConnection(func(_ *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
-		return nil, nil // never reply
-	})
-	sess := newTestMCPSession(conn)
-	sess.initState = mcpSessionInitStateReady
-
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := sess.call(context.Background(), mcptools.JSONRPCRequest{
-			JSONRPC: "2.0",
-			ID:      mcptools.RawStringID("300"),
-			Method:  "tools/list",
+// serveTestMCPServer runs a real go-sdk MCP server with one echo tool over the
+// given pipes — the server half of the stdio seam.
+func serveTestMCPServer(t *testing.T, stdin io.ReadCloser, stdout io.WriteCloser) {
+	t.Helper()
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-mcp", Version: "v0"}, nil)
+	sdkmcp.AddTool(server, &sdkmcp.Tool{Name: "echo", Description: "echoes the input text"},
+		func(_ context.Context, _ *sdkmcp.CallToolRequest, in echoToolArgs) (*sdkmcp.CallToolResult, any, error) {
+			return &sdkmcp.CallToolResult{
+				Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: in.Text}},
+			}, nil, nil
 		})
-		errCh <- err
-	}()
+	sess, err := server.Connect(context.Background(), &sdkmcp.IOTransport{Reader: stdin, Writer: stdout}, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+}
 
-	// Give goroutine time to register in pending.
-	time.Sleep(10 * time.Millisecond)
-	sess.closeWithError(io.EOF)
+// newTestStdioClient wires a full client↔server pair over pipes and returns the
+// wrapper under test.
+func newTestStdioClient(t *testing.T) *mcpStdioClient {
+	t.Helper()
+	clientStdin, clientStdout, serverStdin, serverStdout := newStdioPipePair()
+	serveTestMCPServer(t, serverStdin, serverStdout)
 
-	select {
-	case err := <-errCh:
-		if err == nil {
-			t.Error("expected error after session close, got nil")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("call did not unblock after session close")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := connectStdioClient(ctx, clientStdin, clientStdout)
+	if err != nil {
+		t.Fatalf("connectStdioClient: %v", err)
+	}
+	client := &mcpStdioClient{
+		session:    session,
+		stderrTail: &mcpStderrTail{},
+		done:       make(chan struct{}),
+	}
+	client.exitCode.Store(-1)
+	t.Cleanup(client.Close)
+	return client
+}
+
+func callCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// The SDK session handles handshake, ListTools and CallTool over the same pipe
+// transport production uses — this is the regression net for the migration off
+// the hand-rolled session machine.
+func TestConnectStdioClientRoundTrip(t *testing.T) {
+	client := newTestStdioClient(t)
+	ctx := callCtx(t)
+
+	if err := client.session.Ping(ctx, &sdkmcp.PingParams{}); err != nil {
+		t.Fatalf("ping: %v", err)
 	}
 
-	sess.pendingMu.Lock()
-	pendingCount := len(sess.pending)
-	sess.pendingMu.Unlock()
-	if pendingCount != 0 {
-		t.Fatalf("pending map should be empty after close, got: %d", pendingCount)
+	tools, err := client.session.ListTools(ctx, &sdkmcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	if len(tools.Tools) != 1 || tools.Tools[0].Name != "echo" {
+		t.Fatalf("unexpected tools: %+v", tools.Tools)
+	}
+
+	result, err := client.session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "echo",
+		Arguments: map[string]any{"text": "hello"},
+	})
+	if err != nil {
+		t.Fatalf("call tool: %v", err)
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("unexpected content: %+v", result.Content)
+	}
+	text, ok := result.Content[0].(*sdkmcp.TextContent)
+	if !ok || text.Text != "hello" {
+		t.Fatalf("unexpected tool result: %+v", result.Content[0])
 	}
 }
 
-// TestMCPSession_ReadLoopCancelOnClose tests that closing the session
-// (which cancels readCtx) causes readLoop to exit.
-func TestMCPSession_ReadLoopCancelOnClose(t *testing.T) {
-	conn := newFakeMCPConnection(nil)
-	sess := newTestMCPSession(conn)
+func TestMCPStdioClientDispatch(t *testing.T) {
+	client := newTestStdioClient(t)
+	ctx := callCtx(t)
 
-	loopDone := make(chan struct{})
-	go func() {
-		sess.readLoop()
-		close(loopDone)
-	}()
+	t.Run("ping", func(t *testing.T) {
+		payload, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "ping", ID: mcptools.RawStringID("p1")})
+		if err != nil {
+			t.Fatalf("dispatch ping: %v", err)
+		}
+		if payload["jsonrpc"] != "2.0" || payload["id"] != "p1" {
+			t.Fatalf("unexpected ping payload: %+v", payload)
+		}
+	})
 
-	// Close the session; this should cancel readCtx and unblock readLoop.
-	sess.closeWithError(io.EOF)
+	t.Run("initialize replays the connect handshake result", func(t *testing.T) {
+		payload, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "initialize", ID: mcptools.RawStringID("i1")})
+		if err != nil {
+			t.Fatalf("dispatch initialize: %v", err)
+		}
+		result, ok := payload["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing initialize result: %+v", payload)
+		}
+		serverInfo, ok := result["serverInfo"].(map[string]any)
+		if !ok || serverInfo["name"] != "test-mcp" {
+			t.Fatalf("unexpected initialize result: %+v", result)
+		}
+	})
 
-	select {
-	case <-loopDone:
-		// readLoop exited as expected.
-	case <-time.After(2 * time.Second):
-		t.Fatal("readLoop did not exit after session close")
+	t.Run("tools/list", func(t *testing.T) {
+		payload, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "tools/list", ID: mcptools.RawStringID("t1")})
+		if err != nil {
+			t.Fatalf("dispatch tools/list: %v", err)
+		}
+		result, ok := payload["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing tools/list result: %+v", payload)
+		}
+		tools, ok := result["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("unexpected tools: %+v", result)
+		}
+	})
+
+	t.Run("tools/call", func(t *testing.T) {
+		params, _ := json.Marshal(map[string]any{
+			"name":      "echo",
+			"arguments": map[string]any{"text": "hi"},
+		})
+		payload, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "tools/call", ID: mcptools.RawStringID("c1"), Params: params})
+		if err != nil {
+			t.Fatalf("dispatch tools/call: %v", err)
+		}
+		result, ok := payload["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing tools/call result: %+v", payload)
+		}
+		content, ok := result["content"].([]any)
+		if !ok || len(content) != 1 {
+			t.Fatalf("unexpected content: %+v", result)
+		}
+		first, _ := content[0].(map[string]any)
+		if first["text"] != "hi" {
+			t.Fatalf("unexpected tool output: %+v", first)
+		}
+	})
+
+	t.Run("unknown method is method-not-found", func(t *testing.T) {
+		_, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "resources/read", ID: mcptools.RawStringID("u1")})
+		if !errors.Is(err, errMCPMethodNotFound) {
+			t.Fatalf("expected errMCPMethodNotFound, got %v", err)
+		}
+	})
+}
+
+// When the container-side process dies (e.g. command not found), the failure
+// must name the exit code and stderr — the regression this fixes is a bare
+// "EOF" reaching the UI.
+func TestMCPStdioClientEnrichError(t *testing.T) {
+	t.Run("exit code and stderr tail", func(t *testing.T) {
+		client := &mcpStdioClient{stderrTail: &mcpStderrTail{}}
+		client.exitCode.Store(127)
+		client.stderrTail.append("/bin/sh: 1: foo: not found")
+		err := client.enrichError(io.EOF)
+		msg := err.Error()
+		if !strings.Contains(msg, "process exited with code 127") || !strings.Contains(msg, "foo: not found") {
+			t.Fatalf("unhelpful error: %q", msg)
+		}
+	})
+
+	t.Run("stderr tail without exit code keeps original error", func(t *testing.T) {
+		client := &mcpStdioClient{stderrTail: &mcpStderrTail{}}
+		client.exitCode.Store(-1)
+		client.stderrTail.append("some warning")
+		err := client.enrichError(io.EOF)
+		if !strings.Contains(err.Error(), "EOF") || !strings.Contains(err.Error(), "some warning") {
+			t.Fatalf("unexpected error: %q", err.Error())
+		}
+	})
+
+	t.Run("nil error stays nil", func(t *testing.T) {
+		client := &mcpStdioClient{stderrTail: &mcpStderrTail{}}
+		if err := client.enrichError(nil); err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+	})
+
+	t.Run("no diagnostics falls back to the original error", func(t *testing.T) {
+		client := &mcpStdioClient{stderrTail: &mcpStderrTail{}}
+		client.exitCode.Store(-1)
+		if err := client.enrichError(io.EOF); !errors.Is(err, io.EOF) {
+			t.Fatalf("expected io.EOF, got %v", err)
+		}
+	})
+}
+
+// Killing the server side mid-session must surface as a call error, not a hang.
+func TestStdioClientServerDeath(t *testing.T) {
+	clientStdin, clientStdout, serverStdin, serverStdout := newStdioPipePair()
+	serveTestMCPServer(t, serverStdin, serverStdout)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := connectStdioClient(ctx, clientStdin, clientStdout)
+	if err != nil {
+		t.Fatalf("connectStdioClient: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	// Simulate the process exiting: the bridge would close both pipes.
+	_ = serverStdout.Close()
+	_ = serverStdin.Close()
+
+	if _, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{}); err == nil {
+		t.Fatal("expected error after server death, got nil")
+	}
+}
+
+// buildShellCommand treats Command as ONE executable token; arguments smuggled
+// into it stay quoted (the historical paste-whole-line trap), and flags belong
+// in Args.
+func TestBuildShellCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		req  MCPStdioRequest
+		want string
+	}{
+		{
+			name: "command only",
+			req:  MCPStdioRequest{Command: "npx"},
+			want: "npx",
+		},
+		{
+			name: "command with args",
+			req:  MCPStdioRequest{Command: "npx", Args: []string{"-y", "@modelcontextprotocol/server-everything"}},
+			want: "npx -y @modelcontextprotocol/server-everything",
+		},
+		{
+			name: "whole line pasted into command stays one quoted token",
+			req:  MCPStdioRequest{Command: "npx -y pkg"},
+			want: "'npx -y pkg'",
+		},
+		{
+			name: "env pairs are sorted and escaped",
+			req:  MCPStdioRequest{Command: "srv", Env: map[string]string{"B_KEY": "2", "A_KEY": "a b"}},
+			want: "'A_KEY=a b' B_KEY=2 srv",
+		},
+		{
+			name: "cwd wraps the command",
+			req:  MCPStdioRequest{Command: "srv", Cwd: "/opt/my dir"},
+			want: "cd '/opt/my dir' && srv",
+		},
+		{
+			name: "arg with single quote",
+			req:  MCPStdioRequest{Command: "srv", Args: []string{"it's"}},
+			want: `srv 'it'\''s'`,
+		},
+		{
+			name: "empty command",
+			req:  MCPStdioRequest{},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildShellCommand(tt.req); got != tt.want {
+				t.Fatalf("buildShellCommand() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestJSONRPCResultPayload(t *testing.T) {
+	payload := jsonrpcResultPayload(mcptools.RawStringID("abc"), map[string]any{"ok": true})
+	if payload["jsonrpc"] != "2.0" || payload["id"] != "abc" {
+		t.Fatalf("unexpected envelope: %+v", payload)
+	}
+	result, ok := payload["result"].(map[string]any)
+	if !ok || result["ok"] != true {
+		t.Fatalf("unexpected result: %+v", payload)
 	}
 }

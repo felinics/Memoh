@@ -35,7 +35,6 @@ type ContainerdHandler struct {
 	toolGateway      *mcp.ToolGatewayService
 	toolContexts     *mcp.ToolSessionContextStore
 	acpRuntimes      acpRuntimeContextResolver
-	mcpSess          map[string]*mcpSession
 	mcpStdioMu       sync.Mutex
 	mcpStdioSess     map[string]*mcpStdioSession
 	botService       *bots.Service
@@ -282,7 +281,6 @@ func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg conf
 		cfg:              cfg,
 		containerBackend: containerBackend,
 		logger:           log.With(slog.String("handler", "containerd")),
-		mcpSess:          make(map[string]*mcpSession),
 		mcpStdioSess:     make(map[string]*mcpStdioSession),
 		botService:       botService,
 		accountService:   accountService,
