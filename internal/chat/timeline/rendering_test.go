@@ -72,6 +72,9 @@ func TestRenderMessage_PreservesAddressingFlagsInCanonicalContent(t *testing.T) 
 	replayed := renderMessage(msg, RenderParams{})
 	if replayed.Content[0].Text != seg.Content[0].Text {
 		t.Fatalf("canonical addressing content changed across replay:\nfirst: %s\nagain: %s", seg.Content[0].Text, replayed.Content[0].Text)
+	}
+}
+
 func TestRenderMessagePopulatesSlotIdentityAndEditTime(t *testing.T) {
 	msg := &ICMessage{
 		MessageID:       "msg-slot",

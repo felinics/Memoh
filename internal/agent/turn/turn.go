@@ -95,8 +95,8 @@ type StartTurnCommand struct {
 
 	// DiscussMessages is the composed conversation context for a discuss
 	// turn (Mode == ModeDiscuss), already rendered by the caller's
-	// projection. The runtime appends its own late-binding prompt after
-	// image inlining so vision parts land on the last real user message.
+	// projection. Image parts are injected into the last real user message
+	// before the runtime starts streaming.
 	DiscussMessages  []DiscussMessage
 	DiscussImageRefs []DiscussImageRef
 	// DiscussAddressed covers an explicit @-mention, a reply-to, or a direct
