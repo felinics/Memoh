@@ -977,8 +977,11 @@ async function handleOAuthFlow() {
       if (result === 'success') {
         // The flow is done — close the authorization popup if it is still
         // around (poll-based completion can win the race against the
-        // callback page's own postMessage + self-close).
+        // callback page's own postMessage + self-close), and close the
+        // advanced dialog: it auto-opened to spotlight the missing auth, so
+        // success returns the user to the detail where the result lives.
         popup?.close()
+        showAdvanced.value = false
         toast.success(t('mcp.oauth.authSuccess'))
         void handleProbe(serverId.value)
       } else {
