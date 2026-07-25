@@ -96,6 +96,7 @@ tmp/
 /memoh
 /agent
 /bridge
+/channel
 
 # Rust build artifacts (Cargo workspace at the repo root)
 /target/
