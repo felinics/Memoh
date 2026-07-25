@@ -90,6 +90,12 @@ func renderMessage(msg *ICMessage, params RenderParams) RenderedSegment {
 	if isMyself {
 		attrs = append(attrs, `myself="true"`)
 	}
+	if mentionsMe {
+		attrs = append(attrs, `mentions_me="true"`)
+	}
+	if repliesToMe {
+		attrs = append(attrs, `replies_to_me="true"`)
+	}
 	attrs = append(attrs, fmt.Sprintf("t=%q", formatTimestamp(msg.TimestampSec, msg.UTCOffsetMin)))
 
 	if msg.EditedAtSec > 0 {

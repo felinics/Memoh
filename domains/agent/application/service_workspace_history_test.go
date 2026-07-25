@@ -7,6 +7,7 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/chat/context/history"
+	sessionpkg "github.com/memohai/memoh/domains/agent/chat/thread"
 	"github.com/memohai/memoh/domains/api/bot"
 	"github.com/memohai/memoh/domains/runtime/workspace"
 )
@@ -95,6 +96,85 @@ func TestInjectWorkspaceTransitionRecordsIgnoresLegacyStartingFolderChanges(t *t
 	}
 	if strings.Contains(got[0].ModelMessage.TextContent(), "starting_folder") {
 		t.Fatalf("legacy workspace_path leaked into marker: %#v", got[0].ModelMessage)
+	}
+}
+
+func TestWorkspaceTransitionRendererMatchesLiveAndReplay(t *testing.T) {
+	current := &WorkspaceTarget{TargetID: "computer-b", Kind: "remote", Name: "Computer B"}
+	service := &Service{}
+	live := service.currentWorkspaceContextMessage(t.Context(), ChatRequest{WorkspaceTarget: current})
+	if live == nil {
+		t.Fatal("initial live context must include a workspace snapshot")
+	}
+
+	replayed := injectWorkspaceTransitionRecords([]history.HistoryRecord{
+		workspaceHistoryRecord("user", "first", current.TargetID, current.Kind, current.Name, "/work/b"),
+	})
+	if len(replayed) != 2 {
+		t.Fatalf("replayed records = %d, want marker + message", len(replayed))
+	}
+	if got, want := live.TextContent(), replayed[0].ModelMessage.TextContent(); got != want {
+		t.Fatalf("initial live/replay marker mismatch:\nlive:   %s\nreplay: %s", got, want)
+	}
+}
+
+func TestCurrentWorkspaceContextMessageOmitsUnchangedTarget(t *testing.T) {
+	current := &WorkspaceTarget{TargetID: "computer-b", Kind: "remote", Name: "Computer B"}
+	service := &Service{
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(context.Context, string) (sessionpkg.Thread, error) {
+				return sessionpkg.Thread{Metadata: map[string]any{
+					"workspace_target": map[string]any{
+						"target_id": current.TargetID,
+						"kind":      current.Kind,
+						"name":      current.Name,
+					},
+				}}, nil
+			},
+		},
+	}
+
+	if got := service.currentWorkspaceContextMessage(t.Context(), ChatRequest{
+		ThreadID:        "session-1",
+		WorkspaceTarget: current,
+	}); got != nil {
+		t.Fatalf("unchanged workspace marker = %q, want nil", got.TextContent())
+	}
+}
+
+func TestWorkspaceTransitionRendererMatchesLiveAndReplayAfterChange(t *testing.T) {
+	previous := &WorkspaceTarget{TargetID: "computer-a", Kind: "remote", Name: "Computer A"}
+	current := &WorkspaceTarget{TargetID: "computer-b", Kind: "remote", Name: "Computer B"}
+	service := &Service{
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(context.Context, string) (sessionpkg.Thread, error) {
+				return sessionpkg.Thread{Metadata: map[string]any{
+					"workspace_target": map[string]any{
+						"target_id": previous.TargetID,
+						"kind":      previous.Kind,
+						"name":      previous.Name,
+					},
+				}}, nil
+			},
+		},
+	}
+	live := service.currentWorkspaceContextMessage(t.Context(), ChatRequest{
+		ThreadID:        "session-1",
+		WorkspaceTarget: current,
+	})
+	if live == nil {
+		t.Fatal("changed live context must include a workspace transition")
+	}
+
+	replayed := injectWorkspaceTransitionRecords([]history.HistoryRecord{
+		workspaceHistoryRecord("user", "first", previous.TargetID, previous.Kind, previous.Name, "/work/a"),
+		workspaceHistoryRecord("user", "second", current.TargetID, current.Kind, current.Name, "/work/b"),
+	})
+	if len(replayed) != 4 {
+		t.Fatalf("replayed records = %d, want two markers + two messages", len(replayed))
+	}
+	if got, want := live.TextContent(), replayed[2].ModelMessage.TextContent(); got != want {
+		t.Fatalf("changed live/replay marker mismatch:\nlive:   %s\nreplay: %s", got, want)
 	}
 }
 

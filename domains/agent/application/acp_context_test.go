@@ -3,7 +3,6 @@ package application
 import (
 	"strings"
 	"testing"
-	"time"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/engine"
@@ -13,7 +12,6 @@ func TestRenderACPContextMarkdownIncludesDynamicRuntimeAndMemory(t *testing.T) {
 	t.Parallel()
 
 	got := renderACPContextMarkdown(acpContextRenderInput{
-		Now:                     time.Date(2026, 6, 1, 9, 30, 0, 0, time.FixedZone("PDT", -7*3600)),
 		Timezone:                "America/Los_Angeles",
 		BotID:                   "bot-1",
 		SessionID:               "session-1",
@@ -41,7 +39,6 @@ func TestRenderACPContextMarkdownIncludesDynamicRuntimeAndMemory(t *testing.T) {
 
 	for _, want := range []string{
 		"# Memoh ACP Context",
-		"Current time: 2026-06-01T09:30:00-07:00",
 		"Timezone: America/Los_Angeles",
 		"Bot ID: bot-1",
 		"ACP agent: codex",
@@ -69,6 +66,9 @@ func TestRenderACPContextMarkdownIncludesDynamicRuntimeAndMemory(t *testing.T) {
 	if strings.Contains(got, "Do not inject normal tool prompt.") {
 		t.Fatalf("TOOLS.md content should not be injected into ACP context:\n%s", got)
 	}
+	if strings.Contains(got, "Current time:") {
+		t.Fatalf("ACP context must not include a volatile current time:\n%s", got)
+	}
 }
 
 func TestRenderACPContextMarkdownRespectsSystemFilesBudget(t *testing.T) {
@@ -76,7 +76,6 @@ func TestRenderACPContextMarkdownRespectsSystemFilesBudget(t *testing.T) {
 
 	large := "HEAD\n" + strings.Repeat("0123456789", 200) + "\nTAIL"
 	got := renderACPContextMarkdown(acpContextRenderInput{
-		Now:                 time.Date(2026, 6, 1, 9, 30, 0, 0, time.UTC),
 		Timezone:            "UTC",
 		BotID:               "bot-1",
 		SessionID:           "session-1",

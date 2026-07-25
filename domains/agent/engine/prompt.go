@@ -106,10 +106,6 @@ func selectModeTemplate(sessionType string) string {
 // GenerateSystemPrompt builds the complete system prompt from files, skills, and context.
 func GenerateSystemPrompt(params SystemPromptParams) string {
 	home := "/data"
-	now := params.Now
-	if now.IsZero() {
-		now = TimeNow()
-	}
 	timezoneName := strings.TrimSpace(params.Timezone)
 	if timezoneName == "" {
 		timezoneName = "UTC"
@@ -125,7 +121,6 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 
 	return render(tmpl, map[string]string{
 		"home":                      home,
-		"currentTime":               now.Format(time.RFC3339),
 		"timezone":                  timezoneName,
 		"botInfoSection":            botInfoSection,
 		"skillsSection":             skillsSection,
@@ -143,7 +138,6 @@ type SystemPromptParams struct {
 	Skills                    []SkillEntry
 	Files                     []SystemFile
 	MaxFilesBytes             int
-	Now                       time.Time
 	Timezone                  string
 	PlatformIdentitiesSection string
 }

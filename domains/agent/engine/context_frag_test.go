@@ -137,7 +137,6 @@ func TestRefreshContextFragWithDynamicMutatorsMarksPreProviderBoundary(t *testin
 		fragment.DynamicMutatorReadMedia,
 		fragment.DynamicMutatorBeforeModelCallHook,
 		fragment.DynamicMutatorBackgroundSummary,
-		fragment.DynamicMutatorMidTaskPrune,
 	} {
 		if !manifestHasMutator(cfg.ContextManifest, want) {
 			t.Fatalf("manifest dynamic mutators = %#v, want %q", cfg.ContextManifest.DynamicMutators, want)

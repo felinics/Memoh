@@ -813,31 +813,10 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 		opts = append(opts, sdk.WithApprovalHandler(approvalHandler))
 	}
 
-	// Wrap the existing prepareStep (if any) with mid-task context pruning.
-	// When the message array grows large during multi-tool runs, this prunes
-	// older tool results to keep the context window manageable.
-	basePrepare := prepareStep
-	keepSteps := cfg.MidTaskPruneKeepSteps
-	if keepSteps <= 0 {
-		keepSteps = MidTaskPruneKeepStepsDefault
+	prepareStep = wrapPrepareStepWithForkSnapshot(prepareStep, cfg.ForkContext)
+	if prepareStep != nil {
+		opts = append(opts, sdk.WithPrepareStep(prepareStep))
 	}
-	threshold := cfg.MidTaskPruneThreshold
-	if threshold <= 0 {
-		threshold = MidTaskPruneThresholdDefault
-	}
-	midTaskPrune := func(p *sdk.GenerateParams) *sdk.GenerateParams {
-		if basePrepare != nil {
-			if override := basePrepare(p); override != nil {
-				p = override
-			}
-		}
-		p = pruneOldToolResults(p, keepSteps, threshold)
-		if cfg.ForkContext != nil {
-			_ = cfg.ForkContext.Store(p.Messages)
-		}
-		return p
-	}
-	opts = append(opts, sdk.WithPrepareStep(midTaskPrune))
 
 	opts = append(opts, modelexecution.BuildReasoningOptions(modelexecution.SDKModelConfig{
 		ClientType:            modelexecution.ResolveClientType(cfg.Model),
@@ -1222,100 +1201,22 @@ func wrapToolsWithLoopGuard(tools []sdk.Tool, guard *ToolLoopGuard, abortCallIDs
 	return wrapped
 }
 
-const (
-	// MidTaskPruneKeepStepsDefault is the number of recent tool-call steps to keep
-	// intact when pruning older tool results during a multi-step agent run.
-	MidTaskPruneKeepStepsDefault = 4
-	// MidTaskPruneThresholdDefault is the minimum number of messages before pruning activates.
-	MidTaskPruneThresholdDefault = 20
-)
-
-// pruneOldToolResults prunes older tool result messages in the SDK params to
-// keep the context window manageable during long multi-tool agent runs. It
-// keeps the most recent keepSteps tool-call cycles intact and replaces older
-// tool results with size summaries.
-func pruneOldToolResults(p *sdk.GenerateParams, keepSteps, threshold int) *sdk.GenerateParams {
-	msgs := p.Messages
-	if len(msgs) < threshold {
+func wrapPrepareStepWithForkSnapshot(
+	prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams,
+	forkContext *tool.MessageSnapshot,
+) func(*sdk.GenerateParams) *sdk.GenerateParams {
+	if forkContext == nil {
+		return prepareStep
+	}
+	return func(p *sdk.GenerateParams) *sdk.GenerateParams {
+		if prepareStep != nil {
+			if override := prepareStep(p); override != nil {
+				p = override
+			}
+		}
+		_ = forkContext.Store(p.Messages)
 		return p
 	}
-
-	// Count complete tool-call cycles (tool-result pair) from the end to find the cutoff.
-	toolResultCount := 0
-	cutoffIdx := len(msgs)
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == sdk.MessageRoleTool {
-			// Check that the preceding assistant message contains the matching tool call
-			// to ensure we count complete cycles, not orphaned results.
-			hasMatchingCall := false
-			for j := i - 1; j >= 0; j-- {
-				if msgs[j].Role == sdk.MessageRoleAssistant {
-					// If there's another tool result between this and the assistant msg,
-					// it means this assistant message belongs to a different cycle.
-					if j+1 < i && msgs[j+1].Role == sdk.MessageRoleTool {
-						break
-					}
-					hasMatchingCall = true
-					break
-				}
-				if msgs[j].Role == sdk.MessageRoleUser {
-					break
-				}
-			}
-			if hasMatchingCall {
-				toolResultCount++
-				if toolResultCount > keepSteps {
-					cutoffIdx = i
-					break
-				}
-			}
-		}
-	}
-	if cutoffIdx >= len(msgs) {
-		return p // not enough tool messages to prune
-	}
-
-	// Build a new slice so the original messages can be GC'd.
-	pruned := make([]sdk.Message, 0, len(msgs))
-	pruned = append(pruned, msgs[:cutoffIdx]...)
-	for i := cutoffIdx; i < len(msgs); i++ {
-		if msgs[i].Role != sdk.MessageRoleTool {
-			pruned = append(pruned, msgs[i])
-			continue
-		}
-		// Measure content size from ToolResultPart entries.
-		contentSize := 0
-		for _, part := range msgs[i].Content {
-			if tr, ok := part.(sdk.ToolResultPart); ok {
-				contentSize += len(fmt.Sprintf("%v", tr.Result))
-			}
-		}
-		if contentSize > 512 { // only prune if content is large enough
-			// Build replacement parts preserving ToolResultPart type so that
-			// provider serializers that validate part types per role stay happy.
-			replacementParts := make([]sdk.MessagePart, 0, len(msgs[i].Content))
-			for _, part := range msgs[i].Content {
-				if tr, ok := part.(sdk.ToolResultPart); ok {
-					replacementParts = append(replacementParts, sdk.ToolResultPart{
-						ToolCallID: tr.ToolCallID,
-						ToolName:   tr.ToolName,
-						Result:     fmt.Sprintf("[tool result pruned: %d bytes]", contentSize),
-					})
-				} else {
-					replacementParts = append(replacementParts, part)
-				}
-			}
-			pruned = append(pruned, sdk.Message{
-				Role:    msgs[i].Role,
-				Content: replacementParts,
-			})
-		} else {
-			pruned = append(pruned, msgs[i])
-		}
-	}
-
-	p.Messages = pruned
-	return p
 }
 
 // runMidStreamRetry attempts to continue the agent stream after a retryable

@@ -25,16 +25,39 @@ func injectWorkspaceTransitionRecords(records []history.HistoryRecord) []history
 	var previous *WorkspaceTarget
 	for _, record := range records {
 		if current := workspaceTargetFromMetadata(record.Metadata); current != nil && !sameWorkspaceTarget(previous, current) {
-			text := fmt.Sprintf("[Execution location] Earlier file and command operations from this point belong to %q (target_id=%q).", current.Name, current.TargetID)
-			if previous != nil {
-				text = fmt.Sprintf("[Execution location changed] The default execution location changed from %q (target_id=%q) to %q (target_id=%q). Files, processes, and working-directory state do not transfer between them.", previous.Name, previous.TargetID, current.Name, current.TargetID)
-			}
+			text := renderWorkspaceTransition(previous, current)
 			result = append(result, history.HistoryRecord{ModelMessage: agentdomain.ModelMessage{Role: "system", Content: agentdomain.NewTextContent(text)}})
 			previous = current
 		}
 		result = append(result, record)
 	}
 	return result
+}
+
+func renderWorkspaceTransition(previous, current *WorkspaceTarget) string {
+	if current == nil || strings.TrimSpace(current.TargetID) == "" {
+		return ""
+	}
+	if previous != nil && sameWorkspaceTarget(previous, current) {
+		return ""
+	}
+	if previous == nil {
+		return fmt.Sprintf(
+			"[Execution location] The default Computer is %q (target_id=%q, kind=%q). Workspace tools that omit target_id run there.",
+			current.Name,
+			current.TargetID,
+			current.Kind,
+		)
+	}
+	return fmt.Sprintf(
+		"[Execution location changed] The default Computer changed from %q (target_id=%q, kind=%q) to %q (target_id=%q, kind=%q). Earlier file and command results belong to their recorded Computer. Files, processes, and working-directory state do not transfer between Computers; inspect the new Computer before continuing.",
+		previous.Name,
+		previous.TargetID,
+		previous.Kind,
+		current.Name,
+		current.TargetID,
+		current.Kind,
+	)
 }
 
 func sameWorkspaceTarget(left, right *WorkspaceTarget) bool {
@@ -80,9 +103,9 @@ func (s *Service) currentWorkspaceContextMessage(ctx context.Context, req ChatRe
 			}
 		}
 	}
-	text := fmt.Sprintf("[Current execution location] The default Computer for this request is %q (target_id=%q, kind=%q). Workspace tools that omit target_id run there.", current.Name, current.TargetID, current.Kind)
-	if previous != nil && !sameWorkspaceTarget(previous, current) {
-		text = fmt.Sprintf("[Current execution location changed] The default Computer for this request changed from %q (target_id=%q) to %q (target_id=%q, kind=%q). Earlier file and command results belong to their recorded Computer. Do not assume files, processes, or working-directory state exist on the new Computer; inspect it before continuing.", previous.Name, previous.TargetID, current.Name, current.TargetID, current.Kind)
+	text := renderWorkspaceTransition(previous, current)
+	if text == "" {
+		return nil
 	}
 	message := agentdomain.ModelMessage{Role: "system", Content: agentdomain.NewTextContent(text)}
 	return &message

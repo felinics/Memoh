@@ -1,6 +1,7 @@
 package timeline
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -44,6 +45,33 @@ func TestRenderMessage_NoImageRefs(t *testing.T) {
 
 	if len(seg.ImageRefs) != 0 {
 		t.Fatalf("expected 0 image refs, got %d", len(seg.ImageRefs))
+	}
+}
+
+func TestRenderMessage_PreservesAddressingFlagsInCanonicalContent(t *testing.T) {
+	msg := &ICMessage{
+		MessageID:    "msg-addressed",
+		ReceivedAtMs: 300,
+		TimestampSec: 300,
+		Content:      []ContentNode{{Type: "text", Text: "please inspect this"}},
+		MentionsMe:   true,
+		RepliesToMe:  true,
+		Conversation: ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	}
+
+	seg := renderMessage(msg, RenderParams{})
+	if len(seg.Content) != 1 {
+		t.Fatalf("content pieces = %d, want 1", len(seg.Content))
+	}
+	for _, want := range []string{`mentions_me="true"`, `replies_to_me="true"`} {
+		if !strings.Contains(seg.Content[0].Text, want) {
+			t.Fatalf("canonical content missing %s: %s", want, seg.Content[0].Text)
+		}
+	}
+
+	replayed := renderMessage(msg, RenderParams{})
+	if replayed.Content[0].Text != seg.Content[0].Text {
+		t.Fatalf("canonical addressing content changed across replay:\nfirst: %s\nagain: %s", seg.Content[0].Text, replayed.Content[0].Text)
 	}
 }
 

@@ -15,7 +15,6 @@ import (
 const acpContextURI = "memoh://context/current-turn"
 
 type acpContextRenderInput struct {
-	Now                       time.Time
 	Timezone                  string
 	BotID                     string
 	ChatID                    string
@@ -68,7 +67,6 @@ func (s *Service) buildACPContextMarkdown(ctx context.Context, req ChatRequest, 
 	}
 
 	return renderACPContextMarkdown(acpContextRenderInput{
-		Now:                       now,
 		Timezone:                  timezoneName,
 		BotID:                     req.BotID,
 		ChatID:                    req.ChatID,
@@ -91,10 +89,6 @@ func (s *Service) buildACPContextMarkdown(ctx context.Context, req ChatRequest, 
 }
 
 func renderACPContextMarkdown(input acpContextRenderInput) string {
-	now := input.Now
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
 	timezoneName := strings.TrimSpace(input.Timezone)
 	if timezoneName == "" {
 		timezoneName = "UTC"
@@ -105,7 +99,6 @@ func renderACPContextMarkdown(input acpContextRenderInput) string {
 	sb.WriteString("This virtual resource is already embedded in the current ACP prompt. It is not a workspace file and no file lookup is needed. Use it for identity, memory, user preferences, and session background. The user prompt outside this resource is the actual task.\n\n")
 
 	writeACPContextSection(&sb, "Current Runtime", acpContextMetadataLines([][2]string{
-		{"Current time", now.Format(time.RFC3339)},
 		{"Timezone", timezoneName},
 		{"Bot ID", input.BotID},
 		{"Session ID", input.SessionID},

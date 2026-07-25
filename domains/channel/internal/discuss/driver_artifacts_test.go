@@ -144,7 +144,7 @@ func TestBuildMentionGatesOnWatermarkNotCoverage(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
-	if !pending.command.DiscussMentioned {
+	if !pending.command.DiscussAddressed {
 		t.Fatal("a mention the watermark has not consumed must wake the session even when compaction covers it")
 	}
 
@@ -152,7 +152,7 @@ func TestBuildMentionGatesOnWatermarkNotCoverage(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a composed plan past the mention")
 	}
-	if consumed.command.DiscussMentioned {
+	if consumed.command.DiscussAddressed {
 		t.Fatal("a consumed mention must not re-mark the session as mentioned")
 	}
 }

@@ -93,7 +93,6 @@ func discussCommand() agentdomain.StartTurnCommand {
 		DiscussMessages: []agentdomain.DiscussMessage{
 			{Role: "user", Content: `<message id="1">photo</message>`},
 		},
-		DiscussMentioned: true,
 		DiscussAddressed: true,
 	}
 }
@@ -131,8 +130,8 @@ func TestDiscussInlinesImages(t *testing.T) {
 			userMsgs = append(userMsgs, m)
 		}
 	}
-	if len(userMsgs) < 2 {
-		t.Fatalf("expected at least 2 user messages (rc + late binding), got %d", len(userMsgs))
+	if len(userMsgs) != 1 {
+		t.Fatalf("expected only the canonical RC user message, got %d", len(userMsgs))
 	}
 	hasImage := false
 	for _, part := range userMsgs[0].Content {
@@ -225,9 +224,11 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	if !strings.Contains(req.Query, "please inspect the app") || !strings.Contains(req.Query, "reset each turn") || !strings.Contains(req.Query, "MUST use the `send` tool") {
 		t.Fatalf("runtime query = %q, want full discuss context", req.Query)
 	}
-	// DiscussAddressed=true must render the addressed-directly nudge for ACP.
-	if !strings.Contains(req.Query, "addressed directly") {
-		t.Fatalf("runtime query missing addressed-directly nudge: %q", req.Query)
+	if strings.Contains(req.Query, "Current time:") || strings.Contains(req.Query, "addressed directly") {
+		t.Fatalf("runtime query contains volatile late-binding context: %q", req.Query)
+	}
+	if strings.Index(req.Query, "MUST use the `send` tool") > strings.Index(req.Query, "please inspect the app") {
+		t.Fatalf("ACP send contract must stay in the stable preamble: %q", req.Query)
 	}
 	if !req.UserMessagePersisted {
 		t.Fatal("runtime request should avoid duplicating the full-context prompt as a user history message")
@@ -276,7 +277,7 @@ func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 	}
 }
 
-func TestDiscussRefreshesContextFragAfterLateBinding(t *testing.T) {
+func TestDiscussRefreshesContextFragWithoutLateBindingMessage(t *testing.T) {
 	agent := &fakeAgentStreamer{}
 	resolver := &fakeDiscussService{
 		resolveResult: ResolveRunConfigResult{
@@ -301,8 +302,12 @@ func TestDiscussRefreshesContextFragAfterLateBinding(t *testing.T) {
 	if cfg.ContextManifest.Counts.Messages != len(cfg.Messages) {
 		t.Fatalf("manifest message count = %d, messages = %d", cfg.ContextManifest.Counts.Messages, len(cfg.Messages))
 	}
-	if !lastMessageFragContains(cfg.ContextFrags, "MUST use the `send` tool") {
-		t.Fatalf("context frags do not include late-binding prompt: %#v", cfg.ContextManifest.Items)
+	if len(cfg.Messages) != 1 {
+		t.Fatalf("messages = %d, want only composed discuss context", len(cfg.Messages))
+	}
+	if lastMessageFragContains(cfg.ContextFrags, "Current time:") ||
+		lastMessageFragContains(cfg.ContextFrags, "MUST use the `send` tool") {
+		t.Fatalf("context frags include a volatile late-binding prompt: %#v", cfg.ContextManifest.Items)
 	}
 }
 

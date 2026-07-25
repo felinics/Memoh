@@ -117,17 +117,6 @@ type RunConfig struct {
 	// Anthropic Messages); for other vendors the value is ignored.
 	PromptCacheTTL string
 
-	// MidTaskPruneThreshold is the minimum number of messages before mid-task
-	// pruning kicks in. When the accumulated message count reaches this
-	// threshold, older tool-result pairs are pruned to keep the context
-	// within budget. Defaults to MidTaskPruneThresholdDefault (20).
-	MidTaskPruneThreshold int
-
-	// MidTaskPruneKeepSteps is the number of recent tool-call cycles to
-	// preserve when mid-task pruning is triggered. Defaults to
-	// MidTaskPruneKeepStepsDefault (4).
-	MidTaskPruneKeepSteps int
-
 	// InjectCh receives user messages to inject between tool rounds.
 	// When non-nil, a PrepareStep hook drains this channel and appends
 	// user messages to the conversation before the next LLM call.
@@ -187,6 +176,3 @@ func mustMarshal(v any) json.RawMessage {
 	}
 	return data
 }
-
-// TimeNow is a hook for testing. Defaults to time.Now.
-var TimeNow = time.Now

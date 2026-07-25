@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -158,7 +157,6 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd agentdomain.StartTu
 		imageParts := s.inlineDiscussImages(ctx, cmd.BotID, refs)
 		injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
 	}
-	runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(buildLateBindingPrompt(cmd.DiscussMentioned)))
 	runConfig = runConfig.RefreshContextFrag()
 
 	eventCh := s.streamDiscussAgent(ctx, runConfig)
@@ -231,7 +229,7 @@ func discussCompactableTokens(messages []agentdomain.DiscussMessage) int {
 }
 
 func (s *Service) pumpDiscussACP(ctx context.Context, cmd agentdomain.StartTurnCommand, h *discussHandle) {
-	prompt := discussACPFullContextPrompt(cmd.DiscussMessages, buildLateBindingPrompt(cmd.DiscussAddressed))
+	prompt := discussACPFullContextPrompt(cmd.DiscussMessages)
 	if strings.TrimSpace(prompt) == "" {
 		// No composable context: end without a skip marker so the caller
 		// does not advance its consumed cursor (pre-port semantics).
@@ -354,25 +352,6 @@ func (s *Service) storeDiscussRound(
 	return s.StoreRound(ctx, botID, sessionID, channelIdentityID, currentPlatform, messages, modelID)
 }
 
-// buildLateBindingPrompt renders the per-turn runtime instructions. The
-// native runtime nudges on explicit mentions; the ACP runtime nudges on
-// the broader addressed condition (mention or direct conversation).
-func buildLateBindingPrompt(nudge bool) string {
-	now := time.Now().Format(time.RFC3339)
-	var sb strings.Builder
-	sb.WriteString("Current time: ")
-	sb.WriteString(now)
-	sb.WriteString("\n\n")
-	sb.WriteString("IMPORTANT: You MUST use the `send` tool to speak. Your text output is invisible to everyone — it is only internal monologue. ")
-	sb.WriteString("If you want to say something, you MUST call the `send` tool. Writing text without a tool call means absolute silence — no one will see it.")
-
-	if nudge {
-		sb.WriteString("\n\nYou are being addressed directly. You should respond by calling the `send` tool now.")
-	}
-
-	return sb.String()
-}
-
 // discussMessagesToSDK converts composed context messages into SDK
 // messages, preserving structured raw content when present.
 func discussMessagesToSDK(messages []agentdomain.DiscussMessage) []sdk.Message {
@@ -428,10 +407,12 @@ func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePa
 }
 
 // discussACPFullContextPrompt renders the composed context into the single
-// reset-each-turn prompt used by external ACP runtimes.
-func discussACPFullContextPrompt(messages []agentdomain.DiscussMessage, lateBinding string) string {
+// reset-each-turn prompt used by external ACP runtimes. ACP does not receive
+// native ToolUsage, so its stable preamble owns the send-only output contract.
+func discussACPFullContextPrompt(messages []agentdomain.DiscussMessage) string {
 	var b strings.Builder
 	b.WriteString("You are replying in a discuss-mode conversation. The runtime is reset each turn, so use the complete context below as the source of truth.\n\n")
+	b.WriteString("IMPORTANT: You MUST use the `send` tool to speak in the observed conversation. Ordinary text output is internal and invisible to everyone.\n\n")
 	for _, msg := range messages {
 		role := strings.TrimSpace(msg.Role)
 		if role == "" {
@@ -448,9 +429,5 @@ func discussACPFullContextPrompt(messages []agentdomain.DiscussMessage, lateBind
 		b.WriteString("\n\n")
 	}
 	b.WriteString("Reply to the latest user-visible message when a response is appropriate.")
-	if strings.TrimSpace(lateBinding) != "" {
-		b.WriteString("\n\n")
-		b.WriteString(lateBinding)
-	}
 	return b.String()
 }
