@@ -80,9 +80,8 @@
             <div class="flex items-center gap-2">
               <Badge
                 v-if="item.is_active && item.status === 'error'"
-                variant="outline"
+                variant="destructive"
                 size="sm"
-                class="border-destructive-border text-destructive"
               >
                 {{ $t('mcp.statusError') }}
               </Badge>
@@ -128,20 +127,29 @@
       <Button
         variant="ghost"
         class="mb-6 text-foreground/85"
-        @click="backToList()"
+        @click="requestLeave(backToList)"
       >
         <ChevronLeft class="size-4" />
         {{ $t('bots.tabs.mcp') }}
       </Button>
 
-      <McpServerDetail
-        :key="detailKey"
-        :bot-id="botId"
-        :server="selectedServer"
-        @created="onDetailCreated"
-        @changed="loadList"
-        @deleted="onDetailDeleted"
-      />
+      <!-- AutoHeight sits ABOVE the detail's remount boundary (detailKey), so
+           the shape changes that remount or probe results produce — create form
+           → saved header card, Discovered Tools appearing after the auto-probe —
+           grow the surface smoothly instead of hard-cutting (the OAuth
+           device-code card pattern). First paint still cuts, per the primitive. -->
+      <AutoHeight>
+        <McpServerDetail
+          ref="detailRef"
+          :key="detailKey"
+          :bot-id="botId"
+          :server="selectedServer"
+          :auto-probe="probeOnCreate"
+          @created="onDetailCreated"
+          @changed="loadList"
+          @deleted="onDetailDeleted"
+        />
+      </AutoHeight>
     </section>
   </SwapTransition>
 
@@ -214,13 +222,40 @@
       </DialogFooter>
     </DialogPanel>
   </Dialog>
+
+  <!-- Unsaved-changes guard: leaving the detail (back / switch server / create
+       new) with a dirty draft asks first. Known gap: browser-back and sidebar
+       re-clicks flip the view via useViewSwap's route watcher and bypass this —
+       accepted, since the draft lives in the detail component either way. -->
+  <Dialog v-model:open="leaveConfirmOpen">
+    <DialogPanel>
+      <DialogHeader>
+        <DialogTitle>{{ $t('common.unsaved') }}</DialogTitle>
+        <DialogDescription>{{ $t('mcp.unsavedChangesDesc') }}</DialogDescription>
+      </DialogHeader>
+      <DialogFooter class="gap-2">
+        <Button
+          variant="ghost"
+          @click="leaveConfirmOpen = false"
+        >
+          {{ $t('mcp.keepEditing') }}
+        </Button>
+        <Button
+          variant="outline"
+          @click="confirmDiscard"
+        >
+          {{ $t('mcp.discardAndSwitch') }}
+        </Button>
+      </DialogFooter>
+    </DialogPanel>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Badge, Button, Dialog, DialogClose, DialogDescription, DialogFooter,
+  AutoHeight, Badge, Button, Dialog, DialogClose, DialogDescription, DialogFooter,
   DialogHeader, DialogPanel, DialogTitle, Empty, EmptyContent, EmptyDescription, EmptyTitle,
   InputGroup, InputGroupAddon, InputGroupInput, Skeleton, toast, Tooltip,
   TooltipContent, TooltipProvider, TooltipTrigger,
@@ -237,6 +272,7 @@ import MonacoEditor from '@/components/monaco-editor/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { joinShellWords } from '@/utils/shell-words'
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
@@ -248,9 +284,9 @@ const searchText = ref('')
 const selectedId = ref('')
 const selectedMcpId = useSyncedQueryParam('mcpId', '')
 
-// A stable key for the open detail session: it only changes when the user opens
-// a *different* server (or a new one), so the create→edit transition never
-// remounts the form and discards its live probe state.
+// A stable key for the open detail session: it changes when the user opens a
+// different server, starts a create, or a create redirects onto its new id —
+// each of those is a fresh editing session with its own seeded draft.
 const detailKey = ref('')
 let keySeq = 0
 
@@ -269,11 +305,33 @@ const filteredItems = computed(() => {
 
 const selectedServer = computed(() => items.value.find(i => i.id === selectedId.value) ?? null)
 
+// The detail owns the draft; the list guards transitions that would discard it.
+const detailRef = ref<{ hasChanges: boolean } | null>(null)
+const leaveConfirmOpen = ref(false)
+let pendingLeave: (() => void) | null = null
+
+function requestLeave(action: () => void) {
+  if (detailRef.value?.hasChanges) {
+    pendingLeave = action
+    leaveConfirmOpen.value = true
+    return
+  }
+  action()
+}
+
+function confirmDiscard() {
+  leaveConfirmOpen.value = false
+  const action = pendingLeave
+  pendingLeave = null
+  action?.()
+}
+
 function cardSubtitle(item: McpItem): string {
   const cfg = item.config ?? {}
   if (item.type === 'stdio') {
     const command = typeof cfg.command === 'string' ? cfg.command : ''
-    return command
+    const args = Array.isArray(cfg.args) ? cfg.args.map(String) : []
+    return joinShellWords(command, args)
   }
   const url = typeof cfg.url === 'string' ? cfg.url : ''
   try {
@@ -283,20 +341,37 @@ function cardSubtitle(item: McpItem): string {
   }
 }
 
+// True only for the mount that a create redirects to: that mount auto-probes
+// once, so the new server's feedback loop completes without a manual Test.
+const probeOnCreate = ref(false)
+
 function openServer(item: McpItem) {
-  selectedId.value = item.id
-  detailKey.value = `s${++keySeq}`
-  openDetail()
+  requestLeave(() => {
+    probeOnCreate.value = false
+    selectedId.value = item.id
+    detailKey.value = `s${++keySeq}`
+    openDetail()
+  })
 }
 
 function openCreate() {
-  selectedId.value = ''
-  detailKey.value = `s${++keySeq}`
-  openDetail()
+  requestLeave(() => {
+    probeOnCreate.value = false
+    selectedId.value = ''
+    detailKey.value = `s${++keySeq}`
+    openDetail()
+  })
 }
 
-function onDetailCreated(id: string) {
+// Create redirects explicitly: reload the list (so the detail seeds from the
+// server's canonical stored state, not from the draft that created it), then
+// remount the detail on the new id. The fresh mount sees probeOnCreate and
+// runs the first probe itself.
+async function onDetailCreated(id: string) {
+  probeOnCreate.value = true
+  await loadList()
   selectedId.value = id
+  detailKey.value = `s${++keySeq}`
 }
 
 function onDetailDeleted() {
