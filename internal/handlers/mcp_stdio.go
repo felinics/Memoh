@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcptools "github.com/memohai/memoh/internal/mcp"
@@ -209,6 +210,14 @@ func (c *mcpStdioClient) sdkCall(ctx context.Context, req mcptools.JSONRPCReques
 	}
 	result, err := invoke(ctx)
 	if err != nil {
+		// A JSON-RPC error from the downstream server must keep its code — the
+		// proxy's callers distinguish invalid params (-32602), missing tools,
+		// and server-defined -320xx failures by it. It also needs no exit
+		// diagnostics: the server answered, so it is alive by definition.
+		var wireErr *jsonrpc.Error
+		if errors.As(err, &wireErr) {
+			return nil, wireErr
+		}
 		return nil, c.enrichError(err)
 	}
 	if result == nil {
@@ -493,11 +502,16 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	}
 	payload, err := session.session.dispatch(c.Request().Context(), req)
 	if err != nil {
-		code := -32603
-		if errors.Is(err, errMCPMethodNotFound) {
+		code := int64(-32603)
+		var wireErr *jsonrpc.Error
+		switch {
+		case errors.Is(err, errMCPMethodNotFound):
 			code = -32601
+		case errors.As(err, &wireErr):
+			// Forward the downstream server's code verbatim.
+			code = wireErr.Code
 		}
-		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, code, err.Error()))
+		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, int(code), err.Error()))
 	}
 	return c.JSON(http.StatusOK, payload)
 }

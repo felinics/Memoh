@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -292,9 +293,12 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	if authType == "" {
 		// Upsert payloads never carry auth_type — that field is owned by the
 		// OAuth flow. Defaulting an omitted value to "none" would silently
-		// strip OAuth from the connection on every save/toggle and leave the
-		// stored token permanently unattached, so preserve the stored value.
-		if existing, getErr := s.Get(ctx, botID, id); getErr == nil {
+		// strip OAuth on every save/toggle, so preserve the stored value —
+		// but ONLY within the credential's scope: a bearer token minted for
+		// one origin must never be attached to another. Editing the remote to
+		// a different origin (or switching to stdio) falls back to "none";
+		// the OAuth flow owns re-authorization.
+		if existing, getErr := s.Get(ctx, botID, id); getErr == nil && sameRemoteOrigin(existing, config) {
 			authType = strings.TrimSpace(existing.AuthType)
 		}
 	}
@@ -554,6 +558,26 @@ func normalizeMap(value map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return value
+}
+
+// sameRemoteOrigin reports whether an existing connection and a new config
+// are both remote and point at the same origin (scheme://host[:port]). Any
+// parse failure or type mismatch counts as "different" — the safe side.
+func sameRemoteOrigin(existing Connection, newConfig map[string]any) bool {
+	if existing.Type == "stdio" {
+		return false
+	}
+	oldOrigin := remoteOrigin(existing.Config["url"])
+	return oldOrigin != "" && oldOrigin == remoteOrigin(newConfig["url"])
+}
+
+func remoteOrigin(raw any) string {
+	s, _ := raw.(string)
+	u, err := url.Parse(strings.TrimSpace(s))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
 }
 
 // inferTypeAndConfig builds internal type + config from a standard mcpServers item.

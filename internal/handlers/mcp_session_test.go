@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcptools "github.com/memohai/memoh/internal/mcp"
@@ -275,6 +276,21 @@ func TestMCPStdioClientDispatch(t *testing.T) {
 		_, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "tools/list", ID: mcptools.RawStringID("tc1"), Params: params})
 		if err == nil || !strings.Contains(err.Error(), "invalid tools/list params") {
 			t.Fatalf("expected params decode error, got %v", err)
+		}
+	})
+
+	t.Run("downstream JSON-RPC error keeps its code", func(t *testing.T) {
+		// The server rejects the unknown tool with a JSON-RPC error; dispatch
+		// must surface it as a wire error (code preserved for the handler to
+		// forward), not flatten it into a generic internal error.
+		params, _ := json.Marshal(map[string]any{"name": "no-such-tool", "arguments": map[string]any{}})
+		_, err := client.dispatch(ctx, mcptools.JSONRPCRequest{Method: "tools/call", ID: mcptools.RawStringID("w1"), Params: params})
+		var wireErr *jsonrpc.Error
+		if !errors.As(err, &wireErr) {
+			t.Fatalf("expected a *jsonrpc.Error, got %T: %v", err, err)
+		}
+		if wireErr.Code == -32603 {
+			t.Fatalf("downstream error was flattened to -32603: %v", wireErr)
 		}
 	})
 
