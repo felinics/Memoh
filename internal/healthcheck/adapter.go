@@ -3,10 +3,10 @@ package healthcheck
 import (
 	"context"
 
-	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/domains/api/bot"
 )
 
-// RuntimeCheckerAdapter bridges Checker to bots.RuntimeChecker.
+// RuntimeCheckerAdapter bridges Checker to bot.RuntimeChecker.
 type RuntimeCheckerAdapter struct {
 	checker Checker
 }
@@ -17,14 +17,14 @@ func NewRuntimeCheckerAdapter(checker Checker) *RuntimeCheckerAdapter {
 }
 
 // ListChecks evaluates checks and maps healthcheck results to bots check shape.
-func (a *RuntimeCheckerAdapter) ListChecks(ctx context.Context, botID string) []bots.BotCheck {
+func (a *RuntimeCheckerAdapter) ListChecks(ctx context.Context, botID string) []bot.BotCheck {
 	if a == nil || a.checker == nil {
-		return []bots.BotCheck{}
+		return []bot.BotCheck{}
 	}
 	items := a.checker.ListChecks(ctx, botID)
-	result := make([]bots.BotCheck, 0, len(items))
+	result := make([]bot.BotCheck, 0, len(items))
 	for _, item := range items {
-		result = append(result, bots.BotCheck{
+		result = append(result, bot.BotCheck{
 			ID:       item.ID,
 			Type:     item.Type,
 			TitleKey: item.TitleKey,

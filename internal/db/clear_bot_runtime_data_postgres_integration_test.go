@@ -9,9 +9,63 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
+
+const clearBotRuntimeDataSQL = `
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.bot_id = $1
+  ORDER BY session.id
+  FOR UPDATE
+),
+target_compaction_artifacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts compact
+  USING target_compaction_artifacts target
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = target.id
+  RETURNING compact.id
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+    AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+  ORDER BY message.id
+  FOR UPDATE
+),
+deleted_messages AS (
+  DELETE FROM bot_history_messages message
+  USING target_messages target
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.id = target.id
+  RETURNING message.id
+),
+deleted_sessions AS (
+  DELETE FROM bot_sessions session
+  USING target_sessions target
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
+    AND (SELECT count(*) FROM deleted_messages) >= 0
+  RETURNING session.id
+)
+DELETE FROM bot_channel_routes route
+WHERE route.team_id = public.memoh_current_team_id()
+  AND route.bot_id = $1
+  AND (SELECT count(*) FROM deleted_sessions) >= 0
+`
 
 func TestClearBotRuntimeDataClearsCompactionArtifactsPostgresPath(t *testing.T) {
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
@@ -87,11 +141,7 @@ INSERT INTO bot_history_messages (id, bot_id, session_id, compact_id) VALUES
 		t.Fatalf("insert clear-bot-runtime fixtures: %v", err)
 	}
 
-	parsedTargetBotID, err := ParseUUID(targetBotID)
-	if err != nil {
-		t.Fatalf("parse target bot id: %v", err)
-	}
-	if err := sqlc.New(tx).ClearBotRuntimeData(ctx, parsedTargetBotID); err != nil {
+	if _, err := tx.Exec(ctx, clearBotRuntimeDataSQL, targetBotID); err != nil {
 		t.Fatalf("clear bot runtime data: %v", err)
 	}
 	for _, table := range []string{

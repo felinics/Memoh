@@ -45,6 +45,36 @@ linters:
     paths:
       - internal/db/postgres/sqlc
       - ^.*\.(pb|l|y)\.go$
+    rules:
+      # gosec's credential/taint heuristics fire on test fixtures: model IDs
+      # that look like keys, throwaway API keys for an httptest server, and
+      # paths the test itself built from t.TempDir(). Scoping the exemption to
+      # _test.go keeps it off production code.
+      - path: _test\.go$
+        linters:
+          - gosec
+      # An external test package (package foo_test) dot-importing the package
+      # under test is the one dot-import Go style endorses: it lets the test
+      # exercise the API exactly as a caller writes it.
+      - path: _test\.go$
+        text: 'dot-imports: should not use dot imports'
+        linters:
+          - revive
+      # An embedded interface in a test stub is how the stub satisfies that
+      # interface without implementing every method; `unused` reads the
+      # embedded name as a dead field.
+      - path: _test\.go$
+        text: 'field queries is unused'
+        linters:
+          - unused
+      # cmd/agent has two build profiles (embedded vs //go:build split) whose FX
+      # providers are each referenced by exactly one profile. A single-tag lint
+      # pass always sees the other profile's providers as dead. `mise run
+      # lint:go:split` covers the split side, so a provider dead in BOTH
+      # profiles still gets caught.
+      - path: ^cmd/agent/
+        linters:
+          - unused
   settings:
     govet:
       enable-all: true
@@ -81,6 +111,7 @@ linters:
     sloglint:
       attr-only: true
       no-global: default
+      context: scope
       static-msg: true
       key-naming-case: snake
       forbidden-keys: [time, level, msg, source]

@@ -7,26 +7,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	"github.com/memohai/memoh/domains/agent/tool"
+	"github.com/memohai/memoh/domains/api/setting"
+	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	modeldomain "github.com/memohai/memoh/domains/model"
+	modelspkg "github.com/memohai/memoh/domains/model/catalog"
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	modelspkg "github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
 )
 
 func TestACPToolProvidersIncludeAskUser(t *testing.T) {
-	providers := acpToolProviders([]agenttools.ToolProvider{
-		agenttools.NewAskUserProvider(slog.Default()),
-		agenttools.NewSkillProvider(slog.Default()),
+	providers := acpToolProviders([]tool.ToolProvider{
+		tool.NewAskUserProvider(slog.Default()),
+		tool.NewSkillProvider(slog.Default()),
 	})
 
 	foundAskUser := false
 	for _, provider := range providers {
-		if _, ok := provider.(*agenttools.AskUserProvider); ok {
+		if _, ok := provider.(*tool.AskUserProvider); ok {
 			foundAskUser = true
 		}
 	}
@@ -56,15 +53,16 @@ func TestLazyLLMCompactResolvesModelWithRequestBotID(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := &lazyLLMTestQueries{
 		botID:           botID,
-		compactionModel: mustTestUUID("22222222-2222-2222-2222-222222222222"),
-		providerID:      mustTestUUID("33333333-3333-3333-3333-333333333333"),
+		compactionModel: "22222222-2222-2222-2222-222222222222",
+		providerID:      "33333333-3333-3333-3333-333333333333",
 	}
+	settingsStore := lazyLLMSettingsStore{queries: queries}
 	client := &lazyLLMClient{
-		modelsService:   modelspkg.NewService(slog.Default(), queries),
-		settingsService: settings.NewService(slog.Default(), queries, nil, nil),
-		queries:         queries,
-		timeout:         time.Second,
-		logger:          slog.Default(),
+		modelsService:    modelspkg.NewService(slog.Default(), lazyLLMModelStore{queries: queries}),
+		settingsService:  setting.NewService(slog.Default(), settingsStore, settingsStore, nil, nil),
+		providerResolver: lazyLLMProviderResolver{queries: queries},
+		timeout:          time.Second,
+		logger:           slog.Default(),
 	}
 
 	if _, err := client.Compact(context.Background(), memprovider.CompactRequest{BotID: botID}); err != nil {
@@ -81,67 +79,95 @@ func TestLazyLLMCompactResolvesModelWithRequestBotID(t *testing.T) {
 	}
 }
 
+type lazyLLMModelStore struct {
+	modelspkg.Store
+	queries *lazyLLMTestQueries
+}
+
+func (s lazyLLMModelStore) GetByID(_ context.Context, id string) (modelspkg.Record, error) {
+	s.queries.configuredLookups++
+	if id != s.queries.compactionModel {
+		return modelspkg.Record{}, errors.New("unexpected model id")
+	}
+	return modelspkg.Record{
+		ID:         id,
+		ModelID:    "compact-model",
+		ProviderID: s.queries.providerID,
+		Type:       modeldomain.ModelTypeChat,
+		Enable:     true,
+	}, nil
+}
+
+func (lazyLLMModelStore) GetByModelID(context.Context, string) (modelspkg.Record, error) {
+	return modelspkg.Record{}, modelspkg.ErrModelNotFound
+}
+
+func (s lazyLLMModelStore) ListEnabledByType(context.Context, modeldomain.ModelType) ([]modelspkg.Record, error) {
+	s.queries.fallbackLookups++
+	return nil, errors.New("fallback model lookup should not be used")
+}
+
+type lazyLLMSettingsStore struct {
+	queries *lazyLLMTestQueries
+}
+
+func (s lazyLLMSettingsStore) Get(_ context.Context, botID string) (setting.Record, error) {
+	s.queries.settingsLookups++
+	if botID != s.queries.botID {
+		return setting.Record{}, errors.New("unexpected bot id")
+	}
+	return setting.Record{
+		CompactionModelID: s.queries.compactionModel,
+	}, nil
+}
+
+func (lazyLLMSettingsStore) GetBot(context.Context, string) (setting.BotRecord, error) {
+	return setting.BotRecord{}, errors.New("not implemented")
+}
+
+func (lazyLLMSettingsStore) GetOverlay(context.Context, string) (setting.OverlayRecord, error) {
+	return setting.OverlayRecord{}, errors.New("not implemented")
+}
+
+func (lazyLLMSettingsStore) Upsert(context.Context, setting.UpsertInput) (setting.Record, error) {
+	return setting.Record{}, errors.New("not implemented")
+}
+
+func (lazyLLMSettingsStore) Delete(context.Context, string) error {
+	return errors.New("not implemented")
+}
+
+func (lazyLLMSettingsStore) ModelExists(context.Context, string) (bool, error) {
+	return false, errors.New("not implemented")
+}
+
+func (lazyLLMSettingsStore) ListModelIDs(context.Context, string) ([]string, error) {
+	return nil, errors.New("not implemented")
+}
+
 type lazyLLMTestQueries struct {
-	dbstore.Queries
 	botID             string
-	compactionModel   pgtype.UUID
-	providerID        pgtype.UUID
+	compactionModel   string
+	providerID        string
 	settingsLookups   int
 	fallbackLookups   int
 	configuredLookups int
 }
 
-func (q *lazyLLMTestQueries) GetSettingsByBotID(_ context.Context, id pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
-	q.settingsLookups++
-	if id.String() != q.botID {
-		return sqlc.GetSettingsByBotIDRow{}, errors.New("unexpected bot id")
-	}
-	return sqlc.GetSettingsByBotIDRow{
-		BotID:             id,
-		CompactionModelID: q.compactionModel,
-	}, nil
+type lazyLLMProviderResolver struct {
+	queries *lazyLLMTestQueries
 }
 
-func (q *lazyLLMTestQueries) GetModelByID(_ context.Context, id pgtype.UUID) (sqlc.Model, error) {
-	q.configuredLookups++
-	if id.String() != q.compactionModel.String() {
-		return sqlc.Model{}, errors.New("unexpected model id")
+func (r lazyLLMProviderResolver) ResolveModelProvider(_ context.Context, id string) (modelspkg.ResolvedProvider, error) {
+	if id != r.queries.providerID {
+		return modelspkg.ResolvedProvider{}, errors.New("unexpected provider id")
 	}
-	return sqlc.Model{
-		ID:         id,
-		ModelID:    "compact-model",
-		ProviderID: q.providerID,
-		Type:       string(modelspkg.ModelTypeChat),
-		Enable:     true,
-	}, nil
-}
-
-func (q *lazyLLMTestQueries) ListEnabledModelsByType(context.Context, string) ([]sqlc.Model, error) {
-	q.fallbackLookups++
-	return nil, errors.New("fallback model lookup should not be used")
-}
-
-func (q *lazyLLMTestQueries) GetProviderByID(_ context.Context, id pgtype.UUID) (sqlc.Provider, error) {
-	if id.String() != q.providerID.String() {
-		return sqlc.Provider{}, errors.New("unexpected provider id")
-	}
-	return sqlc.Provider{
+	return modelspkg.ResolvedProvider{
 		ID:         id,
 		Name:       "test-provider",
-		ClientType: string(modelspkg.ClientTypeOpenAIResponses),
+		ClientType: modeldomain.ClientTypeOpenAIResponses,
 		Enable:     true,
-		Config:     []byte(`{"base_url":"http://127.0.0.1","api_key":"test"}`),
+		BaseURL:    "http://127.0.0.1",
+		APIKey:     "test",
 	}, nil
-}
-
-func (*lazyLLMTestQueries) ListModelsByModelID(_ context.Context, _ string) ([]sqlc.Model, error) {
-	return nil, nil
-}
-
-func mustTestUUID(s string) pgtype.UUID {
-	var id pgtype.UUID
-	if err := id.Scan(s); err != nil {
-		panic(err)
-	}
-	return id
 }

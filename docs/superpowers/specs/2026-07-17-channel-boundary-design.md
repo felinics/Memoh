@@ -11,8 +11,8 @@
 
 选择Channel先行的依据（基于2026-07-17对main分支的耦合摸底）：
 
-- Channel与Agent之间的直接耦合集中且可枚举：出站已经通过`messaging.Sender`接口解耦（`internal/agent/tool/message.go`依赖接口，`channel.Manager`是实现）；入站的ACL、identity、route、slash命令等横切逻辑已全部位于`internal/channel/inbound/`，与RFC所有权表一致，无需搬迁。
-- 当时唯一的硬连线是入站Processor直接构建`conversation.ChatRequest`并调用`flow.Runner.StreamChat()`（`internal/channel/inbound/channel.go`）。该路径现已由`agent/turn.Service`替代，具体编排归`internal/agent/application`。
+- Channel与Agent之间的直接耦合集中且可枚举：出站已经通过`messaging.Sender`接口解耦（`domains/agent/tool/message.go`依赖接口，`channel.Manager`是实现）；入站的ACL、identity、route、slash命令等横切逻辑已全部位于`internal/channel/inbound/`，与RFC所有权表一致，无需搬迁。
+- 当时唯一的硬连线是入站Processor直接构建`conversation.ChatRequest`并调用`flow.Runner.StreamChat()`（`internal/channel/inbound/channel.go`）。该路径现已由`agent/turn.Service`替代，具体编排归`domains/agent/application`。
 - Web Chat（`internal/handlers/local_channel.go`）仍属于Agent边界，但现在同样依赖Application服务，不再依赖旧Conversation Resolver。
 - Bridge已成熟无需重写；Agent需先完成Turn契约设计；API Server的拆分是别人搬走后的减法。
 
@@ -22,7 +22,7 @@ PR #791引入的多租户数据面（team GUC连接绑定、RLS、`TeamIDResolve
 
 ### 范围
 
-1. 定义Turn应用层契约包`internal/agent/turn`：命令、事件与port接口；`application.Service`直接实现进程内Turn服务。
+1. 定义Turn应用层契约包`internal/rpc/channel/turn`：命令、事件与port接口；`application.Service`直接实现进程内Turn服务。
 2. Channel入站Processor与DiscussDriver改为依赖Turn port，切断对Agent Application与Runtime实现的直接依赖。
 3. `internal/channel`包内目录重组（gateway／inbound／outbound分层）。
 4. 建立供命令入口复用的Channel装配模块：`cmd/internal/channel`；`cmd/agent`改为组合该模块，行为不变。
@@ -43,10 +43,10 @@ PR #791引入的多租户数据面（team GUC连接绑定、RLS、`TeamIDResolve
 
 | 数据 | 语义 | 唯一写入方 | 现状位置 |
 | --- | --- | --- | --- |
-| `bot_session_events` | 入站观察事实（DCP事件源，含不触发Turn的被动消息） | Channel | `internal/chat/timeline/persistence.go`，由`channel/inbound/channel.go`调用 |
+| `bot_session_events` | 入站观察事实（DCP事件源，含不触发Turn的被动消息） | Channel | `domains/agent/chat/timeline/persistence.go`，由`channel/inbound/channel.go`调用 |
 | `bot_history_messages`被动行（role=user、无Turn关联） | 入站观察事实 | Channel | `persistPassiveMessage`（`channel/inbound/channel.go`） |
-| `bot_history_messages` Turn行（触发Turn的用户消息、assistant／tool输出） | Turn产物 | Agent | `internal/agent/application/service_user_persist.go`的`persistUserTurn`及stream落库 |
-| Compaction、Turn元数据 | Turn产物 | Agent | `internal/agent/context/compaction` |
+| `bot_history_messages` Turn行（触发Turn的用户消息、assistant／tool输出） | Turn产物 | Agent | `domains/agent/application/service_user_persist.go`的`persistUserTurn`及stream落库 |
+| Compaction、Turn元数据 | Turn产物 | Agent | `domains/agent/chat/compaction` |
 
 规则表述：**Turn产物唯一写入方是Agent；入站事实唯一写入方是Channel。**
 
@@ -113,7 +113,7 @@ Memoh/
 - `internal/messaging`不并入`channel/outbound`：`Sender`是Agent工具与Schedule等多个消费方依赖的出站port，依赖方向（消费方依赖接口、Channel提供实现）已经正确。移动只会制造import噪音。
 - `internal/email`、`internal/webhooktunnel`不搬目录，但装配归入`cmd/internal/channel`（见第7节），与RFC第8节任务归属一致。
 
-## 5. Turn契约（`internal/agent/turn`）
+## 5. Turn契约（`internal/rpc/channel/turn`）
 
 ### 5.1 设计原则
 
@@ -171,7 +171,7 @@ type Service interface {
 
 `RunHandle.Events()`的Go channel是**进程内适配器的实现细节**，不属于命令契约本身；跨进程spec将定义等价的流式传输，事件结构（含Seq）不变。
 
-### 5.3 进程内实现（`internal/agent/application`）
+### 5.3 进程内实现（`domains/agent/application`）
 
 - `application.Service`直接实现`turn.Service`，将`StartTurnCommand`翻译为Application内部的`ChatRequest`并驱动Native或ACP runtime。
 - 旧`turn/inprocess`与`conversation/flow`已经删除，不保留兼容包装。
@@ -217,7 +217,7 @@ DiscussDriver留在Channel侧的理由：它的输入是入站观察投影（Cha
 
 ### 7.3 `cmd/channel`
 
-装配`cmd/internal/channel`的`RuntimeModule`：外部渠道适配器、Email、webhook端点与tunnel，Turn与命令/技能/音频面经`internal/agent/turn/grpctransport`与`internal/rpc`的认证gRPC回到Server进程。
+装配`cmd/internal/channel`的`RuntimeModule`：外部渠道适配器、Email、webhook端点与tunnel，Turn与命令/技能/音频面经`internal/rpc/channel/turn/grpctransport`与`internal/rpc`的认证gRPC回到Server进程。
 
 > 实现偏差记录：本spec最初把`cmd/channel`定位为「装配闭合验证、不进发布产物」，实现阶段跨进程传输（`turnpb`/`runtimepb`）已经落地，`cmd/channel`随之成为docker compose默认拓扑中的正式服务（`channel`，8081），并进入发布归档与安装脚本。裸机/单进程部署由§7.2的embedded形态兜底，二进制仍可单机可用。
 
@@ -225,15 +225,15 @@ DiscussDriver留在Channel侧的理由：它的输入是入站观察投影（Cha
 
 | 规则 | 说明 |
 | --- | --- |
-| `internal/channel/**`只能import `internal/agent/turn`、`internal/agent/event`与`internal/agent/decision` | Channel不得穿透到Application、Runtime或Tool实现 |
+| `internal/channel/**`只能import `internal/rpc/channel/turn`、`domains/agent/event`与`domains/agent/decision` | Channel不得穿透到Application、Runtime或Tool实现 |
 | `internal/channel/**`（`gateway`的webhook handler除外）不得import Echo | webhook接入是Channel拥有的HTTP端点，允许 |
-| `internal/channel/**`、`internal/chat/timeline`不得import `fx` | 装配只在`cmd/**` |
-| `internal/agent/turn`不得import Echo、fx、sqlc、`internal/channel/**`、Application或Runtime | RFC第5节规则的第一条落地 |
+| `internal/channel/**`、`domains/agent/chat/timeline`不得import `fx` | 装配只在`cmd/**` |
+| `internal/rpc/channel/turn`不得import Echo、fx、sqlc、`internal/channel/**`、Application或Runtime | RFC第5节规则的第一条落地 |
 | `team.DefaultTeamID`仅允许`internal/db`、`cmd/**`与测试引用 | 防止业务包hardcode单团队假设 |
 
 以上规则由`internal/arch`的守卫测试机械执行（`go test ./internal/arch/`）。当前记录在案的豁免与规则细化（与守卫测试中的豁免表一一对应）：
 
-- `internal/agent/event`视同Turn port的一部分：turn事件payload就是序列化的agent事件，Channel侧消费该纯数据词汇包不构成边界泄漏。
+- `domains/agent/event`视同Turn port的一部分：turn事件payload就是序列化的agent事件，Channel侧消费该纯数据词汇包不构成边界泄漏。
 - `internal/channel/route`已直接路由Bot与内部Thread；旧的伪Conversation生命周期和查询已经删除。
 - `team.DefaultTeamID`豁免：`internal/memory/adapters/**`（既有单团队fallback）与`internal/channel/service.go`（configless渠道合成配置必须携带TeamID，`turn.Service`对空TeamID fail-closed）。
 
@@ -241,7 +241,7 @@ DiscussDriver留在Channel侧的理由：它的输入是入站观察投影（Cha
 
 遵循RFC「目录移动、接口调整和行为变化分开提交」，五个独立可合的PR：
 
-1. **契约包**：新增`internal/agent/turn`+`inprocess`适配器+单测。纯新增，零风险。
+1. **契约包**：新增`internal/rpc/channel/turn`+`inprocess`适配器+单测。纯新增，零风险。
 2. **切换依赖**：Processor与DiscussDriver改走`turn.Service`。接口调整，行为不变，靠现有channel集成测试守护。
 3. **目录重组**：`internal/channel`包根按第4节映射拆入`gateway/`、`outbound/`。纯移动（`git mv`+import路径更新），快速合并减少主干冲突。
 4. **装配拆分**：新增`cmd/internal/core`与`cmd/internal/channel`，`cmd/agent`接线。

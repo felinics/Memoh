@@ -12,22 +12,23 @@ import (
 	"google.golang.org/grpc/health"
 	grpc_health_v1 "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	turntransport "github.com/memohai/memoh/internal/agent/turn/grpctransport"
-	"github.com/memohai/memoh/internal/agent/turn/turnpb"
-	"github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/local"
-	"github.com/memohai/memoh/internal/command"
+	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/agent/command"
+	"github.com/memohai/memoh/domains/api/http/chat/local"
+	runtimehttp "github.com/memohai/memoh/domains/api/http/runtime"
+	"github.com/memohai/memoh/domains/channel/email"
+	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/domains/channel/webhook"
+	"github.com/memohai/memoh/domains/model/audio"
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/handlers"
 	intrpc "github.com/memohai/memoh/internal/rpc"
-	"github.com/memohai/memoh/internal/rpc/channelruntime"
+	channelclient "github.com/memohai/memoh/internal/rpc/channel/client"
+	turntransport "github.com/memohai/memoh/internal/rpc/channel/turn/grpctransport"
+	"github.com/memohai/memoh/internal/rpc/channel/turn/turnpb"
 	runtimeRpc "github.com/memohai/memoh/internal/rpc/runtime"
-	"github.com/memohai/memoh/internal/rpc/runtimepb"
-	"github.com/memohai/memoh/internal/rpc/serverruntime"
-	"github.com/memohai/memoh/internal/webhooktunnel"
+	channelruntime "github.com/memohai/memoh/internal/rpc/runtime/channel"
+	"github.com/memohai/memoh/internal/rpc/runtime/runtimepb"
+	serverruntime "github.com/memohai/memoh/internal/rpc/runtime/server"
 )
 
 type serverRPC struct {
@@ -48,19 +49,23 @@ func provideRuntimeRPCClient(conn *grpc.ClientConn) *runtimeRpc.Client {
 	return runtimeRpc.NewClient(conn)
 }
 
+func provideChannelContractClient(conn *grpc.ClientConn) *channelclient.Client {
+	return channelclient.New(conn)
+}
+
 func provideChannelRuntimeClient(client *runtimeRpc.Client) *channelruntime.Client {
 	return channelruntime.NewClient(client)
 }
 
-func provideChannelRuntime(client *channelruntime.Client, manager *channel.Manager) channel.Runtime {
+func provideChannelRuntime(client *channelruntime.Client, manager *gateway.Manager) gateway.Runtime {
 	return &localFirstChannelRuntime{local: manager, remote: client}
 }
 func provideEmailRuntime(client *channelruntime.Client) email.Runtime { return client }
 
-// channelSendRuntime is the slice of *channel.Manager the local route needs.
+// channelSendRuntime is the slice of *gateway.Manager the local route needs.
 type channelSendRuntime interface {
-	Send(context.Context, string, channel.ChannelType, channel.SendRequest) error
-	React(context.Context, string, channel.ChannelType, channel.ReactRequest) error
+	Send(context.Context, string, gateway.ChannelType, gateway.SendRequest) error
+	React(context.Context, string, gateway.ChannelType, gateway.ReactRequest) error
 }
 
 // localFirstChannelRuntime routes local channel types (web/cli) to this
@@ -71,10 +76,10 @@ type channelSendRuntime interface {
 // surface would vanish).
 type localFirstChannelRuntime struct {
 	local  channelSendRuntime
-	remote channel.Runtime
+	remote gateway.Runtime
 }
 
-func isLocalChannelType(typ channel.ChannelType) bool {
+func isLocalChannelType(typ gateway.ChannelType) bool {
 	switch typ {
 	case local.WebType, local.CLIType:
 		return true
@@ -83,54 +88,51 @@ func isLocalChannelType(typ channel.ChannelType) bool {
 	}
 }
 
-func (r *localFirstChannelRuntime) Send(ctx context.Context, botID string, typ channel.ChannelType, req channel.SendRequest) error {
+func (r *localFirstChannelRuntime) Send(ctx context.Context, botID string, typ gateway.ChannelType, req gateway.SendRequest) error {
 	if isLocalChannelType(typ) {
 		return r.local.Send(ctx, botID, typ, req)
 	}
 	return r.remote.Send(ctx, botID, typ, req)
 }
 
-func (r *localFirstChannelRuntime) React(ctx context.Context, botID string, typ channel.ChannelType, req channel.ReactRequest) error {
+func (r *localFirstChannelRuntime) React(ctx context.Context, botID string, typ gateway.ChannelType, req gateway.ReactRequest) error {
 	if isLocalChannelType(typ) {
 		return r.local.React(ctx, botID, typ, req)
 	}
 	return r.remote.React(ctx, botID, typ, req)
 }
 
-func (r *localFirstChannelRuntime) UpsertBotChannelConfig(ctx context.Context, botID string, typ channel.ChannelType, req channel.UpsertConfigRequest) (channel.ChannelConfig, error) {
+func (r *localFirstChannelRuntime) UpsertBotChannelConfig(ctx context.Context, botID string, typ gateway.ChannelType, req gateway.UpsertConfigRequest) (gateway.ChannelConfig, error) {
 	return r.remote.UpsertBotChannelConfig(ctx, botID, typ, req)
 }
 
-func (r *localFirstChannelRuntime) SetBotChannelStatus(ctx context.Context, botID string, typ channel.ChannelType, disabled bool) (channel.ChannelConfig, error) {
+func (r *localFirstChannelRuntime) SetBotChannelStatus(ctx context.Context, botID string, typ gateway.ChannelType, disabled bool) (gateway.ChannelConfig, error) {
 	return r.remote.SetBotChannelStatus(ctx, botID, typ, disabled)
 }
 
-func (r *localFirstChannelRuntime) DeleteBotChannelConfig(ctx context.Context, botID string, typ channel.ChannelType) error {
+func (r *localFirstChannelRuntime) DeleteBotChannelConfig(ctx context.Context, botID string, typ gateway.ChannelType) error {
 	return r.remote.DeleteBotChannelConfig(ctx, botID, typ)
 }
 
-func (r *localFirstChannelRuntime) SetWebhookEndpoint(ctx context.Context, botID string, typ channel.ChannelType, req channel.SetWebhookEndpointRequest) (channel.SetWebhookEndpointResponse, error) {
+func (r *localFirstChannelRuntime) SetWebhookEndpoint(ctx context.Context, botID string, typ gateway.ChannelType, req gateway.SetWebhookEndpointRequest) (gateway.SetWebhookEndpointResponse, error) {
 	return r.remote.SetWebhookEndpoint(ctx, botID, typ, req)
 }
 
-func (r *localFirstChannelRuntime) ConnectionStatusesByBot(botID string) []channel.ConnectionStatus {
+func (r *localFirstChannelRuntime) ConnectionStatusesByBot(botID string) []gateway.ConnectionStatus {
 	return r.remote.ConnectionStatusesByBot(botID)
 }
 
-func provideWebhookTunnelStatus(client *channelruntime.Client) interface{ Status() webhooktunnel.Status } {
+func provideWebhookTunnelStatus(client *channelruntime.Client) webhook.Service {
 	return client
 }
 
 // provideLocalWebhookTunnelStatus is the embedded-mode counterpart: the
 // tunnel manager runs in this process.
-func provideLocalWebhookTunnelStatus(manager *webhooktunnel.Manager) interface{ Status() webhooktunnel.Status } {
+func provideLocalWebhookTunnelStatus(manager webhook.Manager) webhook.Service {
 	return manager
 }
 
-func provideServerRPC(log *slog.Logger, cfg config.Config, turnService turn.Service, commandHandler *command.Handler, skillHandler *handlers.ContainerdHandler, audioService *audio.Service) (*serverRPC, error) {
-	if err := cfg.ValidateServerRuntime(); err != nil {
-		return nil, err
-	}
+func provideServerRPC(log *slog.Logger, cfg config.Config, turnService agentdomain.Service, commandHandler *command.Handler, skillHandler *runtimehttp.ContainerdHandler, audioService *audio.Service) (*serverRPC, error) {
 	server := intrpc.NewServer(cfg.InternalRPC.SharedSecret)
 	turnpb.RegisterTurnServiceServer(server, turntransport.NewServer(log, turnService))
 	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(log, serverruntime.Handlers(commandHandler, skillHandler, audioService)))
@@ -148,9 +150,9 @@ func startServerRPC(lc fx.Lifecycle, log *slog.Logger, rpcServer *serverRPC, shu
 				return fmt.Errorf("listen server rpc: %w", err)
 			}
 			go func() {
-				log.Info("server rpc listening", slog.String("addr", rpcServer.addr))
+				log.InfoContext(ctx, "server rpc listening", slog.String("addr", rpcServer.addr))
 				if err := rpcServer.server.Serve(lis); err != nil {
-					log.Error("server rpc failed", slog.Any("error", err))
+					log.ErrorContext(ctx, "server rpc failed", slog.Any("error", err))
 					_ = shutdowner.Shutdown()
 				}
 			}()

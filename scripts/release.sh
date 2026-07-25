@@ -10,7 +10,7 @@ BUILD_TIME="${BUILD_TIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist}"
 PREPARE_ASSETS_ONLY="false"
 
-WEB_DIR="$ROOT_DIR/internal/embedded/web"
+WEB_DIR="$ROOT_DIR/domains/api/http/static/web"
 
 log() {
   echo "[release] $*"

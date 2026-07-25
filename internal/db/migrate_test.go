@@ -11,7 +11,7 @@ import (
 )
 
 func TestEmbeddedMigrationsHaveUniqueVersions(t *testing.T) {
-	migrations, err := fs.Sub(dbembed.MigrationsFS, "postgres/migrations")
+	migrations, err := fs.Sub(dbembed.MigrationsFS, "postgres/legacy/v1/migrations")
 	if err != nil {
 		t.Fatalf("open embedded migrations: %v", err)
 	}

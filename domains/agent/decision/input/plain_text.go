@@ -1,0 +1,221 @@
+package input
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"unicode"
+
+	agentdomain "github.com/memohai/memoh/domains/agent"
+)
+
+const maxTextInteractionRetries = 3
+
+// AdvanceText consumes one plain-text reply without submitting the request.
+// The final answer set is persisted first so a process crash before Submit can
+// resume the same completion instead of losing earlier questions.
+func (s *Service) AdvanceText(ctx context.Context, input agentdomain.AdvanceTextInput) (agentdomain.AdvanceTextResult, error) {
+	if s == nil || s.persistence == nil {
+		return agentdomain.AdvanceTextResult{}, errors.New("user input persistence not configured")
+	}
+	resolve := ResolveInput{
+		BotID:                  input.BotID,
+		SessionID:              input.SessionID,
+		ExplicitID:             input.ExplicitID,
+		ReplyExternalMessageID: input.ReplyExternalMessageID,
+	}
+	for attempt := 0; attempt < maxTextInteractionRetries; attempt++ {
+		req, err := s.ResolveTarget(ctx, resolve)
+		if errors.Is(err, ErrNotFound) {
+			return agentdomain.AdvanceTextResult{Handled: false}, nil
+		}
+		if err != nil {
+			return agentdomain.AdvanceTextResult{}, err
+		}
+		// Once selected, retries must stay on this request. Otherwise another
+		// pending ask_user created between CAS attempts could consume the reply.
+		if strings.TrimSpace(resolve.ExplicitID) == "" {
+			resolve.ExplicitID = req.ID
+		}
+		state, invalid, changed, err := advanceTextState(req.UIPayload, req.Interaction, input.Text)
+		if err != nil {
+			return agentdomain.AdvanceTextResult{}, err
+		}
+		if invalid || !changed {
+			req.Interaction = state
+			return advanceTextResult(true, invalid, req)
+		}
+		updated, ok, err := s.persistInteraction(ctx, req, state)
+		if err != nil {
+			return agentdomain.AdvanceTextResult{}, err
+		}
+		if ok {
+			return advanceTextResult(true, false, updated)
+		}
+	}
+	return agentdomain.AdvanceTextResult{}, errors.New("user input changed concurrently; retry the reply")
+}
+
+func advanceTextState(payload UIPayload, state TextInteractionState, raw string) (TextInteractionState, bool, bool, error) {
+	if len(payload.Questions) == 0 {
+		return state, false, false, errors.New("user input has no questions")
+	}
+	state = normalizeTextInteraction(payload, state)
+	command := strings.ToLower(strings.TrimSpace(raw))
+	if isBackCommand(command) {
+		if state.QuestionIndex == 0 {
+			return state, false, false, nil
+		}
+		state.QuestionIndex--
+		state.Completed = false
+		return state, false, true, nil
+	}
+	if state.Completed {
+		return state, false, false, nil
+	}
+	question := payload.Questions[state.QuestionIndex]
+	answer := agentdomain.QuestionAnswer{QuestionID: question.ID}
+	if isSkipCommand(command) {
+		answer.Skipped = true
+	} else {
+		var err error
+		answer, err = parseTextAnswer(question, raw)
+		if err != nil {
+			return state, true, false, nil
+		}
+	}
+	state.Answers = putTextAnswer(state.Answers, answer)
+	if state.QuestionIndex == len(payload.Questions)-1 {
+		state.Completed = true
+	} else {
+		state.QuestionIndex++
+	}
+	return state, false, true, nil
+}
+
+func normalizeTextInteraction(payload UIPayload, state TextInteractionState) TextInteractionState {
+	if state.QuestionIndex < 0 {
+		state.QuestionIndex = 0
+	}
+	if state.QuestionIndex >= len(payload.Questions) {
+		state.QuestionIndex = len(payload.Questions) - 1
+	}
+	valid := make(map[string]struct{}, len(payload.Questions))
+	for _, question := range payload.Questions {
+		valid[question.ID] = struct{}{}
+	}
+	answers := make([]agentdomain.QuestionAnswer, 0, len(state.Answers))
+	seen := map[string]struct{}{}
+	for _, answer := range state.Answers {
+		if _, ok := valid[answer.QuestionID]; !ok {
+			continue
+		}
+		if _, ok := seen[answer.QuestionID]; ok {
+			continue
+		}
+		seen[answer.QuestionID] = struct{}{}
+		answers = append(answers, answer)
+	}
+	state.Answers = answers
+	return state
+}
+
+func parseTextAnswer(question UIQuestion, raw string) (agentdomain.QuestionAnswer, error) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return agentdomain.QuestionAnswer{}, errors.New("answer is required")
+	}
+	answer := agentdomain.QuestionAnswer{QuestionID: question.ID}
+	switch question.Kind {
+	case QuestionKindText:
+		answer.Text = text
+	case QuestionKindSingleSelect:
+		if optionID, ok := matchTextOption(question, text); ok {
+			answer.OptionIDs = []string{optionID}
+		} else if question.AllowCustom {
+			answer.CustomText = text
+		} else {
+			return agentdomain.QuestionAnswer{}, fmt.Errorf("answer %q does not match an option", text)
+		}
+	case QuestionKindMultiSelect:
+		parts := splitTextSelections(text)
+		if len(parts) == 0 {
+			return agentdomain.QuestionAnswer{}, errors.New("at least one selection is required")
+		}
+		seen := map[string]struct{}{}
+		for _, part := range parts {
+			if optionID, ok := matchTextOption(question, part); ok {
+				if _, exists := seen[optionID]; !exists {
+					seen[optionID] = struct{}{}
+					answer.OptionIDs = append(answer.OptionIDs, optionID)
+				}
+				continue
+			}
+			if question.AllowCustom && answer.CustomText == "" {
+				answer.CustomText = part
+				continue
+			}
+			return agentdomain.QuestionAnswer{}, fmt.Errorf("selection %q does not match an option", part)
+		}
+	default:
+		return agentdomain.QuestionAnswer{}, fmt.Errorf("unsupported question kind %q", question.Kind)
+	}
+	return answer, nil
+}
+
+func matchTextOption(question UIQuestion, raw string) (string, bool) {
+	text := strings.TrimSpace(raw)
+	if number, err := strconv.Atoi(text); err == nil && number >= 1 && number <= len(question.Options) {
+		return question.Options[number-1].ID, true
+	}
+	for _, option := range question.Options {
+		if strings.EqualFold(text, strings.TrimSpace(option.ID)) || strings.EqualFold(text, strings.TrimSpace(option.Label)) {
+			return option.ID, true
+		}
+	}
+	return "", false
+}
+
+func splitTextSelections(text string) []string {
+	fields := strings.FieldsFunc(text, func(r rune) bool {
+		return r == ',' || r == '，' || r == ';' || r == '；' || unicode.Is(unicode.Zl, r) || r == '\n' || r == '\r'
+	})
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if part := strings.TrimSpace(field); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func putTextAnswer(answers []agentdomain.QuestionAnswer, answer agentdomain.QuestionAnswer) []agentdomain.QuestionAnswer {
+	out := append([]agentdomain.QuestionAnswer(nil), answers...)
+	for idx := range out {
+		if out[idx].QuestionID == answer.QuestionID {
+			out[idx] = answer
+			return out
+		}
+	}
+	return append(out, answer)
+}
+
+func isBackCommand(text string) bool {
+	switch text {
+	case "back", "返回", "上一步", "戻る":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSkipCommand(text string) bool {
+	switch text {
+	case "skip", "跳过", "略过", "スキップ":
+		return true
+	default:
+		return false
+	}
+}

@@ -5,7 +5,9 @@ on:
     branches: ["main"]
     paths:
       - "packages/runtime/**"
-      - "internal/workspace/bridgepb/bridge.proto"
+      - "domains/runtime/bridge/pb/bridge.proto"
+      - "domains/runtime/bridge/client/**"
+      - "domains/runtime/bridge/server/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -15,7 +17,9 @@ on:
     branches: ["main"]
     paths:
       - "packages/runtime/**"
-      - "internal/workspace/bridgepb/bridge.proto"
+      - "domains/runtime/bridge/pb/bridge.proto"
+      - "domains/runtime/bridge/client/**"
+      - "domains/runtime/bridge/server/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"

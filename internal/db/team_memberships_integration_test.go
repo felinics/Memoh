@@ -7,11 +7,148 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/team"
+	team "github.com/memohai/memoh/domains/iam/team"
 )
+
+type teamAccountRow struct {
+	ID                 pgtype.UUID
+	Role               string
+	DataRoot           pgtype.Text
+	TeamID             pgtype.UUID
+	IsActive           pgtype.Bool
+	PrincipalIsActive  bool
+	MembershipIsActive bool
+}
+
+const getAccountByUserIDSQL = `
+SELECT id, role, data_root, team_id
+FROM team_accounts WHERE id = $1
+`
+
+const createUserSQL = `
+WITH created_user AS (
+  INSERT INTO users (is_active, metadata)
+  VALUES ($1, $2)
+  RETURNING users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
+), created_membership AS (
+  INSERT INTO team_members (team_id, user_id, is_active)
+  SELECT public.memoh_current_team_id(), id, $1
+  FROM created_user
+  RETURNING team_members.team_id, team_members.user_id, team_members.role, team_members.is_active, team_members.data_root, team_members.title_model_id, team_members.metadata, team_members.created_at, team_members.updated_at
+)
+SELECT changed_user.id
+FROM created_user changed_user
+JOIN created_membership changed_membership
+  ON changed_membership.user_id = changed_user.id
+`
+
+const createAccountSQL = `
+WITH updated_user AS (
+  UPDATE users
+  SET username = $1,
+      email = $2,
+      password_hash = $3,
+      display_name = $4,
+      avatar_url = $5,
+      updated_at = now()
+  WHERE users.id = $6
+    AND EXISTS (
+      SELECT 1 FROM team_members membership
+      WHERE membership.team_id = public.memoh_current_team_id()
+        AND membership.user_id = users.id
+    )
+  RETURNING users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
+), updated_membership AS (
+  UPDATE team_members membership
+  SET role = $7::user_role,
+      is_active = $8,
+      data_root = $9,
+      updated_at = now()
+  FROM updated_user
+  WHERE membership.team_id = public.memoh_current_team_id()
+    AND membership.user_id = updated_user.id
+  RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.title_model_id, membership.metadata, membership.created_at, membership.updated_at
+)
+SELECT
+  changed_user.id, changed_membership.role, changed_membership.team_id
+FROM updated_user changed_user
+JOIN updated_membership changed_membership
+  ON changed_membership.user_id = changed_user.id
+`
+
+const upsertAccountByUsernameSQL = `
+WITH upserted_user AS (
+  INSERT INTO users (
+    id, username, email, password_hash, display_name, avatar_url,
+    is_active, metadata
+  )
+  VALUES (
+    $1, $2, $3, $4, $5, $6, $7, '{}'::jsonb
+  )
+  ON CONFLICT (username) DO NOTHING
+  RETURNING users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
+), selected_user AS (
+  SELECT id, username, email, password_hash, display_name, avatar_url, timezone, last_login_at, is_active, metadata, created_at, updated_at FROM upserted_user
+  UNION ALL
+  SELECT users.id, users.username, users.email, users.password_hash, users.display_name, users.avatar_url, users.timezone, users.last_login_at, users.is_active, users.metadata, users.created_at, users.updated_at
+  FROM users
+  WHERE users.username = $2
+    AND NOT EXISTS (SELECT 1 FROM upserted_user)
+), upserted_membership AS (
+  INSERT INTO team_members (
+    team_id, user_id, role, is_active, data_root
+  )
+  SELECT
+    public.memoh_current_team_id(),
+    id,
+    $8::user_role,
+    $7,
+    $9
+  FROM selected_user
+  ON CONFLICT (team_id, user_id) DO UPDATE SET
+    role = EXCLUDED.role,
+    is_active = EXCLUDED.is_active,
+    data_root = EXCLUDED.data_root,
+    updated_at = now()
+  RETURNING team_members.team_id, team_members.user_id, team_members.role, team_members.is_active, team_members.data_root, team_members.title_model_id, team_members.metadata, team_members.created_at, team_members.updated_at
+)
+SELECT
+  changed_user.id, changed_membership.role, changed_membership.team_id
+FROM selected_user changed_user
+JOIN upserted_membership changed_membership
+  ON changed_membership.user_id = changed_user.id
+`
+
+const removeMemberSQL = `
+UPDATE team_members
+SET is_active = FALSE,
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND user_id = $1
+RETURNING user_id
+`
+
+const updateAccountAdminSQL = `
+WITH updated_membership AS (
+  UPDATE team_members membership
+  SET role = $1::user_role,
+      is_active = COALESCE($2::boolean, membership.is_active),
+      updated_at = now()
+  WHERE membership.team_id = public.memoh_current_team_id()
+    AND membership.user_id = $3
+  RETURNING membership.team_id, membership.user_id, membership.role, membership.is_active, membership.data_root, membership.title_model_id, membership.metadata, membership.created_at, membership.updated_at
+)
+SELECT
+  changed_membership.role,
+  (changed_user.is_active AND changed_membership.is_active) AS is_active,
+  changed_user.is_active AS principal_is_active,
+  changed_membership.is_active AS membership_is_active
+FROM updated_membership changed_membership
+JOIN users changed_user ON changed_user.id = changed_membership.user_id
+`
 
 func TestTeamMembershipMigrationBackfillsAndReverses(t *testing.T) {
 	ctx := context.Background()
@@ -127,7 +264,7 @@ func TestGlobalUserCanBelongToMultipleTeams(t *testing.T) {
 		t.Fatalf("seed memberships: %v", err)
 	}
 
-	accountAs := func(teamID string) dbsqlc.TeamAccount {
+	accountAs := func(teamID string) teamAccountRow {
 		t.Helper()
 		tx, err := pool.Begin(ctx)
 		if err != nil {
@@ -137,8 +274,10 @@ func TestGlobalUserCanBelongToMultipleTeams(t *testing.T) {
 		if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", teamID); err != nil {
 			t.Fatalf("bind account team: %v", err)
 		}
-		account, err := dbsqlc.New(tx).GetAccountByUserID(ctx, uuidValue(t, userID))
-		if err != nil {
+		var account teamAccountRow
+		if err := tx.QueryRow(ctx, getAccountByUserIDSQL, uuidValue(t, userID)).Scan(
+			&account.ID, &account.Role, &account.DataRoot, &account.TeamID,
+		); err != nil {
 			t.Fatalf("get account for team %s: %v", teamID, err)
 		}
 		return account
@@ -167,7 +306,8 @@ func TestGlobalUserCanBelongToMultipleTeams(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", teamTwo); err != nil {
 		t.Fatalf("bind remove-member team: %v", err)
 	}
-	if _, err := dbsqlc.New(tx).RemoveMember(ctx, uuidValue(t, userID)); err != nil {
+	var removedUserID pgtype.UUID
+	if err := tx.QueryRow(ctx, removeMemberSQL, uuidValue(t, userID)).Scan(&removedUserID); err != nil {
 		t.Fatalf("remove team-two member: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -212,26 +352,22 @@ func TestAccountQueriesAttachExistingUserToAnotherTeam(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", team.DefaultTeamID); err != nil {
 		t.Fatalf("bind default team: %v", err)
 	}
-	queries := dbsqlc.New(tx)
-	created, err := queries.CreateUser(ctx, dbsqlc.CreateUserParams{
-		IsActive: true,
-		Metadata: []byte(`{"source":"test"}`),
-	})
-	if err != nil {
+	var createdID pgtype.UUID
+	if err := tx.QueryRow(ctx, createUserSQL, true, []byte(`{"source":"test"}`)).Scan(&createdID); err != nil {
 		t.Fatalf("create global user and membership: %v", err)
 	}
-	account, err := queries.CreateAccount(ctx, dbsqlc.CreateAccountParams{
-		Username:     pgtype.Text{String: "query-shared", Valid: true},
-		Email:        pgtype.Text{String: "query-shared@example.com", Valid: true},
-		PasswordHash: pgtype.Text{String: "team-one-hash", Valid: true},
-		DisplayName:  pgtype.Text{String: "Query Shared", Valid: true},
-		AvatarUrl:    pgtype.Text{},
-		UserID:       created.ID,
-		Role:         "admin",
-		IsActive:     true,
-		DataRoot:     pgtype.Text{String: "/query-team-one", Valid: true},
-	})
-	if err != nil {
+	var account teamAccountRow
+	if err := tx.QueryRow(ctx, createAccountSQL,
+		pgtype.Text{String: "query-shared", Valid: true},
+		pgtype.Text{String: "query-shared@example.com", Valid: true},
+		pgtype.Text{String: "team-one-hash", Valid: true},
+		pgtype.Text{String: "Query Shared", Valid: true},
+		pgtype.Text{},
+		createdID,
+		"admin",
+		true,
+		pgtype.Text{String: "/query-team-one", Valid: true},
+	).Scan(&account.ID, &account.Role, &account.TeamID); err != nil {
 		t.Fatalf("create default-team account: %v", err)
 	}
 	if account.Role != "admin" || account.TeamID.String() != team.DefaultTeamID {
@@ -249,22 +385,22 @@ func TestAccountQueriesAttachExistingUserToAnotherTeam(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", teamTwo); err != nil {
 		t.Fatalf("bind second team: %v", err)
 	}
-	attached, err := dbsqlc.New(tx).UpsertAccountByUsername(ctx, dbsqlc.UpsertAccountByUsernameParams{
-		UserID:       uuidValue(t, unusedUserID),
-		Username:     pgtype.Text{String: "query-shared", Valid: true},
-		Email:        pgtype.Text{String: "query-shared@example.com", Valid: true},
-		PasswordHash: pgtype.Text{String: "team-two-hash", Valid: true},
-		DisplayName:  pgtype.Text{String: "Query Shared", Valid: true},
-		AvatarUrl:    pgtype.Text{},
-		IsActive:     true,
-		Role:         "member",
-		DataRoot:     pgtype.Text{String: "/query-team-two", Valid: true},
-	})
-	if err != nil {
+	var attached teamAccountRow
+	if err := tx.QueryRow(ctx, upsertAccountByUsernameSQL,
+		uuidValue(t, unusedUserID),
+		pgtype.Text{String: "query-shared", Valid: true},
+		pgtype.Text{String: "query-shared@example.com", Valid: true},
+		pgtype.Text{String: "team-two-hash", Valid: true},
+		pgtype.Text{String: "Query Shared", Valid: true},
+		pgtype.Text{},
+		true,
+		"member",
+		pgtype.Text{String: "/query-team-two", Valid: true},
+	).Scan(&attached.ID, &attached.Role, &attached.TeamID); err != nil {
 		t.Fatalf("attach existing account to second team: %v", err)
 	}
-	if attached.ID != created.ID {
-		t.Fatalf("attached principal = %s, want existing %s", attached.ID, created.ID)
+	if attached.ID != createdID {
+		t.Fatalf("attached principal = %s, want existing %s", attached.ID, createdID)
 	}
 	if attached.Role != "member" || attached.TeamID.String() != teamTwo {
 		t.Fatalf("second-team account role/team = %q/%q", attached.Role, attached.TeamID.String())
@@ -277,14 +413,14 @@ func TestAccountQueriesAttachExistingUserToAnotherTeam(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username='query-shared'`).Scan(&userCount); err != nil {
 		t.Fatalf("count global users: %v", err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM team_members WHERE user_id=$1`, created.ID).Scan(&membershipCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM team_members WHERE user_id=$1`, createdID).Scan(&membershipCount); err != nil {
 		t.Fatalf("count memberships: %v", err)
 	}
 	if userCount != 1 || membershipCount != 2 {
 		t.Fatalf("global users/memberships = %d/%d, want 1/2", userCount, membershipCount)
 	}
 	var passwordHash string
-	if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, created.ID).Scan(&passwordHash); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, createdID).Scan(&passwordHash); err != nil {
 		t.Fatalf("read shared password hash: %v", err)
 	}
 	if passwordHash != "team-one-hash" {
@@ -322,11 +458,7 @@ func TestAdminAccountUpdateOnlyChangesCurrentMembership(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", teamTwo); err != nil {
 		t.Fatalf("bind admin-update team: %v", err)
 	}
-	updated, err := dbsqlc.New(tx).UpdateAccountAdmin(ctx, dbsqlc.UpdateAccountAdminParams{
-		UserID:   uuidValue(t, userID),
-		Role:     "admin",
-		IsActive: pgtype.Bool{Bool: false, Valid: true},
-	})
+	updated, err := updateAccountAdmin(ctx, tx, uuidValue(t, userID), "admin", pgtype.Bool{Bool: false, Valid: true})
 	if err != nil {
 		t.Fatalf("update current membership: %v", err)
 	}
@@ -389,11 +521,7 @@ func TestRoleOnlyAdminUpdatePreservesMembershipState(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", team.DefaultTeamID); err != nil {
 		t.Fatalf("bind role-only update team: %v", err)
 	}
-	updated, err := dbsqlc.New(tx).UpdateAccountAdmin(ctx, dbsqlc.UpdateAccountAdminParams{
-		UserID:   uuidValue(t, targetID),
-		Role:     "admin",
-		IsActive: pgtype.Bool{},
-	})
+	updated, err := updateAccountAdmin(ctx, tx, uuidValue(t, targetID), "admin", pgtype.Bool{})
 	if err != nil {
 		t.Fatalf("role-only update: %v", err)
 	}
@@ -549,6 +677,17 @@ func TestTeamMembershipDownFailsWithMultipleMemberships(t *testing.T) {
 	if err := tryStepDown(t, dsn, countMigrationsFrom(t, "0115_team_memberships.up.sql")); err == nil {
 		t.Fatal("0115 down must fail closed when a user has multiple memberships")
 	}
+}
+
+func updateAccountAdmin(ctx context.Context, tx pgx.Tx, userID pgtype.UUID, role string, isActive pgtype.Bool) (teamAccountRow, error) {
+	var updated teamAccountRow
+	err := tx.QueryRow(ctx, updateAccountAdminSQL, role, isActive, userID).Scan(
+		&updated.Role,
+		&updated.IsActive,
+		&updated.PrincipalIsActive,
+		&updated.MembershipIsActive,
+	)
+	return updated, err
 }
 
 func uuidValue(t *testing.T, value string) (out pgtype.UUID) {

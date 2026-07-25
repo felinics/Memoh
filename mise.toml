@@ -5,7 +5,7 @@ config_roots = ["apps/web", "cmd/agent"]
 
 [tools]
 # Go version from go.mod
-go = "1.25.6"
+go = "1.25.12"
 # Node.js for frontend packages
 node = "25"
 # pnpm for workspace management
@@ -57,8 +57,25 @@ depends = [
 ]
 
 [tasks.sqlc-generate]
-description = "Generate SQL code"
-run = "sqlc generate"
+description = "Generate SQL code for Epoch v2 owners and pgvector"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+for f in \
+  db/postgres/iam/sqlc.yaml \
+  db/postgres/api/sqlc.yaml \
+  db/postgres/agent/sqlc.yaml \
+  db/postgres/channel/sqlc.yaml \
+  db/postgres/memory/sqlc.yaml \
+  db/postgres/runtime/sqlc.yaml \
+  db/postgres/model/sqlc.yaml \
+  db/postgres/media/sqlc.yaml \
+  sqlc.yaml
+do
+  echo "==> sqlc generate -f $f"
+  sqlc generate -f "$f"
+done
+"""
 
 [tasks.grpc-generate]
 description = "Generate internal gRPC protocol code"
@@ -68,8 +85,21 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
 PATH="$(go env GOPATH)/bin:$PATH" protoc \
   --go_out=paths=source_relative:. \
   --go-grpc_out=paths=source_relative:. \
-  internal/agent/turn/turnpb/turn.proto \
-  internal/rpc/runtimepb/runtime.proto
+  internal/rpc/channel/channelpb/channel.proto \
+  internal/rpc/channel/turn/turnpb/turn.proto \
+  internal/rpc/runtime/runtimepb/runtime.proto \
+  domains/runtime/bridge/bridgepb/bridge.proto
+"""
+
+[tasks."bridge:grpc-generate"]
+description = "Generate Runtime Bridge gRPC protocol code"
+run = """
+go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
+PATH="$(go env GOPATH)/bin:$PATH" protoc \
+  --go_out=paths=source_relative:. \
+  --go-grpc_out=paths=source_relative:. \
+  domains/runtime/bridge/bridgepb/bridge.proto
 """
 
 [tasks.icons-generate]
@@ -214,6 +244,10 @@ run = "scripts/prepare-kata-github-runner.sh"
 description = "Dispatch, watch, and audit the GitHub Linux/KVM Kata runner readiness workflow"
 run = "scripts/run-kata-github-e2e.sh"
 
+[tasks.db-manifest-checksums]
+description = "Recompute db/postgres/manifest.yaml checksums from the published migrations"
+run = "node scripts/db-manifest-checksums.mjs"
+
 [tasks.db-up]
 description = "Initialize and Migrate Database"
 run = "scripts/db-up.sh"
@@ -297,13 +331,19 @@ description = "Run all linters"
 env = { CI = "true", MISE_YES = "1" }
 run = [
   "mise run lint:contract",
+  "mise run lint:db-manifest",
   "mise run lint:es",
   "mise run lint:go",
+  "mise run lint:go:split",
 ]
 
 [tasks."lint:contract"]
 description = "UI design-contract guard (disabled opacity, radius tokens, type scale)"
 run = "node scripts/check-ui-contract.mjs"
+
+[tasks."lint:db-manifest"]
+description = "Fail when db/postgres/manifest.yaml checksums drift from the migrations"
+run = "node scripts/db-manifest-checksums.mjs --check"
 
 [tasks."lint:fix"]
 description = "Run all linters with auto-fix"
@@ -317,6 +357,16 @@ run = [
 description = "Run Go linter"
 depends = ["//:go-install"]
 run = "golangci-lint run ./..."
+
+[tasks."lint:go:split"]
+description = "Run Go linter against the split deployment profile"
+depends = ["//:go-install"]
+run = "golangci-lint run --build-tags split ./..."
+
+[tasks."lint:vuln"]
+description = "Fail on vulnerabilities reachable from our code"
+depends = ["//:go-install"]
+run = "scripts/govulncheck.sh"
 
 [tasks."lint:go:fix"]
 description = "Run Go linter with auto-fix"

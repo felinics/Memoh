@@ -1,0 +1,352 @@
+package agent_test
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+
+	agentdomain "github.com/memohai/memoh/domains/agent"
+)
+
+func TestContractWireJSONShapes(t *testing.T) {
+	metadata := map[string]any{"nested": map[string]any{"ok": true}, "rank": float64(2)}
+	content := json.RawMessage(
+		`[{"type":"text","text":"hello","styles":["bold"],"metadata":{"source":"test"}}]`,
+	)
+
+	tests := []struct {
+		name    string
+		value   any
+		want    string
+		wantErr string
+	}{
+		{
+			name: "attachment",
+			value: agentdomain.Attachment{
+				Type: "image", Base64: "data:image/png;base64,AA==", Path: "/tmp/a.png",
+				URL: "https://example.test/a.png", PlatformKey: "pk", ContentHash: "hash",
+				Name: "a.png", Mime: "image/png", Size: 42, Metadata: metadata,
+			},
+			want: `{"type":"image","base64":"data:image/png;base64,AA==","path":"/tmp/a.png","url":"https://example.test/a.png","platform_key":"pk","content_hash":"hash","name":"a.png","mime":"image/png","size":42,"metadata":{"nested":{"ok":true},"rank":2}}`,
+		},
+		{
+			name: "skill activation",
+			value: agentdomain.SkillActivation{
+				Skills: []agentdomain.SkillActivationSkill{{
+					Name: "skill", DisplayName: "Skill", Description: "desc",
+					SourceKind: "plugin", State: "effective",
+				}},
+				Prompt: "prompt",
+			},
+			want: `{"skills":[{"name":"skill","display_name":"Skill","description":"desc","source_kind":"plugin","state":"effective"}],"prompt":"prompt"}`,
+		},
+		{
+			name: "skill activation skill",
+			value: agentdomain.SkillActivationSkill{
+				Name: "skill", DisplayName: "Skill", Description: "desc",
+				SourceKind: "plugin", State: "effective",
+			},
+			want: `{"name":"skill","display_name":"Skill","description":"desc","source_kind":"plugin","state":"effective"}`,
+		},
+		{
+			name: "requested skill context remains internal",
+			value: agentdomain.RequestedSkillContext{
+				Name: "skill", Description: "desc", Content: "body", SourceKind: "plugin",
+				OpaqueSourceID: "opaque", ContentHash: "hash", Identity: "identity",
+			},
+			want: `{}`,
+		},
+		{
+			name: "outbound asset",
+			value: agentdomain.OutboundAssetRef{
+				ContentHash: "hash", Role: "attachment", Ordinal: 3, Mime: "image/png",
+				SizeBytes: 42, StorageKey: "key", Name: "a.png", Metadata: metadata,
+			},
+			want: `{"ContentHash":"hash","Role":"attachment","Ordinal":3,"Mime":"image/png","SizeBytes":42,"StorageKey":"key","Name":"a.png","Metadata":{"nested":{"ok":true},"rank":2}}`,
+		},
+		{
+			name: "inject message remains internal",
+			value: agentdomain.InjectMessage{
+				Text: "text", HeaderifiedText: "header",
+				Attachments: []agentdomain.Attachment{{Type: "file", ContentHash: "hash"}},
+			},
+			wantErr: "json: unsupported type: func()",
+		},
+		{
+			name: "model message",
+			value: agentdomain.ModelMessage{
+				Role: "assistant", Content: content, Usage: json.RawMessage(`{"ignored":true}`),
+				ToolCalls: []agentdomain.ToolCall{{
+					ID: "call", Type: "function",
+					Function: agentdomain.ToolCallFunction{Name: "read", Arguments: `{"path":"a"}`},
+				}},
+				ToolCallID: "result", Name: "tool",
+			},
+			want: `{"role":"assistant","content":[{"type":"text","text":"hello","styles":["bold"],"metadata":{"source":"test"}}],"tool_calls":[{"id":"call","type":"function","function":{"name":"read","arguments":"{\"path\":\"a\"}"}}],"tool_call_id":"result","name":"tool"}`,
+		},
+		{
+			name:  "assistant output",
+			value: agentdomain.AssistantOutput{Content: "hello", Parts: []agentdomain.ContentPart{{Type: "text", Text: "hello"}}},
+			want:  `{"Content":"hello","Parts":[{"type":"text","text":"hello"}]}`,
+		},
+		{
+			name: "content part",
+			value: agentdomain.ContentPart{
+				Type: "text", Text: "hello", URL: "https://example.test", Styles: []string{"bold"},
+				Language: "en", ChannelIdentityID: "ci", Emoji: "ok", Metadata: metadata,
+			},
+			want: `{"type":"text","text":"hello","url":"https://example.test","styles":["bold"],"language":"en","channel_identity_id":"ci","emoji":"ok","metadata":{"nested":{"ok":true},"rank":2}}`,
+		},
+		{
+			name: "tool call",
+			value: agentdomain.ToolCall{
+				ID: "call", Type: "function",
+				Function: agentdomain.ToolCallFunction{Name: "read", Arguments: `{"path":"a"}`},
+			},
+			want: `{"id":"call","type":"function","function":{"name":"read","arguments":"{\"path\":\"a\"}"}}`,
+		},
+		{
+			name:  "tool call function",
+			value: agentdomain.ToolCallFunction{Name: "read", Arguments: `{"path":"a"}`},
+			want:  `{"name":"read","arguments":"{\"path\":\"a\"}"}`,
+		},
+		{
+			name: "question answer",
+			value: agentdomain.QuestionAnswer{
+				QuestionID: "q", OptionIDs: []string{"a", "b"}, CustomText: "custom",
+				Text: "text", Skipped: true,
+			},
+			want: `{"question_id":"q","option_ids":["a","b"],"custom_text":"custom","text":"text","skipped":true}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := json.Marshal(tt.value)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("json.Marshal() error = nil, want %q", tt.wantErr)
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("json.Marshal() error = %q, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("json.Marshal() =\n%s\nwant:\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContractWireJSONOmitsOptionalFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "attachment", value: agentdomain.Attachment{Type: "file"}, want: `{"type":"file"}`},
+		{
+			name:  "skill activation",
+			value: agentdomain.SkillActivation{},
+			want:  `{}`,
+		},
+		{
+			name:  "skill activation skill",
+			value: agentdomain.SkillActivationSkill{Name: "skill"},
+			want:  `{"name":"skill"}`,
+		},
+		{name: "model message", value: agentdomain.ModelMessage{Role: "user"}, want: `{"role":"user"}`},
+		{name: "content part", value: agentdomain.ContentPart{Type: "text"}, want: `{"type":"text"}`},
+		{
+			name:  "tool call",
+			value: agentdomain.ToolCall{Type: "function"},
+			want:  `{"type":"function","function":{"name":"","arguments":""}}`,
+		},
+		{
+			name:  "question answer",
+			value: agentdomain.QuestionAnswer{QuestionID: "q"},
+			want:  `{"question_id":"q"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := json.Marshal(tt.value)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("json.Marshal() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestModelMessageHelpers(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   json.RawMessage
+		wantText  string
+		wantParts []agentdomain.ContentPart
+		wantHas   bool
+	}{
+		{name: "empty"},
+		{
+			name:     "plain text",
+			content:  agentdomain.NewTextContent("  plain text  "),
+			wantText: "  plain text  ",
+			wantHas:  true,
+		},
+		{
+			name:     "multipart text excludes reasoning",
+			content:  json.RawMessage(`[{"type":"reasoning","text":"secret"},{"type":"text","text":" first "},{"type":"text","text":"second"}]`),
+			wantText: " first \nsecond",
+			wantParts: []agentdomain.ContentPart{
+				{Type: "reasoning", Text: "secret"},
+				{Type: "text", Text: " first "},
+				{Type: "text", Text: "second"},
+			},
+			wantHas: true,
+		},
+		{
+			name:      "non-text multipart still counts as content",
+			content:   json.RawMessage(`[{"type":"image","url":"https://example.test/a.png"}]`),
+			wantParts: []agentdomain.ContentPart{{Type: "image", URL: "https://example.test/a.png"}},
+			wantHas:   true,
+		},
+		{
+			name:    "invalid multipart shape",
+			content: json.RawMessage(`{"not":"valid content"}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			message := agentdomain.ModelMessage{Content: tt.content}
+			if got := message.TextContent(); got != tt.wantText {
+				t.Errorf("TextContent() = %q, want %q", got, tt.wantText)
+			}
+			if got := message.ContentParts(); !reflect.DeepEqual(got, tt.wantParts) {
+				t.Errorf("ContentParts() = %#v, want %#v", got, tt.wantParts)
+			}
+			if got := message.HasContent(); got != tt.wantHas {
+				t.Errorf("HasContent() = %v, want %v", got, tt.wantHas)
+			}
+		})
+	}
+
+	toolOnly := agentdomain.ModelMessage{ToolCalls: []agentdomain.ToolCall{{Type: "function"}}}
+	if !toolOnly.HasContent() {
+		t.Error("tool-call-only message must have content")
+	}
+	if got, want := string(agentdomain.NewTextContent("quoted\ntext")), `"quoted\ntext"`; got != want {
+		t.Errorf("NewTextContent() = %s, want %s", got, want)
+	}
+}
+
+func TestContentPartHasValue(t *testing.T) {
+	tests := []struct {
+		name string
+		part agentdomain.ContentPart
+		want bool
+	}{
+		{name: "empty", part: agentdomain.ContentPart{Type: "text"}},
+		{name: "whitespace only", part: agentdomain.ContentPart{Text: " ", URL: "\t", Emoji: "\n"}},
+		{name: "text", part: agentdomain.ContentPart{Text: "hello"}, want: true},
+		{name: "url", part: agentdomain.ContentPart{URL: "https://example.test"}, want: true},
+		{name: "emoji", part: agentdomain.ContentPart{Emoji: "ok"}, want: true},
+		{
+			name: "metadata alone",
+			part: agentdomain.ContentPart{Metadata: map[string]any{"source": "test"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.part.HasValue(); got != tt.want {
+				t.Errorf("HasValue() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSkillActivationFiltersAndDeduplicatesSkills(t *testing.T) {
+	items := []agentdomain.RequestedSkillContext{
+		{Name: " skill-a ", Description: " desc ", SourceKind: " plugin ", Identity: "same"},
+		{Name: "duplicate", SourceKind: "plugin", Identity: " same "},
+		{Name: " skill-b ", SourceKind: "builtin"},
+		{Name: "skill-b", SourceKind: " builtin "},
+		{Name: "  "},
+	}
+
+	got := agentdomain.NewSkillActivation(items, "  ")
+	want := &agentdomain.SkillActivation{
+		Skills: []agentdomain.SkillActivationSkill{
+			{
+				Name: "skill-a", DisplayName: "skill-a", Description: "desc",
+				SourceKind: "plugin", State: "effective",
+			},
+			{
+				Name: "skill-b", DisplayName: "skill-b",
+				SourceKind: "builtin", State: "effective",
+			},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NewSkillActivation() = %#v, want %#v", got, want)
+	}
+
+	const wantJSON = `{"skills":[{"name":"skill-a","display_name":"skill-a","description":"desc","source_kind":"plugin","state":"effective"},{"name":"skill-b","display_name":"skill-b","source_kind":"builtin","state":"effective"}]}`
+	gotJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotJSON) != wantJSON {
+		t.Fatalf("activation JSON = %s, want %s", gotJSON, wantJSON)
+	}
+
+	const wantQuery = "The user activated the following skill for this turn without an additional prompt: skill-a, skill-b."
+	if query := agentdomain.SkillActivationModelQuery(got); query != wantQuery {
+		t.Errorf("SkillActivationModelQuery() = %q, want %q", query, wantQuery)
+	}
+}
+
+func TestSkillActivationModelQuery(t *testing.T) {
+	if activation := agentdomain.NewSkillActivation(nil, " user prompt "); !reflect.DeepEqual(
+		activation,
+		&agentdomain.SkillActivation{Prompt: "user prompt"},
+	) {
+		t.Fatalf("prompt-only activation = %#v", activation)
+	}
+	if got := agentdomain.SkillActivationModelQuery(&agentdomain.SkillActivation{
+		Skills: []agentdomain.SkillActivationSkill{{Name: "ignored"}},
+		Prompt: " answer ",
+	}); got != "answer" {
+		t.Errorf("prompt query = %q, want %q", got, "answer")
+	}
+
+	const wantFallback = "The user activated the following skill for this turn without an additional prompt: skill-a, Fancy."
+	if got := agentdomain.SkillActivationModelQuery(&agentdomain.SkillActivation{
+		Skills: []agentdomain.SkillActivationSkill{
+			{Name: " skill-a "},
+			{Name: "ignored", DisplayName: " Fancy "},
+			{Name: " "},
+		},
+	}); got != wantFallback {
+		t.Errorf("fallback query = %q, want %q", got, wantFallback)
+	}
+
+	if agentdomain.NewSkillActivation(nil, " ") != nil {
+		t.Error("empty activation must be nil")
+	}
+	if got := agentdomain.SkillActivationModelQuery(nil); got != "" {
+		t.Errorf("nil activation query = %q, want empty", got)
+	}
+	if got := agentdomain.SkillActivationModelQuery(&agentdomain.SkillActivation{}); got != "" {
+		t.Errorf("empty activation query = %q, want empty", got)
+	}
+}

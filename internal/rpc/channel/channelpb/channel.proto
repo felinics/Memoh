@@ -1,0 +1,424 @@
+syntax = "proto3";
+
+// memoh:plane=control
+package memoh.channel;
+
+option go_package = "github.com/memohai/memoh/internal/rpc/channel/channelpb;channelpb";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+service ChannelAdminService {
+  rpc UpsertConfig(UpsertConfigRequest) returns (ChannelConfigResponse);
+  rpc SetStatus(SetStatusRequest) returns (ChannelConfigResponse);
+  rpc DeleteConfig(DeleteConfigRequest) returns (google.protobuf.Empty);
+  rpc SetWebhookEndpoint(SetWebhookEndpointRequest) returns (SetWebhookEndpointResponse);
+  rpc ListIdentityProjections(ListIdentityProjectionsRequest) returns (ListIdentityProjectionsResponse);
+  rpc ListConversationProjections(ListConversationProjectionsRequest) returns (ListConversationProjectionsResponse);
+}
+
+// SendMessage is intentionally absent until AD1 and D11 close the complete capability.
+service ChannelDeliveryService {
+  rpc React(ReactRequest) returns (google.protobuf.Empty);
+}
+
+service ChannelStatusService {
+  rpc ListConnectionStatuses(ListConnectionStatusesRequest) returns (ListConnectionStatusesResponse);
+  rpc GetTunnelStatus(GetTunnelStatusRequest) returns (GetTunnelStatusResponse);
+}
+
+service ChannelEmailService {
+  rpc RefreshProvider(RefreshProviderRequest) returns (google.protobuf.Empty);
+  rpc SendEmail(SendEmailRequest) returns (SendEmailResponse);
+}
+
+enum ChannelType {
+  CHANNEL_TYPE_UNSPECIFIED = 0;
+  CHANNEL_TYPE_DINGTALK = 1;
+  CHANNEL_TYPE_DISCORD = 2;
+  CHANNEL_TYPE_FEISHU = 3;
+  CHANNEL_TYPE_LINE = 4;
+  CHANNEL_TYPE_MATRIX = 5;
+  CHANNEL_TYPE_MISSKEY = 6;
+  CHANNEL_TYPE_QQ = 7;
+  CHANNEL_TYPE_SLACK = 8;
+  CHANNEL_TYPE_TELEGRAM = 9;
+  CHANNEL_TYPE_WECHAT_OA = 10;
+  CHANNEL_TYPE_WECOM = 11;
+  CHANNEL_TYPE_WEIXIN = 12;
+}
+
+enum TunnelMode {
+  TUNNEL_MODE_UNSPECIFIED = 0;
+  TUNNEL_MODE_DISABLED = 1;
+  TUNNEL_MODE_CONFIGURED = 2;
+  TUNNEL_MODE_MANAGED = 3;
+}
+
+enum TunnelState {
+  TUNNEL_STATE_UNSPECIFIED = 0;
+  TUNNEL_STATE_DISABLED = 1;
+  TUNNEL_STATE_STARTING = 2;
+  TUNNEL_STATE_READY = 3;
+  TUNNEL_STATE_ERROR = 4;
+}
+
+enum FeishuRegion {
+  FEISHU_REGION_UNSPECIFIED = 0;
+  FEISHU_REGION_FEISHU = 1;
+  FEISHU_REGION_LARK = 2;
+}
+
+enum FeishuInboundMode {
+  FEISHU_INBOUND_MODE_UNSPECIFIED = 0;
+  FEISHU_INBOUND_MODE_WEBSOCKET = 1;
+  FEISHU_INBOUND_MODE_WEBHOOK = 2;
+}
+
+enum EncryptionMode {
+  ENCRYPTION_MODE_UNSPECIFIED = 0;
+  ENCRYPTION_MODE_PLAIN = 1;
+  ENCRYPTION_MODE_COMPAT = 2;
+  ENCRYPTION_MODE_SAFE = 3;
+}
+
+enum ChannelErrorReason {
+  CHANNEL_ERROR_REASON_UNSPECIFIED = 0;
+  CHANNEL_ERROR_REASON_CONFIG_NOT_FOUND = 1;
+  CHANNEL_ERROR_REASON_DISCOVERY_FAILED = 2;
+  CHANNEL_ERROR_REASON_ENABLE_FAILED = 3;
+  CHANNEL_ERROR_REASON_INVALID_WEBHOOK = 4;
+  CHANNEL_ERROR_REASON_WEBHOOK_UNSUPPORTED = 5;
+  CHANNEL_ERROR_REASON_PAYLOAD_TOO_LARGE = 6;
+  CHANNEL_ERROR_REASON_PROVIDER_FAILED = 7;
+  CHANNEL_ERROR_REASON_TEAM_NOT_SERVED = 8;
+  CHANNEL_ERROR_REASON_FORBIDDEN = 9;
+}
+
+message ErrorDetail {
+  ChannelErrorReason reason = 1;
+  string field = 2;
+  string resource_id = 3;
+  uint64 limit = 4;
+  bool retryable = 5;
+}
+
+message UpsertConfigRequest {
+  string team_id = 1;
+  string bot_id = 2;
+  ChannelType channel_type = 3;
+  ProviderConfig config = 4;
+  string external_identity = 5;
+  optional ChannelSelfIdentity self_identity = 6;
+  optional ChannelRoutingState routing = 7;
+  optional bool disabled = 8;
+  optional google.protobuf.Timestamp verified_at = 9;
+}
+
+message SetStatusRequest {
+  string team_id = 1;
+  string bot_id = 2;
+  ChannelType channel_type = 3;
+  bool disabled = 4;
+}
+
+message DeleteConfigRequest {
+  string team_id = 1;
+  string bot_id = 2;
+  ChannelType channel_type = 3;
+}
+
+message SetWebhookEndpointRequest {
+  string team_id = 1;
+  string bot_id = 2;
+  ChannelType channel_type = 3;
+  string endpoint = 4;
+}
+
+message SetWebhookEndpointResponse {
+  string endpoint = 1;
+}
+
+message ListIdentityProjectionsRequest {
+  repeated string identity_ids = 1;
+}
+
+message ListIdentityProjectionsResponse {
+  repeated IdentityProjection identities = 1;
+}
+
+message IdentityProjection {
+  string id = 1;
+  string channel = 2;
+  string channel_subject_id = 3;
+  string display_name = 4;
+  string avatar_url = 5;
+}
+
+message ListConversationProjectionsRequest {
+  string bot_id = 1;
+  repeated string route_ids = 2;
+  string channel_type = 3;
+}
+
+message ListConversationProjectionsResponse {
+  repeated ConversationProjection projections = 1;
+}
+
+message ConversationProjection {
+  string route_id = 1;
+  string channel = 2;
+  string conversation_type = 3;
+  string conversation_id = 4;
+  string thread_id = 5;
+  string conversation_name = 6;
+  string conversation_avatar_url = 7;
+}
+
+message ChannelConfigResponse {
+  ChannelConfig config = 1;
+}
+
+message ChannelConfig {
+  string id = 1;
+  string team_id = 2;
+  string bot_id = 3;
+  ChannelType channel_type = 4;
+  ProviderConfig provider_config = 5;
+  string external_identity = 6;
+  optional ChannelSelfIdentity self_identity = 7;
+  optional ChannelRoutingState routing = 8;
+  bool disabled = 9;
+  optional google.protobuf.Timestamp verified_at = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+message ReactRequest {
+  string team_id = 1;
+  string bot_id = 2;
+  ChannelType channel_type = 3;
+  string target = 4;
+  string message_id = 5;
+  string emoji = 6;
+  bool remove = 7;
+}
+
+message ListConnectionStatusesRequest {
+  string team_id = 1;
+  string bot_id = 2;
+}
+
+message ListConnectionStatusesResponse {
+  repeated ConnectionStatus statuses = 1;
+}
+
+message ConnectionStatus {
+  string config_id = 1;
+  string bot_id = 2;
+  ChannelType channel_type = 3;
+  bool running = 4;
+  string last_error = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message GetTunnelStatusRequest {}
+
+message GetTunnelStatusResponse {
+  bool enabled = 1;
+  TunnelMode mode = 2;
+  TunnelState status = 3;
+  string public_base_url = 4;
+  string error = 5;
+}
+
+message RefreshProviderRequest {
+  string team_id = 1;
+  string provider_id = 2;
+}
+
+message SendEmailRequest {
+  string team_id = 1;
+  string bot_id = 2;
+  string provider_id = 3;
+  repeated string to = 4;
+  string subject = 5;
+  string body = 6;
+  bool html = 7;
+}
+
+message SendEmailResponse {
+  string message_id = 1;
+}
+
+message ProviderConfig {
+  oneof provider {
+    DingTalkConfig dingtalk = 1;
+    DiscordConfig discord = 2;
+    FeishuConfig feishu = 3;
+    LineConfig line = 4;
+    MatrixConfig matrix = 5;
+    MisskeyConfig misskey = 6;
+    QQConfig qq = 7;
+    SlackConfig slack = 8;
+    TelegramConfig telegram = 9;
+    WeChatOAConfig wechat_oa = 10;
+    WeComConfig wecom = 11;
+    WeixinConfig weixin = 12;
+  }
+}
+
+message DingTalkConfig {
+  string app_key = 1;
+  string app_secret = 2;
+}
+
+message DiscordConfig {
+  string bot_token = 1;
+}
+
+message FeishuConfig {
+  string app_id = 1;
+  string app_secret = 2;
+  string encrypt_key = 3;
+  string verification_token = 4;
+  FeishuRegion region = 5;
+  FeishuInboundMode inbound_mode = 6;
+}
+
+message LineConfig {
+  string channel_secret = 1;
+  string channel_access_token = 2;
+}
+
+message MatrixConfig {
+  string homeserver_url = 1;
+  string access_token = 2;
+  string user_id = 3;
+  google.protobuf.Duration sync_timeout = 4;
+  bool auto_join_invites = 5;
+}
+
+message MisskeyConfig {
+  string instance_url = 1;
+  string access_token = 2;
+}
+
+message QQConfig {
+  string app_id = 1;
+  string app_secret = 2;
+  bool markdown_support = 3;
+  bool enable_input_hint = 4;
+}
+
+message SlackConfig {
+  string bot_token = 1;
+  string app_token = 2;
+}
+
+message TelegramConfig {
+  string bot_token = 1;
+  string api_base_url = 2;
+  optional HttpProxy http_proxy = 3;
+}
+
+message WeChatOAConfig {
+  string app_id = 1;
+  string app_secret = 2;
+  string token = 3;
+  string encoding_aes_key = 4;
+  EncryptionMode encryption_mode = 5;
+  optional HttpProxy http_proxy = 6;
+}
+
+message WeComConfig {
+  string bot_id = 1;
+  string credential = 2;
+  string ws_url = 3;
+  google.protobuf.Duration heartbeat = 4;
+  google.protobuf.Duration ack_timeout = 5;
+  google.protobuf.Duration write_timeout = 6;
+  google.protobuf.Duration read_timeout = 7;
+}
+
+message WeixinConfig {
+  string token = 1;
+  string base_url = 2;
+  google.protobuf.Duration poll_timeout = 3;
+  bool enable_typing = 4;
+}
+
+message HttpProxy {
+  string url = 1;
+}
+
+message ChannelSelfIdentity {
+  oneof identity {
+    DingTalkIdentity dingtalk = 1;
+    FeishuIdentity feishu = 2;
+    LineIdentity line = 3;
+    UserIdentity misskey = 4;
+    SlackIdentity slack = 5;
+    UserIdentity telegram = 6;
+    WeChatOAIdentity wechat_oa = 7;
+    WeComIdentity wecom = 8;
+    EmptyIdentity empty = 9;
+  }
+}
+
+message DingTalkIdentity {
+  string app_key = 1;
+  string name = 2;
+}
+
+message FeishuIdentity {
+  string open_id = 1;
+  string name = 2;
+  string avatar_url = 3;
+}
+
+message LineIdentity {
+  string bot_user_id = 1;
+  string basic_id = 2;
+  string display_name = 3;
+}
+
+message UserIdentity {
+  string user_id = 1;
+  string username = 2;
+  string name = 3;
+  string avatar_url = 4;
+}
+
+message SlackIdentity {
+  string user_id = 1;
+  string bot_id = 2;
+  string team_id = 3;
+  string username = 4;
+  string team = 5;
+}
+
+message WeChatOAIdentity {
+  string app_id = 1;
+}
+
+message WeComIdentity {
+  string bot_id = 1;
+  string aibot_id = 2;
+}
+
+message EmptyIdentity {}
+
+message ChannelRoutingState {
+  oneof state {
+    MatrixRoutingState matrix = 1;
+    EmptyRoutingState empty = 2;
+  }
+}
+
+message MatrixRoutingState {
+  string since_token = 1;
+}
+
+message EmptyRoutingState {}

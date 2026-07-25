@@ -43,12 +43,13 @@ func ShortCommitHash() string {
 	return CommitHash
 }
 
-// GetInfo returns a formatted version string including the version and commit hash.
-func GetInfo() string {
+// GetInfo returns version metadata with a machine-readable build profile.
+func GetInfo(buildProfile string) string {
 	EnsureBuildInfo()
 	res := Version
 	if h := ShortCommitHash(); h != "" {
 		res += fmt.Sprintf(" (%s)", h)
 	}
+	res += fmt.Sprintf(" profile=%s", buildProfile)
 	return res
 }

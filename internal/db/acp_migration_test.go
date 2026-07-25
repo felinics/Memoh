@@ -1,23 +1,26 @@
 package db
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 
 	embeddeddb "github.com/memohai/memoh/db"
 )
 
 func TestPostgresACPAgentSessionTypeMigrationFiles(t *testing.T) {
-	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
+	baseline := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0001_init.up.sql")
 	if !strings.Contains(baseline, "type IN ('chat', 'heartbeat', 'schedule', 'subagent', 'discuss', 'acp_agent')") {
 		t.Fatal("postgres baseline bot_sessions type CHECK missing acp_agent")
 	}
-	up := readEmbeddedMigration(t, "postgres/migrations/0082_acp_agent_session_type.up.sql")
+	up := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0082_acp_agent_session_type.up.sql")
 	if !strings.Contains(up, "DROP CONSTRAINT IF EXISTS bot_sessions_type_check") ||
 		!strings.Contains(up, "'acp_agent'") {
 		t.Fatal("postgres 0082 up migration does not widen bot_sessions_type_check to acp_agent")
 	}
-	down := readEmbeddedMigration(t, "postgres/migrations/0082_acp_agent_session_type.down.sql")
+	down := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0082_acp_agent_session_type.down.sql")
 	if !strings.Contains(down, "WHERE type = 'acp_agent'") ||
 		!strings.Contains(down, "RAISE EXCEPTION") {
 		t.Fatal("postgres 0082 down migration must guard existing acp_agent rows without touching tool approvals")
@@ -25,7 +28,7 @@ func TestPostgresACPAgentSessionTypeMigrationFiles(t *testing.T) {
 }
 
 func TestToolApprovalRequestsConstrainOperationNotToolName(t *testing.T) {
-	path := "postgres/migrations/0001_init.up.sql"
+	path := "postgres/legacy/v1/migrations/0001_init.up.sql"
 	sql := readEmbeddedMigration(t, path)
 	tableSQL := toolApprovalTableSQL(sql)
 	const operationColumn = "operation TEXT NOT NULL"
@@ -73,10 +76,29 @@ func readEmbeddedMigration(t *testing.T, path string) string {
 func readEmbeddedPreTeamInit(t *testing.T) string {
 	t.Helper()
 	const marker = "-- Canonical team and membership schema"
-	sql := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
+	sql := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0001_init.up.sql")
 	before, _, ok := strings.Cut(sql, marker)
 	if !ok {
 		t.Fatalf("canonical 0001 is missing %q", marker)
 	}
 	return before
+}
+
+// applyPreTeamBaseline replays the historical 0001 tables into the temporary
+// schema the caller has already put at the head of its search_path.
+//
+// The baseline guards its enum with an unqualified pg_type lookup, which finds
+// iam.user_role in an Epoch v2 database and therefore skips the CREATE.
+// Pre-creating the type in the temporary schema is what keeps that skip
+// harmless: without it the guard passes silently and the first table declaring a
+// user_role column cannot resolve the type, since platform is not on the
+// search_path.
+func applyPreTeamBaseline(t *testing.T, ctx context.Context, tx pgx.Tx) {
+	t.Helper()
+	if _, err := tx.Exec(ctx, "CREATE TYPE user_role AS ENUM ('member', 'admin')"); err != nil {
+		t.Fatalf("pre-create user_role: %v", err)
+	}
+	if _, err := tx.Exec(ctx, readEmbeddedPreTeamInit(t)); err != nil {
+		t.Fatalf("apply pre-team schema fixture: %v", err)
+	}
 }

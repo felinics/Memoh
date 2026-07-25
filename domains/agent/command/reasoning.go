@@ -1,0 +1,133 @@
+package command
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/memohai/memoh/domains/api/setting"
+	modeldomain "github.com/memohai/memoh/domains/model"
+	"github.com/memohai/memoh/internal/i18n"
+)
+
+// reasoningChoices are the selectable reasoning levels. "off" disables thinking;
+// the rest enable it at that effort.
+var reasoningChoices = []string{
+	"off",
+	modeldomain.ReasoningEffortNone,
+	modeldomain.ReasoningEffortLow,
+	modeldomain.ReasoningEffortMedium,
+	modeldomain.ReasoningEffortHigh,
+	modeldomain.ReasoningEffortXHigh,
+}
+
+func validEffort(v string) bool {
+	switch v {
+	case modeldomain.ReasoningEffortNone, modeldomain.ReasoningEffortLow, modeldomain.ReasoningEffortMedium, modeldomain.ReasoningEffortHigh, modeldomain.ReasoningEffortXHigh:
+		return true
+	}
+	return false
+}
+
+// buildReasoningGroup registers /reasoning — a first-class sibling of /model.
+// Aliases /reason, /effort, /think all resolve here (see resourceAliases). It
+// shows the current reasoning level and lets the user pick the reasoning effort
+// in one tap, reusing settingsService.UpsertBot (no backend changes).
+func (h *Handler) buildReasoningGroup() *CommandGroup {
+	g := newCommandGroup("reasoning", "View or set reasoning level")
+	g.DefaultAction = "show"
+	g.Register(SubCommand{
+		Name:  "show",
+		Usage: "show - Show the reasoning level and pick a new one",
+		ResultHandler: func(cc CommandContext) (*Result, error) {
+			s, err := h.getBotSettings(cc)
+			if err != nil {
+				return nil, err
+			}
+			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort), nil
+		},
+	})
+	g.Register(SubCommand{
+		Name:    "set",
+		Usage:   "set <off|none|low|medium|high|xhigh> - Set the reasoning level",
+		IsWrite: true,
+		ResultHandler: func(cc CommandContext) (*Result, error) {
+			if len(cc.Args) < 1 {
+				return &Result{Text: cc.T("cmd.reasoning.setUsage")}, nil
+			}
+			level := strings.ToLower(strings.TrimSpace(cc.Args[0]))
+			if h.settingsService == nil {
+				return &Result{Text: cc.T("cmd.reasoning.unavailable")}, nil
+			}
+			req := setting.UpsertRequest{}
+			switch {
+			case level == "off":
+				off := false
+				req.ReasoningEnabled = &off
+			case validEffort(level):
+				on := true
+				req.ReasoningEnabled = &on
+				req.ReasoningEffort = &level
+			default:
+				return &Result{Text: cc.T("cmd.reasoning.unknownLevel", map[string]any{"level": fmt.Sprintf("%q", cc.Args[0])})}, nil
+			}
+			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, req); err != nil {
+				return nil, err
+			}
+			s, err := h.getBotSettings(cc)
+			if err != nil {
+				return nil, err
+			}
+			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort), nil
+		},
+	})
+	return g
+}
+
+// reasoningResult builds the picker: a header with the current level plus one
+// button per level (current marked ✓). Tapping re-dispatches "/reasoning set X"
+// which edits the message in place. Level tokens (off/none/low/…) are canonical
+// args and stay untranslated; only the surrounding prose is localized via t.
+//
+// Buttons render for everyone; the owner-only gate is enforced at execution
+// time (IsWrite), so a non-owner tap returns a clear "owner only" message rather
+// than the buttons being hidden — hiding them also hid them from owners whose
+// Telegram identity isn't resolved as owner, killing the feature.
+func reasoningResult(t *i18n.Localizer, enabled bool, effort string) *Result {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	current := t.T("cmd.common.off")
+	if enabled {
+		current = effort
+		if current == "" {
+			current = t.T("cmd.common.on")
+		}
+	}
+	header := MdBold(t.T("cmd.reasoning.header")) + "\n" + t.T("cmd.reasoning.current", map[string]any{"level": current})
+	choices := make([]ListItem, 0, len(reasoningChoices))
+	for _, lvl := range reasoningChoices {
+		selected := false
+		if lvl == "off" {
+			selected = !enabled
+		} else {
+			selected = enabled && lvl == effort
+		}
+		choices = append(choices, ListItem{
+			Label:    lvl,
+			Selected: selected,
+			Action:   &ItemAction{Resource: "reasoning", Action: "set", Args: []string{lvl}},
+		})
+	}
+	// Telegram users see header + "Choose a level:" + tappable buttons. No-button
+	// channels see header + the same "Choose a level:" explainer (the tradeoff
+	// reads as orienting advice on both surfaces) + the auto-derived
+	// "Pick with /reasoning set <…>" trailer the renderer appends. Without the
+	// explainer in Text, text-channel users only saw the bare current-level
+	// header and a command syntax line with no context for why the levels matter.
+	body := header + "\n\n" + t.T("cmd.reasoning.choosePrompt")
+	return &Result{
+		Text: body,
+		Interactive: &Interactive{
+			Kind:    InteractiveChoices,
+			Choices: &ChoicesView{Title: body, Choices: choices},
+		},
+	}
+}

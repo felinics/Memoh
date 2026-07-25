@@ -6,31 +6,19 @@ on:
     paths:
       - ".github/workflows/migrations.yml"
       - "sqlc.yaml"
-      - "db/postgres/migrations/**"
-      - "db/postgres/queries/**"
-      - "db/pgvector/migrations/**"
-      - "db/pgvector/queries/**"
-      - "internal/db/postgres/sqlc/**"
-      - "internal/db/pgvector/**"
-      - "internal/db/*migration*_test.go"
-      - "internal/db/team_*_integration_test.go"
-      - "internal/db/*postgres_integration_test.go"
-      - "internal/chat/message/*postgres_integration_test.go"
+      - "db/**"
+      - "internal/db/**"
+      - "**/*postgres_integration_test.go"
+      - "**/*integration_test.go"
   pull_request:
     branches: [main]
     paths:
       - ".github/workflows/migrations.yml"
       - "sqlc.yaml"
-      - "db/postgres/migrations/**"
-      - "db/postgres/queries/**"
-      - "db/pgvector/migrations/**"
-      - "db/pgvector/queries/**"
-      - "internal/db/postgres/sqlc/**"
-      - "internal/db/pgvector/**"
-      - "internal/db/*migration*_test.go"
-      - "internal/db/team_*_integration_test.go"
-      - "internal/db/*postgres_integration_test.go"
-      - "internal/chat/message/*postgres_integration_test.go"
+      - "db/**"
+      - "internal/db/**"
+      - "**/*postgres_integration_test.go"
+      - "**/*integration_test.go"
 
 concurrency:
   group: migrations-${{ github.ref }}
@@ -41,7 +29,7 @@ permissions:
 
 jobs:
   postgres:
-    name: PostgreSQL migrations
+    name: PostgreSQL Epoch v2
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -64,17 +52,22 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Verify generated PostgreSQL queries
+      # Each owner generates from its own config, so verifying only one would
+      # let the others drift.
+      - name: Verify generated owner SQL is current
         run: |
-          go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
-          untracked="$(git ls-files --others --exclude-standard -- internal/db/postgres/sqlc internal/db/pgvector/sqlc)"
+          for config in db/postgres/*/sqlc.yaml sqlc.yaml; do
+            echo "==> sqlc generate -f $config"
+            go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate -f "$config"
+          done
+          untracked="$(git ls-files --others --exclude-standard)"
           if [ -n "$untracked" ]; then
-            printf 'Untracked generated SQL files:\n%s\n' "$untracked"
+            printf 'Regenerating SQL produced untracked files:\n%s\n' "$untracked"
             exit 1
           fi
-          git diff --exit-code -- internal/db/postgres/sqlc internal/db/pgvector/sqlc
+          git diff --exit-code
 
-      - name: Build
+      - name: Build server
         run: go build -o memoh-server ./cmd/agent
 
       - name: Generate config
@@ -89,16 +82,35 @@ jobs:
           sslmode = "disable"
           TOML
 
-      - name: Migrate up
-        run: ./memoh-server migrate up
+      # Epoch v2 offers no "roll back every migration"; forward repair or
+      # restore is the supported recovery path, so there is no down step here.
+      - name: Fresh install
+        run: |
+          ./memoh-server migrate up
+          ./memoh-server migrate up
+          ./memoh-server migrate status
+          ./memoh-server migrate verify
 
-      - name: Migrate down
-        run: ./memoh-server migrate down
-
-      - name: Migrate up (idempotent)
-        run: ./memoh-server migrate up
-
-      - name: Test PostgreSQL query and compaction lifecycle paths
+      # The upgrade path needs no provisioning here: the parity test builds its
+      # own v1 source from the frozen snapshot in db/postgres/legacy/v1.
+      #
+      # Discovering the packages keeps this gate honest: a new integration test
+      # is covered the moment it reads TEST_POSTGRES_DSN, instead of silently
+      # skipping until someone remembers to list it here.
+      - name: Integration tests against Epoch v2
         env:
           TEST_POSTGRES_DSN: postgres://memoh:memoh123@127.0.0.1:5432/memoh_test?sslmode=disable
-        run: go test -tags=integration -count=1 ./internal/db ./internal/chat/message
+        run: |
+          packages="$(
+            grep -rl --include='*_test.go' TEST_POSTGRES_DSN . \
+              | xargs -n1 dirname | sort -u
+          )"
+          if [ -z "$packages" ]; then
+            echo 'No package reads TEST_POSTGRES_DSN; the gate would silently pass.'
+            exit 1
+          fi
+          printf 'Packages requiring PostgreSQL:\n%s\n' "$packages"
+          printf '%s\n' "$packages" | xargs go test -tags=integration -count=1
+
+      - name: Architecture guards
+        run: go test -count=1 ./internal/arch

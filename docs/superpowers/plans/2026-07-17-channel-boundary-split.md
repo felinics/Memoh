@@ -4,7 +4,7 @@
 
 **Goal:** 按已批准的spec（`docs/superpowers/specs/2026-07-17-channel-boundary-design.md`）落地Channel边界：Turn契约包、Channel切换到port、目录重组、命令装配模块与`cmd/channel`验证二进制。
 
-**Architecture:** 新增`internal/agent/turn`契约包（命令＋事件＋port），`internal/agent/turn/inprocess`适配器包装`flow.Resolver`（chat）与discuss编排；Channel入站Processor与DiscussDriver只依赖port；`cmd/agent`的providers拆到`cmd/internal/core`与`cmd/internal/channel`两个fx模块。
+**Architecture:** 新增`internal/rpc/channel/turn`契约包（命令＋事件＋port），`internal/rpc/channel/turn/inprocess`适配器包装`flow.Resolver`（chat）与discuss编排；Channel入站Processor与DiscussDriver只依赖port；`cmd/agent`的providers拆到`cmd/internal/core`与`cmd/internal/channel`两个fx模块。
 
 **Tech Stack:** Go 1.25（mise管理）、Uber FX、pgx/v5、Vitest不涉及。测试用标准`go test`。
 
@@ -40,19 +40,19 @@ git commit -m "docs: add channel boundary split spec and plan"
 
 ---
 
-## Phase 1：契约包`internal/agent/turn`＋进程内适配器（chat模式）
+## Phase 1：契约包`internal/rpc/channel/turn`＋进程内适配器（chat模式）
 
 ### Task 1.1: 契约类型
 
 **Files:**
-- Create: `internal/agent/turn/turn.go`
-- Test: `internal/agent/turn/turn_test.go`
+- Create: `internal/rpc/channel/turn/turn.go`
+- Test: `internal/rpc/channel/turn/turn_test.go`
 
 **Interfaces（Produces）:** `turn.StartTurnCommand`、`turn.Event`、`turn.RunHandle`、`turn.Service`、`turn.InjectMessage`、`turn.Attachment`、`turn.OutboundAssetRef`、`turn.SkillActivation`、`turn.RequestedSkillContext`——后续所有任务按此签名消费。
 
 - [ ] **Step 1: 写契约类型**
 
-`internal/agent/turn/turn.go`（完整内容）：
+`internal/rpc/channel/turn/turn.go`（完整内容）：
 
 ```go
 // Package turn defines the application-level contract for starting and
@@ -224,7 +224,7 @@ type Service interface {
 
 - [ ] **Step 2: 写失败测试（TeamID校验属于适配器，这里先测类型序列化往返）**
 
-`internal/agent/turn/turn_test.go`：
+`internal/rpc/channel/turn/turn_test.go`：
 
 ```go
 package turn
@@ -246,16 +246,16 @@ func TestEventPayloadRoundTrip(t *testing.T) {
 - [ ] **Step 3: 运行测试确认通过**
 
 ```bash
-go test ./internal/agent/turn/ -v
+go test ./internal/rpc/channel/turn/ -v
 ```
 预期：PASS。
 
 ### Task 1.2: 进程内适配器（chat）
 
 **Files:**
-- Create: `internal/agent/turn/inprocess/adapter.go`
-- Create: `internal/agent/turn/inprocess/convert.go`
-- Test: `internal/agent/turn/inprocess/adapter_test.go`
+- Create: `internal/rpc/channel/turn/inprocess/adapter.go`
+- Create: `internal/rpc/channel/turn/inprocess/convert.go`
+- Test: `internal/rpc/channel/turn/inprocess/adapter_test.go`
 
 **Interfaces:**
 - Consumes: `flow.Runner`（`StreamChat(ctx, conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error)`）、Task 1.1的全部类型。
@@ -263,7 +263,7 @@ go test ./internal/agent/turn/ -v
 
 - [ ] **Step 1: 写失败测试**
 
-`internal/agent/turn/inprocess/adapter_test.go`（要点：假Runner回放chunk，断言Event顺序、Seq单调、Payload逐字节相等、Kind取自JSON type字段；TeamID为空时StartTurn报错；Cancel后Events关闭；Inject送达ChatRequest.InjectCh；AddOutboundAssets被OutboundAssetCollector读回）：
+`internal/rpc/channel/turn/inprocess/adapter_test.go`（要点：假Runner回放chunk，断言Event顺序、Seq单调、Payload逐字节相等、Kind取自JSON type字段；TeamID为空时StartTurn报错；Cancel后Events关闭；Inject送达ChatRequest.InjectCh；AddOutboundAssets被OutboundAssetCollector读回）：
 
 ```go
 package inprocess
@@ -274,7 +274,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/rpc/channel/turn"
 	"github.com/memohai/memoh/internal/conversation"
 )
 
@@ -363,15 +363,15 @@ func TestInjectAndAssets(t *testing.T) {
 - [ ] **Step 2: 运行确认失败**
 
 ```bash
-go test ./internal/agent/turn/inprocess/ -v
+go test ./internal/rpc/channel/turn/inprocess/ -v
 ```
 预期：FAIL（包不存在）。
 
 - [ ] **Step 3: 实现适配器**
 
-`internal/agent/turn/inprocess/convert.go`：`toChatAttachments`／`fromTurnAttachments`／`toConversationInject`／`fromAssetRefs`等逐字段拷贝函数（`turn.Attachment`↔`conversation.ChatAttachment`、`turn.OutboundAssetRef`↔`conversation.OutboundAssetRef`、`turn.SkillActivation`↔`conversation.SkillActivation`、`turn.RequestedSkillContext`↔`conversation.RequestedSkillContext`，字段名一一对应，无逻辑）。
+`internal/rpc/channel/turn/inprocess/convert.go`：`toChatAttachments`／`fromTurnAttachments`／`toConversationInject`／`fromAssetRefs`等逐字段拷贝函数（`turn.Attachment`↔`conversation.ChatAttachment`、`turn.OutboundAssetRef`↔`conversation.OutboundAssetRef`、`turn.SkillActivation`↔`conversation.SkillActivation`、`turn.RequestedSkillContext`↔`conversation.RequestedSkillContext`，字段名一一对应，无逻辑）。
 
-`internal/agent/turn/inprocess/adapter.go`核心：
+`internal/rpc/channel/turn/inprocess/adapter.go`核心：
 
 ```go
 // Package inprocess adapts turn.Service onto the in-process flow.Resolver.
@@ -387,7 +387,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/rpc/channel/turn"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 )
@@ -450,18 +450,18 @@ func parseKind(p json.RawMessage) string {
 - [ ] **Step 4: 运行确认通过**
 
 ```bash
-go test ./internal/agent/turn/inprocess/ -v && go build ./...
+go test ./internal/rpc/channel/turn/inprocess/ -v && go build ./...
 ```
 预期：PASS。
 
 - [ ] **Step 5: 对拍测试（chunk类型枚举完整性）**
 
-在`internal/channel/inbound/channel_test.go`中找出`mapStreamChunkToChannelEvents`的全部fixture chunk（约3273行起的用例表），把每种`"type"`值复制进`internal/agent/turn/inprocess/parity_test.go`，断言`parseKind`对每个fixture都返回非空且等于fixture的type字段。
+在`internal/channel/inbound/channel_test.go`中找出`mapStreamChunkToChannelEvents`的全部fixture chunk（约3273行起的用例表），把每种`"type"`值复制进`internal/rpc/channel/turn/inprocess/parity_test.go`，断言`parseKind`对每个fixture都返回非空且等于fixture的type字段。
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add internal/agent/turn/
+git add internal/rpc/channel/turn/
 git commit -m "feat(turn): add turn contract package and in-process adapter"
 ```
 
@@ -520,7 +520,7 @@ grep -rn "internal/conversation" internal/channel/ --include="*.go" | grep -v _t
 `internal/channel/inbound/`测试：fake runner换成fake `turn.Service`（复用Phase 1的fakeRunner+adapter组合即可）。运行：
 
 ```bash
-go test ./internal/channel/... ./internal/agent/turn/... && go build ./...
+go test ./internal/channel/... ./internal/rpc/channel/turn/... && go build ./...
 ```
 预期：全绿。
 
@@ -537,8 +537,8 @@ git add -A && git commit -m "refactor(channel): route inbound processor through 
 ### Task 3.1: 适配器支持discuss模式
 
 **Files:**
-- Modify: `internal/agent/turn/inprocess/adapter.go`（增discuss分支）
-- Create: `internal/agent/turn/inprocess/discuss.go`
+- Modify: `internal/rpc/channel/turn/inprocess/adapter.go`（增discuss分支）
+- Create: `internal/rpc/channel/turn/inprocess/discuss.go`
 - Modify: `internal/pipeline/driver.go`、`internal/pipeline/turn_response.go`
 - Modify: `cmd/agent/app.go:384`（`provideDiscussDriver`签名）
 - Test: `internal/pipeline/driver_test.go`（更新fake）
@@ -558,7 +558,7 @@ driver中「ResolveRunConfig→构建RunConfig→`Agent.Stream`→逐事件JSON�
 - [ ] **Step 3: 测试与提交**
 
 ```bash
-go test ./internal/pipeline/... ./internal/agent/turn/... && go build ./...
+go test ./internal/pipeline/... ./internal/rpc/channel/turn/... && go build ./...
 git add -A && git commit -m "refactor(pipeline): drive discuss turns through turn.Service"
 ```
 预期：pipeline现有测试全绿（fake streamer换成fake turn.Service）。

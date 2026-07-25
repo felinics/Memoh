@@ -1,18 +1,6 @@
 version: "2"
 sql:
   - engine: "postgresql"
-    schema: "db/postgres/migrations"
-    queries: "db/postgres/queries"
-    gen:
-      go:
-        package: "sqlc"
-        out: "internal/db/postgres/sqlc"
-        sql_package: "pgx/v5"
-        emit_json_tags: true
-        overrides:
-          - db_type: "user_role"
-            go_type: "string"
-  - engine: "postgresql"
     schema: "db/pgvector/migrations"
     queries: "db/pgvector/queries"
     gen:

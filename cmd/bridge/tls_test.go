@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 )
 
 const (

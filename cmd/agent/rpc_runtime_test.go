@@ -4,33 +4,33 @@ import (
 	"context"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/local"
+	"github.com/memohai/memoh/domains/api/http/chat/local"
+	"github.com/memohai/memoh/domains/channel/gateway"
 )
 
-type recordingSendRuntime struct{ sends, reacts []channel.ChannelType }
+type recordingSendRuntime struct{ sends, reacts []gateway.ChannelType }
 
-func (r *recordingSendRuntime) Send(_ context.Context, _ string, typ channel.ChannelType, _ channel.SendRequest) error {
+func (r *recordingSendRuntime) Send(_ context.Context, _ string, typ gateway.ChannelType, _ gateway.SendRequest) error {
 	r.sends = append(r.sends, typ)
 	return nil
 }
 
-func (r *recordingSendRuntime) React(_ context.Context, _ string, typ channel.ChannelType, _ channel.ReactRequest) error {
+func (r *recordingSendRuntime) React(_ context.Context, _ string, typ gateway.ChannelType, _ gateway.ReactRequest) error {
 	r.reacts = append(r.reacts, typ)
 	return nil
 }
 
 type recordingRemoteRuntime struct {
-	channel.Runtime
-	sends []channel.ChannelType
+	gateway.Runtime
+	sends []gateway.ChannelType
 }
 
-func (r *recordingRemoteRuntime) Send(_ context.Context, _ string, typ channel.ChannelType, _ channel.SendRequest) error {
+func (r *recordingRemoteRuntime) Send(_ context.Context, _ string, typ gateway.ChannelType, _ gateway.SendRequest) error {
 	r.sends = append(r.sends, typ)
 	return nil
 }
 
-func (*recordingRemoteRuntime) React(context.Context, string, channel.ChannelType, channel.ReactRequest) error {
+func (*recordingRemoteRuntime) React(context.Context, string, gateway.ChannelType, gateway.ReactRequest) error {
 	return nil
 }
 
@@ -43,18 +43,18 @@ func TestLocalFirstChannelRuntimeRoutesWebLocally(t *testing.T) {
 	rt := &localFirstChannelRuntime{local: localRt, remote: remoteRt}
 
 	ctx := context.Background()
-	for _, typ := range []channel.ChannelType{local.WebType, local.CLIType, channel.ChannelType("telegram")} {
-		if err := rt.Send(ctx, "bot-1", typ, channel.SendRequest{}); err != nil {
+	for _, typ := range []gateway.ChannelType{local.WebType, local.CLIType, gateway.ChannelType("telegram")} {
+		if err := rt.Send(ctx, "bot-1", typ, gateway.SendRequest{}); err != nil {
 			t.Fatalf("send %s: %v", typ, err)
 		}
 	}
 	if len(localRt.sends) != 2 || localRt.sends[0] != local.WebType || localRt.sends[1] != local.CLIType {
 		t.Fatalf("local sends = %v", localRt.sends)
 	}
-	if len(remoteRt.sends) != 1 || remoteRt.sends[0] != channel.ChannelType("telegram") {
+	if len(remoteRt.sends) != 1 || remoteRt.sends[0] != gateway.ChannelType("telegram") {
 		t.Fatalf("remote sends = %v", remoteRt.sends)
 	}
-	if err := rt.React(ctx, "bot-1", local.WebType, channel.ReactRequest{}); err != nil {
+	if err := rt.React(ctx, "bot-1", local.WebType, gateway.ReactRequest{}); err != nil {
 		t.Fatalf("react: %v", err)
 	}
 	if len(localRt.reacts) != 1 {

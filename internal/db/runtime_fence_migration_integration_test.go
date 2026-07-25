@@ -39,10 +39,8 @@ func TestSessionRuntimeFenceMigrationPostgresPath(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SET LOCAL search_path TO "+quotedSchema+", public"); err != nil {
 		t.Fatalf("set search path: %v", err)
 	}
-	if _, err := tx.Exec(ctx, readEmbeddedPreTeamInit(t)); err != nil {
-		t.Fatalf("apply pre-team schema fixture: %v", err)
-	}
-	if _, err := tx.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0113_session_runtime_fencing_token.down.sql")); err != nil {
+	applyPreTeamBaseline(t, ctx, tx)
+	if _, err := tx.Exec(ctx, readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0113_session_runtime_fencing_token.down.sql")); err != nil {
 		t.Fatalf("create pre-0113 schema: %v", err)
 	}
 
@@ -77,7 +75,7 @@ INSERT INTO user_input_requests (
 		t.Fatalf("insert pre-0113 user input: %v", err)
 	}
 
-	up := readEmbeddedMigration(t, "postgres/migrations/0113_session_runtime_fencing_token.up.sql")
+	up := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0113_session_runtime_fencing_token.up.sql")
 	if _, err := tx.Exec(ctx, up); err != nil {
 		t.Fatalf("apply 0113 up: %v", err)
 	}

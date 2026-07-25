@@ -8,12 +8,19 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
-	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
 	coremodule "github.com/memohai/memoh/cmd/internal/core"
-	channelpkg "github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/weixin"
+	accesshttp "github.com/memohai/memoh/domains/api/http/access"
+	agenthttp "github.com/memohai/memoh/domains/api/http/agent"
+	bothttp "github.com/memohai/memoh/domains/api/http/bot"
+	channelhttp "github.com/memohai/memoh/domains/api/http/channel"
+	chathttp "github.com/memohai/memoh/domains/api/http/chat"
+	emailhttp "github.com/memohai/memoh/domains/api/http/email"
+	memoryhttp "github.com/memohai/memoh/domains/api/http/memory"
+	modelhttp "github.com/memohai/memoh/domains/api/http/model"
+	runtimehttp "github.com/memohai/memoh/domains/api/http/runtime"
+	systemhttp "github.com/memohai/memoh/domains/api/http/system"
+	channelmodule "github.com/memohai/memoh/domains/channel/assembly"
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/handlers"
 )
 
 func runServe() {
@@ -22,107 +29,67 @@ func runServe() {
 		fmt.Fprintf(os.Stderr, "memoh: %v\n", err)
 		os.Exit(1)
 	}
+	if err := validateProfile(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "memoh: %v\n", err)
+		os.Exit(1)
+	}
 	fx.New(optionsFor(cfg)).Run()
 }
 
-// optionsFor assembles the server for one of two deployment shapes.
-// With internal_rpc.shared_secret set (docker compose), the channel
-// runtime is a separate process reached over authenticated gRPC. Without
-// it (pre-split bare-metal installs), the full channel runtime runs
-// embedded in this process so external channels, email, and webhook
-// endpoints keep working with a single binary and an unchanged config.
-func optionsFor(cfg config.Config) fx.Option {
-	if cfg.SplitChannelRuntime() {
-		return fx.Options(commonOptions(), splitOptions())
-	}
-	return fx.Options(commonOptions(), embeddedOptions())
-}
-
-func splitOptions() fx.Option {
+func commonOptions(cfg config.Config) fx.Option {
 	return fx.Options(
-		channelmodule.ServerLocalModule(),
-		fx.Provide(
-			provideChannelRPCConn,
-			provideRuntimeRPCClient,
-			provideChannelRuntimeClient,
-			provideChannelRuntime,
-			provideEmailRuntime,
-			provideWebhookTunnelStatus,
-			provideServerRPC,
-		),
-		fx.Invoke(startServerRPC),
-	)
-}
-
-func embeddedOptions() fx.Option {
-	return fx.Options(
-		channelmodule.EmbeddedModule(),
-		fx.Provide(
-			provideLocalWebhookTunnelStatus,
-			// The webhook surfaces the channel process owns in split mode
-			// are served from this process again, as before the split.
-			provideServerHandler(channelpkg.NewWebhookServerHandler),
-			provideServerHandler(weixin.NewQRServerHandler),
-			provideServerHandler(handlers.NewEmailWebhookHandler),
-			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
-		),
-	)
-}
-
-func commonOptions() fx.Option {
-	return fx.Options(
-		fx.Provide(provideConfig),
+		fx.Supply(cfg),
 		coremodule.FoundationModule(),
 		channelmodule.FoundationModule(),
 		coremodule.ServerModule(),
 		fx.Provide(
-			provideServerHandler(handlers.NewPingHandler),
-			provideServerHandler(handlers.NewWebhookTunnelHandler),
+			provideServerHandler(systemhttp.NewPingHandler),
+			provideServerHandler(channelhttp.NewWebhookTunnelHandler),
 			provideServerHandler(provideAuthHandler),
 			provideServerHandler(provideMemoryHandler),
 			provideServerHandler(provideMessageHandler),
 			provideServerHandler(provideSessionHandler),
-			provideServerHandler(handlers.NewUserRuntimeHandler),
-			provideServerHandler(handlers.NewRuntimeConnectHandler),
-			provideServerHandler(handlers.NewBotRemoteRuntimeHandler),
-			provideServerHandler(handlers.NewACPHandler),
-			provideServerHandler(handlers.NewACPRuntimeHandler),
-			provideServerHandler(handlers.NewSwaggerHandler),
-			provideServerHandler(handlers.NewProvidersHandler),
-			provideServerHandler(handlers.NewProviderTemplatesHandler),
+			provideServerHandler(runtimehttp.NewUserRuntimeHandler),
+			provideServerHandler(runtimehttp.NewRuntimeConnectHandler),
+			provideServerHandler(runtimehttp.NewBotRemoteRuntimeHandler),
+			provideServerHandler(agenthttp.NewACPHandler),
+			provideServerHandler(agenthttp.NewACPRuntimeHandler),
+			provideServerHandler(systemhttp.NewSwaggerHandler),
+			provideServerHandler(modelhttp.NewProvidersHandler),
+			provideServerHandler(modelhttp.NewProviderTemplatesHandler),
 			provideServerHandler(provideProviderOAuthHandler),
 			provideServerHandler(provideACPCodexOAuthServerHandler),
 			provideServerHandler(provideACPClaudeCodeOAuthServerHandler),
-			provideServerHandler(handlers.NewFetchProvidersHandler),
-			provideServerHandler(handlers.NewSearchProvidersHandler),
-			provideServerHandler(handlers.NewModelsHandler),
-			provideServerHandler(handlers.NewSettingsHandler),
-			provideServerHandler(handlers.NewToolApprovalHandler),
-			provideServerHandler(handlers.NewHooksHandler),
-			provideServerHandler(handlers.NewACLHandler),
-			provideServerHandler(handlers.NewBotUserAccessHandler),
-			provideServerHandler(handlers.NewChannelAccessHandler),
-			provideServerHandler(handlers.NewScheduleHandler),
-			provideServerHandler(handlers.NewHeartbeatHandler),
-			provideServerHandler(handlers.NewCompactionHandler),
-			provideServerHandler(handlers.NewChannelHandler),
+			provideServerHandler(modelhttp.NewFetchProvidersHandler),
+			provideServerHandler(modelhttp.NewSearchProvidersHandler),
+			provideServerHandler(modelhttp.NewModelsHandler),
+			provideServerHandler(bothttp.NewSettingsHandler),
+			provideServerHandler(agenthttp.NewToolApprovalHandler),
+			provideServerHandler(agenthttp.NewHooksHandler),
+			provideServerHandler(accesshttp.NewACLHandler),
+			provideServerHandler(accesshttp.NewBotUserAccessHandler),
+			provideServerHandler(accesshttp.NewChannelAccessHandler),
+			provideServerHandler(agenthttp.NewScheduleHandler),
+			provideServerHandler(agenthttp.NewHeartbeatHandler),
+			provideServerHandler(chathttp.NewCompactionHandler),
+			provideServerHandler(channelhttp.NewChannelHandler),
 			provideServerHandler(provideUsersHandler),
-			provideServerHandler(handlers.NewMemoryProvidersHandler),
-			provideServerHandler(handlers.NewNetworkHandler),
-			provideServerHandler(handlers.NewAudioHandler),
-			provideServerHandler(handlers.NewVideoHandler),
-			provideServerHandler(handlers.NewBotAudioHandler),
-			provideServerHandler(handlers.NewEmailProvidersHandler),
-			provideServerHandler(handlers.NewEmailBindingsHandler),
-			provideServerHandler(handlers.NewEmailOutboxHandler),
+			provideServerHandler(memoryhttp.NewMemoryProvidersHandler),
+			provideServerHandler(runtimehttp.NewNetworkHandler),
+			provideServerHandler(modelhttp.NewAudioHandler),
+			provideServerHandler(modelhttp.NewVideoHandler),
+			provideServerHandler(bothttp.NewBotAudioHandler),
+			provideServerHandler(emailhttp.NewEmailProvidersHandler),
+			provideServerHandler(emailhttp.NewEmailBindingsHandler),
+			provideServerHandler(emailhttp.NewEmailOutboxHandler),
 			provideServerHandler(provideEmailOAuthHandler),
-			provideServerHandler(handlers.NewMCPHandler),
-			provideServerHandler(handlers.NewMCPOAuthHandler),
-			provideServerHandler(handlers.NewPluginsHandler),
-			provideServerHandler(handlers.NewBotBackupHandler),
-			provideServerHandler(handlers.NewTokenUsageHandler),
-			provideServerHandler(handlers.NewSessionInfoHandler),
-			provideServerHandler(handlers.NewSupermarketHandler),
+			provideServerHandler(agenthttp.NewMCPHandler),
+			provideServerHandler(agenthttp.NewMCPOAuthHandler),
+			provideServerHandler(agenthttp.NewPluginsHandler),
+			provideServerHandler(bothttp.NewBotBackupHandler),
+			provideServerHandler(chathttp.NewTokenUsageHandler),
+			provideServerHandler(chathttp.NewSessionInfoHandler),
+			provideServerHandler(bothttp.NewSupermarketHandler),
 			provideServerHandler(provideWebHandler),
 			provideServer,
 		),

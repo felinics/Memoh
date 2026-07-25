@@ -15,82 +15,95 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/fx"
-	"golang.org/x/crypto/bcrypt"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/acl"
-	acpprofileadapter "github.com/memohai/memoh/internal/agent/adapter/acpprofile"
-	acpsessionadapter "github.com/memohai/memoh/internal/agent/adapter/acpsession"
-	channelcontactadapter "github.com/memohai/memoh/internal/agent/adapter/channelcontact"
-	channelidentityadapter "github.com/memohai/memoh/internal/agent/adapter/channelidentity"
-	channelmessagingadapter "github.com/memohai/memoh/internal/agent/adapter/channelmessaging"
-	channelthreadadapter "github.com/memohai/memoh/internal/agent/adapter/channelthread"
-	"github.com/memohai/memoh/internal/agent/application"
-	"github.com/memohai/memoh/internal/agent/background"
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	agentpayload "github.com/memohai/memoh/internal/agent/event/payload"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/agent/turn"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/botbackup"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/route"
-	"github.com/memohai/memoh/internal/chat/event"
-	"github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	agentdomain "github.com/memohai/memoh/domains/agent"
+	acpagent "github.com/memohai/memoh/domains/agent/acp"
+	acpclient "github.com/memohai/memoh/domains/agent/acp/client"
+	"github.com/memohai/memoh/domains/agent/adapter/acp/profile"
+	"github.com/memohai/memoh/domains/agent/adapter/acp/session"
+	"github.com/memohai/memoh/domains/agent/adapter/channel/contact"
+	identityadapter "github.com/memohai/memoh/domains/agent/adapter/channel/identity"
+	"github.com/memohai/memoh/domains/agent/adapter/channel/messaging"
+	"github.com/memohai/memoh/domains/agent/adapter/channel/thread"
+	"github.com/memohai/memoh/domains/agent/application"
+	applicationpostgres "github.com/memohai/memoh/domains/agent/application/postgres"
+	agentassembly "github.com/memohai/memoh/domains/agent/assembly"
+	"github.com/memohai/memoh/domains/agent/automation/heartbeat"
+	heartbeatpostgres "github.com/memohai/memoh/domains/agent/automation/heartbeat/postgres"
+	"github.com/memohai/memoh/domains/agent/automation/schedule"
+	schedulepostgres "github.com/memohai/memoh/domains/agent/automation/schedule/postgres"
+	chatbackuppostgres "github.com/memohai/memoh/domains/agent/chat/backup/postgres"
+	"github.com/memohai/memoh/domains/agent/chat/compaction"
+	compactionpostgres "github.com/memohai/memoh/domains/agent/chat/compaction/postgres"
+	"github.com/memohai/memoh/domains/agent/chat/event"
+	"github.com/memohai/memoh/domains/agent/chat/message"
+	chatpostgres "github.com/memohai/memoh/domains/agent/chat/postgres"
+	sessionpkg "github.com/memohai/memoh/domains/agent/chat/thread"
+	"github.com/memohai/memoh/domains/agent/chat/timeline"
+	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
+	userinput "github.com/memohai/memoh/domains/agent/decision/input"
+	decisionpostgres "github.com/memohai/memoh/domains/agent/decision/postgres"
+	"github.com/memohai/memoh/domains/agent/engine"
+	"github.com/memohai/memoh/domains/agent/engine/background"
+	agentpayload "github.com/memohai/memoh/domains/agent/event/payload"
+	hookspkg "github.com/memohai/memoh/domains/agent/extension/hooks"
+	pluginspkg "github.com/memohai/memoh/domains/agent/extension/plugins"
+	"github.com/memohai/memoh/domains/agent/mcp"
+	mcpfederation "github.com/memohai/memoh/domains/agent/mcp/sources/federation"
+	"github.com/memohai/memoh/domains/agent/tool"
+	"github.com/memohai/memoh/domains/api/access"
+	"github.com/memohai/memoh/domains/api/access/acl"
+	aclassembly "github.com/memohai/memoh/domains/api/access/acl/assembly"
+	"github.com/memohai/memoh/domains/api/access/policy"
+	apiassembly "github.com/memohai/memoh/domains/api/assembly"
+	"github.com/memohai/memoh/domains/api/auth"
+	"github.com/memohai/memoh/domains/api/bot"
+	botbackup "github.com/memohai/memoh/domains/api/botbackup"
+	apihttp "github.com/memohai/memoh/domains/api/http"
+	agenthttp "github.com/memohai/memoh/domains/api/http/agent"
+	runtimehttp "github.com/memohai/memoh/domains/api/http/runtime"
+	"github.com/memohai/memoh/domains/api/setting"
+	channeldomain "github.com/memohai/memoh/domains/channel"
+	channelbackuppostgres "github.com/memohai/memoh/domains/channel/backup/postgres"
+	"github.com/memohai/memoh/domains/channel/delivery"
+	emailpkg "github.com/memohai/memoh/domains/channel/email"
+	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/domains/channel/identity"
+	"github.com/memohai/memoh/domains/channel/route"
+	"github.com/memohai/memoh/domains/iam/account"
+	iamassembly "github.com/memohai/memoh/domains/iam/assembly"
+	team "github.com/memohai/memoh/domains/iam/team"
+	"github.com/memohai/memoh/domains/media"
+	"github.com/memohai/memoh/domains/media/asset"
+	memoryassembly "github.com/memohai/memoh/domains/memory/assembly"
+	memcatalog "github.com/memohai/memoh/domains/memory/catalog"
+	memregistry "github.com/memohai/memoh/domains/memory/registry"
+	modeldomain "github.com/memohai/memoh/domains/model"
+	audiopkg "github.com/memohai/memoh/domains/model/audio"
+	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
+	modelexecution "github.com/memohai/memoh/domains/model/execution"
+	"github.com/memohai/memoh/domains/model/fetch"
+	providers "github.com/memohai/memoh/domains/model/provider"
+	"github.com/memohai/memoh/domains/model/search"
+	"github.com/memohai/memoh/domains/model/template"
+	videopkg "github.com/memohai/memoh/domains/model/video"
+	runtimedomain "github.com/memohai/memoh/domains/runtime"
+	runtimeassembly "github.com/memohai/memoh/domains/runtime/assembly"
+	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
+	userruntime "github.com/memohai/memoh/domains/runtime/client"
+	ctr "github.com/memohai/memoh/domains/runtime/container"
+	runtimedisplay "github.com/memohai/memoh/domains/runtime/display"
+	netctl "github.com/memohai/memoh/domains/runtime/network"
+	"github.com/memohai/memoh/domains/runtime/workspace"
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	containerprovider "github.com/memohai/memoh/internal/container/provider"
 	"github.com/memohai/memoh/internal/db"
-	pgvectordb "github.com/memohai/memoh/internal/db/pgvector"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
-	hookspkg "github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/logger"
-	"github.com/memohai/memoh/internal/mcp"
-	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
-	"github.com/memohai/memoh/internal/media"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
-	memmem0 "github.com/memohai/memoh/internal/memory/adapters/mem0"
-	memopenviking "github.com/memohai/memoh/internal/memory/adapters/openviking"
-	"github.com/memohai/memoh/internal/memory/memllm"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
-	"github.com/memohai/memoh/internal/memory/wikistore"
-	"github.com/memohai/memoh/internal/messaging"
-	"github.com/memohai/memoh/internal/models"
-	netctl "github.com/memohai/memoh/internal/network"
-	netoverlay "github.com/memohai/memoh/internal/network/overlay"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/providertemplates"
-	"github.com/memohai/memoh/internal/registry"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/storage/providers/containerfs"
-	"github.com/memohai/memoh/internal/storage/providers/fallback"
-	"github.com/memohai/memoh/internal/storage/providers/localfs"
-	"github.com/memohai/memoh/internal/team"
-	"github.com/memohai/memoh/internal/userruntime"
-	videopkg "github.com/memohai/memoh/internal/video"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/memohai/memoh/internal/oauth"
+	"github.com/memohai/memoh/internal/version"
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
@@ -98,8 +111,41 @@ func provideLogger(cfg config.Config) *slog.Logger {
 	return logger.L
 }
 
-func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {
-	svc, cleanup, err := containerprovider.ProvideService(context.Background(), log, cfg, rc.ContainerBackend)
+func provideTokenConfig(cfg config.Config) (auth.TokenConfig, error) {
+	return auth.NewTokenConfig(cfg.Auth.JWTSecret, cfg.Auth.JWTExpiresIn)
+}
+
+func provideListenAddr(cfg config.Config) apihttp.ListenAddr {
+	return apihttp.ResolveListenAddr(cfg.Server.Addr)
+}
+
+func provideContainerBackend(cfg config.Config) (ctr.Backend, error) {
+	return ctr.ParseBackend(cfg.Container.Backend)
+}
+
+func provideRuntimeClock(cfg config.Config) (runtimedomain.Clock, error) {
+	return runtimedomain.ResolveClock(cfg.Timezone)
+}
+
+func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, backend ctr.Backend) (ctr.Service, error) {
+	svc, cleanup, err := runtimeassembly.NewService(context.Background(), runtimeassembly.Deps{
+		Log:     log,
+		Backend: backend.String(),
+		Apple: runtimeassembly.AppleOptions{
+			SocketPath: cfg.Apple.SocketPath,
+			BinaryPath: cfg.Apple.BinaryPath,
+		},
+		Docker: runtimeassembly.DockerOptions{
+			Host: cfg.Docker.Host,
+		},
+		Containerd: runtimeassembly.ContainerdOptions{
+			SocketPath:   cfg.Containerd.SocketPath,
+			Namespace:    cfg.Containerd.Namespace,
+			RuntimeType:  cfg.Containerd.RuntimeType,
+			CNIBinaryDir: cfg.Workspace.CNIBinaryDir,
+			CNIConfigDir: cfg.Workspace.CNIConfigDir,
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -112,11 +158,21 @@ func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Confi
 	return svc, nil
 }
 
-func provideNetworkController(service ctr.Service, rc *boot.RuntimeConfig, networkService *netctl.Service, registry *netctl.Registry) netctl.Controller {
-	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
-	ctrl := netctl.NewController(runtime, networkService, registry)
-	networkService.SetController(ctrl)
-	return ctrl
+func provideDisplayService(lc fx.Lifecycle, log *slog.Logger, manager workspace.Service) (runtimedisplay.Service, error) {
+	svc, cleanup, err := runtimeassembly.NewDisplay(runtimeassembly.DisplayDeps{
+		Log:       log,
+		Workspace: manager,
+	})
+	if err != nil {
+		return nil, err
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(_ context.Context) error {
+			cleanup()
+			return nil
+		},
+	})
+	return svc, nil
 }
 
 func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
@@ -136,114 +192,311 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 	return conn, nil
 }
 
-func providePGVectorStore(lc fx.Lifecycle, log *slog.Logger, cfg config.Config) (*pgvectordb.Store, error) {
-	if !cfg.PGVector.Enabled {
-		return nil, nil
-	}
-	store, err := pgvectordb.Open(context.Background(), log, cfg.PGVector)
+func provideRuntimeSettingsStore(pool *pgxpool.Pool) apiassembly.SettingPersistence {
+	return apiassembly.NewSettingPersistence(pool)
+}
+
+func provideSettingsModelReader(models *modelcatalog.Service) setting.ModelReader {
+	return models
+}
+
+func provideSettingsService(log *slog.Logger, store apiassembly.SettingPersistence, models setting.ModelReader, aclService *acl.Service, networkService *netctl.Service) *setting.Service {
+	return setting.NewService(log, store, models, aclService, networkService)
+}
+
+func provideWorkspaceRuntimeSettings(store apiassembly.SettingPersistence) workspace.BotRuntimeSettingsReader {
+	return store
+}
+
+func provideBotPersistenceStore(pool *pgxpool.Pool) apiassembly.BotPersistence {
+	return apiassembly.NewBotPersistence(pool)
+}
+
+func provideRuntimeContainerStore(pool *pgxpool.Pool) workspace.ContainerStore {
+	return runtimeassembly.NewContainerStore(pool)
+}
+
+func provideBotUserReader(store account.Store) bot.UserReader {
+	return apiassembly.NewBotUserReader(store)
+}
+
+func provideBotContainerReader(store workspace.ContainerStore) bot.ContainerReader {
+	return apiassembly.NewBotContainerReader(store)
+}
+
+func provideWorkspaceBotProfiles(store apiassembly.BotPersistence) workspace.BotProfileStore {
+	return store
+}
+
+// settingsNetworkConfigReader adapts API-owned settings overlay reads to the
+// Runtime network ConfigReader port without importing settings concrete into
+// the public network package.
+type settingsNetworkConfigReader struct {
+	store setting.Store
+}
+
+func (r settingsNetworkConfigReader) GetBotOverlayConfig(ctx context.Context, botID string) (netctl.BotOverlayConfig, error) {
+	row, err := r.store.GetOverlay(ctx, botID)
 	if err != nil {
-		log.Warn("pgvector store unavailable; semantic memory index disabled", slog.Any("error", err))
-		return nil, nil
+		return netctl.BotOverlayConfig{}, err
+	}
+	return netctl.BotOverlayConfig{
+		Enabled:  row.Enabled,
+		Provider: row.Provider,
+		Config:   decodeSettingsOverlayConfig(row.Config),
+	}, nil
+}
+
+func decodeSettingsOverlayConfig(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var config map[string]any
+	if err := json.Unmarshal(raw, &config); err != nil || config == nil {
+		return map[string]any{}
+	}
+	return config
+}
+
+func provideNetwork(log *slog.Logger, store apiassembly.SettingPersistence, conn *pgxpool.Pool, service ctr.Service, backend ctr.Backend, cfg config.Config) (*netctl.Service, netctl.Controller, error) {
+	assembled, err := runtimeassembly.NewNetwork(runtimeassembly.NetworkDeps{
+		Log:          log,
+		Container:    service,
+		Backend:      backend.String(),
+		ConfigReader: settingsNetworkConfigReader{store: store},
+		Pool:         conn,
+		CNIBinaryDir: cfg.Workspace.CNIBinaryDir,
+		CNIConfigDir: cfg.Workspace.CNIConfigDir,
+		DataRoot:     cfg.Workspace.DataRoot,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return assembled.Service, assembled.Controller, nil
+}
+
+func provideAccountPersistenceStore(pool *pgxpool.Pool) account.Store {
+	return iamassembly.NewAccountStore(pool)
+}
+
+func provideAccountCounter(pool *pgxpool.Pool) account.AccountCounter {
+	return iamassembly.NewAccountCounter(pool)
+}
+
+func provideAccountTitleModelValidator(pool *pgxpool.Pool) account.TitleModelValidator {
+	return modelcatalog.NewPostgresTitleModelValidator(pool)
+}
+
+func provideACLStore(pool *pgxpool.Pool) (acl.Store, error) {
+	if pool == nil {
+		return nil, acl.ErrTransactionsRequired
+	}
+	return aclassembly.NewStore(pool), nil
+}
+
+func provideObservedRouteReader(pool *pgxpool.Pool) message.ObservedRouteReader {
+	return chatpostgres.NewObservedRouteReader(pool)
+}
+
+func provideACLObservedConversationReader(
+	observations message.ObservedRouteReader,
+	conversations channeldomain.ConversationProjectionReader,
+) acl.ObservedConversationReader {
+	return aclassembly.NewObservedConversationReader(observations, conversations)
+}
+
+type aclChannelIdentityReader struct {
+	reader channeldomain.IdentityReader
+}
+
+func provideACLChannelIdentityReader(reader channeldomain.IdentityReader) acl.ChannelIdentityReader {
+	return &aclChannelIdentityReader{reader: reader}
+}
+
+func (r *aclChannelIdentityReader) ListChannelIdentities(ctx context.Context, ids []string) ([]acl.ChannelIdentity, error) {
+	items, err := r.reader.ListIdentityProjections(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]acl.ChannelIdentity, 0, len(items))
+	for _, item := range items {
+		result = append(result, acl.ChannelIdentity{
+			ID:               item.ID,
+			Channel:          item.Channel,
+			ChannelSubjectID: item.ChannelSubjectID,
+			DisplayName:      item.DisplayName,
+			AvatarURL:        item.AvatarURL,
+		})
+	}
+	return result, nil
+}
+
+type aclServiceParams struct {
+	fx.In
+
+	Log        *slog.Logger
+	Store      acl.Store
+	Identities acl.ChannelIdentityReader
+	Observed   acl.ObservedConversationReader `optional:"true"`
+}
+
+func provideACLService(params aclServiceParams) *acl.Service {
+	return acl.NewService(params.Log, params.Store, params.Identities, params.Observed)
+}
+
+func provideBotService(log *slog.Logger, store apiassembly.BotPersistence, users bot.UserReader, containers bot.ContainerReader, aclService *acl.Service) *bot.Service {
+	return bot.NewService(log, store, store, users, containers, aclService)
+}
+
+func provideChannelAccessStore(pool *pgxpool.Pool) access.Store {
+	return apiassembly.NewChannelAccessStore(pool)
+}
+
+type channelAccessIdentityReader struct {
+	reader channeldomain.IdentityReader
+}
+
+func provideChannelAccessIdentityReader(reader channeldomain.IdentityReader) access.ChannelIdentityReader {
+	return &channelAccessIdentityReader{reader: reader}
+}
+
+func (r *channelAccessIdentityReader) ListChannelIdentities(ctx context.Context, ids []string) ([]access.ChannelIdentity, error) {
+	items, err := r.reader.ListIdentityProjections(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]access.ChannelIdentity, 0, len(items))
+	for _, item := range items {
+		result = append(result, access.ChannelIdentity{
+			ID:               item.ID,
+			Channel:          item.Channel,
+			ChannelSubjectID: item.ChannelSubjectID,
+			DisplayName:      item.DisplayName,
+			AvatarURL:        item.AvatarURL,
+		})
+	}
+	return result, nil
+}
+
+func provideMCPConnectionStore(pool *pgxpool.Pool) mcp.ConnectionStore {
+	return agentassembly.NewMCPConnectionStore(pool)
+}
+
+func provideMCPOAuthStore(pool *pgxpool.Pool) mcp.OAuthStore {
+	return agentassembly.NewMCPOAuthStore(pool)
+}
+
+func provideFetchProviderService(log *slog.Logger, pool *pgxpool.Pool) *fetch.Service {
+	return fetch.NewPostgresService(log, pool)
+}
+
+func provideSearchProviderService(log *slog.Logger, pool *pgxpool.Pool) *search.Service {
+	return search.NewPostgresService(log, pool)
+}
+
+type automationBotReader struct {
+	bots apiassembly.BotPersistence
+}
+
+func (r automationBotReader) GetBot(ctx context.Context, botID string) (schedule.BotRecord, error) {
+	row, err := r.bots.GetBotByID(ctx, botID)
+	if err != nil {
+		return schedule.BotRecord{}, err
+	}
+	return schedule.BotRecord{OwnerUserID: row.OwnerUserID, Timezone: row.Timezone}, nil
+}
+
+func (r automationBotReader) ListEnabledBots(ctx context.Context) ([]heartbeat.BotRecord, error) {
+	rows, err := r.bots.ListHeartbeatEnabledBots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]heartbeat.BotRecord, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, heartbeat.BotRecord{
+			ID:                row.ID,
+			OwnerUserID:       row.OwnerUserID,
+			Status:            row.Status,
+			HeartbeatEnabled:  row.HeartbeatEnabled,
+			HeartbeatInterval: row.HeartbeatInterval,
+		})
+	}
+	return items, nil
+}
+
+func (r automationBotReader) GetHeartbeatBot(ctx context.Context, botID string) (heartbeat.BotRecord, error) {
+	row, err := r.bots.GetBotByID(ctx, botID)
+	if err != nil {
+		return heartbeat.BotRecord{}, err
+	}
+	return heartbeat.BotRecord{
+		ID:          row.ID,
+		OwnerUserID: row.OwnerUserID,
+		Status:      row.Status,
+	}, nil
+}
+
+type heartbeatBotReader struct {
+	automationBotReader
+}
+
+func (r heartbeatBotReader) GetBot(ctx context.Context, botID string) (heartbeat.BotRecord, error) {
+	return r.GetHeartbeatBot(ctx, botID)
+}
+
+func provideScheduleStore(pool *pgxpool.Pool, botsStore apiassembly.BotPersistence) schedule.Store {
+	return schedulepostgres.NewStoreFromDB(pool, automationBotReader{bots: botsStore})
+}
+
+func provideHeartbeatStore(pool *pgxpool.Pool, botsStore apiassembly.BotPersistence) heartbeat.Store {
+	return heartbeatpostgres.NewStoreFromDB(pool, heartbeatBotReader{
+		automationBotReader: automationBotReader{bots: botsStore},
+	})
+}
+
+type userRuntimeOut struct {
+	fx.Out
+
+	Service *userruntime.Service
+	Pipe    userruntime.Pipe
+}
+
+func provideUserRuntime(lc fx.Lifecycle, log *slog.Logger, pool *pgxpool.Pool, membership *account.Service) (userRuntimeOut, error) {
+	assembled, cleanup, err := runtimeassembly.NewClient(runtimeassembly.ClientDeps{
+		Log:        log,
+		Pool:       pool,
+		Membership: membership,
+	})
+	if err != nil {
+		return userRuntimeOut{}, err
 	}
 	lc.Append(fx.Hook{
-		OnStop: func(context.Context) error {
-			store.Close()
+		OnStop: func(_ context.Context) error {
+			cleanup()
 			return nil
 		},
 	})
-	return store, nil
+	return userRuntimeOut{Service: assembled.Service, Pipe: assembled.Pipe}, nil
 }
 
-func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
-	if conn == nil {
-		return nil, nil
-	}
-	return postgresstore.New(conn)
+func provideAccountService(log *slog.Logger, store account.Store, titleModels account.TitleModelValidator) *account.Service {
+	return account.NewService(log, store, titleModels)
 }
 
-func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config, rc *boot.RuntimeConfig) *netctl.Registry {
-	registry := netctl.NewRegistry()
-	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
-	if err := netoverlay.RegisterBuiltinProviders(registry, netoverlay.ProviderDeps{
-		SidecarRuntime: service,
-		Runtime:        runtime.Descriptor(),
-		StateRoot:      cfg.Workspace.DataRoot,
-	}); err != nil {
-		panic(err)
-	}
-	return registry
-}
-
-func provideNetworkService(log *slog.Logger, queries dbstore.Queries, registry *netctl.Registry, service ctr.Service, rc *boot.RuntimeConfig, cfg config.Config) *netctl.Service {
-	return netctl.NewService(log, queries, registry, service, rc.ContainerBackend, cfg.Workspace.CNIBinaryDir, cfg.Workspace.CNIConfigDir, cfg.Workspace.DataRoot)
-}
-
-func provideDBQueries(postgresStore *postgresstore.Store) (dbstore.Queries, error) {
-	if postgresStore == nil {
-		return nil, errors.New("postgres store not configured")
-	}
-	return postgresstore.NewQueriesWithPool(postgresStore.Pool(), postgresStore.SQLC()), nil
-}
-
-func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountStore, error) {
-	if postgresStore == nil {
-		return nil, errors.New("postgres account store not configured")
-	}
-	return postgresStore, nil
-}
-
-func provideUserRuntimeStore(postgresStore *postgresstore.Store) (dbstore.UserRuntimeStore, error) {
-	if postgresStore == nil {
-		return nil, errors.New("postgres user runtime store not configured")
-	}
-	return postgresStore, nil
-}
-
-func provideBotRemoteRuntimeBindingStore(postgresStore *postgresstore.Store) (dbstore.BotRemoteRuntimeBindingStore, error) {
-	if postgresStore == nil {
-		return nil, errors.New("postgres bot remote runtime binding store not configured")
-	}
-	return postgresStore, nil
-}
-
-func provideUserRuntimeHub(lc fx.Lifecycle, log *slog.Logger) *userruntime.Hub {
-	hub := userruntime.NewHub(log)
-	lc.Append(fx.Hook{OnStop: hub.Shutdown})
-	return hub
-}
-
-func provideUserRuntimePipe() userruntime.Pipe {
-	return userruntime.NewDirectPipe()
-}
-
-func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore) *accounts.Service {
-	return accounts.NewService(log, accountStore)
-}
-
-// provideWikiStore wires the PostgreSQL memory wiki store. Returns a pointer
-// so FX can inject nil-safe into providers that may run without a wiki store.
-func provideWikiStore(postgresStore *postgresstore.Store) (*wikistore.Store, error) {
-	if postgresStore == nil {
-		return nil, errors.New("postgres wiki store not configured")
-	}
-	ws := wikistore.Store(wikistore.NewPostgres(postgresStore.SQLC()))
-	return &ws, nil
-}
-
-func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
+func provideBridgeProvider(manage workspace.Service) bridge.Provider {
 	return manage
 }
 
 type nativeWorkspaceBridgeProvider struct {
-	manager *workspace.Manager
+	manager workspace.Service
 }
 
 type workspaceTargetPolicyResolver struct {
-	manager *workspace.Manager
+	manager workspace.Service
 }
 
 type toolApprovalPolicyProvider struct {
-	settings *settings.Service
+	settings *setting.Service
 }
 
 func (p toolApprovalPolicyProvider) ToolApprovalPolicy(ctx context.Context, botID string) (toolapproval.PolicyConfig, error) {
@@ -254,8 +507,38 @@ func (p toolApprovalPolicyProvider) ToolApprovalPolicy(ctx context.Context, botI
 	return toolApprovalPolicyConfig(botSettings.ToolApprovalConfig), nil
 }
 
-func provideToolApprovalService(log *slog.Logger, queries dbstore.Queries, settingsService *settings.Service) *toolapproval.Service {
-	return toolapproval.NewService(log, queries, toolApprovalPolicyProvider{settings: settingsService})
+type decisionIdentityReader struct {
+	reader application.ChannelIdentityReader
+}
+
+func (r decisionIdentityReader) GetByID(ctx context.Context, id string) (decisionpostgres.ChannelIdentity, error) {
+	identity, err := r.reader.GetByID(ctx, id)
+	if err != nil {
+		return decisionpostgres.ChannelIdentity{}, err
+	}
+	return decisionpostgres.ChannelIdentity{ID: identity.ID, DisplayName: identity.DisplayName}, nil
+}
+
+func provideDecisionCluster(pool *pgxpool.Pool, identities application.ChannelIdentityReader) (*decisionpostgres.Cluster, error) {
+	return decisionpostgres.New(
+		pool,
+		func(tx pgx.Tx) decisionpostgres.BotSessionWriteLocker {
+			return apiassembly.NewBotSessionLockerFromTx(tx)
+		},
+		decisionIdentityReader{reader: identities},
+	)
+}
+
+func provideToolApprovalPersistence(cluster *decisionpostgres.Cluster) toolapproval.Persistence {
+	return cluster.Approval()
+}
+
+func provideUserInputPersistence(cluster *decisionpostgres.Cluster) userinput.Persistence {
+	return cluster.Input()
+}
+
+func provideToolApprovalService(log *slog.Logger, persistence toolapproval.Persistence, settingsService *setting.Service) *toolapproval.Service {
+	return toolapproval.NewService(log, persistence, toolApprovalPolicyProvider{settings: settingsService})
 }
 
 func (r workspaceTargetPolicyResolver) ResolveWorkspaceTargetPolicy(ctx context.Context, botID, targetID string) (toolapproval.WorkspaceTargetPolicy, error) {
@@ -271,7 +554,7 @@ func (r workspaceTargetPolicyResolver) ResolveWorkspaceTargetPolicy(ctx context.
 	}, nil
 }
 
-func toolApprovalPolicyConfig(config settings.ToolApprovalConfig) toolapproval.PolicyConfig {
+func toolApprovalPolicyConfig(config setting.ToolApprovalConfig) toolapproval.PolicyConfig {
 	return toolapproval.PolicyConfig{
 		Enabled: config.Enabled,
 		Read: toolapproval.FilePolicy{
@@ -310,82 +593,221 @@ func providePluginBridgeProvider(provider bridge.Provider) pluginspkg.BridgeProv
 	return pluginspkg.BridgeProvider{Provider: provider}
 }
 
+func providePluginStore(pool *pgxpool.Pool) pluginspkg.Store {
+	return agentassembly.NewPluginStore(pool)
+}
+
 func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginService *pluginspkg.Service) *hookspkg.Service {
 	service := hookspkg.NewService(log, provider)
 	service.SetPluginService(pluginService)
 	return service
 }
 
-func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries, remote *workspace.RemoteWorkspaceService) (*workspace.Manager, error) {
-	mgr := workspace.NewManager(log, service, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
-	mgr.SetRemoteWorkspaceService(remote)
-	tlsOpts, err := workspace.BridgeTLSRuntimeOptionsFromConfig(cfg)
+type workspaceOut struct {
+	fx.Out
+
+	Service workspace.Service
+	Remote  workspace.RemoteService
+}
+
+func provideWorkspace(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, profiles workspace.BotProfileStore, botOwners *policy.Service, runtimeSettings workspace.BotRuntimeSettingsReader, pool *pgxpool.Pool, userRuntime *userruntime.Service) (workspaceOut, error) {
+	if pool == nil {
+		return workspaceOut{}, errors.New("postgres workspace store not configured")
+	}
+	assembled, cleanup, err := runtimeassembly.NewWorkspace(runtimeassembly.WorkspaceDeps{
+		Log:             log,
+		Container:       service,
+		Network:         networkController,
+		Config:          cfg.Workspace,
+		Namespace:       cfg.Containerd.Namespace,
+		Profiles:        profiles,
+		BotOwners:       botOwners,
+		RuntimeSettings: runtimeSettings,
+		Pool:            pool,
+		UserRuntime:     userRuntime,
+		AppConfig:       &cfg,
+	})
+	if err != nil {
+		return workspaceOut{}, err
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(_ context.Context) error {
+			cleanup()
+			return nil
+		},
+	})
+	return workspaceOut{Service: assembled.Service, Remote: assembled.Remote}, nil
+}
+
+func provideMemoryLLM(modelsService *modelcatalog.Service, settingsService *setting.Service, providerResolver modelcatalog.ProviderResolver, log *slog.Logger) memregistry.LLM {
+	return &lazyLLMClient{
+		modelsService:    modelsService,
+		settingsService:  settingsService,
+		providerResolver: providerResolver,
+		timeout:          modelexecution.DefaultProviderRequestTimeout,
+		logger:           log,
+	}
+}
+
+type memoryEmbeddingModelResolver struct {
+	models    *modelcatalog.Service
+	providers modelcatalog.ProviderResolver
+}
+
+func (r memoryEmbeddingModelResolver) model(ctx context.Context, ref string) (modelcatalog.GetResponse, error) {
+	ref = strings.TrimSpace(ref)
+	if _, err := uuid.Parse(ref); err == nil {
+		if model, getErr := r.models.GetByID(ctx, ref); getErr == nil {
+			return model, nil
+		}
+	}
+	return r.models.GetByModelID(ctx, ref)
+}
+
+func (r memoryEmbeddingModelResolver) ResolveEmbeddingModel(ctx context.Context, ref string) (memoryassembly.EmbeddingModelSpec, error) {
+	model, err := r.model(ctx, ref)
+	if err != nil {
+		return memoryassembly.EmbeddingModelSpec{}, err
+	}
+	provider, err := r.providers.ResolveModelProvider(ctx, model.ProviderID)
+	if err != nil {
+		return memoryassembly.EmbeddingModelSpec{}, err
+	}
+	dimensions := 0
+	if model.Config.Dimensions != nil {
+		dimensions = *model.Config.Dimensions
+	}
+	return memoryassembly.EmbeddingModelSpec{
+		ID:         model.ID,
+		ModelID:    model.ModelID,
+		Type:       string(model.Type),
+		Enabled:    model.Enable,
+		Dimensions: dimensions,
+		ProviderID: model.ProviderID,
+		ClientType: string(provider.ClientType),
+		BaseURL:    provider.BaseURL,
+		APIKey:     provider.APIKey,
+	}, nil
+}
+
+func (r memoryEmbeddingModelResolver) EmbeddingModelEnabled(ctx context.Context, ref string) (bool, error) {
+	model, err := r.model(ctx, ref)
+	if err != nil {
+		return false, err
+	}
+	return model.Enable, nil
+}
+
+func provideMemoryProviderRegistry(
+	lc fx.Lifecycle,
+	log *slog.Logger,
+	llm memregistry.LLM,
+	provider bridge.Provider,
+	modelsService *modelcatalog.Service,
+	modelProviders modelcatalog.ProviderResolver,
+	pool *pgxpool.Pool,
+	cfg config.Config,
+) (*memregistry.Registry, error) {
+	reg, cleanup, err := memoryassembly.NewRegistry(memoryassembly.Deps{
+		Log:    log,
+		Pool:   pool,
+		Bridge: provider,
+		LLM:    llm,
+		EmbeddingModels: memoryEmbeddingModelResolver{
+			models:    modelsService,
+			providers: modelProviders,
+		},
+		PGVector: memoryassembly.PGVectorConfig{
+			Enabled:  cfg.PGVector.Enabled,
+			Host:     cfg.PGVector.Host,
+			Port:     cfg.PGVector.Port,
+			User:     cfg.PGVector.User,
+			Password: cfg.PGVector.Password,
+			Database: cfg.PGVector.Database,
+			SSLMode:  cfg.PGVector.SSLMode,
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
-	if tlsOpts != nil {
-		mgr.SetBridgeTLS(tlsOpts)
-	}
-	return mgr, nil
+	lc.Append(fx.Hook{
+		OnStop: func(context.Context) error {
+			_ = reg.Close()
+			cleanup()
+			return nil
+		},
+	})
+	return reg, nil
 }
 
-func provideMemoryLLM(modelsService *models.Service, settingsService *settings.Service, queries dbstore.Queries, log *slog.Logger) memprovider.LLM {
-	return &lazyLLMClient{
-		modelsService:   modelsService,
-		settingsService: settingsService,
-		queries:         queries,
-		timeout:         models.DefaultProviderRequestTimeout,
-		logger:          log,
-	}
+func provideMemoryCatalogService(log *slog.Logger, pool *pgxpool.Pool) *memcatalog.Service {
+	return memcatalog.NewPostgresService(log, pool)
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, provider bridge.Provider, queries dbstore.Queries, vectorStore *pgvectordb.Store, wikiStore *wikistore.Store) *memprovider.Registry {
-	registry := memprovider.NewRegistry(log)
-	fileStore := storefs.New(log, provider)
-	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(ctx context.Context, teamID, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		var ws wikistore.Store
-		if wikiStore != nil {
-			ws = *wikiStore
-		}
-		runtime, err := membuiltin.NewBuiltinRuntimeFromConfigContext(ctx, log, providerConfig, fileStore, queries, vectorStore, ws, memprovider.FixedTeamIDResolver(teamID))
-		if err != nil {
-			return nil, err
-		}
-		p := membuiltin.NewBuiltinProvider(log, runtime)
-		p.SetLLM(llm)
-		p.ApplyProviderConfig(providerConfig)
-		return p, nil
-	})
-	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		return memmem0.NewMem0Provider(log, providerConfig, fileStore)
-	})
-	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		return memopenviking.NewOpenVikingProvider(log, providerConfig)
-	})
-	// Default provider for bots without an explicit memory_provider_id. Uses the
-	// graph runtime (PG nodes/edges as source of truth) when a wiki store is
-	// wired; falls back to the file runtime otherwise (e.g. bootstrap before the
-	// DB is ready).
-	var defaultRuntime membuiltin.Runtime
-	if wikiStore != nil {
-		defaultRuntime = membuiltin.NewGraphRuntime(log, *wikiStore, fileStore)
-	} else {
-		defaultRuntime = membuiltin.NewFileRuntime(fileStore)
-	}
-	defaultProvider := membuiltin.NewBuiltinProvider(log, defaultRuntime)
-	defaultProvider.SetLLM(llm)
-	registry.Register("__builtin_default__", defaultProvider)
-	return registry
+func provideChatMessageStore(pool *pgxpool.Pool) *chatpostgres.MessageStore {
+	return chatpostgres.NewMessageStoreWithPool(
+		apiassembly.NewBotSessionLocker(pool),
+		func(tx pgx.Tx) chatpostgres.BotSessionWriteLocker {
+			return apiassembly.NewBotSessionLockerFromTx(tx)
+		},
+		pool,
+	)
 }
 
-func provideSessionService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *sessionpkg.Service {
-	service := sessionpkg.NewService(log, queries, hub)
-	service.SetACPSetupValidator(acpprofileadapter.NewCatalog())
+func provideChatThreadStore(pool *pgxpool.Pool) *chatpostgres.ThreadStore {
+	return chatpostgres.NewThreadStoreWithPool(pool)
+}
+
+type threadACPPolicyReader struct {
+	bots apiassembly.BotPersistence
+}
+
+func (r threadACPPolicyReader) GetBotMetadata(ctx context.Context, botID string) (map[string]any, error) {
+	row, err := r.bots.GetBotByID(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	if len(row.Metadata) == 0 {
+		return map[string]any{}, nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(row.Metadata, &metadata); err != nil {
+		return nil, fmt.Errorf("decode bot metadata: %w", err)
+	}
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	return metadata, nil
+}
+
+func provideSessionService(log *slog.Logger, store *chatpostgres.ThreadStore, botsStore apiassembly.BotPersistence, hub *event.Hub) *sessionpkg.Service {
+	service := sessionpkg.NewService(log, store, threadACPPolicyReader{bots: botsStore}, hub)
+	service.SetACPSetupValidator(profile.NewCatalog())
 	return service
 }
 
-func provideMessageService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *message.DBService {
-	return message.NewService(log, queries, hub)
+func provideMessageService(log *slog.Logger, store *chatpostgres.MessageStore, hub *event.Hub) *message.DBService {
+	return message.NewService(log, store, hub)
+}
+
+func provideCompactionStore(pool *pgxpool.Pool) *compactionpostgres.Store {
+	return compactionpostgres.NewStoreFromDB(pool)
+}
+
+func provideCompactionPersistence(store *compactionpostgres.Store) compaction.CompactionStore {
+	return store
+}
+
+func provideCompactionArtifacts(store *compactionpostgres.Store) compaction.ArtifactStore {
+	return store
+}
+
+func provideApplicationReads(pool *pgxpool.Pool) *applicationpostgres.Reads {
+	return agentassembly.NewApplicationReads(pool)
+}
+
+func provideApplicationChannelIdentityReader(service *identity.Service) application.ChannelIdentityReader {
+	return identityadapter.NewReader(service)
 }
 
 func provideScheduleTriggerer(service *application.Service) schedule.Triggerer {
@@ -419,8 +841,8 @@ func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.
 	return &sessionCreatorAdapter{svc: sessionService}
 }
 
-func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *native.Agent {
-	return native.New(native.Deps{
+func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *engine.Agent {
+	return engine.New(engine.Deps{
 		BridgeProvider: provider,
 		HookService:    hookService,
 		Logger:         log,
@@ -428,35 +850,35 @@ func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hooks
 	})
 }
 
-func agentLimitsFromConfig(cfg config.AgentConfig) native.Limits {
-	return native.LimitsFromValues(
+func agentLimitsFromConfig(cfg config.AgentConfig) engine.Limits {
+	return engine.LimitsFromValues(
 		cfg.ToolOutputMaxBytes,
 		cfg.ToolOutputMaxLines,
 		cfg.SystemFilesMaxBytes,
 	)
 }
 
-func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, providers []agenttools.ToolProvider) {
+func injectToolProviders(a *engine.Agent, msgService *message.DBService, hookService *hookspkg.Service, providers []tool.ToolProvider) {
 	a.SetToolProviders(providers)
 	for _, p := range providers {
-		if cp, ok := p.(*agenttools.ContainerProvider); ok {
+		if cp, ok := p.(*tool.ContainerProvider); ok {
 			cp.SetHookService(hookService)
 		}
-		if sp, ok := p.(*agenttools.SpawnProvider); ok {
-			sp.SetAgent(native.NewSpawnAdapter(a))
+		if sp, ok := p.(*tool.SpawnProvider); ok {
+			sp.SetAgent(engine.NewSpawnAdapter(a))
 			sp.SetMessageService(msgService)
-			sp.SetSystemPromptFunc(native.SpawnSystemPrompt)
+			sp.SetSystemPromptFunc(engine.SpawnSystemPrompt)
 			sp.SetHookService(hookService)
 		}
 	}
 }
 
-func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.Runner {
+func provideACPRunner(log *slog.Logger, manager workspace.Service) *acpclient.Runner {
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
-	pool := acpagent.NewSessionPool(log, runner, botService, acpsessionadapter.NewSource(sessionService))
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bot.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *runtimehttp.ContainerdHandler) *acpagent.SessionPool {
+	pool := acpagent.NewSessionPool(log, runner, botService, session.NewSource(sessionService))
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
 	pool.SetToolApprovalService(toolApproval)
@@ -475,8 +897,8 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service) *application.Service {
-	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
+func provideAgentService(log *slog.Logger, a *engine.Agent, modelsService *modelcatalog.Service, modelProviderResolver modelcatalog.ProviderResolver, applicationReads *applicationpostgres.Reads, channelIdentityReader application.ChannelIdentityReader, compactionArtifacts compaction.ArtifactStore, msgService *message.DBService, settingsService *setting.Service, accountService *account.Service, botService *bot.Service, mediaService *asset.Service, containerdHandler *runtimehttp.ContainerdHandler, workspaceManager workspace.Service, memoryRegistry *memregistry.Registry, channelStore *gateway.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, clock runtimedomain.Clock, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service) *application.Service {
+	service := application.NewService(log, modelsService, modelProviderResolver, botService, accountService, channelIdentityReader, applicationReads, compactionArtifacts, applicationReads, msgService, settingsService, a, clock.Location, 120*time.Second)
 	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
 	service.SetWorkspaceTargetResolver(workspaceManager)
 	service.SetHookService(hookService)
@@ -492,7 +914,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	service.SetMemoryRegistry(memoryRegistry)
 	service.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
 	service.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
-	service.SetPlatformIdentitySource(channelidentityadapter.NewSource(channelStore))
+	service.SetPlatformIdentitySource(identityadapter.NewSource(channelStore))
 	service.SetSessionService(sessionService)
 	service.SetEventPublisher(eventHub)
 	service.SetCompactionService(compactionService)
@@ -510,7 +932,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 			if eventHub == nil {
 				return
 			}
-			// The wire shape lives in internal/agent/event/payload — see its
+			// The wire shape lives in domains/agent/event/payload — see its
 			// BackgroundTask helper and the tests there that pin the
 			// top-level `session_id` placement the per-session SSE handler
 			// routes on.
@@ -528,18 +950,32 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager workspace.Service, cfg config.Config, backend ctr.Backend, botService *bot.Service, accountService *account.Service, policyService *policy.Service, pluginService *pluginspkg.Service, displayService runtimedisplay.Service) *runtimehttp.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
-	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
+	h := runtimehttp.NewContainerdHandler(log, manager, cfg.Workspace, backend.String(), botService, accountService, policyService, displayService)
 	h.SetPluginService(pluginService)
 	return h
 }
 
-func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool) *botbackup.Service {
+func provideScheduleService(log *slog.Logger, store schedule.Store, triggerer schedule.Triggerer, sessionCreator schedule.SessionCreator, tokens auth.TokenConfig, clock runtimedomain.Clock) *schedule.Service {
+	return schedule.NewService(log, store, triggerer, sessionCreator, tokens.Secret, clock.Location)
+}
+
+func provideHeartbeatService(log *slog.Logger, store heartbeat.Store, triggerer heartbeat.Triggerer, sessionCreator heartbeat.SessionCreator, tokens auth.TokenConfig) *heartbeat.Service {
+	return heartbeat.NewService(log, store, triggerer, sessionCreator, tokens.Secret)
+}
+
+func provideChatBackupStore(pool *pgxpool.Pool) (*chatbackuppostgres.Store, error) {
+	return chatbackuppostgres.New(pool, apiassembly.BotExclusiveLocker{})
+}
+
+func provideChannelBackupStore(pool *pgxpool.Pool) (*channelbackuppostgres.Store, error) {
+	return channelbackuppostgres.New(pool, apiassembly.BotExclusiveLocker{})
+}
+
+func provideBotBackupService(log *slog.Logger, chatBackup *chatbackuppostgres.Store, channelBackup *channelbackuppostgres.Store, botService *bot.Service, settingsService *setting.Service, aclService *acl.Service, channelStore *gateway.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *modelcatalog.Service, searchProviderService *search.Service, fetchProviderService *fetch.Service, memoryProviderService *memcatalog.Service, manager workspace.Service, acpPool *acpagent.SessionPool) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
-		DB:              conn,
-		Queries:         queries,
 		Bots:            botService,
 		Settings:        settingsService,
 		ACL:             aclService,
@@ -553,15 +989,17 @@ func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbsto
 		FetchProviders:  fetchProviderService,
 		MemoryProviders: memoryProviderService,
 		Workspace:       manager,
+		ChatBackup:      chatBackup,
+		ChannelBackup:   channelBackup,
 		ACPRuntimes:     acpPool,
 	})
 }
 
-func provideFederationGateway(log *slog.Logger, containerdHandler *handlers.ContainerdHandler) *handlers.MCPFederationGateway {
-	return handlers.NewMCPFederationGateway(log, containerdHandler)
+func provideFederationGateway(log *slog.Logger, containerdHandler *runtimehttp.ContainerdHandler) *runtimehttp.MCPFederationGateway {
+	return runtimehttp.NewMCPFederationGateway(log, containerdHandler)
 }
 
-func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *mcp.OAuthService {
+func provideOAuthService(log *slog.Logger, store mcp.OAuthStore, cfg config.Config) *mcp.OAuthService {
 	addr := strings.TrimSpace(cfg.Server.Addr)
 	if addr == "" {
 		addr = ":8080"
@@ -571,12 +1009,12 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 		host = "localhost" + host
 	}
 	callbackURL := "http://" + host + "/oauth/mcp/callback"
-	return mcp.NewOAuthService(log, queries, callbackURL)
+	return mcp.NewOAuthService(log, store, callbackURL)
 }
 
-func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *agenttools.NativeToolSource {
+func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *tool.NativeToolSource {
 	limits := agentLimitsFromConfig(cfg.Agent)
-	return agenttools.NewNativeToolSource(log, nil, agenttools.NativeToolSourceOptions{
+	return tool.NewNativeToolSource(log, nil, tool.NativeToolSourceOptions{
 		AllowAll:        true,
 		Approval:        toolApproval,
 		UserInput:       userInput,
@@ -585,15 +1023,15 @@ func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, 
 	})
 }
 
-func injectACPToolProviders(source *agenttools.NativeToolSource, toolProviders []agenttools.ToolProvider) {
+func injectACPToolProviders(source *tool.NativeToolSource, toolProviders []tool.ToolProvider) {
 	if source != nil {
 		source.SetProviders(acpToolProviders(toolProviders))
 	}
 }
 
-func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, fedGateway *runtimehttp.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *runtimehttp.ContainerdHandler, nativeSource *tool.NativeToolSource, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
-	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
+	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(tool.IsBuiltInToolName))
 	limits := agentLimitsFromConfig(cfg.Agent)
 	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, fedSource}, mcp.WithToolOutputLimit(limits.ToolOutputLimit()))
 	containerdHandler.SetToolGatewayService(svc)
@@ -601,13 +1039,13 @@ func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederat
 	return svc
 }
 
-func acpToolProviders(providers []agenttools.ToolProvider) []agenttools.ToolProvider {
-	filtered := make([]agenttools.ToolProvider, 0, len(providers))
+func acpToolProviders(providers []tool.ToolProvider) []tool.ToolProvider {
+	filtered := make([]tool.ToolProvider, 0, len(providers))
 	for _, provider := range providers {
 		if provider == nil {
 			continue
 		}
-		if _, ok := provider.(*agenttools.FederationProvider); ok {
+		if _, ok := provider.(*tool.FederationProvider); ok {
 			continue
 		}
 		filtered = append(filtered, provider)
@@ -619,61 +1057,62 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
-	var assetResolver messaging.AssetResolver
+func provideHistorySearcher(pool *pgxpool.Pool) tool.HistorySearcher {
+	return agentassembly.NewHistorySearcher(pool)
+}
+
+func provideToolProviders(log *slog.Logger, channelRuntime gateway.Runtime, registry *gateway.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *setting.Service, searchProviderService *search.Service, fetchProviderService *fetch.Service, manager workspace.Service, mediaService *asset.Service, memoryRegistry *memregistry.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *runtimehttp.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *modelcatalog.Service, modelProviderResolver modelcatalog.ProviderResolver, historySearcher tool.HistorySearcher, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, displayService runtimedisplay.Service) []tool.ToolProvider {
+	var assetResolver delivery.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
-	channelMessaging := channelmessagingadapter.New(channelRuntime, registry, assetResolver)
-	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
-	return []agenttools.ToolProvider{
-		agenttools.NewAskUserProvider(log),
-		agenttools.NewMessageProvider(log, channelMessaging, channelMessaging, channelMessaging, assetResolver),
-		agenttools.NewContactsProvider(log, channelcontactadapter.NewSource(routeService)),
-		agenttools.NewScheduleProvider(log, scheduleService),
-		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
-		agenttools.NewWebProvider(log, settingsService, searchProviderService),
-		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
-		agenttools.NewBackgroundProvider(log, bgManager),
-		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, manager, config.DefaultDataMount),
-		agenttools.NewEmailProvider(log, emailService, emailRuntime),
-		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
-		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
-		agenttools.NewSkillProvider(log),
-		agenttools.NewTTSProvider(log, settingsService, audioService, channelMessaging, channelMessaging),
-		agenttools.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
-		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
-		agenttools.NewVideoGenProvider(log, settingsService, videoService, bgManager, manager, config.DefaultDataMount),
-		agenttools.NewFederationProvider(log, fedSource),
-		agenttools.NewHistoryProvider(log, channelthreadadapter.NewLister(sessionService, routeService), messageService, queries),
+	channelMessaging := messaging.New(channelRuntime, registry, assetResolver)
+	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(tool.IsBuiltInToolName))
+	return []tool.ToolProvider{
+		tool.NewAskUserProvider(log),
+		tool.NewMessageProvider(log, channelMessaging, channelMessaging, channelMessaging, assetResolver),
+		tool.NewContactsProvider(log, contact.NewSource(routeService)),
+		tool.NewScheduleProvider(log, scheduleService),
+		tool.NewMemoryProvider(log, memoryRegistry, settingsService),
+		tool.NewWebProvider(log, settingsService, searchProviderService),
+		tool.NewContainerProvider(log, manager, bgManager, runtimedomain.DefaultDataMount, hookService),
+		tool.NewBackgroundProvider(log, bgManager),
+		tool.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, displayService, runtimedomain.DefaultDataMount),
+		tool.NewEmailProvider(log, emailService, emailRuntime),
+		tool.NewWebFetchProvider(log, settingsService, fetchProviderService),
+		tool.NewSpawnProvider(log, settingsService, modelsService, modelProviderResolver, sessionService, bgManager),
+		tool.NewSkillProvider(log),
+		tool.NewTTSProvider(log, settingsService, audioService, channelMessaging, channelMessaging),
+		tool.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
+		tool.NewImageGenProvider(log, settingsService, modelsService, modelProviderResolver, manager, runtimedomain.DefaultDataMount),
+		tool.NewVideoGenProvider(log, settingsService, videoService, bgManager, manager, runtimedomain.DefaultDataMount),
+		tool.NewFederationProvider(log, fedSource),
+		tool.NewHistoryProvider(log, thread.NewLister(sessionService, routeService), messageService, historySearcher),
 	}
 }
 
-func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) *media.Service {
-	primary := containerfs.New(provider)
+func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) *asset.Service {
 	dataRoot := cfg.Workspace.DataRoot
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
 	}
-	secondary := localfs.New(filepath.Join(dataRoot, "media"))
-	storageProvider := fallback.New(primary, secondary)
-	return media.NewService(log, storageProvider)
+	return asset.NewContainerFallbackService(log, newBridgeContainerFileClientProvider(provider), filepath.Join(dataRoot, "media"))
 }
 
-func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPCodexOAuthHandler {
-	return handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
+func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bot.Service, accountService *account.Service, workspaceManager workspace.Service) *agenthttp.ACPCodexOAuthHandler {
+	return agenthttp.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
 }
 
-func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPClaudeCodeOAuthHandler {
-	return handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
+func provideACPClaudeCodeOAuthHandler(botService *bot.Service, accountService *account.Service, workspaceManager workspace.Service) *agenthttp.ACPClaudeCodeOAuthHandler {
+	return agenthttp.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
 }
 
-func provideAudioRegistry() *audiopkg.Registry {
-	return audiopkg.NewRegistry()
+func provideAudioService(log *slog.Logger, pool *pgxpool.Pool) *audiopkg.Service {
+	return audiopkg.NewPostgresService(log, pool)
 }
 
-func provideVideoRegistry() *videopkg.Registry {
-	return videopkg.NewRegistry()
+func provideVideoService(log *slog.Logger, pool *pgxpool.Pool) *videopkg.Service {
+	return videopkg.NewPostgresService(log, pool)
 }
 
 func provideAudioTempStore() (*audiopkg.TempStore, error) {
@@ -710,8 +1149,63 @@ func startBackgroundTaskCleanup(lc fx.Lifecycle, mgr *background.Manager) {
 
 // inboundTranscriptionResult moved to the shared Channel module.
 
-func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *providers.Service {
-	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL(), cfg.Registry.ProvidersPath())
+func provideTemplateService(log *slog.Logger, pool *pgxpool.Pool) *template.Service {
+	return template.NewPostgresService(log, pool)
+}
+
+func provideProvidersService(log *slog.Logger, pool *pgxpool.Pool, templates *template.Service, cfg config.Config) *providers.Service {
+	modelexecution.ConfigureProviderUserAgent(version.Version, version.ShortCommitHash())
+	return providers.NewPostgresService(
+		log,
+		pool,
+		defaultProviderOAuthCallbackURL(),
+		templates,
+		cfg.Registry.ProvidersPath(),
+		providers.WithProbeSDK(modelexecution.ProbeSDK{}),
+	)
+}
+
+type modelProviderResolver struct {
+	service *providers.Service
+}
+
+func (r modelProviderResolver) ResolveModelProvider(ctx context.Context, providerID string) (modelcatalog.ResolvedProvider, error) {
+	record, err := r.service.LookupProvider(ctx, providerID)
+	if err != nil {
+		return modelcatalog.ResolvedProvider{}, err
+	}
+	credentials, err := r.service.ResolveModelCredentials(ctx, record)
+	if err != nil {
+		return modelcatalog.ResolvedProvider{}, err
+	}
+	return modelcatalog.ResolvedProvider{
+		ID:                    record.ID,
+		Name:                  record.Name,
+		ClientType:            modeldomain.ClientType(record.ClientType),
+		Enable:                record.Enable,
+		BaseURL:               providers.ProviderConfigString(record.Config, "base_url"),
+		APIKey:                credentials.APIKey,
+		CodexAccountID:        credentials.CodexAccountID,
+		PromptCacheTTL:        providers.ProviderConfigString(record.Config, "prompt_cache_ttl"),
+		ChatCompletionsCompat: providers.ProviderConfigString(record.Config, "chat_completions_compat"),
+	}, nil
+}
+
+func provideModelProviderResolver(service *providers.Service) modelcatalog.ProviderResolver {
+	return modelProviderResolver{service: service}
+}
+
+func provideModelsService(log *slog.Logger, pool *pgxpool.Pool, providerResolver modelcatalog.ProviderResolver) *modelcatalog.Service {
+	return modelcatalog.NewPostgresService(log, pool, providerResolver)
+}
+
+func provideModelExecutionResolver(modelsService *modelcatalog.Service, providerService *providers.Service, pool *pgxpool.Pool) *modelexecution.Resolver {
+	return modelexecution.NewPostgresResolver(
+		modelsService.ExecutionModelReader(),
+		pool,
+		providerService,
+		modelexecution.WithUserIDContext(oauth.WithUserID),
+	)
 }
 
 func defaultProviderOAuthCallbackURL() string {
@@ -726,25 +1220,24 @@ func startProviderTemplateSync(
 	lc fx.Lifecycle,
 	log *slog.Logger,
 	cfg config.Config,
-	queries dbstore.Queries,
+	pool *pgxpool.Pool,
 ) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			defs, err := registry.Load(log, cfg.Registry.ProvidersPath())
+			defs, err := template.Load(log, cfg.Registry.ProvidersPath())
 			if err != nil {
-				log.Warn("registry: failed to load provider definitions", slog.Any("error", err))
+				log.WarnContext(ctx, "registry: failed to load provider definitions", slog.Any("error", err))
 				defs = nil
 			}
-			templates := registry.ProviderTemplateDefinitions(defs)
-			if len(templates) == 0 {
+			if len(defs) == 0 {
 				return nil
 			}
-			return providertemplates.Sync(ctx, log, queries, templates)
+			return template.SyncCatalog(ctx, log, pool, defs)
 		},
 	})
 }
 
-func configureMemoryProviderRegistry(mpService *memprovider.Service, registry *memprovider.Registry) {
+func configureMemoryProviderRegistry(mpService *memcatalog.Service, registry *memregistry.Registry) {
 	mpService.SetRegistry(registry)
 }
 
@@ -764,7 +1257,7 @@ func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service)
 	})
 }
 
-func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
+func startContainerReconciliation(lc fx.Lifecycle, manager workspace.Service, _ *runtimehttp.ContainerdHandler, _ *mcp.ToolGatewayService) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			go manager.ReconcileContainers(ctx)
@@ -773,99 +1266,40 @@ func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _
 	})
 }
 
-// EnsureAdminUser bootstraps the admin account on first start. Exported
-// for the composing commands that host the HTTP server.
-func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service, cfg config.Config) error {
-	if accountStore == nil {
-		return errors.New("account store not configured")
-	}
-	count, err := accountStore.CountAccounts(ctx)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-
-	username := strings.TrimSpace(cfg.Admin.Username)
-	password := strings.TrimSpace(cfg.Admin.Password)
-	email := strings.TrimSpace(cfg.Admin.Email)
-	if username == "" || password == "" {
-		return errors.New("admin username/password required in config.toml")
-	}
-	if password == "change-your-password-here" {
-		log.Warn("admin password uses default placeholder; please update config.toml")
-	}
-
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-
-	user, err := accountStore.CreateUser(ctx, dbstore.CreateUserInput{
-		IsActive: true,
-		Metadata: []byte("{}"),
-	})
-	if err != nil {
-		return fmt.Errorf("create admin user: %w", err)
-	}
-
-	_, err = accountStore.CreateAccount(ctx, dbstore.CreateAccountInput{
-		UserID:       user.ID,
-		Username:     username,
-		Email:        email,
-		PasswordHash: string(hashed),
-		Role:         "admin",
-		DisplayName:  username,
-		IsActive:     true,
-		DataRoot:     cfg.Workspace.DataRoot,
-	})
-	if err != nil {
-		return err
-	}
-	if emailService != nil {
-		if err := emailService.EnsureDefaultGmailProvider(ctx, user.ID); err != nil {
-			return fmt.Errorf("ensure admin gmail provider: %w", err)
-		}
-	}
-	log.Info("Admin user created", slog.String("username", username))
-	return nil
-}
-
 type lazyLLMClient struct {
-	modelsService   *models.Service
-	settingsService *settings.Service
-	queries         dbstore.Queries
-	timeout         time.Duration
-	logger          *slog.Logger
+	modelsService    *modelcatalog.Service
+	settingsService  *setting.Service
+	providerResolver modelcatalog.ProviderResolver
+	timeout          time.Duration
+	logger           *slog.Logger
 }
 
-func (c *lazyLLMClient) Extract(ctx context.Context, req memprovider.ExtractRequest) (memprovider.ExtractResponse, error) {
+func (c *lazyLLMClient) Extract(ctx context.Context, req memregistry.ExtractRequest) (memregistry.ExtractResponse, error) {
 	client, err := c.resolve(ctx, req.BotID)
 	if err != nil {
-		return memprovider.ExtractResponse{}, err
+		return memregistry.ExtractResponse{}, err
 	}
 	return client.Extract(ctx, req)
 }
 
-func (c *lazyLLMClient) Decide(ctx context.Context, req memprovider.DecideRequest) (memprovider.DecideResponse, error) {
+func (c *lazyLLMClient) Decide(ctx context.Context, req memregistry.DecideRequest) (memregistry.DecideResponse, error) {
 	client, err := c.resolve(ctx, req.BotID)
 	if err != nil {
-		return memprovider.DecideResponse{}, err
+		return memregistry.DecideResponse{}, err
 	}
 	return client.Decide(ctx, req)
 }
 
-func (c *lazyLLMClient) Compact(ctx context.Context, req memprovider.CompactRequest) (memprovider.CompactResponse, error) {
+func (c *lazyLLMClient) Compact(ctx context.Context, req memregistry.CompactRequest) (memregistry.CompactResponse, error) {
 	client, err := c.resolve(ctx, req.BotID)
 	if err != nil {
-		return memprovider.CompactResponse{}, err
+		return memregistry.CompactResponse{}, err
 	}
 	return client.Compact(ctx, req)
 }
 
-func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.LLM, error) {
-	if c.modelsService == nil || c.queries == nil {
+func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memregistry.LLM, error) {
+	if c.modelsService == nil || c.providerResolver == nil {
 		return nil, errors.New("models service not configured")
 	}
 
@@ -880,22 +1314,22 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 		}
 	}
 
-	memoryModel, memoryProvider, err := models.SelectMemoryModelForBot(ctx, c.modelsService, c.queries, chatModelID)
+	memoryModel, memoryProvider, err := modelcatalog.SelectMemoryModelForBot(ctx, c.modelsService, c.providerResolver, chatModelID)
 	if err != nil {
 		return nil, err
 	}
-	return memllm.New(memllm.Config{
+	return memoryassembly.NewFormationClient(memoryassembly.FormationClientConfig{
 		ModelID:        memoryModel.ModelID,
-		BaseURL:        strings.TrimRight(providers.ProviderConfigString(memoryProvider, "base_url"), "/"),
-		APIKey:         providers.ProviderConfigString(memoryProvider, "api_key"),
-		ClientType:     memoryProvider.ClientType,
+		BaseURL:        strings.TrimRight(memoryProvider.BaseURL, "/"),
+		APIKey:         memoryProvider.APIKey,
+		ClientType:     string(memoryProvider.ClientType),
 		Timeout:        c.timeout,
-		PromptCacheTTL: providers.ProviderConfigString(memoryProvider, "prompt_cache_ttl"),
+		PromptCacheTTL: memoryProvider.PromptCacheTTL,
 	}), nil
 }
 
 type skillLoaderAdapter struct {
-	handler *handlers.ContainerdHandler
+	handler *runtimehttp.ContainerdHandler
 }
 
 func (a *skillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]application.SkillEntry, error) {
@@ -921,7 +1355,7 @@ func (a *skillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]ap
 }
 
 type mediaAssetResolverAdapter struct {
-	media *media.Service
+	media *asset.Service
 }
 
 func (a *mediaAssetResolverAdapter) Stat(ctx context.Context, botID, contentHash string) (media.Asset, error) {
@@ -945,9 +1379,9 @@ func (a *mediaAssetResolverAdapter) Ingest(ctx context.Context, input media.Inge
 	return a.media.Ingest(ctx, input)
 }
 
-func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, storageKey string) (messaging.AssetMeta, error) {
+func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, storageKey string) (delivery.AssetMeta, error) {
 	if a == nil || a.media == nil {
-		return messaging.AssetMeta{}, errors.New("media service not configured")
+		return delivery.AssetMeta{}, errors.New("media service not configured")
 	}
 	return a.media.GetByStorageKey(ctx, botID, storageKey)
 }
@@ -959,15 +1393,15 @@ func (a *mediaAssetResolverAdapter) AccessPath(ctx context.Context, asset media.
 	return a.media.AccessPath(ctx, asset)
 }
 
-func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (messaging.AssetMeta, error) {
+func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (delivery.AssetMeta, error) {
 	if a == nil || a.media == nil {
-		return messaging.AssetMeta{}, errors.New("media service not configured")
+		return delivery.AssetMeta{}, errors.New("media service not configured")
 	}
 	return a.media.IngestContainerFile(ctx, botID, containerPath)
 }
 
 type gatewayAssetLoaderAdapter struct {
-	media *media.Service
+	media *asset.Service
 }
 
 func (a *gatewayAssetLoaderAdapter) OpenForGateway(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
@@ -998,9 +1432,9 @@ func (a *gatewayAssetLoaderAdapter) AccessPathForGateway(ctx context.Context, bo
 
 // provideTurnService exposes the application service as Channel's only Agent
 // surface. Both chat and discuss turns run directly on the same service.
-func provideTurnService(service *application.Service) turn.Service {
+func provideTurnService(service *application.Service) agentdomain.Service {
 	// The self-hosted runtime binds its DB pool to the singleton team, so
-	// the service fails closed on any other TeamID (turn.ErrTeamNotServed).
+	// the service fails closed on any other TeamID (agentdomain.ErrTeamNotServed).
 	service.SetAllowedTeam(team.DefaultTeamID)
 	return service
 }
@@ -1009,8 +1443,8 @@ func provideTurnService(service *application.Service) turn.Service {
 // permission glue; both adapt bots/accounts onto the same
 // HasBotPermission shape.
 type applicationBotPermissionChecker struct {
-	bots     *bots.Service
-	accounts *accounts.Service
+	bots     *bot.Service
+	accounts *account.Service
 }
 
 func (a *applicationBotPermissionChecker) HasBotPermission(ctx context.Context, botID, accountID, permission string) (bool, error) {
@@ -1025,5 +1459,5 @@ func (a *applicationBotPermissionChecker) HasBotPermission(ctx context.Context, 
 	if err != nil {
 		return false, err
 	}
-	return bots.HasPermission(perms, permission), nil
+	return bot.HasPermission(perms, permission), nil
 }

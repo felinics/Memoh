@@ -25,7 +25,6 @@ const (
 	DefaultNamespace             = "default"
 	DefaultSocketPath            = "/run/containerd/containerd.sock"
 	DefaultDataRoot              = "data"
-	DefaultDataMount             = "/data"
 	DefaultCNIBinaryDir          = "/opt/cni/bin"
 	DefaultCNIConfigDir          = "/etc/cni/net.d"
 	DefaultJWTExpiresIn          = "24h"
@@ -141,15 +140,22 @@ type InternalRPCConfig struct {
 	SharedSecret  string `toml:"shared_secret" json:"-"`
 }
 
-func (c InternalRPCConfig) Validate() error {
+func (c InternalRPCConfig) ValidateServerInternalRPC() error {
+	if strings.TrimSpace(c.SharedSecret) == "" {
+		return errors.New("internal_rpc.shared_secret is required")
+	}
+	if strings.TrimSpace(c.ChannelTarget) == "" {
+		return errors.New("internal_rpc.channel_target is required")
+	}
+	return nil
+}
+
+func (c InternalRPCConfig) ValidateChannelInternalRPC() error {
 	if strings.TrimSpace(c.SharedSecret) == "" {
 		return errors.New("internal_rpc.shared_secret is required")
 	}
 	if strings.TrimSpace(c.ServerTarget) == "" {
 		return errors.New("internal_rpc.server_target is required")
-	}
-	if strings.TrimSpace(c.ChannelTarget) == "" {
-		return errors.New("internal_rpc.channel_target is required")
 	}
 	return nil
 }
@@ -693,15 +699,6 @@ func (cfg Config) validate() error {
 	return nil
 }
 
-// SplitChannelRuntime reports whether the channel runtime runs as a
-// separate process reached over the internal RPC. Setting the shared
-// secret opts into split mode (docker compose does); without it the
-// server embeds the full channel runtime, preserving the pre-split
-// all-in-one deployment for existing configs.
-func (cfg Config) SplitChannelRuntime() bool {
-	return strings.TrimSpace(cfg.InternalRPC.SharedSecret) != ""
-}
-
 // ValidateServerRuntime validates the settings required by the Server process.
 // It is intentionally separate from Load so migration commands do not require
 // runtime-to-runtime credentials.
@@ -712,7 +709,7 @@ func (cfg Config) ValidateServerRuntime() error {
 	if strings.TrimSpace(cfg.Server.RPCListenAddr) == "" {
 		return errors.New("server.rpc_listen_addr is required")
 	}
-	return cfg.InternalRPC.Validate()
+	return cfg.InternalRPC.ValidateServerInternalRPC()
 }
 
 // ValidateChannelRuntime validates the settings required by the Channel process.
@@ -723,7 +720,7 @@ func (cfg Config) ValidateChannelRuntime() error {
 	if strings.TrimSpace(cfg.Channel.RPCListenAddr) == "" {
 		return errors.New("channel.rpc_listen_addr is required")
 	}
-	return cfg.InternalRPC.Validate()
+	return cfg.InternalRPC.ValidateChannelInternalRPC()
 }
 
 func (cfg *Config) applyBridgeTLSEnvOverrides() {

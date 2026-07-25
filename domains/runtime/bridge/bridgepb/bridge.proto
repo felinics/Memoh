@@ -1,0 +1,193 @@
+syntax = "proto3";
+
+// memoh:plane=data
+package bridgepb;
+
+option go_package = "github.com/memohai/memoh/domains/runtime/bridge/bridgepb;bridgepb";
+
+service ContainerService {
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc ListDir(ListDirRequest) returns (ListDirResponse);
+  rpc Stat(StatRequest) returns (StatResponse);
+  rpc Mkdir(MkdirRequest) returns (MkdirResponse);
+  rpc Rename(RenameRequest) returns (RenameResponse);
+  rpc Exec(stream ExecInput) returns (stream ExecOutput);
+  rpc Tunnel(stream TunnelFrame) returns (stream TunnelFrame);
+  rpc ReverseHTTP(stream ReverseHTTPFrame) returns (stream ReverseHTTPFrame);
+  rpc ReadRaw(ReadRawRequest) returns (stream DataChunk);
+  rpc WriteRaw(stream WriteRawChunk) returns (WriteRawResponse);
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+}
+
+message ReadFileRequest {
+  string path = 1;
+  int32 line_offset = 2;
+  int32 n_lines = 3;
+}
+
+message ReadFileResponse {
+  string content = 1;
+  int32 total_lines = 2;
+  bool binary = 3;
+}
+
+message WriteFileRequest {
+  string path = 1;
+  bytes content = 2;
+}
+
+message WriteFileResponse {}
+
+message ListDirRequest {
+  string path = 1;
+  bool recursive = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+  int32 collapse_threshold = 5;
+}
+
+message FileEntry {
+  string path = 1;
+  bool is_dir = 2;
+  int64 size = 3;
+  string mode = 4;
+  string mod_time = 5;
+  string summary = 6;
+}
+
+message ListDirResponse {
+  repeated FileEntry entries = 1;
+  int32 total_count = 2;
+  bool truncated = 3;
+}
+
+message ExecInput {
+  string command = 1;
+  string work_dir = 2;
+  repeated string env = 3;
+  int32 timeout_seconds = 4;
+  bytes stdin_data = 5;
+  bool pty = 6;
+  TerminalResize resize = 7;
+  bool clean_env = 8;
+  repeated string unset_env = 9;
+}
+
+message TerminalResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message ExecOutput {
+  enum Stream {
+    STDOUT = 0;
+    STDERR = 1;
+    EXIT = 2;
+  }
+  Stream stream = 1;
+  bytes data = 2;
+  int32 exit_code = 3;
+}
+
+message TunnelOpen {
+  string address = 1;
+}
+
+message TunnelData {
+  bytes data = 1;
+}
+
+message TunnelClose {
+  string error = 1;
+}
+
+message TunnelFrame {
+  oneof frame {
+    TunnelOpen open = 1;
+    TunnelData data = 2;
+    TunnelClose close = 3;
+  }
+}
+
+message HTTPHeader {
+  string name = 1;
+  repeated string values = 2;
+}
+
+message ReverseHTTPRequest {
+  string id = 1;
+  string method = 2;
+  string url = 3;
+  repeated HTTPHeader headers = 4;
+  bytes body = 5;
+}
+
+message ReverseHTTPResponse {
+  string id = 1;
+  int32 status_code = 2;
+  repeated HTTPHeader headers = 3;
+  bytes body = 4;
+}
+
+message ReverseHTTPError {
+  string id = 1;
+  string error = 2;
+}
+
+message ReverseHTTPFrame {
+  oneof frame {
+    ReverseHTTPRequest request = 1;
+    ReverseHTTPResponse response = 2;
+    ReverseHTTPError error = 3;
+  }
+}
+
+message ReadRawRequest {
+  string path = 1;
+}
+
+message DataChunk {
+  bytes data = 1;
+}
+
+message WriteRawChunk {
+  string path = 1;
+  bytes data = 2;
+  // Terminal markers. Exactly one of complete/abort may be set, and when set
+  // path and data must both be empty. Bare EOF without complete aborts.
+  bool complete = 3;
+  bool abort = 4;
+}
+
+message WriteRawResponse {
+  int64 bytes_written = 1;
+}
+
+message DeleteFileRequest {
+  string path = 1;
+  bool recursive = 2;
+}
+
+message DeleteFileResponse {}
+
+message StatRequest {
+  string path = 1;
+}
+
+message StatResponse {
+  FileEntry entry = 1;
+}
+
+message MkdirRequest {
+  string path = 1;
+}
+
+message MkdirResponse {}
+
+message RenameRequest {
+  string old_path = 1;
+  string new_path = 2;
+}
+
+message RenameResponse {}

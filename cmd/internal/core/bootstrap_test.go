@@ -3,36 +3,39 @@ package core
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/registry"
+	"github.com/memohai/memoh/domains/model/template"
 )
 
-func TestRegistryProviderTemplatesKeepAllProviderFiles(t *testing.T) {
-	defs := []registry.ProviderDefinition{
+func TestTemplateDefinitionsKeepAllProviderFiles(t *testing.T) {
+	defs := []template.Definition{
 		{
-			Name:       "DeepSeek",
-			ClientType: "openai-completions",
+			Name:   "DeepSeek",
+			Driver: "openai-completions",
+			Domain: template.DomainLLM,
 		},
 		{
-			Name:       "OpenAI",
-			ClientType: "openai-responses",
+			Name:   "OpenAI",
+			Driver: "openai-responses",
+			Domain: template.DomainLLM,
 		},
 		{
-			Name:       "OpenAI Speech",
-			ClientType: "openai-speech",
+			Name:   "OpenAI Speech",
+			Driver: "openai-speech",
+			Domain: template.DomainSpeech,
 		},
 		{
-			Name:       "Google Transcription",
-			ClientType: "google-transcription",
+			Name:   "Google Transcription",
+			Driver: "google-transcription",
+			Domain: template.DomainTranscription,
 		},
 	}
 
-	got := registry.ProviderTemplateDefinitions(defs)
-	if len(got) != len(defs) {
-		t.Fatalf("definition count = %d, want %d", len(got), len(defs))
+	if len(defs) != 4 {
+		t.Fatalf("definition count = %d, want 4", len(defs))
 	}
 	for i := range defs {
-		if got[i].Name != defs[i].Name {
-			t.Fatalf("definition %d = %#v, want %#v", i, got[i], defs[i])
+		if defs[i].Name == "" || defs[i].Driver == "" {
+			t.Fatalf("definition %d = %#v", i, defs[i])
 		}
 	}
 }

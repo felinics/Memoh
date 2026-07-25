@@ -1,0 +1,863 @@
+[
+  {
+    "constraint": "bot_acl_rules_channel_identity_id_fkey",
+    "src": "bot_acl_rules",
+    "src_owner": "api",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "bot_acl_rules_created_by_user_id_fkey",
+    "src": "bot_acl_rules",
+    "src_owner": "api",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_acl_rules_team_id_fkey",
+    "src": "bot_acl_rules",
+    "src_owner": "api",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_channel_admins_channel_identity_id_fkey",
+    "src": "bot_channel_admins",
+    "src_owner": "api",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "bot_channel_admins_created_by_user_id_fkey",
+    "src": "bot_channel_admins",
+    "src_owner": "api",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_channel_admins_team_id_fkey",
+    "src": "bot_channel_admins",
+    "src_owner": "api",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_channel_configs_bot_id_fkey",
+    "src": "bot_channel_configs",
+    "src_owner": "channel",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_channel_configs_team_id_fkey",
+    "src": "bot_channel_configs",
+    "src_owner": "channel",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_channel_routes_bot_id_fkey",
+    "src": "bot_channel_routes",
+    "src_owner": "channel",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_channel_routes_team_id_fkey",
+    "src": "bot_channel_routes",
+    "src_owner": "channel",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_email_bindings_bot_id_fkey",
+    "src": "bot_email_bindings",
+    "src_owner": "channel",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_email_bindings_team_id_fkey",
+    "src": "bot_email_bindings",
+    "src_owner": "channel",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_heartbeat_logs_bot_id_fkey",
+    "src": "bot_heartbeat_logs",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_heartbeat_logs_model_id_fkey",
+    "src": "bot_heartbeat_logs",
+    "src_owner": "agent",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bot_heartbeat_logs_team_id_fkey",
+    "src": "bot_heartbeat_logs",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_history_message_assets_team_id_fkey",
+    "src": "bot_history_message_assets",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_history_message_compacts_bot_id_fkey",
+    "src": "bot_history_message_compacts",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_history_message_compacts_model_id_fkey",
+    "src": "bot_history_message_compacts",
+    "src_owner": "agent",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bot_history_message_compacts_team_id_fkey",
+    "src": "bot_history_message_compacts",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_history_messages_bot_id_fkey",
+    "src": "bot_history_messages",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_history_messages_event_id_fkey",
+    "src": "bot_history_messages",
+    "src_owner": "agent",
+    "dst": "bot_session_events",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "bot_history_messages_model_id_fkey",
+    "src": "bot_history_messages",
+    "src_owner": "agent",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bot_history_messages_sender_account_user_id_fkey",
+    "src": "bot_history_messages",
+    "src_owner": "agent",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_history_messages_sender_channel_identity_id_fkey",
+    "src": "bot_history_messages",
+    "src_owner": "agent",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "bot_history_messages_team_id_fkey",
+    "src": "bot_history_messages",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_plugin_installations_bot_id_fkey",
+    "src": "bot_plugin_installations",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_plugin_installations_team_id_fkey",
+    "src": "bot_plugin_installations",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_plugin_resources_team_id_fkey",
+    "src": "bot_plugin_resources",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_remote_runtime_bindings_bot_id_fkey",
+    "src": "bot_remote_runtime_bindings",
+    "src_owner": "runtime",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_remote_runtime_bindings_team_id_fkey",
+    "src": "bot_remote_runtime_bindings",
+    "src_owner": "runtime",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_session_discuss_cursors_session_id_fkey",
+    "src": "bot_session_discuss_cursors",
+    "src_owner": "channel",
+    "dst": "bot_sessions",
+    "dst_owner": "agent"
+  },
+  {
+    "constraint": "bot_session_discuss_cursors_team_id_fkey",
+    "src": "bot_session_discuss_cursors",
+    "src_owner": "channel",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_session_events_bot_id_fkey",
+    "src": "bot_session_events",
+    "src_owner": "channel",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_session_events_session_id_fkey",
+    "src": "bot_session_events",
+    "src_owner": "channel",
+    "dst": "bot_sessions",
+    "dst_owner": "agent"
+  },
+  {
+    "constraint": "bot_session_events_team_id_fkey",
+    "src": "bot_session_events",
+    "src_owner": "channel",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_sessions_bot_id_fkey",
+    "src": "bot_sessions",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_sessions_created_by_user_id_fkey",
+    "src": "bot_sessions",
+    "src_owner": "agent",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_sessions_route_id_fkey",
+    "src": "bot_sessions",
+    "src_owner": "agent",
+    "dst": "bot_channel_routes",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "bot_sessions_team_id_fkey",
+    "src": "bot_sessions",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_storage_bindings_bot_id_fkey",
+    "src": "bot_storage_bindings",
+    "src_owner": "media",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_storage_bindings_team_id_fkey",
+    "src": "bot_storage_bindings",
+    "src_owner": "media",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_user_grants_created_by_user_id_fkey",
+    "src": "bot_user_grants",
+    "src_owner": "api",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_user_grants_team_id_fkey",
+    "src": "bot_user_grants",
+    "src_owner": "api",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_user_grants_user_id_fkey",
+    "src": "bot_user_grants",
+    "src_owner": "api",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bot_workspace_resource_limits_bot_id_fkey",
+    "src": "bot_workspace_resource_limits",
+    "src_owner": "runtime",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "bot_workspace_resource_limits_team_id_fkey",
+    "src": "bot_workspace_resource_limits",
+    "src_owner": "runtime",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bots_chat_model_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bots_compaction_model_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bots_discuss_probe_model_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bots_fetch_provider_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "fetch_providers",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bots_heartbeat_model_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bots_image_model_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bots_memory_provider_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "memory_providers",
+    "dst_owner": "memory"
+  },
+  {
+    "constraint": "bots_owner_user_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bots_search_provider_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "search_providers",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bots_team_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "bots_transcription_model_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bots_tts_model_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "bots_video_model_id_fkey",
+    "src": "bots",
+    "src_owner": "api",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "channel_identities_team_id_fkey",
+    "src": "channel_identities",
+    "src_owner": "channel",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "channel_link_codes_consumed_channel_identity_id_fkey",
+    "src": "channel_link_codes",
+    "src_owner": "api",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "channel_link_codes_team_id_fkey",
+    "src": "channel_link_codes",
+    "src_owner": "api",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "channel_link_codes_user_id_fkey",
+    "src": "channel_link_codes",
+    "src_owner": "api",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "container_versions_team_id_fkey",
+    "src": "container_versions",
+    "src_owner": "runtime",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "containers_bot_id_fkey",
+    "src": "containers",
+    "src_owner": "runtime",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "containers_team_id_fkey",
+    "src": "containers",
+    "src_owner": "runtime",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "email_oauth_tokens_team_id_fkey",
+    "src": "email_oauth_tokens",
+    "src_owner": "channel",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "email_outbox_bot_id_fkey",
+    "src": "email_outbox",
+    "src_owner": "channel",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "email_outbox_team_id_fkey",
+    "src": "email_outbox",
+    "src_owner": "channel",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "email_providers_team_id_fkey",
+    "src": "email_providers",
+    "src_owner": "channel",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "email_providers_user_id_fkey",
+    "src": "email_providers",
+    "src_owner": "channel",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "fetch_providers_team_id_fkey",
+    "src": "fetch_providers",
+    "src_owner": "model",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "fk_bot_channel_routes_active_session",
+    "src": "bot_channel_routes",
+    "src_owner": "channel",
+    "dst": "bot_sessions",
+    "dst_owner": "agent"
+  },
+  {
+    "constraint": "lifecycle_events_team_id_fkey",
+    "src": "lifecycle_events",
+    "src_owner": "runtime",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "mcp_connections_bot_id_fkey",
+    "src": "mcp_connections",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "mcp_connections_team_id_fkey",
+    "src": "mcp_connections",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "mcp_oauth_tokens_team_id_fkey",
+    "src": "mcp_oauth_tokens",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "media_assets_bot_id_fkey",
+    "src": "media_assets",
+    "src_owner": "media",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "media_assets_team_id_fkey",
+    "src": "media_assets",
+    "src_owner": "media",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "memory_edges_bot_id_fkey",
+    "src": "memory_edges",
+    "src_owner": "memory",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "memory_edges_team_id_fkey",
+    "src": "memory_edges",
+    "src_owner": "memory",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "memory_nodes_bot_id_fkey",
+    "src": "memory_nodes",
+    "src_owner": "memory",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "memory_nodes_team_id_fkey",
+    "src": "memory_nodes",
+    "src_owner": "memory",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "memory_providers_team_id_fkey",
+    "src": "memory_providers",
+    "src_owner": "memory",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "model_variants_team_id_fkey",
+    "src": "model_variants",
+    "src_owner": "model",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "models_team_id_fkey",
+    "src": "models",
+    "src_owner": "model",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "provider_oauth_tokens_team_id_fkey",
+    "src": "provider_oauth_tokens",
+    "src_owner": "model",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "providers_team_id_fkey",
+    "src": "providers",
+    "src_owner": "model",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "schedule_bot_id_fkey",
+    "src": "schedule",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "schedule_logs_bot_id_fkey",
+    "src": "schedule_logs",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "schedule_logs_model_id_fkey",
+    "src": "schedule_logs",
+    "src_owner": "agent",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "schedule_logs_team_id_fkey",
+    "src": "schedule_logs",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "schedule_team_id_fkey",
+    "src": "schedule",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "search_providers_team_id_fkey",
+    "src": "search_providers",
+    "src_owner": "model",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "snapshots_team_id_fkey",
+    "src": "snapshots",
+    "src_owner": "runtime",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "storage_providers_team_id_fkey",
+    "src": "storage_providers",
+    "src_owner": "media",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "subagent_configs_model_uuid_fkey",
+    "src": "subagent_configs",
+    "src_owner": "agent",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "subagent_configs_team_id_fkey",
+    "src": "subagent_configs",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "tasks_team_id_fkey",
+    "src": "tasks",
+    "src_owner": "runtime",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "team_members_title_model_id_fkey",
+    "src": "team_members",
+    "src_owner": "iam",
+    "dst": "models",
+    "dst_owner": "model"
+  },
+  {
+    "constraint": "tool_approval_requests_bot_id_fkey",
+    "src": "tool_approval_requests",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "tool_approval_requests_channel_identity_id_fkey",
+    "src": "tool_approval_requests",
+    "src_owner": "agent",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "tool_approval_requests_decided_by_channel_identity_id_fkey",
+    "src": "tool_approval_requests",
+    "src_owner": "agent",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "tool_approval_requests_requested_by_channel_identity_id_fkey",
+    "src": "tool_approval_requests",
+    "src_owner": "agent",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "tool_approval_requests_route_id_fkey",
+    "src": "tool_approval_requests",
+    "src_owner": "agent",
+    "dst": "bot_channel_routes",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "tool_approval_requests_team_id_fkey",
+    "src": "tool_approval_requests",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "tts_models_team_id_fkey",
+    "src": "tts_models",
+    "src_owner": "model",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "tts_providers_team_id_fkey",
+    "src": "tts_providers",
+    "src_owner": "model",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "user_channel_bindings_team_id_fkey",
+    "src": "user_channel_bindings",
+    "src_owner": "api",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "user_channel_bindings_user_id_fkey",
+    "src": "user_channel_bindings",
+    "src_owner": "api",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "user_channel_identity_bindings_channel_identity_id_fkey",
+    "src": "user_channel_identity_bindings",
+    "src_owner": "api",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "user_channel_identity_bindings_team_id_fkey",
+    "src": "user_channel_identity_bindings",
+    "src_owner": "api",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "user_channel_identity_bindings_user_id_fkey",
+    "src": "user_channel_identity_bindings",
+    "src_owner": "api",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "user_input_requests_bot_id_fkey",
+    "src": "user_input_requests",
+    "src_owner": "agent",
+    "dst": "bots",
+    "dst_owner": "api"
+  },
+  {
+    "constraint": "user_input_requests_channel_identity_id_fkey",
+    "src": "user_input_requests",
+    "src_owner": "agent",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "user_input_requests_requested_by_channel_identity_id_fkey",
+    "src": "user_input_requests",
+    "src_owner": "agent",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "user_input_requests_responded_by_channel_identity_id_fkey",
+    "src": "user_input_requests",
+    "src_owner": "agent",
+    "dst": "channel_identities",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "user_input_requests_route_id_fkey",
+    "src": "user_input_requests",
+    "src_owner": "agent",
+    "dst": "bot_channel_routes",
+    "dst_owner": "channel"
+  },
+  {
+    "constraint": "user_input_requests_team_id_fkey",
+    "src": "user_input_requests",
+    "src_owner": "agent",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "user_provider_oauth_tokens_team_id_fkey",
+    "src": "user_provider_oauth_tokens",
+    "src_owner": "model",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "user_provider_oauth_tokens_user_id_fkey",
+    "src": "user_provider_oauth_tokens",
+    "src_owner": "model",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "user_runtimes_team_id_fkey",
+    "src": "user_runtimes",
+    "src_owner": "runtime",
+    "dst": "teams",
+    "dst_owner": "iam"
+  },
+  {
+    "constraint": "user_runtimes_user_id_fkey",
+    "src": "user_runtimes",
+    "src_owner": "runtime",
+    "dst": "team_members",
+    "dst_owner": "iam"
+  }
+]

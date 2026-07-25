@@ -1,0 +1,27 @@
+# v1 -> v2 one-shot bridge plan (not an owner migration stream)
+from_epoch: 1
+to_epoch: 2
+requires:
+  schema_migrations_version: 119
+  dirty: false
+steps:
+  - id: preflight
+    sql: sql/01_preflight.sql
+  - id: create_schemas
+    sql: sql/02_create_schemas.sql
+  - id: drop_cross_owner_fks
+    sql: sql/03_drop_cross_owner_fks.sql
+    cross_owner_fk_list: cross_owner_fks.json
+  - id: move_types_functions_sequences
+    sql: sql/04_move_types_functions_sequences.sql
+  - id: move_tables
+    sql: sql/05_move_tables.sql
+  - id: fix_platform_functions
+    sql: sql/06_fix_platform_functions.sql
+    note: Also reassigns owner-schema objects to memoh_migrate and applies business-role DML grants (fresh/upgrade parity).
+  - id: verify
+    sql: sql/07_verify.sql
+  - id: stamp_ready
+    sql: sql/08_stamp_ready.sql
+    stamp_owners_to: 1
+    note: Goose creates schema-qualified goose_db_version tables; Migrator stamps 00001 after verify.

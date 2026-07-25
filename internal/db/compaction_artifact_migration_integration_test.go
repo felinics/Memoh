@@ -10,9 +10,187 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
+
+const listCompactionArtifactLineageBySessionSQL = `
+SELECT c.id, c.bot_id
+FROM bot_history_message_compacts c
+JOIN bot_sessions owner_session
+  ON owner_session.id = $1
+ AND owner_session.bot_id = c.bot_id
+ AND owner_session.team_id = c.team_id
+WHERE c.team_id = public.memoh_current_team_id()
+  AND c.session_id = owner_session.id
+  AND c.compaction_epoch = owner_session.compaction_epoch
+  AND (
+    c.status = 'ok'
+    OR EXISTS (
+      SELECT 1
+      FROM bot_history_message_compacts parent
+      WHERE parent.team_id = c.team_id
+        AND parent.bot_id = owner_session.bot_id
+        AND parent.session_id = owner_session.id
+        AND parent.compaction_epoch = owner_session.compaction_epoch
+        AND parent.status = 'ok'
+        AND parent.superseded_by = c.id
+    )
+  )
+ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC
+`
+
+const listCompactionArtifactParentIDsBySuccessorSQL = `
+SELECT parent.id
+FROM bot_history_message_compacts parent
+JOIN bot_sessions owner_session
+  ON owner_session.id = $1::uuid
+ AND owner_session.bot_id = $2
+ AND owner_session.team_id = parent.team_id
+WHERE parent.team_id = public.memoh_current_team_id()
+  AND parent.superseded_by = $3
+  AND parent.bot_id = owner_session.bot_id
+  AND parent.session_id = owner_session.id
+  AND parent.compaction_epoch = owner_session.compaction_epoch
+  AND parent.status = 'ok'
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_message_compacts successor
+    WHERE successor.team_id = parent.team_id
+      AND successor.id = parent.superseded_by
+      AND successor.bot_id = owner_session.bot_id
+      AND successor.session_id = owner_session.id
+      AND successor.compaction_epoch = owner_session.compaction_epoch
+  )
+ORDER BY parent.id ASC
+`
+
+const clearHistoryBySessionSQL = `
+WITH target_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = $1
+  FOR UPDATE
+),
+invalidated_session AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  FROM target_session target
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
+  RETURNING session.id
+),
+target_compaction_artifacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.session_id = $1
+    AND (SELECT count(*) FROM target_session) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  USING target_compaction_artifacts target
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = target.id
+  RETURNING compact.id
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.session_id = $1
+    AND (SELECT count(*) FROM target_session) >= 0
+    AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+  ORDER BY message.id
+  FOR UPDATE
+)
+DELETE FROM bot_history_messages AS message
+USING target_messages target
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.id = target.id
+`
+
+const clearHistoryByBotSQL = `
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.bot_id = $1
+  ORDER BY session.id
+  FOR UPDATE
+),
+invalidated_sessions AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  FROM target_sessions target
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
+  RETURNING session.id
+),
+target_compaction_artifacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  USING target_compaction_artifacts target
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = target.id
+  RETURNING compact.id
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+    AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+  ORDER BY message.id
+  FOR UPDATE
+)
+DELETE FROM bot_history_messages AS message
+USING target_messages target
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.id = target.id
+`
+
+const deleteCompactionLogsByBotSQL = `
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.bot_id = $1
+  ORDER BY session.id
+  FOR UPDATE
+),
+invalidated_sessions AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  FROM target_sessions target
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
+  RETURNING session.id
+),
+target_compaction_logs AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
+)
+DELETE FROM bot_history_message_compacts AS compacts
+USING target_compaction_logs target
+WHERE compacts.team_id = public.memoh_current_team_id()
+  AND compacts.id = target.id
+`
 
 func TestCompactionArtifactMigrationPostgresPath(t *testing.T) {
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
@@ -133,7 +311,7 @@ INSERT INTO bot_history_messages (
 		t.Fatalf("simulate legacy history clear: %v", err)
 	}
 
-	up0108 := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_artifacts.up.sql")
+	up0108 := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0108_compaction_artifacts.up.sql")
 	if _, err := tx.Exec(ctx, up0108); err != nil {
 		t.Fatalf("apply 0108 up: %v", err)
 	}
@@ -143,7 +321,7 @@ INSERT INTO bot_history_messages (
 	assertIndexExists(t, ctx, tx, "idx_compacts_active_session", true)
 	assertForeignKeyDeleteAction(t, ctx, tx, "bot_history_message_compacts", "bot_history_message_compacts_superseded_by_fkey", "n")
 
-	up0109 := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_epoch.up.sql")
+	up0109 := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0109_compaction_epoch.up.sql")
 	if _, err := tx.Exec(ctx, up0109); err != nil {
 		t.Fatalf("apply 0109 up: %v", err)
 	}
@@ -158,11 +336,7 @@ INSERT INTO bot_history_messages (
 	assertCompactionEpoch(t, ctx, tx, "bot_history_message_compacts", repairArtifactID, 0)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", clearedSessionID, 1)
 	assertCompactionEpoch(t, ctx, tx, "bot_history_message_compacts", clearedArtifactID, 0)
-	parsedClearedSessionID, err := ParseUUID(clearedSessionID)
-	if err != nil {
-		t.Fatalf("parse cleared session id: %v", err)
-	}
-	clearedLineage, err := sqlc.New(tx).ListCompactionArtifactLineageBySession(ctx, parsedClearedSessionID)
+	clearedLineage, err := listCompactionArtifactLineageBySession(ctx, tx, clearedSessionID)
 	if err != nil {
 		t.Fatalf("query cleared session lineage: %v", err)
 	}
@@ -238,66 +412,45 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 		t.Fatalf("insert compacted messages: %v", err)
 	}
 
-	queries := sqlc.New(tx)
-	assertGeneratedLineageQueries(t, ctx, queries, botID, sessionID, []string{parentOneID, parentTwoID}, activeID)
+	assertGeneratedLineageQueries(t, ctx, tx, botID, sessionID, []string{parentOneID, parentTwoID}, activeID)
 
-	parsedSessionID, err := ParseUUID(sessionID)
-	if err != nil {
-		t.Fatalf("parse session id: %v", err)
-	}
-	if err := queries.ClearHistoryBySession(ctx, parsedSessionID); err != nil {
+	if _, err := tx.Exec(ctx, clearHistoryBySessionSQL, sessionID); err != nil {
 		t.Fatalf("delete session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 2)
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 4)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 1)
 
-	parsedForeignBotID, err := ParseUUID(foreignBotID)
-	if err != nil {
-		t.Fatalf("parse foreign bot id: %v", err)
-	}
-	if err := queries.ClearHistoryByBot(ctx, parsedForeignBotID); err != nil {
+	if _, err := tx.Exec(ctx, clearHistoryByBotSQL, foreignBotID); err != nil {
 		t.Fatalf("delete bot history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", foreignSessionID, 1)
 
-	parsedRepairSessionID, err := ParseUUID(repairSessionID)
-	if err != nil {
-		t.Fatalf("parse repair session id: %v", err)
-	}
-	if err := queries.ClearHistoryBySession(ctx, parsedRepairSessionID); err != nil {
+	if _, err := tx.Exec(ctx, clearHistoryBySessionSQL, repairSessionID); err != nil {
 		t.Fatalf("delete repaired session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 0)
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", repairSessionID, 2)
-	if err := queries.ClearHistoryBySession(ctx, parsedClearedSessionID); err != nil {
+	if _, err := tx.Exec(ctx, clearHistoryBySessionSQL, clearedSessionID); err != nil {
 		t.Fatalf("delete cleared session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", clearedSessionID, 2)
 
-	parsedBotID, err := ParseUUID(botID)
-	if err != nil {
-		t.Fatalf("parse bot id: %v", err)
-	}
-	if err := queries.DeleteCompactionLogsByBot(ctx, parsedBotID); err != nil {
+	if _, err := tx.Exec(ctx, deleteCompactionLogsByBotSQL, botID); err != nil {
 		t.Fatalf("fence in-flight compaction before deleting logs: %v", err)
 	}
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 2)
 
-	parsedLogOnlyBotID, err := ParseUUID(logOnlyBotID)
-	if err != nil {
-		t.Fatalf("parse log-only bot id: %v", err)
-	}
-	if err := queries.DeleteCompactionLogsByBot(ctx, parsedLogOnlyBotID); err != nil {
+	if _, err := tx.Exec(ctx, deleteCompactionLogsByBotSQL, logOnlyBotID); err != nil {
 		t.Fatalf("delete artifacts through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
 
-	down0109 := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_epoch.down.sql")
+	down0109 := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0109_compaction_epoch.down.sql")
 	if _, err := tx.Exec(ctx, down0109); err != nil {
 		t.Fatalf("apply 0109 down: %v", err)
 	}
@@ -306,7 +459,7 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 	assertColumnExists(t, ctx, tx, schema, "bot_sessions", "compaction_epoch", false)
 	assertColumnExists(t, ctx, tx, schema, "bot_history_message_compacts", "compaction_epoch", false)
 
-	down0108 := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_artifacts.down.sql")
+	down0108 := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0108_compaction_artifacts.down.sql")
 	if _, err := tx.Exec(ctx, down0108); err != nil {
 		t.Fatalf("apply 0108 down: %v", err)
 	}
@@ -330,21 +483,35 @@ WHERE table_schema = $1
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
 }
 
-func assertGeneratedLineageQueries(t *testing.T, ctx context.Context, queries *sqlc.Queries, botID, sessionID string, parentIDs []string, activeID string) {
+type compactionLineageRow struct {
+	ID    uuid.UUID
+	BotID uuid.UUID
+}
+
+func listCompactionArtifactLineageBySession(ctx context.Context, tx pgx.Tx, sessionID string) ([]compactionLineageRow, error) {
+	rows, err := tx.Query(ctx, listCompactionArtifactLineageBySessionSQL, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []compactionLineageRow
+	for rows.Next() {
+		var row compactionLineageRow
+		if err := rows.Scan(&row.ID, &row.BotID); err != nil {
+			return nil, err
+		}
+		items = append(items, row)
+	}
+	return items, rows.Err()
+}
+
+func assertGeneratedLineageQueries(t *testing.T, ctx context.Context, tx pgx.Tx, botID, sessionID string, parentIDs []string, activeID string) {
 	t.Helper()
-	parsedBotID, err := ParseUUID(botID)
+	parsedBotID, err := uuid.Parse(botID)
 	if err != nil {
 		t.Fatalf("parse bot id: %v", err)
 	}
-	parsedSessionID, err := ParseUUID(sessionID)
-	if err != nil {
-		t.Fatalf("parse session id: %v", err)
-	}
-	parsedActiveID, err := ParseUUID(activeID)
-	if err != nil {
-		t.Fatalf("parse active id: %v", err)
-	}
-	rows, err := queries.ListCompactionArtifactLineageBySession(ctx, parsedSessionID)
+	rows, err := listCompactionArtifactLineageBySession(ctx, tx, sessionID)
 	if err != nil {
 		t.Fatalf("query session lineage: %v", err)
 	}
@@ -360,17 +527,21 @@ func assertGeneratedLineageQueries(t *testing.T, ctx context.Context, queries *s
 			t.Fatalf("session lineage query omitted %s: %#v", id, seen)
 		}
 	}
-	parents, err := queries.ListCompactionArtifactParentIDsBySuccessor(ctx, sqlc.ListCompactionArtifactParentIDsBySuccessorParams{
-		SuccessorID: parsedActiveID,
-		BotID:       parsedBotID,
-		SessionID:   parsedSessionID,
-	})
+	parentRows, err := tx.Query(ctx, listCompactionArtifactParentIDsBySuccessorSQL, sessionID, botID, activeID)
 	if err != nil {
 		t.Fatalf("query reverse lineage edges: %v", err)
 	}
-	gotParents := make([]string, 0, len(parents))
-	for _, parent := range parents {
+	defer parentRows.Close()
+	gotParents := make([]string, 0, len(parentIDs))
+	for parentRows.Next() {
+		var parent uuid.UUID
+		if err := parentRows.Scan(&parent); err != nil {
+			t.Fatalf("scan reverse lineage parent: %v", err)
+		}
 		gotParents = append(gotParents, parent.String())
+	}
+	if err := parentRows.Err(); err != nil {
+		t.Fatalf("iterate reverse lineage parents: %v", err)
 	}
 	if !reflect.DeepEqual(gotParents, parentIDs) {
 		t.Fatalf("reverse lineage parents = %#v, want %#v", gotParents, parentIDs)

@@ -20,9 +20,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	embeddeddb "github.com/memohai/memoh/db"
+	team "github.com/memohai/memoh/domains/iam/team"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/team"
 )
 
 func sqlState(err error) string {
@@ -116,7 +116,7 @@ func pgConfigFromDSN(t *testing.T, dsn string) config.PostgresConfig {
 // postgresMigrationsFS returns the embedded PostgreSQL migrations sub-tree.
 func postgresMigrationsFS(t *testing.T) fs.FS {
 	t.Helper()
-	sub, err := fs.Sub(embeddeddb.MigrationsFS, "postgres/migrations")
+	sub, err := fs.Sub(embeddeddb.MigrationsFS, "postgres/legacy/v1/migrations")
 	if err != nil {
 		t.Fatalf("migrations fs: %v", err)
 	}

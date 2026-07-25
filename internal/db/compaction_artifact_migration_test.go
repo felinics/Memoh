@@ -8,8 +8,8 @@ import (
 func TestCompactionArtifactMigrationPreservesPublished0108Schema(t *testing.T) {
 	t.Parallel()
 
-	up := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_artifacts.up.sql")
-	down := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_artifacts.down.sql")
+	up := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0108_compaction_artifacts.up.sql")
+	down := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0108_compaction_artifacts.down.sql")
 
 	if !strings.HasPrefix(up, "-- 0108_compaction_artifacts\n-- Persist summary artifact") ||
 		!strings.HasPrefix(down, "-- 0108_compaction_artifacts\n-- Remove summary artifact") {
@@ -45,7 +45,7 @@ func TestCompactionArtifactMigrationPreservesPublished0108Schema(t *testing.T) {
 func TestCompactionArtifactCanonicalSchemaMatchesPublished0108(t *testing.T) {
 	t.Parallel()
 
-	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
+	baseline := readEmbeddedMigration(t, "postgres/legacy/v1/migrations/0001_init.up.sql")
 
 	for _, required := range []string{
 		"superseded_by UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL",

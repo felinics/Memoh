@@ -49,6 +49,21 @@ func MigrateUp(logger *slog.Logger, cfg config.PGVectorConfig) error {
 	return validateMigrationStatus(status, true)
 }
 
+// VerifyCompatibility checks the optional vector schema without mutating it.
+// Business process startup uses this path; schema changes belong to the
+// explicit migration command.
+func VerifyCompatibility(cfg config.PGVectorConfig) error {
+	migrations, err := MigrationsFS()
+	if err != nil {
+		return err
+	}
+	status, err := db.ReadMigrationStatus(cfg.PostgresConfig(), migrations)
+	if err != nil {
+		return fmt.Errorf("pgvector migration status: %w", err)
+	}
+	return validateMigrationStatus(status, true)
+}
+
 func validateMigrationStatus(status db.MigrationStatus, requireCurrent bool) error {
 	if status.Dirty {
 		return fmt.Errorf("pgvector schema version %d is dirty", status.Version)

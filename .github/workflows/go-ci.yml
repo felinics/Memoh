@@ -99,7 +99,7 @@ jobs:
       - name: Test versioned pgvector schema and queries
         env:
           TEST_PGVECTOR_DSN: postgres://memoh:memoh123@127.0.0.1:5432/memoh_vector_test?sslmode=disable
-        run: go test -count=1 ./internal/db/pgvector ./internal/memory/adapters/builtin
+        run: go test -count=1 ./internal/db/pgvector ./domains/memory/internal/provider/builtin
 
   session-runtime-backend:
     name: Session Runtime (${{ matrix.target }})
@@ -136,7 +136,7 @@ jobs:
           MEMOH_TEST_DISTRIBUTED_REQUIRED: "1"
           RUNTIME_URL: redis://127.0.0.1:${{ job.services.runtime.ports['6379'] }}/0
           RUNTIME_ENV_NAME: ${{ matrix.env_name }}
-        run: env "$RUNTIME_ENV_NAME=$RUNTIME_URL" go test -v -race -count=1 -timeout 90s ./internal/agent/runtime/session
+        run: env "$RUNTIME_ENV_NAME=$RUNTIME_URL" go test -v -race -count=1 -timeout 90s ./domains/agent/internal/session
 
   session-runtime-postgres:
     name: Session Runtime (PostgreSQL fencing)
@@ -169,8 +169,8 @@ jobs:
           TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/memoh_runtime_test?sslmode=disable
         run: |
           go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgresRuntimeFence' ./internal/runtimefence
+            -run '^TestPostgresRuntimeFence' ./domains/agent/chat/runtimefence
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgresRuntimeFence' ./internal/chat/message
+            -run '^TestPostgresRuntimeFence' ./domains/agent/chat/message
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgresRuntimeFence' ./internal/agent/runtime/acp
+            -run '^TestPostgresRuntimeFence' ./domains/agent/acp

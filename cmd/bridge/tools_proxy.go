@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 	"github.com/memohai/memoh/internal/logger"
-	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 func startACPToolsProxy(ctx context.Context, handler http.Handler) {
@@ -23,13 +23,13 @@ func startACPToolsProxy(ctx context.Context, handler http.Handler) {
 		addr = bridge.ACPToolsProxyAddr
 	}
 	if !isLoopbackTCPAddr(addr) {
-		logger.FromContext(ctx).Warn("ACP tools proxy skipped; proxy addr must be loopback", slog.String("addr", addr))
+		logger.FromContext(ctx).WarnContext(ctx, "ACP tools proxy skipped; proxy addr must be loopback", slog.String("addr", addr))
 		return
 	}
 
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
-		logger.FromContext(ctx).Warn("ACP tools proxy listen failed", slog.String("addr", addr), slog.Any("error", err))
+		logger.FromContext(ctx).WarnContext(ctx, "ACP tools proxy listen failed", slog.String("addr", addr), slog.Any("error", err))
 		return
 	}
 
@@ -44,9 +44,9 @@ func startACPToolsProxy(ctx context.Context, handler http.Handler) {
 		_ = server.Shutdown(shutdownCtx)
 	}()
 	go func() {
-		logger.FromContext(ctx).Info("ACP tools proxy listening", slog.String("addr", addr))
+		logger.FromContext(ctx).InfoContext(ctx, "ACP tools proxy listening", slog.String("addr", addr))
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.FromContext(ctx).Warn("ACP tools proxy stopped", slog.Any("error", err))
+			logger.FromContext(ctx).WarnContext(ctx, "ACP tools proxy stopped", slog.Any("error", err))
 		}
 	}()
 }

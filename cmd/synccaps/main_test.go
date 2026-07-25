@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/capabilities"
+	"github.com/memohai/memoh/domains/model/capability"
 )
 
 func TestEnrichFileClearsStaleReasoningWhenRegistrySaysNone(t *testing.T) {
 	t.Parallel()
 
-	resolver, err := capabilities.NewResolver([]byte(`{
+	resolver, err := capability.NewResolver([]byte(`{
 		"plain-model": {"mode": "chat", "supports_reasoning": false}
 	}`))
 	if err != nil {
@@ -63,7 +63,7 @@ models:
 func TestEnrichFileLeavesPlainNoReasonModelUntouched(t *testing.T) {
 	t.Parallel()
 
-	resolver, err := capabilities.NewResolver([]byte(`{
+	resolver, err := capability.NewResolver([]byte(`{
 		"plain-model": {"mode": "chat", "supports_reasoning": false}
 	}`))
 	if err != nil {
@@ -104,7 +104,7 @@ models:
 func TestEnrichFilePreservesCompactModelSpacing(t *testing.T) {
 	t.Parallel()
 
-	resolver, err := capabilities.NewResolver([]byte(`{
+	resolver, err := capability.NewResolver([]byte(`{
 		"reasoning-a": {"mode": "chat", "supports_reasoning": true},
 		"reasoning-b": {"mode": "chat", "supports_reasoning": true}
 	}`))

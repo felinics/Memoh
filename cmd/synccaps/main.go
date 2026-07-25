@@ -26,7 +26,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/memohai/memoh/internal/capabilities"
+	"github.com/memohai/memoh/domains/model/capability"
 )
 
 const defaultLitellmURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
@@ -53,7 +53,7 @@ func main() {
 	if err != nil {
 		fail("load registry: %v", err)
 	}
-	resolver, err := capabilities.NewResolver(body)
+	resolver, err := capability.NewResolver(body)
 	if err != nil {
 		fail("parse registry: %v", err)
 	}
@@ -108,7 +108,7 @@ func loadRegistry(src string) ([]byte, error) {
 
 // enrichFile applies derived capabilities to one provider template and returns
 // the number of models whose thinking_mode/reasoning_efforts changed.
-func enrichFile(path string, resolver *capabilities.Resolver, check bool) (int, error) {
+func enrichFile(path string, resolver *capability.Resolver, check bool) (int, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // operator-managed provider template
 	if err != nil {
 		if os.IsNotExist(err) {

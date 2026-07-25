@@ -34,38 +34,38 @@
 /conf/                           @memohai/backend
 /db/                             @memohai/backend
 /internal/                       @memohai/backend
+/domains/api/                    @memohai/backend
 /packages/sdk/                   @memohai/backend
 /openapi-ts.config.ts            @memohai/backend
 /sqlc.yaml                       @memohai/backend
 
 # Agent loop, orchestration, context, and approval flow
-/internal/agent/                 @memohai/agent-loop
-/internal/chat/                  @memohai/agent-loop
-/internal/healthcheck/checkers/mcp/ @memohai/agent-loop
-/internal/heartbeat/             @memohai/agent-loop
-/internal/hooks/                 @memohai/agent-loop
-/internal/mcp/                   @memohai/agent-loop
-/internal/memory/                @memohai/agent-loop
-/internal/prune/                 @memohai/agent-loop
-/internal/schedule/              @memohai/agent-loop
-/internal/skills/                @memohai/agent-loop
+/domains/agent/                  @memohai/agent-loop
+/domains/agent/chat/             @memohai/agent-loop
+/domains/agent/internal/health/mcp/ @memohai/agent-loop
+/domains/agent/automation/      @memohai/agent-loop
+/domains/agent/extension/       @memohai/agent-loop
+/domains/agent/mcp/             @memohai/agent-loop
+/domains/memory/                 @memohai/agent-loop
+/domains/agent/chat/text/       @memohai/agent-loop
 
 # Channels, messaging, identities, and commands
-/internal/acl/                   @memohai/channel
-/internal/channel/               @memohai/channel
-/internal/channelaccess/         @memohai/channel
-/internal/chat/event/            @memohai/channel
-/internal/chat/message/          @memohai/channel
-/internal/command/               @memohai/channel
-/internal/commandsyntax/         @memohai/channel
-/internal/email/                 @memohai/channel
-/internal/healthcheck/checkers/channel/ @memohai/channel
+/domains/channel/                @memohai/channel
+/domains/api/http/chat/          @memohai/channel
+/domains/api/access/             @memohai/channel
+/domains/api/access/acl/         @memohai/channel
+/domains/channel/http/           @memohai/channel
+/domains/agent/chat/event/      @memohai/channel
+/domains/agent/chat/message/    @memohai/channel
+/domains/agent/command/         @memohai/channel
+/domains/agent/command/syntax/  @memohai/channel
+/domains/channel/internal/health/ @memohai/channel
 /internal/i18n/                  @memohai/channel
-/internal/identity/              @memohai/channel
-/internal/messageconv/           @memohai/channel
-/internal/messaging/             @memohai/channel
-/internal/slash/                 @memohai/channel
-/internal/webhooktunnel/         @memohai/channel
+/domains/agent/chat/convert/    @memohai/channel
+/domains/agent/command/slash/   @memohai/channel
+/internal/rpc/channel/           @memohai/channel
+/internal/rpc/channel/turn/      @memohai/agent-loop
+/internal/rpc/runtime/channel/   @memohai/channel
 
 # Workspace runtime, ACP, containers, display, and bridge tooling
 /.dockerignore                   @memohai/runtime
@@ -78,15 +78,19 @@
 /packages/runtime/               @memohai/runtime
 /cmd/bridge/                     @memohai/runtime
 /cmd/gen-bridge-mtls/            @memohai/runtime
-/internal/agent/adapter/acpprofile/ @memohai/runtime
-/internal/agent/decision/feedback/ @memohai/runtime
-/internal/agent/runtime/acp/     @memohai/runtime
-/internal/agent/runtime/session/ @memohai/runtime
+/domains/media/                  @memohai/runtime
+/domains/runtime/                @memohai/runtime
+/domains/runtime/bridge/client/  @memohai/runtime
+/domains/runtime/bridge/bridgepb/ @memohai/runtime
+/domains/runtime/bridge/server/  @memohai/runtime
+/domains/agent/adapter/acp/profile/ @memohai/runtime
+/domains/agent/decision/feedback/ @memohai/runtime
+/domains/agent/acp/             @memohai/runtime
+/domains/agent/internal/session/ @memohai/runtime
 /internal/boot/                  @memohai/runtime
 /internal/container/             @memohai/runtime
 /internal/display/               @memohai/runtime
 /internal/network/               @memohai/runtime
-/internal/storage/               @memohai/runtime
 /internal/userruntime/           @memohai/runtime
 /internal/workspace/             @memohai/runtime
 /internal/workspacetemplate/     @memohai/runtime
@@ -132,8 +136,8 @@
 /skills-lock.json
 /spec/
 /internal/db/postgres/sqlc/
-/internal/workspace/bridgepb/bridge.pb.go
-/internal/workspace/bridgepb/bridge_grpc.pb.go
+/domains/runtime/bridge/bridgepb/bridge.pb.go
+/domains/runtime/bridge/bridgepb/bridge_grpc.pb.go
 /packages/sdk/src/
 /packages/icons/src/
 /apps/web/src/components/file-manager/seti/seti.woff

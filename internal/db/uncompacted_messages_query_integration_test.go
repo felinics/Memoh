@@ -5,14 +5,44 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
+
+const listUncompactedMessagesBySessionSQL = `
+SELECT
+  m.id,
+  m.created_at
+FROM bot_visible_history_messages m
+LEFT JOIN channel_identities ci
+  ON ci.id = m.sender_channel_identity_id
+ AND ci.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s
+  ON s.id = m.session_id
+ AND s.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_channel_routes r
+  ON r.id = s.route_id
+ AND r.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND (m.compact_id IS NULL OR NOT EXISTS (
+    SELECT 1 FROM bot_history_message_compacts c
+    WHERE c.team_id = public.memoh_current_team_id()
+      AND c.id = m.compact_id
+      AND c.bot_id = m.bot_id
+      AND c.session_id = s.id
+      AND c.compaction_epoch = s.compaction_epoch
+      AND (
+        (c.status = 'ok' AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL)
+        OR (c.status = 'pending' AND c.started_at > now() - INTERVAL '15 minutes')
+      )
+  ))
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+`
 
 // TestListUncompactedMessagesReclaimEligibility exercises the real SQL
 // eligibility predicate against PostgreSQL: usable summaries and fresh pending
@@ -45,10 +75,7 @@ func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SET LOCAL search_path TO "+quotedSchema+", public"); err != nil {
 		t.Fatalf("set search path: %v", err)
 	}
-	baseline := readEmbeddedPreTeamInit(t)
-	if _, err := tx.Exec(ctx, baseline); err != nil {
-		t.Fatalf("apply 0001 baseline: %v", err)
-	}
+	applyPreTeamBaseline(t, ctx, tx)
 	bindTeamQueryFixture(t, ctx, tx)
 	if _, err := tx.Exec(ctx, `
 ALTER TABLE users ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
@@ -166,22 +193,28 @@ VALUES
 		}
 	}
 
-	var sessionUUID pgtype.UUID
-	if err := sessionUUID.Scan(sessionID); err != nil {
-		t.Fatalf("scan session uuid: %v", err)
-	}
-	rows, err := sqlc.New(tx).ListUncompactedMessagesBySession(ctx, sessionUUID)
+	rows, err := tx.Query(ctx, listUncompactedMessagesBySessionSQL, sessionID)
 	if err != nil {
 		t.Fatalf("ListUncompactedMessagesBySession: %v", err)
 	}
+	defer rows.Close()
 
 	got := make(map[string]bool)
-	for i, row := range rows {
-		id := uuid.UUID(row.ID.Bytes).String()
-		got[id] = true
-		if i > 0 && row.CreatedAt.Time.Before(rows[i-1].CreatedAt.Time) {
-			t.Fatalf("rows not ordered by created_at: %v after %v", row.CreatedAt.Time, rows[i-1].CreatedAt.Time)
+	var prevCreatedAt time.Time
+	for i := 0; rows.Next(); i++ {
+		var id uuid.UUID
+		var createdAt time.Time
+		if err := rows.Scan(&id, &createdAt); err != nil {
+			t.Fatalf("scan uncompacted row: %v", err)
 		}
+		got[id.String()] = true
+		if i > 0 && createdAt.Before(prevCreatedAt) {
+			t.Fatalf("rows not ordered by created_at: %v after %v", createdAt, prevCreatedAt)
+		}
+		prevCreatedAt = createdAt
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate uncompacted rows: %v", err)
 	}
 	for id, name := range wantEligible {
 		if !got[id] {

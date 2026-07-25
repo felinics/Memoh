@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/memohai/memoh/internal/rpc/runtimepb"
+	"github.com/memohai/memoh/internal/rpc/runtime/runtimepb"
 )
 
 var (
@@ -75,7 +75,7 @@ func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtime
 	}
 	result, err := handler(ctx, json.RawMessage(req.GetPayload()))
 	if err != nil {
-		s.logger.Error("runtime rpc call failed", slog.String("method", method), slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "runtime rpc call failed", slog.String("method", method), slog.Any("error", err))
 		var public *publicError
 		if errors.As(err, &public) {
 			return nil, status.Error(codes.Unknown, public.Error())
@@ -90,7 +90,7 @@ func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtime
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
-		s.logger.Error("runtime rpc result encoding failed", slog.String("method", method), slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "runtime rpc result encoding failed", slog.String("method", method), slog.Any("error", err))
 		return nil, status.Error(codes.Internal, "internal runtime result encoding failed")
 	}
 	return &runtimepb.CallResponse{Payload: data}, nil

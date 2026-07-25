@@ -9,9 +9,10 @@ import (
 	dbpkg "github.com/memohai/memoh/internal/db"
 )
 
-// MigratePostgresUp applies the same embedded migration chain used by the server.
-func MigratePostgresUp(dsn string) error {
-	migrations, err := fs.Sub(dbembed.MigrationsFS, "postgres/migrations")
+// MigratePostgresLegacyUp applies the frozen Epoch v1 chain for tests that
+// still exercise public-schema adapters.
+func MigratePostgresLegacyUp(dsn string) error {
+	migrations, err := fs.Sub(dbembed.MigrationsFS, "postgres/legacy/v1/migrations")
 	if err != nil {
 		return fmt.Errorf("open embedded PostgreSQL migrations: %w", err)
 	}

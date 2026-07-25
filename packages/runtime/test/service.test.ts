@@ -218,7 +218,7 @@ setInterval(() => {}, 1_000)
 })
 
 function loadTestClientConstructor(): TestClientConstructor {
-  const proto = fileURLToPath(new URL('../../../internal/workspace/bridgepb/bridge.proto', import.meta.url))
+  const proto = fileURLToPath(new URL('../../../domains/runtime/bridge/pb/bridge.proto', import.meta.url))
   const definition = loadSync(proto, {
     keepCase: true,
     longs: String,

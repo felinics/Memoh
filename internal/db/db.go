@@ -7,8 +7,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	team "github.com/memohai/memoh/domains/iam/team"
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/team"
 )
 
 func Open(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {

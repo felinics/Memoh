@@ -8,19 +8,15 @@ import (
 	"github.com/memohai/memoh/internal/config"
 )
 
-// TestFXOptionsValidate validates both deployment shapes: split (channel
-// runtime behind the internal RPC) and embedded (pre-split all-in-one,
-// no shared secret configured).
+// TestFXOptionsValidate proves runtime configuration cannot change the
+// composition selected by the build profile.
 func TestFXOptionsValidate(t *testing.T) {
-	cases := map[string]config.Config{
-		"split":    {InternalRPC: config.InternalRPCConfig{SharedSecret: "validate-only"}},
-		"embedded": {},
-	}
-	for name, cfg := range cases {
-		t.Run(name, func(t *testing.T) {
-			if err := fx.ValidateApp(optionsFor(cfg)); err != nil {
-				t.Fatal(err)
-			}
-		})
+	for _, cfg := range []config.Config{
+		{},
+		{InternalRPC: config.InternalRPCConfig{SharedSecret: "validate-only"}},
+	} {
+		if err := fx.ValidateApp(optionsFor(cfg)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

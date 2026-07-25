@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/team"
+	team "github.com/memohai/memoh/domains/iam/team"
 )
 
 func TestProviderTemplateMigrationUpgradesWithoutBackfill(t *testing.T) {

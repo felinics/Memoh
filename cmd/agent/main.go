@@ -23,7 +23,7 @@ func main() {
 			os.Exit(1)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "Usage: memoh-server <command>\n\nCommands:\n  serve     Start the server (default)\n  migrate   Run database migrations (up|down|version|force)\n  account   Local account recovery operations\n  version   Print version information\n")
+		fmt.Fprintf(os.Stderr, "Usage: memoh-server <command>\n\nCommands:\n  serve     Start the server (default)\n  migrate   Run database migrations (up|status|verify|upgrade-v2)\n  account   Local account recovery operations\n  version   Print version information\n")
 		os.Exit(1)
 	}
 }
@@ -40,10 +40,10 @@ func runAccount(args []string) {
 
 func runMigrate(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: memoh-server migrate <up|down|version|force N>\n")
+		fmt.Fprintf(os.Stderr, "Usage: memoh-server migrate <up|status|verify|upgrade-v2>\n")
 		os.Exit(1)
 	}
-	if err := runMigrateCommand(args); err != nil {
+	if err := runMigrateCommand(args, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "migrate: %v\n", err)
 		os.Exit(1)
 	}

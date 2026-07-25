@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+// memoh:plane=legacy retired when the final inbound/Turn capability switches atomically (docs/architecture/migration/agent-chat-turn.md)
+package memoh.turn.v1;
+
+option go_package = "github.com/memohai/memoh/internal/rpc/channel/turn/turnpb;turnpb";
+
+service TurnService {
+  rpc Run(stream RunRequest) returns (stream RunResponse);
+  rpc RespondToolApproval(JsonRequest) returns (stream EventResponse);
+  rpc RespondUserInput(JsonRequest) returns (stream EventResponse);
+  rpc AdvancePlainTextUserInput(JsonRequest) returns (JsonResponse);
+}
+
+message JsonRequest {
+  bytes json = 1;
+}
+
+message JsonResponse {
+  bytes json = 1;
+}
+
+message RunRequest {
+  oneof body {
+    bytes start_json = 1;
+    bytes inject_json = 2;
+    bytes outbound_assets_json = 3;
+    bool cancel = 4;
+  }
+}
+
+message RunResponse {
+  oneof body {
+    Started started = 1;
+    EventResponse event = 2;
+    Completed completed = 3;
+  }
+}
+
+message Started {
+  string run_id = 1;
+}
+
+message EventResponse {
+  string run_id = 1;
+  string team_id = 2;
+  string session_id = 3;
+  int64 seq = 4;
+  string kind = 5;
+  bytes payload = 6;
+}
+
+message Completed {}

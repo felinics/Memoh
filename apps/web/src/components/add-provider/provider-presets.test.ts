@@ -4,19 +4,17 @@ import { suggestProviderName } from './provider-presets'
 
 describe('provider preset helpers', () => {
   it('keeps onboarding presets focused while settings can use the full preset catalog', () => {
-    expect(onboardingProviderPresets.map(preset => preset.id)).toEqual([
-      'openai',
-      'anthropic',
-      'openrouter',
-      'google',
-      'deepseek',
-      'moonshot',
-      'minimax',
-      'xai',
-    ])
+    const catalogIds = new Set(providerPresets.map(preset => preset.id))
+    const onboardingIds = onboardingProviderPresets.map(preset => preset.id)
 
-    expect(providerPresets.some(preset => preset.id === 'ollama')).toBe(true)
-    expect(providerPresets.some(preset => preset.id === 'github-copilot')).toBe(true)
+    // Onboarding stays a non-empty strict subset: self-hosted and OAuth-only
+    // providers belong in settings, not the first-run flow.
+    expect(onboardingIds.length).toBeGreaterThan(0)
+    expect(onboardingIds.length).toBeLessThan(providerPresets.length)
+    for (const settingsOnly of ['ollama', 'github-copilot']) {
+      expect(catalogIds.has(settingsOnly)).toBe(true)
+      expect(onboardingIds).not.toContain(settingsOnly)
+    }
   })
 
   it('keeps registry source metadata separate from provider instances', () => {

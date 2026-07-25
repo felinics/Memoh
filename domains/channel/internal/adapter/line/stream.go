@@ -1,0 +1,152 @@
+package line
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"strings"
+	"sync"
+
+	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/internal/redact"
+)
+
+func (a *Adapter) OpenStream(_ context.Context, cfg gateway.ChannelConfig, target string, _ gateway.StreamOptions) (gateway.PreparedOutboundStream, error) {
+	target = normalizeTarget(target)
+	if target == "" {
+		return nil, errors.New("line target is required")
+	}
+	return &outboundStream{
+		adapter: a,
+		cfg:     cfg,
+		target:  target,
+	}, nil
+}
+
+type outboundStream struct {
+	adapter *Adapter
+	cfg     gateway.ChannelConfig
+	target  string
+
+	mu          sync.Mutex
+	closed      bool
+	textBuilder strings.Builder
+	attachments []gateway.PreparedAttachment
+}
+
+func (s *outboundStream) Push(ctx context.Context, event gateway.PreparedStreamEvent) error {
+	if s == nil || s.adapter == nil {
+		return errors.New("line stream is not configured")
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return errors.New("line stream is closed")
+	}
+	switch event.Type {
+	case gateway.StreamEventDelta:
+		if strings.TrimSpace(event.Delta) != "" && event.Phase != gateway.StreamPhaseReasoning {
+			s.textBuilder.WriteString(event.Delta)
+		}
+		s.mu.Unlock()
+		return nil
+	case gateway.StreamEventAttachment:
+		if len(event.Attachments) > 0 {
+			s.attachments = append(s.attachments, event.Attachments...)
+		}
+		s.mu.Unlock()
+		return nil
+	case gateway.StreamEventFinal:
+		prepared := s.snapshotFinalLocked(event.Final)
+		s.mu.Unlock()
+		return s.sendSnapshot(ctx, prepared)
+	case gateway.StreamEventError:
+		errText := redact.Text(strings.TrimSpace(event.Error))
+		s.textBuilder.Reset()
+		s.attachments = nil
+		s.mu.Unlock()
+		if errText == "" {
+			return nil
+		}
+		return s.sendSnapshot(ctx, gateway.PreparedMessage{
+			Message: gateway.Message{
+				Format: gateway.MessageFormatPlain,
+				Text:   "Error: " + errText,
+			},
+		})
+	default:
+		s.mu.Unlock()
+		return nil
+	}
+}
+
+func (s *outboundStream) Close(ctx context.Context) error {
+	if s == nil || s.adapter == nil {
+		return errors.New("line stream is not configured")
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	prepared := s.snapshotBufferedLocked()
+	s.mu.Unlock()
+	return s.sendSnapshot(ctx, prepared)
+}
+
+func (s *outboundStream) snapshotFinalLocked(final *gateway.PreparedStreamFinalizePayload) gateway.PreparedMessage {
+	var prepared gateway.PreparedMessage
+	if final != nil {
+		prepared = final.Message
+	}
+	if strings.TrimSpace(prepared.Message.Text) == "" {
+		prepared.Message.Text = strings.TrimSpace(s.textBuilder.String())
+	}
+	if len(prepared.Attachments) == 0 && len(s.attachments) > 0 {
+		prepared.Attachments = append([]gateway.PreparedAttachment(nil), s.attachments...)
+		prepared.Message.Attachments = lineLogicalAttachments(s.attachments)
+	}
+	s.textBuilder.Reset()
+	s.attachments = nil
+	return prepared
+}
+
+func (s *outboundStream) snapshotBufferedLocked() gateway.PreparedMessage {
+	if strings.TrimSpace(s.textBuilder.String()) == "" && len(s.attachments) == 0 {
+		return gateway.PreparedMessage{}
+	}
+	prepared := gateway.PreparedMessage{
+		Message: gateway.Message{
+			Format: gateway.MessageFormatPlain,
+			Text:   strings.TrimSpace(s.textBuilder.String()),
+		},
+	}
+	if len(s.attachments) > 0 {
+		prepared.Attachments = append([]gateway.PreparedAttachment(nil), s.attachments...)
+		prepared.Message.Attachments = lineLogicalAttachments(s.attachments)
+	}
+	s.textBuilder.Reset()
+	s.attachments = nil
+	return prepared
+}
+
+func (s *outboundStream) sendSnapshot(ctx context.Context, prepared gateway.PreparedMessage) error {
+	if prepared.Message.IsEmpty() && len(prepared.Attachments) == 0 {
+		return nil
+	}
+	sent, err := s.adapter.sendPrepared(ctx, s.cfg, gateway.PreparedOutboundMessage{
+		Target:  s.target,
+		Message: prepared,
+	})
+	if err != nil && sent > 0 {
+		s.adapter.logWarn("line stream partial send failed after push",
+			slog.String("config_id", s.cfg.ID),
+			slog.String("bot_id", s.cfg.BotID),
+			slog.String("target_hash", hashValue(s.target)),
+			slog.String("reason", "partial_failure_suppressed"),
+		)
+		return nil
+	}
+	return err
+}

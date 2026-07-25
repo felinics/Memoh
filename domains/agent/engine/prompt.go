@@ -1,0 +1,346 @@
+package engine
+
+import (
+	"embed"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	textprune "github.com/memohai/memoh/domains/agent/chat/text/prune"
+	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
+	"github.com/memohai/memoh/domains/agent/sessionmode"
+)
+
+//go:embed prompts/*.md
+var promptsFS embed.FS
+
+var (
+	systemCommonTmpl  string
+	modeChatTmpl      string
+	modeDiscussTmpl   string
+	modeHeartbeatTmpl string
+	modeScheduleTmpl  string
+	modeSubagentTmpl  string
+	scheduleTmpl      string
+	heartbeatTmpl     string
+
+	includes map[string]string
+)
+
+var includeRe = regexp.MustCompile(`\{\{include:(\w+)\}\}`)
+
+func init() {
+	systemCommonTmpl = mustReadPrompt("prompts/system_common.md")
+	modeChatTmpl = mustReadPrompt("prompts/mode_chat.md")
+	modeDiscussTmpl = mustReadPrompt("prompts/mode_discuss.md")
+	modeHeartbeatTmpl = mustReadPrompt("prompts/mode_heartbeat.md")
+	modeScheduleTmpl = mustReadPrompt("prompts/mode_schedule.md")
+	modeSubagentTmpl = mustReadPrompt("prompts/mode_subagent.md")
+	scheduleTmpl = mustReadPrompt("prompts/schedule.md")
+	heartbeatTmpl = mustReadPrompt("prompts/heartbeat.md")
+
+	includes = map[string]string{
+		"_memory":     mustReadPrompt("prompts/_memory.md"),
+		"_identities": mustReadPrompt("prompts/_identities.md"),
+	}
+
+	systemCommonTmpl = resolveIncludes(systemCommonTmpl)
+	modeChatTmpl = resolveIncludes(modeChatTmpl)
+	modeDiscussTmpl = resolveIncludes(modeDiscussTmpl)
+	modeHeartbeatTmpl = resolveIncludes(modeHeartbeatTmpl)
+	modeScheduleTmpl = resolveIncludes(modeScheduleTmpl)
+	modeSubagentTmpl = resolveIncludes(modeSubagentTmpl)
+}
+
+func mustReadPrompt(name string) string {
+	data, err := promptsFS.ReadFile(name)
+	if err != nil {
+		panic(fmt.Sprintf("failed to read embedded prompt %s: %v", name, err))
+	}
+	return string(data)
+}
+
+// resolveIncludes replaces {{include:_name}} placeholders with the content of the named fragment.
+func resolveIncludes(tmpl string) string {
+	return includeRe.ReplaceAllStringFunc(tmpl, func(match string) string {
+		sub := includeRe.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		content, ok := includes[sub[1]]
+		if !ok {
+			return match
+		}
+		return strings.TrimSpace(content)
+	})
+}
+
+// render replaces all {{key}} placeholders in tmpl with values from vars.
+func render(tmpl string, vars map[string]string) string {
+	result := tmpl
+	for k, v := range vars {
+		result = strings.ReplaceAll(result, "{{"+k+"}}", v)
+	}
+	return strings.TrimSpace(result)
+}
+
+func selectModeTemplate(sessionType string) string {
+	switch sessionType {
+	case sessionmode.Discuss:
+		return modeDiscussTmpl
+	case sessionmode.Heartbeat:
+		return modeHeartbeatTmpl
+	case sessionmode.Schedule:
+		return modeScheduleTmpl
+	case sessionmode.Subagent:
+		return modeSubagentTmpl
+	default:
+		return modeChatTmpl
+	}
+}
+
+// GenerateSystemPrompt builds the complete system prompt from files, skills, and context.
+func GenerateSystemPrompt(params SystemPromptParams) string {
+	home := "/data"
+	now := params.Now
+	if now.IsZero() {
+		now = TimeNow()
+	}
+	timezoneName := strings.TrimSpace(params.Timezone)
+	if timezoneName == "" {
+		timezoneName = "UTC"
+	}
+
+	botInfoSection := buildBotInfoSection(params.Bot)
+
+	skillsSection := buildSkillsSection(params.Skills)
+
+	fileSections := buildFileSections(params.Files, params.MaxFilesBytes)
+
+	tmpl := strings.TrimSpace(systemCommonTmpl + "\n\n" + selectModeTemplate(params.SessionType))
+
+	return render(tmpl, map[string]string{
+		"home":                      home,
+		"currentTime":               now.Format(time.RFC3339),
+		"timezone":                  timezoneName,
+		"botInfoSection":            botInfoSection,
+		"skillsSection":             skillsSection,
+		"platformIdentitiesSection": strings.TrimSpace(params.PlatformIdentitiesSection),
+		"mainAgentSections":         buildMainAgentSections(strings.TrimSpace(params.PlatformIdentitiesSection), skillsSection, fileSections),
+		"subagentSections":          buildSubagentSections(strings.TrimSpace(params.PlatformIdentitiesSection)),
+		"fileSections":              fileSections,
+	})
+}
+
+// SystemPromptParams holds all inputs for system prompt generation.
+type SystemPromptParams struct {
+	SessionType               string
+	Bot                       BotInfo
+	Skills                    []SkillEntry
+	Files                     []SystemFile
+	MaxFilesBytes             int
+	Now                       time.Time
+	Timezone                  string
+	PlatformIdentitiesSection string
+}
+
+func buildBotInfoSection(bot BotInfo) string {
+	bot.ID = strings.TrimSpace(bot.ID)
+	bot.Name = strings.TrimSpace(bot.Name)
+	bot.DisplayName = strings.TrimSpace(bot.DisplayName)
+	bot.Timezone = strings.TrimSpace(bot.Timezone)
+	if bot.ID == "" && bot.Name == "" && bot.DisplayName == "" && bot.Timezone == "" {
+		return ""
+	}
+	raw, err := json.MarshalIndent(bot, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return "## Bot\n\nService-provided bot identity. Use `display_name` as your user-facing name when it is present; otherwise use `name`. `name` is the stable slug. Do not invent another name.\n\n```json\n" + string(raw) + "\n```"
+}
+
+// GenerateSchedulePrompt builds the user message for a scheduled task trigger.
+func GenerateSchedulePrompt(s Schedule) string {
+	maxCallsStr := "Unlimited"
+	if s.MaxCalls != nil {
+		maxCallsStr = strconv.Itoa(*s.MaxCalls)
+	}
+	return render(scheduleTmpl, map[string]string{
+		"name":        s.Name,
+		"description": s.Description,
+		"maxCalls":    maxCallsStr,
+		"pattern":     s.Pattern,
+		"command":     s.Command,
+	})
+}
+
+// GenerateHeartbeatPrompt builds the user message for a heartbeat trigger.
+func GenerateHeartbeatPrompt(interval int, checklist string, now time.Time, lastHeartbeatAt string) string {
+	checklistSection := ""
+	if strings.TrimSpace(checklist) != "" {
+		checklistSection = "\n## HEARTBEAT.md (checklist)\n\n" + strings.TrimSpace(checklist) + "\n"
+	}
+	lastHB := strings.TrimSpace(lastHeartbeatAt)
+	if lastHB == "" {
+		lastHB = "never (first heartbeat)"
+	}
+	return render(heartbeatTmpl, map[string]string{
+		"interval":         strconv.Itoa(interval),
+		"timeNow":          now.Format(time.RFC3339),
+		"lastHeartbeat":    lastHB,
+		"checklistSection": checklistSection,
+	})
+}
+
+func buildSkillsSection(skills []SkillEntry) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	sorted := make([]SkillEntry, len(skills))
+	copy(sorted, skills)
+	slices.SortFunc(sorted, func(a, b SkillEntry) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	var sb strings.Builder
+	sb.WriteString("## Skills\n\n")
+	sb.WriteString("Memoh-managed skills are stored in `" + skillset.ManagedDir() + "/`. ")
+	sb.WriteString("Compatible external skill directories inside the bot workspace may also be discovered automatically. ")
+	sb.WriteString("Each skill is a `SKILL.md` file inside a named subdirectory. ")
+	sb.WriteString("Only activate a skill when it is relevant to the current task and a skill-loading capability is available.\n\n")
+	sb.WriteString(strconv.Itoa(len(sorted)))
+	sb.WriteString(" skill(s) available:\n")
+	for _, s := range sorted {
+		sb.WriteString("- **" + s.Name + "**: " + s.Description + "\n")
+	}
+	return sb.String()
+}
+
+func buildFileSections(files []SystemFile, maxBytes int) string {
+	maxBytes = normalizeSystemFilesMaxBytes(maxBytes)
+	var sb strings.Builder
+	lineCount := 0
+	for _, f := range files {
+		if f.Content == "" {
+			continue
+		}
+		separator := ""
+		separatorLines := 0
+		if sb.Len() > 0 {
+			separator = "\n\n"
+			separatorLines = 2
+		}
+		remaining := maxBytes - sb.Len() - len(separator)
+		remainingLines := textprune.DefaultMaxLines - lineCount - separatorLines
+		if remaining <= 0 || remainingLines <= 0 {
+			break
+		}
+		section := formatSystemFile(f)
+		if textprune.Exceeds(section, remaining, remainingLines) {
+			truncated, ok := truncateSystemFileSection(f, remaining, remainingLines)
+			if !ok {
+				break
+			}
+			section = truncated
+		}
+		if separator != "" {
+			sb.WriteString(separator)
+		}
+		sb.WriteString(section)
+		lineCount += separatorLines + textprune.CountLines(section)
+		if len(section) == remaining {
+			break
+		}
+	}
+	return sb.String()
+}
+
+func normalizeSystemFilesMaxBytes(maxBytes int) int {
+	if maxBytes <= 0 {
+		return DefaultSystemFilesMaxBytes
+	}
+	return maxBytes
+}
+
+func truncateSystemFileSection(file SystemFile, maxBytes, maxLines int) (string, bool) {
+	heading := fmt.Sprintf("## %s\n\n", file.Filename)
+	headingLines := textprune.CountLines(heading)
+	if maxBytes <= len(heading) || maxLines <= headingLines {
+		return "", false
+	}
+	contentBudget := maxBytes - len(heading)
+	content := textprune.PruneWithEdges(file.Content, systemFilePruneLabel(file), systemFilePruneConfig(contentBudget, maxLines-headingLines))
+	return heading + content, true
+}
+
+func systemFilePruneLabel(file SystemFile) string {
+	filename := strings.TrimSpace(file.Filename)
+	if filename == "" {
+		return "workspace file"
+	}
+	return "workspace file " + filename
+}
+
+func systemFilePruneConfig(maxBytes, maxLines int) textprune.Config {
+	headBytes, tailBytes := splitHeadTail(maxBytes)
+	headLines, tailLines := splitHeadTail(maxLines)
+	return textprune.Config{
+		MaxBytes:  maxBytes,
+		MaxLines:  maxLines,
+		HeadBytes: headBytes,
+		TailBytes: tailBytes,
+		HeadLines: headLines,
+		TailLines: tailLines,
+		Marker:    textprune.DefaultMarker,
+	}
+}
+
+func splitHeadTail(maxBytes int) (int, int) {
+	headBytes := maxBytes * 3 / 4
+	tailBytes := maxBytes - headBytes
+	if headBytes <= 0 {
+		return maxBytes, 0
+	}
+	return headBytes, tailBytes
+}
+
+func buildMainAgentSections(platformIdentitiesSection string, skillsSection, fileSections string) string {
+	identitiesSection := render(includes["_identities"], map[string]string{
+		"platformIdentitiesSection": platformIdentitiesSection,
+	})
+	sections := []string{
+		includes["_memory"],
+		identitiesSection,
+		skillsSection,
+		fileSections,
+	}
+	return joinPromptSections(sections...)
+}
+
+func buildSubagentSections(platformIdentitiesSection string) string {
+	return strings.TrimSpace(render(includes["_identities"], map[string]string{
+		"platformIdentitiesSection": platformIdentitiesSection,
+	}))
+}
+
+func joinPromptSections(sections ...string) string {
+	var sb strings.Builder
+	for _, section := range sections {
+		section = strings.TrimSpace(section)
+		if section == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(section)
+	}
+	return sb.String()
+}
+
+func formatSystemFile(file SystemFile) string {
+	return fmt.Sprintf("## %s\n\n%s", file.Filename, file.Content)
+}

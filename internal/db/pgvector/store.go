@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,14 +15,14 @@ import (
 )
 
 // Store is the shared typed connection to the optional pgvector database.
-// Schema migration and vector type registration happen once when it opens.
+// Startup verifies schema compatibility but never applies migrations.
 type Store struct {
 	pool    *pgxpool.Pool
 	queries *pgvectorsqlc.Queries
 }
 
-func Open(ctx context.Context, logger *slog.Logger, cfg config.PGVectorConfig) (*Store, error) {
-	if err := MigrateUp(logger, cfg); err != nil {
+func Open(ctx context.Context, cfg config.PGVectorConfig) (*Store, error) {
+	if err := VerifyCompatibility(cfg); err != nil {
 		return nil, err
 	}
 	poolCfg, err := pgxpool.ParseConfig(db.DSN(cfg.PostgresConfig()))

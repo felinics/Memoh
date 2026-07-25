@@ -22,12 +22,12 @@ metadata:
 4. **传输可异、语义同源**：HTTP 用 `application/problem+json`，SSE 用各自 event envelope，
    但 code/args/detail/request_id 全部来自同一个 `apperror.PublicFrom`，禁止各端点自造。
 5. **旧行为直通**：非 apperror 的错误（`echo.HTTPError` 等）原样走 echo 默认渲染，
-   不做任何转换（`internal/server/server_test.go` 的 legacy 测试锁定此行为）。
+   不做任何转换（`domains/api/http/server/server_test.go` 的 legacy 测试锁定此行为）。
 
 ## 后端：新增一个错误的标准步骤
 
-参照实现：`internal/apperror/`（catalog + Problem）、`internal/server/error_handler.go`（HTTP 渲染）、
-`internal/handlers/display.go` 的 `newDisplayPrepareAppError`（SSE envelope 适配）。
+参照实现：`internal/apperror/`（catalog + Problem）、`domains/api/http/server/error_handler.go`（HTTP 渲染）、
+`domains/api/http/runtime/display.go` 的 `NewDisplayPrepareAppError`（SSE envelope 适配）。
 
 1. **catalog 注册**（`internal/apperror/error.go`）：
    ```go
@@ -80,7 +80,7 @@ metadata:
 ## 验证（新增/修改错误后必跑）
 
 ```bash
-go test ./internal/apperror/... ./internal/server/... ./internal/handlers/...
+go test ./internal/apperror/... ./domains/api/http/server/... ./domains/api/http/runtime/...
 cd apps/web && pnpm vitest run src/utils/api-error.test.ts src/composables/api/sse-error.test.ts
 ```
 
@@ -116,4 +116,4 @@ curl -sN -X POST "$HOST/bots/$BOT/container/display/prepare" \
   文案会误导用户；语义不同就开新 code。
 - 面向用户的响应里不放 stderr/exit code 等诊断——记日志（带 `request_id`），
   用户侧只给 catalog detail。
-- `requestID` 统一用 `internal/httpx.RequestID`，不要在包内再写局部副本。
+- `requestID` 统一用 `domains/api/http/httpx.RequestID`，不要在包内再写局部副本。

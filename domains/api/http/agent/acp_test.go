@@ -1,0 +1,118 @@
+package agent
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/labstack/echo/v4"
+
+	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
+)
+
+func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/acp/profiles", nil)
+	rec := httptest.NewRecorder()
+
+	if err := NewACPHandler().ListProfiles(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ListProfiles() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp acpprofile.ProfilesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Items) != 3 {
+		t.Fatalf("profiles len = %d, want 3", len(resp.Items))
+	}
+	profile := resp.Items[0]
+	if profile.ID != acpprofile.AgentClaudeCodeID {
+		t.Fatalf("first profile id = %q, want %q", profile.ID, acpprofile.AgentClaudeCodeID)
+	}
+	profile = resp.Items[1]
+	if profile.ID != acpprofile.AgentCodexID {
+		t.Fatalf("profile id = %q", profile.ID)
+	}
+	if len(profile.ManagedFields) == 0 {
+		t.Fatalf("managed fields should be exposed for schema-driven UI")
+	}
+
+	raw := rec.Body.String()
+	profile = resp.Items[2]
+	if profile.ID != acpprofile.AgentHermesID {
+		t.Fatalf("profile id = %q", profile.ID)
+	}
+
+	for _, forbidden := range []string{"codex-acp", "claude-agent-acp", "hermes-acp", "npx", "uvx", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "HERMES_HOME"} {
+		if jsonContainsSubstring(raw, forbidden) {
+			t.Fatalf("profiles response leaked unsafe implementation detail %q: %s", forbidden, raw)
+		}
+	}
+	for _, forbidden := range []string{"sk-test-secret"} {
+		if jsonContainsValue(raw, forbidden) {
+			t.Fatalf("profiles response leaked unsafe implementation detail %q: %s", forbidden, raw)
+		}
+	}
+}
+
+func jsonContainsSubstring(raw, value string) bool {
+	var decoded any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return false
+	}
+	return containsStringSubstring(decoded, value)
+}
+
+func jsonContainsValue(raw, value string) bool {
+	var decoded any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return false
+	}
+	return containsString(decoded, value)
+}
+
+func containsString(value any, needle string) bool {
+	switch v := value.(type) {
+	case string:
+		return v == needle
+	case []any:
+		for _, item := range v {
+			if containsString(item, needle) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, item := range v {
+			if containsString(item, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func containsStringSubstring(value any, needle string) bool {
+	switch v := value.(type) {
+	case string:
+		return strings.Contains(v, needle)
+	case []any:
+		for _, item := range v {
+			if containsStringSubstring(item, needle) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, item := range v {
+			if containsStringSubstring(item, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}

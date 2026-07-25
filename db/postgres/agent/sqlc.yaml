@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "migrations"
+    queries: "queries"
+    gen:
+      go:
+        package: "sqlc"
+        out: "../../../domains/agent/internal/postgres/sqlc"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        omit_unused_structs: true

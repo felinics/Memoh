@@ -12,17 +12,21 @@ import (
 	"google.golang.org/grpc/health"
 	grpc_health_v1 "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	turntransport "github.com/memohai/memoh/internal/agent/turn/grpctransport"
-	"github.com/memohai/memoh/internal/channel"
+	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/channel"
+	"github.com/memohai/memoh/domains/channel/email"
+	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/domains/channel/identity"
+	"github.com/memohai/memoh/domains/channel/webhook"
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/email"
 	intrpc "github.com/memohai/memoh/internal/rpc"
-	"github.com/memohai/memoh/internal/rpc/channelruntime"
+	"github.com/memohai/memoh/internal/rpc/channel/channelpb"
+	channelserver "github.com/memohai/memoh/internal/rpc/channel/server"
+	turntransport "github.com/memohai/memoh/internal/rpc/channel/turn/grpctransport"
 	runtimeRpc "github.com/memohai/memoh/internal/rpc/runtime"
-	"github.com/memohai/memoh/internal/rpc/runtimepb"
-	"github.com/memohai/memoh/internal/rpc/serverruntime"
-	"github.com/memohai/memoh/internal/webhooktunnel"
+	channelruntime "github.com/memohai/memoh/internal/rpc/runtime/channel"
+	"github.com/memohai/memoh/internal/rpc/runtime/runtimepb"
+	serverruntime "github.com/memohai/memoh/internal/rpc/runtime/server"
 )
 
 type channelRPC struct {
@@ -39,7 +43,7 @@ func provideServerRPCConn(lc fx.Lifecycle, cfg config.Config) (*grpc.ClientConn,
 	return conn, nil
 }
 
-func provideTurnClient(conn *grpc.ClientConn, log *slog.Logger) turn.Service {
+func provideTurnClient(conn *grpc.ClientConn, log *slog.Logger) agentdomain.Service {
 	return turntransport.NewClient(conn, turntransport.WithClientLogger(log))
 }
 
@@ -51,11 +55,9 @@ func provideServerRuntimeClient(client *runtimeRpc.Client) *serverruntime.Client
 	return serverruntime.NewClient(client)
 }
 
-func provideChannelRPC(log *slog.Logger, cfg config.Config, channelRuntime channel.Runtime, emailRuntime email.Runtime, tunnel *webhooktunnel.Manager) (*channelRPC, error) {
-	if err := cfg.ValidateChannelRuntime(); err != nil {
-		return nil, err
-	}
+func provideChannelRPC(log *slog.Logger, cfg config.Config, channelRuntime gateway.Runtime, emailRuntime email.Runtime, tunnel webhook.Manager, identities *identity.Service, projections channel.ConversationProjectionReader) (*channelRPC, error) {
 	server := intrpc.NewServer(cfg.InternalRPC.SharedSecret)
+	channelpb.RegisterChannelAdminServiceServer(server, channelserver.NewAdmin(nil, identities, projections))
 	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(log, channelruntime.Handlers(channelRuntime, emailRuntime, tunnel)))
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
@@ -71,9 +73,9 @@ func startChannelRPC(lc fx.Lifecycle, log *slog.Logger, rpcServer *channelRPC, s
 				return fmt.Errorf("listen channel rpc: %w", err)
 			}
 			go func() {
-				log.Info("channel rpc listening", slog.String("addr", rpcServer.addr))
+				log.InfoContext(ctx, "channel rpc listening", slog.String("addr", rpcServer.addr))
 				if err := rpcServer.server.Serve(lis); err != nil {
-					log.Error("channel rpc failed", slog.Any("error", err))
+					log.ErrorContext(ctx, "channel rpc failed", slog.Any("error", err))
 					_ = shutdowner.Shutdown()
 				}
 			}()

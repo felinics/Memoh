@@ -15,9 +15,9 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
+	"github.com/memohai/memoh/domains/runtime/bridge/bridgepb"
+	bridgeserver "github.com/memohai/memoh/domains/runtime/bridge/server"
 	"github.com/memohai/memoh/internal/logger"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
-	"github.com/memohai/memoh/internal/workspace/bridgesvc"
 )
 
 const (
@@ -32,7 +32,7 @@ func main() {
 	// Container-native tools take priority since toolkit is appended at the end.
 	_ = os.Setenv("PATH", os.Getenv("PATH")+":/opt/memoh/toolkit/bin")
 
-	reverseHTTP := bridgesvc.NewReverseHTTPBroker()
+	reverseHTTP := bridgeserver.NewReverseHTTPBroker()
 	startDisplaySupervisor(ctx)
 	startACPToolsProxy(ctx, reverseHTTP)
 
@@ -102,9 +102,9 @@ func main() {
 		}
 	}
 	srv := grpc.NewServer(serverOpts...)
-	pb.RegisterContainerServiceServer(srv, bridgesvc.New(bridgesvc.Options{
-		DefaultWorkDir:    bridgesvc.DefaultWorkDir,
-		DataMount:         bridgesvc.DefaultWorkDir,
+	bridgepb.RegisterContainerServiceServer(srv, bridgeserver.New(bridgeserver.Options{
+		DefaultWorkDir:    bridgeserver.DefaultWorkDir,
+		DataMount:         bridgeserver.DefaultWorkDir,
 		AllowHostAbsolute: true,
 		ReverseHTTP:       reverseHTTP,
 	}))

@@ -123,6 +123,13 @@ INSERT INTO public.memory_node_embeddings (
 		Database: databaseName,
 		SSLMode:  "disable",
 	}
+	if err := VerifyCompatibility(vectorCfg); err == nil {
+		t.Fatal("unmigrated vector schema reported compatible")
+	}
+	if store, err := Open(ctx, vectorCfg); err == nil {
+		store.Close()
+		t.Fatal("Open() migrated an incompatible vector schema during business startup")
+	}
 
 	const workers = 12
 	var wg sync.WaitGroup
@@ -143,6 +150,9 @@ INSERT INTO public.memory_node_embeddings (
 	}
 	if err := MigrateUp(slog.New(slog.DiscardHandler), vectorCfg); err != nil {
 		t.Fatalf("repeat migrate: %v", err)
+	}
+	if err := VerifyCompatibility(vectorCfg); err != nil {
+		t.Fatalf("verify migrated schema: %v", err)
 	}
 
 	var version int
@@ -168,7 +178,7 @@ INSERT INTO public.memory_node_embeddings (
 		t.Fatalf("legacy team = %q", legacyTeamID)
 	}
 
-	store, err := Open(ctx, slog.New(slog.DiscardHandler), vectorCfg)
+	store, err := Open(ctx, vectorCfg)
 	if err != nil {
 		t.Fatalf("open typed store: %v", err)
 	}

@@ -1,0 +1,106 @@
+# Active Epoch v2 owner migration manifest
+epoch: 2
+order:
+  - iam
+  - api
+  - model
+  - media
+  - agent
+  - channel
+  - memory
+  - runtime
+owners:
+  - name: iam
+    schema: iam
+    version_table: iam.goose_db_version
+    migrations_dir: iam/migrations
+    version: 1
+    dependencies: []
+    files:
+      - path: iam/migrations/00001_baseline.sql
+        version: 1
+        checksum: sha256:af848c7ffe378059a668859344a3ed0a557090649b065089062a2b6ae10d0dca
+  - name: api
+    schema: api
+    version_table: api.goose_db_version
+    migrations_dir: api/migrations
+    version: 1
+    dependencies:
+      - iam
+    files:
+      - path: api/migrations/00001_baseline.sql
+        version: 1
+        checksum: sha256:9a398cd97ae6bafdf59bbfc1361ba1a7c2d20b5c164bf93d76df9028d830ef83
+  - name: model
+    schema: model
+    version_table: model.goose_db_version
+    migrations_dir: model/migrations
+    version: 1
+    dependencies:
+      - iam
+    files:
+      - path: model/migrations/00001_baseline.sql
+        version: 1
+        checksum: sha256:d9455951438898f4f18126754a4c0f02c23b877c14f31821ca3b655f30eec81f
+  - name: media
+    schema: media
+    version_table: media.goose_db_version
+    migrations_dir: media/migrations
+    version: 1
+    dependencies:
+      - iam
+    files:
+      - path: media/migrations/00001_baseline.sql
+        version: 1
+        checksum: sha256:e74d5c1a3eb36e500aadd0b420b7214ccb5634b625c27c8270ba1f1add4a3a1f
+  - name: agent
+    schema: agent
+    version_table: agent.goose_db_version
+    migrations_dir: agent/migrations
+    version: 1
+    dependencies:
+      - iam
+      - api
+      - model
+      - media
+    files:
+      - path: agent/migrations/00001_baseline.sql
+        version: 1
+        checksum: sha256:29d0ee264b889792622efe7272f3f68aa812adcd5c559ca1b743cab22377969e
+  - name: channel
+    schema: channel
+    version_table: channel.goose_db_version
+    migrations_dir: channel/migrations
+    version: 1
+    dependencies:
+      - iam
+      - api
+      - agent
+    files:
+      - path: channel/migrations/00001_baseline.sql
+        version: 1
+        checksum: sha256:0296150e2988da35b2ed780f4aa95dfa0905c0b581279eb6638553a3ed74afd1
+  - name: memory
+    schema: memory
+    version_table: memory.goose_db_version
+    migrations_dir: memory/migrations
+    version: 1
+    dependencies:
+      - iam
+      - api
+    files:
+      - path: memory/migrations/00001_baseline.sql
+        version: 1
+        checksum: sha256:78762ce383718afe24223986e4498673ee21f888d61bf78e84de4dbf39760246
+  - name: runtime
+    schema: runtime
+    version_table: runtime.goose_db_version
+    migrations_dir: runtime/migrations
+    version: 1
+    dependencies:
+      - iam
+      - api
+    files:
+      - path: runtime/migrations/00001_baseline.sql
+        version: 1
+        checksum: sha256:97cf7d66ab847c288b80a335e368e8151e7245a2cfde3e962c9689c4c4f1b0b0

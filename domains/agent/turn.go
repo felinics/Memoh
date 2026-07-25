@@ -1,0 +1,206 @@
+// Package agent defines stable Agent contracts shared across runtimes,
+// Channel, and process-boundary transports. Root production files must not
+// import Memoh internal packages, Echo, fx, sqlc, or Channel.
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+)
+
+// ErrDuplicateTurn reports that a StartTurnCommand's (TeamID,
+// IdempotencyKey) pair was already claimed by an earlier run. Callers
+// handling platform webhook retries should treat it as successful
+// delivery and drop the duplicate silently.
+var ErrDuplicateTurn = errors.New("turn: duplicate idempotency key")
+
+// ErrTeamNotServed reports that the service instance does not serve the
+// command's team. The in-process runtime binds its database pool to the
+// single self-hosted team, so commands for any other team must fail
+// closed instead of silently reading and writing the default team's data.
+var ErrTeamNotServed = errors.New("turn: team not served by this instance")
+
+// Mode selects the turn orchestration path.
+type Mode string
+
+const (
+	ModeChat    Mode = "chat"
+	ModeDiscuss Mode = "discuss"
+)
+
+// StartTurnCommand is a pure-data command. Field set mirrors exactly what
+// the channel inbound processor supplies today; function- and channel-typed fields are
+// intentionally excluded — injection goes through RunHandle.Inject and
+// outbound assets through RunHandle.AddOutboundAssets.
+type StartTurnCommand struct {
+	SchemaVersion int
+	TeamID        string // required; the service fails closed when empty
+	Mode          Mode
+
+	BotID                   string
+	ChatID                  string
+	ThreadID                string
+	RouteID                 string
+	Token                   string
+	ChatToken               string
+	UserID                  string
+	SourceChannelIdentityID string
+	DisplayName             string
+	AvatarURL               string
+
+	IdempotencyKey    string // derived from platform external message id
+	ExternalMessageID string
+	EventID           string
+
+	Query           string
+	ModelQuery      string
+	UserMessageKind string
+	UserVisibleText string
+	Attachments     []Attachment
+
+	ReplyTarget            string
+	ConversationType       string
+	ConversationName       string
+	SourceReplyToMessageID string
+	ReplySender            string
+	ReplyPreview           string
+	ReplyAttachments       []Attachment
+	MentionsBot            bool
+	RepliesToBot           bool
+
+	ForwardMessageID          string
+	ForwardFromUserID         string
+	ForwardFromConversationID string
+	ForwardSender             string
+	ForwardDate               int64
+
+	CurrentChannel string
+	Channels       []string
+
+	Model             string
+	ReasoningEffort   string
+	WorkspaceTargetID string
+
+	SkillActivation      *SkillActivation
+	RequestedSkills      []RequestedSkillContext
+	SkipMemoryExtraction bool
+	SkipTitleGeneration  bool
+	UserMessagePersisted bool
+
+	// Discuss-mode extras.
+	SessionToken string //nolint:gosec // session credential material; crosses only the authenticated internal RPC in split deployments
+	ToolHTTPURL  string
+
+	// DiscussMessages is the composed conversation context for a discuss
+	// turn (Mode == ModeDiscuss), already rendered by the caller's
+	// projection. The runtime appends its own late-binding prompt after
+	// image inlining so vision parts land on the last real user message.
+	DiscussMessages  []DiscussMessage
+	DiscussImageRefs []DiscussImageRef
+	// DiscussMentioned reports an explicit @-mention or reply-to in the
+	// new context window; DiscussAddressed additionally covers direct
+	// (1:1) conversations. Expensive external runtimes (ACP) use
+	// DiscussAddressed as a participation gate and skip the run when
+	// false.
+	DiscussMentioned bool
+	DiscussAddressed bool
+}
+
+// DiscussMessage is one composed context message for a discuss turn.
+type DiscussMessage struct {
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	RawContent json.RawMessage `json:"raw_content,omitempty"`
+}
+
+// DiscussImageRef references an image attachment to inline as vision input.
+type DiscussImageRef struct {
+	ContentHash string `json:"content_hash"`
+	Mime        string `json:"mime,omitempty"`
+}
+
+// Synthetic discuss event kinds emitted by the runtime before (or instead
+// of) the model event stream.
+const (
+	// DiscussEventRunResolved is always the first event of a discuss run;
+	// its payload is DiscussRunResolvedPayload.
+	DiscussEventRunResolved = "discuss_run_resolved"
+	// DiscussEventSkipped signals the runtime declined to start (e.g. ACP
+	// participation gate); the run ends after this event.
+	DiscussEventSkipped = "discuss_skipped"
+)
+
+// DiscussRunResolvedPayload is the payload of DiscussEventRunResolved.
+type DiscussRunResolvedPayload struct {
+	RuntimeType string `json:"runtime_type"`
+}
+
+// ToolApprovalResponse resumes a thread's turn deferred on tool approval
+// (RFC ResumeApprovalCommand).
+type ToolApprovalResponse struct {
+	BotID                      string
+	ThreadID                   string
+	ActorChannelIdentityID     string
+	ActorUserID                string
+	ApprovalID                 string
+	ExplicitID                 string
+	ReplyExternalMessageID     string
+	Decision                   string
+	Reason                     string
+	ChatToken                  string
+	SuppressActivePromptAttach bool
+}
+
+// UserInputResponse resumes a thread's turn deferred on ask_user
+// (RFC ResumeUserInputCommand).
+type UserInputResponse struct {
+	BotID                      string
+	ThreadID                   string
+	ActorChannelIdentityID     string
+	ActorUserID                string
+	UserInputID                string
+	ExplicitID                 string
+	ReplyExternalMessageID     string
+	Answers                    []QuestionAnswer
+	TextAnswer                 string
+	Canceled                   bool
+	Reason                     string
+	ChatToken                  string
+	SuppressActivePromptAttach bool
+}
+
+// Event is one element of a thread turn's event stream. Payload is the raw JSON
+// chunk exactly as produced by the runtime; Kind is the parsed "type"
+// field (best effort, empty when unparsable). Seq is monotonically
+// increasing per run.
+type Event struct {
+	RunID    string
+	TeamID   string
+	ThreadID string
+	Seq      int64
+	Kind     string
+	Payload  json.RawMessage
+}
+
+// RunHandle observes and steers one running turn. Events and Errs mirror
+// the runtime's chunk/error channel pair; both close when the run ends.
+type RunHandle interface {
+	RunID() string
+	Events() <-chan Event
+	Errs() <-chan error
+	Inject(ctx context.Context, msg InjectMessage) error
+	AddOutboundAssets(refs []OutboundAssetRef)
+	Cancel()
+}
+
+// Service starts and resumes turns. The application service implements this
+// contract directly; cross-process transports expose the same contract. The
+// eventCh parameters mirror the application's raw JSON stream for resumed
+// turns and are not part of the serialized command shape.
+type Service interface {
+	StartTurn(ctx context.Context, cmd StartTurnCommand) (RunHandle, error)
+	RespondToolApproval(ctx context.Context, input ToolApprovalResponse, eventCh chan<- json.RawMessage) error
+	RespondUserInput(ctx context.Context, input UserInputResponse, eventCh chan<- json.RawMessage) error
+	AdvancePlainTextUserInput(ctx context.Context, input AdvanceTextInput) (AdvanceTextResult, error)
+}

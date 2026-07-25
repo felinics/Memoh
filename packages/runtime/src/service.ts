@@ -342,7 +342,7 @@ function unary<Request, Response>(
 async function locateBridgeProto(): Promise<string> {
   const candidates = [
     fileURLToPath(new URL('./bridge.proto', import.meta.url)),
-    fileURLToPath(new URL('../../../internal/workspace/bridgepb/bridge.proto', import.meta.url)),
+    fileURLToPath(new URL('../../../domains/runtime/bridge/pb/bridge.proto', import.meta.url)),
   ]
   for (const candidate of candidates) {
     try {

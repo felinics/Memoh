@@ -227,6 +227,48 @@ func TestRuntimeValidationRequiresInternalRPCSecret(t *testing.T) {
 	}
 }
 
+func TestServerRuntimeValidatesOnlyChannelTarget(t *testing.T) {
+	cfg := Config{
+		Server: ServerConfig{
+			Addr:          "127.0.0.1:8080",
+			RPCListenAddr: DefaultServerRPCListenAddr,
+		},
+		InternalRPC: InternalRPCConfig{
+			SharedSecret:  "test-only-secret",
+			ChannelTarget: DefaultChannelRPCTarget,
+		},
+	}
+	if err := cfg.ValidateServerRuntime(); err != nil {
+		t.Fatalf("server validation: %v", err)
+	}
+	cfg.InternalRPC.ChannelTarget = ""
+	err := cfg.ValidateServerRuntime()
+	if err == nil || !strings.Contains(err.Error(), "channel_target") {
+		t.Fatalf("server validation error = %v", err)
+	}
+}
+
+func TestChannelRuntimeValidatesOnlyServerTarget(t *testing.T) {
+	cfg := Config{
+		Channel: ChannelConfig{
+			Addr:          DefaultChannelHTTPAddr,
+			RPCListenAddr: DefaultChannelRPCListenAddr,
+		},
+		InternalRPC: InternalRPCConfig{
+			SharedSecret: "test-only-secret",
+			ServerTarget: DefaultServerRPCTarget,
+		},
+	}
+	if err := cfg.ValidateChannelRuntime(); err != nil {
+		t.Fatalf("channel validation: %v", err)
+	}
+	cfg.InternalRPC.ServerTarget = ""
+	err := cfg.ValidateChannelRuntime()
+	if err == nil || !strings.Contains(err.Error(), "server_target") {
+		t.Fatalf("channel validation error = %v", err)
+	}
+}
+
 func TestLoadRejectsInvalidWebhookTunnelMode(t *testing.T) {
 	t.Parallel()
 

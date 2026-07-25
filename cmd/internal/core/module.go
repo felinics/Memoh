@@ -3,29 +3,14 @@ package core
 import (
 	"go.uber.org/fx"
 
-	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channelaccess"
-	"github.com/memohai/memoh/internal/chat/event"
-	"github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/mcp"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthclients"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/providertemplates"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/userruntime"
-	videopkg "github.com/memohai/memoh/internal/video"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/domains/agent/chat/compaction"
+	"github.com/memohai/memoh/domains/agent/chat/event"
+	userinput "github.com/memohai/memoh/domains/agent/decision/input"
+	pluginspkg "github.com/memohai/memoh/domains/agent/extension/plugins"
+	"github.com/memohai/memoh/domains/agent/mcp"
+	"github.com/memohai/memoh/domains/api/access"
+	"github.com/memohai/memoh/domains/api/access/policy"
+	"github.com/memohai/memoh/internal/oauth"
 )
 
 // FoundationModule assembles process-neutral domain infrastructure shared by
@@ -36,17 +21,30 @@ func FoundationModule() fx.Option {
 		fx.Provide(
 			provideLogger,
 			provideDBConn,
-			providePostgresStore,
-			provideDBQueries,
-			provideAccountStore,
-			bots.NewService,
+			provideAccountPersistenceStore,
+			provideAccountCounter,
+			provideAccountTitleModelValidator,
+			provideBotPersistenceStore,
+			provideRuntimeContainerStore,
+			provideBotUserReader,
+			provideBotContainerReader,
+			provideBotService,
 			provideAccountService,
-			acl.NewService,
-			channelaccess.NewService,
+			provideACLStore,
+			provideACLChannelIdentityReader,
+			provideACLService,
+			provideChannelAccessStore,
+			provideChannelAccessIdentityReader,
+			access.NewService,
+			provideApplicationChannelIdentityReader,
+			provideDecisionCluster,
+			provideUserInputPersistence,
 			userinput.NewService,
 			policy.NewService,
-			oauthclients.NewRegistry,
+			oauth.NewRegistry,
 			event.NewHub,
+			provideChatMessageStore,
+			provideChatThreadStore,
 			provideSessionService,
 			provideMessageService,
 		),
@@ -59,62 +57,76 @@ func FoundationModule() fx.Option {
 func ServerModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
-			boot.ProvideRuntimeConfig,
+			provideTokenConfig,
+			provideListenAddr,
+			provideContainerBackend,
+			provideRuntimeClock,
 			provideContainerService,
-			provideOverlayProviderRegistry,
-			provideNetworkService,
-			provideNetworkController,
-			settings.NewService,
+			provideDisplayService,
+			provideRuntimeSettingsStore,
+			provideNetwork,
+			provideSettingsModelReader,
+			provideSettingsService,
+			provideToolApprovalPersistence,
 			provideToolApprovalService,
-			providePGVectorStore,
-			provideUserRuntimeStore,
-			provideBotRemoteRuntimeBindingStore,
-			provideUserRuntimeHub,
-			userruntime.NewService,
-			workspace.NewRemoteWorkspaceService,
-			provideUserRuntimePipe,
-			provideWikiStore,
-			provideWorkspaceManager,
+			provideUserRuntime,
+			provideWorkspaceBotProfiles,
+			provideWorkspaceRuntimeSettings,
+			provideWorkspace,
 			provideBridgeProvider,
 			providePluginBridgeProvider,
+			provideTemplateService,
+			provideProvidersService,
+			provideModelProviderResolver,
+			provideModelsService,
+			provideModelExecutionResolver,
 			provideMemoryLLM,
-			memprovider.NewService,
+			provideMemoryCatalogService,
 			provideMemoryProviderRegistry,
-			models.NewService,
 			provideACPRunner,
 			provideACPSessionPool,
 			provideACPCodexOAuthHandler,
 			provideACPClaudeCodeOAuthHandler,
 			provideHooksService,
-			provideProvidersService,
-			providertemplates.NewService,
-			fetchproviders.NewService,
-			searchproviders.NewService,
+			provideFetchProviderService,
+			provideSearchProviderService,
+			provideMCPConnectionStore,
+			provideMCPOAuthStore,
 			mcp.NewConnectionService,
+			providePluginStore,
 			pluginspkg.NewService,
 			mcp.NewToolSessionContextStore,
-			provideAudioRegistry,
-			audiopkg.NewService,
-			provideVideoRegistry,
-			videopkg.NewService,
+			provideAudioService,
+			provideVideoService,
 			provideAudioTempStore,
 			provideMediaService,
+			provideObservedRouteReader,
+			provideACLObservedConversationReader,
 			provideAgent,
+			provideApplicationReads,
+			provideCompactionStore,
+			provideCompactionPersistence,
+			provideCompactionArtifacts,
 			provideAgentService,
 			provideTurnService,
+			provideScheduleStore,
 			provideScheduleTriggerer,
+			provideHeartbeatStore,
 			provideHeartbeatSessionCreator,
 			provideScheduleSessionCreator,
-			schedule.NewService,
+			provideScheduleService,
 			provideHeartbeatTriggerer,
-			heartbeat.NewService,
+			provideHeartbeatService,
 			compaction.NewService,
 			provideContainerdHandler,
+			provideChatBackupStore,
+			provideChannelBackupStore,
 			provideBotBackupService,
 			provideFederationGateway,
 			provideACPToolSource,
 			provideToolGatewayService,
 			provideBackgroundManager,
+			provideHistorySearcher,
 			provideToolProviders,
 			provideOAuthService,
 		),

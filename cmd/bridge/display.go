@@ -56,11 +56,11 @@ func ensureDisplayRuntimeLinks(ctx context.Context, xkbcompPath string) {
 		return
 	}
 	if strings.TrimSpace(xkbcompPath) == "" {
-		logger.FromContext(ctx).Warn("display requested but xkbcomp is unavailable")
+		logger.FromContext(ctx).WarnContext(ctx, "display requested but xkbcomp is unavailable")
 		return
 	}
 	if err := os.Symlink(xkbcompPath, systemXkbcompPath); err != nil && !os.IsExist(err) {
-		logger.FromContext(ctx).Warn("failed to link xkbcomp for Xvnc", slog.String("target", xkbcompPath), slog.String("link", systemXkbcompPath), slog.Any("error", err))
+		logger.FromContext(ctx).WarnContext(ctx, "failed to link xkbcomp for Xvnc", slog.String("target", xkbcompPath), slog.String("link", systemXkbcompPath), slog.Any("error", err))
 	}
 }
 
@@ -70,7 +70,7 @@ func superviseXvnc(ctx context.Context) {
 		startedAt := time.Now()
 		xvncPath := resolveDisplayCommand(toolkitXvncPath, "/usr/bin/Xvnc", "/usr/local/bin/Xvnc", "Xvnc")
 		if xvncPath == "" {
-			logger.FromContext(ctx).Warn("display requested but Xvnc is unavailable")
+			logger.FromContext(ctx).WarnContext(ctx, "display requested but Xvnc is unavailable")
 			if waitDisplayRetry(ctx, backoff) {
 				return
 			}
@@ -84,7 +84,7 @@ func superviseXvnc(ctx context.Context) {
 		geometry := displayGeometry()
 		prepareX11SocketDir(ctx)
 		if displayTCPReady(ctx, rfbTCPAddr) {
-			logger.FromContext(ctx).Info("Xvnc display already available", slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
+			logger.FromContext(ctx).InfoContext(ctx, "Xvnc display already available", slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
 			go startDisplaySession(ctx)
 			if waitExistingDisplay(ctx, rfbTCPAddr) {
 				return
@@ -109,9 +109,9 @@ func superviseXvnc(ctx context.Context) {
 		cmd.Stderr = os.Stderr
 
 		if err := cmd.Start(); err != nil {
-			logger.FromContext(ctx).Warn("failed to start Xvnc", slog.Any("error", err))
+			logger.FromContext(ctx).WarnContext(ctx, "failed to start Xvnc", slog.Any("error", err))
 		} else {
-			logger.FromContext(ctx).Info("Xvnc display started", slog.Int("pid", cmd.Process.Pid), slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
+			logger.FromContext(ctx).InfoContext(ctx, "Xvnc display started", slog.Int("pid", cmd.Process.Pid), slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
 			go startDisplaySession(ctx)
 			waitErr := make(chan error, 1)
 			go func() {
@@ -127,9 +127,9 @@ func superviseXvnc(ctx context.Context) {
 					return
 				}
 				if err != nil {
-					logger.FromContext(ctx).Warn("Xvnc exited", slog.Any("error", err))
+					logger.FromContext(ctx).WarnContext(ctx, "Xvnc exited", slog.Any("error", err))
 				} else {
-					logger.FromContext(ctx).Warn("Xvnc exited")
+					logger.FromContext(ctx).WarnContext(ctx, "Xvnc exited")
 				}
 			}
 		}
@@ -306,24 +306,24 @@ func prepareDisplaySockets(ctx context.Context) {
 	}
 	for _, stalePath := range []string{xvncSocketPath, xvncLockPath} {
 		if err := os.Remove(stalePath); err != nil && !os.IsNotExist(err) {
-			logger.FromContext(ctx).Warn("failed to remove stale Xvnc file", slog.String("path", stalePath), slog.Any("error", err))
+			logger.FromContext(ctx).WarnContext(ctx, "failed to remove stale Xvnc file", slog.String("path", stalePath), slog.Any("error", err))
 		}
 	}
 }
 
 func prepareX11SocketDir(ctx context.Context) {
 	if err := os.MkdirAll(x11SocketDir, 0o1777); err != nil { //nolint:gosec // X11 socket dir must be world-writable with sticky bit.
-		logger.FromContext(ctx).Warn("failed to create X11 socket directory", slog.String("dir", x11SocketDir), slog.Any("error", err))
+		logger.FromContext(ctx).WarnContext(ctx, "failed to create X11 socket directory", slog.String("dir", x11SocketDir), slog.Any("error", err))
 		return
 	}
 	if err := os.Chmod(x11SocketDir, 0o1777); err != nil { //nolint:gosec // X11 socket dir must be world-writable with sticky bit.
-		logger.FromContext(ctx).Warn("failed to set X11 socket directory permissions", slog.String("dir", x11SocketDir), slog.Any("error", err))
+		logger.FromContext(ctx).WarnContext(ctx, "failed to set X11 socket directory permissions", slog.String("dir", x11SocketDir), slog.Any("error", err))
 	}
 }
 
 func startDisplaySession(ctx context.Context) {
 	if err := waitForDisplaySocket(ctx, displayReadyTimeout); err != nil {
-		logger.FromContext(ctx).Warn("display session skipped; X socket not ready", slog.Any("error", err))
+		logger.FromContext(ctx).WarnContext(ctx, "display session skipped; X socket not ready", slog.Any("error", err))
 		return
 	}
 	if err := sleepWithContext(ctx, 300*time.Millisecond); err != nil {
@@ -384,7 +384,7 @@ func runDisplayCommand(ctx context.Context, path string, args ...string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.FromContext(ctx).Warn("display helper failed", slog.String("path", path), slog.Any("error", err))
+		logger.FromContext(ctx).WarnContext(ctx, "display helper failed", slog.String("path", path), slog.Any("error", err))
 	}
 }
 
@@ -418,7 +418,7 @@ func startDesktopSession(ctx context.Context) {
 		startDisplayCommand(ctx, "window manager", windowManager)
 		return
 	}
-	logger.FromContext(ctx).Warn("display desktop session unavailable")
+	logger.FromContext(ctx).WarnContext(ctx, "display desktop session unavailable")
 }
 
 func superviseDesktopSession(ctx context.Context) {
@@ -440,7 +440,7 @@ func superviseDesktopSession(ctx context.Context) {
 				continue
 			}
 			lastRestart = time.Now()
-			logger.FromContext(ctx).Warn("display desktop session is not running; restarting")
+			logger.FromContext(ctx).WarnContext(ctx, "display desktop session is not running; restarting")
 			startDesktopSession(ctx)
 			startDesktopStyle(ctx)
 		}
@@ -534,7 +534,7 @@ func startDisplayBrowser(ctx context.Context) {
 	}
 	browser := resolveDisplayCommand("google-chrome-stable", "google-chrome", "chromium", "chromium-browser")
 	if browser == "" {
-		logger.FromContext(ctx).Warn("display browser unavailable")
+		logger.FromContext(ctx).WarnContext(ctx, "display browser unavailable")
 		return
 	}
 	if browserProcessRunning(false) {
@@ -564,7 +564,7 @@ func startDisplayBrowser(ctx context.Context) {
 func startDesktopStyle(ctx context.Context) {
 	info, err := os.Stat(desktopStylePath)
 	if err != nil || info.IsDir() {
-		logger.FromContext(ctx).Warn("display desktop style script is unavailable",
+		logger.FromContext(ctx).WarnContext(ctx, "display desktop style script is unavailable",
 			slog.String("path", desktopStylePath),
 			slog.Any("error", err),
 		)
@@ -713,7 +713,7 @@ func cleanupBrowserProfile(ctx context.Context) {
 	for _, name := range []string{"SingletonLock", "SingletonSocket", "SingletonCookie"} {
 		path := filepath.Join(displayBrowserProfile, name)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			logger.FromContext(ctx).Warn("failed to remove stale browser profile lock", slog.String("path", path), slog.Any("error", err))
+			logger.FromContext(ctx).WarnContext(ctx, "failed to remove stale browser profile lock", slog.String("path", path), slog.Any("error", err))
 		}
 	}
 }
@@ -774,11 +774,11 @@ func stopXvncProcesses(ctx context.Context) {
 func startDisplayCommand(ctx context.Context, name, path string, args ...string) {
 	info, err := os.Stat(path)
 	if err != nil {
-		logger.FromContext(ctx).Warn("display helper unavailable", slog.String("name", name), slog.String("path", path), slog.Any("error", err))
+		logger.FromContext(ctx).WarnContext(ctx, "display helper unavailable", slog.String("name", name), slog.String("path", path), slog.Any("error", err))
 		return
 	}
 	if info.Mode().Perm()&0o111 == 0 {
-		logger.FromContext(ctx).Warn("display helper is not executable", slog.String("name", name), slog.String("path", path))
+		logger.FromContext(ctx).WarnContext(ctx, "display helper is not executable", slog.String("name", name), slog.String("path", path))
 		return
 	}
 	cmd := exec.CommandContext(ctx, path, args...) //nolint:gosec // path is a fixed runtime bundle executable
@@ -786,13 +786,13 @@ func startDisplayCommand(ctx context.Context, name, path string, args ...string)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		logger.FromContext(ctx).Warn("failed to start display helper", slog.String("name", name), slog.Any("error", err))
+		logger.FromContext(ctx).WarnContext(ctx, "failed to start display helper", slog.String("name", name), slog.Any("error", err))
 		return
 	}
-	logger.FromContext(ctx).Info("display helper started", slog.String("name", name), slog.Int("pid", cmd.Process.Pid))
+	logger.FromContext(ctx).InfoContext(ctx, "display helper started", slog.String("name", name), slog.Int("pid", cmd.Process.Pid))
 	go func() {
 		if err := cmd.Wait(); err != nil && ctx.Err() == nil {
-			logger.FromContext(ctx).Warn("display helper exited", slog.String("name", name), slog.Any("error", err))
+			logger.FromContext(ctx).WarnContext(ctx, "display helper exited", slog.String("name", name), slog.Any("error", err))
 		}
 	}()
 }
