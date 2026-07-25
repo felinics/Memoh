@@ -554,6 +554,11 @@ CREATE INDEX IF NOT EXISTS idx_bot_channel_routes_bot ON bot_channel_routes(bot_
 -- bot_sessions: chat sessions within a bot, optionally linked to a channel route.
 CREATE SEQUENCE IF NOT EXISTS session_runtime_fencing_token_seq AS BIGINT NO CYCLE;
 
+CREATE SEQUENCE IF NOT EXISTS bot_session_event_cursor_seq
+  AS BIGINT
+  MINVALUE 1
+  MAXVALUE 9007199254740991;
+
 CREATE TABLE IF NOT EXISTS bot_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -709,6 +714,7 @@ CREATE TABLE IF NOT EXISTS bot_session_discuss_cursors (
   route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   source TEXT NOT NULL DEFAULT '',
   consumed_cursor BIGINT NOT NULL DEFAULT 0,
+  consumed_event_cursor BIGINT NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (session_id, scope_key)
 );

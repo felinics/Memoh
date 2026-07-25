@@ -33,22 +33,32 @@ func NewEventStore(log *slog.Logger, queries dbstore.Queries) *EventStore {
 	}
 }
 
-// PersistEvent writes a CanonicalEvent to the bot_session_events table.
-// Returns the UUID of the persisted event row, or empty string if the event
-// was a duplicate (ON CONFLICT DO NOTHING).
-func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, event CanonicalEvent) (string, error) {
+// PersistEvent writes a CanonicalEvent to the bot_session_events table with a
+// freshly allocated monotonic event cursor stamped into its payload. Returns
+// the UUID of the persisted event row (empty for ON CONFLICT duplicates) and
+// the stamped event the caller must project instead of the input.
+func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, event CanonicalEvent) (string, CanonicalEvent, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
 	if err != nil {
-		return "", fmt.Errorf("invalid bot id: %w", err)
+		return "", event, fmt.Errorf("invalid bot id: %w", err)
 	}
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
-		return "", fmt.Errorf("invalid session id: %w", err)
+		return "", event, fmt.Errorf("invalid session id: %w", err)
+	}
+
+	original := event
+	if cursor, cursorErr := s.queries.NextSessionEventCursor(ctx); cursorErr != nil {
+		s.logger.Warn("allocate session event cursor failed", slog.Any("error", cursorErr))
+	} else if stamped, stampErr := assignEventCursor(event, cursor); stampErr != nil {
+		s.logger.Warn("stamp session event cursor failed", slog.Any("error", stampErr))
+	} else {
+		event = stamped
 	}
 
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		return "", fmt.Errorf("marshal event data: %w", err)
+		return "", event, fmt.Errorf("marshal event data: %w", err)
 	}
 
 	externalMessageID := extractExternalMessageID(event)
@@ -77,15 +87,15 @@ func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, 
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", nil
+			return "", original, nil
 		}
-		return "", fmt.Errorf("persist session event: %w", err)
+		return "", event, fmt.Errorf("persist session event: %w", err)
 	}
 
 	if pgID.Valid {
-		return pgID.String(), nil
+		return pgID.String(), event, nil
 	}
-	return "", nil
+	return "", original, nil
 }
 
 // LoadEvents loads all events for a session, ordered by received_at_ms.
@@ -130,13 +140,13 @@ func (s *EventStore) HasEvents(ctx context.Context, sessionID string) (bool, err
 	return count > 0, nil
 }
 
-func (s *EventStore) GetDiscussConsumedCursor(ctx context.Context, sessionID, scopeKey string) (int64, error) {
+func (s *EventStore) GetDiscussCursor(ctx context.Context, sessionID, scopeKey string) (DiscussCursorPosition, error) {
 	if s == nil || s.queries == nil {
-		return 0, nil
+		return DiscussCursorPosition{}, nil
 	}
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
-		return 0, fmt.Errorf("invalid session id: %w", err)
+		return DiscussCursorPosition{}, fmt.Errorf("invalid session id: %w", err)
 	}
 	row, err := s.queries.GetSessionDiscussCursor(ctx, sqlc.GetSessionDiscussCursorParams{
 		SessionID: pgSessionID,
@@ -144,15 +154,18 @@ func (s *EventStore) GetDiscussConsumedCursor(ctx context.Context, sessionID, sc
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, nil
+			return DiscussCursorPosition{}, nil
 		}
-		return 0, fmt.Errorf("get discuss cursor: %w", err)
+		return DiscussCursorPosition{}, fmt.Errorf("get discuss cursor: %w", err)
 	}
-	return row.ConsumedCursor, nil
+	return DiscussCursorPosition{
+		SourceCursor: row.ConsumedCursor,
+		EventCursor:  row.ConsumedEventCursor,
+	}, nil
 }
 
-func (s *EventStore) UpsertDiscussConsumedCursor(ctx context.Context, sessionID, scopeKey, routeID, source string, cursor int64) error {
-	if s == nil || s.queries == nil || cursor <= 0 {
+func (s *EventStore) UpsertDiscussCursor(ctx context.Context, sessionID, scopeKey, routeID, source string, position DiscussCursorPosition) error {
+	if s == nil || s.queries == nil || (position.SourceCursor <= 0 && position.EventCursor <= 0) {
 		return nil
 	}
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
@@ -168,11 +181,12 @@ func (s *EventStore) UpsertDiscussConsumedCursor(ctx context.Context, sessionID,
 		pgRouteID = parsed
 	}
 	_, err = s.queries.UpsertSessionDiscussCursor(ctx, sqlc.UpsertSessionDiscussCursorParams{
-		SessionID:      pgSessionID,
-		ScopeKey:       normalizeDiscussCursorScope(scopeKey),
-		RouteID:        pgRouteID,
-		Source:         strings.TrimSpace(source),
-		ConsumedCursor: cursor,
+		SessionID:           pgSessionID,
+		ScopeKey:            normalizeDiscussCursorScope(scopeKey),
+		RouteID:             pgRouteID,
+		Source:              strings.TrimSpace(source),
+		ConsumedCursor:      position.SourceCursor,
+		ConsumedEventCursor: position.EventCursor,
 	})
 	if err != nil {
 		return fmt.Errorf("upsert discuss cursor: %w", err)

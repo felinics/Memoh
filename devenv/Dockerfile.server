@@ -7,7 +7,7 @@ FROM golang:1.25-alpine
 
 WORKDIR /workspace
 
-RUN go install github.com/air-verse/air@latest
+RUN go install github.com/air-verse/air@v1.66.0
 
 RUN apk add --no-cache \
     bash \

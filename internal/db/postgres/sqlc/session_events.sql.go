@@ -112,7 +112,7 @@ func (q *Queries) ListSessionEventsByBot(ctx context.Context, botID pgtype.UUID)
 const listSessionEventsBySession = `-- name: ListSessionEventsBySession :many
 SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at, team_id FROM bot_session_events
 WHERE team_id = public.memoh_current_team_id() AND session_id = $1
-ORDER BY received_at_ms ASC
+ORDER BY received_at_ms ASC, created_at ASC, id ASC
 `
 
 func (q *Queries) ListSessionEventsBySession(ctx context.Context, sessionID pgtype.UUID) ([]BotSessionEvent, error) {
@@ -149,7 +149,7 @@ func (q *Queries) ListSessionEventsBySession(ctx context.Context, sessionID pgty
 const listSessionEventsBySessionAfter = `-- name: ListSessionEventsBySessionAfter :many
 SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at, team_id FROM bot_session_events
 WHERE team_id = public.memoh_current_team_id() AND session_id = $1 AND received_at_ms >= $2
-ORDER BY received_at_ms ASC
+ORDER BY received_at_ms ASC, created_at ASC, id ASC
 `
 
 type ListSessionEventsBySessionAfterParams struct {
@@ -186,4 +186,15 @@ func (q *Queries) ListSessionEventsBySessionAfter(ctx context.Context, arg ListS
 		return nil, err
 	}
 	return items, nil
+}
+
+const nextSessionEventCursor = `-- name: NextSessionEventCursor :one
+SELECT nextval('bot_session_event_cursor_seq')::bigint
+`
+
+func (q *Queries) NextSessionEventCursor(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, nextSessionEventCursor)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }

@@ -41,6 +41,7 @@ DROP TABLE IF EXISTS bot_session_events CASCADE;
 DROP TABLE IF EXISTS bot_session_discuss_cursors CASCADE;
 DROP TABLE IF EXISTS bot_sessions CASCADE;
 DROP SEQUENCE IF EXISTS session_runtime_fencing_token_seq;
+DROP SEQUENCE IF EXISTS bot_session_event_cursor_seq;
 DROP TABLE IF EXISTS bot_channel_routes CASCADE;
 DROP TABLE IF EXISTS channel_identity_bind_codes CASCADE;
 DROP TABLE IF EXISTS bot_channel_configs CASCADE;

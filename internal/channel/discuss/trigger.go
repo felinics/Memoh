@@ -11,31 +11,32 @@ type discussTriggerBuilder struct{}
 
 type discussTurnPlan struct {
 	command         turn.StartTurnCommand
-	consumedMs      int64
+	consumed        timeline.DiscussCursorPosition
 	messageCount    int
 	estimatedTokens int
 }
 
 // Build composes the durable timeline and persisted turn responses into the
 // pure StartTurn command consumed by Agent.
-func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, afterMs int64) (discussTurnPlan, bool) {
-	composed := timeline.ComposeContext(rc, trs, "")
+func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact) (discussTurnPlan, bool) {
+	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
 		return discussTurnPlan{}, false
 	}
 
-	isMentioned := wasRecentlyMentioned(rc, afterMs)
+	isMentioned := wasRecentlyMentioned(rc, after)
 	addressed := isMentioned || turn.IsPrivateConversationType(cfg.ConversationType)
 	msgs := make([]turn.DiscussMessage, 0, len(composed.Messages))
 	for _, message := range composed.Messages {
 		msgs = append(msgs, turn.DiscussMessage{
-			Role:       message.Role,
-			Content:    message.Content,
-			RawContent: message.RawContent,
+			Role:                 message.Role,
+			Content:              message.Content,
+			RawContent:           message.RawContent,
+			CompactionArtifactID: message.CompactionArtifactID,
 		})
 	}
 	imageRefs := make([]turn.DiscussImageRef, 0)
-	for _, ref := range extractNewImageRefs(rc, afterMs) {
+	for _, ref := range extractNewImageRefs(timeline.ActiveRenderedContext(rc, artifacts), after) {
 		imageRefs = append(imageRefs, turn.DiscussImageRef{
 			ContentHash: ref.ContentHash,
 			Mime:        ref.Mime,
@@ -62,39 +63,30 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			DiscussImageRefs:        imageRefs,
 			DiscussAddressed:        addressed,
 		},
-		consumedMs:      latestRCReceivedAtMs(rc),
+		consumed:        timeline.ConsumedDiscussCursor(rc),
 		messageCount:    len(composed.Messages),
 		estimatedTokens: composed.EstimatedTokens,
 	}, true
 }
 
-// latestRCReceivedAtMs returns the maximum ReceivedAtMs across all segments
-// in the given RC, or 0 if the RC is empty.
-func latestRCReceivedAtMs(rc timeline.RenderedContext) int64 {
-	var latest int64
-	for _, segment := range rc {
-		if segment.ReceivedAtMs > latest {
-			latest = segment.ReceivedAtMs
-		}
-	}
-	return latest
-}
-
 // extractNewImageRefs collects image references from external RC segments
 // that arrived after the last consumed cursor.
-func extractNewImageRefs(rc timeline.RenderedContext, afterMs int64) []timeline.ImageAttachmentRef {
+func extractNewImageRefs(rc timeline.RenderedContext, after timeline.DiscussCursorPosition) []timeline.ImageAttachmentRef {
 	var refs []timeline.ImageAttachmentRef
 	for _, segment := range rc {
-		if segment.ReceivedAtMs > afterMs && !segment.IsMyself {
+		if !after.Covers(segment) && !segment.IsMyself && !segment.IsSelfSent {
 			refs = append(refs, segment.ImageRefs...)
 		}
 	}
 	return refs
 }
 
-func wasRecentlyMentioned(rc timeline.RenderedContext, afterMs int64) bool {
+func wasRecentlyMentioned(rc timeline.RenderedContext, after timeline.DiscussCursorPosition) bool {
 	for _, segment := range rc {
-		if segment.ReceivedAtMs > afterMs && (segment.MentionsMe || segment.RepliesToMe) {
+		if segment.IsMyself || segment.IsSelfSent {
+			continue
+		}
+		if !after.Covers(segment) && (segment.MentionsMe || segment.RepliesToMe) {
 			return true
 		}
 	}

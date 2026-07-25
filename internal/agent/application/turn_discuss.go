@@ -186,6 +186,46 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			}
 		}
 	}
+
+	// Compute pressure on this goroutine so the detached trigger holds a few
+	// scalars instead of pinning the whole composed context until it runs.
+	if compactable := discussCompactableTokens(cmd.DiscussMessages); compactable > 0 && s.compactionService != nil && s.settingsService != nil {
+		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
+	}
+}
+
+// maybeCompactDiscuss re-evaluates compaction pressure after a native discuss
+// turn with the same trigger policy as the chat path. ACP discuss turns run
+// through streamTurnChat and inherit its trigger directly.
+func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, modelID string, compactable int) {
+	budget := 0
+	if s.modelsService != nil && strings.TrimSpace(modelID) != "" {
+		if model, err := s.modelsService.GetByID(ctx, modelID); err == nil && model.Config.ContextWindow != nil {
+			budget = *model.Config.ContextWindow
+		}
+	}
+	s.maybeCompact(ctx, ChatRequest{BotID: botID, ThreadID: threadID}, resolvedContext{
+		compactableTokens:      compactable,
+		compactableTokensKnown: true,
+		contextTokenBudget:     budget,
+	}, compactable)
+}
+
+// discussCompactableTokens estimates the raw history share of a discuss
+// context, excluding artifact summaries, in the chat trigger's token unit.
+func discussCompactableTokens(messages []turn.DiscussMessage) int {
+	total := 0
+	for _, message := range messages {
+		if message.CompactionArtifactID != "" {
+			continue
+		}
+		size := len(message.RawContent)
+		if size == 0 {
+			size = len(message.Content)
+		}
+		total += size / 4
+	}
+	return total
 }
 
 func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {

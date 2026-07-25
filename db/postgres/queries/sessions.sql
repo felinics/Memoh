@@ -420,19 +420,21 @@ WHERE team_id = public.memoh_current_team_id()
 
 -- name: UpsertSessionDiscussCursor :one
 INSERT INTO bot_session_discuss_cursors (
-  session_id, scope_key, route_id, source, consumed_cursor
+  session_id, scope_key, route_id, source, consumed_cursor, consumed_event_cursor
 )
 VALUES (
   sqlc.arg(session_id),
   sqlc.arg(scope_key),
   sqlc.narg(route_id)::uuid,
   sqlc.arg(source),
-  sqlc.arg(consumed_cursor)
+  sqlc.arg(consumed_cursor),
+  sqlc.arg(consumed_event_cursor)
 )
 ON CONFLICT (team_id, session_id, scope_key) DO UPDATE
 SET route_id = COALESCE(EXCLUDED.route_id, bot_session_discuss_cursors.route_id),
     source = EXCLUDED.source,
     consumed_cursor = GREATEST(bot_session_discuss_cursors.consumed_cursor, EXCLUDED.consumed_cursor),
+    consumed_event_cursor = GREATEST(bot_session_discuss_cursors.consumed_event_cursor, EXCLUDED.consumed_event_cursor),
     updated_at = now()
 RETURNING *;
 

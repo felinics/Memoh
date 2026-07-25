@@ -9,6 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	"github.com/memohai/memoh/internal/apperror"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/settings"
@@ -109,6 +110,38 @@ func (*recordingMessageService) DeleteBySession(context.Context, string) error {
 
 func (*recordingMessageService) LinkAssets(context.Context, string, []messagepkg.AssetRef) error {
 	return nil
+}
+
+func TestStreamChatWSResultRejectsTurnReplacementForACP(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Service{
+		sessionService: acpRuntimeSessionServiceForTest("user-1"),
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	preflightCalled := false
+	postPersistCalled := false
+
+	_, err := resolver.streamChatWSResultWithHooks(
+		context.Background(),
+		ChatRequest{BotID: "bot-1", ThreadID: "session-1"},
+		make(chan WSStreamEvent, 1),
+		make(chan struct{}),
+		func(context.Context) error {
+			preflightCalled = true
+			return nil
+		},
+		func(context.Context, []messagepkg.Message) error {
+			postPersistCalled = true
+			return nil
+		},
+	)
+	if got := apperror.CodeOf(err); got != apperror.CodeACPTurnReplacementUnsupported {
+		t.Fatalf("error code = %q, want %q", got, apperror.CodeACPTurnReplacementUnsupported)
+	}
+	if preflightCalled || postPersistCalled {
+		t.Fatalf("replacement hooks ran for ACP: preflight=%v postPersist=%v", preflightCalled, postPersistCalled)
+	}
 }
 
 func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {

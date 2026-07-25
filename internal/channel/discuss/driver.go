@@ -12,8 +12,14 @@ import (
 )
 
 type DiscussCursorStore interface {
-	GetDiscussConsumedCursor(ctx context.Context, sessionID, scopeKey string) (int64, error)
-	UpsertDiscussConsumedCursor(ctx context.Context, sessionID, scopeKey, routeID, source string, cursor int64) error
+	GetDiscussCursor(ctx context.Context, sessionID, scopeKey string) (timeline.DiscussCursorPosition, error)
+	UpsertDiscussCursor(ctx context.Context, sessionID, scopeKey, routeID, source string, position timeline.DiscussCursorPosition) error
+}
+
+// DiscussArtifactProvider projects the session's active compaction artifacts
+// for timeline composition. Implemented agent-side and injected at assembly.
+type DiscussArtifactProvider interface {
+	ActiveCompactionArtifacts(ctx context.Context, botID, sessionID string) ([]timeline.CompactionArtifact, error)
 }
 
 // DiscussStreamBroadcaster publishes stream events to local UI subscribers.
@@ -27,6 +33,7 @@ type DiscussDriverDeps struct {
 	Turn           turn.Service
 	MessageService messagepkg.Service
 	CursorStore    DiscussCursorStore
+	Artifacts      DiscussArtifactProvider
 	Broadcaster    DiscussStreamBroadcaster
 	Logger         *slog.Logger
 }
@@ -51,22 +58,23 @@ type DiscussSessionConfig struct {
 // cursor persistence, turn execution, and stream projection live in dedicated
 // collaborators.
 type DiscussDriver struct {
-	mu       sync.Mutex
-	turn     turn.Service
-	sessions map[string]*discussSession
-	history  discussHistoryReader
-	cursor   discussCursorTracker
-	trigger  discussTriggerBuilder
-	runner   discussTurnRunner
-	logger   *slog.Logger
+	mu        sync.Mutex
+	turn      turn.Service
+	sessions  map[string]*discussSession
+	history   discussHistoryReader
+	cursor    discussCursorTracker
+	trigger   discussTriggerBuilder
+	runner    discussTurnRunner
+	artifacts DiscussArtifactProvider
+	logger    *slog.Logger
 }
 
 type discussSession struct {
-	config          DiscussSessionConfig
-	rcCh            chan timeline.RenderedContext
-	stopCh          chan struct{}
-	cancel          context.CancelFunc
-	lastProcessedMs int64
+	config        DiscussSessionConfig
+	rcCh          chan timeline.RenderedContext
+	stopCh        chan struct{}
+	cancel        context.CancelFunc
+	lastProcessed timeline.DiscussCursorPosition
 }
 
 // NewDiscussDriver creates a new DiscussDriver.
@@ -78,12 +86,13 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 	logger = logger.With(slog.String("service", "channel/discuss"))
 	projector := newDiscussEventProjector(deps.Broadcaster)
 	return &DiscussDriver{
-		turn:     deps.Turn,
-		sessions: make(map[string]*discussSession),
-		history:  discussHistoryReader{messages: deps.MessageService, logger: logger},
-		cursor:   discussCursorTracker{store: deps.CursorStore},
-		runner:   discussTurnRunner{projector: projector},
-		logger:   logger,
+		turn:      deps.Turn,
+		sessions:  make(map[string]*discussSession),
+		history:   discussHistoryReader{messages: deps.MessageService, logger: logger},
+		cursor:    discussCursorTracker{store: deps.CursorStore},
+		runner:    discussTurnRunner{projector: projector},
+		artifacts: deps.Artifacts,
+		logger:    logger,
 	}
 }
 

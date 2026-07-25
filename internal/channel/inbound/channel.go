@@ -860,17 +860,11 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		pipelineMsg.Message = msg.Message
 		pipelineMsg.Message.Attachments = resolvedAttachments
 		event := AdaptInbound(pipelineMsg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
+		var store sessionEventPersister
 		if p.eventStore != nil {
-			eid, persistErr := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event)
-			if persistErr != nil {
-				if p.logger != nil {
-					p.logger.Warn("persist pipeline event failed", slog.Any("error", persistErr))
-				}
-			} else {
-				eventID = eid
-			}
+			store = p.eventStore
 		}
-		latestRC = p.pipeline.PushEvent(sessionID, event)
+		eventID, latestRC = persistAndProjectEvent(ctx, store, p.pipeline, p.logger, identity.BotID, sessionID, event)
 	}
 
 	// Discuss mode: dispatch to the discuss driver and return.

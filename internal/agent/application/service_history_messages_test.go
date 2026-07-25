@@ -1,0 +1,196 @@
+package application
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"strings"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	compaction "github.com/memohai/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	"github.com/memohai/memoh/internal/chat/timeline"
+	dbpkg "github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
+)
+
+const (
+	pipelineTestBotID     = "11111111-1111-1111-1111-111111111111"
+	pipelineTestSessionID = "22222222-2222-2222-2222-222222222222"
+)
+
+type fakeArtifactLineageQueries struct {
+	dbstore.Queries
+	rows []sqlc.BotHistoryMessageCompact
+}
+
+func (f fakeArtifactLineageQueries) ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	return f.rows, nil
+}
+
+func (fakeArtifactLineageQueries) GetCompactionLogByID(context.Context, pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
+	return sqlc.BotHistoryMessageCompact{}, pgx.ErrNoRows
+}
+
+func (fakeArtifactLineageQueries) ListCompactionArtifactParentIDsBySuccessor(context.Context, sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
+	return nil, nil
+}
+
+func compactionLogRow(t *testing.T, summary string, coveredExternalID string, createdAtMs int64) sqlc.BotHistoryMessageCompact {
+	t.Helper()
+	coverage, err := json.Marshal([]compaction.CoveredSource{{
+		Ref: contextfrag.ContextRef{
+			Namespace:   "bot_history_message",
+			ID:          "33333333-3333-3333-3333-333333333333",
+			Schema:      contextfrag.SchemaContextRef,
+			HashAlgo:    contextfrag.HashAlgoSHA256,
+			HashScope:   contextfrag.HashScopeSourcePayload,
+			ContentHash: "deadbeef",
+		},
+		ExternalMessageID: coveredExternalID,
+		CreatedAtMs:       createdAtMs,
+	}})
+	if err != nil {
+		t.Fatalf("encode coverage: %v", err)
+	}
+	id, err := dbpkg.ParseUUID("44444444-4444-4444-4444-444444444444")
+	if err != nil {
+		t.Fatalf("parse artifact id: %v", err)
+	}
+	botID, err := dbpkg.ParseUUID(pipelineTestBotID)
+	if err != nil {
+		t.Fatalf("parse bot id: %v", err)
+	}
+	sessionID, err := dbpkg.ParseUUID(pipelineTestSessionID)
+	if err != nil {
+		t.Fatalf("parse session id: %v", err)
+	}
+	return sqlc.BotHistoryMessageCompact{
+		ID:            id,
+		BotID:         botID,
+		SessionID:     sessionID,
+		Status:        "ok",
+		Summary:       summary,
+		Coverage:      coverage,
+		AnchorStartMs: createdAtMs,
+		AnchorEndMs:   createdAtMs,
+	}
+}
+
+func pipelineTextEvent(messageID string, atMs int64, text string) timeline.MessageEvent {
+	return timeline.MessageEvent{
+		SessionID:    pipelineTestSessionID,
+		MessageID:    messageID,
+		ReceivedAtMs: atMs,
+		TimestampSec: atMs / 1000,
+		Content:      []timeline.ContentNode{{Type: "text", Text: text}},
+		Conversation: timeline.ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	}
+}
+
+func TestBuildMessagesFromPipelineInsertsArtifactSummary(t *testing.T) {
+	t.Parallel()
+
+	pipeline := timeline.NewPipeline(timeline.RenderParams{})
+	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("m1", 1000, "old original"))
+	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("m2", 2000, "current question"))
+
+	svc := &Service{
+		pipeline: pipeline,
+		queries:  fakeArtifactLineageQueries{rows: []sqlc.BotHistoryMessageCompact{compactionLogRow(t, "compacted window", "m1", 1000)}},
+		logger:   slog.New(slog.DiscardHandler),
+	}
+
+	messages := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+		BotID:    pipelineTestBotID,
+		ThreadID: pipelineTestSessionID,
+	}, 0)
+
+	if len(messages) != 2 {
+		t.Fatalf("expected summary + current message, got %d: %s", len(messages), messagesDebug(messages))
+	}
+	var summaryText string
+	if err := json.Unmarshal(messages[0].Content, &summaryText); err != nil {
+		t.Fatalf("decode summary content: %v", err)
+	}
+	if !strings.Contains(summaryText, "<summary>") || !strings.Contains(summaryText, "compacted window") {
+		t.Fatalf("expected leading summary, got %q", summaryText)
+	}
+	joined := messagesDebug(messages)
+	if strings.Contains(joined, "old original") {
+		t.Fatalf("covered original must be replaced, got %s", joined)
+	}
+	if !strings.Contains(joined, "current question") {
+		t.Fatalf("uncovered message must survive, got %s", joined)
+	}
+}
+
+func messagesDebug(messages []ModelMessage) string {
+	parts := make([]string, 0, len(messages))
+	for _, m := range messages {
+		parts = append(parts, m.Role+":"+string(m.Content))
+	}
+	return strings.Join(parts, "|")
+}
+
+func TestTrimPipelineMessagesKeepsPinnedSummaries(t *testing.T) {
+	t.Parallel()
+
+	messages := []ModelMessage{
+		{Role: "user", Content: newTextContent("<summary>\nold window\n</summary>")},
+		{Role: "user", Content: newTextContent(strings.Repeat("a", 400))},
+		{Role: "assistant", Content: newTextContent(strings.Repeat("b", 400))},
+		{Role: "user", Content: newTextContent("recent")},
+	}
+	pinned := []bool{true, false, false, false}
+
+	trimmed := trimPipelineMessagesByTokens(nil, messages, pinned, 40)
+
+	if len(trimmed) != 2 {
+		t.Fatalf("expected pinned summary + recent, got %s", messagesDebug(trimmed))
+	}
+	if !strings.Contains(string(trimmed[0].Content), "old window") {
+		t.Fatalf("pinned summary must survive trim, got %s", messagesDebug(trimmed))
+	}
+	if !strings.Contains(string(trimmed[1].Content), "recent") {
+		t.Fatalf("recent message must survive trim, got %s", messagesDebug(trimmed))
+	}
+}
+
+func TestBuildMessagesFromPipelineKeepsSummaryUnderBudget(t *testing.T) {
+	t.Parallel()
+
+	pipeline := timeline.NewPipeline(timeline.RenderParams{})
+	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("m1", 1000, "old original"))
+	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("m2", 2000, strings.Repeat("x", 4000)))
+	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("m3", 3000, "current question"))
+
+	svc := &Service{
+		pipeline: pipeline,
+		queries:  fakeArtifactLineageQueries{rows: []sqlc.BotHistoryMessageCompact{compactionLogRow(t, "compacted window", "m1", 1000)}},
+		logger:   slog.New(slog.DiscardHandler),
+	}
+
+	messages := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+		BotID:    pipelineTestBotID,
+		ThreadID: pipelineTestSessionID,
+	}, 200)
+
+	// Consecutive rendered segments merge into one user message, so the tail
+	// here is a single oversized block: without pinning the budget would drop
+	// everything and the model would receive no context at all.
+	if len(messages) == 0 {
+		t.Fatal("artifact summary must survive a budget that drops the whole tail")
+	}
+	joined := messagesDebug(messages)
+	if !strings.Contains(joined, "compacted window") {
+		t.Fatalf("artifact summary must survive the dropped prefix, got %s", joined)
+	}
+	if strings.Contains(joined, strings.Repeat("x", 4000)) {
+		t.Fatalf("oversized tail should have been trimmed, got %d messages", len(messages))
+	}
+}

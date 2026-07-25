@@ -125,6 +125,7 @@
     },
     "acp": {
       "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。",
+      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。",
       "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
       "model_id_required": "请选择模型后重试。",
       "model_unavailable": "所选模型已不再可用于这个外部 Agent。",

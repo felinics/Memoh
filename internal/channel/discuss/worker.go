@@ -54,7 +54,7 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 		if len(latestRC) == 0 {
 			continue
 		}
-		if timeline.LatestExternalEventMs(latestRC, sess.lastProcessedMs) == 0 {
+		if !timeline.HasUncoveredExternalEvent(latestRC, sess.lastProcessed) {
 			continue
 		}
 		d.handleReply(ctx, sess, latestRC, log)
@@ -65,22 +65,38 @@ func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, r
 	d.handleReplyWithTurn(ctx, sess, rc, log, d.turnServiceSnapshot())
 }
 
+// loadArtifacts projects the session's active compaction frontier. Failures
+// degrade to uncompacted composition.
+func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg DiscussSessionConfig, log *slog.Logger) []timeline.CompactionArtifact {
+	if d.artifacts == nil {
+		return nil
+	}
+	artifacts, err := d.artifacts.ActiveCompactionArtifacts(ctx, cfg.BotID, cfg.ThreadID)
+	if err != nil {
+		log.Warn("load compaction artifacts failed", slog.Any("error", err))
+		return nil
+	}
+	return artifacts
+}
+
 // handleReplyWithTurn remains as a narrow seam for parity tests. Production
 // workers obtain the current service through turnServiceSnapshot.
 func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger, turnSvc turn.Service) {
 	cfg := d.sessionConfigSnapshot(sess)
 	trs := d.history.Load(ctx, cfg.ThreadID)
 
-	// Cold-start / post-idle initialisation anchors the in-memory cursor to
-	// both persisted replies and the durable discuss cursor.
-	if sess.lastProcessedMs == 0 {
-		sess.lastProcessedMs = maxInt64(anchorFromTRs(trs), d.cursor.Load(ctx, cfg, log))
+	// Cold-start / post-idle initialisation combines the durable position with
+	// the persisted-reply anchor; each segment is then gated inside its own
+	// cursor or source-time domain.
+	if sess.lastProcessed == (timeline.DiscussCursorPosition{}) {
+		persisted := d.cursor.Load(ctx, cfg, log)
+		sess.lastProcessed = persisted.Merge(timeline.DiscussCursorPosition{SourceCursor: anchorFromTRs(trs)})
 	}
-	if timeline.LatestExternalEventMs(rc, sess.lastProcessedMs) == 0 {
+	if !timeline.HasUncoveredExternalEvent(rc, sess.lastProcessed) {
 		return
 	}
 
-	plan, ok := d.trigger.Build(cfg, rc, trs, sess.lastProcessedMs)
+	plan, ok := d.trigger.Build(cfg, rc, trs, sess.lastProcessed, d.loadArtifacts(ctx, cfg, log))
 	if !ok {
 		return
 	}
@@ -98,9 +114,9 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 	}
 	if outcome.runtimeType == sessionRuntimeACPAgent {
 		if outcome.skipped || (outcome.streamed && outcome.terminal && !outcome.failed) {
-			d.cursor.Advance(ctx, sess, cfg, plan.consumedMs, log)
+			d.cursor.Advance(ctx, sess, cfg, plan.consumed, log)
 		}
 		return
 	}
-	d.cursor.Advance(ctx, sess, cfg, plan.consumedMs, log)
+	d.cursor.Advance(ctx, sess, cfg, plan.consumed, log)
 }

@@ -274,13 +274,14 @@ type BotSession struct {
 }
 
 type BotSessionDiscussCursor struct {
-	SessionID      pgtype.UUID        `json:"session_id"`
-	ScopeKey       string             `json:"scope_key"`
-	RouteID        pgtype.UUID        `json:"route_id"`
-	Source         string             `json:"source"`
-	ConsumedCursor int64              `json:"consumed_cursor"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	TeamID         pgtype.UUID        `json:"team_id"`
+	SessionID           pgtype.UUID        `json:"session_id"`
+	ScopeKey            string             `json:"scope_key"`
+	RouteID             pgtype.UUID        `json:"route_id"`
+	Source              string             `json:"source"`
+	ConsumedCursor      int64              `json:"consumed_cursor"`
+	ConsumedEventCursor int64              `json:"consumed_event_cursor"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
 }
 
 type BotSessionEvent struct {

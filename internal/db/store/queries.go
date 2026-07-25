@@ -50,6 +50,7 @@ type Queries interface {
 	CountScheduleLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
 	CountScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) (int64, error)
 	CountSessionEvents(ctx context.Context, sessionID pgtype.UUID) (int64, error)
+	NextSessionEventCursor(ctx context.Context) (int64, error)
 	CountTokenUsageRecords(ctx context.Context, arg dbsqlc.CountTokenUsageRecordsParams) (int64, error)
 	CreateAccount(ctx context.Context, arg dbsqlc.CreateAccountParams) (dbsqlc.CreateAccountRow, error)
 	CreateBot(ctx context.Context, arg dbsqlc.CreateBotParams) (dbsqlc.CreateBotRow, error)

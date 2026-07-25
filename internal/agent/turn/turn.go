@@ -108,9 +108,10 @@ type StartTurnCommand struct {
 
 // DiscussMessage is one composed context message for a discuss turn.
 type DiscussMessage struct {
-	Role       string          `json:"role"`
-	Content    string          `json:"content"`
-	RawContent json.RawMessage `json:"raw_content,omitempty"`
+	Role                 string          `json:"role"`
+	Content              string          `json:"content"`
+	RawContent           json.RawMessage `json:"raw_content,omitempty"`
+	CompactionArtifactID string          `json:"compaction_artifact_id,omitempty"`
 }
 
 // DiscussImageRef references an image attachment to inline as vision input.
