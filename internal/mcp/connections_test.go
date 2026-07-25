@@ -171,3 +171,84 @@ func TestEntryToUpsertRequest(t *testing.T) {
 		t.Fatalf("expected 2 args, got %v", req.Args)
 	}
 }
+
+// sameRemoteOrigin gates whether Update may preserve a stored auth_type: the
+// bearer token minted for one origin must never follow the connection to
+// another. Table covers the exact boundary (origin identity, not URL
+// identity) plus every fail-safe case.
+func TestSameRemoteOrigin(t *testing.T) {
+	tests := []struct {
+		name      string
+		existing  Connection
+		newConfig map[string]any
+		want      bool
+	}{
+		{
+			name:      "same origin, different path preserves",
+			existing:  Connection{Type: "http", Config: map[string]any{"url": "https://mcp.linear.app/mcp"}},
+			newConfig: map[string]any{"url": "https://mcp.linear.app/v2/mcp"},
+			want:      true,
+		},
+		{
+			name:      "identical URL preserves",
+			existing:  Connection{Type: "sse", Config: map[string]any{"url": "https://mcp.linear.app/mcp"}},
+			newConfig: map[string]any{"url": "https://mcp.linear.app/mcp"},
+			want:      true,
+		},
+		{
+			name:      "different host clears",
+			existing:  Connection{Type: "http", Config: map[string]any{"url": "https://mcp.linear.app/mcp"}},
+			newConfig: map[string]any{"url": "https://mcp.sentry.dev/mcp"},
+			want:      false,
+		},
+		{
+			name:      "scheme downgrade clears",
+			existing:  Connection{Type: "http", Config: map[string]any{"url": "https://mcp.linear.app/mcp"}},
+			newConfig: map[string]any{"url": "http://mcp.linear.app/mcp"},
+			want:      false,
+		},
+		{
+			name:      "explicit port difference clears",
+			existing:  Connection{Type: "http", Config: map[string]any{"url": "https://mcp.linear.app/mcp"}},
+			newConfig: map[string]any{"url": "https://mcp.linear.app:8443/mcp"},
+			want:      false,
+		},
+		{
+			name:      "existing stdio never preserves",
+			existing:  Connection{Type: "stdio", Config: map[string]any{"command": "npx"}},
+			newConfig: map[string]any{"url": "https://mcp.linear.app/mcp"},
+			want:      false,
+		},
+		{
+			name:      "new stdio config clears",
+			existing:  Connection{Type: "http", Config: map[string]any{"url": "https://mcp.linear.app/mcp"}},
+			newConfig: map[string]any{"command": "npx"},
+			want:      false,
+		},
+		{
+			name:      "unparseable stored URL fails safe",
+			existing:  Connection{Type: "http", Config: map[string]any{"url": "://not-a-url"}},
+			newConfig: map[string]any{"url": "https://mcp.linear.app/mcp"},
+			want:      false,
+		},
+		{
+			name:      "missing new URL fails safe",
+			existing:  Connection{Type: "http", Config: map[string]any{"url": "https://mcp.linear.app/mcp"}},
+			newConfig: map[string]any{},
+			want:      false,
+		},
+		{
+			name:      "case-insensitive scheme and host preserve",
+			existing:  Connection{Type: "http", Config: map[string]any{"url": "HTTPS://MCP.Linear.APP/mcp"}},
+			newConfig: map[string]any{"url": "https://mcp.linear.app/mcp"},
+			want:      true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sameRemoteOrigin(tt.existing, tt.newConfig); got != tt.want {
+				t.Fatalf("sameRemoteOrigin() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
