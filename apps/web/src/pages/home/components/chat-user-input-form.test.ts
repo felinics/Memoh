@@ -65,7 +65,7 @@ describe('chat-user-input-form', () => {
     return root
   }
 
-  it('hands the composer back (focused) when an option is selected', async () => {
+  it('keeps the composer hidden when an option is selected', async () => {
     const revealComposer = vi.fn()
     const ChatUserInputForm = (await import('./chat-user-input-form.vue')).default
     const el = await mount(ChatUserInputForm, {
@@ -88,9 +88,42 @@ describe('chat-user-input-form', () => {
     await nextTick()
 
     expect(firstOption!.getAttribute('aria-checked')).toBe('true')
-    // Selecting an option reveals the composer (focused, since this is the
-    // lone question) so the user can keep typing; it does not submit yet.
-    expect(revealComposer).toHaveBeenCalledWith({ focus: true })
+    expect(revealComposer).not.toHaveBeenCalled()
     expect(respondUserInput).not.toHaveBeenCalled()
+  })
+
+  it('hands the composer back when the request is canceled', async () => {
+    const revealComposer = vi.fn()
+    const userInput = {
+      user_input_id: 'input-1',
+      status: 'pending',
+      questions: [{
+        id: 'q1',
+        text: 'Choose one',
+        kind: 'single_select',
+        options: [{ id: 'q1.o1', label: 'One' }],
+      }],
+    }
+    const ChatUserInputForm = (await import('./chat-user-input-form.vue')).default
+    const el = await mount(ChatUserInputForm, {
+      userInput,
+      onRevealComposer: revealComposer,
+    })
+
+    const cancel = [...el.querySelectorAll<HTMLButtonElement>('button')]
+      .find(button => button.textContent === 'chat.tools.cancelUserInput')
+    expect(cancel).toBeDefined()
+    cancel!.click()
+    await nextTick()
+
+    expect(revealComposer).toHaveBeenCalledWith({ focus: true })
+    expect(respondUserInput).toHaveBeenCalledWith(userInput, {
+      canceled: true,
+      reason: 'user_canceled',
+    }, {
+      botId: 'bot-1',
+      sessionId: 'session-1',
+      viewId: 'view-1',
+    })
   })
 })

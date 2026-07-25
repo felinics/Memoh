@@ -54,8 +54,9 @@
 //   REPLACING the composer is a deliberate product decision, not an accident:
 //   while the agent is asking, answering is the only input that matters, and
 //   the capsule's own free-text field IS the substitute input. That mutex is
-//   a public capability of this dock (the capsule can hand the slot back via
-//   `reveal-composer`) — it must survive any future refactor of the tiers.
+//   a public capability of this dock: selecting an answer never releases it;
+//   the capsule hands the slot back only when the request resolves or the user
+//   explicitly cancels.
 // - STACK tier (ComposerPanel, hugs the box): approvals / command results /
 //   errors — surfaces the user answers with a CLICK, so they must not take
 //   the input slot away.
@@ -107,7 +108,7 @@ const stackVisible = computed(() => Boolean(
 
 // Box-tier mutex: while an ask_user request is pending the capsule owns the
 // slot and the composer hides (v-show so its textarea state survives); the
-// capsule hands the slot back once an option is picked or it resolves.
+// capsule hands the slot back only once the request resolves or is canceled.
 const userInputComposerRevealed = ref(false)
 const composerVisible = computed(() => !props.pendingUserInput || userInputComposerRevealed.value)
 

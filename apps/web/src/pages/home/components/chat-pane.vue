@@ -2056,7 +2056,7 @@ const dockMaskHeight = computed(() => dockEl.value?.maskHeight ?? `${COMPOSER_MA
 const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24}px`)
 
 // The textarea belongs to the pane, so when the dock hands the input slot
-// back (ask_user resolved or an option picked) it emits and we focus here.
+// back after ask_user is resolved or canceled, it emits and we focus here.
 function handleDockRevealComposer(opts: { focus?: boolean }) {
   if (opts.focus) void nextTick(focusTextarea)
 }

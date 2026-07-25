@@ -107,9 +107,8 @@ import ComposerCapsule from './composer-capsule.vue'
 // while a request is pending (the parent hides the textarea and shows this
 // capsule, styled like the composer, in its place) and is fully
 // self-contained: option rows on top, then a divider, then the free-text
-// input ("tell the bot more") and the Submit / Cancel pair. Cancel resolves
-// the request as canceled, which hands the composer back. Picking an option
-// also reveals the composer again so the user can keep typing.
+// input ("tell the bot more") and the Submit / Cancel pair. The normal
+// composer stays hidden until the request is submitted or canceled.
 // Multi-question requests keep per-question inline inputs, because one footer
 // input cannot answer several text questions at once.
 const props = defineProps<{
@@ -199,8 +198,6 @@ function toggleOption(question: UIUserInputQuestion, optionId: string) {
     draft.customSelected = false
     draft.customText = ''
   }
-  // Picking an option hands the textarea back so the user can keep typing.
-  emit('reveal-composer', { focus: isSingle.value })
 }
 
 function toggleCustom(question: UIUserInputQuestion) {
