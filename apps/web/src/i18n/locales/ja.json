@@ -122,6 +122,7 @@
     },
     "acp": {
       "runtime_not_found": "この Agent ランタイムは利用できなくなりました。再起動します。",
+      "turn_replacement_unsupported": "外部 Agent のセッションでは再試行とメッセージの編集は利用できません。代わりに新しいメッセージを送信してください。",
       "model_selection_unsupported": "この外部Agentはモデルの切り替えに対応していません。",
       "model_id_required": "モデルを選択して、もう一度お試しください。",
       "model_unavailable": "選択したモデルはこの外部Agentで利用できなくなりました。",

@@ -11,6 +11,7 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // WSStreamEvent represents a raw JSON event forwarded from the agent.
@@ -310,6 +311,12 @@ func (s *Service) streamChatWSResultWithHooks(
 	} else if ok {
 		if err := rejectACPWorkspaceTarget(req); err != nil {
 			return nil, err
+		}
+		// Hooks currently mean retry/edit turn replacement. ACP runtimes have
+		// no rewind primitive, so running the turn would leave their in-process
+		// context inconsistent with the visible history.
+		if preflight != nil || postPersist != nil {
+			return nil, apperror.New(apperror.CodeACPTurnReplacementUnsupported, nil)
 		}
 		return nil, s.streamACPAgentWS(ctx, req, eventCh, abortCh)
 	}

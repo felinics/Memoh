@@ -125,6 +125,7 @@
     },
     "acp": {
       "runtime_not_found": "That Agent runtime is no longer available. It will be started again.",
+      "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead.",
       "model_selection_unsupported": "This external agent does not support model selection.",
       "model_id_required": "Choose a model and try again.",
       "model_unavailable": "The selected model is no longer available for this external agent.",

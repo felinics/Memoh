@@ -899,8 +899,18 @@ const canForkAssistant = computed(() =>
   && activeChatCanFork.value,
 )
 
+// ACP has no rewind primitive: the external agent keeps its own in-process
+// context, so a replaced turn stays in the agent's memory no matter what the
+// visible history shows. Retry/edit therefore cannot be implemented honestly
+// for ACP sessions and the affordances are hidden, like image upload is for
+// models without vision.
+const activeSupportsTurnReplacement = computed(() =>
+  !activeChatTarget.value.isACP && !activeChatTarget.value.isPendingACP,
+)
+
 const latestRetryableAssistantId = computed(() => {
   if (streaming.value || loadingMessages.value || activeChatReadOnly.value) return ''
+  if (!activeSupportsTurnReplacement.value) return ''
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const message = messages.value[i]
     if (message?.role === 'assistant' && !message.streaming && !message.__optimistic) {
@@ -912,6 +922,7 @@ const latestRetryableAssistantId = computed(() => {
 
 const latestEditableUserId = computed(() => {
   if (streaming.value || loadingMessages.value || activeChatReadOnly.value) return ''
+  if (!activeSupportsTurnReplacement.value) return ''
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const message = messages.value[i]
     if (message?.role === 'user' && !message.streaming && !message.__optimistic) {

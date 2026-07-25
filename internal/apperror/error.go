@@ -28,6 +28,7 @@ const (
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed              Code = "profile.update_failed"
 	CodeACPRuntimeNotFound               Code = "acp.runtime_not_found"
+	CodeACPTurnReplacementUnsupported    Code = "acp.turn_replacement_unsupported"
 	CodeACPModelSelectionUnsupported     Code = "acp.model_selection_unsupported"
 	CodeACPModelIDRequired               Code = "acp.model_id_required"
 	CodeACPModelUnavailable              Code = "acp.model_unavailable"
@@ -119,6 +120,10 @@ var catalog = map[Code]Definition{
 	CodeACPRuntimeNotFound: {
 		HTTPStatus: http.StatusNotFound,
 		Detail:     "The ACP runtime is no longer available.",
+	},
+	CodeACPTurnReplacementUnsupported: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "Retry and edit are unavailable for external agent sessions. Send a new message instead.",
 	},
 	CodeACPModelSelectionUnsupported: {
 		HTTPStatus: http.StatusBadRequest,
