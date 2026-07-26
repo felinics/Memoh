@@ -70,12 +70,28 @@ export function quoteShellWord(value: string): string {
 // - a LEGACY config that stored a whole pasted line as one token ("npx -y pkg")
 //   must re-display raw, so the parsed draft differs from the stored shape and
 //   the repair surfaces as unsaved changes (the next save writes the clean
-//   split). Heuristic: a multi-word token whose first word is a bare name (no
-//   path separator) is a pasted line, not a spaced path.
+//   split).
+// The two shapes are statically indistinguishable in general, so the heuristic
+// must err toward NEVER corrupting a valid spaced path (buildShellCommand
+// escapeShellArg-quotes the stored command, so a stored "my dir/srv" runs
+// fine; a legacy whole-line is what is actually broken at runtime). Rules:
+//  1. args must be empty — a true legacy whole-line never has separate args;
+//  2. the first word is a bare name (no path separator) — "/opt/my ..." is a path;
+//  3. some later word looks like a flag ("-y") or carries no path separator —
+//     "npx -y @scope/pkg" is legacy, "my dir/srv" is a spaced path.
+// ponytail: known ceiling — a legacy line whose args contain a path separator
+// and no flag ("python scripts/gen.py") is misread as a spaced path and stays
+// un-repaired (as broken as it already was); a spaced path with a dash-prefixed
+// segment would be misread as legacy. Upgrade path: persist an explicit
+// shape marker on the connection instead of guessing.
 export function joinShellWords(command: string, args: string[]): string {
   const token = command.trim()
   const words = token === '' ? [] : splitShellWords(token)
-  const isLegacyWholeLine = words.length > 1 && !/[/\\]/.test(words[0] ?? '')
+  const isLegacyWholeLine =
+    args.length === 0 &&
+    words.length > 1 &&
+    !/[/\\]/.test(words[0] ?? '') &&
+    words.slice(1).some((w) => w.startsWith('-') || !/[/\\]/.test(w))
   const rendered = token === '' || isLegacyWholeLine ? token : quoteShellWord(token)
   return [rendered, ...args.map(quoteShellWord)].filter((s) => s !== '').join(' ')
 }
