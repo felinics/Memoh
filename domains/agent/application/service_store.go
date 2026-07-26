@@ -9,6 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	attachmentpkg "github.com/memohai/memoh/domains/media/attachment"
 )
@@ -98,7 +99,7 @@ func isEmptyAssistantMessage(m agentdomain.ModelMessage) bool {
 // and memory extraction. Used by the discuss driver so it shares the same
 // persistence quality as chat mode.
 func (s *Service) StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, sdkMessages []sdk.Message, modelID string) error {
-	modelMessages := sdkMessagesToModelMessages(sdkMessages)
+	modelMessages := convert.SDKMessagesToModelMessages(sdkMessages)
 	req := ChatRequest{
 		BotID:                   botID,
 		ChatID:                  botID,

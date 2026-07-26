@@ -7,8 +7,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 	audiopkg "github.com/memohai/memoh/domains/model/audio"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // BotAudioHandler handles per-bot speech synthesis requests from the agent tool.
@@ -51,41 +52,41 @@ type synthesizeResponse struct {
 // @Param bot_id path string true "Bot ID"
 // @Param request body synthesizeRequest true "Text to synthesize"
 // @Success 200 {object} synthesizeResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/tts/synthesize [post].
 func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return apperror.Required("bot_id")
 	}
 
 	var req synthesizeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind tts payload", err)
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "text is required")
+		return apperror.Required("text")
 	}
 	const maxTextLen = 500
 	if len([]rune(text)) > maxTextLen {
-		return echo.NewHTTPError(http.StatusBadRequest, "text too long, max 500 characters")
+		return apperror.Field("text", apperror.FieldTooLong)
 	}
 
 	botSettings, err := h.settingsService.GetBot(c.Request().Context(), botID)
 	if err != nil {
 		h.logger.Error("failed to load bot settings", slog.String("bot_id", botID), slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load bot settings")
+		return apperror.Internal("load bot settings", err)
 	}
 	if botSettings.TtsModelID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot has no TTS model configured")
+		return apperror.Invalid("synthesize speech", nil)
 	}
 
 	tempID, f, err := h.tempStore.Create()
 	if err != nil {
 		h.logger.Error("failed to create temp file", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create temp file")
+		return apperror.Internal("create temp file", err)
 	}
 
 	contentType, streamErr := h.audioService.StreamToFile(c.Request().Context(), botSettings.TtsModelID, text, f)
@@ -93,12 +94,12 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 	if streamErr != nil {
 		h.logger.Error("speech synthesis failed", slog.String("bot_id", botID), slog.String("model_id", botSettings.TtsModelID), slog.Any("error", streamErr))
 		h.tempStore.Delete(tempID)
-		return echo.NewHTTPError(http.StatusInternalServerError, streamErr.Error())
+		return apperror.Internal("stream speech", streamErr)
 	}
 	if closeErr != nil {
 		h.logger.Error("failed to finalize audio file", slog.String("bot_id", botID), slog.Any("error", closeErr))
 		h.tempStore.Delete(tempID)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to finalize audio file")
+		return apperror.Internal("finalize audio file", closeErr)
 	}
 
 	size, _ := h.tempStore.FileSize(tempID)

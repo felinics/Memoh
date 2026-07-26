@@ -11,6 +11,7 @@ import (
 	"time"
 
 	mcpgw "github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 const cacheTTL = 5 * time.Second
@@ -20,30 +21,30 @@ const cacheTTL = 5 * time.Second
 const mcpCallTimeout = 60 * time.Second
 
 type ConnectionLister interface {
-	ListActiveByBot(ctx context.Context, botID string) ([]mcpgw.Connection, error)
+	ListActiveByBot(ctx context.Context, botID string) ([]mcppersistence.Connection, error)
 }
 
 type Gateway interface {
-	ListHTTPConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error)
-	CallHTTPConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error)
+	ListHTTPConnectionTools(ctx context.Context, connection mcppersistence.Connection) ([]mcppersistence.ToolDescriptor, error)
+	CallHTTPConnectionTool(ctx context.Context, connection mcppersistence.Connection, toolName string, args map[string]any) (map[string]any, error)
 
-	ListSSEConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error)
-	CallSSEConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error)
+	ListSSEConnectionTools(ctx context.Context, connection mcppersistence.Connection) ([]mcppersistence.ToolDescriptor, error)
+	CallSSEConnectionTool(ctx context.Context, connection mcppersistence.Connection, toolName string, args map[string]any) (map[string]any, error)
 
-	ListStdioConnectionTools(ctx context.Context, botID string, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error)
-	CallStdioConnectionTool(ctx context.Context, botID string, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error)
+	ListStdioConnectionTools(ctx context.Context, botID string, connection mcppersistence.Connection) ([]mcppersistence.ToolDescriptor, error)
+	CallStdioConnectionTool(ctx context.Context, botID string, connection mcppersistence.Connection, toolName string, args map[string]any) (map[string]any, error)
 }
 
 type toolRoute struct {
 	sourceType   string
 	originalName string
-	connection   mcpgw.Connection
+	connection   mcppersistence.Connection
 }
 
 type cacheEntry struct {
 	expiresAt time.Time
 	routes    map[string]toolRoute
-	tools     []mcpgw.ToolDescriptor
+	tools     []mcppersistence.ToolDescriptor
 }
 
 type Source struct {
@@ -82,10 +83,10 @@ func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister, 
 	return source
 }
 
-func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" || s.gateway == nil {
-		return []mcpgw.ToolDescriptor{}, nil
+		return []mcppersistence.ToolDescriptor{}, nil
 	}
 	if cached, ok := s.getCache(botID); ok {
 		return cloneTools(cached.tools), nil
@@ -155,11 +156,11 @@ func (s *Source) CallTool(ctx context.Context, session mcpgw.ToolSessionContext,
 	return mcpgw.BuildToolSuccessResult(payload), nil
 }
 
-func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw.ToolDescriptor, map[string]toolRoute) {
+func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcppersistence.ToolDescriptor, map[string]toolRoute) {
 	routes := map[string]toolRoute{}
-	tools := make([]mcpgw.ToolDescriptor, 0, 16)
+	tools := make([]mcppersistence.ToolDescriptor, 0, 16)
 
-	addTool := func(descriptor mcpgw.ToolDescriptor, route toolRoute) {
+	addTool := func(descriptor mcppersistence.ToolDescriptor, route toolRoute) {
 		name := strings.TrimSpace(descriptor.Name)
 		if name == "" {
 			return
@@ -196,7 +197,7 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 				return items[i].Name < items[j].Name
 			})
 			for _, connection := range items {
-				var connTools []mcpgw.ToolDescriptor
+				var connTools []mcppersistence.ToolDescriptor
 				listCtx, listCancel := context.WithTimeout(ctx, mcpCallTimeout)
 				switch strings.ToLower(strings.TrimSpace(connection.Type)) {
 				case "http":
@@ -267,13 +268,13 @@ func sanitizePrefix(raw string) string {
 	return normalized
 }
 
-func cloneTools(items []mcpgw.ToolDescriptor) []mcpgw.ToolDescriptor {
+func cloneTools(items []mcppersistence.ToolDescriptor) []mcppersistence.ToolDescriptor {
 	if len(items) == 0 {
-		return []mcpgw.ToolDescriptor{}
+		return []mcppersistence.ToolDescriptor{}
 	}
-	out := make([]mcpgw.ToolDescriptor, 0, len(items))
+	out := make([]mcppersistence.ToolDescriptor, 0, len(items))
 	for _, item := range items {
-		out = append(out, mcpgw.ToolDescriptor{
+		out = append(out, mcppersistence.ToolDescriptor{
 			Name:        item.Name,
 			Description: item.Description,
 			InputSchema: item.InputSchema,

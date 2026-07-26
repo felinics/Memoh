@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+
 	"github.com/google/uuid"
 
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
-	"github.com/memohai/memoh/domains/api/access/acl"
+	"github.com/memohai/memoh/domains/api/bot/access/acl"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 	"github.com/memohai/memoh/domains/runtime/workspace"
 	tzutil "github.com/memohai/memoh/internal/timezone"
@@ -20,17 +22,17 @@ import (
 
 // Service provides bot CRUD and membership management.
 type Service struct {
-	bots                  BotStore
-	grants                GrantStore
-	users                 UserReader
-	containers            ContainerReader
+	bots                  botpersistence.BotStore
+	grants                botpersistence.GrantStore
+	users                 botpersistence.UserReader
+	containers            botpersistence.ContainerReader
 	logger                *slog.Logger
 	aclPresets            ACLPresetApplier
 	containerLifecycle    ContainerLifecycle
 	checkers              []RuntimeChecker
 	containerReachability func(ctx context.Context, botID string) error
-	purgers               []BotDataPurger
-	tombstones            TombstoneReader
+	purgers               []botpersistence.BotDataPurger
+	tombstones            botpersistence.TombstoneReader
 }
 
 // ACLPresetApplier initializes ACL state after a bot row is created.
@@ -43,17 +45,17 @@ const (
 )
 
 var (
-	ErrBotNotFound       = errors.New("bot not found")
+	ErrBotNotFound       = botpersistence.ErrBotNotFound
 	ErrBotAccessDenied   = errors.New("bot access denied")
 	ErrOwnerUserNotFound = errors.New("owner user not found")
-	ErrBotNameTaken      = errors.New("bot name already taken")
+	ErrBotNameTaken      = botpersistence.ErrBotNameTaken
 	ErrBotNameInvalid    = errors.New("bot name is invalid")
 	ErrBotNameReserved   = errors.New("bot name is reserved")
 	ErrContainerNotFound = errors.New("bot container not found")
 )
 
 // NewService creates a new bot service.
-func NewService(log *slog.Logger, botStore BotStore, grantStore GrantStore, users UserReader, containers ContainerReader, presetAppliers ...ACLPresetApplier) *Service {
+func NewService(log *slog.Logger, botStore botpersistence.BotStore, grantStore botpersistence.GrantStore, users botpersistence.UserReader, containers botpersistence.ContainerReader, presetAppliers ...ACLPresetApplier) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -83,14 +85,14 @@ func (s *Service) SetContainerReachability(fn func(ctx context.Context, botID st
 
 // AddBotDataPurger registers an owner that holds bot-scoped rows. Purgers run
 // in registration order before the bot row itself is removed.
-func (s *Service) AddBotDataPurger(p BotDataPurger) {
+func (s *Service) AddBotDataPurger(p botpersistence.BotDataPurger) {
 	if p != nil {
 		s.purgers = append(s.purgers, p)
 	}
 }
 
 // SetTombstoneReader enables resuming deletes that were interrupted mid-saga.
-func (s *Service) SetTombstoneReader(r TombstoneReader) {
+func (s *Service) SetTombstoneReader(r botpersistence.TombstoneReader) {
 	s.tombstones = r
 }
 
@@ -167,7 +169,7 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err != nil {
 		return Bot{}, err
 	}
-	row, err := s.bots.CreateBot(ctx, CreateInput{
+	row, err := s.bots.CreateBot(ctx, botpersistence.CreateInput{
 		OwnerUserID: ownerID,
 		Name:        botName,
 		DisplayName: displayName,
@@ -227,11 +229,11 @@ func (s *Service) Get(ctx context.Context, identifier string) (Bot, error) {
 	}
 	trimmed := strings.TrimSpace(identifier)
 	if botID, err := parseUUID(trimmed); err == nil {
-		return s.getByRow(ctx, func() (Record, error) {
+		return s.getByRow(ctx, func() (botpersistence.Record, error) {
 			return s.bots.GetBotByID(ctx, botID)
 		})
 	}
-	return s.getByRow(ctx, func() (Record, error) {
+	return s.getByRow(ctx, func() (botpersistence.Record, error) {
 		return s.bots.GetBotByName(ctx, normalizeName(trimmed))
 	})
 }
@@ -243,7 +245,7 @@ func (s *Service) GetForAccess(ctx context.Context, identifier string) (Bot, err
 		return Bot{}, errors.New("bot queries not configured")
 	}
 	trimmed := strings.TrimSpace(identifier)
-	var row Record
+	var row botpersistence.Record
 	var err error
 	if botID, parseErr := parseUUID(trimmed); parseErr == nil {
 		row, err = s.bots.GetBotByID(ctx, botID)
@@ -256,7 +258,7 @@ func (s *Service) GetForAccess(ctx context.Context, identifier string) (Bot, err
 	return toBot(row)
 }
 
-func (s *Service) getByRow(ctx context.Context, fetch func() (Record, error)) (Bot, error) {
+func (s *Service) getByRow(ctx context.Context, fetch func() (botpersistence.Record, error)) (Bot, error) {
 	row, err := fetch()
 	if err != nil {
 		return Bot{}, err
@@ -411,7 +413,7 @@ func (s *Service) UpdateReplacingMetadata(ctx context.Context, botID string, req
 	return s.updateWithParams(ctx, params)
 }
 
-func (s *Service) updateWithParams(ctx context.Context, params UpdateInput) (Bot, error) {
+func (s *Service) updateWithParams(ctx context.Context, params botpersistence.UpdateInput) (Bot, error) {
 	row, err := s.bots.UpdateBot(ctx, params)
 	if err != nil {
 		return Bot{}, err
@@ -426,24 +428,24 @@ func (s *Service) updateWithParams(ctx context.Context, params UpdateInput) (Bot
 	return bot, nil
 }
 
-func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req UpdateBotRequest, mergeSensitiveMetadata bool) (UpdateInput, error) {
+func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req UpdateBotRequest, mergeSensitiveMetadata bool) (botpersistence.UpdateInput, error) {
 	if s.bots == nil {
-		return UpdateInput{}, errors.New("bot queries not configured")
+		return botpersistence.UpdateInput{}, errors.New("bot queries not configured")
 	}
 	botID, err := parseUUID(botID)
 	if err != nil {
-		return UpdateInput{}, err
+		return botpersistence.UpdateInput{}, err
 	}
 	existing, err := s.bots.GetBotByID(ctx, botID)
 	if err != nil {
-		return UpdateInput{}, err
+		return botpersistence.UpdateInput{}, err
 	}
 	displayName := strings.TrimSpace(existing.DisplayName)
 	avatarURL := strings.TrimSpace(existing.AvatarURL)
 	isActive := existing.IsActive
 	metadata, err := decodeMetadata(existing.Metadata)
 	if err != nil {
-		return UpdateInput{}, err
+		return botpersistence.UpdateInput{}, err
 	}
 	if req.DisplayName != nil {
 		displayName = strings.TrimSpace(*req.DisplayName)
@@ -458,7 +460,7 @@ func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req Upd
 	if req.Timezone != nil {
 		timezoneValue, err = normalizeOptionalTimezone(req.Timezone)
 		if err != nil {
-			return UpdateInput{}, err
+			return botpersistence.UpdateInput{}, err
 		}
 	}
 	if req.Metadata != nil {
@@ -475,14 +477,14 @@ func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req Upd
 	if req.Name != nil {
 		botName, err = s.resolveName(ctx, *req.Name, displayName, existing.ID)
 		if err != nil {
-			return UpdateInput{}, err
+			return botpersistence.UpdateInput{}, err
 		}
 	}
 	payload, err := json.Marshal(metadata)
 	if err != nil {
-		return UpdateInput{}, err
+		return botpersistence.UpdateInput{}, err
 	}
-	return UpdateInput{
+	return botpersistence.UpdateInput{
 		ID:          botID,
 		Name:        botName,
 		DisplayName: displayName,
@@ -705,7 +707,7 @@ func (s *Service) ensureUserExists(ctx context.Context, userID string) error {
 	return err
 }
 
-func toBot(row Record) (Bot, error) {
+func toBot(row botpersistence.Record) (Bot, error) {
 	metadata, err := decodeMetadata(row.Metadata)
 	if err != nil {
 		return Bot{}, err
@@ -756,7 +758,7 @@ func normalizeOptionalTimezone(raw *string) (string, error) {
 	return loc.String(), nil
 }
 
-func (s *Service) attachCheckSummary(ctx context.Context, bot *Bot, row Record) error {
+func (s *Service) attachCheckSummary(ctx context.Context, bot *Bot, row botpersistence.Record) error {
 	checks, err := s.buildRuntimeChecks(ctx, row, false)
 	if err != nil {
 		return err
@@ -769,7 +771,7 @@ func (s *Service) attachCheckSummary(ctx context.Context, bot *Bot, row Record) 
 
 // buildRuntimeChecks composes builtin checks and optional dynamic checker results.
 // includeDynamic is disabled when computing list summary to avoid expensive runtime probes.
-func (s *Service) buildRuntimeChecks(ctx context.Context, row Record, includeDynamic bool) ([]BotCheck, error) {
+func (s *Service) buildRuntimeChecks(ctx context.Context, row botpersistence.Record, includeDynamic bool) ([]BotCheck, error) {
 	status := strings.TrimSpace(row.Status)
 	checks := make([]BotCheck, 0, 4)
 

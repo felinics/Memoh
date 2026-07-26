@@ -9,6 +9,7 @@ import (
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	"github.com/memohai/memoh/domains/agent/chat/timeline"
 	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/domains/channel/inbound"
 )
 
 type DiscussCursorStore interface {
@@ -38,22 +39,6 @@ type DiscussDriverDeps struct {
 	Logger         *slog.Logger
 }
 
-// DiscussSessionConfig holds per-thread configuration for discuss mode.
-type DiscussSessionConfig struct {
-	TeamID            string
-	BotID             string
-	ThreadID          string
-	RouteID           string
-	ChannelIdentityID string
-	ReplyTarget       string
-	CurrentPlatform   string
-	ConversationType  string
-	ConversationName  string
-	SessionToken      string //nolint:gosec // session credential material
-	ChatToken         string //nolint:gosec // scoped chat routing token
-	ToolHTTPURL       string
-}
-
 // DiscussDriver owns worker lifecycle only. Trigger construction, history,
 // cursor persistence, turn execution, and stream projection live in dedicated
 // collaborators.
@@ -61,6 +46,8 @@ type DiscussDriver struct {
 	mu        sync.Mutex
 	turn      agentdomain.Service
 	sessions  map[string]*discussSession
+	workers   map[*discussSession]struct{}
+	stopped   bool
 	history   discussHistoryReader
 	cursor    discussCursorTracker
 	trigger   discussTriggerBuilder
@@ -70,12 +57,21 @@ type DiscussDriver struct {
 }
 
 type discussSession struct {
-	config        DiscussSessionConfig
+	config        inbound.DiscussSessionConfig
 	rcCh          chan timeline.RenderedContext
 	stopCh        chan struct{}
+	done          chan struct{}
 	cancel        context.CancelFunc
+	stopOnce      sync.Once
 	lastProcessed timeline.DiscussCursorPosition
 }
+
+func (s *discussSession) stop() {
+	s.cancel()
+	s.stopOnce.Do(func() { close(s.stopCh) })
+}
+
+var _ inbound.DiscussDriver = (*DiscussDriver)(nil)
 
 // NewDiscussDriver creates a new DiscussDriver.
 func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
@@ -88,6 +84,7 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 	return &DiscussDriver{
 		turn:      deps.Turn,
 		sessions:  make(map[string]*discussSession),
+		workers:   make(map[*discussSession]struct{}),
 		history:   discussHistoryReader{messages: deps.MessageService, logger: logger},
 		cursor:    discussCursorTracker{store: deps.CursorStore},
 		runner:    discussTurnRunner{projector: projector},
@@ -96,23 +93,14 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 	}
 }
 
-// SetTurnService sets the turn service after construction (breaks DI cycles).
-func (d *DiscussDriver) SetTurnService(svc agentdomain.Service) {
-	d.mu.Lock()
-	d.turn = svc
-	d.mu.Unlock()
-}
-
-// SetBroadcaster sets the stream broadcaster after construction so that
-// discuss-mode agent events are forwarded to the Web UI in real time.
-func (d *DiscussDriver) SetBroadcaster(b DiscussStreamBroadcaster) {
-	d.runner.projector.SetBroadcaster(b)
-}
-
 // NotifyRC pushes a new timeline.RenderedContext to the discuss thread worker.
 // If the worker goroutine is not running, it starts one.
-func (d *DiscussDriver) NotifyRC(_ context.Context, sessionID string, rc timeline.RenderedContext, config DiscussSessionConfig) {
+func (d *DiscussDriver) NotifyRC(_ context.Context, sessionID string, rc timeline.RenderedContext, config inbound.DiscussSessionConfig) {
 	d.mu.Lock()
+	if d.stopped {
+		d.mu.Unlock()
+		return
+	}
 	sess, ok := d.sessions[sessionID]
 	if !ok {
 		sessCtx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in sess.cancel
@@ -120,9 +108,11 @@ func (d *DiscussDriver) NotifyRC(_ context.Context, sessionID string, rc timelin
 			config: config,
 			rcCh:   make(chan timeline.RenderedContext, 16),
 			stopCh: make(chan struct{}),
+			done:   make(chan struct{}),
 			cancel: cancel,
 		}
 		d.sessions[sessionID] = sess
+		d.workers[sess] = struct{}{}
 		go d.runSession(sessCtx, sess) //nolint:contextcheck // long-lived goroutine; must outlive the inbound HTTP request
 	} else {
 		sess.config = config
@@ -148,22 +138,35 @@ func (d *DiscussDriver) StopSession(sessionID string) {
 	d.mu.Lock()
 	sess, ok := d.sessions[sessionID]
 	if ok {
-		sess.cancel()
-		close(sess.stopCh)
 		delete(d.sessions, sessionID)
+		sess.stop()
 	}
 	d.mu.Unlock()
 }
 
-// StopAll stops all discuss session goroutines.
-func (d *DiscussDriver) StopAll() {
+// Shutdown stops all discuss session goroutines and waits for their active
+// turns to release runtime dependencies.
+func (d *DiscussDriver) Shutdown(ctx context.Context) error {
 	d.mu.Lock()
-	for id, sess := range d.sessions {
-		sess.cancel()
-		close(sess.stopCh)
-		delete(d.sessions, id)
+	d.stopped = true
+	workers := make([]*discussSession, 0, len(d.workers))
+	for sess := range d.workers {
+		sess.stop()
+		workers = append(workers, sess)
 	}
 	d.mu.Unlock()
+
+	for _, sess := range workers {
+		if sess.done == nil {
+			continue
+		}
+		select {
+		case <-sess.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 // HasSession returns true if a discuss thread worker is running.
@@ -174,14 +177,8 @@ func (d *DiscussDriver) HasSession(sessionID string) bool {
 	return ok
 }
 
-func (d *DiscussDriver) sessionConfigSnapshot(sess *discussSession) DiscussSessionConfig {
+func (d *DiscussDriver) sessionConfigSnapshot(sess *discussSession) inbound.DiscussSessionConfig {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return sess.config
-}
-
-func (d *DiscussDriver) turnServiceSnapshot() agentdomain.Service {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.turn
 }

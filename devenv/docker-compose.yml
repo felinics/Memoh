@@ -102,7 +102,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
-      GOFLAGS: -buildvcs=false
+      GOFLAGS: -buildvcs=false -tags=split
       TZ: "${MEMOH_DEV_TZ:-UTC}"
       # Proxy: use host.docker.internal for localhost proxies, e.g.
       #   HTTP_PROXY=http://host.docker.internal:7890 mise run dev

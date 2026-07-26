@@ -16,15 +16,18 @@ import (
 	mg "github.com/mailgun/mailgun-go/v5"
 	"github.com/mailgun/mailgun-go/v5/events"
 
+	emailcatalog "github.com/memohai/memoh/domains/channel/internal/email/catalog"
 	emailport "github.com/memohai/memoh/domains/channel/internal/port/email"
 )
 
 const (
-	InboundModeWebhook = "webhook"
-	InboundModePoll    = "poll"
+	InboundModeWebhook = emailcatalog.MailgunInboundModeWebhook
+	InboundModePoll    = emailcatalog.MailgunInboundModePoll
 )
 
-const ProviderName emailport.ProviderName = "mailgun"
+const ProviderName emailport.ProviderName = emailcatalog.ProviderMailgun
+
+var providerDescriptor = emailcatalog.Mailgun()
 
 type Adapter struct {
 	logger *slog.Logger
@@ -34,47 +37,12 @@ func New(log *slog.Logger) *Adapter {
 	return &Adapter{logger: log.With(slog.String("adapter", "mailgun"))}
 }
 
-func (*Adapter) Type() emailport.ProviderName { return ProviderName }
+func (*Adapter) Type() emailport.ProviderName { return providerDescriptor.Type() }
 
-func (*Adapter) Meta() emailport.ProviderMeta {
-	return emailport.ProviderMeta{
-		Provider:    string(ProviderName),
-		DisplayName: "Mailgun",
-		ConfigSchema: emailport.ConfigSchema{
-			Fields: []emailport.FieldSchema{
-				{Key: "domain", Type: "string", Title: "Domain", Required: true, Example: "mg.example.com", Order: 1},
-				{Key: "api_key", Type: "secret", Title: "API Key", Required: true, Order: 2},
-				{Key: "region", Type: "enum", Title: "Region", Enum: []string{"us", "eu"}, Example: "us", Order: 3},
-				{Key: "inbound_mode", Type: "enum", Title: "Inbound Mode", Description: "webhook requires public IP; poll does not", Enum: []string{InboundModeWebhook, InboundModePoll}, Example: InboundModePoll, Order: 4},
-				{Key: "webhook_signing_key", Type: "secret", Title: "Webhook Signing Key", Description: "Required for webhook mode", Order: 5},
-				{Key: "poll_interval_seconds", Type: "number", Title: "Poll Interval (seconds)", Description: "For poll mode (minimum 15)", Example: 30, Order: 6},
-			},
-		},
-	}
-}
+func (*Adapter) Meta() emailport.ProviderMeta { return providerDescriptor.Meta() }
 
 func (*Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
-	for _, key := range []string{"domain", "api_key"} {
-		if v, _ := raw[key].(string); strings.TrimSpace(v) == "" {
-			return nil, fmt.Errorf("%s is required", key)
-		}
-	}
-	mode, _ := raw["inbound_mode"].(string)
-	if mode == "" {
-		raw["inbound_mode"] = InboundModePoll
-	}
-	if mode == InboundModeWebhook {
-		if v, _ := raw["webhook_signing_key"].(string); strings.TrimSpace(v) == "" {
-			return nil, errors.New("webhook_signing_key is required for webhook mode")
-		}
-	}
-	if _, ok := raw["region"]; !ok {
-		raw["region"] = "us"
-	}
-	if _, ok := raw["poll_interval_seconds"]; !ok {
-		raw["poll_interval_seconds"] = float64(30)
-	}
-	return raw, nil
+	return providerDescriptor.NormalizeConfig(raw)
 }
 
 func newClient(config map[string]any) *mg.Client {
@@ -131,8 +99,12 @@ func (a *Adapter) StartReceiving(ctx context.Context, config map[string]any, han
 		providerID:   providerID,
 		handler:      handler,
 		cancel:       cancel,
+		done:         make(chan struct{}),
 	}
-	go conn.run(rctx)
+	go func() {
+		defer close(conn.done)
+		conn.run(rctx)
+	}()
 	return conn, nil
 }
 
@@ -191,13 +163,19 @@ type pollConn struct {
 	providerID   string
 	handler      emailport.InboundHandler
 	cancel       context.CancelFunc
+	done         chan struct{}
 	once         sync.Once
 	lastTime     time.Time
 }
 
-func (c *pollConn) Stop(_ context.Context) error {
+func (c *pollConn) Stop(ctx context.Context) error {
 	c.once.Do(func() { c.cancel() })
-	return nil
+	select {
+	case <-c.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *pollConn) run(ctx context.Context) {

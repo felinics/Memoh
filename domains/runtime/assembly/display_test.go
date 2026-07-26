@@ -27,5 +27,7 @@ func TestNewDisplayReturnsServiceAndCleanup(t *testing.T) {
 	if cleanup == nil {
 		t.Fatal("expected cleanup")
 	}
-	cleanup()
+	if err := cleanup(t.Context()); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
 }

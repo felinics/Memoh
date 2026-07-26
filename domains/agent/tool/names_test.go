@@ -16,8 +16,8 @@ import (
 
 const (
 	sdkImportPath            = "github.com/memohai/twilight-ai/sdk"
-	mcpImportPath            = "github.com/memohai/memoh/domains/agent/mcp"
-	memoryRegistryImportPath = "github.com/memohai/memoh/domains/memory/registry"
+	mcpImportPath            = "github.com/memohai/memoh/domains/agent/mcp/persistence"
+	memoryRegistryImportPath = "github.com/memohai/memoh/domains/memory/provider"
 
 	protocolTypeSDKTool           = "sdk.Tool"
 	protocolTypeMCPToolDescriptor = "mcp.ToolDescriptor"
@@ -53,20 +53,20 @@ func TestBuiltInToolNamesAreRegisteredAndUnique(t *testing.T) {
 			t.Fatalf("internal tool value %s must be re-exported from names.go", name)
 		}
 		if _, ok := registryKeys[name]; !ok {
-			t.Fatalf("internal tool value %s must be listed in internal/toolname all catalog", name)
+			t.Fatalf("internal tool value %s must be listed in internal/name all catalog", name)
 		}
 	}
 	for name := range exportedTools {
 		if _, ok := internalTools[name]; !ok {
-			t.Fatalf("exported tool value %s must come from internal/toolname", name)
+			t.Fatalf("exported tool value %s must come from internal/name", name)
 		}
 		if _, ok := registryKeys[name]; !ok {
-			t.Fatalf("tool value %s must be listed in internal/toolname all catalog", name)
+			t.Fatalf("tool value %s must be listed in internal/name all catalog", name)
 		}
 	}
 	for name := range registryKeys {
 		if _, ok := exportedTools[name]; !ok {
-			t.Fatalf("internal/toolname all catalog contains %s, but names.go does not export that tool value", name)
+			t.Fatalf("internal/name all catalog contains %s, but names.go does not export that tool value", name)
 		}
 	}
 
@@ -251,7 +251,7 @@ import (
 
 
 	"github.com/memohai/twilight-ai/sdk"
-	"github.com/memohai/memoh/domains/agent/mcp"
+	mcp "github.com/memohai/memoh/domains/agent/mcp/persistence"
 
 
 
@@ -425,8 +425,8 @@ import (
 
 
 	twilight "github.com/memohai/twilight-ai/sdk"
-	mcpgw "github.com/memohai/memoh/domains/agent/mcp"
-	memoryadapters "github.com/memohai/memoh/domains/memory/registry"
+	mcpgw "github.com/memohai/memoh/domains/agent/mcp/persistence"
+	memoryadapters "github.com/memohai/memoh/domains/memory/provider"
 
 
 
@@ -535,7 +535,7 @@ func toolValueNames(t *testing.T) map[string]struct{} {
 func internalToolValues(t *testing.T) map[string]string {
 	t.Helper()
 
-	parsed := parseGoFile(t, "internal/toolname/toolname.go")
+	parsed := parseGoFile(t, "internal/name/toolname.go")
 	values := map[string]string{}
 	constants := map[string]string{
 		"memprovider.ToolSearchMemory": "search_memory",
@@ -558,7 +558,7 @@ func internalToolValues(t *testing.T) map[string]string {
 func internalToolRegistryKeys(t *testing.T) map[string]struct{} {
 	t.Helper()
 
-	parsed := parseGoFile(t, "internal/toolname/toolname.go")
+	parsed := parseGoFile(t, "internal/name/toolname.go")
 	for _, decl := range parsed.Decls {
 		gen, ok := decl.(*ast.GenDecl)
 		if !ok || gen.Tok != token.VAR {
@@ -571,24 +571,24 @@ func internalToolRegistryKeys(t *testing.T) map[string]struct{} {
 			}
 			lit, ok := valueSpec.Values[0].(*ast.CompositeLit)
 			if !ok {
-				t.Fatal("internal/toolname all catalog must be a []Name literal")
+				t.Fatal("internal/name all catalog must be a []Name literal")
 			}
 			keys := map[string]struct{}{}
 			for _, elt := range lit.Elts {
 				call, ok := elt.(*ast.CallExpr)
 				if !ok || len(call.Args) != 0 {
-					t.Fatal("internal/toolname all catalog entries must be Tool*() calls")
+					t.Fatal("internal/name all catalog entries must be Tool*() calls")
 				}
 				name, ok := call.Fun.(*ast.Ident)
 				if !ok || !strings.HasPrefix(name.Name, "Tool") {
-					t.Fatalf("internal/toolname all catalog entry at %s must be a Tool*() call", token.NewFileSet().Position(call.Pos()))
+					t.Fatalf("internal/name all catalog entry at %s must be a Tool*() call", token.NewFileSet().Position(call.Pos()))
 				}
 				keys[name.Name] = struct{}{}
 			}
 			return keys
 		}
 	}
-	t.Fatal("internal/toolname all catalog not found")
+	t.Fatal("internal/name all catalog not found")
 	return nil
 }
 

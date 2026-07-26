@@ -6,13 +6,14 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/domains/agent/chat/timeline"
+	"github.com/memohai/memoh/domains/channel/inbound"
 )
 
 type discussCursorTracker struct {
 	store DiscussCursorStore
 }
 
-func (t discussCursorTracker) Load(ctx context.Context, cfg DiscussSessionConfig, log *slog.Logger) timeline.DiscussCursorPosition {
+func (t discussCursorTracker) Load(ctx context.Context, cfg inbound.DiscussSessionConfig, log *slog.Logger) timeline.DiscussCursorPosition {
 	if t.store == nil {
 		return timeline.DiscussCursorPosition{}
 	}
@@ -24,7 +25,7 @@ func (t discussCursorTracker) Load(ctx context.Context, cfg DiscussSessionConfig
 	return position
 }
 
-func (t discussCursorTracker) Advance(ctx context.Context, sess *discussSession, cfg DiscussSessionConfig, position timeline.DiscussCursorPosition, log *slog.Logger) {
+func (t discussCursorTracker) Advance(ctx context.Context, sess *discussSession, cfg inbound.DiscussSessionConfig, position timeline.DiscussCursorPosition, log *slog.Logger) {
 	merged := sess.lastProcessed.Merge(position)
 	if merged == sess.lastProcessed {
 		return
@@ -49,7 +50,7 @@ func (t discussCursorTracker) Advance(ctx context.Context, sess *discussSession,
 	}
 }
 
-func discussCursorScope(cfg DiscussSessionConfig) string {
+func discussCursorScope(cfg inbound.DiscussSessionConfig) string {
 	if routeID := strings.TrimSpace(cfg.RouteID); routeID != "" {
 		return "route:" + routeID
 	}

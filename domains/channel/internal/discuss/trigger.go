@@ -5,6 +5,7 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/chat/timeline"
+	"github.com/memohai/memoh/domains/channel/inbound"
 )
 
 type discussTriggerBuilder struct{}
@@ -18,7 +19,7 @@ type discussTurnPlan struct {
 
 // Build composes the durable timeline and persisted turn responses into the
 // pure StartTurn command consumed by Agent.
-func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact) (discussTurnPlan, bool) {
+func (discussTriggerBuilder) Build(cfg inbound.DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact) (discussTurnPlan, bool) {
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
 		return discussTurnPlan{}, false

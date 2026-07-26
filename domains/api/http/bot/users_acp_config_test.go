@@ -9,7 +9,7 @@ import (
 	acpclient "github.com/memohai/memoh/domains/agent/acp/client"
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
 	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 )
 

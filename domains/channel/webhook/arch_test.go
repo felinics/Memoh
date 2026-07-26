@@ -24,25 +24,13 @@ func TestPublicWebhookForbidsPrivateAliasFacade(t *testing.T) {
 	})
 
 	const privateImport = "github.com/memohai/memoh/domains/channel/internal/webhook"
-	privateAlias := ""
 	for filename, f := range files {
 		for _, imp := range f.Imports {
 			path := strings.Trim(imp.Path.Value, `"`)
-			if path != privateImport {
-				continue
-			}
-			if filepath.Base(filename) != "constructors.go" {
-				t.Fatalf("%s imports private webhook; only constructors.go may", filepath.Base(filename))
-			}
-			if imp.Name != nil {
-				privateAlias = imp.Name.Name
-			} else {
-				privateAlias = "webhook"
+			if path == privateImport {
+				t.Fatalf("%s imports private webhook; concrete construction belongs in webhook/tunnel", filepath.Base(filename))
 			}
 		}
-	}
-	if privateAlias == "" {
-		t.Fatal("constructors.go must import private webhook for the adapter")
 	}
 
 	for filename, f := range files {
@@ -53,40 +41,10 @@ func TestPublicWebhookForbidsPrivateAliasFacade(t *testing.T) {
 				if node.Assign.IsValid() {
 					t.Fatalf("%s: forbidden type alias %q", base, node.Name.Name)
 				}
-			case *ast.ValueSpec:
-				for i, name := range node.Names {
-					if i >= len(node.Values) || node.Values[i] == nil {
-						continue
-					}
-					if isPrivateSelector(node.Values[i], privateAlias) {
-						t.Fatalf("%s: forbidden const/var forwarding of private %s via %q", base, privateImport, name.Name)
-					}
-				}
-			case *ast.ReturnStmt:
-				if base != "constructors.go" {
-					break
-				}
-				for _, result := range node.Results {
-					if call, ok := result.(*ast.CallExpr); ok && isPrivateSelector(call.Fun, privateAlias) {
-						t.Fatalf("%s: NewManager must return adapter, not bare private constructor call", base)
-					}
-				}
 			}
 			return true
 		})
 	}
-}
-
-func isPrivateSelector(expr ast.Expr, privateAlias string) bool {
-	sel, ok := expr.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	ident, ok := sel.X.(*ast.Ident)
-	if !ok {
-		return false
-	}
-	return privateAlias != "" && ident.Name == privateAlias
 }
 
 // parsePackageFiles replaces the deprecated parser.ParseDir. These guards only

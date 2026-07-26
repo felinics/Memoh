@@ -2,25 +2,17 @@ package discuss
 
 import (
 	"strings"
-	"sync"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/channel/gateway"
 )
 
 type discussEventProjector struct {
-	mu          sync.RWMutex
 	broadcaster DiscussStreamBroadcaster
 }
 
 func newDiscussEventProjector(broadcaster DiscussStreamBroadcaster) *discussEventProjector {
 	return &discussEventProjector{broadcaster: broadcaster}
-}
-
-func (p *discussEventProjector) SetBroadcaster(broadcaster DiscussStreamBroadcaster) {
-	p.mu.Lock()
-	p.broadcaster = broadcaster
-	p.mu.Unlock()
 }
 
 // Broadcast maps Agent events to the stable Channel stream contract.
@@ -29,11 +21,8 @@ func (p *discussEventProjector) Broadcast(botID string, event agentdomain.Stream
 	if !ok {
 		return
 	}
-	p.mu.RLock()
-	broadcaster := p.broadcaster
-	p.mu.RUnlock()
-	if broadcaster != nil {
-		broadcaster.PublishEvent(botID, streamEvent)
+	if p.broadcaster != nil {
+		p.broadcaster.PublishEvent(botID, streamEvent)
 	}
 }
 

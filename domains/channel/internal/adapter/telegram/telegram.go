@@ -22,7 +22,8 @@ import (
 	"github.com/memohai/memoh/domains/agent/command"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	"github.com/memohai/memoh/domains/channel/gateway"
-	"github.com/memohai/memoh/domains/channel/internal/common"
+	"github.com/memohai/memoh/domains/channel/internal/logging"
+	"github.com/memohai/memoh/domains/channel/internal/proxy"
 	"github.com/memohai/memoh/domains/media"
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/redact"
@@ -142,7 +143,7 @@ func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tele.Bot
 	if bot, ok := a.bots[cacheKey]; ok {
 		return bot, nil
 	}
-	httpClient, err := common.NewHTTPClient(30*time.Second, cfg.HTTPProxy)
+	httpClient, err := proxy.NewHTTPClient(30*time.Second, cfg.HTTPProxy)
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Error("create bot http client failed", slog.String("config_id", configID), slog.Any("error", err))
@@ -1141,7 +1142,7 @@ func (a *TelegramAdapter) logTelegramInbound(configID string, msg gateway.Inboun
 		slog.String("chat_id", msg.Conversation.ID),
 		slog.String("user_id", msg.Sender.Attribute("user_id")),
 		slog.String("username", msg.Sender.Attribute("username")),
-		slog.String("text", common.SummarizeText(msg.Message.Text)),
+		slog.String("text", logging.SummarizeText(msg.Message.Text)),
 		slog.Int("attachments", len(msg.Message.Attachments)),
 	)
 }

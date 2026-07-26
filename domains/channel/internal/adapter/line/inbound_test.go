@@ -5,15 +5,13 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v4"
-
 	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const testLineSecret = "line-secret"
@@ -80,12 +78,8 @@ func TestHandleWebhookQueueFullReturnsRetryableError(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		rec := httptest.NewRecorder()
 		err := adapter.HandleWebhook(context.Background(), cfg, handler, signedLineRequest(body), rec)
-		var httpErr *echo.HTTPError
-		if !errors.As(err, &httpErr) {
-			t.Fatalf("error on attempt %d = %T, want *echo.HTTPError", i+1, err)
-		}
-		if httpErr.Code != http.StatusServiceUnavailable {
-			t.Fatalf("status on attempt %d = %d, want %d", i+1, httpErr.Code, http.StatusServiceUnavailable)
+		if apperror.KindOf(err) != apperror.KindUnavailable {
+			t.Fatalf("kind on attempt %d = %v, want %v", i+1, apperror.KindOf(err), apperror.KindUnavailable)
 		}
 	}
 	if calls != 2 {
@@ -100,12 +94,8 @@ func TestHandleWebhookMissingSelfIdentityReturnsError(t *testing.T) {
 	cfg.SelfIdentity = nil
 
 	err := NewAdapter(nil).HandleWebhook(context.Background(), cfg, nil, signedLineRequest(testLineTextCallback("event-no-self")), httptest.NewRecorder())
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusInternalServerError)
+	if apperror.KindOf(err) != apperror.KindInternal {
+		t.Fatalf("kind = %v, want %v", apperror.KindOf(err), apperror.KindInternal)
 	}
 }
 
@@ -116,12 +106,8 @@ func TestHandleWebhookRejectsInvalidSignature(t *testing.T) {
 	req.Header.Set("x-line-signature", "invalid")
 
 	err := NewAdapter(nil).HandleWebhook(context.Background(), testLineConfig(), nil, req, httptest.NewRecorder())
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusForbidden)
+	if apperror.KindOf(err) != apperror.KindForbidden {
+		t.Fatalf("kind = %v, want %v", apperror.KindOf(err), apperror.KindForbidden)
 	}
 }
 
@@ -132,12 +118,8 @@ func TestHandleWebhookNilBodyFollowsSignatureValidation(t *testing.T) {
 	req.Body = nil
 
 	err := NewAdapter(nil).HandleWebhook(context.Background(), testLineConfig(), nil, req, httptest.NewRecorder())
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusForbidden)
+	if apperror.KindOf(err) != apperror.KindForbidden {
+		t.Fatalf("kind = %v, want %v", apperror.KindOf(err), apperror.KindForbidden)
 	}
 }
 

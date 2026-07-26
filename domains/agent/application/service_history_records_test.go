@@ -11,6 +11,7 @@ import (
 	"github.com/memohai/memoh/domains/agent/chat/compaction"
 	"github.com/memohai/memoh/domains/agent/chat/context/fragment"
 	"github.com/memohai/memoh/domains/agent/chat/context/history"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
@@ -225,7 +226,7 @@ func TestHistoryContextFragsForMessagesCarriesActiveSummaryCoverage(t *testing.T
 	}
 
 	cfg := engine.RunConfig{
-		Messages:     modelMessagesToSDKMessages(messages),
+		Messages:     convert.ModelMessagesToSDKMessages(messages),
 		ContextFrags: frags,
 	}.RefreshContextFrag()
 	if len(cfg.ContextManifest.CoverageTrace) != 1 {

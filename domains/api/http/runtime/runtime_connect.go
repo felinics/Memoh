@@ -18,6 +18,7 @@ import (
 
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 	userruntime "github.com/memohai/memoh/domains/runtime/client"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const (
@@ -51,22 +52,24 @@ func (h *RuntimeConnectHandler) Register(e *echo.Echo) {
 func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 	key, err := bearerToken(c.Request().Header.Get(echo.HeaderAuthorization))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "runtime key is required")
+		return apperror.Unauthenticated("require runtime key", err)
 	}
 	runtime, err := h.service.AuthenticateKey(c.Request().Context(), key)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid runtime key")
+		return apperror.Unauthenticated("authenticate runtime key", err)
 	}
 	info, err := userruntime.ParseHandshakeMetadata(c.Request().Header.Get(userruntime.RuntimeMetadataHeader))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("parse runtime handshake", err)
 	}
 	if !offersSubprotocol(c.Request(), runtimeProtocolGRPC) {
 		c.Response().Header().Set("Sec-WebSocket-Protocol", runtimeProtocolGRPC)
-		return echo.NewHTTPError(http.StatusUpgradeRequired, "unsupported runtime subprotocol")
+		// 426 Upgrade Required has no Kind mapping; keep the wire status until
+		// a serial pass decides whether this becomes FailedPrecondition.
+		return echo.NewHTTPError(http.StatusUpgradeRequired)
 	}
 	if h.pipe == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, userruntime.ErrPipeNotConfigured.Error())
+		return apperror.Unavailable("connect runtime pipe", userruntime.ErrPipeNotConfigured)
 	}
 	conn, err := websocket.Accept(c.Response().Writer, c.Request(), &websocket.AcceptOptions{
 		Subprotocols: []string{runtimeProtocolGRPC},

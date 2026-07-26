@@ -12,7 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
-	"github.com/memohai/memoh/domains/api/auth"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 )
 
 type recordingToolApprovalResponder struct {

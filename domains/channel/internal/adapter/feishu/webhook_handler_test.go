@@ -12,6 +12,7 @@ import (
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const testWebhookConfigID = "cfg-1"
@@ -83,12 +84,8 @@ func TestHandleWebhook_URLVerification(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error")
 				}
-				he := &echo.HTTPError{}
-				if !errors.As(err, &he) {
-					t.Fatalf("expected HTTPError, got %T", err)
-				}
-				if he.Code != tc.wantStatus {
-					t.Fatalf("unexpected status code: %d", he.Code)
+				if apperror.KindOf(err).HTTPStatus() != tc.wantStatus {
+					t.Fatalf("unexpected status code: %d", apperror.KindOf(err).HTTPStatus())
 				}
 				if len(manager.calls) != 0 {
 					t.Fatalf("expected no inbound calls, got %d", len(manager.calls))
@@ -291,12 +288,8 @@ func TestHandleWebhook_EventCallbackRejectsInvalidTokenWhenEncryptKeyMissing(t *
 			if err == nil {
 				t.Fatal("expected unauthorized error")
 			}
-			he := &echo.HTTPError{}
-			if !errors.As(err, &he) {
-				t.Fatalf("expected HTTPError, got %T", err)
-			}
-			if he.Code != http.StatusUnauthorized {
-				t.Fatalf("unexpected status code: %d", he.Code)
+			if apperror.KindOf(err) != apperror.KindUnauthenticated {
+				t.Fatalf("kind = %v, want %v", apperror.KindOf(err), apperror.KindUnauthenticated)
 			}
 			if len(manager.calls) != 0 {
 				t.Fatalf("expected no inbound calls, got %d", len(manager.calls))

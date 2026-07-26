@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -286,10 +285,10 @@ func (s *Store) DeleteCatalogModel(ctx context.Context, providerID, modelID stri
 
 func record(row dbsqlc.ModelModel) catalogport.Record {
 	return catalogport.Record{
-		ID:         uuidString(row.ID),
+		ID:         db.UUIDString(row.ID),
 		ModelID:    row.ModelID,
-		Name:       textString(row.Name),
-		ProviderID: uuidString(row.ProviderID),
+		Name:       db.TextToString(row.Name),
+		ProviderID: db.UUIDString(row.ProviderID),
 		Type:       modeldomain.ModelType(row.Type),
 		Enable:     row.Enable,
 		Config:     cloneBytes(row.Config),
@@ -306,26 +305,12 @@ func records(rows []dbsqlc.ModelModel) []catalogport.Record {
 
 func variantRecord(row dbsqlc.ModelModelVariant) catalogport.VariantRecord {
 	return catalogport.VariantRecord{
-		ID:        uuidString(row.ID),
-		ModelID:   uuidString(row.ModelUuid),
+		ID:        db.UUIDString(row.ID),
+		ModelID:   db.UUIDString(row.ModelUuid),
 		VariantID: row.VariantID,
 		Weight:    row.Weight,
 		Metadata:  cloneBytes(row.Metadata),
 	}
-}
-
-func uuidString(value pgtype.UUID) string {
-	if !value.Valid {
-		return ""
-	}
-	return uuid.UUID(value.Bytes).String()
-}
-
-func textString(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String
 }
 
 func optionalText(value string) pgtype.Text {

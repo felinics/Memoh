@@ -11,6 +11,7 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/chat/compaction"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	"github.com/memohai/memoh/domains/agent/chat/timeline"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 )
@@ -187,7 +188,7 @@ func stripNonAskUserToolCalls(message agentdomain.ModelMessage) (agentdomain.Mod
 	legacyToolCalls := keepAskUserLegacyToolCalls(message.ToolCalls)
 	text := strings.TrimSpace(message.TextContent())
 
-	keptParts := filterAssistantContextParts(modelMessageToSDKMessage(message).Content)
+	keptParts := filterAssistantContextParts(convert.ModelMessageToSDKMessage(message).Content)
 	if len(keptParts) > 0 {
 		message = modelMessageFromSDKParts(sdk.MessageRoleAssistant, keptParts, message.Usage)
 		message.ToolCalls = legacyToolCalls
@@ -212,7 +213,7 @@ func keepAskUserToolResultMessage(message agentdomain.ModelMessage) *agentdomain
 	if strings.EqualFold(strings.TrimSpace(message.Name), userinput.ToolNameAskUser) {
 		return &message
 	}
-	results := filterAskUserToolResults(modelMessageToSDKMessage(message).Content)
+	results := filterAskUserToolResults(convert.ModelMessageToSDKMessage(message).Content)
 	if len(results) == 0 {
 		return nil
 	}
@@ -275,7 +276,7 @@ func filterAskUserToolResults(parts []sdk.MessagePart) []sdk.MessagePart {
 }
 
 func modelMessageFromSDKParts(role sdk.MessageRole, parts []sdk.MessagePart, usage json.RawMessage) agentdomain.ModelMessage {
-	converted := sdkMessagesToModelMessages([]sdk.Message{{Role: role, Content: parts}})
+	converted := convert.SDKMessagesToModelMessages([]sdk.Message{{Role: role, Content: parts}})
 	if len(converted) == 0 {
 		return agentdomain.ModelMessage{Role: string(role)}
 	}

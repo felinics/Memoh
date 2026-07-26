@@ -8,7 +8,7 @@ import (
 	memport "github.com/memohai/memoh/domains/memory/internal/port"
 	storefs "github.com/memohai/memoh/domains/memory/internal/store/fs"
 	wikistore "github.com/memohai/memoh/domains/memory/internal/store/wiki"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 // EmbeddingModelSpec is the persistence-neutral model and provider state the
@@ -48,7 +48,7 @@ func NewBuiltinRuntimeFromConfig(logger *slog.Logger, providerConfig map[string]
 // NewBuiltinRuntimeFromConfigContext builds a team-owned runtime. resolver is
 // fixed by the registry at provider instantiation time so asynchronous index
 // retries retain the same team after the request context is gone.
-func NewBuiltinRuntimeFromConfigContext(ctx context.Context, logger *slog.Logger, providerConfig map[string]any, store *storefs.Service, modelResolver EmbeddingModelResolver, vectorStore memport.SemanticEmbeddingStore, wikiStore wikistore.Store, resolver memreg.TeamIDResolver) (Runtime, error) {
+func NewBuiltinRuntimeFromConfigContext(ctx context.Context, logger *slog.Logger, providerConfig map[string]any, store *storefs.Service, modelResolver EmbeddingModelResolver, vectorStore memport.SemanticEmbeddingStore, wikiStore wikistore.Store, resolver memprovider.TeamIDResolver) (Runtime, error) {
 	if wikiStore == nil {
 		return nil, errors.New("graph runtime: wiki store not configured")
 	}

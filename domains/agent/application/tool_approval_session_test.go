@@ -12,7 +12,7 @@ import (
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	"github.com/memohai/memoh/domains/agent/engine"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 	"github.com/memohai/memoh/domains/runtime/workspace"
 )
 

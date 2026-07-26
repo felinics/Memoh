@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 type registryItem struct {
 	source ToolSource
-	tool   ToolDescriptor
+	tool   mcppersistence.ToolDescriptor
 }
 
 // ToolRegistry stores provider ownership and descriptor metadata.
@@ -23,7 +25,7 @@ func NewToolRegistry() *ToolRegistry {
 	}
 }
 
-func (r *ToolRegistry) Register(source ToolSource, tool ToolDescriptor) error {
+func (r *ToolRegistry) Register(source ToolSource, tool mcppersistence.ToolDescriptor) error {
 	if source == nil {
 		return errors.New("tool source is required")
 	}
@@ -48,24 +50,24 @@ func (r *ToolRegistry) Register(source ToolSource, tool ToolDescriptor) error {
 	return nil
 }
 
-func (r *ToolRegistry) Lookup(name string) (ToolSource, ToolDescriptor, bool) {
+func (r *ToolRegistry) Lookup(name string) (ToolSource, mcppersistence.ToolDescriptor, bool) {
 	item, ok := r.items[strings.TrimSpace(name)]
 	if !ok {
-		return nil, ToolDescriptor{}, false
+		return nil, mcppersistence.ToolDescriptor{}, false
 	}
 	return item.source, item.tool, true
 }
 
-func (r *ToolRegistry) List() []ToolDescriptor {
+func (r *ToolRegistry) List() []mcppersistence.ToolDescriptor {
 	if len(r.items) == 0 {
-		return []ToolDescriptor{}
+		return []mcppersistence.ToolDescriptor{}
 	}
 	names := make([]string, 0, len(r.items))
 	for name := range r.items {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	tools := make([]ToolDescriptor, 0, len(names))
+	tools := make([]mcppersistence.ToolDescriptor, 0, len(names))
 	for _, name := range names {
 		tools = append(tools, r.items[name].tool)
 	}

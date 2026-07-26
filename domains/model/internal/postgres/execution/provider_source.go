@@ -108,11 +108,11 @@ func providerDescriptor(row dbsqlc.ModelProvider) executionport.ProviderDescript
 
 func providerCredentialRecord(row dbsqlc.ModelProvider) providers.ProviderRecord {
 	return providers.ProviderRecord{
-		ID:                 uuidString(row.ID),
-		ProviderTemplateID: uuidString(row.ProviderTemplateID),
+		ID:                 db.UUIDString(row.ID),
+		ProviderTemplateID: db.UUIDString(row.ProviderTemplateID),
 		Name:               row.Name,
 		ClientType:         row.ClientType,
-		Icon:               textString(row.Icon),
+		Icon:               db.TextToString(row.Icon),
 		Enable:             row.Enable,
 		Config:             cloneBytes(row.Config),
 		Metadata:           cloneBytes(row.Metadata),

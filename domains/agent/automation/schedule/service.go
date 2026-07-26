@@ -11,9 +11,11 @@ import (
 	"sync"
 	"time"
 
+	schedulepersistence "github.com/memohai/memoh/domains/agent/automation/schedule/persistence"
+
 	"github.com/robfig/cron/v3"
 
-	"github.com/memohai/memoh/domains/api/auth"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 )
 
 // SessionCreator creates sessions for schedule runs.
@@ -22,7 +24,7 @@ type SessionCreator interface {
 }
 
 type Service struct {
-	store           Store
+	store           schedulepersistence.Store
 	cron            *cron.Cron
 	parser          cron.Parser
 	triggerer       Triggerer
@@ -32,9 +34,13 @@ type Service struct {
 	defaultLocation *time.Location
 	mu              sync.Mutex
 	jobs            map[string]cron.EntryID
+	runCtx          context.Context
+	cancel          context.CancelFunc
+	started         bool
+	stopped         bool
 }
 
-func NewService(log *slog.Logger, store Store, triggerer Triggerer, sessionCreator SessionCreator, jwtSecret string, location *time.Location) *Service {
+func NewService(log *slog.Logger, store schedulepersistence.Store, triggerer Triggerer, sessionCreator SessionCreator, jwtSecret string, location *time.Location) *Service {
 	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	if location == nil {
 		location = time.UTC
@@ -51,8 +57,52 @@ func NewService(log *slog.Logger, store Store, triggerer Triggerer, sessionCreat
 		defaultLocation: location,
 		jobs:            map[string]cron.EntryID{},
 	}
-	c.Start()
 	return service
+}
+
+// Start begins dispatching scheduled jobs. It is safe to call Start more than
+// once. Call Bootstrap before Start so persisted jobs are registered before
+// the scheduler begins dispatching them.
+func (s *Service) Start(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return errors.New("schedule service is stopped")
+	}
+	if s.started {
+		return nil
+	}
+	s.runCtx, s.cancel = context.WithCancel(context.WithoutCancel(ctx))
+	s.started = true
+	s.cron.Start()
+	return nil
+}
+
+// Shutdown stops dispatching new jobs and waits for active jobs to finish.
+// The caller may bound the wait with ctx; the scheduler remains stopped when
+// ctx expires.
+func (s *Service) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	s.stopped = true
+	cancel := s.cancel
+	s.cancel = nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+
+	stopped := s.cron.Stop()
+	select {
+	case <-stopped.Done():
+		return nil
+	default:
+	}
+	select {
+	case <-stopped.Done():
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Service) Bootstrap(ctx context.Context) error {
@@ -92,7 +142,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	row, err := s.store.Create(ctx, CreateCommand{
+	row, err := s.store.Create(ctx, schedulepersistence.CreateCommand{
 		Name:        req.Name,
 		Description: req.Description,
 		Pattern:     req.Pattern,
@@ -115,7 +165,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
 	row, err := s.store.Get(ctx, id)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, schedulepersistence.ErrNotFound) {
 			return Schedule{}, errors.New("schedule not found")
 		}
 		return Schedule{}, err
@@ -174,7 +224,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	updated, err := s.store.Update(ctx, UpdateCommand{
+	updated, err := s.store.Update(ctx, schedulepersistence.UpdateCommand{
 		ID:          id,
 		Name:        name,
 		Description: description,
@@ -247,7 +297,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		}
 	}
 
-	logID, err := s.store.CreateLog(ctx, CreateLogCommand{
+	logID, err := s.store.CreateLog(ctx, schedulepersistence.CreateLogCommand{
 		ScheduleID: sched.ID,
 		BotID:      sched.BotID,
 		SessionID:  sessionID,
@@ -286,7 +336,7 @@ func (s *Service) completeLog(ctx context.Context, logID, status, resultText, er
 	if logID == "" {
 		return
 	}
-	err := s.store.CompleteLog(ctx, CompleteLogCommand{
+	err := s.store.CompleteLog(ctx, schedulepersistence.CompleteLogCommand{
 		ID:           logID,
 		Status:       status,
 		ResultText:   resultText,
@@ -312,7 +362,7 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 		return nil, 0, err
 	}
 
-	rows, err := s.store.ListLogsByBot(ctx, LogPage{
+	rows, err := s.store.ListLogsByBot(ctx, schedulepersistence.LogPage{
 		ID:     botID,
 		Limit:  int32(limit),  //nolint:gosec // capped to 100 above
 		Offset: int32(offset), //nolint:gosec // validated above
@@ -340,7 +390,7 @@ func (s *Service) ListLogsBySchedule(ctx context.Context, scheduleID string, lim
 		return nil, 0, err
 	}
 
-	rows, err := s.store.ListLogsBySchedule(ctx, LogPage{
+	rows, err := s.store.ListLogsBySchedule(ctx, schedulepersistence.LogPage{
 		ID:     scheduleID,
 		Limit:  int32(limit),  //nolint:gosec // capped to 100 above
 		Offset: int32(offset), //nolint:gosec // validated above
@@ -359,7 +409,7 @@ func (s *Service) DeleteLogs(ctx context.Context, botID string) error {
 	return s.store.DeleteLogsByBot(ctx, botID)
 }
 
-func toScheduleLog(row LogRecord) Log {
+func toScheduleLog(row schedulepersistence.LogRecord) Log {
 	l := Log{
 		ID:           row.ID,
 		ScheduleID:   row.ScheduleID,
@@ -383,7 +433,7 @@ func toScheduleLog(row LogRecord) Log {
 	return l
 }
 
-func toScheduleLogFromSchedule(row LogRecord) Log {
+func toScheduleLogFromSchedule(row schedulepersistence.LogRecord) Log {
 	return toScheduleLog(row)
 }
 
@@ -412,16 +462,19 @@ func (s *Service) generateTriggerToken(userID string) (string, error) {
 	return "Bearer " + signed, nil
 }
 
-func (s *Service) scheduleJob(ctx context.Context, schedule Record) error {
+func (s *Service) scheduleJob(ctx context.Context, schedule schedulepersistence.Record) error {
 	id := schedule.ID
 	if id == "" {
 		return errors.New("schedule id missing")
 	}
 	job := func() {
-		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), scheduleRunTimeout)
+		runCtx, runCancel, ok := s.jobContext(scheduleRunTimeout)
+		if !ok {
+			return
+		}
 		defer runCancel()
 		if err := s.runSchedule(runCtx, toSchedule(schedule)); err != nil {
-			s.logger.ErrorContext(ctx, "scheduled job failed", slog.String("schedule_id", schedule.ID), slog.Any("error", err))
+			s.logger.ErrorContext(runCtx, "scheduled job failed", slog.String("schedule_id", schedule.ID), slog.Any("error", err))
 		}
 	}
 
@@ -439,7 +492,17 @@ func (s *Service) scheduleJob(ctx context.Context, schedule Record) error {
 	return nil
 }
 
-func (s *Service) rescheduleJob(ctx context.Context, schedule Record) error {
+func (s *Service) jobContext(timeout time.Duration) (context.Context, context.CancelFunc, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.started || s.stopped || s.runCtx == nil {
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithTimeout(s.runCtx, timeout)
+	return ctx, cancel, true
+}
+
+func (s *Service) rescheduleJob(ctx context.Context, schedule schedulepersistence.Record) error {
 	id := schedule.ID
 	if id == "" {
 		return nil
@@ -461,7 +524,7 @@ func (s *Service) removeJob(id string) {
 	}
 }
 
-func toSchedule(row Record) Schedule {
+func toSchedule(row schedulepersistence.Record) Schedule {
 	return Schedule(row)
 }
 

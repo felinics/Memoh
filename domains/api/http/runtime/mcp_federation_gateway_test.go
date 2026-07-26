@@ -8,7 +8,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	mcpgw "github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 type testToolInput struct {
@@ -54,7 +54,7 @@ func TestFederationGatewayHTTPConnectionViaSDK(t *testing.T) {
 	gateway := &MCPFederationGateway{
 		client: httpServer.Client(),
 	}
-	connection := mcpgw.Connection{
+	connection := mcppersistence.Connection{
 		Config: map[string]any{
 			"url": httpServer.URL,
 			"headers": map[string]any{
@@ -91,7 +91,7 @@ func TestFederationGatewaySSEConnectionViaSDK(t *testing.T) {
 	gateway := &MCPFederationGateway{
 		client: httpServer.Client(),
 	}
-	connection := mcpgw.Connection{
+	connection := mcppersistence.Connection{
 		Config: map[string]any{
 			"url": httpServer.URL,
 			"headers": map[string]any{

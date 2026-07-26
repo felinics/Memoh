@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 )
 
 // providerListRecord builds a compact provider row: the name as the label, then

@@ -236,7 +236,7 @@ global db/store or global SQLC
 go build ./cmd/agent
 go build -tags split ./cmd/agent
 go build ./cmd/channel
-go test ./domains/channel/... ./internal/rpc/channel/... ./internal/arch/...
+go test ./domains/channel/... ./internal/rpc/channel/...
 
 set -o pipefail
 go list -deps -tags split ./cmd/agent >/tmp/split-server-deps

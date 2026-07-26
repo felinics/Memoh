@@ -5,15 +5,16 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 type federationTestSource struct {
-	tools []mcp.ToolDescriptor
+	tools []mcppersistence.ToolDescriptor
 	calls []string
 }
 
-func (s *federationTestSource) ListTools(context.Context, mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
-	return append([]mcp.ToolDescriptor(nil), s.tools...), nil
+func (s *federationTestSource) ListTools(context.Context, mcp.ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
+	return append([]mcppersistence.ToolDescriptor(nil), s.tools...), nil
 }
 
 func (s *federationTestSource) CallTool(_ context.Context, _ mcp.ToolSessionContext, toolName string, _ map[string]any) (map[string]any, error) {
@@ -25,7 +26,7 @@ func TestFederationProviderSkipsBuiltInNameCollisions(t *testing.T) {
 	t.Parallel()
 
 	source := &federationTestSource{
-		tools: []mcp.ToolDescriptor{
+		tools: []mcppersistence.ToolDescriptor{
 			{
 				Name:        ToolBrowserObserve().String(),
 				Description: "Federated collision",

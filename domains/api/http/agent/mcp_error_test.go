@@ -6,9 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
-
-	"github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 func TestMCPConnectionServiceError(t *testing.T) {
@@ -16,39 +15,35 @@ func TestMCPConnectionServiceError(t *testing.T) {
 		name           string
 		err            error
 		fallbackStatus int
-		wantStatus     int
-		wantMessage    string
+		wantKind       apperror.Kind
 	}{
 		{
 			name:           "not found",
-			err:            fmt.Errorf("get connection: %w", mcp.ErrNotFound),
+			err:            fmt.Errorf("get connection: %w", mcppersistence.ErrNotFound),
 			fallbackStatus: http.StatusInternalServerError,
-			wantStatus:     http.StatusNotFound,
-			wantMessage:    "mcp connection not found",
+			wantKind:       apperror.KindNotFound,
 		},
 		{
 			name:           "bad request fallback",
 			err:            errors.New("name is required"),
 			fallbackStatus: http.StatusBadRequest,
-			wantStatus:     http.StatusBadRequest,
-			wantMessage:    "name is required",
+			wantKind:       apperror.KindInvalid,
 		},
 		{
 			name:           "internal error fallback",
 			err:            errors.New("storage unavailable"),
 			fallbackStatus: http.StatusInternalServerError,
-			wantStatus:     http.StatusInternalServerError,
-			wantMessage:    "storage unavailable",
+			wantKind:       apperror.KindInternal,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			var httpErr *echo.HTTPError
-			if !errors.As(mcpConnectionServiceError(test.err, test.fallbackStatus), &httpErr) {
-				t.Fatal("mcpConnectionServiceError() did not return *echo.HTTPError")
+			got := mcpConnectionServiceError(test.err, test.fallbackStatus)
+			if kind := apperror.KindOf(got); kind != test.wantKind {
+				t.Fatalf("mcpConnectionServiceError() kind = %s, want %s", kind, test.wantKind)
 			}
-			if httpErr.Code != test.wantStatus || httpErr.Message != test.wantMessage {
-				t.Fatalf("mcpConnectionServiceError() = (%d, %v), want (%d, %q)", httpErr.Code, httpErr.Message, test.wantStatus, test.wantMessage)
+			if cause := apperror.CauseOf(got); !errors.Is(cause, test.err) {
+				t.Fatalf("mcpConnectionServiceError() cause = %v, want %v", cause, test.err)
 			}
 		})
 	}

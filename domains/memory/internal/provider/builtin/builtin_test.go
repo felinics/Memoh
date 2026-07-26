@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 func TestBuiltinProviderNilService(t *testing.T) {
@@ -16,7 +16,7 @@ func TestBuiltinProviderNilService(t *testing.T) {
 		t.Fatalf("expected type %q, got %q", BuiltinType, p.Type())
 	}
 
-	result, err := p.OnBeforeChat(context.Background(), memreg.BeforeChatRequest{
+	result, err := p.OnBeforeChat(context.Background(), memprovider.BeforeChatRequest{
 		BotID: "bot-1",
 		Query: "hello",
 	})
@@ -75,7 +75,7 @@ func TestBuiltinProviderOnBeforeChatEmptyQuery(t *testing.T) {
 	runtime := newFileRuntime(store)
 	p := NewBuiltinProvider(slog.Default(), runtime)
 
-	result, err := p.OnBeforeChat(context.Background(), memreg.BeforeChatRequest{
+	result, err := p.OnBeforeChat(context.Background(), memprovider.BeforeChatRequest{
 		BotID: "bot-1",
 		Query: "",
 	})
@@ -93,16 +93,16 @@ func TestBuiltinProviderContextPackingProducesMemoryContextTags(t *testing.T) {
 	runtime := newFileRuntime(store)
 	p := NewBuiltinProvider(slog.Default(), runtime)
 
-	_ = p.OnAfterChat(context.Background(), memreg.AfterChatRequest{
+	_ = p.OnAfterChat(context.Background(), memprovider.AfterChatRequest{
 		BotID:    "bot-1",
-		Messages: []memreg.Message{{Role: "user", Content: "I like green tea"}},
+		Messages: []memprovider.Message{{Role: "user", Content: "I like green tea"}},
 	})
-	_ = p.OnAfterChat(context.Background(), memreg.AfterChatRequest{
+	_ = p.OnAfterChat(context.Background(), memprovider.AfterChatRequest{
 		BotID:    "bot-1",
-		Messages: []memreg.Message{{Role: "user", Content: "I work in Tokyo"}},
+		Messages: []memprovider.Message{{Role: "user", Content: "I work in Tokyo"}},
 	})
 
-	result, err := p.OnBeforeChat(context.Background(), memreg.BeforeChatRequest{
+	result, err := p.OnBeforeChat(context.Background(), memprovider.BeforeChatRequest{
 		BotID: "bot-1",
 		Query: "tea",
 	})
@@ -161,7 +161,7 @@ func TestBuiltinProviderCompactUsesLLMResults(t *testing.T) {
 	provider.SetLLM(llm)
 	ctx := context.Background()
 	for _, memory := range []string{"Ran likes black tea", "Ran likes oolong tea"} {
-		if _, err := provider.Add(ctx, memreg.AddRequest{
+		if _, err := provider.Add(ctx, memprovider.AddRequest{
 			BotID:    "bot-1",
 			Message:  memory,
 			Metadata: map[string]any{"subject": "Ran tea"},
@@ -193,7 +193,7 @@ func TestBuiltinProviderCompactUsesLLMResults(t *testing.T) {
 	if result.BeforeCount != 2 || result.AfterCount != 1 {
 		t.Fatalf("unexpected counts: before=%d after=%d", result.BeforeCount, result.AfterCount)
 	}
-	all, err := provider.GetAll(ctx, memreg.GetAllRequest{BotID: "bot-1"})
+	all, err := provider.GetAll(ctx, memprovider.GetAllRequest{BotID: "bot-1"})
 	if err != nil {
 		t.Fatalf("GetAll after compact: %v", err)
 	}
@@ -240,13 +240,13 @@ func TestIntFromConfig(t *testing.T) {
 func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 	t.Parallel()
 	p := NewBuiltinProvider(slog.Default(), nil)
-	if _, err := p.Add(context.Background(), memreg.AddRequest{}); err == nil {
+	if _, err := p.Add(context.Background(), memprovider.AddRequest{}); err == nil {
 		t.Fatal("expected Add error")
 	}
-	if _, err := p.GetAll(context.Background(), memreg.GetAllRequest{}); err == nil {
+	if _, err := p.GetAll(context.Background(), memprovider.GetAllRequest{}); err == nil {
 		t.Fatal("expected GetAll error")
 	}
-	if _, err := p.Update(context.Background(), memreg.UpdateRequest{}); err == nil {
+	if _, err := p.Update(context.Background(), memprovider.UpdateRequest{}); err == nil {
 		t.Fatal("expected Update error")
 	}
 	if _, err := p.Delete(context.Background(), "x"); err == nil {
@@ -255,7 +255,7 @@ func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 	if _, err := p.DeleteBatch(context.Background(), []string{"x"}); err == nil {
 		t.Fatal("expected DeleteBatch error")
 	}
-	if _, err := p.DeleteAll(context.Background(), memreg.DeleteAllRequest{}); err == nil {
+	if _, err := p.DeleteAll(context.Background(), memprovider.DeleteAllRequest{}); err == nil {
 		t.Fatal("expected DeleteAll error")
 	}
 	if _, err := p.Compact(context.Background(), nil, 0.5, 0); err == nil {

@@ -11,8 +11,9 @@ import (
 
 	"github.com/memohai/memoh/domains/agent/automation/heartbeat"
 	"github.com/memohai/memoh/domains/agent/automation/schedule"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	"github.com/memohai/memoh/domains/agent/engine"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 )
 
 // TriggerSchedule executes a scheduled command via the internal agent.
@@ -59,8 +60,8 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		return schedule.TriggerResult{}, err
 	}
 
-	outputMessages := sdkMessagesToModelMessages(result.Messages)
-	roundMessages := prependUserMessage(req.Query, outputMessages)
+	outputMessages := convert.SDKMessagesToModelMessages(result.Messages)
+	roundMessages := convert.PrependUserMessage(req.Query, outputMessages)
 	storeErr := s.storeRound(ctx, req, roundMessages, rc.model.ID)
 
 	totalUsageJSON, _ := json.Marshal(result.Usage)
@@ -131,8 +132,8 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 		status = "ok"
 	}
 
-	outputMessages := sdkMessagesToModelMessages(result.Messages)
-	roundMessages := prependUserMessage(heartbeatPrompt, outputMessages)
+	outputMessages := convert.SDKMessagesToModelMessages(result.Messages)
+	roundMessages := convert.PrependUserMessage(heartbeatPrompt, outputMessages)
 	_ = s.storeRound(ctx, req, roundMessages, rc.model.ID)
 
 	totalUsageJSON, _ := json.Marshal(result.Usage)

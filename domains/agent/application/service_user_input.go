@@ -10,6 +10,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	sessionpkg "github.com/memohai/memoh/domains/agent/chat/thread"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	"github.com/memohai/memoh/domains/api/bot"
@@ -274,7 +275,7 @@ func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req useri
 	if err != nil {
 		return err
 	}
-	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
+	modelMessages := convert.SDKMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := ChatRequest{
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,

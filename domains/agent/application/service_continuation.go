@@ -5,6 +5,7 @@ import (
 
 	"github.com/memohai/memoh/domains/agent/chat/context/fragment"
 	"github.com/memohai/memoh/domains/agent/chat/context/history"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	"github.com/memohai/memoh/domains/agent/engine"
 )
 
@@ -35,7 +36,7 @@ func (s *Service) prepareContinuationRunConfig(
 	// keeps the fragments faithful to history while the outgoing messages stay
 	// provider-valid. Applies to every continuation path that resumes after a
 	// deferred tool call.
-	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
+	base.Messages = convert.ModelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)

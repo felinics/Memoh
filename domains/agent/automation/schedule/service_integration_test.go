@@ -8,12 +8,14 @@ import (
 	"strings"
 	"testing"
 
+	schedulepersistence "github.com/memohai/memoh/domains/agent/automation/schedule/persistence"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/domains/agent/automation/schedule"
-	schedulepostgres "github.com/memohai/memoh/domains/agent/automation/schedule/postgres"
+	schedulepostgres "github.com/memohai/memoh/domains/agent/internal/postgres/schedule"
 	agentsqlc "github.com/memohai/memoh/domains/agent/internal/postgres/sqlc"
 	"github.com/memohai/memoh/internal/db"
 )
@@ -22,10 +24,10 @@ type integrationBotReader struct {
 	pool *pgxpool.Pool
 }
 
-func (r integrationBotReader) GetBot(ctx context.Context, id string) (schedule.BotRecord, error) {
+func (r integrationBotReader) GetBot(ctx context.Context, id string) (schedulepersistence.BotRecord, error) {
 	parsed, err := db.ParseUUID(id)
 	if err != nil {
-		return schedule.BotRecord{}, err
+		return schedulepersistence.BotRecord{}, err
 	}
 	var ownerUserID pgtype.UUID
 	var timezone pgtype.Text
@@ -35,9 +37,9 @@ func (r integrationBotReader) GetBot(ctx context.Context, id string) (schedule.B
 		WHERE team_id = iam.memoh_current_team_id() AND id = $1
 	`, parsed).Scan(&ownerUserID, &timezone)
 	if err != nil {
-		return schedule.BotRecord{}, err
+		return schedulepersistence.BotRecord{}, err
 	}
-	return schedule.BotRecord{
+	return schedulepersistence.BotRecord{
 		OwnerUserID: ownerUserID.String(),
 		Timezone:    db.TextToString(timezone),
 	}, nil

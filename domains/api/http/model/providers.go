@@ -3,7 +3,6 @@ package model
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -11,7 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/api/auth"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 	modeldomain "github.com/memohai/memoh/domains/model"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
 	providers "github.com/memohai/memoh/domains/model/provider"
@@ -65,11 +64,11 @@ func (h *ProvidersHandler) Register(e *echo.Echo) {
 func (h *ProvidersHandler) CreateFromTemplate(c echo.Context) error {
 	var req providers.CreateFromTemplateRequest
 	if err := c.Bind(&req); err != nil {
-		return apperror.Wrap(apperror.CodeProviderTemplateRequestInvalid, err, nil)
+		return apperror.Invalid("bind provider from template", err).WithCode(apperror.CodeProviderTemplateRequestInvalid, nil)
 	}
 	resp, err := h.service.CreateFromTemplate(c.Request().Context(), req)
 	if err != nil {
-		return mapProviderCreateFromTemplateError(err)
+		return mapProviderCreateFromTemplateError("create provider from template", err)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -82,23 +81,23 @@ func (h *ProvidersHandler) CreateFromTemplate(c echo.Context) error {
 // @Produce json
 // @Param request body providers.CreateRequest true "Provider configuration"
 // @Success 201 {object} providers.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers [post].
 func (h *ProvidersHandler) Create(c echo.Context) error {
 	var req providers.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind provider", err)
 	}
 
 	// Validate required fields
 	if req.Name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+		return apperror.Required("name")
 	}
 
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("create provider", err)
 	}
 
 	return c.JSON(http.StatusCreated, resp)
@@ -111,12 +110,12 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 // @Accept json
 // @Produce json
 // @Success 200 {array} providers.GetResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /providers [get].
 func (h *ProvidersHandler) List(c echo.Context) error {
 	resp, err := h.service.List(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list providers", err)
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -130,19 +129,19 @@ func (h *ProvidersHandler) List(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id} [get].
 func (h *ProvidersHandler) Get(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 
 	resp, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get provider", err)
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -155,17 +154,17 @@ func (h *ProvidersHandler) Get(c echo.Context) error {
 // @Param id path string true "Provider ID (UUID)"
 // @Param type query string false "Model type (chat, embedding)"
 // @Success 200 {array} modelcatalog.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id}/models [get].
 func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 	if h.modelsService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "models service not configured")
+		return apperror.Internal("list provider models", nil)
 	}
 	id := c.Param("id")
 	if strings.TrimSpace(id) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	modelType := strings.TrimSpace(c.QueryParam("type"))
 	var (
@@ -179,9 +178,9 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid") {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.Invalid("list provider models", err)
 		}
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("list provider models", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -194,19 +193,19 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 // @Produce json
 // @Param name path string true "Provider name"
 // @Success 200 {object} providers.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/name/{name} [get].
 func (h *ProvidersHandler) GetByName(c echo.Context) error {
 	name := c.Param("name")
 	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+		return apperror.Required("name")
 	}
 
 	resp, err := h.service.GetByName(c.Request().Context(), name)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get provider by name", err)
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -221,24 +220,24 @@ func (h *ProvidersHandler) GetByName(c echo.Context) error {
 // @Param id path string true "Provider ID (UUID)"
 // @Param request body providers.UpdateRequest true "Updated provider configuration"
 // @Success 200 {object} providers.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id} [put].
 func (h *ProvidersHandler) Update(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 
 	var req providers.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind provider", err)
 	}
 
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("update provider", err)
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -252,18 +251,18 @@ func (h *ProvidersHandler) Update(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id} [delete].
 func (h *ProvidersHandler) Delete(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("delete provider", err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -276,12 +275,12 @@ func (h *ProvidersHandler) Delete(c echo.Context) error {
 // @Accept json
 // @Produce json
 // @Success 200 {object} providers.CountResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/count [get].
 func (h *ProvidersHandler) Count(c echo.Context) error {
 	count, err := h.service.Count(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("count providers", err)
 	}
 
 	return c.JSON(http.StatusOK, providers.CountResponse{Count: count})
@@ -295,14 +294,14 @@ func (h *ProvidersHandler) Count(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.TestResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id}/test [post].
 func (h *ProvidersHandler) Test(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 
 	ctx := c.Request().Context()
@@ -313,9 +312,9 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid") {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.Invalid("test provider", err)
 		}
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("test provider", err)
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -329,14 +328,14 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.ImportModelsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id}/import-models [post].
 func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 
 	ctx := c.Request().Context()
@@ -346,15 +345,15 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 
 	provider, err := h.service.Get(ctx, id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("provider not found: %v", err))
+		return apperror.NotFound("import provider models", err)
 	}
 	if !modeldomain.IsLLMClientType(modeldomain.ClientType(provider.ClientType)) {
-		return echo.NewHTTPError(http.StatusBadRequest, "import models is not supported for speech providers")
+		return apperror.Invalid("import provider models", nil)
 	}
 
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote models: %v", err))
+		return apperror.Internal("fetch remote models", err)
 	}
 
 	resp := providers.ImportModelsResponse{
@@ -554,19 +553,19 @@ func mergeDiscoveredConfig(existing, discovered modeldomain.ModelConfig) (modeld
 	return out, changed
 }
 
-func mapProviderCreateFromTemplateError(err error) error {
+func mapProviderCreateFromTemplateError(op string, err error) error {
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, template.ErrDomainInvalid):
-		return apperror.New(apperror.CodeProviderTemplateDomainInvalid, nil)
+		return apperror.Invalid(op, err).WithCode(apperror.CodeProviderTemplateDomainInvalid, nil)
 	case errors.Is(err, template.ErrTemplateNotFound):
-		return apperror.New(apperror.CodeProviderTemplateNotFound, nil)
+		return apperror.NotFound(op, err).WithCode(apperror.CodeProviderTemplateNotFound, nil)
 	case errors.Is(err, template.ErrDomainMismatch):
-		return apperror.New(apperror.CodeProviderTemplateDomainMismatch, nil)
+		return apperror.Invalid(op, err).WithCode(apperror.CodeProviderTemplateDomainMismatch, nil)
 	case errors.Is(err, providers.ErrProviderNameTaken):
-		return apperror.Wrap(apperror.CodeProviderNameTaken, err, nil)
+		return apperror.Conflict(op, err).WithCode(apperror.CodeProviderNameTaken, nil)
 	default:
-		return apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, err, nil)
+		return apperror.Internal(op, err).WithCode(apperror.CodeProviderTemplateOperationFailed, nil)
 	}
 }

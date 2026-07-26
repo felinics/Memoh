@@ -12,9 +12,10 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
-	"github.com/memohai/memoh/domains/api/auth"
 	"github.com/memohai/memoh/domains/api/bot"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type ToolApprovalHandler struct {
@@ -54,9 +55,9 @@ func (h *ToolApprovalHandler) Register(e *echo.Echo) {
 // @Param approval_id path string true "Approval ID"
 // @Param payload body ToolApprovalDecisionRequest false "Approval payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/tool-approvals/{approval_id}/approve [post].
 func (h *ToolApprovalHandler) Approve(c echo.Context) error {
 	return h.respond(c, "approve")
@@ -69,9 +70,9 @@ func (h *ToolApprovalHandler) Approve(c echo.Context) error {
 // @Param approval_id path string true "Approval ID"
 // @Param payload body ToolApprovalDecisionRequest false "Rejection payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/tool-approvals/{approval_id}/reject [post].
 func (h *ToolApprovalHandler) Reject(c echo.Context) error {
 	return h.respond(c, "reject")
@@ -84,8 +85,11 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	approvalID := strings.TrimSpace(c.Param("approval_id"))
-	if botID == "" || approvalID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and approval_id are required")
+	if botID == "" {
+		return apperror.Required("bot_id")
+	}
+	if approvalID == "" {
+		return apperror.Required("approval_id")
 	}
 	var req ToolApprovalDecisionRequest
 	_ = c.Bind(&req)
@@ -102,15 +106,15 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 	return c.JSON(http.StatusOK, map[string]string{"status": decision})
 }
 
-func toolApprovalHTTPError(err error) *echo.HTTPError {
+func toolApprovalHTTPError(err error) error {
 	switch {
 	case errors.Is(err, toolapproval.ErrForbidden):
-		return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		return apperror.Forbidden("respond tool approval", err)
 	case errors.Is(err, toolapproval.ErrNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("respond tool approval", err)
 	case errors.Is(err, toolapproval.ErrAlreadyDecided), errors.Is(err, toolapproval.ErrAmbiguous):
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
+		return apperror.Conflict("respond tool approval", err)
 	default:
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("respond tool approval", err)
 	}
 }

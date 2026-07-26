@@ -8,9 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
+
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 )
 
 type fenceCapturingToolSource struct {
@@ -18,8 +20,8 @@ type fenceCapturingToolSource struct {
 	calls int
 }
 
-func (*fenceCapturingToolSource) ListTools(context.Context, ToolSessionContext) ([]ToolDescriptor, error) {
-	return []ToolDescriptor{{Name: "fenced_tool", InputSchema: map[string]any{"type": "object"}}}, nil
+func (*fenceCapturingToolSource) ListTools(context.Context, ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
+	return []mcppersistence.ToolDescriptor{{Name: "fenced_tool", InputSchema: map[string]any{"type": "object"}}}, nil
 }
 
 func (s *fenceCapturingToolSource) CallTool(ctx context.Context, _ ToolSessionContext, _ string, _ map[string]any) (map[string]any, error) {
@@ -88,7 +90,7 @@ func TestValidateRuntimeGuardRejectsCancellationDuringGuard(t *testing.T) {
 
 func TestToolGatewayMiddlewareScopesRuntimeToolCallsToActivePrompts(t *testing.T) {
 	provider := &gatewayTestProvider{
-		tools:      []ToolDescriptor{{Name: "echo_tool", InputSchema: map[string]any{"type": "object"}}},
+		tools:      []mcppersistence.ToolDescriptor{{Name: "echo_tool", InputSchema: map[string]any{"type": "object"}}},
 		callResult: map[string]map[string]any{"echo_tool": BuildToolSuccessResult(map[string]any{"ok": true})},
 		callErr:    map[string]error{},
 	}

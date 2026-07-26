@@ -1,3 +1,5 @@
+//go:build split
+
 package main
 
 import (

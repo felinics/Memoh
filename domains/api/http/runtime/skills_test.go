@@ -21,6 +21,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/apperror"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -29,7 +31,8 @@ import (
 	pluginspkg "github.com/memohai/memoh/domains/agent/extension/plugins"
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
 	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 	"github.com/memohai/memoh/domains/iam/account"
 	runtimeassembly "github.com/memohai/memoh/domains/runtime/assembly"
 	"github.com/memohai/memoh/domains/runtime/bridge/bridgepb"
@@ -197,12 +200,8 @@ func TestDeleteSkillsAPIRejectsExternalOnlySkill(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected deleting external-only skill to fail")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo.HTTPError, got %T", err)
-	}
-	if httpErr.Code != http.StatusNotFound {
-		t.Fatalf("delete external-only status = %d, want 404", httpErr.Code)
+	if apperror.KindOf(err) != apperror.KindNotFound {
+		t.Fatalf("delete external-only kind = %q, want not_found", apperror.KindOf(err))
 	}
 }
 
@@ -215,12 +214,8 @@ func TestUpsertSkillsAPIRejectsTraversalName(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected upserting traversal skill name to fail")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo.HTTPError, got %T", err)
-	}
-	if httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("upsert traversal status = %d, want 400", httpErr.Code)
+	if apperror.KindOf(err) != apperror.KindInvalid {
+		t.Fatalf("upsert traversal kind = %q, want invalid", apperror.KindOf(err))
 	}
 }
 
@@ -401,7 +396,7 @@ func newSkillsTestEnvWithMetadata(t *testing.T, metadata map[string]any) *skills
 		metadataJSON = []byte(`{}`)
 	}
 	cfg.DataRoot = dataRoot
-	botStore := httpfixture.NewBotStore(bot.Record{
+	botStore := httpfixture.NewBotStore(botpersistence.Record{
 		ID:          botID,
 		OwnerUserID: userID,
 		IsActive:    true,

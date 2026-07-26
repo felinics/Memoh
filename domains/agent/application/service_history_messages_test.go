@@ -84,9 +84,9 @@ func TestBuildMessagesFromPipelineInsertsArtifactSummary(t *testing.T) {
 	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("m2", 2000, "current question"))
 
 	svc := &Service{
-		pipeline: pipeline,
+		pipeline:            pipeline,
 		compactionArtifacts: fakeArtifactStore{rows: []compaction.ArtifactRecord{compactionLogRow(t, "compacted window", "m1", 1000)}},
-		logger:   slog.New(slog.DiscardHandler),
+		logger:              slog.New(slog.DiscardHandler),
 	}
 
 	messages := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
@@ -154,9 +154,9 @@ func TestBuildMessagesFromPipelineKeepsSummaryUnderBudget(t *testing.T) {
 	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("m3", 3000, "current question"))
 
 	svc := &Service{
-		pipeline: pipeline,
+		pipeline:            pipeline,
 		compactionArtifacts: fakeArtifactStore{rows: []compaction.ArtifactRecord{compactionLogRow(t, "compacted window", "m1", 1000)}},
-		logger:   slog.New(slog.DiscardHandler),
+		logger:              slog.New(slog.DiscardHandler),
 	}
 
 	messages := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{

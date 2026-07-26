@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	settingpersistence "github.com/memohai/memoh/domains/api/bot/setting/persistence"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 	userruntime "github.com/memohai/memoh/domains/runtime/client"
 	runtimeworkspace "github.com/memohai/memoh/domains/runtime/workspace"
@@ -127,7 +127,7 @@ func (s *RemoteWorkspaceService) UpdateToolApproval(ctx context.Context, botID, 
 	return s.updateToolApprovalConfig(ctx, record, config)
 }
 
-func (s *RemoteWorkspaceService) UpdateToolApprovalConfig(ctx context.Context, botID, targetID string, config setting.ToolApprovalConfig) error {
+func (s *RemoteWorkspaceService) UpdateToolApprovalConfig(ctx context.Context, botID, targetID string, config settingpersistence.ToolApprovalConfig) error {
 	if s == nil || s.store == nil {
 		return errors.New("remote workspace service not configured")
 	}
@@ -135,10 +135,10 @@ func (s *RemoteWorkspaceService) UpdateToolApprovalConfig(ctx context.Context, b
 	if err != nil {
 		return err
 	}
-	return s.updateToolApprovalConfig(ctx, record, setting.NormalizeToolApprovalConfig(config))
+	return s.updateToolApprovalConfig(ctx, record, settingpersistence.NormalizeToolApprovalConfig(config))
 }
 
-func (s *RemoteWorkspaceService) updateToolApprovalConfig(ctx context.Context, record runtimeworkspace.RemoteMountRecord, config setting.ToolApprovalConfig) error {
+func (s *RemoteWorkspaceService) updateToolApprovalConfig(ctx context.Context, record runtimeworkspace.RemoteMountRecord, config settingpersistence.ToolApprovalConfig) error {
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return err

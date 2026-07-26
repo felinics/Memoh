@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 )
 
 func TestResolveDisplayHostIPsStripsPorts(t *testing.T) {

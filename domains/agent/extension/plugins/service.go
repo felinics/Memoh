@@ -11,10 +11,13 @@ import (
 	"regexp"
 	"strings"
 
+	pluginspersistence "github.com/memohai/memoh/domains/agent/extension/plugins/persistence"
+
 	"gopkg.in/yaml.v3"
 
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
 	"github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 )
 
@@ -23,7 +26,7 @@ type BridgeProvider struct {
 }
 
 type Service struct {
-	store        Store
+	store        pluginspersistence.Store
 	mcpService   *mcp.ConnectionService
 	oauthService *mcp.OAuthService
 	oauthClients *OAuthClientRegistry
@@ -31,7 +34,7 @@ type Service struct {
 	logger       *slog.Logger
 }
 
-func NewService(log *slog.Logger, store Store, mcpService *mcp.ConnectionService, oauthService *mcp.OAuthService, oauthClients *OAuthClientRegistry, bridges BridgeProvider) *Service {
+func NewService(log *slog.Logger, store pluginspersistence.Store, mcpService *mcp.ConnectionService, oauthService *mcp.OAuthService, oauthClients *OAuthClientRegistry, bridges BridgeProvider) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -98,7 +101,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		return Installation{}, err
 	}
 
-	row, err := s.store.CreateInstallation(ctx, CreateInstallationInput{
+	row, err := s.store.CreateInstallation(ctx, pluginspersistence.CreateInstallationInput{
 		BotID:      botID,
 		PluginID:   manifest.ID,
 		PluginName: manifest.Name,
@@ -135,7 +138,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		if err != nil {
 			return Installation{}, fmt.Errorf("create plugin MCP resource %q: %w", resource.Key, err)
 		}
-		if err := s.store.UpsertResource(ctx, ResourceUpsert{
+		if err := s.store.UpsertResource(ctx, pluginspersistence.ResourceUpsert{
 			InstallationID: row.ID,
 			Type:           "mcp",
 			Key:            resource.Key,
@@ -148,7 +151,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 	}
 
 	for _, resource := range manifest.Skills {
-		if err := s.store.UpsertResource(ctx, ResourceUpsert{
+		if err := s.store.UpsertResource(ctx, pluginspersistence.ResourceUpsert{
 			InstallationID: row.ID,
 			Type:           "skill",
 			Key:            resource.Key,
@@ -168,7 +171,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		if key == "" {
 			continue
 		}
-		if err := s.store.UpsertResource(ctx, ResourceUpsert{
+		if err := s.store.UpsertResource(ctx, pluginspersistence.ResourceUpsert{
 			InstallationID: row.ID,
 			Type:           "skill",
 			Key:            key,
@@ -311,7 +314,7 @@ func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbac
 			callbackURL = client.RedirectURI
 		}
 		if strings.TrimSpace(client.AuthorizationEndpoint) != "" && strings.TrimSpace(client.TokenEndpoint) != "" {
-			if err := s.oauthService.SaveDiscovery(ctx, connID, &mcp.DiscoveryResult{
+			if err := s.oauthService.SaveDiscovery(ctx, connID, &mcppersistence.DiscoveryResult{
 				AuthorizationServerURL: authorizationServerFromEndpoint(client.AuthorizationEndpoint),
 				AuthorizationEndpoint:  client.AuthorizationEndpoint,
 				TokenEndpoint:          client.TokenEndpoint,
@@ -359,12 +362,12 @@ func (s *Service) RefreshOAuthStatus(ctx context.Context, botID, installationID 
 	return s.normalizeInstallation(ctx, updated)
 }
 
-func (s *Service) getRow(ctx context.Context, botID, installationID string) (InstallationRecord, error) {
+func (s *Service) getRow(ctx context.Context, botID, installationID string) (pluginspersistence.InstallationRecord, error) {
 	return s.store.FindInstallation(ctx, botID, installationID)
 }
 
-func (s *Service) updateStatus(ctx context.Context, botID, installationID, status string, enabled bool) (InstallationRecord, error) {
-	return s.store.UpdateInstallationStatus(ctx, InstallationStatusUpdate{
+func (s *Service) updateStatus(ctx context.Context, botID, installationID, status string, enabled bool) (pluginspersistence.InstallationRecord, error) {
+	return s.store.UpdateInstallationStatus(ctx, pluginspersistence.InstallationStatusUpdate{
 		BotID:          botID,
 		InstallationID: installationID,
 		Status:         status,
@@ -372,7 +375,7 @@ func (s *Service) updateStatus(ctx context.Context, botID, installationID, statu
 	})
 }
 
-func (s *Service) normalizeInstallation(ctx context.Context, row InstallationRecord) (Installation, error) {
+func (s *Service) normalizeInstallation(ctx context.Context, row pluginspersistence.InstallationRecord) (Installation, error) {
 	manifest, err := decodeManifest(row.Manifest)
 	if err != nil {
 		return Installation{}, err
@@ -414,7 +417,7 @@ func (s *Service) normalizeInstallation(ctx context.Context, row InstallationRec
 	}, nil
 }
 
-func (s *Service) installBundledSkills(ctx context.Context, botID string, row InstallationRecord, manifest Manifest) error {
+func (s *Service) installBundledSkills(ctx context.Context, botID string, row pluginspersistence.InstallationRecord, manifest Manifest) error {
 	if s.bridges == nil || len(manifest.BundledSkills) == 0 {
 		return nil
 	}
@@ -453,7 +456,7 @@ func (s *Service) installBundledSkills(ctx context.Context, botID string, row In
 	return nil
 }
 
-func (s *Service) uninstallBundledSkills(ctx context.Context, botID string, row InstallationRecord) error {
+func (s *Service) uninstallBundledSkills(ctx context.Context, botID string, row pluginspersistence.InstallationRecord) error {
 	if s.bridges == nil {
 		return nil
 	}
@@ -509,7 +512,7 @@ func canDeletePluginSkill(ctx context.Context, client skillFileClient, dirPath, 
 	return strings.TrimSpace(owner.InstallationID) == installationID
 }
 
-func pluginSkillRaw(skill SkillEntry, name string, row InstallationRecord) string {
+func pluginSkillRaw(skill SkillEntry, name string, row pluginspersistence.InstallationRecord) string {
 	metadata := normalizeMetadataMap(skill.Metadata)
 	metadata["managed_by_plugin"] = map[string]any{
 		"installation_id": row.ID,
@@ -529,7 +532,7 @@ func pluginSkillRaw(skill SkillEntry, name string, row InstallationRecord) strin
 	return "---\n" + strings.TrimSpace(string(payload)) + "\n---\n\n" + body + "\n"
 }
 
-func pluginSkillOwner(row InstallationRecord, manifest Manifest, skill SkillEntry, name string) map[string]any {
+func pluginSkillOwner(row pluginspersistence.InstallationRecord, manifest Manifest, skill SkillEntry, name string) map[string]any {
 	return map[string]any{
 		"installation_id": row.ID,
 		"plugin_id":       manifest.ID,
@@ -575,7 +578,7 @@ func (s *Service) evaluateInitialStatus(manifest Manifest, variables map[string]
 	return status
 }
 
-func (s *Service) refreshOAuthStatus(ctx context.Context, botID string, row InstallationRecord, manifest Manifest) (string, error) {
+func (s *Service) refreshOAuthStatus(ctx context.Context, botID string, row pluginspersistence.InstallationRecord, manifest Manifest) (string, error) {
 	resources, err := s.store.ListResources(ctx, row.ID)
 	if err != nil {
 		return "", err
@@ -615,7 +618,7 @@ func (s *Service) refreshOAuthStatus(ctx context.Context, botID string, row Inst
 	return row.Status, nil
 }
 
-func normalizeResource(row ResourceRecord) (Resource, error) {
+func normalizeResource(row pluginspersistence.ResourceRecord) (Resource, error) {
 	metadata, err := decodeJSONMap(row.Metadata)
 	if err != nil {
 		return Resource{}, err
@@ -817,7 +820,7 @@ func resourceStatus(installationStatus string, authReq AuthRequirement) string {
 	return installationStatus
 }
 
-func applyRequestedScopes(result *mcp.DiscoveryResult, scopes []string) {
+func applyRequestedScopes(result *mcppersistence.DiscoveryResult, scopes []string) {
 	if result == nil || len(scopes) == 0 {
 		return
 	}

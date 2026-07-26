@@ -9,7 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 )
 
 type AskUserProvider struct{}

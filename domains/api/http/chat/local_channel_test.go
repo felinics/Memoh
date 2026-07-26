@@ -26,7 +26,8 @@ import (
 	"github.com/memohai/memoh/domains/agent/command/slash"
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
 	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 	"github.com/memohai/memoh/domains/channel/gateway"
 	"github.com/memohai/memoh/domains/iam/account"
 	"github.com/memohai/memoh/domains/media/asset"
@@ -41,27 +42,37 @@ func (f fakeSessionTurnActiveChecker) SessionTurnActive(botID, sessionID string)
 	return f[strings.TrimSpace(botID)+":"+strings.TrimSpace(sessionID)]
 }
 
-func TestNewWSAppErrorEventUsesPublicCatalogOnly(t *testing.T) {
+func TestWSErrorEventIsFlatAndPublic(t *testing.T) {
 	t.Parallel()
 
-	event, ok := newWSAppErrorEvent(
-		"stream-1",
-		"session-1",
-		apperror.Wrap(apperror.CodeACPConfigUpdateFailed, errors.New("SECRET transport path"), nil),
-	)
-	if !ok {
-		t.Fatal("newWSAppErrorEvent() did not recognize application error")
+	event := wsErrorEvent{
+		Type:      "error",
+		StreamID:  "stream-1",
+		SessionID: "session-1",
+		Public: apperror.PublicOf(
+			apperror.Unavailable("update acp config", errors.New("SECRET transport path")).
+				WithCode(apperror.CodeACPConfigUpdateFailed, nil), ""),
 	}
-	feedback, ok := event.Feedback.(apperror.Public)
-	if !ok || feedback.Code != apperror.CodeACPConfigUpdateFailed {
-		t.Fatalf("event feedback = %#v", event.Feedback)
-	}
+
 	data, err := json.Marshal(event)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(data), "SECRET") || strings.Contains(string(data), "i18n_key") {
 		t.Fatalf("public WebSocket error leaked private or legacy data: %s", data)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	// The identity sits at the top level: a client reads the same kind, code
+	// and args keys it reads from a Problem body, without unwrapping anything.
+	if decoded["kind"] != apperror.KindUnavailable.String() {
+		t.Fatalf("kind = %#v", decoded["kind"])
+	}
+	if decoded["code"] != string(apperror.CodeACPConfigUpdateFailed) {
+		t.Fatalf("code = %#v", decoded["code"])
 	}
 }
 
@@ -394,7 +405,7 @@ func TestCanOpenLocalWebSocketAllowsWorkspaceOrManage(t *testing.T) {
 
 type localChannelSessionAuthQueries struct {
 	stubThreadStore
-	bot            bot.Record
+	bot            botpersistence.Record
 	session        sessionpkg.Thread
 	permissions    []byte
 	createSession  func(context.Context, sessionpkg.CreateRecord) (sessionpkg.Thread, error)
@@ -563,10 +574,7 @@ func TestLocalChannelAuthorizeWSSessionScopesChatToCreator(t *testing.T) {
 	}
 
 	err := handler.authorizeWSSession(testEchoContext(currentUser), currentUser, botID, sessionID)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("authorizeWSSession() error = %v, want HTTP 404", err)
-	}
+	requireHTTPStatus(t, err, http.StatusNotFound)
 }
 
 func TestLocalChannelAuthorizeWSSessionAllowsManageAccess(t *testing.T) {
@@ -670,8 +678,8 @@ func TestLocalChannelWSMessageAuthorizesSessionBeforeSlashCommand(t *testing.T) 
 	if got := event["type"]; got != "error" {
 		t.Fatalf("event type = %#v, want error; event=%#v", got, event)
 	}
-	if got := event["message"]; got != "session not found" {
-		t.Fatalf("event message = %#v, want session not found; event=%#v", got, event)
+	if got := event["kind"]; got != apperror.KindNotFound.String() {
+		t.Fatalf("event kind = %#v, want %q; event=%#v", got, apperror.KindNotFound, event)
 	}
 	if _, ok := event["result"]; ok {
 		t.Fatalf("unexpected command result before session authorization: %#v", event)
@@ -811,8 +819,8 @@ func TestLocalChannelWSSkillActivationRequiresChatAccessWithSession(t *testing.T
 	if got := event["type"]; got != "error" {
 		t.Fatalf("event type = %#v, want error; event=%#v", got, event)
 	}
-	if got := event["message"]; got != "bot access denied" {
-		t.Fatalf("event message = %#v, want bot access denied; event=%#v", got, event)
+	if got := event["kind"]; got != apperror.KindForbidden.String() {
+		t.Fatalf("event kind = %#v, want %q; event=%#v", got, apperror.KindForbidden, event)
 	}
 	if _, ok := event["error"]; ok {
 		t.Fatalf("workspace_exec-only skill activation reached slash command handling: %#v", event)

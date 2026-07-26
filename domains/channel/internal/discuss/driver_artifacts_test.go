@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/domains/agent/chat/timeline"
+	"github.com/memohai/memoh/domains/channel/inbound"
 )
 
 type fakeArtifactProvider struct {
@@ -50,7 +51,7 @@ func TestHandleReplyWithTurn_InsertsArtifactSummaryAtCoveredSlot(t *testing.T) {
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{Artifacts: provider})
 	sess := &discussSession{
-		config: DiscussSessionConfig{TeamID: "team-1", BotID: "bot-1", ThreadID: "sess-1"},
+		config: inbound.DiscussSessionConfig{TeamID: "team-1", BotID: "bot-1", ThreadID: "sess-1"},
 	}
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
@@ -92,7 +93,7 @@ func TestHandleReplyWithTurn_NilArtifactProviderComposesPlain(t *testing.T) {
 	}
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
-	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"}}
+	sess := &discussSession{config: inbound.DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"}}
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
 
@@ -140,7 +141,7 @@ func TestBuildMentionGatesOnWatermarkNotCoverage(t *testing.T) {
 		Sources: []timeline.CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 100}},
 	}}
 
-	pending, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts)
+	pending, ok := discussTriggerBuilder{}.Build(inbound.DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts)
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
@@ -148,7 +149,7 @@ func TestBuildMentionGatesOnWatermarkNotCoverage(t *testing.T) {
 		t.Fatal("a mention the watermark has not consumed must wake the session even when compaction covers it")
 	}
 
-	consumed, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{SourceCursor: 150}, artifacts)
+	consumed, ok := discussTriggerBuilder{}.Build(inbound.DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{SourceCursor: 150}, artifacts)
 	if !ok {
 		t.Fatal("expected a composed plan past the mention")
 	}
@@ -178,7 +179,7 @@ func TestBuildSkipsImageRefsCoveredByArtifacts(t *testing.T) {
 		Sources: []timeline.CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 100}},
 	}}
 
-	plan, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts)
+	plan, ok := discussTriggerBuilder{}.Build(inbound.DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts)
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
@@ -186,7 +187,7 @@ func TestBuildSkipsImageRefsCoveredByArtifacts(t *testing.T) {
 		t.Fatalf("covered image must not be re-attached, got %+v", plan.command.DiscussImageRefs)
 	}
 
-	planLive, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, nil)
+	planLive, ok := discussTriggerBuilder{}.Build(inbound.DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, nil)
 	if !ok {
 		t.Fatal("expected a composed plan without artifacts")
 	}
@@ -208,7 +209,7 @@ func TestHandleReplyWithTurn_ColdStartAnchorCoversCursorBearingSegments(t *testi
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{CursorStore: &fakeDiscussCursorStore{}})
 	driver.history = discussHistoryReader{messages: nil, logger: driver.logger}
-	sess := &discussSession{config: DiscussSessionConfig{BotID: "b", ThreadID: "s"}}
+	sess := &discussSession{config: inbound.DiscussSessionConfig{BotID: "b", ThreadID: "s"}}
 	sess.lastProcessed = timeline.DiscussCursorPosition{SourceCursor: 3000}
 
 	driver.handleReplyWithTurn(context.Background(), sess, timeline.RenderedContext{answered}, driver.logger, svc)

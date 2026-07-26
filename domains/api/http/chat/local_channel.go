@@ -27,11 +27,11 @@ import (
 	"github.com/memohai/memoh/domains/agent/command/slash"
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
 	chatview "github.com/memohai/memoh/domains/agent/view"
-	"github.com/memohai/memoh/domains/api/auth"
 	"github.com/memohai/memoh/domains/api/bot"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	agenthttp "github.com/memohai/memoh/domains/api/http/agent"
 	"github.com/memohai/memoh/domains/api/http/chat/local"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 	"github.com/memohai/memoh/domains/channel/gateway"
 	"github.com/memohai/memoh/domains/iam/account"
 	"github.com/memohai/memoh/domains/media"
@@ -185,9 +185,9 @@ type CommandActionError struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body QuickActionExecuteRequest true "Quick action payload"
 // @Success 200 {object} CommandEventResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/quick-actions/execute [post].
 func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -196,14 +196,14 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
 	}
 	var req QuickActionExecuteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind quick action payload", err)
 	}
 	actionID := strings.TrimSpace(req.ActionID)
 	sessionID := strings.TrimSpace(req.SessionID)
@@ -214,7 +214,7 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 		}
 		supported, supportErr := h.wsSessionSupportsRequestedSkills(c.Request().Context(), sessionID)
 		if supportErr != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, supportErr.Error())
+			return apperror.Internal("execute quick action", supportErr)
 		}
 		skillActivationAllowed = supported
 	}
@@ -436,9 +436,9 @@ func sendWSCommandResult(writer *wsWriter, msg wsClientMessage, actionID string,
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {string} string "SSE stream"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/web/stream [get].
 func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -447,13 +447,13 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
 	}
 	if h.routeHub == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "route hub not configured")
+		return apperror.Internal("stream local messages", nil)
 	}
 
 	if err := httpx.PrepareSSE(c); err != nil {
@@ -463,7 +463,7 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
-		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+		return apperror.Internal("stream local channel", errors.New("response writer is not a flusher"))
 	}
 	writer := c.Response().Writer
 
@@ -523,9 +523,9 @@ type LocalChannelMessageRequest struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body LocalChannelMessageRequest true "Message payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/web/messages [post].
 func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -534,17 +534,17 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
 	}
 	if h.channelManager == nil || h.channelStore == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "channel manager not configured")
+		return apperror.Internal("post local message", nil)
 	}
 	body, readErr := io.ReadAll(c.Request().Body)
 	if readErr != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, readErr.Error())
+		return apperror.Invalid("read local message body", readErr)
 	}
 	c.Request().Body = io.NopCloser(bytes.NewReader(body))
 	if jsonBodyHasKey(body, "requested_skills") {
@@ -555,10 +555,10 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	var req LocalChannelMessageRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("post local message", err)
 	}
 	if req.Message.IsEmpty() {
-		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+		return apperror.Required("message")
 	}
 	workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID)
 	if workspaceTargetID != "" {
@@ -570,10 +570,10 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 			return err
 		}
 		if h.agentService == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "resolver not configured")
+			return apperror.Internal("resolve local channel", nil)
 		}
 		if err := h.agentService.ValidateWorkspaceTarget(c.Request().Context(), botID, workspaceTargetID); err != nil {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
+			return apperror.Conflict("post local message", err)
 		}
 	}
 	if err := gateway.RejectReservedSkillMetadata(req.Message); err != nil {
@@ -594,7 +594,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	cfg, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, h.channelType)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("post local message", err)
 	}
 	routeKey := botID
 	msg := gateway.InboundMessage{
@@ -635,7 +635,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 		msg.Metadata["workspace_target_id"] = workspaceTargetID
 	}
 	if err := h.channelManager.HandleInbound(c.Request().Context(), cfg, msg); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("post local message", err)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -685,6 +685,19 @@ type wsOutboundEvent struct {
 	Data      any    `json:"data,omitempty"`
 	Message   string `json:"message,omitempty"`
 	Feedback  any    `json:"feedback,omitempty"`
+}
+
+// wsErrorEvent carries apperror.Public flat rather than nesting a Problem: a
+// stream frame is not an HTTP response, and flat is what streaming clients in
+// this ecosystem expect. It also means the browser reads the same identity
+// keys — kind, code, args — that it already reads from a Problem body.
+type wsErrorEvent struct {
+	Type      string `json:"type"`
+	StreamID  string `json:"stream_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Feedback  any    `json:"feedback,omitempty"`
+
+	apperror.Public
 }
 
 type activeWSStream struct {
@@ -976,45 +989,16 @@ func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID
 	return "Bearer " + signed
 }
 
-func sendWSError(writer *wsWriter, streamID, sessionID, message string) {
-	writer.SendJSON(wsOutboundEvent{
+// sendWSError projects any error through the contract. Every error frame goes
+// through here, so a handler cannot put a raw err.Error() on the socket — the
+// leak the HTTP side already closed.
+func sendWSError(writer *wsWriter, streamID, sessionID string, err error) {
+	writer.SendJSON(wsErrorEvent{
 		Type:      "error",
 		StreamID:  strings.TrimSpace(streamID),
 		SessionID: strings.TrimSpace(sessionID),
-		Message:   message,
-	})
-}
-
-func newWSAppErrorEvent(streamID, sessionID string, err error) (wsOutboundEvent, bool) {
-	public, ok := apperror.PublicFrom(err, "")
-	if !ok {
-		return wsOutboundEvent{}, false
-	}
-	return wsOutboundEvent{
-		Type:      "error",
-		StreamID:  strings.TrimSpace(streamID),
-		SessionID: strings.TrimSpace(sessionID),
-		Message:   public.Detail,
-		Feedback:  public,
-	}, true
-}
-
-func sendWSErrorFromError(writer *wsWriter, streamID, sessionID string, err error) {
-	if event, ok := newWSAppErrorEvent(streamID, sessionID, err); ok {
-		writer.SendJSON(event)
-		return
-	}
-	feedback := agenthttp.AcpFeedbackError(err)
-	if feedback == nil {
-		sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
-		return
-	}
-	writer.SendJSON(wsOutboundEvent{
-		Type:      "error",
-		StreamID:  strings.TrimSpace(streamID),
-		SessionID: strings.TrimSpace(sessionID),
-		Message:   strings.TrimSpace(feedback.Message),
-		Feedback:  feedback,
+		Feedback:  agenthttp.AcpFeedbackError(err),
+		Public:    apperror.PublicOf(err, ""),
 	})
 }
 
@@ -1057,11 +1041,16 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 				})
 				continue
 			case agentdomain.Error:
-				message := strings.TrimSpace(streamEvent.Error)
-				if message == "" {
-					message = "stream error"
-				}
-				sendWSError(writer, streamID, sessionID, message)
+				// A turn fails almost only because the model provider refused
+				// it, and for those calls this service is a proxy: "you
+				// exceeded your current quota" is addressed to the user who
+				// owns that provider account, and only they can act on it.
+				// Quote it instead of classifying it away — the Kind stays
+				// internal because the runtime reports the failure as free
+				// text we cannot reliably classify.
+				text := strings.TrimSpace(streamEvent.Error)
+				sendWSError(writer, streamID, sessionID,
+					apperror.Internal("forward ws stream", errors.New(text)).WithUpstream("", text))
 				continue
 			}
 
@@ -1096,7 +1085,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 		if onFinish != nil {
 			onFinish()
 		}
-		sendWSError(writer, streamID, sessionID, err.Error())
+		sendWSError(writer, streamID, sessionID, err)
 		return
 	}
 
@@ -1123,7 +1112,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 				slog.Any("error", privateErr),
 				slog.String("bot_id", botID),
 				slog.String("session_id", sessionID))
-			sendWSErrorFromError(writer, streamID, sessionID, err)
+			sendWSError(writer, streamID, sessionID, err)
 		}
 	}()
 
@@ -1139,9 +1128,9 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 // @Tags local-channel
 // @Param bot_id path string true "Bot ID"
 // @Success 101 {string} string "Switching Protocols"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/web/ws [get].
 func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1150,17 +1139,17 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	_, perms, err := h.authorizeBotSessionAccess(c.Request().Context(), channelIdentityID, botID)
 	if err != nil {
 		return err
 	}
 	if !canOpenLocalWebSocket(perms) {
-		return echo.NewHTTPError(http.StatusForbidden, "bot access denied")
+		return apperror.Forbidden("authorize local channel", nil)
 	}
 	if h.agentService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "resolver not configured")
+		return apperror.Internal("resolve local channel", nil)
 	}
 
 	conn, err := wsUpgrader.Upgrade(c.Response(), c.Request(), nil)
@@ -1204,7 +1193,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		case "abort":
 			streamID := strings.TrimSpace(msg.StreamID)
 			if streamID == "" {
-				sendWSError(writer, "", strings.TrimSpace(msg.SessionID), "stream_id is required")
+				sendWSError(writer, "", strings.TrimSpace(msg.SessionID), apperror.Required("stream_id"))
 				continue
 			}
 			activeStreams.abort(streamID)
@@ -1212,16 +1201,16 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		case "tool_approval_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
 			if sessionID == "" {
-				sendWSError(writer, strings.TrimSpace(msg.StreamID), "", "session_id is required")
+				sendWSError(writer, strings.TrimSpace(msg.StreamID), "", apperror.Required("session_id"))
 				continue
 			}
 			streamID := strings.TrimSpace(msg.StreamID)
 			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+				sendWSError(writer, "", sessionID, apperror.Required("stream_id"))
 				continue
 			}
 			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, streamID, sessionID, err)
 				continue
 			}
 			explicitID := strings.TrimSpace(msg.ApprovalID)
@@ -1251,16 +1240,16 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		case "user_input_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
 			if sessionID == "" {
-				sendWSError(writer, strings.TrimSpace(msg.StreamID), "", "session_id is required")
+				sendWSError(writer, strings.TrimSpace(msg.StreamID), "", apperror.Required("session_id"))
 				continue
 			}
 			streamID := strings.TrimSpace(msg.StreamID)
 			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+				sendWSError(writer, "", sessionID, apperror.Required("stream_id"))
 				continue
 			}
 			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, streamID, sessionID, err)
 				continue
 			}
 			explicitID := strings.TrimSpace(msg.UserInputID)
@@ -1295,22 +1284,22 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 
 			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+				sendWSError(writer, "", sessionID, apperror.Required("stream_id"))
 				continue
 			}
 			if sessionID != "" {
 				if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-					sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+					sendWSError(writer, streamID, sessionID, err)
 					continue
 				}
 			}
 			if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, streamID, sessionID, err)
 				continue
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					sendWSError(writer, streamID, sessionID, err.Error())
+					sendWSError(writer, streamID, sessionID, err)
 					continue
 				}
 			}
@@ -1326,7 +1315,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			case slash.DecisionNormalChat:
 			case slash.DecisionCommandAction:
 				if err := h.authorizeWSChatAccess(streamBaseCtx, channelIdentityID, botID); err != nil {
-					sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+					sendWSError(writer, streamID, sessionID, err)
 					continue
 				}
 				actionID := webActionID(decision.Command.Resource, decision.Command.Action)
@@ -1334,7 +1323,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if strings.TrimSpace(sessionID) != "" {
 					supported, supportErr := h.wsSessionSupportsRequestedSkills(streamBaseCtx, sessionID)
 					if supportErr != nil {
-						sendWSErrorFromError(writer, streamID, sessionID, supportErr)
+						sendWSError(writer, streamID, sessionID, supportErr)
 						continue
 					}
 					skillActivationAllowed = supported
@@ -1363,12 +1352,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 			hasSkillActivation := hasRequestedSkills || pendingSkillIntent != nil
 			if text == "" && len(msg.Attachments) == 0 && !hasSkillActivation {
-				sendWSError(writer, streamID, sessionID, "message text or attachments required")
+				sendWSError(writer, streamID, sessionID, apperror.Required("text"))
 				continue
 			}
 			if sessionID == "" || hasSkillActivation {
 				if err := h.authorizeWSChatAccess(streamBaseCtx, channelIdentityID, botID); err != nil {
-					sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+					sendWSError(writer, streamID, sessionID, err)
 					continue
 				}
 			}
@@ -1406,7 +1395,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					}
 					supported, supportErr := h.wsSessionSupportsRequestedSkills(streamBaseCtx, sessionID)
 					if supportErr != nil {
-						sendWSErrorFromError(writer, streamID, sessionID, supportErr)
+						sendWSError(writer, streamID, sessionID, supportErr)
 						continue
 					}
 					if !supported {
@@ -1462,13 +1451,13 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 			if sessionID == "" {
 				if h.sessionService == nil {
-					sendWSError(writer, streamID, "", "session service not configured")
+					sendWSError(writer, streamID, "", apperror.Internal("open ws session", errors.New("session service not configured")))
 					releaseActiveWSTurnNow()
 					continue
 				}
 				created, createErr := h.createWSChatSession(streamBaseCtx, botID, channelIdentityID)
 				if createErr != nil {
-					sendWSError(writer, streamID, "", createErr.Error())
+					sendWSError(writer, streamID, "", createErr)
 					releaseActiveWSTurnNow()
 					continue
 				}
@@ -1492,14 +1481,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			if !sessionAuthorized {
 				if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-					sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+					sendWSError(writer, streamID, sessionID, err)
 					releaseActiveWSTurnNow()
 					continue
 				}
 			}
 			acpInfo, err := h.authorizeWSACPExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
 			if err != nil {
-				sendWSErrorFromError(writer, streamID, sessionID, err)
+				sendWSError(writer, streamID, sessionID, err)
 				releaseActiveWSTurnNow()
 				continue
 			}
@@ -1543,7 +1532,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				preparedReq, persisted, persistErr := h.agentService.ApplyUserMessageHookAndPersistUserTurn(streamBaseCtx, userReq)
 				if persistErr != nil {
-					sendWSErrorFromError(writer, streamID, sessionID, persistErr)
+					sendWSError(writer, streamID, sessionID, persistErr)
 					releaseActiveWSTurnNow()
 					continue
 				}
@@ -1623,28 +1612,28 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			messageID := strings.TrimSpace(msg.MessageID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+				sendWSError(writer, "", sessionID, apperror.Required("stream_id"))
 				continue
 			}
 			if sessionID == "" {
-				sendWSError(writer, streamID, "", "session_id is required")
+				sendWSError(writer, streamID, "", apperror.Required("session_id"))
 				continue
 			}
 			if messageID == "" {
-				sendWSError(writer, streamID, sessionID, "message_id is required")
+				sendWSError(writer, streamID, sessionID, apperror.Required("message_id"))
 				continue
 			}
 			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, streamID, sessionID, err)
 				continue
 			}
 			if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, streamID, sessionID, err)
 				continue
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					sendWSError(writer, streamID, sessionID, err.Error())
+					sendWSError(writer, streamID, sessionID, err)
 					continue
 				}
 			}
@@ -1674,15 +1663,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			messageID := strings.TrimSpace(msg.MessageID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+				sendWSError(writer, "", sessionID, apperror.Required("stream_id"))
 				continue
 			}
 			if sessionID == "" {
-				sendWSError(writer, streamID, "", "session_id is required")
+				sendWSError(writer, streamID, "", apperror.Required("session_id"))
 				continue
 			}
 			if messageID == "" {
-				sendWSError(writer, streamID, sessionID, "message_id is required")
+				sendWSError(writer, streamID, sessionID, apperror.Required("message_id"))
 				continue
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
@@ -1695,20 +1684,20 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			if text == "" && len(chatAttachments) == 0 {
-				sendWSError(writer, streamID, sessionID, "message text or attachments required")
+				sendWSError(writer, streamID, sessionID, apperror.Required("text"))
 				continue
 			}
 			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, streamID, sessionID, err)
 				continue
 			}
 			if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, streamID, sessionID, err)
 				continue
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					sendWSError(writer, streamID, sessionID, err.Error())
+					sendWSError(writer, streamID, sessionID, err)
 					continue
 				}
 			}
@@ -1735,7 +1724,8 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			)
 
 		default:
-			sendWSError(writer, strings.TrimSpace(msg.StreamID), strings.TrimSpace(msg.SessionID), "unknown message type: "+msg.Type)
+			sendWSError(writer, strings.TrimSpace(msg.StreamID), strings.TrimSpace(msg.SessionID),
+				apperror.Field("type", apperror.FieldUnsupported))
 		}
 	}
 	return nil
@@ -1774,18 +1764,18 @@ func (h *LocalChannelHandler) authorizeWSACPExecution(ctx context.Context, chann
 	}
 	if strings.TrimSpace(info.RuntimeOwnerAccountID) == "" {
 		feedback := agenthttp.AcpRuntimeOwnerMissingFeedback()
-		return info, echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return info, apperror.OfKind(apperror.KindFromHTTPStatus(feedback.HTTPStatus), "authorize acp execution", feedback)
 	}
 	record, err := httpx.AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, bot.PermissionWorkspaceExec)
 	if err != nil {
 		if agenthttp.IsHTTPStatus(err, http.StatusForbidden) {
 			feedback := agenthttp.AcpNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
-			return info, echo.NewHTTPError(feedback.HTTPStatus, feedback)
+			return info, apperror.OfKind(apperror.KindFromHTTPStatus(feedback.HTTPStatus), "authorize acp execution", feedback)
 		}
 		return info, err
 	}
 	if strings.TrimSpace(info.BotID) != "" && info.BotID != record.ID {
-		return info, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return info, apperror.NotFound("authorize local session", nil)
 	}
 	perms, err := h.resolveCurrentUserPermissions(ctx, channelIdentityID, record.ID)
 	if err != nil {
@@ -1795,23 +1785,6 @@ func (h *LocalChannelHandler) authorizeWSACPExecution(ctx context.Context, chann
 		return info, err
 	}
 	return info, nil
-}
-
-func wsErrorMessage(err error) string {
-	var httpErr *echo.HTTPError
-	if errors.As(err, &httpErr) {
-		switch msg := httpErr.Message.(type) {
-		case interface{ Error() string }:
-			return msg.Error()
-		case string:
-			return msg
-		default:
-			if msg != nil {
-				return fmt.Sprint(msg)
-			}
-		}
-	}
-	return err.Error()
 }
 
 func canOpenLocalWebSocket(perms []string) bool {
@@ -1825,7 +1798,7 @@ func authorizeWorkspaceTargetSelection(perms []string, targetID string) error {
 	if bot.HasPermission(perms, bot.PermissionWorkspaceRead) {
 		return nil
 	}
-	return echo.NewHTTPError(http.StatusForbidden, "workspace_read permission is required to select a computer")
+	return apperror.Forbidden("select workspace target", nil)
 }
 
 func (*LocalChannelHandler) requireChannelIdentityID(c echo.Context) (string, error) {
@@ -1843,7 +1816,7 @@ func (h *LocalChannelHandler) authorizeWSChatAccess(ctx context.Context, channel
 
 func (h *LocalChannelHandler) authorizeWSSession(c echo.Context, channelIdentityID, botID, sessionID string) error {
 	if h.sessionService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
+		return apperror.Internal("authorize local session", nil)
 	}
 	bot, perms, err := h.authorizeBotSessionAccess(c.Request().Context(), channelIdentityID, botID)
 	if err != nil {
@@ -1851,10 +1824,10 @@ func (h *LocalChannelHandler) authorizeWSSession(c echo.Context, channelIdentity
 	}
 	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
 	if err != nil || sess.BotID != bot.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.NotFound("authorize local session", nil)
 	}
 	if !canAccessSession(sess, channelIdentityID, perms) {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.NotFound("authorize local session", nil)
 	}
 	return nil
 }
@@ -1876,15 +1849,15 @@ func (h *LocalChannelHandler) authorizeBotSessionAccess(ctx context.Context, cha
 
 func (h *LocalChannelHandler) resolveCurrentUserPermissions(ctx context.Context, channelIdentityID, botID string) ([]string, error) {
 	if h.botService == nil || h.accountService == nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+		return nil, apperror.Internal("resolve user permissions", nil)
 	}
 	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, apperror.Internal("resolve user permissions", err)
 	}
 	perms, err := h.botService.ResolveUserPermissions(ctx, botID, channelIdentityID, isAdmin)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, apperror.Internal("resolve user permissions", err)
 	}
 	return perms, nil
 }

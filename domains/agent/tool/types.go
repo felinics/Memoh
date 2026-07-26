@@ -11,8 +11,8 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/domains/agent/sessionmode"
-	"github.com/memohai/memoh/domains/agent/tool/internal/toolset"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
+	toolset "github.com/memohai/memoh/domains/agent/tool/internal/set"
 )
 
 // SkillDetail holds the description and content of a loadable skill.

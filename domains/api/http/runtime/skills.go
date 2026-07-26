@@ -13,6 +13,7 @@ import (
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
 	"github.com/memohai/memoh/domains/api/bot"
 	"github.com/memohai/memoh/domains/runtime/workspace"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type SkillItem struct {
@@ -67,10 +68,10 @@ func (h *ContainerdHandler) SetPluginService(service PluginInstallationLister) {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} SkillsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills [get].
 func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bot.PermissionManage)
@@ -80,7 +81,7 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 
 	skills, err := h.listSkillsFromContainer(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list skills", err)
 	}
 	return c.JSON(http.StatusOK, SkillsResponse{Skills: skills})
 }
@@ -90,10 +91,10 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 // @Tags skills
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} SafeSkillsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/skills/catalog [get].
 func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bot.PermissionChat)
@@ -102,7 +103,7 @@ func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 	}
 	catalog, err := h.buildSafeSkillCatalog(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list safe skills", err)
 	}
 	return c.JSON(http.StatusOK, SafeSkillsResponse{Skills: catalog})
 }
@@ -113,9 +114,9 @@ func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body SkillsUpsertRequest true "Skills payload"
 // @Success 200 {object} skillsOpResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills [post].
 func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
@@ -126,10 +127,10 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 
 	var req SkillsUpsertRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind skills", err)
 	}
 	if len(req.Skills) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "skills is required")
+		return apperror.Required("skills")
 	}
 
 	ctx := c.Request().Context()
@@ -142,7 +143,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		parsed := skillset.ParseFile(raw, "")
 		dirPath, dirErr := skillset.ManagedSkillDirForName(parsed.Name)
 		if dirErr != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
+			return apperror.Field("skills", apperror.FieldInvalid)
 		}
 		// A pooled client can pass getGRPCClient and still fail on first use
 		// when the workspace just stopped; classify per-op errors so the dial
@@ -165,9 +166,9 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body SkillsDeleteRequest true "Delete skills payload"
 // @Success 200 {object} skillsOpResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills [delete].
 func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
@@ -178,10 +179,10 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 
 	var req SkillsDeleteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind skill names", err)
 	}
 	if len(req.Names) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "names is required")
+		return apperror.Required("names")
 	}
 
 	ctx := c.Request().Context()
@@ -194,7 +195,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		skillName := strings.TrimSpace(name)
 		managedDir, dirErr := skillset.ManagedSkillDirForName(skillName)
 		if dirErr != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid skill name")
+			return apperror.Field("names", apperror.FieldInvalid)
 		}
 		if _, statErr := client.Stat(ctx, managedDir); statErr != nil {
 			return FSHTTPError(statErr)
@@ -213,9 +214,9 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body SkillsActionRequest true "Skill action payload"
 // @Success 200 {object} skillsOpResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills/actions [post].
 func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
@@ -226,7 +227,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 
 	var req SkillsActionRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind skill action", err)
 	}
 
 	ctx := c.Request().Context()
@@ -236,7 +237,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 	}
 	roots, pluginRoots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("resolve skill roots", err)
 	}
 
 	if err := skillset.ApplyActionWithPluginRoots(ctx, client, roots, pluginRoots, skillset.ActionRequest{

@@ -11,49 +11,49 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type PlatformUserRole string
+type IamUserRole string
 
 const (
-	PlatformUserRoleMember PlatformUserRole = "member"
-	PlatformUserRoleAdmin  PlatformUserRole = "admin"
+	IamUserRoleMember IamUserRole = "member"
+	IamUserRoleAdmin  IamUserRole = "admin"
 )
 
-func (e *PlatformUserRole) Scan(src interface{}) error {
+func (e *IamUserRole) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = PlatformUserRole(s)
+		*e = IamUserRole(s)
 	case string:
-		*e = PlatformUserRole(s)
+		*e = IamUserRole(s)
 	default:
-		return fmt.Errorf("unsupported scan type for PlatformUserRole: %T", src)
+		return fmt.Errorf("unsupported scan type for IamUserRole: %T", src)
 	}
 	return nil
 }
 
-type NullPlatformUserRole struct {
-	PlatformUserRole PlatformUserRole `json:"platform_user_role"`
-	Valid            bool             `json:"valid"` // Valid is true if PlatformUserRole is not NULL
+type NullIamUserRole struct {
+	IamUserRole IamUserRole `json:"iam_user_role"`
+	Valid       bool        `json:"valid"` // Valid is true if IamUserRole is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullPlatformUserRole) Scan(value interface{}) error {
+func (ns *NullIamUserRole) Scan(value interface{}) error {
 	if value == nil {
-		ns.PlatformUserRole, ns.Valid = "", false
+		ns.IamUserRole, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.PlatformUserRole.Scan(value)
+	return ns.IamUserRole.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullPlatformUserRole) Value() (driver.Value, error) {
+func (ns NullIamUserRole) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.PlatformUserRole), nil
+	return string(ns.IamUserRole), nil
 }
 
-type PlatformTeam struct {
+type IamTeam struct {
 	ID        pgtype.UUID        `json:"id"`
 	Slug      pgtype.Text        `json:"slug"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
@@ -61,7 +61,7 @@ type PlatformTeam struct {
 	Metadata  []byte             `json:"metadata"`
 }
 
-type PlatformTeamAccount struct {
+type IamTeamAccount struct {
 	ID                  pgtype.UUID        `json:"id"`
 	Username            pgtype.Text        `json:"username"`
 	Email               pgtype.Text        `json:"email"`
@@ -70,7 +70,6 @@ type PlatformTeamAccount struct {
 	DisplayName         pgtype.Text        `json:"display_name"`
 	AvatarUrl           pgtype.Text        `json:"avatar_url"`
 	Timezone            string             `json:"timezone"`
-	DataRoot            pgtype.Text        `json:"data_root"`
 	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
 	IsActive            pgtype.Bool        `json:"is_active"`
 	Metadata            []byte             `json:"metadata"`
@@ -84,19 +83,18 @@ type PlatformTeamAccount struct {
 	TitleModelID        pgtype.UUID        `json:"title_model_id"`
 }
 
-type PlatformTeamMember struct {
+type IamTeamMember struct {
 	TeamID       pgtype.UUID        `json:"team_id"`
 	UserID       pgtype.UUID        `json:"user_id"`
 	Role         string             `json:"role"`
 	IsActive     bool               `json:"is_active"`
-	DataRoot     pgtype.Text        `json:"data_root"`
 	TitleModelID pgtype.UUID        `json:"title_model_id"`
 	Metadata     []byte             `json:"metadata"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
-type PlatformUser struct {
+type IamUser struct {
 	ID           pgtype.UUID        `json:"id"`
 	Username     pgtype.Text        `json:"username"`
 	Email        pgtype.Text        `json:"email"`

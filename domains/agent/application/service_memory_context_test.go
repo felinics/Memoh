@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/domains/api/setting"
-	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	"github.com/memohai/memoh/domains/api/bot/setting"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
+	memregistry "github.com/memohai/memoh/domains/memory/registry"
 )
 
 func TestLoadMemoryContextMessage_NoProvider(t *testing.T) {
@@ -28,7 +29,7 @@ func TestLoadMemoryContextMessage_NoProvider(t *testing.T) {
 func TestLoadMemoryContextMessageSkipsEmptyQuery(t *testing.T) {
 	t.Parallel()
 
-	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
+	registry := memregistry.NewRegistry(slog.New(slog.DiscardHandler))
 	registry.Register(storeRoundMemoryProviderID, &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 1)})
 	resolver := &Service{
 		memoryRegistry:  registry,
@@ -56,14 +57,14 @@ func TestLoadMemoryContextMessageUsesStaleCacheOnTimeout(t *testing.T) {
 			RetrievalMode: "graph",
 		},
 	}
-	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
+	registry := memregistry.NewRegistry(slog.New(slog.DiscardHandler))
 	registry.Register(storeRoundMemoryProviderID, provider)
 	resolver := &Service{
 		memoryRegistry:      registry,
 		settingsService:     setting.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil, nil),
 		logger:              slog.New(slog.DiscardHandler),
 		memorySearchTimeout: 5 * time.Millisecond,
-		memoryContextCache: memprovider.NewMemoryContextCache(memprovider.MemoryContextCacheConfig{
+		memoryContextCache: memregistry.NewMemoryContextCache(memregistry.MemoryContextCacheConfig{
 			TTL:      time.Millisecond,
 			StaleTTL: time.Minute,
 			Now: func() time.Time {

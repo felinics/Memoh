@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/line/line-bot-sdk-go/v8/linebot/webhook"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
 	"github.com/memohai/memoh/domains/media"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type eventResult string
@@ -43,7 +45,7 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg gateway.ChannelConfig, 
 			slog.String("bot_id", cfg.BotID),
 			slog.String("reason", "credentials_invalid"),
 		)
-		return a.httpError(http.StatusInternalServerError, "line channel not configured")
+		return apperror.Internal("configure line channel", err)
 	}
 	var body []byte
 	if r.Body != nil {
@@ -51,18 +53,18 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg gateway.ChannelConfig, 
 		body, err = media.ReadAllWithLimit(r.Body, lineMaxWebhookBodyBytes)
 		if err != nil {
 			if errors.Is(err, media.ErrAssetTooLarge) {
-				return a.httpError(http.StatusRequestEntityTooLarge, "payload too large")
+				return echo.NewHTTPError(http.StatusRequestEntityTooLarge)
 			}
 			a.logWarn("line webhook body read failed",
 				slog.String("config_id", cfg.ID),
 				slog.String("bot_id", cfg.BotID),
 				slog.String("reason", "read_failed"),
 			)
-			return a.httpError(http.StatusInternalServerError, "failed to read request body")
+			return apperror.Internal("read line webhook body", err)
 		}
 	}
 	if !webhook.ValidateSignature(creds.ChannelSecret, r.Header.Get("x-line-signature"), body) {
-		return a.httpError(http.StatusForbidden, "invalid signature")
+		return apperror.Forbidden("verify line signature", nil)
 	}
 
 	var cb webhook.CallbackRequest
@@ -89,7 +91,7 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg gateway.ChannelConfig, 
 		return nil
 	}
 	if selfID == "" {
-		return a.httpError(http.StatusInternalServerError, "line channel identity not configured")
+		return apperror.Internal("resolve line channel identity", nil)
 	}
 	destination := strings.TrimSpace(cb.Destination)
 	if destination == "" {
@@ -131,10 +133,10 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg gateway.ChannelConfig, 
 		}
 	}
 	if hasQueueFull {
-		return a.httpError(http.StatusServiceUnavailable, "line inbound queue full")
+		return apperror.Unavailable("enqueue line inbound", nil)
 	}
 	if hasRetryable {
-		return a.httpError(http.StatusInternalServerError, "line webhook processing failed")
+		return apperror.Internal("process line webhook", nil)
 	}
 	w.WriteHeader(http.StatusOK)
 	return nil

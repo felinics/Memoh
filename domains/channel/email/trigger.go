@@ -2,8 +2,10 @@ package email
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 )
 
 // ChatTriggerer triggers a proactive bot conversation (e.g. when a new email arrives).
@@ -17,6 +19,12 @@ type Trigger struct {
 	logger        *slog.Logger
 	emailService  *Service
 	chatTriggerer ChatTriggerer
+
+	mu      sync.Mutex
+	tasks   sync.WaitGroup
+	runCtx  context.Context
+	cancel  context.CancelFunc
+	stopped bool
 }
 
 func NewTrigger(log *slog.Logger, emailService *Service, chatTriggerer ChatTriggerer) *Trigger {
@@ -25,6 +33,22 @@ func NewTrigger(log *slog.Logger, emailService *Service, chatTriggerer ChatTrigg
 		emailService:  emailService,
 		chatTriggerer: chatTriggerer,
 	}
+}
+
+// Start establishes the application-lifetime context used by asynchronous
+// email turns. Request cancellation must not abort a turn after a webhook or
+// receiver callback has returned.
+func (t *Trigger) Start(ctx context.Context) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped {
+		return errors.New("email trigger is stopped")
+	}
+	if t.runCtx != nil {
+		return nil
+	}
+	t.runCtx, t.cancel = context.WithCancel(context.WithoutCancel(ctx))
+	return nil
 }
 
 // HandleInbound triggers a conversation for each bound bot so it can process
@@ -49,15 +73,53 @@ func (t *Trigger) HandleInbound(ctx context.Context, providerID string, mail Inb
 			slog.String("from", mail.From))
 
 		if t.chatTriggerer != nil {
-			go func(botID, text string) {
-				if err := t.chatTriggerer.TriggerBotChat(ctx, botID, text); err != nil {
-					t.logger.ErrorContext(ctx, "failed to trigger bot chat for email",
+			taskCtx, ok := t.startTask()
+			if !ok {
+				continue
+			}
+			go func(taskCtx context.Context, botID, text string) {
+				defer t.tasks.Done()
+				if err := t.chatTriggerer.TriggerBotChat(taskCtx, botID, text); err != nil {
+					t.logger.ErrorContext(taskCtx, "failed to trigger bot chat for email",
 						slog.String("bot_id", botID),
 						slog.Any("error", err))
 				}
-			}(binding.BotID, content)
+			}(taskCtx, binding.BotID, content)
 		}
 	}
 
 	return nil
+}
+
+func (t *Trigger) startTask() (context.Context, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped || t.runCtx == nil {
+		return nil, false
+	}
+	t.tasks.Add(1)
+	return t.runCtx, true
+}
+
+// Shutdown prevents new triggers and waits for active bot turns to finish.
+func (t *Trigger) Shutdown(ctx context.Context) error {
+	t.mu.Lock()
+	t.stopped = true
+	cancel := t.cancel
+	t.cancel = nil
+	t.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		t.tasks.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

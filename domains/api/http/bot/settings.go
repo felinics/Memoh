@@ -11,10 +11,11 @@ import (
 
 	"github.com/memohai/memoh/domains/agent/automation/heartbeat"
 	"github.com/memohai/memoh/domains/api/bot"
+	"github.com/memohai/memoh/domains/api/bot/setting"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	agenthttp "github.com/memohai/memoh/domains/api/http/agent"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
-	"github.com/memohai/memoh/domains/api/setting"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type SettingsHandler struct {
@@ -49,8 +50,8 @@ func (h *SettingsHandler) Register(e *echo.Echo) {
 // @Tags settings
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} setting.Settings
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/settings [get].
 func (h *SettingsHandler) Get(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -59,7 +60,7 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	// Reading settings is part of the chat experience (the chat UI needs model
 	// capabilities, etc.), so allow chat-level members. Writes stay manage-only.
@@ -68,7 +69,7 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 	}
 	resp, err := h.service.GetBot(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("get bot settings", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -80,8 +81,8 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body setting.UpsertRequest true "Settings payload"
 // @Success 200 {object} setting.Settings
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/settings [put]
 // @Router /bots/{bot_id}/settings [post].
 func (h *SettingsHandler) Upsert(c echo.Context) error {
@@ -91,14 +92,14 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
 	}
 	var req setting.UpsertRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind bot settings", err)
 	}
 	resp, err := h.service.UpsertBot(c.Request().Context(), botID, req)
 	if err != nil {
@@ -106,12 +107,15 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 			return feedbackErr
 		}
 		if errors.Is(err, setting.ErrInvalidModelRef) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.Invalid("upsert bot settings", err)
 		}
 		if errors.Is(err, setting.ErrModelIDAmbiguous) {
-			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; select by model UUID")
+			return apperror.Conflict("upsert bot settings", err).WithFields(apperror.FieldError{
+				Pointer: "model_id",
+				Code:    apperror.FieldTaken,
+			})
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("upsert bot settings", err)
 	}
 
 	if req.HeartbeatEnabled != nil || req.HeartbeatInterval != nil {
@@ -129,8 +133,8 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 // @Tags settings
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/settings [delete].
 func (h *SettingsHandler) Delete(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -139,13 +143,13 @@ func (h *SettingsHandler) Delete(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
 	}
 	if err := h.service.Delete(c.Request().Context(), botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("delete bot settings", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

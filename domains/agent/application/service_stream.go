@@ -10,6 +10,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	"github.com/memohai/memoh/internal/apperror"
 )
@@ -503,7 +504,7 @@ func (s *Service) persistTerminalSnapshot(ctx context.Context, req ChatRequest, 
 }
 
 func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatRequest, rc resolvedContext, snap terminalSnapshot) ([]messagepkg.Message, error) {
-	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
+	outputMessages := convert.SDKMessagesToModelMessages(snap.sdkMessages)
 	if snap.aborted && !snap.visibleOutput {
 		s.logger.InfoContext(ctx, "skip persisting aborted terminal snapshot before visible output",
 			slog.String("bot_id", req.BotID),

@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -15,9 +16,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/channel/publicmedia"
+	publicmedia "github.com/memohai/memoh/domains/channel/internal/http/media"
 	"github.com/memohai/memoh/domains/media"
 	mediasvc "github.com/memohai/memoh/domains/media/asset"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/config"
 )
 
@@ -94,7 +96,7 @@ func TestPublicMediaHandlerRejectsOversizedOriginalImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
-	e := echo.New()
+	e := newPublicMediaEcho()
 	NewPublicMediaHandler(slog.Default(), service, testPublicMediaSecret).Register(e)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, signedPublicMediaPath(publicmedia.OriginalPath("line", "bot-1", asset.ContentHash, "image.png")), nil)
@@ -124,7 +126,7 @@ func TestPublicMediaHandlerRejectsOversizedPreviewDimensions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
-	e := echo.New()
+	e := newPublicMediaEcho()
 	NewPublicMediaHandler(slog.Default(), service, testPublicMediaSecret).Register(e)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, signedPublicMediaPath(publicmedia.PreviewPath("line", "bot-1", asset.ContentHash)), nil)
@@ -173,7 +175,7 @@ func TestConfiguredPublicMediaHandlerOnlyRegistersWithPublicBase(t *testing.T) {
 	t.Parallel()
 
 	service := mediasvc.NewLocalService(slog.Default(), filepath.Join(t.TempDir(), "media"))
-	e := echo.New()
+	e := newPublicMediaEcho()
 	NewConfiguredPublicMediaHandler(slog.Default(), config.Config{}, service).Register(e)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg", nil)
@@ -206,9 +208,25 @@ func newPublicMediaTestServer(t *testing.T) (*echo.Echo, media.Asset) {
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
-	e := echo.New()
+	e := newPublicMediaEcho()
 	NewPublicMediaHandler(slog.Default(), service, testPublicMediaSecret).Register(e)
 	return e, asset
+}
+
+func newPublicMediaEcho() *echo.Echo {
+	e := echo.New()
+	e.HTTPErrorHandler = func(err error, c echo.Context) {
+		if c.Response().Committed {
+			return
+		}
+		var he *echo.HTTPError
+		if errors.As(err, &he) {
+			_ = c.NoContent(he.Code)
+			return
+		}
+		_ = c.NoContent(apperror.KindOf(err).HTTPStatus())
+	}
+	return e
 }
 
 func signedPublicMediaPath(path string) string {

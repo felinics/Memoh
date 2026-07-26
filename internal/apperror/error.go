@@ -1,185 +1,246 @@
 package apperror
 
 import (
+	"context"
 	"errors"
-	"net/http"
 	"strings"
 )
 
-// Code is the stable machine identity shared by every transport. Client logic
-// may branch on it; it must never branch on Detail or an underlying cause.
-type Code string
+// Error is the only error carrier in this project. Its identity has three
+// segments: Kind (mandatory, closed enum), Code (optional, stable business
+// identity) and op/cause (never leaves the process, diagnostics only).
+//
+// Unlike the pre-v1 design this type does implement Unwrap. Keeping causes
+// reachable is what lets errors.Is(err, context.Canceled) work in the middle
+// layers; the guarantee that a cause never reaches a client is enforced by the
+// renderers, which only ever read Kind, Code and Args.
+type Error struct {
+	kind     Kind
+	code     Code
+	args     map[string]string
+	fields   []FieldError
+	upstream *Upstream
+	op       string
+	cause    error
+}
+
+// FieldCode is the closed set of reasons a single input can be rejected.
+//
+// It exists so that the hundreds of hand-written sentences this codebase used
+// for client errors ("bot id is required", "skills is required") converge on a
+// reusable, localizable identity instead of minting a catalog Code each. A
+// catalog Code answers "which business rule failed"; a FieldCode answers "what
+// is wrong with this input", and the latter repeats across the whole API.
+type FieldCode string
 
 const (
-	CodeBotNameTaken                     Code = "bot.name_taken"
-	CodeChannelRuntimeUnavailable        Code = "channel.runtime_unavailable"
-	CodeWorkspaceUnreachable             Code = "workspace.unreachable"
-	CodeWorkspaceImageIncompatible       Code = "workspace.image_incompatible"
-	CodeWorkspaceTemplateBootstrapFailed Code = "workspace.template_bootstrap_failed"
-	CodeWorkspaceDisplayPrepareFailed    Code = "workspace.display_prepare_failed"
-	CodeProviderTemplateNotFound         Code = "provider_template.not_found"
-	CodeProviderTemplateDomainInvalid    Code = "provider_template.domain_invalid"
-	CodeProviderTemplateDomainMismatch   Code = "provider_template.domain_mismatch"
-	CodeProviderTemplateOperationFailed  Code = "provider_template.operation_failed"
-	CodeProviderNameTaken                Code = "provider.name_taken"
-	CodeProviderTemplateRequestInvalid   Code = "provider_template.request_invalid"
-	CodeSearchProviderTypeConflict       Code = "search_provider.type_conflict"
-	CodeProfileRequestInvalid            Code = "profile.request_invalid"
-	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
-	CodeProfileUpdateFailed              Code = "profile.update_failed"
-	CodeACPRuntimeNotFound               Code = "acp.runtime_not_found"
-	CodeACPTurnReplacementUnsupported    Code = "acp.turn_replacement_unsupported"
-	CodeACPModelSelectionUnsupported     Code = "acp.model_selection_unsupported"
-	CodeACPModelIDRequired               Code = "acp.model_id_required"
-	CodeACPModelUnavailable              Code = "acp.model_unavailable"
-	CodeACPReasoningUnsupported          Code = "acp.reasoning_selection_unsupported"
-	CodeACPReasoningEffortRequired       Code = "acp.reasoning_effort_required"
-	CodeACPReasoningUnavailable          Code = "acp.reasoning_effort_unavailable"
-	CodeACPConfigUpdateFailed            Code = "acp.config_update_failed"
+	FieldRequired    FieldCode = "required"
+	FieldInvalid     FieldCode = "invalid"
+	FieldTooLong     FieldCode = "too_long"
+	FieldOutOfRange  FieldCode = "out_of_range"
+	FieldTaken       FieldCode = "taken"
+	FieldUnsupported FieldCode = "unsupported"
 )
 
-// Definition is the single catalog entry for a public error contract.
-// Type URIs and frontend i18n keys are derived mechanically from Code.
-type Definition struct {
-	HTTPStatus  int
-	Detail      string
-	AllowedArgs []string
+var fieldCodes = map[FieldCode]struct{}{
+	FieldRequired:    {},
+	FieldInvalid:     {},
+	FieldTooLong:     {},
+	FieldOutOfRange:  {},
+	FieldTaken:       {},
+	FieldUnsupported: {},
 }
 
-// codesync(error-catalog): Detail strings double as the no-locale fallback for
-// clients; the localized copies live under errors.* in
-// apps/web/src/i18n/locales/{en,zh,ja}.json. Keep both sides in sync.
-var catalog = map[Code]Definition{
-	CodeBotNameTaken: {
-		HTTPStatus:  http.StatusConflict,
-		Detail:      "This name is already taken.",
-		AllowedArgs: []string{"field"},
-	},
-	CodeChannelRuntimeUnavailable: {
-		HTTPStatus: http.StatusServiceUnavailable,
-		Detail:     "The channel service could not be reached.",
-	},
-	CodeWorkspaceUnreachable: {
-		HTTPStatus: http.StatusServiceUnavailable,
-		Detail:     "The workspace could not be reached.",
-	},
-	CodeWorkspaceImageIncompatible: {
-		HTTPStatus: http.StatusUnprocessableEntity,
-		Detail:     "The workspace image is incompatible with this version of Memoh.",
-	},
-	CodeWorkspaceTemplateBootstrapFailed: {
-		HTTPStatus: http.StatusInternalServerError,
-		Detail:     "The workspace files could not be initialized.",
-	},
-	// Distinct from workspace.unreachable: preparation started but broke
-	// mid-flight, so "could not be reached" would mislead the user.
-	CodeWorkspaceDisplayPrepareFailed: {
-		HTTPStatus: http.StatusInternalServerError,
-		Detail:     "Display preparation failed.",
-	},
-	CodeProviderTemplateNotFound: {
-		HTTPStatus: http.StatusNotFound,
-		Detail:     "The provider template was not found.",
-	},
-	CodeProviderTemplateDomainInvalid: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "The provider template domain is invalid.",
-	},
-	CodeProviderTemplateDomainMismatch: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "The provider template cannot be used for this provider type.",
-	},
-	CodeProviderTemplateOperationFailed: {
-		HTTPStatus: http.StatusInternalServerError,
-		Detail:     "The provider template operation failed.",
-	},
-	CodeProviderNameTaken: {
-		HTTPStatus: http.StatusConflict,
-		Detail:     "This provider name is already taken.",
-	},
-	CodeProviderTemplateRequestInvalid: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "The provider template request is invalid.",
-	},
-	CodeSearchProviderTypeConflict: {
-		HTTPStatus: http.StatusConflict,
-		Detail:     "This web search provider is already configured.",
-	},
-	CodeProfileTitleModelInvalid: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "The selected title model is unavailable or is not a chat model.",
-	},
-	CodeProfileRequestInvalid: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "The profile update request is invalid.",
-	},
-	CodeProfileUpdateFailed: {
-		HTTPStatus: http.StatusInternalServerError,
-		Detail:     "The profile could not be updated.",
-	},
-	CodeACPRuntimeNotFound: {
-		HTTPStatus: http.StatusNotFound,
-		Detail:     "The ACP runtime is no longer available.",
-	},
-	CodeACPTurnReplacementUnsupported: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "Retry and edit are unavailable for external agent sessions. Send a new message instead.",
-	},
-	CodeACPModelSelectionUnsupported: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "This external agent does not support model selection.",
-	},
-	CodeACPModelIDRequired: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "Choose a model and try again.",
-	},
-	CodeACPModelUnavailable: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "The selected model is no longer available for this external agent.",
-	},
-	CodeACPReasoningUnsupported: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "This external agent does not support reasoning effort selection.",
-	},
-	CodeACPReasoningEffortRequired: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "Choose a reasoning effort and try again.",
-	},
-	CodeACPReasoningUnavailable: {
-		HTTPStatus: http.StatusBadRequest,
-		Detail:     "The selected reasoning effort is no longer available for this external agent.",
-	},
-	CodeACPConfigUpdateFailed: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The external agent could not apply the selected settings. Please retry.",
-	},
+// FieldError is a per-field validation detail rendered into the RFC 9457
+// errors[] extension member.
+type FieldError struct {
+	// Pointer is an RFC 6901 JSON Pointer into the request body.
+	Pointer string    `json:"pointer"`
+	Code    FieldCode `json:"code"`
 }
 
-// Error keeps the public contract separate from private diagnostics. The cause
-// is intentionally not exposed through Unwrap; transport boundaries may log it
-// through CauseOf without making infrastructure details part of the API.
-type Error struct {
-	code  Code
-	args  map[string]string
-	cause error
+// Required reports a missing input. This is the most common client error in the
+// codebase, so it gets a one-argument constructor: the field is both the op and
+// the pointer, which keeps the call site shorter than the string it replaces.
+func Required(field string) *Error {
+	return Field(field, FieldRequired)
 }
 
-// New creates a public application error without an infrastructure cause.
+// Field reports a single rejected input.
+func Field(field string, code FieldCode) *Error {
+	return Invalid(field, nil).WithFields(FieldError{Pointer: field, Code: code})
+}
+
+// pointer normalizes a field name into an RFC 6901 JSON Pointer so that call
+// sites may pass either "bot_id" or "/bot_id".
+func pointer(field string) string {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return ""
+	}
+	if strings.HasPrefix(field, "/") {
+		return field
+	}
+	return "/" + field
+}
+
+func newError(kind Kind, op string, cause error) *Error {
+	return &Error{kind: kind, op: strings.TrimSpace(op), cause: cause}
+}
+
+// The twelve constructors below need no registration: an error that carries
+// only a Kind still renders as a complete, localizable Problem.
+//
+// op describes the code site, not the data: it must stay a static lowercase
+// phrase such as "create bot" or "archive directory". Interpolating an ID, a
+// path or user input makes it both a high-cardinality metric label and a leak
+// surface.
+
+func Internal(op string, cause error) *Error { return newError(KindInternal, op, cause) }
+func Invalid(op string, cause error) *Error  { return newError(KindInvalid, op, cause) }
+func NotFound(op string, cause error) *Error { return newError(KindNotFound, op, cause) }
+func Conflict(op string, cause error) *Error { return newError(KindConflict, op, cause) }
+func Canceled(op string, cause error) *Error { return newError(KindCanceled, op, cause) }
+
+func Unauthenticated(op string, cause error) *Error {
+	return newError(KindUnauthenticated, op, cause)
+}
+func Forbidden(op string, cause error) *Error { return newError(KindForbidden, op, cause) }
+
+func FailedPrecondition(op string, cause error) *Error {
+	return newError(KindFailedPrecondition, op, cause)
+}
+func Exhausted(op string, cause error) *Error { return newError(KindExhausted, op, cause) }
+
+func DeadlineExceeded(op string, cause error) *Error {
+	return newError(KindDeadlineExceeded, op, cause)
+}
+func Unavailable(op string, cause error) *Error   { return newError(KindUnavailable, op, cause) }
+func Unimplemented(op string, cause error) *Error { return newError(KindUnimplemented, op, cause) }
+
+// OfKind builds an error from a Kind resolved at runtime, for example when
+// translating an inbound gRPC status. Prefer the named constructors.
+func OfKind(kind Kind, op string, cause error) *Error { return newError(kind, op, cause) }
+
+// New creates a public application error identified by a catalog code.
 func New(code Code, args map[string]string) *Error {
-	return &Error{code: code, args: sanitizeArgs(code, args)}
+	return newCoded(code, nil, args)
 }
 
 // Wrap retains a private cause for boundary logging. Only catalog-allowed args
 // are kept for serialization.
 func Wrap(code Code, cause error, args map[string]string) *Error {
-	return &Error{code: code, args: sanitizeArgs(code, args), cause: cause}
+	return newCoded(code, cause, args)
 }
 
+func newCoded(code Code, cause error, args map[string]string) *Error {
+	kind := KindInternal
+	if definition, ok := catalog[code]; ok {
+		kind = KindFromHTTPStatus(definition.HTTPStatus)
+	}
+	return &Error{
+		kind:  kind,
+		code:  code,
+		args:  sanitizeArgs(code, args),
+		cause: cause,
+	}
+}
+
+// WithCode promotes an error to a stable business identity, which is how a
+// coded error acquires an op:
+//
+//	apperror.Conflict("create search provider", err).WithCode(apperror.CodeProviderNameTaken, nil)
+//
+// The catalog owns the Kind of a coded error, so promoting also adopts the
+// registered Kind. Otherwise a call site could pair a 409 code with a 500 Kind
+// and the status and the code in the same response would disagree.
+//
+// The code must be registered; an unregistered code is ignored so that a typo
+// degrades to the generic Kind rendering instead of an empty contract.
+func (e *Error) WithCode(code Code, args map[string]string) *Error {
+	if e == nil {
+		return nil
+	}
+	definition, ok := catalog[code]
+	if !ok {
+		return e
+	}
+	clone := *e
+	clone.kind = KindFromHTTPStatus(definition.HTTPStatus)
+	clone.code = code
+	clone.args = sanitizeArgs(code, args)
+	return &clone
+}
+
+// WithFields attaches per-field validation details. Pointers are normalized and
+// an unregistered FieldCode degrades to FieldInvalid, so a typo weakens the
+// detail instead of putting an unlocalizable string on the wire.
+func (e *Error) WithFields(fields ...FieldError) *Error {
+	if e == nil {
+		return nil
+	}
+	clone := *e
+	clone.fields = append([]FieldError(nil), e.fields...)
+	for _, field := range fields {
+		if _, ok := fieldCodes[field.Code]; !ok {
+			field.Code = FieldInvalid
+		}
+		field.Pointer = pointer(field.Pointer)
+		clone.fields = append(clone.fields, field)
+	}
+	return &clone
+}
+
+// WithUpstream attaches a third party's verbatim error, for the calls where
+// this service is a proxy rather than the author of the failure. The message
+// must already be free of credentials: the caller owns them, apperror cannot
+// recognize them.
+//
+// The Kind still classifies the failure for status and retry decisions. The
+// quotation only adds what the provider said, it never overrides what we
+// concluded.
+func (e *Error) WithUpstream(provider, message string) *Error {
+	if e == nil {
+		return nil
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return e
+	}
+	clone := *e
+	clone.upstream = &Upstream{Provider: strings.TrimSpace(provider), Message: message}
+	return &clone
+}
+
+// Error renders the diagnostic form: "op: identity: cause". It is for logs
+// only. Never pass it to a client; forbidigo rejects err.Error() inside
+// response construction and 5xx renderings discard handler-supplied text.
 func (e *Error) Error() string {
 	if e == nil {
 		return ""
 	}
-	return string(e.code)
+	var out strings.Builder
+	if e.op != "" {
+		out.WriteString(e.op)
+		out.WriteString(": ")
+	}
+	if e.code != "" {
+		out.WriteString(string(e.code))
+	} else {
+		out.WriteString(e.kind.String())
+	}
+	if e.cause != nil {
+		out.WriteString(": ")
+		out.WriteString(e.cause.Error())
+	}
+	return out.String()
+}
+
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
 }
 
 func As(err error) (*Error, bool) {
@@ -188,6 +249,26 @@ func As(err error) (*Error, bool) {
 		return nil, false
 	}
 	return appErr, true
+}
+
+// KindOf classifies any error. Errors produced outside the contract fold to
+// the safest category, except for the two standard-library cancellations whose
+// intent is unambiguous.
+func KindOf(err error) Kind {
+	if err == nil {
+		return KindInternal
+	}
+	if appErr, ok := As(err); ok {
+		return appErr.kind
+	}
+	switch {
+	case errors.Is(err, context.Canceled):
+		return KindCanceled
+	case errors.Is(err, context.DeadlineExceeded):
+		return KindDeadlineExceeded
+	default:
+		return KindInternal
+	}
 }
 
 func CodeOf(err error) Code {
@@ -206,56 +287,40 @@ func ArgsOf(err error) map[string]string {
 	return cloneArgs(appErr.args)
 }
 
-// CauseOf is intentionally separate from errors.Unwrap: infrastructure errors
-// are retained for boundary logging without becoming a domain-level contract.
+func FieldsOf(err error) []FieldError {
+	appErr, ok := As(err)
+	if !ok || len(appErr.fields) == 0 {
+		return nil
+	}
+	return append([]FieldError(nil), appErr.fields...)
+}
+
+// UpstreamOf returns the quoted third-party error, if any.
+func UpstreamOf(err error) *Upstream {
+	appErr, ok := As(err)
+	if !ok || appErr.upstream == nil {
+		return nil
+	}
+	quoted := *appErr.upstream
+	return &quoted
+}
+
+// OpOf returns the logical operation trail for logging. It replaces stack
+// traces: the op chain locates the failure without a stack library and without
+// anything that could reach a client.
+func OpOf(err error) string {
+	appErr, ok := As(err)
+	if !ok {
+		return ""
+	}
+	return appErr.op
+}
+
+// CauseOf returns the private diagnostic cause for boundary logging.
 func CauseOf(err error) error {
 	appErr, ok := As(err)
 	if !ok {
 		return nil
 	}
 	return appErr.cause
-}
-
-func Lookup(code Code) (Definition, bool) {
-	definition, ok := catalog[code]
-	definition.AllowedArgs = append([]string(nil), definition.AllowedArgs...)
-	return definition, ok
-}
-
-func TypeURI(code Code) string {
-	return "urn:memoh:error:" + string(code)
-}
-
-func cloneArgs(args map[string]string) map[string]string {
-	cloned := make(map[string]string, len(args))
-	for key, value := range args {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			cloned[key] = value
-		}
-	}
-	return cloned
-}
-
-// sanitizeArgs is the public-data boundary for error metadata. Callers may
-// provide useful internal context, but only keys declared by the catalog are
-// allowed onto the wire.
-func sanitizeArgs(code Code, args map[string]string) map[string]string {
-	definition, ok := catalog[code]
-	if !ok || len(definition.AllowedArgs) == 0 {
-		return map[string]string{}
-	}
-
-	allowed := make(map[string]struct{}, len(definition.AllowedArgs))
-	for _, key := range definition.AllowedArgs {
-		allowed[key] = struct{}{}
-	}
-	sanitized := make(map[string]string, len(args))
-	for key, value := range args {
-		key = strings.TrimSpace(key)
-		if _, ok := allowed[key]; ok {
-			sanitized[key] = value
-		}
-	}
-	return sanitized
 }

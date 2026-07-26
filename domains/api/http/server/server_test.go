@@ -14,7 +14,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/internal/apperror"
 )
 
@@ -157,23 +157,135 @@ func TestServerLogsFinalProblemStatus(t *testing.T) {
 	}
 }
 
-func TestServerKeepsLegacyHTTPErrorBehavior(t *testing.T) {
+// The four envelope statuses have no Kind, so the renderer cannot derive their
+// status from one. It must carry the handler's status through untouched;
+// deriving it would answer a 413 with a 400 and tell the client to retry a
+// request that can never succeed.
+func TestServerPreservesStatusesKindDoesNotModel(t *testing.T) {
+	for _, status := range []int{
+		http.StatusMethodNotAllowed,
+		http.StatusRequestEntityTooLarge,
+		http.StatusUnsupportedMediaType,
+		http.StatusUpgradeRequired,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := NewServer(
+				slog.New(slog.DiscardHandler),
+				":0",
+				"test-secret",
+				errorTestHandler{err: echo.NewHTTPError(status)},
+			)
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil)
+			rec := httptest.NewRecorder()
+			server.echo.ServeHTTP(rec, req)
+
+			if rec.Code != status {
+				t.Fatalf("status = %d, want %d", rec.Code, status)
+			}
+			if got := rec.Header().Get(echo.HeaderContentType); got != "application/problem+json" {
+				t.Fatalf("content-type = %q, want application/problem+json", got)
+			}
+
+			var problem apperror.Problem
+			if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("decode problem: %v", err)
+			}
+			if problem.Status != status {
+				t.Fatalf("problem status = %d, want %d", problem.Status, status)
+			}
+		})
+	}
+}
+
+// TestServerNeverServesServerErrorDiagnostics is the leak gate. Every shape
+// below is copied from a real call site in this repository, and all of them
+// used to put a socket path, a stderr dump or a provider payload in front of
+// the user. The contract answers a 5xx with the Kind's generic text and sends
+// the original message to the log instead.
+func TestServerNeverServesServerErrorDiagnostics(t *testing.T) {
+	const secret = "dial unix /run/memoh/SECRET.sock: connection refused"
+	cause := errors.New(secret)
+
+	for _, tc := range []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{
+			name:       "err.Error() passed straight through",
+			err:        echo.NewHTTPError(http.StatusInternalServerError, cause.Error()),
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "diagnostic concatenated onto a prefix",
+			err:        echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+cause.Error()),
+			wantStatus: http.StatusBadGateway,
+		},
+		{
+			name:       "diagnostic inside a legacy structured body",
+			err:        echo.NewHTTPError(http.StatusServiceUnavailable, map[string]string{"message": secret}),
+			wantStatus: http.StatusServiceUnavailable,
+		},
+		{
+			name:       "bare error reaching the handler",
+			err:        cause,
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "contract error carrying a cause",
+			err:        apperror.Internal("prepare display", cause),
+			wantStatus: http.StatusInternalServerError,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := NewServer(slog.New(slog.DiscardHandler), ":0", "test-secret", errorTestHandler{err: tc.err})
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil)
+			rec := httptest.NewRecorder()
+			server.echo.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+			if got := rec.Header().Get(echo.HeaderContentType); got != "application/problem+json" {
+				t.Fatalf("content-type = %q, want application/problem+json", got)
+			}
+			if strings.Contains(rec.Body.String(), "SECRET") {
+				t.Fatalf("diagnostic reached the client: %s", rec.Body.String())
+			}
+
+			var problem apperror.Problem
+			if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("decode problem: %v", err)
+			}
+			if problem.Detail == "" || problem.Title == "" || problem.RequestID == "" {
+				t.Fatalf("problem is not actionable: %#v", problem)
+			}
+		})
+	}
+}
+
+// A suppressed message must survive somewhere: dropping it would trade a leak
+// for an outage nobody can debug.
+func TestServerLogsSuppressedServerErrorMessage(t *testing.T) {
+	var logs bytes.Buffer
 	server := NewServer(
-		slog.New(slog.DiscardHandler),
+		slog.New(slog.NewJSONHandler(&logs, nil)),
 		":0",
 		"test-secret",
-		errorTestHandler{err: echo.NewHTTPError(http.StatusBadRequest, "legacy message")},
+		errorTestHandler{err: echo.NewHTTPError(http.StatusInternalServerError, "archive directory: SECRET")},
 	)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	server.echo.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	if strings.Contains(rec.Body.String(), "SECRET") {
+		t.Fatalf("diagnostic reached the client: %s", rec.Body.String())
 	}
-	if rec.Body.String() != "{\"message\":\"legacy message\"}\n" {
-		t.Fatalf("legacy body changed: %s", rec.Body.String())
+	if got := logs.String(); !strings.Contains(got, "suppressed_message") || !strings.Contains(got, "SECRET") {
+		t.Fatalf("suppressed message was lost instead of logged: %s", got)
 	}
 }
 

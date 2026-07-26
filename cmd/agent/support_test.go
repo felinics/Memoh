@@ -10,6 +10,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/memohai/memoh/domains/iam/account"
+	accountpersistence "github.com/memohai/memoh/domains/iam/account/persistence"
 	"github.com/memohai/memoh/internal/config"
 )
 
@@ -23,19 +24,25 @@ func (f accountCounterFake) CountAccounts(context.Context) (int64, error) {
 }
 
 type accountCreatorFake struct {
-	account.Store
-	createdUser    account.CreateUserInput
-	createdAccount account.CreateInput
+	accountpersistence.Store
+	createdUser    accountpersistence.CreateUserInput
+	createdAccount accountpersistence.CreateInput
 }
 
-func (f *accountCreatorFake) CreateUser(_ context.Context, input account.CreateUserInput) (account.Record, error) {
+func (f *accountCreatorFake) CreateUser(_ context.Context, input accountpersistence.CreateUserInput) (accountpersistence.Record, error) {
 	f.createdUser = input
-	return account.Record{ID: "user-1"}, nil
+	return accountpersistence.Record{ID: "user-1"}, nil
 }
 
-func (f *accountCreatorFake) CreateAccount(_ context.Context, input account.CreateInput) (account.Record, error) {
+func (f *accountCreatorFake) CreateAccount(_ context.Context, input accountpersistence.CreateInput) (accountpersistence.Record, error) {
 	f.createdAccount = input
-	return account.Record{ID: input.UserID}, nil
+	return accountpersistence.Record{ID: input.UserID}, nil
+}
+
+// accountServiceFor wraps the persistence fake in a real Service so bootstrap
+// tests exercise the same hashing and role normalization as production.
+func accountServiceFor(store accountpersistence.Store) *account.Service {
+	return account.NewService(slog.New(slog.DiscardHandler), store)
 }
 
 func TestParseMigrateCommand(t *testing.T) {
@@ -85,7 +92,7 @@ func TestEnsureAdminUserSkipsExistingInstallation(t *testing.T) {
 		context.Background(),
 		slog.New(slog.DiscardHandler),
 		accountCounterFake{count: 1},
-		creator,
+		accountServiceFor(creator),
 		nil,
 		config.Config{},
 	)
@@ -111,7 +118,7 @@ func TestEnsureAdminUserCreatesFirstAdminThroughAccountsPort(t *testing.T) {
 		context.Background(),
 		slog.New(slog.DiscardHandler),
 		accountCounterFake{},
-		creator,
+		accountServiceFor(creator),
 		nil,
 		cfg,
 	)
@@ -136,7 +143,7 @@ func TestEnsureAdminUserWrapsCountFailure(t *testing.T) {
 		context.Background(),
 		slog.New(slog.DiscardHandler),
 		accountCounterFake{err: sentinel},
-		&accountCreatorFake{},
+		accountServiceFor(&accountCreatorFake{}),
 		nil,
 		config.Config{},
 	)

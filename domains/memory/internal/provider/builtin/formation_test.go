@@ -6,41 +6,41 @@ import (
 	"strings"
 	"testing"
 
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
-// fakeLLM implements memreg.LLM for testing the formation pipeline.
+// fakeLLM implements memprovider.LLM for testing the formation pipeline.
 type fakeLLM struct {
 	extractFacts  []string
 	extractErr    error
-	decideActions []memreg.DecisionAction
+	decideActions []memprovider.DecisionAction
 	decideErr     error
 	compactFacts  []string
 	compactErr    error
-	compactFunc   func(memreg.CompactRequest) memreg.CompactResponse
+	compactFunc   func(memprovider.CompactRequest) memprovider.CompactResponse
 	extractCalls  int
 	decideCalls   int
 	compactCalls  int
-	compactReqs   []memreg.CompactRequest
+	compactReqs   []memprovider.CompactRequest
 }
 
-func (f *fakeLLM) Extract(_ context.Context, _ memreg.ExtractRequest) (memreg.ExtractResponse, error) {
+func (f *fakeLLM) Extract(_ context.Context, _ memprovider.ExtractRequest) (memprovider.ExtractResponse, error) {
 	f.extractCalls++
-	return memreg.ExtractResponse{Facts: f.extractFacts}, f.extractErr
+	return memprovider.ExtractResponse{Facts: f.extractFacts}, f.extractErr
 }
 
-func (f *fakeLLM) Decide(_ context.Context, _ memreg.DecideRequest) (memreg.DecideResponse, error) {
+func (f *fakeLLM) Decide(_ context.Context, _ memprovider.DecideRequest) (memprovider.DecideResponse, error) {
 	f.decideCalls++
-	return memreg.DecideResponse{Actions: f.decideActions}, f.decideErr
+	return memprovider.DecideResponse{Actions: f.decideActions}, f.decideErr
 }
 
-func (f *fakeLLM) Compact(_ context.Context, req memreg.CompactRequest) (memreg.CompactResponse, error) {
+func (f *fakeLLM) Compact(_ context.Context, req memprovider.CompactRequest) (memprovider.CompactResponse, error) {
 	f.compactCalls++
 	f.compactReqs = append(f.compactReqs, req)
 	if f.compactFunc != nil {
 		return f.compactFunc(req), f.compactErr
 	}
-	return memreg.CompactResponse{Facts: f.compactFacts}, f.compactErr
+	return memprovider.CompactResponse{Facts: f.compactFacts}, f.compactErr
 }
 
 func TestFormationExtractAndAdd(t *testing.T) {
@@ -49,15 +49,15 @@ func TestFormationExtractAndAdd(t *testing.T) {
 	runtime := newFileRuntime(store)
 	llm := &fakeLLM{
 		extractFacts: []string{"User likes oolong tea", "User is based in Berlin"},
-		decideActions: []memreg.DecisionAction{
+		decideActions: []memprovider.DecisionAction{
 			{Event: "ADD", Text: "User likes oolong tea"},
 			{Event: "ADD", Text: "User is based in Berlin"},
 		},
 	}
 
-	result := runFormation(context.Background(), slog.Default(), llm, runtime, memreg.AfterChatRequest{
+	result := runFormation(context.Background(), slog.Default(), llm, runtime, memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "I like oolong tea and I live in Berlin"},
 			{Role: "assistant", Content: "Noted!"},
 		},
@@ -85,7 +85,7 @@ func TestFormationUpdate(t *testing.T) {
 	store := newFakeStore()
 	runtime := newFileRuntime(store)
 
-	addResp, err := runtime.Add(context.Background(), memreg.AddRequest{
+	addResp, err := runtime.Add(context.Background(), memprovider.AddRequest{
 		BotID:   "bot-1",
 		Message: "User lives in Tokyo",
 		Filters: map[string]any{"bot_id": "bot-1"},
@@ -97,14 +97,14 @@ func TestFormationUpdate(t *testing.T) {
 
 	llm := &fakeLLM{
 		extractFacts: []string{"User moved to Berlin"},
-		decideActions: []memreg.DecisionAction{
+		decideActions: []memprovider.DecisionAction{
 			{Event: "UPDATE", ID: memID, Text: "User is based in Berlin", OldMemory: "User lives in Tokyo"},
 		},
 	}
 
-	result := runFormation(context.Background(), slog.Default(), llm, runtime, memreg.AfterChatRequest{
+	result := runFormation(context.Background(), slog.Default(), llm, runtime, memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "Actually, I moved to Berlin"},
 		},
 	})
@@ -130,7 +130,7 @@ func TestFormationDelete(t *testing.T) {
 	store := newFakeStore()
 	runtime := newFileRuntime(store)
 
-	addResp, err := runtime.Add(context.Background(), memreg.AddRequest{
+	addResp, err := runtime.Add(context.Background(), memprovider.AddRequest{
 		BotID:   "bot-1",
 		Message: "User likes coffee",
 		Filters: map[string]any{"bot_id": "bot-1"},
@@ -142,14 +142,14 @@ func TestFormationDelete(t *testing.T) {
 
 	llm := &fakeLLM{
 		extractFacts: []string{"User no longer drinks coffee"},
-		decideActions: []memreg.DecisionAction{
+		decideActions: []memprovider.DecisionAction{
 			{Event: "DELETE", ID: memID},
 		},
 	}
 
-	result := runFormation(context.Background(), slog.Default(), llm, runtime, memreg.AfterChatRequest{
+	result := runFormation(context.Background(), slog.Default(), llm, runtime, memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "I stopped drinking coffee"},
 		},
 	})
@@ -169,14 +169,14 @@ func TestFormationNOOP(t *testing.T) {
 
 	llm := &fakeLLM{
 		extractFacts: []string{"User likes tea"},
-		decideActions: []memreg.DecisionAction{
+		decideActions: []memprovider.DecisionAction{
 			{Event: "NOOP"},
 		},
 	}
 
-	result := runFormation(context.Background(), slog.Default(), llm, runtime, memreg.AfterChatRequest{
+	result := runFormation(context.Background(), slog.Default(), llm, runtime, memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "I like tea"},
 		},
 	})
@@ -201,9 +201,9 @@ func TestFormationNoFacts(t *testing.T) {
 		extractFacts: []string{},
 	}
 
-	result := runFormation(context.Background(), slog.Default(), llm, runtime, memreg.AfterChatRequest{
+	result := runFormation(context.Background(), slog.Default(), llm, runtime, memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "Hello"},
 			{Role: "assistant", Content: "Hi there!"},
 		},
@@ -222,7 +222,7 @@ func TestFormationMixedActions(t *testing.T) {
 	store := newFakeStore()
 	runtime := newFileRuntime(store)
 
-	addResp, _ := runtime.Add(context.Background(), memreg.AddRequest{
+	addResp, _ := runtime.Add(context.Background(), memprovider.AddRequest{
 		BotID:   "bot-1",
 		Message: "User lives in Tokyo",
 		Filters: map[string]any{"bot_id": "bot-1"},
@@ -231,16 +231,16 @@ func TestFormationMixedActions(t *testing.T) {
 
 	llm := &fakeLLM{
 		extractFacts: []string{"User moved to Berlin", "User prefers dark mode"},
-		decideActions: []memreg.DecisionAction{
+		decideActions: []memprovider.DecisionAction{
 			{Event: "UPDATE", ID: existingID, Text: "User lives in Berlin"},
 			{Event: "ADD", Text: "User prefers dark mode"},
 			{Event: "NOOP"},
 		},
 	}
 
-	result := runFormation(context.Background(), slog.Default(), llm, runtime, memreg.AfterChatRequest{
+	result := runFormation(context.Background(), slog.Default(), llm, runtime, memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "I moved to Berlin and I like dark mode"},
 		},
 	})
@@ -266,7 +266,7 @@ func TestFormationInvalidActionsSkipped(t *testing.T) {
 
 	llm := &fakeLLM{
 		extractFacts: []string{"User likes cats"},
-		decideActions: []memreg.DecisionAction{
+		decideActions: []memprovider.DecisionAction{
 			{Event: "ADD", Text: ""},
 			{Event: "UPDATE", ID: "", Text: "something"},
 			{Event: "DELETE", ID: ""},
@@ -275,9 +275,9 @@ func TestFormationInvalidActionsSkipped(t *testing.T) {
 		},
 	}
 
-	result := runFormation(context.Background(), slog.Default(), llm, runtime, memreg.AfterChatRequest{
+	result := runFormation(context.Background(), slog.Default(), llm, runtime, memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "I like cats"},
 		},
 	})
@@ -295,7 +295,7 @@ func TestFormationDuplicateActionsSameID(t *testing.T) {
 	store := newFakeStore()
 	runtime := newFileRuntime(store)
 
-	addResp, _ := runtime.Add(context.Background(), memreg.AddRequest{
+	addResp, _ := runtime.Add(context.Background(), memprovider.AddRequest{
 		BotID:   "bot-1",
 		Message: "User likes tea",
 		Filters: map[string]any{"bot_id": "bot-1"},
@@ -304,15 +304,15 @@ func TestFormationDuplicateActionsSameID(t *testing.T) {
 
 	llm := &fakeLLM{
 		extractFacts: []string{"Updated fact"},
-		decideActions: []memreg.DecisionAction{
+		decideActions: []memprovider.DecisionAction{
 			{Event: "UPDATE", ID: memID, Text: "User prefers coffee"},
 			{Event: "UPDATE", ID: memID, Text: "User prefers juice"},
 		},
 	}
 
-	result := runFormation(context.Background(), slog.Default(), llm, runtime, memreg.AfterChatRequest{
+	result := runFormation(context.Background(), slog.Default(), llm, runtime, memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "I changed my mind"},
 		},
 	})
@@ -331,7 +331,7 @@ func TestOnAfterChatWithLLM(t *testing.T) {
 	runtime := newFileRuntime(store)
 	llm := &fakeLLM{
 		extractFacts: []string{"User prefers dark mode"},
-		decideActions: []memreg.DecisionAction{
+		decideActions: []memprovider.DecisionAction{
 			{Event: "ADD", Text: "User prefers dark mode"},
 		},
 	}
@@ -339,9 +339,9 @@ func TestOnAfterChatWithLLM(t *testing.T) {
 	p := NewBuiltinProvider(slog.Default(), runtime)
 	p.SetLLM(llm)
 
-	err := p.OnAfterChat(context.Background(), memreg.AfterChatRequest{
+	err := p.OnAfterChat(context.Background(), memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "I prefer dark mode"},
 			{Role: "assistant", Content: "Got it!"},
 		},
@@ -366,9 +366,9 @@ func TestOnAfterChatFallbackWithoutLLM(t *testing.T) {
 
 	p := NewBuiltinProvider(slog.Default(), runtime)
 
-	err := p.OnAfterChat(context.Background(), memreg.AfterChatRequest{
+	err := p.OnAfterChat(context.Background(), memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "Hello world"},
 		},
 	})
@@ -386,7 +386,7 @@ func TestOnBeforeChatRecallsFactMemory(t *testing.T) {
 	runtime := newFileRuntime(store)
 	llm := &fakeLLM{
 		extractFacts: []string{"User prefers oolong tea"},
-		decideActions: []memreg.DecisionAction{
+		decideActions: []memprovider.DecisionAction{
 			{Event: "ADD", Text: "User prefers oolong tea"},
 		},
 	}
@@ -394,14 +394,14 @@ func TestOnBeforeChatRecallsFactMemory(t *testing.T) {
 	p := NewBuiltinProvider(slog.Default(), runtime)
 	p.SetLLM(llm)
 
-	_ = p.OnAfterChat(context.Background(), memreg.AfterChatRequest{
+	_ = p.OnAfterChat(context.Background(), memprovider.AfterChatRequest{
 		BotID: "bot-1",
-		Messages: []memreg.Message{
+		Messages: []memprovider.Message{
 			{Role: "user", Content: "I prefer oolong tea"},
 		},
 	})
 
-	result, err := p.OnBeforeChat(context.Background(), memreg.BeforeChatRequest{
+	result, err := p.OnBeforeChat(context.Background(), memprovider.BeforeChatRequest{
 		BotID: "bot-1",
 		Query: "tea",
 	})

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,10 +99,19 @@ type rtcSettings struct {
 type Service struct {
 	logger    *slog.Logger
 	workspace runtimedisplay.Workspace
+	ctx       context.Context
+	cancel    context.CancelFunc
 
-	mu       sync.Mutex
-	sessions map[string]*session
-	starting map[string]*sessionStart
+	mu             sync.Mutex
+	sessions       map[string]*session
+	starting       map[string]*sessionStart
+	workers        map[*session]struct{}
+	terminalErrors []error
+	stopped        bool
+
+	operations         sync.WaitGroup
+	operationsDone     chan struct{}
+	operationsWaitOnce sync.Once
 }
 
 type sessionStart struct {
@@ -114,11 +124,51 @@ func NewService(logger *slog.Logger, workspace runtimedisplay.Workspace) *Servic
 	if logger == nil {
 		logger = slog.Default()
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
-		logger:    logger.With(slog.String("component", "display")),
-		workspace: workspace,
-		sessions:  make(map[string]*session),
-		starting:  make(map[string]*sessionStart),
+		logger:         logger.With(slog.String("component", "display")),
+		workspace:      workspace,
+		ctx:            ctx,
+		cancel:         cancel,
+		sessions:       make(map[string]*session),
+		starting:       make(map[string]*sessionStart),
+		workers:        make(map[*session]struct{}),
+		operationsDone: make(chan struct{}),
+	}
+}
+
+// beginOperation atomically admits request-scoped work before shutdown seals
+// the service. The returned context is canceled by either the caller or the
+// service lifecycle.
+func (s *Service) beginOperation(ctx context.Context) (context.Context, func(), error) {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return nil, nil, runtimedisplay.ErrServiceStopped
+	}
+	s.operations.Add(1)
+	serviceCtx := s.ctx
+	s.mu.Unlock()
+
+	runCtx, cancel := context.WithCancel(ctx)
+	stopServiceCancel := context.AfterFunc(serviceCtx, cancel)
+	var finishOnce sync.Once
+	finish := func() {
+		finishOnce.Do(func() {
+			stopServiceCancel()
+			cancel()
+			s.operations.Done()
+		})
+	}
+	return runCtx, finish, nil
+}
+
+func (s *Service) waitOperations(ctx context.Context) error {
+	select {
+	case <-s.operationsDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -196,6 +246,12 @@ func (s *Service) Answer(ctx context.Context, botID string, req runtimedisplay.O
 	if s == nil || s.workspace == nil {
 		return runtimedisplay.OfferResponse{}, runtimedisplay.ErrManagerUnavailable
 	}
+	runCtx, finish, err := s.beginOperation(ctx)
+	if err != nil {
+		return runtimedisplay.OfferResponse{}, err
+	}
+	defer finish()
+	ctx = runCtx
 	if !s.workspace.BotDisplayEnabled(ctx, botID) {
 		return runtimedisplay.OfferResponse{}, runtimedisplay.ErrDisplayDisabled
 	}
@@ -257,6 +313,12 @@ func (s *Service) Screenshot(ctx context.Context, botID string) ([]byte, string,
 	if s == nil || s.workspace == nil {
 		return nil, "", runtimedisplay.ErrManagerUnavailable
 	}
+	runCtx, finish, err := s.beginOperation(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer finish()
+	ctx = runCtx
 	if !s.workspace.BotDisplayEnabled(ctx, botID) {
 		return nil, "", runtimedisplay.ErrDisplayDisabled
 	}
@@ -284,11 +346,18 @@ func (s *Service) Screenshot(ctx context.Context, botID string) ([]byte, string,
 		cancel()
 		return nil, "", fmt.Errorf("start RFB screenshot shim: %w", err)
 	}
-	defer func() { _ = proxy.Close() }()
-	defer cancel()
-	go proxyRFBListener(runCtx, proxy, func(ctx context.Context) (net.Conn, error) {
-		return s.dialRFB(ctx, botID)
-	}, s.logger, botID)
+	proxyDone := make(chan struct{})
+	go func() {
+		defer close(proxyDone)
+		proxyRFBListener(runCtx, proxy, func(ctx context.Context) (net.Conn, error) {
+			return s.dialRFB(ctx, botID)
+		}, s.logger, botID)
+	}()
+	defer func() {
+		cancel()
+		_ = proxy.Close()
+		<-proxyDone
+	}()
 
 	proxyPort := proxy.Addr().(*net.TCPAddr).Port
 	cmd := exec.CommandContext(runCtx, gstLaunch, gstreamerScreenshotArgs(proxyPort, outputPath)...) //nolint:gosec // executable is resolved from PATH or explicit admin env.
@@ -320,6 +389,12 @@ func (s *Service) ControlInputs(ctx context.Context, botID string, events []runt
 	if s == nil || s.workspace == nil {
 		return runtimedisplay.ErrManagerUnavailable
 	}
+	runCtx, finish, err := s.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	ctx = runCtx
 	if !s.workspace.BotDisplayEnabled(ctx, botID) {
 		return runtimedisplay.ErrDisplayDisabled
 	}
@@ -335,6 +410,8 @@ func (s *Service) ControlInputs(ctx context.Context, botID string, events []runt
 		return fmt.Errorf("connect display input: %w", err)
 	}
 	defer func() { _ = input.Close() }()
+	stopOnCancel := context.AfterFunc(ctx, func() { _ = input.Close() })
+	defer stopOnCancel()
 	for _, event := range events {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -360,6 +437,10 @@ func (s *Service) ControlInputs(ctx context.Context, botID string, events []runt
 
 func (s *Service) session(ctx context.Context, botID, gstLaunch, codec string) (*session, error) {
 	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return nil, runtimedisplay.ErrServiceStopped
+	}
 	if sess := s.sessions[botID]; sess != nil && !sess.closed() {
 		s.mu.Unlock()
 		// Display sessions are shared across viewers via RTP fan-out. If a new
@@ -393,6 +474,16 @@ func (s *Service) session(ctx context.Context, botID, gstLaunch, codec string) (
 	s.mu.Unlock()
 
 	sess := newSession(s, botID, gstLaunch, codec)
+	s.mu.Lock()
+	start.sess = sess
+	s.workers[sess] = struct{}{}
+	stopped := s.stopped
+	s.mu.Unlock()
+	if stopped {
+		sess.stop()
+		s.finishSessionStart(botID, start, nil, runtimedisplay.ErrServiceStopped)
+		return nil, runtimedisplay.ErrServiceStopped
+	}
 	if err := sess.start(ctx); err != nil {
 		sess.stop()
 		s.finishSessionStart(botID, start, nil, err)
@@ -400,6 +491,12 @@ func (s *Service) session(ctx context.Context, botID, gstLaunch, codec string) (
 	}
 
 	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		sess.stop()
+		s.finishSessionStart(botID, start, nil, runtimedisplay.ErrServiceStopped)
+		return nil, runtimedisplay.ErrServiceStopped
+	}
 	current := s.sessions[botID]
 	if current == nil || current.closed() {
 		s.sessions[botID] = sess
@@ -420,9 +517,9 @@ func (s *Service) session(ctx context.Context, botID, gstLaunch, codec string) (
 }
 
 func (s *Service) finishSessionStart(botID string, start *sessionStart, sess *session, err error) {
+	s.mu.Lock()
 	start.sess = sess
 	start.err = err
-	s.mu.Lock()
 	if s.starting[botID] == start {
 		delete(s.starting, botID)
 	}
@@ -438,20 +535,102 @@ func (s *Service) removeSession(botID string, target *session) {
 	}
 }
 
-// Close stops all active display encoder sessions. Safe for process shutdown.
-func (s *Service) Close() {
-	if s == nil {
-		return
-	}
+func (s *Service) removeWorker(target *session) {
+	err := target.stopError()
 	s.mu.Lock()
-	sessions := make([]*session, 0, len(s.sessions))
-	for _, sess := range s.sessions {
-		sessions = append(sessions, sess)
+	delete(s.workers, target)
+	if err != nil {
+		s.terminalErrors = append(s.terminalErrors, fmt.Errorf("stop display session %s: %w", target.botID, err))
 	}
 	s.mu.Unlock()
-	for _, sess := range sessions {
-		sess.stop()
+}
+
+func (s *Service) terminalErrorSnapshot() []error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]error(nil), s.terminalErrors...)
+}
+
+// Shutdown rejects new display work, stops every encoder and peer, and waits
+// for all session-owned goroutines to exit within ctx.
+func (s *Service) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
 	}
+	s.mu.Lock()
+	if !s.stopped {
+		s.stopped = true
+		if s.cancel != nil {
+			s.cancel()
+		}
+	}
+	starts := make([]*sessionStart, 0, len(s.starting))
+	for _, start := range s.starting {
+		starts = append(starts, start)
+	}
+	workers := make(map[*session]struct{}, len(s.workers))
+	for sess := range s.workers {
+		workers[sess] = struct{}{}
+	}
+	s.operationsWaitOnce.Do(func() {
+		go func() {
+			s.operations.Wait()
+			close(s.operationsDone)
+		}()
+	})
+	s.mu.Unlock()
+
+	for sess := range workers {
+		sess.requestStop()
+	}
+
+	var waitErr error
+
+waitStarts:
+	for _, start := range starts {
+		select {
+		case <-start.done:
+		case <-ctx.Done():
+			waitErr = ctx.Err()
+			break waitStarts
+		}
+	}
+
+	// A session can be attached to a start while shutdown is taking its first
+	// snapshot. Merge the second snapshot so completed sessions and their
+	// terminal errors cannot disappear between the two passes.
+	s.mu.Lock()
+	for sess := range s.workers {
+		workers[sess] = struct{}{}
+	}
+	s.mu.Unlock()
+	for sess := range workers {
+		sess.requestStop()
+	}
+
+	if waitErr == nil {
+		for sess := range workers {
+			if err := sess.wait(ctx); err != nil {
+				waitErr = err
+				break
+			}
+		}
+	}
+	if waitErr == nil {
+		waitErr = s.waitOperations(ctx)
+	}
+
+	errs := s.terminalErrorSnapshot()
+	if waitErr != nil {
+		errs = append(errs, waitErr)
+	}
+	return errors.Join(errs...)
+}
+
+// Close is retained for non-lifecycle callers. Composition should use
+// Shutdown so the application deadline and cleanup errors are preserved.
+func (s *Service) Close() {
+	_ = s.Shutdown(context.Background())
 }
 
 type session struct {
@@ -485,7 +664,13 @@ type session struct {
 	idleStopMu    sync.Mutex
 	idleStopTimer *time.Timer
 
-	stopOnce sync.Once
+	lifecycleMu   sync.Mutex
+	workersMu     sync.Mutex
+	workersWG     sync.WaitGroup
+	stopping      bool
+	done          chan struct{}
+	stopErr       error
+	stopRequested atomic.Bool
 }
 
 type peerSession struct {
@@ -513,6 +698,16 @@ func newSession(service *Service, botID, gstLaunch, codec string) *session {
 		tracks:      make(map[string]*webrtc.TrackLocalStaticRTP),
 		peers:       make(map[string]*peerSession),
 		firstPacket: make(chan struct{}),
+		done:        make(chan struct{}),
+	}
+}
+
+func newSessionRunContext(requestCtx, sessionCtx context.Context) (context.Context, context.CancelFunc) {
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(requestCtx))
+	stopSessionCancel := context.AfterFunc(sessionCtx, cancel)
+	return runCtx, func() {
+		stopSessionCancel()
+		cancel()
 	}
 }
 
@@ -525,23 +720,63 @@ func (s *session) closed() bool {
 	}
 }
 
+func (s *session) goWorker(run func()) bool {
+	s.workersMu.Lock()
+	defer s.workersMu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.workersWG.Add(1)
+	go func() {
+		defer s.workersWG.Done()
+		run()
+	}()
+	return true
+}
+
+func (s *session) wait(ctx context.Context) error {
+	select {
+	case <-s.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *session) stopError() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return s.stopErr
+}
+
 func (s *session) start(ctx context.Context) error {
+	if s.closed() {
+		return runtimedisplay.ErrServiceStopped
+	}
 	if !s.service.displayReachable(ctx, s.botID) {
 		return fmt.Errorf("%w: %s", runtimedisplay.ErrDisplayUnavailable, s.service.displayTarget(s.botID))
 	}
+	s.lifecycleMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			s.lifecycleMu.Unlock()
+		}
+	}()
+	if s.closed() {
+		return runtimedisplay.ErrServiceStopped
+	}
 
-	runCtx, runCtxCancel := context.WithCancel(context.WithoutCancel(ctx))
+	// Preserve request values for the long-lived encoder, while linking its
+	// cancellation to the session before any listener, process, dial, or RFB
+	// handshake can block startup.
+	runCtx, runCtxCancel := newSessionRunContext(ctx, s.ctx)
 	cancelRunCtx := true
 	defer func() {
 		if cancelRunCtx {
 			runCtxCancel()
 		}
 	}()
-	go func() {
-		<-s.ctx.Done()
-		runCtxCancel()
-	}()
-
 	listenConfig := net.ListenConfig{}
 	proxy, err := listenConfig.Listen(runCtx, "tcp", "127.0.0.1:0")
 	if err != nil {
@@ -595,10 +830,12 @@ func (s *session) start(ctx context.Context) error {
 		slog.Int("pid", cmd.Process.Pid),
 	)
 
-	go s.acceptProxy()
-	go s.forwardRTP()
+	s.goWorker(s.acceptProxy)
+	s.goWorker(s.forwardRTP)
 	gstreamerDone := make(chan error, 1)
-	go s.waitGStreamer(gstreamerDone)
+	s.goWorker(func() { s.waitGStreamer(gstreamerDone) })
+	s.lifecycleMu.Unlock()
+	locked = false
 
 	select {
 	case <-ctx.Done():
@@ -631,7 +868,6 @@ func (s *session) answer(ctx context.Context, req runtimedisplay.OfferRequest) (
 		sessionID = uuid.NewString()
 	}
 	s.closeStalePeers(time.Now())
-	previousPeer := s.peer(sessionID)
 
 	mediaEngine := &webrtc.MediaEngine{}
 	if err := registerVideoCodec(mediaEngine, s.codec); err != nil {
@@ -669,8 +905,6 @@ func (s *session) answer(ctx context.Context, req runtimedisplay.OfferRequest) (
 		_ = pc.Close()
 		return runtimedisplay.OfferResponse{}, err
 	}
-	go drainRTCP(sender)
-
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		if dc.Label() != "display-input" {
 			return
@@ -683,7 +917,6 @@ func (s *session) answer(ctx context.Context, req runtimedisplay.OfferRequest) (
 	})
 
 	trackID := uuid.NewString()
-	s.addTrack(trackID, track)
 	peer := &peerSession{
 		id:        sessionID,
 		codec:     s.codec,
@@ -703,9 +936,22 @@ func (s *session) answer(ctx context.Context, req runtimedisplay.OfferRequest) (
 		})
 	}
 	peer.close = func() { cleanup(true) }
-	s.addPeer(peer)
+	s.lifecycleMu.Lock()
+	if s.closed() {
+		s.lifecycleMu.Unlock()
+		cleanup(true)
+		return runtimedisplay.OfferResponse{}, runtimedisplay.ErrServiceStopped
+	}
+	s.addTrack(trackID, track)
+	previousPeer := s.replacePeer(peer)
+	workerStarted := s.goWorker(func() { drainRTCP(sender) })
+	s.lifecycleMu.Unlock()
 	if previousPeer != nil {
 		previousPeer.closeNow()
+	}
+	if !workerStarted {
+		cleanup(true)
+		return runtimedisplay.OfferResponse{}, runtimedisplay.ErrServiceStopped
 	}
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
@@ -833,22 +1079,26 @@ func (s *session) removeTrack(id string) {
 // reuses the session shell instead of rebuilding it. encoderIdleHold cannot
 // help here because the pipeline is gone, not idle.
 func (s *session) scheduleIdleStop() {
+	if s.closed() {
+		return
+	}
 	s.idleStopMu.Lock()
 	defer s.idleStopMu.Unlock()
 	if s.idleStopTimer != nil {
 		s.idleStopTimer.Stop()
 	}
 	s.idleStopTimer = time.AfterFunc(encoderIdleHold, func() {
-		// Hold tracksMu for the empty-check AND the stop() so a concurrent
-		// addTrack cannot insert a track between "still empty" and "stop the
-		// encoder" — that race bound a new viewer to a pipeline being torn
-		// down. stop() is idempotent (stopOnce) and lock-free w.r.t. tracksMu.
+		// Use the same lifecycle -> tracks lock order as peer admission, then
+		// mark the session closed before releasing either lock. A new viewer can
+		// therefore never bind between the empty check and encoder teardown.
+		s.lifecycleMu.Lock()
 		s.tracksMu.Lock()
 		empty := len(s.tracks) == 0
 		if empty && !s.closed() {
-			s.stop()
+			s.requestStop()
 		}
 		s.tracksMu.Unlock()
+		s.lifecycleMu.Unlock()
 	})
 }
 
@@ -862,9 +1112,15 @@ func (s *session) cancelIdleStop() {
 }
 
 func (s *session) addPeer(peer *peerSession) {
+	_ = s.replacePeer(peer)
+}
+
+func (s *session) replacePeer(peer *peerSession) *peerSession {
 	s.peersMu.Lock()
+	previous := s.peers[peer.id]
 	s.peers[peer.id] = peer
 	s.peersMu.Unlock()
+	return previous
 }
 
 func (s *session) removePeer(peer *peerSession) {
@@ -923,6 +1179,18 @@ func (s *session) closeStalePeers(now time.Time) {
 	}
 }
 
+func (s *session) closePeers() {
+	s.peersMu.RLock()
+	peers := make([]*peerSession, 0, len(s.peers))
+	for _, peer := range s.peers {
+		peers = append(peers, peer)
+	}
+	s.peersMu.RUnlock()
+	for _, peer := range peers {
+		peer.closeNow()
+	}
+}
+
 func (p *peerSession) setState(state string) {
 	p.mu.Lock()
 	p.state = state
@@ -967,27 +1235,65 @@ func (p *peerSession) stale(now time.Time) bool {
 }
 
 func (s *session) stop() {
-	s.stopOnce.Do(func() {
+	s.requestStop()
+}
+
+// requestStop starts the one-way transition without waiting for lifecycleMu.
+// Shutdown can therefore honor its context even when startup or an I/O close
+// is still unwinding inside the session lifecycle critical section.
+func (s *session) requestStop() {
+	if !s.stopRequested.CompareAndSwap(false, true) {
+		return
+	}
+	s.cancel()
+	go func() {
+		s.lifecycleMu.Lock()
+		s.initiateStopLocked()
+		s.lifecycleMu.Unlock()
+	}()
+}
+
+// initiateStopLocked performs the one-way lifecycle transition while
+// lifecycleMu is held. Peer cleanup runs outside the lock because callbacks
+// remove tracks and may otherwise deadlock a stop initiated by the idle timer.
+func (s *session) initiateStopLocked() {
+	s.workersMu.Lock()
+	s.stopping = true
+	s.workersMu.Unlock()
+	if s.runCtxCancel != nil {
+		s.runCtxCancel()
+	}
+	var errs []error
+	if s.proxy != nil {
+		if err := s.proxy.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errs = append(errs, fmt.Errorf("close RFB proxy: %w", err))
+		}
+	}
+	if s.udp != nil {
+		if err := s.udp.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errs = append(errs, fmt.Errorf("close RTP socket: %w", err))
+		}
+	}
+	if s.cmd != nil && s.cmd.Process != nil {
+		if err := s.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			errs = append(errs, fmt.Errorf("kill GStreamer: %w", err))
+		}
+	}
+	if s.input != nil {
+		if err := s.input.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errs = append(errs, fmt.Errorf("close RFB input: %w", err))
+		}
+	}
+	s.stopErr = errors.Join(errs...)
+	s.service.removeSession(s.botID, s)
+	s.service.logger.Info("display encoder stopped", slog.String("bot_id", s.botID))
+	go func() {
+		s.closePeers()
 		s.cancelIdleStop()
-		s.cancel()
-		if s.runCtxCancel != nil {
-			s.runCtxCancel()
-		}
-		if s.proxy != nil {
-			_ = s.proxy.Close()
-		}
-		if s.udp != nil {
-			_ = s.udp.Close()
-		}
-		if s.cmd != nil && s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-		}
-		if s.input != nil {
-			_ = s.input.Close()
-		}
-		s.service.removeSession(s.botID, s)
-		s.service.logger.Info("display encoder stopped", slog.String("bot_id", s.botID))
-	})
+		s.workersWG.Wait()
+		s.service.removeWorker(s)
+		close(s.done)
+	}()
 }
 
 func (s *session) acceptProxy() {
@@ -999,7 +1305,10 @@ func (s *session) acceptProxy() {
 			}
 			return
 		}
-		go s.proxyRFB(conn)
+		if !s.goWorker(func() { s.proxyRFB(conn) }) {
+			_ = conn.Close()
+			return
+		}
 	}
 }
 
@@ -1010,6 +1319,8 @@ func (s *session) proxyRFB(conn net.Conn) {
 }
 
 func proxyRFBListener(ctx context.Context, listener net.Listener, dialRFB func(context.Context) (net.Conn, error), logger *slog.Logger, botID string) {
+	var workers sync.WaitGroup
+	defer workers.Wait()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -1018,7 +1329,9 @@ func proxyRFBListener(ctx context.Context, listener net.Listener, dialRFB func(c
 			}
 			return
 		}
-		go proxyRFBConnection(ctx, conn, dialRFB, logger, botID)
+		workers.Go(func() {
+			proxyRFBConnection(ctx, conn, dialRFB, logger, botID)
+		})
 	}
 }
 
@@ -1031,6 +1344,11 @@ func proxyRFBConnection(ctx context.Context, conn net.Conn, dialRFB func(context
 		return
 	}
 	defer func() { _ = rfbConn.Close() }()
+	stopOnCancel := context.AfterFunc(ctx, func() {
+		_ = conn.Close()
+		_ = rfbConn.Close()
+	})
+	defer stopOnCancel()
 
 	done := make(chan struct{}, 2)
 	go func() {
@@ -1041,6 +1359,9 @@ func proxyRFBConnection(ctx context.Context, conn net.Conn, dialRFB func(context
 		_, _ = io.Copy(rfbConn, conn)
 		done <- struct{}{}
 	}()
+	<-done
+	_ = conn.Close()
+	_ = rfbConn.Close()
 	<-done
 }
 
@@ -1444,8 +1765,9 @@ func (w processLogWriter) Write(p []byte) (int, error) {
 }
 
 type rfbInputClient struct {
-	mu   sync.Mutex
-	conn net.Conn
+	connMu  sync.Mutex
+	writeMu sync.Mutex
+	conn    net.Conn
 }
 
 func newRFBInputClient(conn net.Conn) (*rfbInputClient, error) {
@@ -1458,41 +1780,42 @@ func newRFBInputClient(conn net.Conn) (*rfbInputClient, error) {
 }
 
 func (c *rfbInputClient) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
+	c.connMu.Lock()
+	conn := c.conn
+	c.conn = nil
+	c.connMu.Unlock()
+	if conn == nil {
 		return nil
 	}
-	err := c.conn.Close()
-	c.conn = nil
-	return err
+	return conn.Close()
 }
 
 func (c *rfbInputClient) Pointer(x, y int, buttonMask uint8) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
-		return net.ErrClosed
-	}
 	msg := []byte{5, buttonMask, 0, 0, 0, 0}
 	binary.BigEndian.PutUint16(msg[2:4], clampUint16(x))
 	binary.BigEndian.PutUint16(msg[4:6], clampUint16(y))
-	_, err := c.conn.Write(msg)
-	return err
+	return c.write(msg)
 }
 
 func (c *rfbInputClient) Key(keysym uint32, down bool) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
-		return net.ErrClosed
-	}
 	msg := []byte{4, 0, 0, 0, 0, 0, 0, 0}
 	if down {
 		msg[1] = 1
 	}
 	binary.BigEndian.PutUint32(msg[4:8], keysym)
-	_, err := c.conn.Write(msg)
+	return c.write(msg)
+}
+
+func (c *rfbInputClient) write(msg []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.connMu.Lock()
+	conn := c.conn
+	c.connMu.Unlock()
+	if conn == nil {
+		return net.ErrClosed
+	}
+	_, err := conn.Write(msg)
 	return err
 }
 

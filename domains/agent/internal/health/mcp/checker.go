@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 	"github.com/memohai/memoh/internal/healthcheck"
 )
 
@@ -22,12 +23,12 @@ const (
 
 // ConnectionLister lists active MCP connections for a bot.
 type ConnectionLister interface {
-	ListActiveByBot(ctx context.Context, botID string) ([]mcp.Connection, error)
+	ListActiveByBot(ctx context.Context, botID string) ([]mcppersistence.Connection, error)
 }
 
 // ToolLister lists tools for a bot session.
 type ToolLister interface {
-	ListTools(ctx context.Context, session mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error)
+	ListTools(ctx context.Context, session mcp.ToolSessionContext) ([]mcppersistence.ToolDescriptor, error)
 }
 
 // Checker evaluates MCP connection health checks.
@@ -182,7 +183,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 	return results
 }
 
-func buildCheckID(conn mcp.Connection, idx int) string {
+func buildCheckID(conn mcppersistence.Connection, idx int) string {
 	connectionID := strings.TrimSpace(conn.ID)
 	if connectionID != "" {
 		return checkTypeMCPConnection + "." + connectionID

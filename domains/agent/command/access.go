@@ -3,7 +3,7 @@ package command
 import (
 	"strings"
 
-	"github.com/memohai/memoh/domains/api/access/acl"
+	aclpersistence "github.com/memohai/memoh/domains/api/bot/access/acl/persistence"
 )
 
 func (h *Handler) buildAccessGroup() *CommandGroup {
@@ -39,11 +39,11 @@ func (h *Handler) buildAccessGroup() *CommandGroup {
 
 			aclStatus := cc.T("cmd.common.unavailable")
 			if h.aclEvaluator != nil && strings.TrimSpace(cc.ChannelType) != "" {
-				allowed, err := h.aclEvaluator.Evaluate(cc.Ctx, acl.EvaluateRequest{
+				allowed, err := h.aclEvaluator.Evaluate(cc.Ctx, aclpersistence.EvaluateRequest{
 					BotID:             cc.BotID,
 					ChannelIdentityID: cc.ChannelIdentityID,
 					ChannelType:       cc.ChannelType,
-					SourceScope: acl.SourceScope{
+					SourceScope: aclpersistence.SourceScope{
 						ConversationType: cc.ConversationType,
 						ConversationID:   cc.ConversationID,
 						ThreadID:         cc.ThreadID,

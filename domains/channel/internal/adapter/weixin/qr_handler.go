@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // QRHandler handles WeChat QR code login for the management UI.
@@ -54,13 +55,13 @@ type QRStartResponse struct {
 // @Tags bots
 // @Param id path string true "Bot ID"
 // @Success 200 {object} QRStartResponse
-// @Failure 500 {object} map[string]string
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{id}/channel/weixin/qr/start [post].
 func (h *QRHandler) Start(c echo.Context) error {
 	qr, err := h.client.FetchQRCode(c.Request().Context(), defaultBaseURL)
 	if err != nil {
 		h.logger.Error("weixin qr start failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch QR code: "+err.Error())
+		return apperror.Internal("fetch weixin qr code", err)
 	}
 
 	return c.JSON(http.StatusOK, QRStartResponse{
@@ -88,28 +89,28 @@ type QRPollResponse struct {
 // @Param id path string true "Bot ID"
 // @Param payload body QRPollRequest true "QR code to poll"
 // @Success 200 {object} QRPollResponse
-// @Failure 400 {object} map[string]string
-// @Failure 500 {object} map[string]string
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{id}/channel/weixin/qr/poll [post].
 func (h *QRHandler) Poll(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("id")
 	}
 
 	var req QRPollRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind weixin qr poll", err)
 	}
 	qrCode := strings.TrimSpace(req.QRCode)
 	if qrCode == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "qr_code is required")
+		return apperror.Required("qr_code")
 	}
 
 	status, err := h.client.PollQRStatus(c.Request().Context(), defaultBaseURL, qrCode)
 	if err != nil {
 		h.logger.Error("weixin qr poll failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "Poll failed: "+err.Error())
+		return apperror.Internal("poll weixin qr status", err)
 	}
 
 	resp := QRPollResponse{
@@ -143,7 +144,7 @@ func (h *QRHandler) Poll(c echo.Context) error {
 					slog.String("bot_id", botID),
 					slog.Any("error", saveErr),
 				)
-				return echo.NewHTTPError(http.StatusInternalServerError, "Login succeeded but failed to save credentials: "+saveErr.Error())
+				return apperror.Internal("save weixin credentials", saveErr)
 			}
 			h.logger.Info("weixin qr login saved",
 				slog.String("bot_id", botID),

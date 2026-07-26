@@ -3,7 +3,6 @@ package model
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -15,6 +14,7 @@ import (
 	modeldomain "github.com/memohai/memoh/domains/model"
 	audiopkg "github.com/memohai/memoh/domains/model/audio"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type AudioHandler struct {
@@ -87,12 +87,12 @@ func (h *AudioHandler) ListTranscriptionMeta(c echo.Context) error {
 // @Tags speech-providers
 // @Produce json
 // @Success 200 {array} audiopkg.SpeechProviderResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /speech-providers [get].
 func (h *AudioHandler) ListProviders(c echo.Context) error {
 	items, err := h.service.ListSpeechProviders(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list speech providers", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -103,12 +103,12 @@ func (h *AudioHandler) ListProviders(c echo.Context) error {
 // @Tags transcription-providers
 // @Produce json
 // @Success 200 {array} audiopkg.SpeechProviderResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /transcription-providers [get].
 func (h *AudioHandler) ListTranscriptionProviders(c echo.Context) error {
 	items, err := h.service.ListTranscriptionProviders(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list transcription providers", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -120,18 +120,18 @@ func (h *AudioHandler) ListTranscriptionProviders(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} audiopkg.SpeechProviderResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /speech-providers/{id} [get].
 // @Router /transcription-providers/{id} [get].
 func (h *AudioHandler) GetProvider(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	item, err := h.service.GetSpeechProvider(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get speech provider", err)
 	}
 	return c.JSON(http.StatusOK, item)
 }
@@ -143,17 +143,17 @@ func (h *AudioHandler) GetProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {array} audiopkg.SpeechModelResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /speech-providers/{id}/models [get].
 func (h *AudioHandler) ListModelsByProvider(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	items, err := h.service.ListSpeechModelsByProvider(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list speech models by provider", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -166,19 +166,19 @@ func (h *AudioHandler) ListModelsByProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} audiopkg.ImportModelsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /speech-providers/{id}/import-models [post].
 func (h *AudioHandler) ImportModels(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 
 	remoteModels, err := h.service.FetchRemoteModels(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote speech models: %v", err))
+		return apperror.Internal("fetch remote speech models", err)
 	}
 
 	resp := audiopkg.ImportModelsResponse{
@@ -223,17 +223,17 @@ func (h *AudioHandler) ImportModels(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {array} audiopkg.TranscriptionModelResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /transcription-providers/{id}/models [get].
 func (h *AudioHandler) ListTranscriptionModelsByProvider(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	items, err := h.service.ListTranscriptionModelsByProvider(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list transcription models by provider", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -246,19 +246,19 @@ func (h *AudioHandler) ListTranscriptionModelsByProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} audiopkg.ImportModelsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /transcription-providers/{id}/import-models [post].
 func (h *AudioHandler) ImportTranscriptionModels(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 
 	remoteModels, err := h.service.FetchRemoteTranscriptionModels(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote transcription models: %v", err))
+		return apperror.Internal("fetch remote transcription models", err)
 	}
 
 	resp := audiopkg.ImportModelsResponse{
@@ -301,12 +301,12 @@ func (h *AudioHandler) ImportTranscriptionModels(c echo.Context) error {
 // @Tags speech-models
 // @Produce json
 // @Success 200 {array} audiopkg.SpeechModelResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /speech-models [get].
 func (h *AudioHandler) ListModels(c echo.Context) error {
 	items, err := h.service.ListSpeechModels(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list speech models", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -317,12 +317,12 @@ func (h *AudioHandler) ListModels(c echo.Context) error {
 // @Tags transcription-models
 // @Produce json
 // @Success 200 {array} audiopkg.TranscriptionModelResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /transcription-models [get].
 func (h *AudioHandler) ListTranscriptionModels(c echo.Context) error {
 	items, err := h.service.ListTranscriptionModels(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list transcription models", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -333,16 +333,16 @@ func (h *AudioHandler) ListTranscriptionModels(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID"
 // @Success 200 {object} audiopkg.SpeechModelResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /speech-models/{id} [get].
 func (h *AudioHandler) GetModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	resp, err := h.service.GetSpeechModel(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get speech model", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -355,21 +355,21 @@ func (h *AudioHandler) GetModel(c echo.Context) error {
 // @Param id path string true "Model ID"
 // @Param request body audiopkg.UpdateSpeechModelRequest true "Model update payload"
 // @Success 200 {object} audiopkg.SpeechModelResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /speech-models/{id} [put].
 func (h *AudioHandler) UpdateModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	var req audiopkg.UpdateSpeechModelRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind speech model", err)
 	}
 	resp, err := h.service.UpdateSpeechModel(c.Request().Context(), id, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("update speech model", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -380,16 +380,16 @@ func (h *AudioHandler) UpdateModel(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID"
 // @Success 200 {object} audiopkg.TranscriptionModelResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /transcription-models/{id} [get].
 func (h *AudioHandler) GetTranscriptionModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	resp, err := h.service.GetTranscriptionModel(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get transcription model", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -402,21 +402,21 @@ func (h *AudioHandler) GetTranscriptionModel(c echo.Context) error {
 // @Param id path string true "Model ID"
 // @Param request body audiopkg.UpdateSpeechModelRequest true "Model update payload"
 // @Success 200 {object} audiopkg.TranscriptionModelResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /transcription-models/{id} [put].
 func (h *AudioHandler) UpdateTranscriptionModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	var req audiopkg.UpdateSpeechModelRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind transcription model", err)
 	}
 	resp, err := h.service.UpdateTranscriptionModel(c.Request().Context(), id, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("update transcription model", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -427,16 +427,16 @@ func (h *AudioHandler) UpdateTranscriptionModel(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID"
 // @Success 200 {object} audiopkg.ModelCapabilities
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /speech-models/{id}/capabilities [get].
 func (h *AudioHandler) GetModelCapabilities(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	caps, err := h.service.GetModelCapabilities(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get speech model capabilities", err)
 	}
 	return c.JSON(http.StatusOK, caps)
 }
@@ -447,16 +447,16 @@ func (h *AudioHandler) GetModelCapabilities(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID"
 // @Success 200 {object} audiopkg.ModelCapabilities
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /transcription-models/{id}/capabilities [get].
 func (h *AudioHandler) GetTranscriptionModelCapabilities(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	caps, err := h.service.GetTranscriptionModelCapabilities(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get transcription model capabilities", err)
 	}
 	return c.JSON(http.StatusOK, caps)
 }
@@ -470,29 +470,29 @@ func (h *AudioHandler) GetTranscriptionModelCapabilities(c echo.Context) error {
 // @Param id path string true "Model ID"
 // @Param request body audiopkg.TestSynthesizeRequest true "Text to synthesize"
 // @Success 200 {file} binary "Audio data"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /speech-models/{id}/test [post].
 func (h *AudioHandler) TestModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	var req audiopkg.TestSynthesizeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind speech test", err)
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "text is required")
+		return apperror.Required("text")
 	}
 	const maxTestTextLen = 500
 	if len([]rune(text)) > maxTestTextLen {
-		return echo.NewHTTPError(http.StatusBadRequest, "text too long, max 500 characters")
+		return apperror.Field("text", apperror.FieldTooLong)
 	}
 	audio, contentType, err := h.service.Synthesize(c.Request().Context(), id, text, req.Config)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("test speech model", err)
 	}
 	return c.Blob(http.StatusOK, contentType, audio)
 }
@@ -507,21 +507,21 @@ func (h *AudioHandler) TestModel(c echo.Context) error {
 // @Param file formData file true "Audio file"
 // @Param config formData string false "Optional JSON config"
 // @Success 200 {object} audiopkg.TestTranscriptionResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /transcription-models/{id}/test [post].
 func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	file, err := c.FormFile("file")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "file is required")
+		return apperror.Required("file")
 	}
 	src, err := file.Open()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("open transcription upload", err)
 	}
 	defer func(src multipart.File) {
 		err := src.Close()
@@ -531,17 +531,17 @@ func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 	}(src)
 	audio, err := io.ReadAll(src)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("read transcription upload", err)
 	}
 	var cfg map[string]any
 	if raw := strings.TrimSpace(c.FormValue("config")); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid config")
+			return apperror.Field("config", apperror.FieldInvalid)
 		}
 	}
 	result, err := h.service.Transcribe(c.Request().Context(), id, audio, file.Filename, file.Header.Get("Content-Type"), cfg)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("test transcription model", err)
 	}
 	resp := audiopkg.TestTranscriptionResponse{
 		Text:            result.Text,

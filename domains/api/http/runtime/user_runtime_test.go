@@ -2,29 +2,29 @@ package runtime
 
 import (
 	"errors"
-	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
-
 	userruntime "github.com/memohai/memoh/domains/runtime/client"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
-func TestRuntimeHTTPErrorUsesDomainErrors(t *testing.T) {
+func TestRuntimeErrorUsesDomainErrors(t *testing.T) {
 	tests := []struct {
-		name string
-		err  error
-		code int
+		name     string
+		err      error
+		wantKind apperror.Kind
 	}{
-		{name: "not found", err: userruntime.ErrRuntimeNotFound, code: http.StatusNotFound},
-		{name: "duplicate name", err: userruntime.ErrRuntimeNameTaken, code: http.StatusConflict},
+		{name: "not found", err: userruntime.ErrRuntimeNotFound, wantKind: apperror.KindNotFound},
+		{name: "duplicate name", err: userruntime.ErrRuntimeNameTaken, wantKind: apperror.KindConflict},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := runtimeHTTPError(nil, tt.err)
-			var httpErr *echo.HTTPError
-			if !errors.As(err, &httpErr) || httpErr.Code != tt.code {
-				t.Fatalf("runtimeHTTPError() = %#v, want HTTP %d", err, tt.code)
+			err := runtimeError(nil, "create user runtime", tt.err)
+			if kind := apperror.KindOf(err); kind != tt.wantKind {
+				t.Fatalf("kind = %q, want %q", kind, tt.wantKind)
+			}
+			if !errors.Is(apperror.CauseOf(err), tt.err) {
+				t.Fatalf("cause = %v, want %v", apperror.CauseOf(err), tt.err)
 			}
 		})
 	}

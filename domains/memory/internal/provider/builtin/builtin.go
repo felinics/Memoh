@@ -8,7 +8,7 @@ import (
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
 	memport "github.com/memohai/memoh/domains/memory/internal/port"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 const (
@@ -20,7 +20,7 @@ const (
 // BuiltinProvider wraps the existing Service as a Provider.
 type BuiltinProvider struct {
 	service Runtime
-	llm     memreg.LLM
+	llm     memprovider.LLM
 	logger  *slog.Logger
 	packer  contextPackerConfig
 }
@@ -29,22 +29,22 @@ type BuiltinProvider struct {
 // It is intentionally defined as an interface to decouple provider wiring from
 // concrete service structs in the memory package.
 type Runtime interface {
-	Add(ctx context.Context, req memreg.AddRequest) (memreg.SearchResponse, error)
-	Search(ctx context.Context, req memreg.SearchRequest) (memreg.SearchResponse, error)
-	GetAll(ctx context.Context, req memreg.GetAllRequest) (memreg.SearchResponse, error)
-	Update(ctx context.Context, req memreg.UpdateRequest) (memorydomain.Item, error)
-	Delete(ctx context.Context, memoryID string) (memreg.DeleteResponse, error)
-	DeleteBatch(ctx context.Context, memoryIDs []string) (memreg.DeleteResponse, error)
-	DeleteAll(ctx context.Context, req memreg.DeleteAllRequest) (memreg.DeleteResponse, error)
-	Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (memreg.CompactResult, error)
-	Usage(ctx context.Context, filters map[string]any) (memreg.UsageResponse, error)
+	Add(ctx context.Context, req memprovider.AddRequest) (memprovider.SearchResponse, error)
+	Search(ctx context.Context, req memprovider.SearchRequest) (memprovider.SearchResponse, error)
+	GetAll(ctx context.Context, req memprovider.GetAllRequest) (memprovider.SearchResponse, error)
+	Update(ctx context.Context, req memprovider.UpdateRequest) (memorydomain.Item, error)
+	Delete(ctx context.Context, memoryID string) (memprovider.DeleteResponse, error)
+	DeleteBatch(ctx context.Context, memoryIDs []string) (memprovider.DeleteResponse, error)
+	DeleteAll(ctx context.Context, req memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error)
+	Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (memprovider.CompactResult, error)
+	Usage(ctx context.Context, filters map[string]any) (memprovider.UsageResponse, error)
 	Mode() string
-	Status(ctx context.Context, botID string) (memreg.MemoryStatusResponse, error)
-	Rebuild(ctx context.Context, botID string) (memreg.RebuildResult, error)
+	Status(ctx context.Context, botID string) (memprovider.MemoryStatusResponse, error)
+	Rebuild(ctx context.Context, botID string) (memprovider.RebuildResult, error)
 }
 
 type llmCompactRuntime interface {
-	CompactWithLLM(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm memreg.LLM) (memreg.CompactResult, error)
+	CompactWithLLM(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm memprovider.LLM) (memprovider.CompactResult, error)
 }
 
 func NewBuiltinProvider(log *slog.Logger, service Runtime) *BuiltinProvider {
@@ -60,7 +60,7 @@ func NewBuiltinProvider(log *slog.Logger, service Runtime) *BuiltinProvider {
 }
 
 // SetLLM injects the LLM client used for Extract/Decide in memory formation.
-func (p *BuiltinProvider) SetLLM(llm memreg.LLM) {
+func (p *BuiltinProvider) SetLLM(llm memprovider.LLM) {
 	p.llm = llm
 }
 
@@ -139,18 +139,18 @@ func (p *BuiltinProvider) MemoryVersion(ctx context.Context, botID string) strin
 	return versioned.MemoryVersion(ctx, botID)
 }
 
-func (p *BuiltinProvider) SemanticCompactCapability() memreg.MemoryCompactCapability {
+func (p *BuiltinProvider) SemanticCompactCapability() memprovider.MemoryCompactCapability {
 	if p.service == nil {
-		return memreg.MemoryCompactCapability{Reason: "memory runtime not configured"}
+		return memprovider.MemoryCompactCapability{Reason: "memory runtime not configured"}
 	}
 	if p.llm == nil {
-		return memreg.MemoryCompactCapability{Reason: "semantic compact requires a configured LLM"}
+		return memprovider.MemoryCompactCapability{Reason: "semantic compact requires a configured LLM"}
 	}
 	if _, ok := p.service.(llmCompactRuntime); !ok {
-		return memreg.MemoryCompactCapability{Reason: "selected memory runtime does not support semantic compact"}
+		return memprovider.MemoryCompactCapability{Reason: "selected memory runtime does not support semantic compact"}
 	}
 	mode := strings.TrimSpace(p.service.Mode())
-	return memreg.MemoryCompactCapability{
+	return memprovider.MemoryCompactCapability{
 		Semantic:     true,
 		Archive:      mode != ModeGraph,
 		RebuildIndex: mode == "graph",
@@ -181,7 +181,7 @@ func memorySourceLabel(item memorydomain.Item) string {
 
 // --- Conversation Hooks ---
 
-func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req memreg.BeforeChatRequest) (*memreg.BeforeChatResult, error) {
+func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req memprovider.BeforeChatRequest) (*memprovider.BeforeChatResult, error) {
 	if p.service == nil {
 		return nil, nil
 	}
@@ -190,7 +190,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req memreg.BeforeCha
 	}
 
 	fetchLimit := overfetchLimit(p.packer)
-	resp, err := p.service.Search(ctx, memreg.SearchRequest{
+	resp, err := p.service.Search(ctx, memprovider.SearchRequest{
 		Query: req.Query,
 		BotID: req.BotID,
 		Limit: fetchLimit,
@@ -237,14 +237,14 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req memreg.BeforeCha
 	if retrievalMode == "" {
 		retrievalMode = strings.TrimSpace(p.service.Mode())
 	}
-	return &memreg.BeforeChatResult{
+	return &memprovider.BeforeChatResult{
 		ContextText:    payload,
 		RetrievalMode:  retrievalMode,
 		FallbackReason: strings.TrimSpace(resp.FallbackReason),
 	}, nil
 }
 
-func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req memreg.AfterChatRequest) error {
+func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req memprovider.AfterChatRequest) error {
 	if p.service == nil {
 		return nil
 	}
@@ -276,7 +276,7 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req memreg.AfterChatR
 		"bot_id":    botID,
 	}
 	metadata := memport.BuildProfileMetadata(req.UserID, req.ChannelIdentityID, req.DisplayName)
-	if _, err := p.service.Add(ctx, memreg.AddRequest{
+	if _, err := p.service.Add(ctx, memprovider.AddRequest{
 		Messages: req.Messages,
 		BotID:    botID,
 		Metadata: metadata,
@@ -289,58 +289,58 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req memreg.AfterChatR
 
 // --- CRUD ---
 
-func (p *BuiltinProvider) Add(ctx context.Context, req memreg.AddRequest) (memreg.SearchResponse, error) {
+func (p *BuiltinProvider) Add(ctx context.Context, req memprovider.AddRequest) (memprovider.SearchResponse, error) {
 	if p.service == nil {
-		return memreg.SearchResponse{}, errors.New("memory runtime not configured")
+		return memprovider.SearchResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Add(ctx, req)
 }
 
-func (p *BuiltinProvider) Search(ctx context.Context, req memreg.SearchRequest) (memreg.SearchResponse, error) {
+func (p *BuiltinProvider) Search(ctx context.Context, req memprovider.SearchRequest) (memprovider.SearchResponse, error) {
 	if p.service == nil {
-		return memreg.SearchResponse{}, errors.New("memory runtime not configured")
+		return memprovider.SearchResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Search(ctx, req)
 }
 
-func (p *BuiltinProvider) GetAll(ctx context.Context, req memreg.GetAllRequest) (memreg.SearchResponse, error) {
+func (p *BuiltinProvider) GetAll(ctx context.Context, req memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
 	if p.service == nil {
-		return memreg.SearchResponse{}, errors.New("memory runtime not configured")
+		return memprovider.SearchResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.GetAll(ctx, req)
 }
 
-func (p *BuiltinProvider) Update(ctx context.Context, req memreg.UpdateRequest) (memorydomain.Item, error) {
+func (p *BuiltinProvider) Update(ctx context.Context, req memprovider.UpdateRequest) (memorydomain.Item, error) {
 	if p.service == nil {
 		return memorydomain.Item{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Update(ctx, req)
 }
 
-func (p *BuiltinProvider) Delete(ctx context.Context, memoryID string) (memreg.DeleteResponse, error) {
+func (p *BuiltinProvider) Delete(ctx context.Context, memoryID string) (memprovider.DeleteResponse, error) {
 	if p.service == nil {
-		return memreg.DeleteResponse{}, errors.New("memory runtime not configured")
+		return memprovider.DeleteResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Delete(ctx, memoryID)
 }
 
-func (p *BuiltinProvider) DeleteBatch(ctx context.Context, memoryIDs []string) (memreg.DeleteResponse, error) {
+func (p *BuiltinProvider) DeleteBatch(ctx context.Context, memoryIDs []string) (memprovider.DeleteResponse, error) {
 	if p.service == nil {
-		return memreg.DeleteResponse{}, errors.New("memory runtime not configured")
+		return memprovider.DeleteResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.DeleteBatch(ctx, memoryIDs)
 }
 
-func (p *BuiltinProvider) DeleteAll(ctx context.Context, req memreg.DeleteAllRequest) (memreg.DeleteResponse, error) {
+func (p *BuiltinProvider) DeleteAll(ctx context.Context, req memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
 	if p.service == nil {
-		return memreg.DeleteResponse{}, errors.New("memory runtime not configured")
+		return memprovider.DeleteResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.DeleteAll(ctx, req)
 }
 
-func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (memreg.CompactResult, error) {
+func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (memprovider.CompactResult, error) {
 	if p.service == nil {
-		return memreg.CompactResult{}, errors.New("memory runtime not configured")
+		return memprovider.CompactResult{}, errors.New("memory runtime not configured")
 	}
 	capability := p.SemanticCompactCapability()
 	if !capability.Semantic {
@@ -348,28 +348,28 @@ func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, r
 		if reason == "" {
 			reason = "semantic compact is not available"
 		}
-		return memreg.CompactResult{}, errors.New(reason)
+		return memprovider.CompactResult{}, errors.New(reason)
 	}
 	return p.service.(llmCompactRuntime).CompactWithLLM(ctx, filters, ratio, decayDays, p.llm)
 }
 
-func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (memreg.UsageResponse, error) {
+func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (memprovider.UsageResponse, error) {
 	if p.service == nil {
-		return memreg.UsageResponse{}, errors.New("memory runtime not configured")
+		return memprovider.UsageResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Usage(ctx, filters)
 }
 
-func (p *BuiltinProvider) Status(ctx context.Context, botID string) (memreg.MemoryStatusResponse, error) {
+func (p *BuiltinProvider) Status(ctx context.Context, botID string) (memprovider.MemoryStatusResponse, error) {
 	if p.service == nil {
-		return memreg.MemoryStatusResponse{}, errors.New("memory runtime not configured")
+		return memprovider.MemoryStatusResponse{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Status(ctx, botID)
 }
 
-func (p *BuiltinProvider) Rebuild(ctx context.Context, botID string) (memreg.RebuildResult, error) {
+func (p *BuiltinProvider) Rebuild(ctx context.Context, botID string) (memprovider.RebuildResult, error) {
 	if p.service == nil {
-		return memreg.RebuildResult{}, errors.New("memory runtime not configured")
+		return memprovider.RebuildResult{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Rebuild(ctx, botID)
 }
@@ -381,20 +381,20 @@ type markdownIngestor interface {
 	IngestMarkdownFiles(ctx context.Context, botID string) (IngestResult, error)
 }
 
-// IngestFromMarkdown implements memreg.MarkdownIngestProvider. It imports
+// IngestFromMarkdown implements memprovider.MarkdownIngestProvider. It imports
 // /data/memory/*.md into the wiki store so agent-authored files become
 // searchable DB nodes (and survive the next derived-view rebuild).
-func (p *BuiltinProvider) IngestFromMarkdown(ctx context.Context, botID string) (memreg.IngestResult, error) {
+func (p *BuiltinProvider) IngestFromMarkdown(ctx context.Context, botID string) (memprovider.IngestResult, error) {
 	if p.service == nil {
-		return memreg.IngestResult{}, errors.New("memory runtime not configured")
+		return memprovider.IngestResult{}, errors.New("memory runtime not configured")
 	}
 	ing, ok := p.service.(markdownIngestor)
 	if !ok {
-		return memreg.IngestResult{}, errors.New("selected memory runtime does not support markdown ingest")
+		return memprovider.IngestResult{}, errors.New("selected memory runtime does not support markdown ingest")
 	}
 	res, err := ing.IngestMarkdownFiles(ctx, botID)
 	if err != nil {
-		return memreg.IngestResult{}, err
+		return memprovider.IngestResult{}, err
 	}
-	return memreg.IngestResult{Ingested: res.Ingested, Skipped: res.Skipped}, nil
+	return memprovider.IngestResult{Ingested: res.Ingested, Skipped: res.Skipped}, nil
 }

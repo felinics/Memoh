@@ -10,16 +10,17 @@ import (
 	"github.com/labstack/echo/v4"
 
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
-	"github.com/memohai/memoh/domains/agent/chat/usage"
+	usagepersistence "github.com/memohai/memoh/domains/agent/chat/usage/persistence"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type SessionInfoHandler struct {
-	reader          usage.Reader
+	reader          usagepersistence.Reader
 	botService      *bot.Service
 	accountService  *account.Service
 	modelsService   *modelcatalog.Service
@@ -27,7 +28,7 @@ type SessionInfoHandler struct {
 	logger          *slog.Logger
 }
 
-func NewSessionInfoHandler(log *slog.Logger, reader usage.Reader, botService *bot.Service, accountService *account.Service, modelsService *modelcatalog.Service, settingsService *setting.Service) *SessionInfoHandler {
+func NewSessionInfoHandler(log *slog.Logger, reader usagepersistence.Reader, botService *bot.Service, accountService *account.Service, modelsService *modelcatalog.Service, settingsService *setting.Service) *SessionInfoHandler {
 	return &SessionInfoHandler{
 		reader:          reader,
 		botService:      botService,
@@ -68,9 +69,9 @@ type CacheStats struct {
 // @Param session_id path string true "Session ID"
 // @Param model_id query string false "Optional model UUID override for context window"
 // @Success 200 {object} SessionInfoResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/status [get].
 func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
@@ -79,21 +80,21 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+		return apperror.Required("session_id")
 	}
 
 	if _, err := uuid.Parse(sessionID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid session id")
+		return apperror.Field("session_id", apperror.FieldInvalid)
 	}
 
 	ctx := c.Request().Context()
 	sessionRow, err := h.reader.GetSession(ctx, sessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.NotFound("get session info", nil)
 	}
 	sessionMode, runtimeType := normalizedSessionDescriptor(session.Thread{
 		Type:        sessionRow.Type,
@@ -105,7 +106,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		return err
 	}
 	if sessionRow.BotID != bot.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.NotFound("get session info", nil)
 	}
 	perms, err := h.resolveCurrentUserPermissions(c, userID, bot.ID)
 	if err != nil {
@@ -120,20 +121,20 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		CreatedByUserID: sessionRow.CreatedByUserID,
 	}
 	if !canAccessSession(sess, userID, perms) {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.NotFound("get session info", nil)
 	}
 
 	messageCount, err := h.reader.CountMessagesBySession(ctx, sessionID)
 	if err != nil {
 		h.logger.Error("count messages failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to count messages")
+		return apperror.Internal("count session messages", err)
 	}
 
 	var usedTokens int64
 	latestUsage, err := h.reader.GetLatestAssistantUsage(ctx, sessionID)
-	if err != nil && !errors.Is(err, usage.ErrNotFound) {
+	if err != nil && !errors.Is(err, usagepersistence.ErrNotFound) {
 		h.logger.Error("get latest usage failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get latest usage")
+		return apperror.Internal("get latest usage", err)
 	}
 	if err == nil {
 		usedTokens = latestUsage
@@ -144,7 +145,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	cacheRow, err := h.reader.GetSessionCacheStats(ctx, sessionID)
 	if err != nil {
 		h.logger.Error("get cache stats failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get cache stats")
+		return apperror.Internal("get cache stats", err)
 	}
 
 	var cacheHitRate float64
@@ -155,7 +156,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	skills, err := h.reader.GetSessionUsedSkills(ctx, sessionID)
 	if err != nil {
 		h.logger.Error("get used skills failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get used skills")
+		return apperror.Internal("get used skills", err)
 	}
 	if skills == nil {
 		skills = []string{}
@@ -179,15 +180,15 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 func (h *SessionInfoHandler) resolveCurrentUserPermissions(c echo.Context, channelIdentityID, botID string) ([]string, error) {
 	if h.botService == nil || h.accountService == nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+		return nil, apperror.Internal("resolve user permissions", nil)
 	}
 	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, apperror.Internal("resolve user permissions", err)
 	}
 	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, apperror.Internal("resolve user permissions", err)
 	}
 	return perms, nil
 }

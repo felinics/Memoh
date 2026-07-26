@@ -7,10 +7,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/api/auth"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	agenthttp "github.com/memohai/memoh/domains/api/http/agent"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 	providers "github.com/memohai/memoh/domains/model/provider"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/oauth"
 )
 
@@ -41,13 +42,13 @@ func (h *ProviderOAuthHandler) Register(e *echo.Echo) {
 // @Tags providers-oauth
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.OAuthAuthorizeResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /providers/{id}/oauth/authorize [get].
 func (h *ProviderOAuthHandler) Authorize(c echo.Context) error {
 	providerID := strings.TrimSpace(c.Param("id"))
 	if providerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	ctx := c.Request().Context()
 	if userID, err := auth.UserIDFromContext(c); err == nil {
@@ -55,7 +56,7 @@ func (h *ProviderOAuthHandler) Authorize(c echo.Context) error {
 	}
 	resp, err := h.service.StartOAuthAuthorization(ctx, providerID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("authorize provider oauth", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -65,13 +66,13 @@ func (h *ProviderOAuthHandler) Authorize(c echo.Context) error {
 // @Tags providers-oauth
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.OAuthStatus
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /providers/{id}/oauth/poll [post].
 func (h *ProviderOAuthHandler) Poll(c echo.Context) error {
 	providerID := strings.TrimSpace(c.Param("id"))
 	if providerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	ctx := c.Request().Context()
 	if userID, err := auth.UserIDFromContext(c); err == nil {
@@ -79,7 +80,7 @@ func (h *ProviderOAuthHandler) Poll(c echo.Context) error {
 	}
 	status, err := h.service.PollOAuthAuthorization(ctx, providerID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("poll provider oauth", err)
 	}
 	return c.JSON(http.StatusOK, status)
 }
@@ -89,13 +90,13 @@ func (h *ProviderOAuthHandler) Poll(c echo.Context) error {
 // @Tags providers-oauth
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.OAuthStatus
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /providers/{id}/oauth/status [get].
 func (h *ProviderOAuthHandler) Status(c echo.Context) error {
 	providerID := strings.TrimSpace(c.Param("id"))
 	if providerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	ctx := c.Request().Context()
 	if userID, err := auth.UserIDFromContext(c); err == nil {
@@ -103,7 +104,7 @@ func (h *ProviderOAuthHandler) Status(c echo.Context) error {
 	}
 	status, err := h.service.GetOAuthStatus(ctx, providerID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("get provider oauth status", err)
 	}
 	return c.JSON(http.StatusOK, status)
 }
@@ -113,20 +114,20 @@ func (h *ProviderOAuthHandler) Status(c echo.Context) error {
 // @Tags providers-oauth
 // @Param id path string true "Provider ID (UUID)"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /providers/{id}/oauth/token [delete].
 func (h *ProviderOAuthHandler) Revoke(c echo.Context) error {
 	providerID := strings.TrimSpace(c.Param("id"))
 	if providerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	ctx := c.Request().Context()
 	if userID, err := auth.UserIDFromContext(c); err == nil {
 		ctx = oauth.WithUserID(ctx, userID)
 	}
 	if err := h.service.RevokeOAuthToken(ctx, providerID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("revoke provider oauth", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -137,23 +138,23 @@ func (h *ProviderOAuthHandler) Revoke(c echo.Context) error {
 // @Param code query string true "Authorization code"
 // @Param state query string true "State parameter"
 // @Success 200 {string} string "HTML success page"
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Router /providers/oauth/callback [get].
 func (h *ProviderOAuthHandler) Callback(c echo.Context) error {
 	code := strings.TrimSpace(c.QueryParam("code"))
 	state := strings.TrimSpace(c.QueryParam("state"))
 	if code == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "code is required")
+		return apperror.Required("code")
 	}
 	if state == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "state is required")
+		return apperror.Required("state")
 	}
 	if h.acpCodexOAuth != nil && h.acpCodexOAuth.HandlesCallbackState(state) {
 		return h.acpCodexOAuth.Callback(c)
 	}
 	providerID, err := h.service.HandleOAuthCallback(c.Request().Context(), state, code)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("handle provider oauth callback", err)
 	}
 
 	page := template.Must(template.New("oauth-success").Parse(`<!doctype html>

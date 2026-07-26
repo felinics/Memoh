@@ -13,9 +13,10 @@ import (
 	"github.com/memohai/memoh/domains/agent/engine"
 	"github.com/memohai/memoh/domains/agent/extension/hooks"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type HooksHandler struct {
@@ -82,9 +83,9 @@ func (h *HooksHandler) Register(e *echo.Echo) {
 // @Tags hooks
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} HooksEventsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/hooks/events [get].
 func (h *HooksHandler) Events(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
@@ -93,7 +94,7 @@ func (h *HooksHandler) Events(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bot.PermissionChat); err != nil {
 		return err
@@ -117,9 +118,9 @@ func (h *HooksHandler) Events(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body HookTestRequest true "Hook test payload"
 // @Success 200 {object} HookTestResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/hooks/test [post].
 func (h *HooksHandler) Test(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
@@ -128,26 +129,26 @@ func (h *HooksHandler) Test(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bot.PermissionWorkspaceExec); err != nil {
 		return err
 	}
 	var input HookTestRequest
 	if err := c.Bind(&input); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind hook test", err)
 	}
 	eventName := strings.TrimSpace(input.Event)
 	if eventName == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "event is required")
+		return apperror.Required("event")
 	}
 	if h.service == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "hooks service is not configured")
+		return apperror.Internal("run hook test", nil)
 	}
 	ctx := c.Request().Context()
 	cfg, exists, err := h.service.LoadEffective(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("load hook config", err)
 	}
 	req := hooks.Request{
 		Version:   1,
@@ -177,7 +178,7 @@ func (h *HooksHandler) Test(c echo.Context) error {
 		if errors.Is(err, hooks.ErrDenied) {
 			return c.JSON(http.StatusOK, HookTestResponse{ConfigExists: exists, Result: result})
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("run hook test", err)
 	}
 	return c.JSON(http.StatusOK, HookTestResponse{ConfigExists: exists, Result: result})
 }
@@ -211,7 +212,7 @@ type hookTestToolRunner struct {
 
 func (r hookTestToolRunner) RunHookTool(ctx context.Context, toolName string, input map[string]any) (any, error) {
 	if r.agent == nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, "agent is not configured")
+		return nil, apperror.Internal("run hook tool", nil)
 	}
 	part, err := r.agent.ExecuteTool(ctx, r.cfg, sdk.ToolCall{
 		ToolName:   strings.TrimSpace(toolName),

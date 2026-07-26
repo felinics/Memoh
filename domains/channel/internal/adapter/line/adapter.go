@@ -7,14 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/labstack/echo/v4"
 	"github.com/line/line-bot-sdk-go/v8/linebot/messaging_api"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
@@ -211,13 +209,6 @@ func (*Adapter) Connect(_ context.Context, cfg gateway.ChannelConfig, _ gateway.
 		return nil, err
 	}
 	return gateway.NewConnection(cfg, func(context.Context) error { return nil }), nil
-}
-
-func (*Adapter) httpError(status int, message string) error {
-	if strings.TrimSpace(message) == "" {
-		message = http.StatusText(status)
-	}
-	return echo.NewHTTPError(status, message)
 }
 
 func (a *Adapter) logWarn(message string, attrs ...any) {

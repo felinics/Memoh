@@ -40,6 +40,10 @@ type statusSnapshot struct {
 	Error         string
 }
 
+type processKiller interface {
+	Kill() error
+}
+
 type Manager struct {
 	log               *slog.Logger
 	cfg               config.WebhookTunnelConfig
@@ -47,11 +51,14 @@ type Manager struct {
 
 	httpClient *http.Client
 
-	mu      sync.RWMutex
-	status  statusSnapshot
-	cmd     *exec.Cmd
-	cmdDone chan struct{}
-	cancel  context.CancelFunc
+	mu             sync.RWMutex
+	status         statusSnapshot
+	managedProcess processKiller
+	cmdDone        chan struct{}
+	pollDone       chan struct{}
+	cancel         context.CancelFunc
+	started        bool
+	stopped        bool
 }
 
 func NewManager(log *slog.Logger, cfg config.Config, defaultListenAddr string) *Manager {
@@ -85,8 +92,19 @@ func (m *Manager) Start(ctx context.Context) error {
 	if m == nil {
 		return nil
 	}
-	runCtx, cancel := context.WithCancel(ctx)
-	m.setCancel(cancel)
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return errors.New("webhook tunnel manager is stopped")
+	}
+	if m.started {
+		m.mu.Unlock()
+		return nil
+	}
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	m.cancel = cancel
+	m.started = true
+	m.mu.Unlock()
 	switch m.cfg.EffectiveMode() {
 	case config.WebhookTunnelModeDisabled:
 		cancel()
@@ -95,7 +113,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return nil
 	case config.WebhookTunnelModeExternal:
 		m.setStatus(statusSnapshot{Enabled: true, Mode: config.WebhookTunnelModeExternal, Status: statusStarting})
-		go m.pollLoop(runCtx, m.metricsURL())
+		m.startPollLoop(runCtx, m.metricsURL())
 		return nil
 	case config.WebhookTunnelModeManaged:
 		m.setStatus(statusSnapshot{Enabled: true, Mode: config.WebhookTunnelModeManaged, Status: statusStarting})
@@ -105,7 +123,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			m.setError(err)
 			return nil
 		}
-		go m.pollLoop(runCtx, m.localMetricsURL())
+		m.startPollLoop(runCtx, m.localMetricsURL())
 		return nil
 	default:
 		cancel()
@@ -123,30 +141,56 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	cancel := m.cancel
 	m.cancel = nil
-	cmd := m.cmd
-	done := m.cmdDone
+	m.started = false
+	m.stopped = true
+	process := m.managedProcess
+	cmdDone := m.cmdDone
+	pollDone := m.pollDone
 	m.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
 	}
-	if cmd == nil || cmd.Process == nil {
+	var errs []error
+	if process != nil {
+		if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			errs = append(errs, fmt.Errorf("stop managed webhook tunnel: %w", err))
+		}
+	}
+	cmdWaitErr := waitForTask(ctx, cmdDone)
+	if cmdWaitErr != nil {
+		errs = append(errs, fmt.Errorf("wait for managed webhook tunnel: %w", cmdWaitErr))
+	}
+	pollWaitErr := waitForTask(ctx, pollDone)
+	if pollWaitErr != nil {
+		errs = append(errs, fmt.Errorf("wait for webhook tunnel polling: %w", pollWaitErr))
+	}
+	if cmdWaitErr == nil && pollWaitErr == nil {
 		m.markStopped()
-		return nil
 	}
-	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		return err
-	}
+	return errors.Join(errs...)
+}
+
+func waitForTask(ctx context.Context, done <-chan struct{}) error {
 	if done == nil {
-		m.markStopped()
 		return nil
 	}
 	select {
-	case <-ctx.Done():
-		return ctx.Err()
 	case <-done:
-		m.markStopped()
 		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		// Prefer a completed task when completion races the shutdown deadline.
+		select {
+		case <-done:
+			return nil
+		default:
+			return ctx.Err()
+		}
 	}
 }
 
@@ -229,34 +273,45 @@ func (m *Manager) startManaged(ctx context.Context) error {
 	}
 	done := make(chan struct{})
 	m.mu.Lock()
-	m.cmd = cmd
+	m.managedProcess = cmd.Process
 	m.cmdDone = done
 	m.mu.Unlock()
 	go func() {
 		defer close(done)
 		defer func() { _ = os.RemoveAll(homeDir) }()
 		err := cmd.Wait()
+		stopping := ctx.Err() != nil
 		m.mu.Lock()
-		if m.cmd == cmd {
-			m.cmd = nil
-			m.cmdDone = nil
+		if m.cmdDone == done {
+			m.managedProcess = nil
 			current := statusSnapshot{
 				Enabled: true,
 				Mode:    m.cfg.EffectiveMode(),
 				Status:  statusStopped,
 			}
-			if err != nil {
+			if err != nil && !stopping {
 				current.Status = statusError
 				current.Error = "cloudflared exited"
 			}
 			m.status = current
 		}
 		m.mu.Unlock()
-		if err != nil && m.log != nil {
+		if err != nil && !stopping && m.log != nil {
 			m.log.WarnContext(ctx, "cloudflared exited", slog.Any("error", err))
 		}
 	}()
 	return nil
+}
+
+func (m *Manager) startPollLoop(ctx context.Context, metricsURL string) {
+	done := make(chan struct{})
+	m.mu.Lock()
+	m.pollDone = done
+	m.mu.Unlock()
+	go func() {
+		defer close(done)
+		m.pollLoop(ctx, metricsURL)
+	}()
 }
 
 func (m *Manager) pollLoop(ctx context.Context, metricsURL string) {

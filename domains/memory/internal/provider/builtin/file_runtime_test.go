@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 func TestFileRuntimeRejectsEmptyMemoryWithoutHTTPError(t *testing.T) {
 	t.Parallel()
 	runtime := newFileRuntime(newFakeStore())
 
-	_, err := runtime.Add(context.Background(), memreg.AddRequest{BotID: "bot-1"})
+	_, err := runtime.Add(context.Background(), memprovider.AddRequest{BotID: "bot-1"})
 	if err == nil {
 		t.Fatal("Add() error = nil, want message validation error")
 	}

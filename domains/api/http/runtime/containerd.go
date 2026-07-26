@@ -16,9 +16,9 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/domains/agent/mcp"
-	"github.com/memohai/memoh/domains/api/access/policy"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	"github.com/memohai/memoh/domains/api/bot/access/policy"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 	ctr "github.com/memohai/memoh/domains/runtime/container"
@@ -122,7 +122,7 @@ func NewWorkspaceSetupAppError(setupErr error, requestID string) (CreateContaine
 	default:
 		return CreateContainerErrorEvent{}, false
 	}
-	public, ok := apperror.PublicFrom(apperror.Wrap(code, setupErr, nil), requestID)
+	public, ok := apperror.PublicFrom(apperror.Internal("setup workspace", setupErr).WithCode(code, nil), requestID)
 	if !ok {
 		return CreateContainerErrorEvent{}, false
 	}
@@ -351,8 +351,8 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body CreateContainerRequest true "Create workspace payload"
 // @Success 200 {object} CreateContainerResponse "SSE stream of workspace creation events"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container [post].
 func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -362,7 +362,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 
 	var req CreateContainerRequest
 	if err := c.Bind(&req); err != nil {
-		return httpx.NewI18nHTTPError(http.StatusBadRequest, "workspace_create_request_invalid", "bot.container.createFailed", err.Error())
+		return apperror.Invalid("bind create workspace", err)
 	}
 	// Image override lets administrators specify a custom base image.
 	// NOTE(saas): if this becomes a multi-tenant SaaS, image override must be
@@ -395,7 +395,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
-		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+		return apperror.Internal("create workspace stream", nil)
 	}
 
 	if err := httpx.PrepareSSE(c); err != nil {
@@ -594,8 +594,8 @@ func (h *ContainerdHandler) clearContainerSetupFailure(ctx context.Context, botI
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} GetContainerResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container [get].
 func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -605,9 +605,9 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	status, err := h.manager.GetContainerInfo(c.Request().Context(), botID)
 	if err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
-			return httpx.NewI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bot.container.loadFailed", "workspace not found for bot")
+			return apperror.NotFound("get workspace", err)
 		}
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_load_failed", "bot.container.loadFailed", err.Error())
+		return apperror.Internal("get workspace", err)
 	}
 	return c.JSON(http.StatusOK, GetContainerResponse{
 		ContainerID:      status.ContainerID,
@@ -631,7 +631,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} GetContainerMetricsResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/metrics [get].
 func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -641,7 +641,7 @@ func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 
 	response, err := h.buildContainerMetricsResponse(c.Request().Context(), botID, nil)
 	if err != nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_metrics_load_failed", "bot.container.metricsLoadFailed", err.Error())
+		return apperror.Internal("load workspace metrics", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -652,8 +652,8 @@ func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body UpdateContainerMetricsRequest true "Metrics settings payload"
 // @Success 200 {object} GetContainerMetricsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/metrics [put].
 func (h *ContainerdHandler) UpdateContainerMetrics(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bot.PermissionManage)
@@ -663,14 +663,14 @@ func (h *ContainerdHandler) UpdateContainerMetrics(c echo.Context) error {
 
 	var req UpdateContainerMetricsRequest
 	if err := c.Bind(&req); err != nil {
-		return httpx.NewI18nHTTPError(http.StatusBadRequest, "workspace_resource_limits_invalid", "bot.container.resourceLimits.saveFailed", err.Error())
+		return apperror.Invalid("bind resource limits", err)
 	}
 	if req.ResourceLimits == nil {
-		return httpx.NewI18nHTTPError(http.StatusBadRequest, "workspace_resource_limits_required", "bot.container.resourceLimits.saveFailed", "resource_limits is required")
+		return apperror.Required("resource_limits")
 	}
 	limitsReq := req.ResourceLimits
 	if limitsReq.CPUMillicores < 0 || limitsReq.MemoryBytes < 0 || limitsReq.StorageBytes < 0 {
-		return httpx.NewI18nHTTPError(http.StatusBadRequest, "workspace_resource_limits_invalid", "bot.container.resourceLimits.saveFailed", "resource limits must be non-negative")
+		return apperror.Field("resource_limits", apperror.FieldOutOfRange)
 	}
 	limits, err := h.manager.SetResourceLimits(c.Request().Context(), botID, ctr.ResourceLimits{
 		CPUMillicores: limitsReq.CPUMillicores,
@@ -678,11 +678,11 @@ func (h *ContainerdHandler) UpdateContainerMetrics(c echo.Context) error {
 		StorageBytes:  limitsReq.StorageBytes,
 	})
 	if err != nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_resource_limits_save_failed", "bot.container.resourceLimits.saveFailed", err.Error())
+		return apperror.Internal("save resource limits", err)
 	}
 	response, err := h.buildContainerMetricsResponse(c.Request().Context(), botID, limits)
 	if err != nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_metrics_load_failed", "bot.container.metricsLoadFailed", err.Error())
+		return apperror.Internal("load workspace metrics", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -731,8 +731,8 @@ func (h *ContainerdHandler) buildContainerMetricsResponse(
 // @Param bot_id path string true "Bot ID"
 // @Param preserve_data query bool false "Export /data before deletion"
 // @Success 204
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container [delete].
 func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -741,7 +741,7 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 	}
 	preserveData := c.QueryParam("preserve_data") == "true"
 	if err := h.manager.CleanupBotContainer(c.Request().Context(), botID, preserveData); err != nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_delete_failed", "bot.container.deleteFailed", err.Error())
+		return apperror.Internal("delete workspace", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -751,8 +751,8 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/start [post].
 func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -761,9 +761,9 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	}
 	if err := h.manager.EnsureNativeRunning(c.Request().Context(), botID); err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
-			return httpx.NewI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bot.container.startFailed", "workspace not found for bot")
+			return apperror.NotFound("start workspace", err)
 		}
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_start_failed", "bot.container.startFailed", err.Error())
+		return apperror.Internal("start workspace", err)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"started": true})
 }
@@ -773,8 +773,8 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/stop [post].
 func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -783,9 +783,9 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	}
 	if err := h.manager.StopBot(c.Request().Context(), botID); err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
-			return httpx.NewI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bot.container.stopFailed", "workspace not found for bot")
+			return apperror.NotFound("stop workspace", err)
 		}
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_stop_failed", "bot.container.stopFailed", err.Error())
+		return apperror.Internal("stop workspace", err)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"stopped": true})
 }
@@ -796,31 +796,31 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body CreateSnapshotRequest true "Create snapshot payload"
 // @Success 200 {object} CreateSnapshotResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 501 {object} ErrorResponse "Snapshots currently not supported on this backend"
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Failure 501 {object} apperror.Problem "Snapshots currently not supported on this backend"
 // @Router /bots/{bot_id}/container/snapshots [post].
 func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	if h.containerBackend == "apple" {
-		return httpx.NewI18nHTTPError(http.StatusNotImplemented, "workspace_snapshots_unsupported", "bot.container.snapshotActionFailed", "snapshots are not supported by the Apple runtime backend")
+		return apperror.Unimplemented("create workspace snapshot", nil)
 	}
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
 	}
 	if h.manager == nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_snapshot_manager_unavailable", "bot.container.snapshotActionFailed", "snapshot manager not configured")
+		return apperror.Internal("create workspace snapshot", nil)
 	}
 	var req CreateSnapshotRequest
 	if err := c.Bind(&req); err != nil {
-		return httpx.NewI18nHTTPError(http.StatusBadRequest, "workspace_snapshot_request_invalid", "bot.container.snapshotActionFailed", err.Error())
+		return apperror.Invalid("bind create snapshot", err)
 	}
 	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, workspace.SnapshotSourceManual)
 	if err != nil {
 		if ctr.IsNotFound(err) {
-			return httpx.NewI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bot.container.snapshotActionFailed", "workspace not found")
+			return apperror.NotFound("create workspace snapshot", err)
 		}
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_snapshot_create_failed", "bot.container.snapshotActionFailed", err.Error())
+		return apperror.Internal("create workspace snapshot", err)
 	}
 	return c.JSON(http.StatusOK, CreateSnapshotResponse{
 		ContainerID:         created.ContainerID,
@@ -839,30 +839,30 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param snapshotter query string false "Snapshotter name"
 // @Success 200 {object} ListSnapshotsResponse
-// @Failure 501 {object} ErrorResponse "Snapshots currently not supported on this backend"
+// @Failure 501 {object} apperror.Problem "Snapshots currently not supported on this backend"
 // @Router /bots/{bot_id}/container/snapshots [get].
 func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	if h.containerBackend == "apple" {
-		return httpx.NewI18nHTTPError(http.StatusNotImplemented, "workspace_snapshots_unsupported", "bot.container.snapshotLoadFailed", "snapshots are not supported by the Apple runtime backend")
+		return apperror.Unimplemented("list workspace snapshots", nil)
 	}
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
 	}
 	if h.manager == nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_snapshot_manager_unavailable", "bot.container.snapshotLoadFailed", "snapshot manager not configured")
+		return apperror.Internal("list workspace snapshots", nil)
 	}
 
 	data, err := h.manager.ListBotSnapshotData(c.Request().Context(), botID)
 	if err != nil {
 		if ctr.IsNotFound(err) {
-			return httpx.NewI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bot.container.snapshotLoadFailed", "workspace not found")
+			return apperror.NotFound("list workspace snapshots", err)
 		}
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_snapshots_load_failed", "bot.container.snapshotLoadFailed", err.Error())
+		return apperror.Internal("list workspace snapshots", err)
 	}
 
 	if req := strings.TrimSpace(c.QueryParam("snapshotter")); req != "" && req != data.Snapshotter {
-		return httpx.NewI18nHTTPError(http.StatusBadRequest, "workspace_snapshotter_mismatch", "bot.container.snapshotLoadFailed", "snapshotter does not match the workspace runtime")
+		return apperror.Field("snapshotter", apperror.FieldInvalid)
 	}
 
 	snapshotKey := strings.TrimSpace(data.Info.StorageRef.Key)
@@ -874,7 +874,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 			slog.String("snapshotter", data.Snapshotter),
 			slog.String("snapshot_key", snapshotKey),
 		)
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_snapshot_chain_not_found", "bot.container.snapshotLoadFailed", "workspace snapshot chain not found")
+		return apperror.Internal("list workspace snapshots", nil)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -885,8 +885,8 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body RollbackRequest true "Rollback payload"
 // @Success 200 {object} object
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/snapshots/rollback [post].
 func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -894,19 +894,19 @@ func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 		return err
 	}
 	if h.manager == nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_manager_unavailable", "bot.container.rollbackFailed", "manager not configured")
+		return apperror.Internal("rollback workspace snapshot", nil)
 	}
 
 	var req RollbackRequest
 	if err := c.Bind(&req); err != nil {
-		return httpx.NewI18nHTTPError(http.StatusBadRequest, "workspace_snapshot_rollback_request_invalid", "bot.container.rollbackFailed", "invalid request body")
+		return apperror.Invalid("bind rollback snapshot", err)
 	}
 	if req.Version < 1 {
-		return httpx.NewI18nHTTPError(http.StatusBadRequest, "workspace_snapshot_version_invalid", "bot.container.rollbackFailed", "version must be >= 1")
+		return apperror.Field("version", apperror.FieldOutOfRange)
 	}
 
 	if err := h.manager.RollbackVersion(c.Request().Context(), botID, req.Version); err != nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_snapshot_rollback_failed", "bot.container.rollbackFailed", err.Error())
+		return apperror.Internal("rollback workspace snapshot", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"rolled_back_to": req.Version})
 }
@@ -916,8 +916,8 @@ func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/data/restore [post].
 func (h *ContainerdHandler) RestorePreservedData(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -925,15 +925,15 @@ func (h *ContainerdHandler) RestorePreservedData(c echo.Context) error {
 		return err
 	}
 	if h.manager == nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_manager_unavailable", "bot.container.restoreFailed", "manager not configured")
+		return apperror.Internal("restore preserved data", nil)
 	}
 
 	if !h.manager.HasPreservedData(botID) {
-		return httpx.NewI18nHTTPError(http.StatusNotFound, "workspace_preserved_data_not_found", "bot.container.restoreFailed", "no preserved data found")
+		return apperror.NotFound("restore preserved data", nil)
 	}
 
 	if err := h.manager.RestorePreservedData(c.Request().Context(), botID); err != nil {
-		return httpx.NewI18nHTTPError(http.StatusInternalServerError, "workspace_restore_failed", "bot.container.restoreFailed", err.Error())
+		return apperror.Internal("restore preserved data", err)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"restored": true})
 }
@@ -1214,7 +1214,7 @@ func (h *ContainerdHandler) requireBotAccessWithPermission(c echo.Context, permi
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return "", apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccessWithPermission(c.Request().Context(), channelIdentityID, botID, permission); err != nil {
 		return "", err
@@ -1239,7 +1239,7 @@ func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, e
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return "", apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
 		return "", err

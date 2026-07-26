@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/domains/agent/automation/schedule"
-	"github.com/memohai/memoh/domains/agent/chat/usage"
-	"github.com/memohai/memoh/domains/agent/mcp"
-	"github.com/memohai/memoh/domains/api/access/acl"
-	"github.com/memohai/memoh/domains/api/setting"
+	usagepersistence "github.com/memohai/memoh/domains/agent/chat/usage/persistence"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
+	aclpersistence "github.com/memohai/memoh/domains/api/bot/access/acl/persistence"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 	"github.com/memohai/memoh/internal/i18n"
 )
 
@@ -31,7 +31,7 @@ type fakeAccessEvaluator struct {
 	err   error
 }
 
-func (f *fakeAccessEvaluator) Evaluate(_ context.Context, _ acl.EvaluateRequest) (bool, error) {
+func (f *fakeAccessEvaluator) Evaluate(_ context.Context, _ aclpersistence.EvaluateRequest) (bool, error) {
 	return f.allow, f.err
 }
 
@@ -91,7 +91,7 @@ func newTestHandler(roleResolver MemberRoleResolver) *Handler {
 	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
-func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries usage.CommandReader) *Handler {
+func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries usagepersistence.CommandReader) *Handler {
 	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
 }
 
@@ -792,7 +792,7 @@ func TestExecute_CorrectIdentityForwarded(t *testing.T) {
 // suppress unused warnings.
 var (
 	_ = fakeScheduleService{items: []schedule.Schedule{{ID: "1", Name: "test"}}}
-	_ = mcp.Connection{}
+	_ = mcppersistence.Connection{}
 	_ = setting.Settings{}
 )
 

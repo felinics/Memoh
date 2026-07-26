@@ -11,7 +11,7 @@ import (
 	memorydomain "github.com/memohai/memoh/domains/memory"
 	memseg "github.com/memohai/memoh/domains/memory/internal/segment"
 	storefs "github.com/memohai/memoh/domains/memory/internal/store/fs"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 )
 
@@ -39,14 +39,14 @@ func newFileRuntime(store memoryStore) *fileRuntime {
 	return &fileRuntime{store: store}
 }
 
-func (r *fileRuntime) Add(ctx context.Context, req memreg.AddRequest) (memreg.SearchResponse, error) {
+func (r *fileRuntime) Add(ctx context.Context, req memprovider.AddRequest) (memprovider.SearchResponse, error) {
 	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
 	text := runtimeText(req.Message, req.Messages)
 	if text == "" {
-		return memreg.SearchResponse{}, errors.New("message is required")
+		return memprovider.SearchResponse{}, errors.New("message is required")
 	}
 	now := time.Now().UTC()
 	item := memorydomain.Item{
@@ -60,19 +60,19 @@ func (r *fileRuntime) Add(ctx context.Context, req memreg.AddRequest) (memreg.Se
 	}
 	itemsToPersist := []memorydomain.Item{storeItemFromMemoryItem(item)}
 	if err := r.store.PersistMemories(ctx, botID, itemsToPersist, req.Filters); err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
-	return memreg.SearchResponse{Results: []memorydomain.Item{item}, RetrievalMode: "file"}, nil
+	return memprovider.SearchResponse{Results: []memorydomain.Item{item}, RetrievalMode: "file"}, nil
 }
 
-func (r *fileRuntime) Search(ctx context.Context, req memreg.SearchRequest) (memreg.SearchResponse, error) {
+func (r *fileRuntime) Search(ctx context.Context, req memprovider.SearchRequest) (memprovider.SearchResponse, error) {
 	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
 	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
 	if err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
 	query := strings.ToLower(strings.TrimSpace(req.Query))
 	results := make([]memorydomain.Item, 0, len(items))
@@ -94,17 +94,17 @@ func (r *fileRuntime) Search(ctx context.Context, req memreg.SearchRequest) (mem
 	if req.Limit > 0 && len(results) > req.Limit {
 		results = results[:req.Limit]
 	}
-	return memreg.SearchResponse{Results: results, RetrievalMode: "file"}, nil
+	return memprovider.SearchResponse{Results: results, RetrievalMode: "file"}, nil
 }
 
-func (r *fileRuntime) GetAll(ctx context.Context, req memreg.GetAllRequest) (memreg.SearchResponse, error) {
+func (r *fileRuntime) GetAll(ctx context.Context, req memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
 	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
 	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
 	if err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
 	for i := range items {
 		items[i].BotID = botID
@@ -113,10 +113,10 @@ func (r *fileRuntime) GetAll(ctx context.Context, req memreg.GetAllRequest) (mem
 	if req.Limit > 0 && len(items) > req.Limit {
 		items = items[:req.Limit]
 	}
-	return memreg.SearchResponse{Results: memoryItemsFromStore(items), RetrievalMode: "file"}, nil
+	return memprovider.SearchResponse{Results: memoryItemsFromStore(items), RetrievalMode: "file"}, nil
 }
 
-func (r *fileRuntime) Update(ctx context.Context, req memreg.UpdateRequest) (memorydomain.Item, error) {
+func (r *fileRuntime) Update(ctx context.Context, req memprovider.UpdateRequest) (memorydomain.Item, error) {
 	memoryID := strings.TrimSpace(req.MemoryID)
 	if memoryID == "" {
 		return memorydomain.Item{}, errors.New("memory_id is required")
@@ -159,11 +159,11 @@ func (r *fileRuntime) Update(ctx context.Context, req memreg.UpdateRequest) (mem
 	return item, nil
 }
 
-func (r *fileRuntime) Delete(ctx context.Context, memoryID string) (memreg.DeleteResponse, error) {
+func (r *fileRuntime) Delete(ctx context.Context, memoryID string) (memprovider.DeleteResponse, error) {
 	return r.DeleteBatch(ctx, []string{memoryID})
 }
 
-func (r *fileRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (memreg.DeleteResponse, error) {
+func (r *fileRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (memprovider.DeleteResponse, error) {
 	grouped := map[string][]string{}
 	for _, id := range memoryIDs {
 		id = strings.TrimSpace(id)
@@ -178,37 +178,37 @@ func (r *fileRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (memr
 	}
 	for botID, ids := range grouped {
 		if err := r.store.RemoveMemories(ctx, botID, ids); err != nil {
-			return memreg.DeleteResponse{}, err
+			return memprovider.DeleteResponse{}, err
 		}
 	}
-	return memreg.DeleteResponse{Message: "Memories deleted successfully!"}, nil
+	return memprovider.DeleteResponse{Message: "Memories deleted successfully!"}, nil
 }
 
-func (r *fileRuntime) DeleteAll(ctx context.Context, req memreg.DeleteAllRequest) (memreg.DeleteResponse, error) {
+func (r *fileRuntime) DeleteAll(ctx context.Context, req memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
 	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
-		return memreg.DeleteResponse{}, err
+		return memprovider.DeleteResponse{}, err
 	}
 	if err := r.store.RemoveAllMemories(ctx, botID); err != nil {
-		return memreg.DeleteResponse{}, err
+		return memprovider.DeleteResponse{}, err
 	}
-	return memreg.DeleteResponse{Message: "All memories deleted successfully!"}, nil
+	return memprovider.DeleteResponse{Message: "All memories deleted successfully!"}, nil
 }
 
-func (*fileRuntime) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (memreg.CompactResult, error) {
-	return memreg.CompactResult{}, errors.New("file runtime compact is disabled; use graph runtime")
+func (*fileRuntime) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (memprovider.CompactResult, error) {
+	return memprovider.CompactResult{}, errors.New("file runtime compact is disabled; use graph runtime")
 }
 
-func (r *fileRuntime) Usage(ctx context.Context, filters map[string]any) (memreg.UsageResponse, error) {
+func (r *fileRuntime) Usage(ctx context.Context, filters map[string]any) (memprovider.UsageResponse, error) {
 	botID, err := runtimeBotID("", filters)
 	if err != nil {
-		return memreg.UsageResponse{}, err
+		return memprovider.UsageResponse{}, err
 	}
 	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
 	if err != nil {
-		return memreg.UsageResponse{}, err
+		return memprovider.UsageResponse{}, err
 	}
-	var usage memreg.UsageResponse
+	var usage memprovider.UsageResponse
 	usage.Count = len(items)
 	for _, item := range items {
 		usage.TotalTextBytes += int64(len(item.Memory))
@@ -228,16 +228,16 @@ func (*fileRuntime) Mode() string {
 	return "file"
 }
 
-func (r *fileRuntime) Status(ctx context.Context, botID string) (memreg.MemoryStatusResponse, error) {
+func (r *fileRuntime) Status(ctx context.Context, botID string) (memprovider.MemoryStatusResponse, error) {
 	fileCount, err := r.store.CountMemoryFiles(ctx, botID)
 	if err != nil {
-		return memreg.MemoryStatusResponse{}, err
+		return memprovider.MemoryStatusResponse{}, err
 	}
 	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
 	if err != nil {
-		return memreg.MemoryStatusResponse{}, err
+		return memprovider.MemoryStatusResponse{}, err
 	}
-	return memreg.MemoryStatusResponse{
+	return memprovider.MemoryStatusResponse{
 		ProviderType:      BuiltinType,
 		MemoryMode:        "file",
 		CanManualSync:     false,
@@ -248,15 +248,15 @@ func (r *fileRuntime) Status(ctx context.Context, botID string) (memreg.MemorySt
 	}, nil
 }
 
-func (r *fileRuntime) Rebuild(ctx context.Context, botID string) (memreg.RebuildResult, error) {
+func (r *fileRuntime) Rebuild(ctx context.Context, botID string) (memprovider.RebuildResult, error) {
 	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
 	if err != nil {
-		return memreg.RebuildResult{}, err
+		return memprovider.RebuildResult{}, err
 	}
 	if err := r.store.SyncOverview(ctx, botID); err != nil {
-		return memreg.RebuildResult{}, err
+		return memprovider.RebuildResult{}, err
 	}
-	return memreg.RebuildResult{
+	return memprovider.RebuildResult{
 		FsCount:      len(items),
 		StorageCount: len(items),
 	}, nil

@@ -21,9 +21,10 @@ import (
 	pluginspkg "github.com/memohai/memoh/domains/agent/extension/plugins"
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/config"
 )
 
@@ -136,14 +137,14 @@ func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
 
 	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, url, nil)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("proxy supermarket", err)
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := h.httpClient.Do(req) //nolint:gosec // URL constructed from trusted config
 	if err != nil {
 		h.logger.Error("supermarket proxy failed", slog.String("url", url), slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+		return apperror.Unavailable("proxy supermarket", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -161,7 +162,7 @@ func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
 // @Param page query int false "Page number"
 // @Param limit query int false "Items per page"
 // @Success 200 {object} SupermarketPluginListResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/plugins [get].
 func (h *SupermarketHandler) ListPlugins(c echo.Context) error {
 	return h.proxy(c, "/api/plugins")
@@ -172,8 +173,8 @@ func (h *SupermarketHandler) ListPlugins(c echo.Context) error {
 // @Tags supermarket
 // @Param id path string true "Plugin ID"
 // @Success 200 {object} plugins.Manifest
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/plugins/{id} [get].
 func (h *SupermarketHandler) GetPlugin(c echo.Context) error {
 	id := c.Param("id")
@@ -188,7 +189,7 @@ func (h *SupermarketHandler) GetPlugin(c echo.Context) error {
 // @Param page query int false "Page number"
 // @Param limit query int false "Items per page"
 // @Success 200 {object} SupermarketSkillListResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/skills [get].
 func (h *SupermarketHandler) ListSkills(c echo.Context) error {
 	return h.proxy(c, "/api/skills")
@@ -199,8 +200,8 @@ func (h *SupermarketHandler) ListSkills(c echo.Context) error {
 // @Tags supermarket
 // @Param id path string true "Skill ID"
 // @Success 200 {object} SupermarketSkillEntry
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/skills/{id} [get].
 func (h *SupermarketHandler) GetSkill(c echo.Context) error {
 	id := c.Param("id")
@@ -211,7 +212,7 @@ func (h *SupermarketHandler) GetSkill(c echo.Context) error {
 // @Summary List all tags from supermarket
 // @Tags supermarket
 // @Success 200 {object} SupermarketTagsResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/tags [get].
 func (h *SupermarketHandler) ListTags(c echo.Context) error {
 	return h.proxy(c, "/api/tags")
@@ -236,9 +237,9 @@ type InstallSkillRequest struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body InstallPluginRequest true "Install plugin request"
 // @Success 200 {object} plugins.Installation
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /bots/{bot_id}/supermarket/install-plugin [post].
 func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -248,10 +249,10 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 
 	var req InstallPluginRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind install plugin", err)
 	}
 	if strings.TrimSpace(req.PluginID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "plugin_id is required")
+		return apperror.Required("plugin_id")
 	}
 
 	manifest, err := h.fetchPluginEntry(c, req.PluginID)
@@ -260,17 +261,17 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	}
 	manifest = pluginspkg.NormalizeManifest(manifest)
 	if manifest.ID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "plugin id is required")
+		return apperror.Required("id")
 	}
 
 	ctx := c.Request().Context()
 	bundleResult, err := h.installPluginBundle(ctx, botID, req.PluginID, manifest.ID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+		return apperror.Unavailable("install plugin bundle", err)
 	}
 	scriptsResult, err := h.runPluginInstallScripts(ctx, botID, manifest.ID, manifest.Install)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+		return apperror.Unavailable("run plugin install scripts", err)
 	}
 
 	installation, err := h.pluginService.Install(ctx, botID, pluginspkg.InstallRequest{
@@ -278,7 +279,7 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 		Variables: req.Variables,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("install plugin", err)
 	}
 	installation = withPluginBundleInstallMetadata(installation, bundleResult, nil)
 	installation = withPluginInstallScriptsMetadata(installation, scriptsResult, nil)
@@ -291,9 +292,9 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body InstallSkillRequest true "Install skill request"
 // @Success 200 {object} map[string]bool
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /bots/{bot_id}/supermarket/install-skill [post].
 func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -303,50 +304,50 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 
 	var req InstallSkillRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind install skill", err)
 	}
 	skillID := strings.TrimSpace(req.SkillID)
 	if skillID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "skill_id is required")
+		return apperror.Required("skill_id")
 	}
 	if strings.Contains(skillID, "..") || strings.Contains(skillID, "/") {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid skill_id")
+		return apperror.Field("skill_id", apperror.FieldInvalid)
 	}
 
 	ctx := c.Request().Context()
 	client, err := h.containers.MCPClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
+		return apperror.Internal("reach workspace", err)
 	}
 
 	downloadURL := h.baseURL + "/api/skills/" + skillID + "/download"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("download skill", err)
 	}
 	resp, err := h.httpClient.Do(httpReq) //nolint:gosec // URL constructed from trusted config
 	if err != nil {
 		h.logger.Error("supermarket skill download failed", slog.String("url", downloadURL), slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+		return apperror.Unavailable("download skill", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("skill %q not found in supermarket", skillID))
+		return apperror.NotFound("download skill", nil)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
+		return apperror.Unavailable("download skill", nil)
 	}
 
 	gz, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "invalid gzip response from supermarket")
+		return apperror.Unavailable("decode skill archive", err)
 	}
 	defer func() { _ = gz.Close() }()
 
 	skillDir := path.Join(skillset.ManagedDir(), skillID)
 	if err := client.Mkdir(ctx, skillDir); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("mkdir failed: %v", err))
+		return apperror.Internal("mkdir skill dir", err)
 	}
 
 	tr := tar.NewReader(gz)
@@ -357,7 +358,7 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 			break
 		}
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("invalid tar: %v", err))
+			return apperror.Unavailable("read skill archive", err)
 		}
 		if hdr.Typeflag != tar.TypeReg {
 			continue
@@ -370,7 +371,7 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 
 		content, err := io.ReadAll(tr)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("read tar entry failed: %v", err))
+			return apperror.Unavailable("read skill archive entry", err)
 		}
 
 		filePath := path.Join(skillDir, relativePath)
@@ -380,13 +381,13 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 		}
 
 		if err := client.WriteFile(ctx, filePath, content); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("write file %s failed: %v", relativePath, err))
+			return apperror.Internal("write skill file", err)
 		}
 		filesWritten++
 	}
 
 	if filesWritten == 0 {
-		return echo.NewHTTPError(http.StatusBadGateway, "skill archive was empty")
+		return apperror.Unavailable("install skill", nil)
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{"ok": true, "files_written": filesWritten})
@@ -438,27 +439,27 @@ func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (
 	url := h.baseURL + "/api/plugins/" + pluginID
 	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, url, nil)
 	if err != nil {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return pluginspkg.Manifest{}, apperror.Internal("fetch plugin", err)
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := h.httpClient.Do(req) //nolint:gosec // URL constructed from trusted config
 	if err != nil {
 		h.logger.Error("supermarket plugin fetch failed", slog.String("url", url), slog.Any("error", err))
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+		return pluginspkg.Manifest{}, apperror.Unavailable("fetch plugin", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("plugin %q not found in supermarket", pluginID))
+		return pluginspkg.Manifest{}, apperror.NotFound("fetch plugin", nil)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
+		return pluginspkg.Manifest{}, apperror.Unavailable("fetch plugin", nil)
 	}
 
 	var manifest pluginspkg.Manifest
 	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
+		return pluginspkg.Manifest{}, apperror.Unavailable("decode plugin", err)
 	}
 	return manifest, nil
 }

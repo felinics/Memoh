@@ -11,6 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	"github.com/memohai/memoh/domains/agent/engine"
@@ -103,21 +104,21 @@ func chatResolvedRequest() userinput.Request {
 func TestUserInputContinuationHistoryClosesOlderPendingCall(t *testing.T) {
 	t.Parallel()
 
-	oldCall := sdkMessagesToModelMessages([]sdk.Message{{
+	oldCall := convert.SDKMessagesToModelMessages([]sdk.Message{{
 		Role: sdk.MessageRoleAssistant,
 		Content: []sdk.MessagePart{sdk.ToolCallPart{
 			ToolCallID: "old-call",
 			ToolName:   userinput.ToolNameAskUser,
 		}},
 	}})[0]
-	currentCall := sdkMessagesToModelMessages([]sdk.Message{{
+	currentCall := convert.SDKMessagesToModelMessages([]sdk.Message{{
 		Role: sdk.MessageRoleAssistant,
 		Content: []sdk.MessagePart{sdk.ToolCallPart{
 			ToolCallID: "current-call",
 			ToolName:   userinput.ToolNameAskUser,
 		}},
 	}})[0]
-	currentResult := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(sdk.ToolResultPart{
+	currentResult := convert.SDKMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(sdk.ToolResultPart{
 		ToolCallID: "current-call",
 		ToolName:   userinput.ToolNameAskUser,
 		Result:     map[string]any{"status": userinput.StatusSubmitted},

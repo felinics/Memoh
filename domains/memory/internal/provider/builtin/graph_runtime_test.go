@@ -9,7 +9,7 @@ import (
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
 	wikistore "github.com/memohai/memoh/domains/memory/internal/store/wiki"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 var errForced = errors.New("forced store error for test")
@@ -122,14 +122,14 @@ func TestGraphRuntimeAddSearchDelete(t *testing.T) {
 	ctx := context.Background()
 
 	// Add two memories sharing a profile_ref -> implicit same_profile edge.
-	if _, err := rt.Add(ctx, memreg.AddRequest{
+	if _, err := rt.Add(ctx, memprovider.AddRequest{
 		BotID:    botID,
 		Message:  "I prefer oolong tea",
 		Metadata: map[string]any{"profile_ref": "user:1", "topic": "drinks"},
 	}); err != nil {
 		t.Fatalf("Add 1: %v", err)
 	}
-	if _, err := rt.Add(ctx, memreg.AddRequest{
+	if _, err := rt.Add(ctx, memprovider.AddRequest{
 		BotID:    botID,
 		Message:  "I live in Berlin",
 		Metadata: map[string]any{"profile_ref": "user:1", "topic": "location"},
@@ -138,7 +138,7 @@ func TestGraphRuntimeAddSearchDelete(t *testing.T) {
 	}
 
 	// GetAll reflects 2 nodes.
-	all, err := rt.GetAll(ctx, memreg.GetAllRequest{BotID: botID})
+	all, err := rt.GetAll(ctx, memprovider.GetAllRequest{BotID: botID})
 	if err != nil {
 		t.Fatalf("GetAll: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestGraphRuntimeAddSearchDelete(t *testing.T) {
 
 	// Search "tea" seeds the oolong node; expansion reaches the Berlin node via
 	// the shared-profile edge, so both surface and Relations is non-empty.
-	resp, err := rt.Search(ctx, memreg.SearchRequest{BotID: botID, Query: "tea", Limit: 5})
+	resp, err := rt.Search(ctx, memprovider.SearchRequest{BotID: botID, Query: "tea", Limit: 5})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -185,13 +185,13 @@ func TestGraphRuntimeAddSearchDelete(t *testing.T) {
 	if _, err := rt.Delete(ctx, firstID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	remaining, _ := rt.GetAll(ctx, memreg.GetAllRequest{BotID: botID})
+	remaining, _ := rt.GetAll(ctx, memprovider.GetAllRequest{BotID: botID})
 	if len(remaining.Results) != 1 {
 		t.Fatalf("after Delete, GetAll = %d, want 1", len(remaining.Results))
 	}
 
 	// DeleteAll clears everything.
-	if _, err := rt.DeleteAll(ctx, memreg.DeleteAllRequest{BotID: botID}); err != nil {
+	if _, err := rt.DeleteAll(ctx, memprovider.DeleteAllRequest{BotID: botID}); err != nil {
 		t.Fatalf("DeleteAll: %v", err)
 	}
 	if n, _ := store.CountNodes(ctx, botID); n != 0 {
@@ -207,14 +207,14 @@ func TestGraphRuntimeSearchExpandsRefs(t *testing.T) {
 	botID := "graph-bot-refs"
 	ctx := context.Background()
 
-	if _, err := rt.Add(ctx, memreg.AddRequest{
+	if _, err := rt.Add(ctx, memprovider.AddRequest{
 		BotID:    botID,
 		Message:  "Alice's favorite editor is Helix and she links [[berlin-home]].",
 		Metadata: map[string]any{"subject": "alice-profile"},
 	}); err != nil {
 		t.Fatalf("Add ref source: %v", err)
 	}
-	if _, err := rt.Add(ctx, memreg.AddRequest{
+	if _, err := rt.Add(ctx, memprovider.AddRequest{
 		BotID:    botID,
 		Message:  "Berlin home details are kept here.",
 		Metadata: map[string]any{"subject": "Berlin Home"},
@@ -222,7 +222,7 @@ func TestGraphRuntimeSearchExpandsRefs(t *testing.T) {
 		t.Fatalf("Add ref target: %v", err)
 	}
 
-	resp, err := rt.Search(ctx, memreg.SearchRequest{BotID: botID, Query: "Helix", Limit: 5})
+	resp, err := rt.Search(ctx, memprovider.SearchRequest{BotID: botID, Query: "Helix", Limit: 5})
 	if err != nil {
 		t.Fatalf("Search refs: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestGraphRuntimeUpdateCanonicalIDMigratesLegacyBareNode(t *testing.T) {
 		Layer: memorydomain.LayerNote,
 	}
 
-	item, err := rt.Update(ctx, memreg.UpdateRequest{
+	item, err := rt.Update(ctx, memprovider.UpdateRequest{
 		MemoryID: botID + ":mem_legacy",
 		Memory:   "new body",
 	})
@@ -375,7 +375,7 @@ func TestGraphRuntimeCompactWithLLMMergesConceptNodes(t *testing.T) {
 		Metadata:   map[string]any{"subject": "Bob"},
 		CapturedAt: now,
 	}
-	llm := &fakeLLM{compactFunc: func(req memreg.CompactRequest) memreg.CompactResponse {
+	llm := &fakeLLM{compactFunc: func(req memprovider.CompactRequest) memprovider.CompactResponse {
 		if req.BotID != botID {
 			t.Errorf("Compact BotID = %q, want %q", req.BotID, botID)
 		}
@@ -390,7 +390,7 @@ func TestGraphRuntimeCompactWithLLMMergesConceptNodes(t *testing.T) {
 				t.Errorf("Compact candidate id = %q, want canonical bot prefix", memory.ID)
 			}
 		}
-		return memreg.CompactResponse{Facts: []string{"Alice likes tea and prefers oolong."}}
+		return memprovider.CompactResponse{Facts: []string{"Alice likes tea and prefers oolong."}}
 	}}
 
 	result, err := rt.CompactWithLLM(ctx, map[string]any{"bot_id": botID}, 1, 0, llm)
@@ -461,13 +461,13 @@ func TestGraphRuntimeCompactWithLLMPreservesProtectedConceptNodes(t *testing.T) 
 		Metadata:   map[string]any{"subject": "Alice"},
 		CapturedAt: now.Add(-time.Hour),
 	}
-	llm := &fakeLLM{compactFunc: func(req memreg.CompactRequest) memreg.CompactResponse {
+	llm := &fakeLLM{compactFunc: func(req memprovider.CompactRequest) memprovider.CompactResponse {
 		for _, memory := range req.Memories {
 			if memory.ID == botID+":mem_pinned" {
 				t.Errorf("protected node was sent to compact LLM")
 			}
 		}
-		return memreg.CompactResponse{Facts: []string{"Alice likes tea and prefers oolong."}}
+		return memprovider.CompactResponse{Facts: []string{"Alice likes tea and prefers oolong."}}
 	}}
 
 	result, err := rt.CompactWithLLM(ctx, map[string]any{"bot_id": botID}, 1, 0, llm)
@@ -546,7 +546,7 @@ func TestGraphRuntimeFileFallback(t *testing.T) {
 	)
 	rt := NewGraphRuntime(nil, store, fs)
 
-	resp, err := rt.Search(context.Background(), memreg.SearchRequest{
+	resp, err := rt.Search(context.Background(), memprovider.SearchRequest{
 		BotID: "bot-x", Query: "oolong", Limit: 5,
 	})
 	if err != nil {
@@ -605,7 +605,7 @@ func TestGraphRuntimeSearchCJKSentence(t *testing.T) {
 	botID := "graph-bot-cjk"
 	ctx := context.Background()
 
-	if _, err := rt.Add(ctx, memreg.AddRequest{
+	if _, err := rt.Add(ctx, memprovider.AddRequest{
 		BotID:   botID,
 		Message: "用户使用中文交流",
 	}); err != nil {
@@ -614,7 +614,7 @@ func TestGraphRuntimeSearchCJKSentence(t *testing.T) {
 
 	// A full Chinese sentence query (no spaces). Pre-fix this scored 0 and
 	// returned no results.
-	resp, err := rt.Search(ctx, memreg.SearchRequest{BotID: botID, Query: "你还记得我用什么语言交流吗？", Limit: 5})
+	resp, err := rt.Search(ctx, memprovider.SearchRequest{BotID: botID, Query: "你还记得我用什么语言交流吗？", Limit: 5})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

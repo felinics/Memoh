@@ -21,7 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
-	"github.com/memohai/memoh/domains/channel/internal/common"
+	"github.com/memohai/memoh/domains/channel/internal/logging"
 	"github.com/memohai/memoh/domains/media"
 	attachmentpkg "github.com/memohai/memoh/domains/media/attachment"
 	"github.com/memohai/memoh/internal/textutil"
@@ -298,10 +298,19 @@ func (a *MatrixAdapter) Connect(ctx context.Context, cfg gateway.ChannelConfig, 
 		return nil, err
 	}
 	connCtx, cancel := context.WithCancel(ctx)
-	go a.runSyncLoop(connCtx, cfg, parsed, handler)
-	return gateway.NewConnection(cfg, func(context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.runSyncLoop(connCtx, cfg, parsed, handler)
+	}()
+	return gateway.NewConnection(cfg, func(stopCtx context.Context) error {
 		cancel()
-		return nil
+		select {
+		case <-done:
+			return nil
+		case <-stopCtx.Done():
+			return stopCtx.Err()
+		}
 	}), nil
 }
 
@@ -710,7 +719,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg gateway.ChannelConf
 			slog.String("room_id", evt.RoomID),
 			slog.String("sender", evt.Sender),
 			slog.Bool("is_mentioned", isMentioned),
-			slog.String("text", common.SummarizeText(body)),
+			slog.String("text", logging.SummarizeText(body)),
 		)
 	}
 	return true, handler(ctx, cfg, msg)

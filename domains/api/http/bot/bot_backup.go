@@ -12,12 +12,13 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/api/auth"
 	"github.com/memohai/memoh/domains/api/bot"
-	botbackup "github.com/memohai/memoh/domains/api/botbackup"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
-	"github.com/memohai/memoh/domains/api/internal/backup/secure"
+	botbackup "github.com/memohai/memoh/domains/api/bot/backup"
+	httpx "github.com/memohai/memoh/domains/api/http"
+	"github.com/memohai/memoh/domains/api/identity/auth"
+	"github.com/memohai/memoh/domains/api/internal/bot/backup/secure"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type BotBackupHandler struct {
@@ -43,24 +44,24 @@ func (h *BotBackupHandler) Register(e *echo.Echo) {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} botbackup.SummaryResult
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/backup/summary [get].
 func (h *BotBackupHandler) Summary(c echo.Context) error {
 	if h.service == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "bot backup service not configured")
+		return apperror.Internal("backup service", nil)
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return apperror.Unauthenticated("resolve user", err)
 	}
 	if _, err := httpx.AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID); err != nil {
 		return err
 	}
 	res, err := h.service.Summary(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("summarize bot backup", err)
 	}
 	return c.JSON(http.StatusOK, res)
 }
@@ -73,18 +74,18 @@ func (h *BotBackupHandler) Summary(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body botbackup.ExportRequest true "Export options"
 // @Success 200 {file} file
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/backup/export [post].
 func (h *BotBackupHandler) Export(c echo.Context) error {
 	if h.service == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "bot backup service not configured")
+		return apperror.Internal("backup service", nil)
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return apperror.Unauthenticated("resolve user", err)
 	}
 	bot, err := httpx.AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID)
 	if err != nil {
@@ -93,7 +94,7 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	var req botbackup.ExportRequest
 	if c.Request().Body != nil {
 		if err := c.Bind(&req); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.Invalid("bind export request", err)
 		}
 	}
 
@@ -102,7 +103,7 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	// rather than a truncated body after a misleading "200 OK".
 	tmp, err := os.CreateTemp("", "memoh-backup-*.zip")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to allocate temp file")
+		return apperror.Internal("create temp file", err)
 	}
 	tmpPath := tmp.Name()
 	defer func() {
@@ -111,10 +112,10 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	}()
 
 	if err := h.service.Export(c.Request().Context(), botID, botbackup.ExportOptions{Sections: req.Sections}, tmp); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "export failed: "+err.Error())
+		return apperror.Internal("export bot backup", err)
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("seek backup file", err)
 	}
 
 	// A bundle is arbitrarily large and the client may be on a slow link, so the
@@ -152,15 +153,15 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 // @Param sections formData string false "JSON object mapping section to strategy (skip|merge|replace), e.g. {\"settings\":\"replace\"}; omit to import all"
 // @Param passphrase formData string false "Passphrase to decrypt an encrypted backup"
 // @Success 200 {object} botbackup.PreviewResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/backup/import/preview [post].
 func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 	if h.service == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "bot backup service not configured")
+		return apperror.Internal("backup service", nil)
 	}
 	if _, err := auth.UserIDFromContext(c); err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return apperror.Unauthenticated("resolve user", err)
 	}
 	raw, err := readUploadedBackup(c)
 	if err != nil {
@@ -168,7 +169,7 @@ func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 	}
 	preview, err := h.service.Preview(c.Request().Context(), raw, importOptionsFromForm(c), c.FormValue("passphrase"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("preview bot backup", err)
 	}
 	return c.JSON(http.StatusOK, preview)
 }
@@ -184,17 +185,17 @@ func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 // @Param sections formData string false "JSON object mapping section to strategy (skip|merge|replace), e.g. {\"settings\":\"replace\"}; omit to import all"
 // @Param passphrase formData string false "Passphrase to decrypt an encrypted backup"
 // @Success 200 {object} botbackup.ImportResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/backup/import [post].
 func (h *BotBackupHandler) Import(c echo.Context) error {
 	if h.service == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "bot backup service not configured")
+		return apperror.Internal("backup service", nil)
 	}
 	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return apperror.Unauthenticated("resolve user", err)
 	}
 	opts := importOptionsFromForm(c)
 	if opts.Mode == botbackup.ImportModeOverwrite {
@@ -208,7 +209,7 @@ func (h *BotBackupHandler) Import(c echo.Context) error {
 	}
 	result, err := h.service.Import(c.Request().Context(), userID, raw, opts, c.FormValue("passphrase"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("import bot backup", err)
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -220,11 +221,11 @@ func readUploadedBackup(c echo.Context) ([]byte, error) {
 	}
 	file, err := c.FormFile("file")
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "file is required")
+		return nil, apperror.Required("file")
 	}
 	src, err := file.Open()
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "failed to open uploaded file")
+		return nil, apperror.Invalid("open backup file", err)
 	}
 	defer func() { _ = src.Close() }()
 	return io.ReadAll(src)

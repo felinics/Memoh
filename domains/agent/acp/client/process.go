@@ -56,14 +56,19 @@ type processOptions struct {
 }
 
 type bridgeProcess struct {
-	stream  *bridge.ExecStream
-	stdin   *io.PipeWriter
-	stdout  *io.PipeReader
-	tail    *stderrTail
-	done    chan struct{}
-	env     []string
-	cleanup func()
-	once    sync.Once
+	stream    *bridge.ExecStream
+	stdin     *io.PipeWriter
+	stdout    *io.PipeReader
+	tail      *stderrTail
+	stdinDone chan struct{}
+	recvDone  chan struct{}
+	env       []string
+	cleanup   func(context.Context) error
+
+	closeOnce sync.Once
+	closeErr  error
+	cleanMu   sync.Mutex
+	cleaned   bool
 }
 
 func startBridgeProcess(ctx context.Context, client *bridge.Client, command string, args []string, workDir string, timeout time.Duration, opts processOptions) (*bridgeProcess, error) {
@@ -94,7 +99,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 	resolvedCommand, err := resolveCommand(ctx, client, command, workDir, env, opts)
 	if err != nil {
 		if cleanup != nil {
-			cleanup()
+			_ = cleanup(context.Background())
 		}
 		return nil, err
 	}
@@ -107,7 +112,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 	})
 	if err != nil {
 		if cleanup != nil {
-			cleanup()
+			_ = cleanup(context.Background())
 		}
 		return nil, err
 	}
@@ -115,16 +120,18 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
 	proc := &bridgeProcess{
-		stream:  execStream,
-		stdin:   stdinW,
-		stdout:  stdoutR,
-		tail:    &stderrTail{},
-		done:    make(chan struct{}),
-		env:     append([]string(nil), env...),
-		cleanup: cleanup,
+		stream:    execStream,
+		stdin:     stdinW,
+		stdout:    stdoutR,
+		tail:      &stderrTail{},
+		stdinDone: make(chan struct{}),
+		recvDone:  make(chan struct{}),
+		env:       append([]string(nil), env...),
+		cleanup:   cleanup,
 	}
 
 	go func() {
+		defer close(proc.stdinDone)
 		defer func() { _ = stdinR.Close() }()
 		buf := make([]byte, 32*1024)
 		for {
@@ -142,7 +149,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 	}()
 
 	go func() {
-		defer close(proc.done)
+		defer close(proc.recvDone)
 		for {
 			output, recvErr := execStream.Recv()
 			if recvErr != nil {
@@ -171,7 +178,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 	return proc, nil
 }
 
-func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir string, opts processOptions) ([]string, func(), error) {
+func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir string, opts processOptions) ([]string, func(context.Context) error, error) {
 	mode := normalizeSetupMode(opts.SetupMode)
 
 	env := withoutEnvKeys(opts.Env, "HOME", "PATH", "CODEX_HOME")
@@ -207,19 +214,23 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 			}
 		}
 
-		// Cleanup intentionally derives a fresh background ctx with its own
-		// short deadline: the parent ctx is usually already cancelled by the
-		// time we tear down the ACP HOME, but we still want to issue rm -rf.
-		cleanup := func() { //nolint:contextcheck // cleanup uses independent background ctx by design.
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Startup failures may supply an independent context, while lifecycle
+		// shutdown passes its deadline through to the temporary HOME cleanup.
+		cleanup := func(parent context.Context) error {
+			if parent == nil {
+				parent = context.Background()
+			}
+			cleanupCtx, cancel := context.WithTimeout(parent, 5*time.Second)
 			defer cancel()
 			if homeDir == tempHomeDir {
-				_, _ = client.ExecWithOptions(cleanupCtx, "rm -rf "+escapeShellArg(homeDir), workDir, 5, nil, bridge.ExecOptions{
+				_, err := client.ExecWithOptions(cleanupCtx, "rm -rf "+escapeShellArg(homeDir), workDir, 5, nil, bridge.ExecOptions{
 					Env:      env,
 					CleanEnv: opts.CleanEnv,
 					UnsetEnv: opts.UnsetEnv,
 				})
+				return err
 			}
+			return nil
 		}
 		return env, cleanup, nil
 	case SetupModeSelf:
@@ -383,23 +394,70 @@ func (p *bridgeProcess) Write(b []byte) (int, error) {
 }
 
 func (p *bridgeProcess) Close() error {
-	p.once.Do(func() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return p.CloseContext(ctx)
+}
+
+// CloseContext stops the bridge stream and waits for both owned I/O pumps.
+// A timed-out call can be retried with a fresh context; shutdown initiation is
+// idempotent while the pump completion channels remain available for joining.
+func (p *bridgeProcess) CloseContext(ctx context.Context) error {
+	if p == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	p.closeOnce.Do(func() {
+		var errs []error
 		if p.stdin != nil {
-			_ = p.stdin.Close()
+			if err := p.stdin.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("close ACP stdin: %w", err))
+			}
 		}
 		if p.stdout != nil {
-			_ = p.stdout.Close()
+			if err := p.stdout.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("close ACP stdout: %w", err))
+			}
 		}
 		if p.stream != nil {
-			_ = p.stream.Close()
+			if err := p.stream.Close(); err != nil && !errors.Is(err, context.Canceled) {
+				errs = append(errs, fmt.Errorf("close ACP exec stream: %w", err))
+			}
 		}
-		if p.cleanup != nil {
-			p.cleanup()
-		}
+		p.closeErr = errors.Join(errs...)
 	})
-	select {
-	case <-p.done:
-	case <-time.After(2 * time.Second):
+	if err := waitForProcessPumps(ctx, p.stdinDone, p.recvDone); err != nil {
+		return errors.Join(p.closeErr, err)
+	}
+	p.cleanMu.Lock()
+	var cleanupErr error
+	if !p.cleaned {
+		if p.cleanup != nil {
+			cleanupErr = p.cleanup(ctx)
+		}
+		if cleanupErr == nil {
+			p.cleaned = true
+		}
+	}
+	p.cleanMu.Unlock()
+	if cleanupErr != nil {
+		cleanupErr = fmt.Errorf("clean up ACP process environment: %w", cleanupErr)
+	}
+	return errors.Join(p.closeErr, cleanupErr)
+}
+
+func waitForProcessPumps(ctx context.Context, pumps ...<-chan struct{}) error {
+	for _, done := range pumps {
+		if done == nil {
+			continue
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return fmt.Errorf("wait for ACP process I/O pumps: %w", ctx.Err())
+		}
 	}
 	return nil
 }
@@ -474,7 +532,7 @@ func (p *bridgeProcess) errorWithStderr(err error) error {
 	}
 	if strings.TrimSpace(p.tail.String()) == "" {
 		select {
-		case <-p.done:
+		case <-p.recvDone:
 		case <-time.After(250 * time.Millisecond):
 		}
 	}

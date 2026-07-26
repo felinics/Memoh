@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
 )
 
@@ -24,12 +26,12 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 	})
 	var persisted []byte
 	store := &botStoreFake{
-		getByID: func(context.Context, string) (Record, error) {
+		getByID: func(context.Context, string) (botpersistence.Record, error) {
 			row := baseRecord()
 			row.Metadata = existingMetadata
 			return row, nil
 		},
-		update: func(_ context.Context, input UpdateInput) (Record, error) {
+		update: func(_ context.Context, input botpersistence.UpdateInput) (botpersistence.Record, error) {
 			persisted = append([]byte(nil), input.Metadata...)
 			row := baseRecord()
 			row.Metadata = input.Metadata

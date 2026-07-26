@@ -6,6 +6,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 )
 
 const syntheticToolClosureError = "tool execution interrupted before a response was recorded"
@@ -103,7 +104,7 @@ func repairToolCallClosures(messages []agentdomain.ModelMessage, reason string) 
 }
 
 func extractAssistantToolCallParts(msg agentdomain.ModelMessage) []sdk.ToolCallPart {
-	sdkMsg := modelMessageToSDKMessage(msg)
+	sdkMsg := convert.ModelMessageToSDKMessage(msg)
 	if len(sdkMsg.Content) == 0 {
 		return nil
 	}
@@ -119,7 +120,7 @@ func extractAssistantToolCallParts(msg agentdomain.ModelMessage) []sdk.ToolCallP
 }
 
 func extractToolResultParts(msg agentdomain.ModelMessage) []sdk.ToolResultPart {
-	sdkMsg := modelMessageToSDKMessage(msg)
+	sdkMsg := convert.ModelMessageToSDKMessage(msg)
 	if len(sdkMsg.Content) == 0 {
 		return nil
 	}
@@ -151,7 +152,7 @@ func filterToolMessageToPending(msg agentdomain.ModelMessage, pending map[string
 		return nil
 	}
 
-	converted := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(filtered...)})
+	converted := convert.SDKMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(filtered...)})
 	if len(converted) == 0 {
 		return nil
 	}
@@ -161,7 +162,7 @@ func filterToolMessageToPending(msg agentdomain.ModelMessage, pending map[string
 }
 
 func syntheticToolResultMessage(toolCallID, toolName, reason string) agentdomain.ModelMessage {
-	converted := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(sdk.ToolResultPart{
+	converted := convert.SDKMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(sdk.ToolResultPart{
 		ToolCallID: strings.TrimSpace(toolCallID),
 		ToolName:   strings.TrimSpace(toolName),
 		Result:     strings.TrimSpace(reason),

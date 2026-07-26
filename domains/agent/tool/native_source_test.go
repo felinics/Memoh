@@ -14,7 +14,7 @@ import (
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	"github.com/memohai/memoh/domains/agent/mcp"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 )
 
 func TestNativeToolSourceAllowlistAndCall(t *testing.T) {

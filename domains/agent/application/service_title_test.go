@@ -7,6 +7,7 @@ import (
 
 	"github.com/memohai/memoh/domains/api/bot"
 	"github.com/memohai/memoh/domains/iam/account"
+	accountpersistence "github.com/memohai/memoh/domains/iam/account/persistence"
 )
 
 type titleModelBotReader struct {
@@ -18,11 +19,11 @@ func (q titleModelBotReader) GetForAccess(context.Context, string) (bot.Bot, err
 }
 
 type titleModelAccountStore struct {
-	account.Store
-	account account.Record
+	accountpersistence.Store
+	account accountpersistence.Record
 }
 
-func (s titleModelAccountStore) GetByUserID(context.Context, string) (account.Record, error) {
+func (s titleModelAccountStore) GetByUserID(context.Context, string) (accountpersistence.Record, error) {
 	return s.account, nil
 }
 
@@ -97,7 +98,7 @@ func TestResolveTitleModelUsesBotOwnerProfile(t *testing.T) {
 	const botID = "11111111-1111-1111-1111-111111111111"
 	const ownerID = "22222222-2222-2222-2222-222222222222"
 	const modelID = "33333333-3333-3333-3333-333333333333"
-	accountService := account.NewService(nil, titleModelAccountStore{account: account.Record{
+	accountService := account.NewService(nil, titleModelAccountStore{account: accountpersistence.Record{
 		ID: ownerID, TitleModelID: modelID,
 	}})
 	resolver := &Service{

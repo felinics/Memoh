@@ -15,6 +15,7 @@ import (
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	acpagent "github.com/memohai/memoh/domains/agent/acp"
 	acpclient "github.com/memohai/memoh/domains/agent/acp/client"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
 	acpfeedback "github.com/memohai/memoh/domains/agent/decision/feedback"
@@ -625,7 +626,7 @@ func (s *Service) persistACPDecisionProjection(ctx context.Context, req ChatRequ
 	if s == nil || s.messageService == nil || strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.ThreadID) == "" {
 		return false
 	}
-	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents([]agentdomain.StreamEvent{ev}, ""))
+	output := convert.SDKMessagesToModelMessages(acpclient.TranscriptFromEvents([]agentdomain.StreamEvent{ev}, ""))
 	sessionMode, runtimeType := s.persistSessionRuntimeSnapshot(ctx, req)
 	for _, msg := range output {
 		if msg.Role != "assistant" {
@@ -738,7 +739,7 @@ func (s *Service) persistACPRound(ctx context.Context, req ChatRequest, agentID,
 	}
 	// result.Output is already assembled by the ACP client; the application only
 	// converts and stores it.
-	output := sdkMessagesToModelMessages(result.Output)
+	output := convert.SDKMessagesToModelMessages(result.Output)
 	if len(output) == 0 {
 		output = []agentdomain.ModelMessage{{Role: "assistant", Content: agentdomain.NewTextContent("")}}
 	}

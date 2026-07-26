@@ -9,7 +9,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	pluginspkg "github.com/memohai/memoh/domains/agent/extension/plugins"
+	pluginspersistence "github.com/memohai/memoh/domains/agent/extension/plugins/persistence"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 func TestPluginsHandlerRegisterDoesNotExposeManifestInstallRoute(t *testing.T) {
@@ -27,32 +28,26 @@ func TestPluginsHandlerRegisterDoesNotExposeManifestInstallRoute(t *testing.T) {
 
 func TestPluginServiceError(t *testing.T) {
 	tests := []struct {
-		name        string
-		err         error
-		wantStatus  int
-		wantMessage string
+		name     string
+		err      error
+		wantKind apperror.Kind
 	}{
 		{
-			name:        "not found",
-			err:         fmt.Errorf("get installation: %w", pluginspkg.ErrNotFound),
-			wantStatus:  http.StatusNotFound,
-			wantMessage: "plugin installation not found",
+			name:     "not found",
+			err:      fmt.Errorf("get installation: %w", pluginspersistence.ErrNotFound),
+			wantKind: apperror.KindNotFound,
 		},
 		{
-			name:        "bad request",
-			err:         errors.New("plugin is not ready"),
-			wantStatus:  http.StatusBadRequest,
-			wantMessage: "plugin is not ready",
+			name:     "bad request",
+			err:      errors.New("plugin is not ready"),
+			wantKind: apperror.KindInvalid,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			var httpErr *echo.HTTPError
-			if !errors.As(pluginServiceError(test.err), &httpErr) {
-				t.Fatal("pluginServiceError() did not return *echo.HTTPError")
-			}
-			if httpErr.Code != test.wantStatus || httpErr.Message != test.wantMessage {
-				t.Fatalf("pluginServiceError() = (%d, %v), want (%d, %q)", httpErr.Code, httpErr.Message, test.wantStatus, test.wantMessage)
+			got := pluginServiceError(test.err)
+			if kind := apperror.KindOf(got); kind != test.wantKind {
+				t.Fatalf("pluginServiceError() kind = %s, want %s", kind, test.wantKind)
 			}
 		})
 	}

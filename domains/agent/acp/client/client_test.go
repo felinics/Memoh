@@ -22,10 +22,11 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	"github.com/memohai/memoh/domains/agent/internal/session"
 	"github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 	"github.com/memohai/memoh/domains/runtime/bridge/bridgepb"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
@@ -1450,11 +1451,11 @@ func TestCallbackToolApprovalRejectionErrorsUsePromptToolOutputLimit(t *testing.
 }
 
 type fakeACPToolSource struct {
-	tools []mcp.ToolDescriptor
+	tools []mcppersistence.ToolDescriptor
 }
 
-func (s fakeACPToolSource) ListTools(context.Context, mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
-	return append([]mcp.ToolDescriptor(nil), s.tools...), nil
+func (s fakeACPToolSource) ListTools(context.Context, mcp.ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
+	return append([]mcppersistence.ToolDescriptor(nil), s.tools...), nil
 }
 
 func (fakeACPToolSource) CallTool(context.Context, mcp.ToolSessionContext, string, map[string]any) (map[string]any, error) {
@@ -1462,9 +1463,9 @@ func (fakeACPToolSource) CallTool(context.Context, mcp.ToolSessionContext, strin
 }
 
 func testACPToolGateway(toolNames ...string) *mcp.ToolGatewayService {
-	tools := make([]mcp.ToolDescriptor, 0, len(toolNames))
+	tools := make([]mcppersistence.ToolDescriptor, 0, len(toolNames))
 	for _, name := range toolNames {
-		tools = append(tools, mcp.ToolDescriptor{
+		tools = append(tools, mcppersistence.ToolDescriptor{
 			Name:        name,
 			InputSchema: map[string]any{"type": "object"},
 		})

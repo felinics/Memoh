@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
-	"github.com/memohai/memoh/domains/channel/internal/common"
+	"github.com/memohai/memoh/domains/channel/internal/proxy"
 )
 
 const (
@@ -20,7 +20,7 @@ type Config struct {
 	Token          string
 	EncodingAESKey string
 	EncryptionMode string
-	HTTPProxy      common.HTTPProxyConfig
+	HTTPProxy      proxy.HTTPProxyConfig
 }
 
 type UserConfig struct {
@@ -42,7 +42,7 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 	if cfg.EncodingAESKey != "" {
 		out["encodingAESKey"] = cfg.EncodingAESKey
 	}
-	common.NormalizeHTTPProxyConfig(out, cfg.HTTPProxy)
+	proxy.NormalizeHTTPProxyConfig(out, cfg.HTTPProxy)
 	return out, nil
 }
 
@@ -54,7 +54,7 @@ func parseConfig(raw map[string]any) (Config, error) {
 		EncodingAESKey: strings.TrimSpace(gateway.ReadString(raw, "encodingAESKey", "encoding_aes_key")),
 		EncryptionMode: normalizeEncryptionMode(gateway.ReadString(raw, "encryptionMode", "encryption_mode")),
 	}
-	proxyCfg, err := common.ParseHTTPProxyConfig(raw)
+	proxyCfg, err := proxy.ParseHTTPProxyConfig(raw)
 	if err != nil {
 		return Config{}, err
 	}

@@ -81,6 +81,45 @@ function renderI18nMessage(key: string, args?: ErrorRecord): string {
   return template ? formatMessage(template, args).trim() : ''
 }
 
+// renderUpstream presents a third party's error as an attributed quotation.
+//
+// It outranks the kind fallback rather than being appended to it: when the
+// model provider says "you exceeded your current quota", prefixing that with
+// our own "something went wrong on our side" is both wrong and the opposite of
+// useful. The message is not translated — it is not ours to translate — so it
+// is wrapped in a localized frame that marks it as someone else's words.
+function renderUpstream(record: ErrorRecord): string {
+  const upstream = asRecord(record.upstream)
+  if (!upstream || typeof upstream.message !== 'string' || !upstream.message.trim()) return ''
+
+  const message = upstream.message.trim()
+  const provider = typeof upstream.provider === 'string' ? upstream.provider.trim() : ''
+  const key = provider ? 'errors.upstream.attributed' : 'errors.upstream.anonymous'
+  return renderI18nMessage(key, { provider, message }) || message
+}
+
+// renderFieldErrors localizes the RFC 9457 errors[] extension. A field error
+// says which input was rejected and why, which is more specific than the
+// sentence the kind would produce, so it outranks the kind fallback. The
+// sentences are deliberately field-agnostic: the pointer binds them to a
+// labelled input, so repeating the field name in the text would be noise.
+function renderFieldErrors(record: ErrorRecord): string {
+  if (!Array.isArray(record.errors)) return ''
+
+  const rendered: string[] = []
+  for (const entry of record.errors) {
+    const field = asRecord(entry)
+    if (!field || typeof field.code !== 'string') continue
+    const sentence = renderI18nMessage(`errors.field.${field.code.trim()}`)
+    if (sentence && !rendered.includes(sentence)) rendered.push(sentence)
+  }
+  return rendered.join(' ')
+}
+
+// pickApiFeedbackMessage resolves the most specific localized sentence the
+// error supports: a catalog code names one business rule, a field error names
+// one rejected input, and a kind is the always-present fallback. Most errors
+// carry only a kind, so that last branch is the common path, not the edge case.
 function pickApiFeedbackMessage(error: unknown): string {
   for (const record of collectErrorRecords(error)) {
     const args = asRecord(record.args) ?? undefined
@@ -93,6 +132,17 @@ function pickApiFeedbackMessage(error: unknown): string {
 
     if (typeof record.code === 'string' && record.code.trim()) {
       const rendered = renderI18nMessage(`errors.${record.code.trim()}`, args)
+      if (rendered) return rendered
+    }
+
+    const quoted = renderUpstream(record)
+    if (quoted) return quoted
+
+    const fields = renderFieldErrors(record)
+    if (fields) return fields
+
+    if (typeof record.kind === 'string' && record.kind.trim()) {
+      const rendered = renderI18nMessage(`errors.kind.${record.kind.trim()}`, args)
       if (rendered) return rendered
     }
   }

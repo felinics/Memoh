@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
 )
 

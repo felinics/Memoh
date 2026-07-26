@@ -14,6 +14,7 @@ import (
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	"github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 type NativeToolSourceOptions struct {
@@ -113,10 +114,10 @@ func (s *NativeToolSource) SetProviders(providers []ToolProvider) {
 	s.mu.Unlock()
 }
 
-func (s *NativeToolSource) ListTools(ctx context.Context, session mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
+func (s *NativeToolSource) ListTools(ctx context.Context, session mcp.ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
 	tools := s.loadTools(ctx, session)
 	if len(tools) == 0 {
-		return []mcp.ToolDescriptor{}, nil
+		return []mcppersistence.ToolDescriptor{}, nil
 	}
 	seen := map[string]struct{}{}
 	visible := make([]nativeLoadedTool, 0, len(tools))
@@ -134,7 +135,7 @@ func (s *NativeToolSource) ListTools(ctx context.Context, session mcp.ToolSessio
 	}
 	available := availableFromLoadedTools(visible)
 	usageApplied := map[int]bool{}
-	descriptors := make([]mcp.ToolDescriptor, 0, len(visible))
+	descriptors := make([]mcppersistence.ToolDescriptor, 0, len(visible))
 	for _, item := range visible {
 		tool := item.tool
 		description := strings.TrimSpace(tool.Description)
@@ -144,7 +145,7 @@ func (s *NativeToolSource) ListTools(ctx context.Context, session mcp.ToolSessio
 			}
 			usageApplied[item.usageID] = true
 		}
-		descriptors = append(descriptors, mcp.ToolDescriptor{
+		descriptors = append(descriptors, mcppersistence.ToolDescriptor{
 			Name:        tool.Name,
 			Description: description,
 			InputSchema: toolInputSchema(tool.Parameters),

@@ -8,7 +8,7 @@ import (
 
 	team "github.com/memohai/memoh/domains/iam/team"
 	memport "github.com/memohai/memoh/domains/memory/internal/port"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 type embeddingModelResolverFake struct {
@@ -83,7 +83,7 @@ func TestCheckedPGVectorInt32(t *testing.T) {
 
 func TestPGVectorTeamResolverDefaultsToSingleton(t *testing.T) {
 	t.Parallel()
-	index := &pgvectorIndex{resolveTeam: memreg.FixedTeamIDResolver(team.DefaultTeamID)}
+	index := &pgvectorIndex{resolveTeam: memprovider.FixedTeamIDResolver(team.DefaultTeamID)}
 	got, err := index.teamID(context.Background())
 	if err != nil {
 		t.Fatalf("teamID() error = %v", err)
@@ -101,7 +101,7 @@ func TestPGVectorTeamResolverFailsClosed(t *testing.T) {
 	if _, err := index.teamID(context.Background()); err == nil {
 		t.Fatal("teamID() without team succeeded")
 	}
-	index.resolveTeam = memreg.FixedTeamIDResolver("not-a-uuid")
+	index.resolveTeam = memprovider.FixedTeamIDResolver("not-a-uuid")
 	if _, err := index.teamID(context.Background()); err == nil {
 		t.Fatal("teamID() with invalid team succeeded")
 	}
@@ -112,7 +112,7 @@ func TestPGVectorIndexUsesPersistenceNeutralStore(t *testing.T) {
 	store := &semanticEmbeddingStoreFake{count: 7}
 	index := &pgvectorIndex{
 		store: store, modelID: "22222222-2222-4222-8222-222222222222",
-		resolveTeam: memreg.FixedTeamIDResolver("11111111-1111-4111-8111-111111111111"),
+		resolveTeam: memprovider.FixedTeamIDResolver("11111111-1111-4111-8111-111111111111"),
 	}
 	if err := index.DeleteNodes(t.Context(), "33333333-3333-4333-8333-333333333333", []string{" node-a ", "", "node-b"}); err != nil {
 		t.Fatalf("DeleteNodes() error = %v", err)

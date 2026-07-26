@@ -128,11 +128,20 @@ func (a *QQAdapter) Connect(ctx context.Context, cfg gateway.ChannelConfig, hand
 	}
 
 	connCtx, cancel := context.WithCancel(ctx)
-	go a.runReceiver(connCtx, cfg, parsed, handler)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.runReceiver(connCtx, cfg, parsed, handler)
+	}()
 
-	return gateway.NewConnection(cfg, func(context.Context) error {
+	return gateway.NewConnection(cfg, func(stopCtx context.Context) error {
 		cancel()
-		return nil
+		select {
+		case <-done:
+			return nil
+		case <-stopCtx.Done():
+			return stopCtx.Err()
+		}
 	}), nil
 }
 

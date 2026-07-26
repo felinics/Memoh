@@ -206,6 +206,44 @@ PostgreSQL adapter。禁止继续扩展 `db/store.Queries`。
 每个owner拥有独立Goose migration序列和`<schema>.goose_db_version`，但全仓只有一个统一
 Migrator。Embedded/split使用完全相同的schema contract；业务进程只验证版本，不执行migration。
 
+**统一的 adapter 目录形态（项目契约，已落地）。** 每个 domain 只有一棵 owner-private
+PostgreSQL 树，root 不放 Go 文件，只含 `sqlc/` 与 leaf 子包：
+
+```
+domains/<owner>/internal/postgres/<sub>/    # adapter，唯一出现 sqlc 与 pgx 的位置
+domains/<owner>/internal/postgres/sqlc/     # 生成代码，每 owner 一个 target
+```
+
+leaf 的 package 名与目录名一致（`package catalog`，不是 `package postgres`），
+调用点无需 import alias。三层方向固定为 adapter → port ← service：service 只依赖
+port，永远不知道 PostgreSQL 存在。
+
+port 的可见性由类型的到达范围决定：record 不跨 domain 时留在 `internal/port/`
+（model、memory、channel）；只有别的 domain 需要消费这些类型时才放公开
+`persistence/`（如 `api/identity/link/persistence.Binding` 被 Agent 与 Channel 读取）。
+默认私有，不预先公开。
+
+`NewPostgres*` constructor 必须返回 port 而非 adapter 具体类型——一旦泄漏具体类型，
+每个调用方都得 import adapter 包，边界即失效。一个 adapter 同时满足多个 port 时，
+在 constructor 旁声明 bundle interface，而不是返回 struct。
+
+`cmd/**` 只调用 `NewPostgres*` seam，绝不 import adapter。adapter 内收到 `internal/`
+之后这条由 Go compiler 免费强制，这正是它们住在那里的全部理由——不需要守卫测试。
+
+少数 port 与其 adapter 实现同包（`chat/message`、`chat/thread`、`chat/compaction`、
+`chat/backup`），在 port 旁放 `constructors.go` 会形成 import cycle，因此这些 seam
+落在 domain 的公开 composition 入口 `domains/<owner>/assembly/`。该包只有薄
+constructor：不承载业务 policy、不选择 build profile、不启动进程。
+
+共享的 pg 转换 helper 统一放 `internal/db`（`UUIDString`、`TimeFromPg`、
+`TextToString`、`ParseUUID`、`ParseUUIDOrEmpty`、`TimestamptzFromTime`），adapter 内
+不得重复声明私有副本；语义确有差异时（不同的 error message contract、UTC 归一化）
+才写局部 helper，并在注释里说明差异。
+
+结构性规则不用测试守卫：仓库刻意不保留 `internal/arch`。目录形态与 import 方向由
+Go compiler 能管的部分交给编译器，其余交给 review；仅复述布局的守卫测试只有维护
+成本，没有安全收益。
+
 ### 3.8 Store boundary 先于目录移动
 
 “先重构 Store”指先改变依赖方向和事务所有权，不是先全仓重写 SQLC 或搬迁生成文件：
@@ -487,7 +525,7 @@ func profileOptions(cfg config.Config) fx.Option {
 | Channel 直接调用 `flow.Runner` | `channel/inbound -> agent/turn.Service` | 已完成依赖反转 |
 | Pipeline 直接持有 Agent/Resolver | `pipeline -> agent/turn.Service` | 已完成依赖反转 |
 | 单进程 Channel wiring | 新增 `cmd/channel` 与 RPC | 已成为正式 split 部署路径 |
-| 仅靠约定保护边界 | `internal/arch/arch_test.go` | 已有机械守卫 |
+| 仅靠约定保护边界 | Go compiler + `domains/<owner>/internal/postgres` | adapter 内收后由编译器强制；已删除 `internal/arch` 守卫测试 |
 | Workspace `LocalService`/`RuntimeRouter` | 当前统一 workspace contract | 旧实现已删除，不再迁移 |
 
 ## 7. 现有一级包迁移台账
@@ -510,16 +548,16 @@ func profileOptions(cfg config.Config) fx.Option {
 | `agent` | `domains/agent/internal/engine` + `domains/agent` contract | Split | Engine/background/tools/turn 分开；Turn 细分见后文 |
 | `agentpayload` | `domains/agent/internal/engine/payload` | Move | 当前无跨 domain consumer；修复复合包名并内收 |
 | `apperror` | 各 `http`/`grpc` transport error mapper | Delete | Transport 状态映射不得作为共享 domain error |
-| `arch` | `internal/arch` | Keep | 扩展 build profile、SQLC 和 domain import guard |
+| `arch` | — | Delete | 结构守卫测试已删除：目录形态与 import 方向由 Go compiler 与 review 保证，不再用测试复述布局 |
 | `attachment` | `domains/media/attachment`（纯 wire）；data mount 归 `domains/runtime`；media access path 归 `domains/media` | Split | 跨 domain 纯值公开；业务包不依赖 containerfs |
 | `audio` | `domains/model/internal/audio` | Split | Provider/model 归 Model；Channel transcription 走 port |
-| `auth` | `domains/api/internal/identity/auth` | Split | JWT/token/session middleware 与 transport binding 分开 |
+| `auth` | `domains/api/identity/auth` | Split | JWT/token/session middleware 与 transport binding 分开 |
 | `boot` | `internal/config` + `domains/runtime` composition | Split | Operator detection 与 Server-local Runtime construction 分开；不建立 `local` wrapper |
-| `botbackup` | `domains/api/internal/bot/backup` | Split | 跨域读取改用窄 export/import port 后再移动 |
+| `botbackup` | `domains/api/bot/backup` | Split | Bot-owned archive workflow 公开；加密实现留在 API internal adapter |
 | `bots` | `domains/api/internal/bot` | Split | Bot registry owner 为 API；Agent 只消费 execution snapshot/reader |
 | `capabilities` | `domains/model/capability` | Split/Move | `cmd/synccaps` 需合法导入公开 catalog；运行实现可留 Model internal |
 | `channel` | `domains/channel` + `domains/channel/internal/*` | Split | 根 contract、store、gateway、outbound、adapter 分拆 |
-| `channelaccess` | `domains/api/internal/bot/access` + `domains/api/internal/identity/link` | Split | Manage权限归Bot Access；link code/binding归Identity；Channel只消费判定结果或窄reader |
+| `channelaccess` | `domains/api/bot/access` + `domains/api/identity/link` | Split | Manage权限归Bot Access；link code/binding归Identity；Channel只消费判定结果或窄reader |
 | `command` | `domains/agent/command` | Split | parsing、catalog、execution和result projection均留Server；Channel只提交typed inbound/interaction |
 | `commandsyntax` | `domains/agent/command/syntax` | Move | Server-owned command parser/value；Channel只做平台payload normalization |
 | `compaction` | `domains/agent/chat/compaction` | Move | Turn 历史产物归 Agent |
@@ -556,7 +594,7 @@ func profileOptions(cfg config.Config) fx.Option {
 | `oauthctx` | `internal/oauth/context` | Move | 共享纯 context value；修复复合包名 |
 | `pipeline` | `domains/channel/internal/{observe,discuss}` | Split | 依照已批准 spec，入站观察投影与 Discuss trigger 按职责拆分 |
 | `plugins` | `domains/agent/internal/extension/plugin` | Split | 执行归 Agent，管理 HTTP 归 API |
-| `policy` | `domains/api/internal/bot/access` | Move | Guest/Bot access policy |
+| `policy` | `domains/api/bot/access/policy` | Move | Guest/Bot access policy |
 | `providers` | `domains/model/internal/provider` | Split | Catalog、credential、OAuth/client construction 分开 |
 | `providertemplates` | `domains/model/internal/template` | Split | 先切 Store interface，禁止 SQLC 泄漏 |
 | `prune` | `domains/agent/chat/text/prune` | Move | Agent/Chat text policy |
@@ -568,7 +606,7 @@ func profileOptions(cfg config.Config) fx.Option {
 | `server` | `domains/api/http/server` | Move | Echo runtime、middleware、shutdown |
 | `session` | `domains/agent/chat/session` | Split | CRUD、route、ACP、hook、fence 拆职责后移动 |
 | `sessionruntime` | `domains/agent/chat/session/runtime` | Decide | 当前未进入生产依赖图；先决定接入、保留或删除 |
-| `settings` | API Bot setting + Agent/Runtime consumers | Split/Delete | Network/ACL/ACP side effect 移到应用协调器 |
+| `settings` | `domains/api/bot/setting` + Agent/Runtime consumers | Split/Delete | Network/ACL/ACP side effect 移到应用协调器 |
 | `skills` | `domains/agent/internal/extension/skill` | Split | Runtime activation 归 Agent；配置管理 HTTP 归 API |
 | `slash` | `domains/agent/command/slash` | Move | 业务command classifier留Server；Channel只标准化平台interaction |
 | `storage` | `domains/media/storage` ports + `domains/media/internal/storage` providers + Runtime adapter | Split | 公开 ports 归 Media；concrete providers 为 owner-private；container access 由 Runtime adapter 实现 |
@@ -669,8 +707,8 @@ func profileOptions(cfg config.Config) fx.Option {
 | `agent/event` | Agent root `message.go` + `internal/engine/event.go` | Split；只公开 Channel/RPC 真正消费的 wire 字段 |
 | `agent/sessionmode` | `domains/agent/chat/session/mode` | 修复复合包名 |
 | `agent/tools` | `domains/agent/tool` + capability adapters | 先拆 contract/implementation |
-| `agent/tools/internal/toolname` | `domains/agent/tool/name` | 单词 leaf |
-| `agent/tools/internal/toolset` | `domains/agent/tool/set` | 单词 leaf |
+| `agent/tools/internal/toolname` | `domains/agent/tool/internal/name` | 单词 leaf；仅 Tool owner 可见 |
+| `agent/tools/internal/toolset` | `domains/agent/tool/internal/set` | 单词 leaf；仅 Tool owner 可见 |
 | `agent/turn` | `domains/agent` 根 contract | 当前实现只作行为/字段盘点；直接形成唯一最终typed contract |
 | `agent/turn/inprocess` | `domains/agent/internal/turn` | Server-local implementation；embedded/split均编译 |
 | `agent/turn/grpctransport` | `internal/rpc/channel/client` + `server` | 仅用于Channel -> Server final inbound/Turn边界，不迁移旧wrapper |
@@ -866,11 +904,11 @@ go list ./...
 
 # Embedded Server
 go build ./cmd/agent
-go test ./cmd/agent ./domains/... ./internal/arch
+go test ./cmd/agent ./domains/...
 
 # Split Server
 go build -tags split ./cmd/agent
-go test -tags split ./cmd/agent ./internal/arch
+go test -tags split ./cmd/agent ./domains/...
 
 # Child process
 go build ./cmd/channel

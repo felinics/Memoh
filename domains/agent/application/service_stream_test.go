@@ -10,8 +10,9 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
-	"github.com/memohai/memoh/domains/api/setting"
-	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	"github.com/memohai/memoh/domains/api/bot/setting"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
+	memregistry "github.com/memohai/memoh/domains/memory/registry"
 	"github.com/memohai/memoh/internal/apperror"
 )
 
@@ -366,7 +367,7 @@ func TestPersistTerminalSnapshotHonorsSkipMemoryExtraction(t *testing.T) {
 	t.Parallel()
 
 	memory := &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 2)}
-	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
+	registry := memregistry.NewRegistry(slog.New(slog.DiscardHandler))
 	registry.Register(storeRoundMemoryProviderID, memory)
 	resolver := &Service{
 		messageService:  &recordingMessageService{},

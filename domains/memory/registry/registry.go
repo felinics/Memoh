@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+
+	"github.com/memohai/memoh/domains/memory/provider"
 )
 
 // defaultSingletonTeamID matches domains/iam/team.DefaultTeamID without importing
@@ -14,12 +16,7 @@ import (
 const defaultSingletonTeamID = "00000000-0000-0000-0000-000000000001"
 
 // Factory creates an Instance from a provider type string and JSON config.
-type Factory func(ctx context.Context, teamID, id string, config map[string]any) (Instance, error)
-
-// TeamIDResolver resolves the team that owns a memory operation. Hosted
-// deployments can inject a strict request-context resolver; upstream defaults
-// to its published singleton team.
-type TeamIDResolver func(context.Context) (string, error)
+type Factory func(ctx context.Context, teamID, id string, config map[string]any) (provider.Instance, error)
 
 // ProviderConfigLoader loads one provider configuration under the team
 // already bound to ctx. It lets a registry lazily instantiate providers on
@@ -28,7 +25,7 @@ type ProviderConfigLoader func(ctx context.Context, id string) (providerType str
 
 // TeamDefaultFactory creates the builtin fallback independently for each
 // team. It is used for bots without an explicit memory provider.
-type TeamDefaultFactory func(ctx context.Context, teamID string) (Instance, error)
+type TeamDefaultFactory func(ctx context.Context, teamID string) (provider.Instance, error)
 
 type providerCloser interface {
 	Close() error
@@ -44,15 +41,15 @@ type registryKey struct {
 // them on demand from stored configuration.
 type Registry struct {
 	mu             sync.RWMutex
-	instances      map[registryKey]Instance
+	instances      map[registryKey]provider.Instance
 	factories      map[string]Factory
-	resolveTeam    TeamIDResolver
+	resolveTeam    provider.TeamIDResolver
 	configLoader   ProviderConfigLoader
 	defaultFactory TeamDefaultFactory
 	logger         *slog.Logger
 }
 
-func NewRegistry(log *slog.Logger, resolvers ...TeamIDResolver) *Registry {
+func NewRegistry(log *slog.Logger, resolvers ...provider.TeamIDResolver) *Registry {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -61,7 +58,7 @@ func NewRegistry(log *slog.Logger, resolvers ...TeamIDResolver) *Registry {
 		resolver = resolvers[0]
 	}
 	return &Registry{
-		instances:   map[registryKey]Instance{},
+		instances:   map[registryKey]provider.Instance{},
 		factories:   map[string]Factory{},
 		resolveTeam: resolver,
 		logger:      log.With(slog.String("component", "memory_provider_registry")),
@@ -70,19 +67,6 @@ func NewRegistry(log *slog.Logger, resolvers ...TeamIDResolver) *Registry {
 
 func defaultTeamIDResolver(context.Context) (string, error) {
 	return defaultSingletonTeamID, nil
-}
-
-// FixedTeamIDResolver returns a resolver permanently scoped to teamID.
-// Provider factories use this for team-owned runtimes whose background work
-// may outlive the request context that instantiated them.
-func FixedTeamIDResolver(teamID string) TeamIDResolver {
-	teamID = strings.TrimSpace(teamID)
-	return func(context.Context) (string, error) {
-		if teamID == "" {
-			return "", errors.New("memory team id is required")
-		}
-		return teamID, nil
-	}
 }
 
 // RegisterFactory registers a factory for a given provider type (e.g. "builtin").
@@ -107,23 +91,23 @@ func (r *Registry) SetTeamDefaultFactory(factory TeamDefaultFactory) {
 }
 
 // Register adds a pre-built provider instance by ID.
-func (r *Registry) Register(id string, provider Instance) {
-	if err := r.RegisterContext(context.Background(), id, provider); err != nil {
+func (r *Registry) Register(id string, inst provider.Instance) {
+	if err := r.RegisterContext(context.Background(), id, inst); err != nil {
 		r.logger.Error("register memory provider failed", slog.String("id", id), slog.Any("error", err))
 	}
 }
 
 // RegisterContext adds a pre-built provider under the team resolved from ctx.
-func (r *Registry) RegisterContext(ctx context.Context, id string, provider Instance) error {
+func (r *Registry) RegisterContext(ctx context.Context, id string, inst provider.Instance) error {
 	key, err := r.key(ctx, id)
 	if err != nil {
 		return err
 	}
 	r.mu.Lock()
 	previous := r.instances[key]
-	r.instances[key] = provider
+	r.instances[key] = inst
 	r.mu.Unlock()
-	if previous != nil && previous != provider {
+	if previous != nil && previous != inst {
 		closeProvider(previous)
 	}
 	return nil
@@ -131,7 +115,7 @@ func (r *Registry) RegisterContext(ctx context.Context, id string, provider Inst
 
 // Get returns the team-owned provider for the given DB record ID. Cache
 // misses are loaded and instantiated under the same team scope.
-func (r *Registry) Get(ctx context.Context, id string) (Instance, error) {
+func (r *Registry) Get(ctx context.Context, id string) (provider.Instance, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, errors.New("provider id is required")
@@ -148,7 +132,7 @@ func (r *Registry) Get(ctx context.Context, id string) (Instance, error) {
 	if ok {
 		return p, nil
 	}
-	if id == DefaultBuiltinProviderID && defaultFactory != nil {
+	if id == provider.DefaultBuiltinProviderID && defaultFactory != nil {
 		return r.instantiateDefault(ctx, key, defaultFactory)
 	}
 	if loader != nil {
@@ -163,7 +147,7 @@ func (r *Registry) Get(ctx context.Context, id string) (Instance, error) {
 
 // Instantiate creates a provider from a DB row and caches it.
 // If the instance already exists, it is returned directly.
-func (r *Registry) Instantiate(ctx context.Context, id, providerType string, config map[string]any) (Instance, error) {
+func (r *Registry) Instantiate(ctx context.Context, id, providerType string, config map[string]any) (provider.Instance, error) {
 	id = strings.TrimSpace(id)
 	providerType = strings.TrimSpace(providerType)
 	key, err := r.key(ctx, id)
@@ -173,7 +157,7 @@ func (r *Registry) Instantiate(ctx context.Context, id, providerType string, con
 	return r.instantiate(ctx, key, providerType, config)
 }
 
-func (r *Registry) instantiate(ctx context.Context, key registryKey, providerType string, config map[string]any) (Instance, error) {
+func (r *Registry) instantiate(ctx context.Context, key registryKey, providerType string, config map[string]any) (provider.Instance, error) {
 	// Factory construction is serialized with Remove. Besides deduplicating
 	// concurrent cache misses, this prevents an in-flight old configuration
 	// from being stored after Update has evicted it.
@@ -194,7 +178,7 @@ func (r *Registry) instantiate(ctx context.Context, key registryKey, providerTyp
 	return p, nil
 }
 
-func (r *Registry) instantiateDefault(ctx context.Context, key registryKey, factory TeamDefaultFactory) (Instance, error) {
+func (r *Registry) instantiateDefault(ctx context.Context, key registryKey, factory TeamDefaultFactory) (provider.Instance, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if p, ok := r.instances[key]; ok {
@@ -215,10 +199,10 @@ func (r *Registry) Remove(ctx context.Context, id string) error {
 		return err
 	}
 	r.mu.Lock()
-	provider := r.instances[key]
+	inst := r.instances[key]
 	delete(r.instances, key)
 	r.mu.Unlock()
-	closeProvider(provider)
+	closeProvider(inst)
 	return nil
 }
 
@@ -229,20 +213,20 @@ func (r *Registry) Close() error {
 		return nil
 	}
 	r.mu.Lock()
-	providers := make([]Instance, 0, len(r.instances))
-	for key, provider := range r.instances {
-		providers = append(providers, provider)
+	providers := make([]provider.Instance, 0, len(r.instances))
+	for key, inst := range r.instances {
+		providers = append(providers, inst)
 		delete(r.instances, key)
 	}
 	r.mu.Unlock()
-	for _, provider := range providers {
-		closeProvider(provider)
+	for _, inst := range providers {
+		closeProvider(inst)
 	}
 	return nil
 }
 
-func closeProvider(provider Instance) {
-	if closer, ok := provider.(providerCloser); ok && closer != nil {
+func closeProvider(inst provider.Instance) {
+	if closer, ok := inst.(providerCloser); ok && closer != nil {
 		_ = closer.Close()
 	}
 }

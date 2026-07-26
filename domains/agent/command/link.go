@@ -5,13 +5,14 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/memohai/memoh/domains/api/access"
+	identitylink "github.com/memohai/memoh/domains/api/identity/link"
+	linkpersistence "github.com/memohai/memoh/domains/api/identity/link/persistence"
 )
 
 // LinkConsumer binds the calling channel identity to the web user that owns a
-// one-time link code. It is satisfied by access.Service.
+// one-time link code. It is satisfied by identitylink.Service.
 type LinkConsumer interface {
-	ConsumeLinkCode(ctx context.Context, token, channelIdentityID string) (access.Binding, error)
+	ConsumeLinkCode(ctx context.Context, token, channelIdentityID string) (linkpersistence.Binding, error)
 }
 
 // SetLinkConsumer wires the account-link consumer used by the /link command.
@@ -41,11 +42,11 @@ func (h *Handler) buildLinkGroup() *CommandGroup {
 			}
 			if _, err := h.linkConsumer.ConsumeLinkCode(cc.Ctx, token, cc.ChannelIdentityID); err != nil {
 				switch {
-				case errors.Is(err, access.ErrCodeNotFound):
+				case errors.Is(err, identitylink.ErrCodeNotFound):
 					return cc.T("cmd.link.notFound"), nil
-				case errors.Is(err, access.ErrCodeExpired):
+				case errors.Is(err, identitylink.ErrCodeExpired):
 					return cc.T("cmd.link.expired"), nil
-				case errors.Is(err, access.ErrCodeConsumed):
+				case errors.Is(err, identitylink.ErrCodeConsumed):
 					return cc.T("cmd.link.consumed"), nil
 				default:
 					return cc.T("cmd.link.failed"), nil

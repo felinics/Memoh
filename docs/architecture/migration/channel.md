@@ -122,8 +122,8 @@ contract或executor。
 | `internal/channel/inbound` | `domains/channel/internal/inbound` | Split | 保留外部入站；巨型 processor 切 ports/文件 |
 | `internal/channel/identities` | `domains/channel/internal/identity` + `postgres` | Split | 业务值/服务与 SQLC 分离 |
 | `internal/channel/route` | `domains/channel/internal/route` + `postgres` | Split | 去除对 `conversation.Service` 的直接调用 |
-| `internal/channel/publicmedia` | `domains/channel/internal/http` | Move | 签名路径属于 Channel public delivery surface |
-| `internal/channel/common` | 各 adapter 邻近文件 | Delete | 不保留 `common`；logging/proxy 分别放入 adapter 包 |
+| `internal/channel/publicmedia` | `domains/channel/internal/http/media` | Move | 签名路径属于 Channel public delivery surface |
+| `internal/channel/common` | `domains/channel/internal/{logging,proxy}` | Split/Delete | 不保留 `common`；日志预览与代理配置形成明确的单词 leaf |
 | `internal/channel/channeltest` | `domains/channel/internal/test/store` | Move | 多个包测试共用的编译型 store helper |
 | `internal/channel/partsfixture` | `domains/channel/internal/test/fixture` | Move | 多 adapter 测试共用 canonical parts fixture |
 | `internal/email` | `domains/channel/email.go` + `internal/email` + `internal/postgres` | Split | 跨边界DTO公开；各consumer就地定义port；runtime与DB adapter内收 |
@@ -582,7 +582,7 @@ owned non-Go assets = 4/4 mapped
 
 ```bash
 go test ./domains/channel/... ./domains/api/http/chat/...
-go test ./internal/arch/...
+go test ./domains/channel/...
 go build ./cmd/channel
 go build ./cmd/agent
 go build -tags split ./cmd/agent

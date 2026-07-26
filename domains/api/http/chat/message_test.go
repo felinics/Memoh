@@ -9,7 +9,7 @@ import (
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	chatview "github.com/memohai/memoh/domains/agent/view"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 )
 
 type testFlusher struct{}

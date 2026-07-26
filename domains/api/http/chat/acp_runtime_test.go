@@ -18,14 +18,15 @@ import (
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
 	acpfeedback "github.com/memohai/memoh/domains/agent/decision/feedback"
 	"github.com/memohai/memoh/domains/api/bot"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
 	agenthttp "github.com/memohai/memoh/domains/api/http/agent"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 	"github.com/memohai/memoh/internal/apperror"
 )
 
 type acpRuntimeQueries struct {
 	stubThreadStore
-	bot         bot.Record
+	bot         botpersistence.Record
 	session     session.Thread
 	permissions []byte
 }
@@ -291,13 +292,10 @@ func TestACPRuntimeHandlerEnsureRejectsMissingRuntimeOwner(t *testing.T) {
 	ctx.SetParamValues(botID, sessionID)
 
 	err := handler.EnsureRuntime(ctx)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
-		t.Fatalf("EnsureRuntime() error = %v, want %d", err, http.StatusConflict)
-	}
-	feedback, ok := httpErr.Message.(*acpfeedback.Error)
-	if !ok || feedback.Code != acpfeedback.CodeRuntimeOwnerMissing {
-		t.Fatalf("feedback = %#v, want runtime owner missing", httpErr.Message)
+	requireHTTPStatus(t, err, http.StatusConflict)
+	var feedback *acpfeedback.Error
+	if !errors.As(err, &feedback) || feedback.Code != acpfeedback.CodeRuntimeOwnerMissing {
+		t.Fatalf("feedback = %#v, want runtime owner missing", err)
 	}
 	if pool.ensureInput.BotID != "" {
 		t.Fatalf("pool should not be called without runtime owner: %#v", pool.ensureInput)
@@ -341,10 +339,7 @@ func TestACPRuntimeHandlerEnsureRejectsDifferentRuntimeOwner(t *testing.T) {
 	ctx.SetParamValues(botID, sessionID)
 
 	err := handler.EnsureRuntime(ctx)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("EnsureRuntime() error = %v, want HTTP 403", err)
-	}
+	requireHTTPStatus(t, err, http.StatusForbidden)
 	if pool.ensureInput.BotID != "" {
 		t.Fatalf("pool should not be called for a different runtime owner: %#v", pool.ensureInput)
 	}
@@ -368,10 +363,7 @@ func TestAuthorizeACPRuntimeSessionAccess(t *testing.T) {
 			[]string{bot.PermissionManage},
 			"user-2",
 		)
-		var httpErr *echo.HTTPError
-		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-			t.Fatalf("agenthttp.AuthorizeACPRuntimeSessionAccess() error = %v, want HTTP 403", err)
-		}
+		requireHTTPStatus(t, err, http.StatusForbidden)
 	})
 
 	t.Run("owner still needs workspace exec", func(t *testing.T) {
@@ -380,10 +372,7 @@ func TestAuthorizeACPRuntimeSessionAccess(t *testing.T) {
 			[]string{bot.PermissionChat},
 			"user-1",
 		)
-		var httpErr *echo.HTTPError
-		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-			t.Fatalf("agenthttp.AuthorizeACPRuntimeSessionAccess() error = %v, want HTTP 403", err)
-		}
+		requireHTTPStatus(t, err, http.StatusForbidden)
 	})
 
 	t.Run("different owner is forbidden", func(t *testing.T) {
@@ -392,10 +381,7 @@ func TestAuthorizeACPRuntimeSessionAccess(t *testing.T) {
 			[]string{bot.PermissionWorkspaceExec},
 			"user-2",
 		)
-		var httpErr *echo.HTTPError
-		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-			t.Fatalf("agenthttp.AuthorizeACPRuntimeSessionAccess() error = %v, want HTTP 403", err)
-		}
+		requireHTTPStatus(t, err, http.StatusForbidden)
 	})
 }
 
@@ -669,10 +655,7 @@ func TestACPRuntimeHandlerSetRuntimeModelRejectsDifferentRuntimeOwner(t *testing
 	ctx.SetParamValues(botID, "rt_warm")
 
 	err := handler.SetRuntimeModel(ctx)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("SetRuntimeModel() error = %v, want HTTP 403", err)
-	}
+	requireHTTPStatus(t, err, http.StatusForbidden)
 	if pool.modelID != "" {
 		t.Fatalf("pool should not be called for a different runtime owner: model=%q", pool.modelID)
 	}
@@ -705,10 +688,7 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsDisabledAgent(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("CreateRuntime() error = %v, want %d", err, http.StatusForbidden)
-	}
+	requireHTTPStatus(t, err, http.StatusForbidden)
 	if pool.createInput.BotID != "" {
 		t.Fatalf("pool should not be called for a disabled agent: %#v", pool.createInput)
 	}
@@ -747,13 +727,10 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsUnconfiguredAgent(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("CreateRuntime() error = %v, want %d", err, http.StatusBadRequest)
-	}
-	feedback, ok := httpErr.Message.(*acpfeedback.Error)
-	if !ok || feedback.Code != acpfeedback.CodeAgentNotConfigured {
-		t.Fatalf("feedback = %#v, want code %s", httpErr.Message, acpfeedback.CodeAgentNotConfigured)
+	requireHTTPStatus(t, err, http.StatusBadRequest)
+	var feedback *acpfeedback.Error
+	if !errors.As(err, &feedback) || feedback.Code != acpfeedback.CodeAgentNotConfigured {
+		t.Fatalf("feedback = %#v, want code %s", err, acpfeedback.CodeAgentNotConfigured)
 	}
 	if pool.createInput.BotID != "" {
 		t.Fatalf("pool should not be called for an unconfigured agent: %#v", pool.createInput)
@@ -787,10 +764,7 @@ func TestACPRuntimeHandlerCreateRuntimeMapsCapToTooManyRequests(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusTooManyRequests {
-		t.Fatalf("CreateRuntime() error = %v, want %d", err, http.StatusTooManyRequests)
-	}
+	requireHTTPStatus(t, err, http.StatusTooManyRequests)
 }
 
 func TestACPRuntimeHandlerCreateRuntimeRedactsStartFailure(t *testing.T) {
@@ -820,13 +794,10 @@ func TestACPRuntimeHandlerCreateRuntimeRedactsStartFailure(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusInternalServerError {
-		t.Fatalf("CreateRuntime() error = %v, want %d", err, http.StatusInternalServerError)
-	}
-	feedback, ok := httpErr.Message.(*acpfeedback.Error)
-	if !ok || feedback.Code != acpfeedback.CodeRuntimeStartFailed {
-		t.Fatalf("feedback = %#v, want code %s", httpErr.Message, acpfeedback.CodeRuntimeStartFailed)
+	requireHTTPStatus(t, err, http.StatusInternalServerError)
+	var feedback *acpfeedback.Error
+	if !errors.As(err, &feedback) || feedback.Code != acpfeedback.CodeRuntimeStartFailed {
+		t.Fatalf("feedback = %#v, want code %s", err, acpfeedback.CodeRuntimeStartFailed)
 	}
 	if strings.Contains(feedback.Message, "/Users/alice") || strings.Contains(feedback.Message, "sk-secret") {
 		t.Fatalf("runtime start feedback leaked raw error: %q", feedback.Message)
@@ -1016,10 +987,7 @@ func TestACPRuntimeHandlerRejectsNonACPSession(t *testing.T) {
 	if err == nil {
 		t.Fatalf("GetRuntime() error = nil, want HTTP 400")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("GetRuntime() error = %v, want HTTP 400", err)
-	}
+	requireHTTPStatus(t, err, http.StatusBadRequest)
 }
 
 func TestBuildACPMCPToolsURLUsesOnlyExplicitOrLoopbackBaseURL(t *testing.T) {

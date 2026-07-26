@@ -14,6 +14,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcpgw "github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 type MCPFederationGateway struct {
@@ -41,7 +42,7 @@ func (g *MCPFederationGateway) SetOAuthService(svc *mcpgw.OAuthService) {
 	g.oauthService = svc
 }
 
-func (g *MCPFederationGateway) ListHTTPConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+func (g *MCPFederationGateway) ListHTTPConnectionTools(ctx context.Context, connection mcppersistence.Connection) ([]mcppersistence.ToolDescriptor, error) {
 	session, err := g.connectStreamableSession(ctx, connection)
 	if err != nil {
 		return nil, err
@@ -54,7 +55,7 @@ func (g *MCPFederationGateway) ListHTTPConnectionTools(ctx context.Context, conn
 	return convertSDKTools(result.Tools), nil
 }
 
-func (g *MCPFederationGateway) CallHTTPConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error) {
+func (g *MCPFederationGateway) CallHTTPConnectionTool(ctx context.Context, connection mcppersistence.Connection, toolName string, args map[string]any) (map[string]any, error) {
 	session, err := g.connectStreamableSession(ctx, connection)
 	if err != nil {
 		return nil, err
@@ -70,7 +71,7 @@ func (g *MCPFederationGateway) CallHTTPConnectionTool(ctx context.Context, conne
 	return wrapSDKToolResult(result)
 }
 
-func (g *MCPFederationGateway) ListSSEConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+func (g *MCPFederationGateway) ListSSEConnectionTools(ctx context.Context, connection mcppersistence.Connection) ([]mcppersistence.ToolDescriptor, error) {
 	session, err := g.connectSSESession(ctx, connection)
 	if err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func (g *MCPFederationGateway) ListSSEConnectionTools(ctx context.Context, conne
 	return convertSDKTools(result.Tools), nil
 }
 
-func (g *MCPFederationGateway) CallSSEConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error) {
+func (g *MCPFederationGateway) CallSSEConnectionTool(ctx context.Context, connection mcppersistence.Connection, toolName string, args map[string]any) (map[string]any, error) {
 	session, err := g.connectSSESession(ctx, connection)
 	if err != nil {
 		return nil, err
@@ -99,7 +100,7 @@ func (g *MCPFederationGateway) CallSSEConnectionTool(ctx context.Context, connec
 	return wrapSDKToolResult(result)
 }
 
-func (g *MCPFederationGateway) connectStreamableSession(ctx context.Context, connection mcpgw.Connection) (*sdkmcp.ClientSession, error) {
+func (g *MCPFederationGateway) connectStreamableSession(ctx context.Context, connection mcppersistence.Connection) (*sdkmcp.ClientSession, error) {
 	url := strings.TrimSpace(anyToString(connection.Config["url"]))
 	if url == "" {
 		return nil, errors.New("http mcp url is required")
@@ -116,7 +117,7 @@ func (g *MCPFederationGateway) connectStreamableSession(ctx context.Context, con
 	return client.Connect(ctx, transport, nil)
 }
 
-func (g *MCPFederationGateway) connectSSESession(ctx context.Context, connection mcpgw.Connection) (*sdkmcp.ClientSession, error) {
+func (g *MCPFederationGateway) connectSSESession(ctx context.Context, connection mcppersistence.Connection) (*sdkmcp.ClientSession, error) {
 	endpoints := resolveSSEEndpointCandidates(connection.Config)
 	if len(endpoints) == 0 {
 		return nil, errors.New("sse mcp url is required")
@@ -194,7 +195,7 @@ func resolveSSEEndpointCandidates(config map[string]any) []string {
 	return out
 }
 
-func (g *MCPFederationGateway) connectionHTTPClient(ctx context.Context, connection mcpgw.Connection) *http.Client {
+func (g *MCPFederationGateway) connectionHTTPClient(ctx context.Context, connection mcppersistence.Connection) *http.Client {
 	base := g.client
 	if base == nil {
 		base = &http.Client{Timeout: 30 * time.Second}
@@ -233,7 +234,7 @@ func (g *MCPFederationGateway) connectionHTTPClient(ctx context.Context, connect
 	}
 }
 
-func (g *MCPFederationGateway) ListStdioConnectionTools(ctx context.Context, botID string, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+func (g *MCPFederationGateway) ListStdioConnectionTools(ctx context.Context, botID string, connection mcppersistence.Connection) ([]mcppersistence.ToolDescriptor, error) {
 	sess, err := g.startStdioConnectionSession(ctx, botID, connection)
 	if err != nil {
 		return nil, err
@@ -251,7 +252,7 @@ func (g *MCPFederationGateway) ListStdioConnectionTools(ctx context.Context, bot
 	return parseGatewayToolsListPayload(payload)
 }
 
-func (g *MCPFederationGateway) CallStdioConnectionTool(ctx context.Context, botID string, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error) {
+func (g *MCPFederationGateway) CallStdioConnectionTool(ctx context.Context, botID string, connection mcppersistence.Connection, toolName string, args map[string]any) (map[string]any, error) {
 	sess, err := g.startStdioConnectionSession(ctx, botID, connection)
 	if err != nil {
 		return nil, err
@@ -273,7 +274,7 @@ func (g *MCPFederationGateway) CallStdioConnectionTool(ctx context.Context, botI
 	})
 }
 
-func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, botID string, connection mcpgw.Connection) (*mcpSession, error) {
+func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, botID string, connection mcppersistence.Connection) (*mcpSession, error) {
 	if g.handler == nil {
 		return nil, errors.New("containerd handler not configured")
 	}
@@ -299,7 +300,7 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 	return g.handler.startContainerdMCPCommandSession(ctx, botID, containerID, request)
 }
 
-func parseGatewayToolsListPayload(payload map[string]any) ([]mcpgw.ToolDescriptor, error) {
+func parseGatewayToolsListPayload(payload map[string]any) ([]mcppersistence.ToolDescriptor, error) {
 	if err := mcpgw.PayloadError(payload); err != nil {
 		return nil, err
 	}
@@ -311,7 +312,7 @@ func parseGatewayToolsListPayload(payload map[string]any) ([]mcpgw.ToolDescripto
 	if !ok {
 		return nil, errors.New("invalid tools/list tools field")
 	}
-	tools := make([]mcpgw.ToolDescriptor, 0, len(rawTools))
+	tools := make([]mcppersistence.ToolDescriptor, 0, len(rawTools))
 	for _, rawTool := range rawTools {
 		item, ok := rawTool.(map[string]any)
 		if !ok {
@@ -329,7 +330,7 @@ func parseGatewayToolsListPayload(payload map[string]any) ([]mcpgw.ToolDescripto
 				"properties": map[string]any{},
 			}
 		}
-		tools = append(tools, mcpgw.ToolDescriptor{
+		tools = append(tools, mcppersistence.ToolDescriptor{
 			Name:        name,
 			Description: description,
 			InputSchema: inputSchema,
@@ -338,11 +339,11 @@ func parseGatewayToolsListPayload(payload map[string]any) ([]mcpgw.ToolDescripto
 	return tools, nil
 }
 
-func convertSDKTools(items []*sdkmcp.Tool) []mcpgw.ToolDescriptor {
+func convertSDKTools(items []*sdkmcp.Tool) []mcppersistence.ToolDescriptor {
 	if len(items) == 0 {
-		return []mcpgw.ToolDescriptor{}
+		return []mcppersistence.ToolDescriptor{}
 	}
-	tools := make([]mcpgw.ToolDescriptor, 0, len(items))
+	tools := make([]mcppersistence.ToolDescriptor, 0, len(items))
 	for _, item := range items {
 		if item == nil {
 			continue
@@ -351,7 +352,7 @@ func convertSDKTools(items []*sdkmcp.Tool) []mcpgw.ToolDescriptor {
 		if name == "" {
 			continue
 		}
-		tools = append(tools, mcpgw.ToolDescriptor{
+		tools = append(tools, mcppersistence.ToolDescriptor{
 			Name:        name,
 			Description: strings.TrimSpace(item.Description),
 			InputSchema: normalizeToolInputSchema(item.InputSchema),

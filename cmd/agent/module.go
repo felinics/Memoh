@@ -9,6 +9,8 @@ import (
 	"go.uber.org/fx/fxevent"
 
 	coremodule "github.com/memohai/memoh/cmd/internal/core"
+	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/agent/application"
 	accesshttp "github.com/memohai/memoh/domains/api/http/access"
 	agenthttp "github.com/memohai/memoh/domains/api/http/agent"
 	bothttp "github.com/memohai/memoh/domains/api/http/bot"
@@ -19,9 +21,13 @@ import (
 	modelhttp "github.com/memohai/memoh/domains/api/http/model"
 	runtimehttp "github.com/memohai/memoh/domains/api/http/runtime"
 	systemhttp "github.com/memohai/memoh/domains/api/http/system"
-	channelmodule "github.com/memohai/memoh/domains/channel/assembly"
+	emailpkg "github.com/memohai/memoh/domains/channel/email"
 	"github.com/memohai/memoh/internal/config"
 )
+
+func provideEmailChatTriggerer(turns agentdomain.Service, owners application.BotOwnerResolver, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
+	return application.NewEmailChatGateway(turns, owners, cfg.Auth.JWTSecret, log)
+}
 
 func runServe() {
 	cfg, err := provideConfig()
@@ -40,9 +46,9 @@ func commonOptions(cfg config.Config) fx.Option {
 	return fx.Options(
 		fx.Supply(cfg),
 		coremodule.FoundationModule(),
-		channelmodule.FoundationModule(),
 		coremodule.ServerModule(),
 		fx.Provide(
+			provideEmailChatTriggerer,
 			provideServerHandler(systemhttp.NewPingHandler),
 			provideServerHandler(channelhttp.NewWebhookTunnelHandler),
 			provideServerHandler(provideAuthHandler),

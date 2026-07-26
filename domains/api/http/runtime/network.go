@@ -8,9 +8,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
 	netctl "github.com/memohai/memoh/domains/runtime/network"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type NetworkHandler struct {
@@ -53,7 +54,7 @@ func (h *NetworkHandler) Status(c echo.Context) error {
 	}
 	status, err := h.service.StatusBot(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("get network status", err)
 	}
 	return c.JSON(http.StatusOK, status)
 }
@@ -65,7 +66,7 @@ func (h *NetworkHandler) ListNodes(c echo.Context) error {
 	}
 	resp, err := h.service.ListBotNodes(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("list network nodes", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -77,15 +78,15 @@ func (h *NetworkHandler) ExecuteAction(c echo.Context) error {
 	}
 	actionID := strings.TrimSpace(c.Param("action_id"))
 	if actionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "action_id is required")
+		return apperror.Required("action_id")
 	}
 	var req netctl.BotActionRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind network action", err)
 	}
 	resp, err := h.service.ExecuteActionBot(c.Request().Context(), botID, actionID, req.Input)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("execute network action", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -97,7 +98,7 @@ func (h *NetworkHandler) authorize(c echo.Context) (string, error) {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return "", apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
 		return "", err

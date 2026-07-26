@@ -10,8 +10,9 @@ import (
 
 	"github.com/memohai/memoh/domains/agent/automation/schedule"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type ScheduleHandler struct {
@@ -48,8 +49,8 @@ func (h *ScheduleHandler) Register(e *echo.Echo) {
 // @Tags schedule
 // @Param payload body schedule.CreateRequest true "Schedule payload"
 // @Success 201 {object} schedule.Schedule
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule [post].
 func (h *ScheduleHandler) Create(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -58,18 +59,18 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	var req schedule.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind schedule", err)
 	}
 	resp, err := h.service.Create(c.Request().Context(), botID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("create schedule", err)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -79,8 +80,8 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 // @Description List schedules for current user
 // @Tags schedule
 // @Success 200 {object} schedule.ListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule [get].
 func (h *ScheduleHandler) List(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -89,14 +90,14 @@ func (h *ScheduleHandler) List(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	items, err := h.service.List(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list schedules", err)
 	}
 	return c.JSON(http.StatusOK, schedule.ListResponse{Items: items})
 }
@@ -107,9 +108,9 @@ func (h *ScheduleHandler) List(c echo.Context) error {
 // @Tags schedule
 // @Param id path string true "Schedule ID"
 // @Success 200 {object} schedule.Schedule
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/{id} [get].
 func (h *ScheduleHandler) Get(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -118,18 +119,18 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	id := c.Param("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get schedule", err)
 	}
 	if item.BotID != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
+		return apperror.Forbidden("authorize schedule bot", nil)
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -144,8 +145,8 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 // @Param id path string true "Schedule ID"
 // @Param payload body schedule.UpdateRequest true "Schedule payload"
 // @Success 200 {object} schedule.Schedule
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/{id} [put].
 func (h *ScheduleHandler) Update(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -154,29 +155,29 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	id := c.Param("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	var req schedule.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind schedule", err)
 	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get schedule", err)
 	}
 	if item.BotID != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
+		return apperror.Forbidden("authorize schedule bot", nil)
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("update schedule", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -187,8 +188,8 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 // @Tags schedule
 // @Param id path string true "Schedule ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/{id} [delete].
 func (h *ScheduleHandler) Delete(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -197,24 +198,24 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	id := c.Param("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get schedule", err)
 	}
 	if item.BotID != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
+		return apperror.Forbidden("authorize schedule bot", nil)
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("delete schedule", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -227,8 +228,8 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 // @Param limit query int false "Limit" default(50)
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} schedule.ListLogsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/logs [get].
 func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -237,7 +238,7 @@ func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -246,7 +247,7 @@ func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 	limit, offset := httpx.ParseOffsetLimit(c)
 	items, total, err := h.service.ListLogs(c.Request().Context(), botID, limit, offset)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list schedule logs", err)
 	}
 	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items, TotalCount: total})
 }
@@ -260,8 +261,8 @@ func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 // @Param limit query int false "Limit" default(50)
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} schedule.ListLogsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/{id}/logs [get].
 func (h *ScheduleHandler) ListLogsBySchedule(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -270,20 +271,20 @@ func (h *ScheduleHandler) ListLogsBySchedule(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	scheduleID := strings.TrimSpace(c.Param("id"))
 	if scheduleID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "schedule id is required")
+		return apperror.Required("id")
 	}
 
 	limit, offset := httpx.ParseOffsetLimit(c)
 	items, total, err := h.service.ListLogsBySchedule(c.Request().Context(), scheduleID, limit, offset)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list schedule logs", err)
 	}
 	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items, TotalCount: total})
 }
@@ -294,8 +295,8 @@ func (h *ScheduleHandler) ListLogsBySchedule(c echo.Context) error {
 // @Tags schedule
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/logs [delete].
 func (h *ScheduleHandler) DeleteLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -304,13 +305,13 @@ func (h *ScheduleHandler) DeleteLogs(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	if err := h.service.DeleteLogs(c.Request().Context(), botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("delete schedule logs", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

@@ -8,8 +8,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	userruntime "github.com/memohai/memoh/domains/runtime/client"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // UserRuntimeHandler only manages the long-lived credential used by the
@@ -42,9 +43,9 @@ func (h *UserRuntimeHandler) Register(e *echo.Echo) {
 // @Produce json
 // @Param request body userruntime.CreateRuntimeRequest true "Runtime configuration"
 // @Success 201 {object} userruntime.Runtime
-// @Failure 400 {object} ErrorResponse
-// @Failure 409 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/runtimes [post].
 func (h *UserRuntimeHandler) Create(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
@@ -53,11 +54,11 @@ func (h *UserRuntimeHandler) Create(c echo.Context) error {
 	}
 	var req userruntime.CreateRuntimeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind user runtime", err)
 	}
 	resp, err := h.service.CreateRuntime(c.Request().Context(), userID, req)
 	if err != nil {
-		return runtimeHTTPError(h.log, err)
+		return runtimeError(h.log, "create user runtime", err)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -67,7 +68,7 @@ func (h *UserRuntimeHandler) Create(c echo.Context) error {
 // @Tags user-runtimes
 // @Produce json
 // @Success 200 {array} userruntime.Runtime
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/runtimes [get].
 func (h *UserRuntimeHandler) List(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
@@ -76,7 +77,7 @@ func (h *UserRuntimeHandler) List(c echo.Context) error {
 	}
 	items, err := h.service.ListRuntimes(c.Request().Context(), userID)
 	if err != nil {
-		return runtimeHTTPError(h.log, err)
+		return runtimeError(h.log, "list user runtimes", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -86,9 +87,9 @@ func (h *UserRuntimeHandler) List(c echo.Context) error {
 // @Tags user-runtimes
 // @Param id path string true "Runtime ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/runtimes/{id} [delete].
 func (h *UserRuntimeHandler) Delete(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
@@ -96,23 +97,23 @@ func (h *UserRuntimeHandler) Delete(c echo.Context) error {
 		return err
 	}
 	if err := h.service.RevokeRuntime(c.Request().Context(), userID, strings.TrimSpace(c.Param("id"))); err != nil {
-		return runtimeHTTPError(h.log, err)
+		return runtimeError(h.log, "revoke user runtime", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
-func runtimeHTTPError(log *slog.Logger, err error) error {
-	if errors.Is(err, userruntime.ErrInvalidInput) || errors.Is(err, userruntime.ErrInvalidKey) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+func runtimeError(log *slog.Logger, op string, err error) error {
+	switch {
+	case errors.Is(err, userruntime.ErrInvalidInput), errors.Is(err, userruntime.ErrInvalidKey):
+		return apperror.Invalid(op, err)
+	case errors.Is(err, userruntime.ErrRuntimeNotFound):
+		return apperror.NotFound(op, err)
+	case errors.Is(err, userruntime.ErrRuntimeNameTaken):
+		return apperror.Conflict(op, err)
+	default:
+		if log != nil {
+			log.Error("runtime request failed", slog.Any("error", err))
+		}
+		return apperror.Internal(op, err)
 	}
-	if errors.Is(err, userruntime.ErrRuntimeNotFound) {
-		return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
-	}
-	if errors.Is(err, userruntime.ErrRuntimeNameTaken) {
-		return echo.NewHTTPError(http.StatusConflict, "runtime already exists")
-	}
-	if log != nil {
-		log.Error("runtime request failed", slog.Any("error", err))
-	}
-	return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 	"github.com/memohai/memoh/domains/agent/decision"
 	agentsqlc "github.com/memohai/memoh/domains/agent/internal/postgres/sqlc"
 )

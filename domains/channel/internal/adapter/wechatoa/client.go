@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
-	"github.com/memohai/memoh/domains/channel/internal/common"
+	"github.com/memohai/memoh/domains/channel/internal/proxy"
 	"github.com/memohai/memoh/internal/redact"
 )
 
@@ -64,7 +64,7 @@ func (a *WeChatOAAdapter) clientForConfig(raw map[string]any) (*apiClient, error
 	if existing := a.clients[key]; existing != nil {
 		return existing, nil
 	}
-	httpClient, err := common.NewHTTPClient(25*time.Second, cfg.HTTPProxy)
+	httpClient, err := proxy.NewHTTPClient(25*time.Second, cfg.HTTPProxy)
 	if err != nil {
 		return nil, err
 	}

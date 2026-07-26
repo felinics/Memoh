@@ -14,7 +14,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/runtime/bridge/bridgepb"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 	runtimedisplay "github.com/memohai/memoh/domains/runtime/display"
@@ -69,7 +69,7 @@ type displayRuntimeProbe struct {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} displayInfoResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display [get].
 func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -130,8 +130,8 @@ func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body displayWebRTCOfferRequest true "WebRTC offer payload"
 // @Success 200 {object} displayWebRTCOfferResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display/webrtc/offer [post].
 func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -139,12 +139,12 @@ func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 		return err
 	}
 	if h.displayService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "display service not configured")
+		return apperror.Internal("answer display offer", nil)
 	}
 
 	var req displayWebRTCOfferRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid display offer payload")
+		return apperror.Invalid("bind display offer", err)
 	}
 
 	answer, err := h.displayService.Answer(c.Request().Context(), botID, runtimedisplay.OfferRequest{
@@ -154,16 +154,13 @@ func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 		NATIPs:    h.displayNATIPs(c, req.CandidateHost),
 	})
 	if err != nil {
-		status := http.StatusServiceUnavailable
-		if errors.Is(err, runtimedisplay.ErrDisplayDisabled) {
-			status = http.StatusBadRequest
+		switch {
+		case errors.Is(err, runtimedisplay.ErrEncoderUnavailable),
+			errors.Is(err, runtimedisplay.ErrDisplayUnavailable):
+			return apperror.Unavailable("answer display offer", err)
+		default:
+			return apperror.Invalid("answer display offer", err)
 		}
-		if !errors.Is(err, runtimedisplay.ErrEncoderUnavailable) &&
-			!errors.Is(err, runtimedisplay.ErrDisplayUnavailable) &&
-			!errors.Is(err, runtimedisplay.ErrDisplayDisabled) {
-			status = http.StatusBadRequest
-		}
-		return echo.NewHTTPError(status, err.Error())
 	}
 
 	h.applyDisplayStyleAsync(c.Request().Context(), botID)
@@ -180,7 +177,7 @@ func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} displaySessionListResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display/sessions [get].
 func (h *ContainerdHandler) ListDisplaySessions(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -201,7 +198,7 @@ func (h *ContainerdHandler) ListDisplaySessions(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Display session ID"
 // @Success 204
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display/sessions/{session_id} [delete].
 func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -210,10 +207,10 @@ func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "display session id is required")
+		return apperror.Required("session_id")
 	}
 	if h.displayService == nil || !h.displayService.CloseSession(botID, sessionID) {
-		return echo.NewHTTPError(http.StatusNotFound, "display session not found")
+		return apperror.NotFound("close display session", nil)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -261,7 +258,7 @@ func NewDisplayPrepareAppError(step string, err error, requestID string) display
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {string} string "SSE stream of display preparation events"
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display/prepare [post].
 func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -271,7 +268,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
-		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+		return apperror.Internal("prepare display stream", nil)
 	}
 
 	if err := httpx.PrepareSSE(c); err != nil {
@@ -302,7 +299,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 				slog.Any("error", cause),
 			)
 		}
-		send(NewDisplayPrepareAppError(step, apperror.Wrap(code, cause, nil), streamRequestID))
+		send(NewDisplayPrepareAppError(step, apperror.Internal("prepare display", cause).WithCode(code, nil), streamRequestID))
 	}
 
 	ctx := c.Request().Context()

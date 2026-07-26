@@ -10,7 +10,8 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
-	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
+	memregistry "github.com/memohai/memoh/domains/memory/registry"
 )
 
 const (
@@ -20,12 +21,12 @@ const (
 )
 
 type MemoryProvider struct {
-	registry *memprovider.Registry
+	registry *memregistry.Registry
 	settings BotSettingsReader
 	logger   *slog.Logger
 }
 
-func NewMemoryProvider(log *slog.Logger, registry *memprovider.Registry, settingsSvc BotSettingsReader) *MemoryProvider {
+func NewMemoryProvider(log *slog.Logger, registry *memregistry.Registry, settingsSvc BotSettingsReader) *MemoryProvider {
 	if log == nil {
 		log = slog.Default()
 	}

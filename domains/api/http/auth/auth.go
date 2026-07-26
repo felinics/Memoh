@@ -9,8 +9,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/api/auth"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type AuthHandler struct {
@@ -56,43 +57,46 @@ func (h *AuthHandler) Register(e *echo.Echo) {
 // @Tags auth
 // @Param payload body LoginRequest true "Login request"
 // @Success 200 {object} LoginResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 401 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /auth/login [post].
 func (h *AuthHandler) Login(c echo.Context) error {
 	if h.accountService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "user service not configured")
+		return apperror.Internal("configure user service", nil)
 	}
 	if strings.TrimSpace(h.jwtSecret) == "" {
-		return echo.NewHTTPError(http.StatusInternalServerError, "jwt secret not configured")
+		return apperror.Internal("configure jwt secret", nil)
 	}
 	if h.expiresIn <= 0 {
-		return echo.NewHTTPError(http.StatusInternalServerError, "jwt expiry not configured")
+		return apperror.Internal("configure jwt expiry", nil)
 	}
 
 	var req LoginRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind login payload", err)
 	}
 	req.Username = strings.TrimSpace(req.Username)
-	if req.Username == "" || strings.TrimSpace(req.Password) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "username and password are required")
+	if req.Username == "" {
+		return apperror.Required("username")
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		return apperror.Required("password")
 	}
 
 	record, err := h.accountService.Login(c.Request().Context(), req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, account.ErrInvalidCredentials) {
-			return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
+			return apperror.Unauthenticated("authenticate user", err)
 		}
 		if errors.Is(err, account.ErrInactiveAccount) {
-			return echo.NewHTTPError(http.StatusUnauthorized, "user is inactive")
+			return apperror.Unauthenticated("authenticate user", err)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("authenticate user", err)
 	}
 	token, expiresAt, err := auth.GenerateToken(record.ID, h.jwtSecret, h.expiresIn)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("generate access token", err)
 	}
 
 	return c.JSON(http.StatusOK, LoginResponse{
@@ -119,17 +123,17 @@ type RefreshResponse struct {
 // @Tags auth
 // @Security BearerAuth
 // @Success 200 {object} RefreshResponse
-// @Failure 401 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 401 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /auth/refresh [post].
 func (h *AuthHandler) Refresh(c echo.Context) error {
 	if strings.TrimSpace(h.jwtSecret) == "" {
-		return echo.NewHTTPError(http.StatusInternalServerError, "jwt secret not configured")
+		return apperror.Internal("configure jwt secret", nil)
 	}
 
 	token, expiresAt, err := auth.RefreshTokenFromContext(c, h.jwtSecret, h.expiresIn)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return apperror.Unauthenticated("refresh access token", err)
 	}
 
 	return c.JSON(http.StatusOK, RefreshResponse{

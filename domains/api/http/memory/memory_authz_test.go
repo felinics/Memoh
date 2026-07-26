@@ -3,7 +3,6 @@ package memory
 import (
 	"bytes"
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,10 +12,12 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 	"github.com/memohai/memoh/domains/iam/account"
 	memorydomain "github.com/memohai/memoh/domains/memory"
-	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
+	memregistry "github.com/memohai/memoh/domains/memory/registry"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // recordingMemoryProvider records write calls so tests can assert the handler
@@ -46,7 +47,7 @@ func (p *recordingMemoryProvider) DeleteBatch(_ context.Context, memoryIDs []str
 func newMemoryAuthzHandler(t *testing.T, botID, userID string) (*MemoryHandler, *recordingMemoryProvider) {
 	t.Helper()
 	provider := &recordingMemoryProvider{}
-	registry := memprovider.NewRegistry(slog.Default())
+	registry := memregistry.NewRegistry(slog.Default())
 	registry.Register(defaultBuiltinProviderID, provider)
 
 	botRow := httpfixture.BotRow(botID, map[string]any{})
@@ -67,12 +68,8 @@ func requireForbidden(t *testing.T, err error) {
 	if err == nil {
 		t.Fatal("expected forbidden error, got nil")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo HTTP error, got %T", err)
-	}
-	if httpErr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", httpErr.Code)
+	if kind := apperror.KindOf(err); kind != apperror.KindForbidden {
+		t.Fatalf("kind = %q, want %q", kind, apperror.KindForbidden)
 	}
 }
 

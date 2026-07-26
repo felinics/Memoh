@@ -2,7 +2,6 @@ package chat
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,7 +11,8 @@ import (
 
 	messageevent "github.com/memohai/memoh/domains/agent/chat/event"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // TestMessagesEventsRouteIsRemoved guards the route contract: the bot-wide
@@ -56,12 +56,8 @@ func TestListMessagesRequiresSessionID(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ListMessages() err = nil, want HTTP 400")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error type = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("HTTPError.Code = %d, want 400", httpErr.Code)
+	if apperror.KindOf(err) != apperror.KindInvalid {
+		t.Fatalf("error = %v (kind %q), want KindInvalid", err, apperror.KindOf(err))
 	}
 }
 
@@ -159,11 +155,7 @@ func TestStreamSessionMessageEventsRequiresSessionPath(t *testing.T) {
 	if err == nil {
 		t.Fatalf("StreamSessionMessageEvents() err = nil, want HTTP 400")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error type = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("HTTPError.Code = %d, want 400", httpErr.Code)
+	if apperror.KindOf(err) != apperror.KindInvalid {
+		t.Fatalf("error = %v (kind %q), want KindInvalid", err, apperror.KindOf(err))
 	}
 }

@@ -22,12 +22,12 @@ import (
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/acp/client"
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	"github.com/memohai/memoh/domains/agent/decision/feedback"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	"github.com/memohai/memoh/domains/agent/mcp"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
 	"github.com/memohai/memoh/domains/api/bot"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 	"github.com/memohai/memoh/domains/runtime/bridge/bridgepb"
@@ -2679,6 +2679,68 @@ func TestSessionPoolReapIdlePolicies(t *testing.T) {
 	}
 	if _, ok := pool.bySession["s1"]; ok {
 		t.Fatalf("reap left the session index entry behind")
+	}
+}
+
+func TestSessionPoolReaperStopsWithContext(t *testing.T) {
+	pool := &SessionPool{}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := pool.StartReaper(ctx)
+	cancel()
+
+	select {
+	case <-done:
+	case <-t.Context().Done():
+		t.Fatal("reaper did not stop after context cancellation")
+	}
+}
+
+func TestSessionPoolCloseAllContextRetainsTimedOutRuntimeForRetry(t *testing.T) {
+	startDone := make(chan struct{})
+	pool := newSessionPool(nil, nil, nil)
+	h := &runtimeHandle{
+		id:         "rt_shutdown-retry",
+		botID:      "bot-1",
+		status:     stateStarting,
+		lastActive: time.Now(),
+		startDone:  startDone,
+	}
+	injectRuntime(pool, h)
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := pool.CloseAllContext(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CloseAllContext() error = %v, want context.Canceled", err)
+	}
+	pool.mu.RLock()
+	_, retained := pool.runtimes[h.id]
+	pool.mu.RUnlock()
+	if !retained {
+		t.Fatal("timed-out runtime was removed before its workers were joined")
+	}
+
+	close(startDone)
+	if err := pool.CloseAllContext(t.Context()); err != nil {
+		t.Fatalf("CloseAllContext() retry error = %v", err)
+	}
+	pool.mu.RLock()
+	_, retained = pool.runtimes[h.id]
+	pool.mu.RUnlock()
+	if retained {
+		t.Fatal("joined runtime remained indexed after shutdown retry")
+	}
+}
+
+func TestSessionPoolRejectsAdmissionAfterCloseAll(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	if err := pool.CloseAllContext(t.Context()); err != nil {
+		t.Fatalf("CloseAllContext() error = %v", err)
+	}
+	if _, err := pool.CreateRuntime(t.Context(), CreateRuntimeInput{}); !errors.Is(err, ErrSessionPoolStopped) {
+		t.Fatalf("CreateRuntime() error = %v, want ErrSessionPoolStopped", err)
+	}
+	if _, err := pool.Ensure(t.Context(), PromptInput{}); !errors.Is(err, ErrSessionPoolStopped) {
+		t.Fatalf("Ensure() error = %v, want ErrSessionPoolStopped", err)
 	}
 }
 

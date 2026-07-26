@@ -7,14 +7,15 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 type fakeConnectionLister struct {
-	items []mcp.Connection
+	items []mcppersistence.Connection
 	err   error
 }
 
-func (f *fakeConnectionLister) ListActiveByBot(_ context.Context, _ string) ([]mcp.Connection, error) {
+func (f *fakeConnectionLister) ListActiveByBot(_ context.Context, _ string) ([]mcppersistence.Connection, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -22,11 +23,11 @@ func (f *fakeConnectionLister) ListActiveByBot(_ context.Context, _ string) ([]m
 }
 
 type fakeToolLister struct {
-	items []mcp.ToolDescriptor
+	items []mcppersistence.ToolDescriptor
 	err   error
 }
 
-func (f *fakeToolLister) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
+func (f *fakeToolLister) ListTools(_ context.Context, _ mcp.ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -43,13 +44,13 @@ func TestCheckerListChecks(t *testing.T) {
 	checker := NewChecker(
 		newTestLogger(),
 		&fakeConnectionLister{
-			items: []mcp.Connection{
+			items: []mcppersistence.Connection{
 				{ID: "conn-1", Name: "Hello World", Type: "http"},
 				{ID: "conn-2", Name: "NoTools", Type: "sse"},
 			},
 		},
 		&fakeToolLister{
-			items: []mcp.ToolDescriptor{
+			items: []mcppersistence.ToolDescriptor{
 				{Name: "hello_world_ping"},
 				{Name: "hello_world_echo"},
 			},
@@ -91,7 +92,7 @@ func TestCheckerListChecksToolListError(t *testing.T) {
 	checker := NewChecker(
 		newTestLogger(),
 		&fakeConnectionLister{
-			items: []mcp.Connection{
+			items: []mcppersistence.Connection{
 				{ID: "conn-1", Name: "ErrConn", Type: "http"},
 			},
 		},

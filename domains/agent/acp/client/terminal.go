@@ -38,6 +38,7 @@ type terminalManager struct {
 	mu        sync.Mutex
 	nextID    int
 	terminals map[string]*terminal
+	stopped   bool
 }
 
 type (
@@ -76,7 +77,10 @@ type terminal struct {
 	// being visible once emitTerminalEnd returns.
 	endReported chan struct{}
 	done        chan struct{}
+	readDone    chan struct{}
 	doneOnce    sync.Once
+	closeOnce   sync.Once
+	closeErr    error
 	onDone      func(*terminal)
 }
 
@@ -111,6 +115,15 @@ func (m *terminalManager) setToolOutputLimit(limit ToolOutputLimit) {
 }
 
 func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest, approve terminalApprovalFunc, runtimeScope terminalRuntimeScope) (acp.CreateTerminalResponse, error) {
+	if m == nil {
+		return acp.CreateTerminalResponse{}, errors.New("terminal manager is not configured")
+	}
+	m.mu.Lock()
+	stopped := m.stopped
+	m.mu.Unlock()
+	if stopped {
+		return acp.CreateTerminalResponse{}, errors.New("terminal manager is stopped")
+	}
 	cwd := m.defaultCwd
 	if p.Cwd != nil && strings.TrimSpace(*p.Cwd) != "" {
 		resolved, err := m.resolvePath(*p.Cwd)
@@ -213,8 +226,14 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		return acp.CreateTerminalResponse{}, err
 	}
 
-	term := &terminal{stream: stream, outputLimit: outputLimit, id: toolCallID, input: input, releaseContext: releaseExecContext, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
+	term := &terminal{stream: stream, outputLimit: outputLimit, id: toolCallID, input: input, releaseContext: releaseExecContext, done: make(chan struct{}), readDone: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
 	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		_ = term.kill("closed")
+		m.emitTerminalEnd(term)
+		return acp.CreateTerminalResponse{}, errors.New("terminal manager is stopped")
+	}
 	m.terminals[id] = term
 	m.mu.Unlock()
 
@@ -226,14 +245,14 @@ func (m *terminalManager) resolvePath(path string) (string, error) {
 	return ResolvePathUnderVirtualRoot(m.root, path)
 }
 
-func (m *terminalManager) KillTerminal(_ context.Context, p acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
+func (m *terminalManager) KillTerminal(ctx context.Context, p acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
 	term, err := m.get(p.TerminalId)
 	if err != nil {
 		return acp.KillTerminalResponse{}, err
 	}
-	term.kill("killed")
+	err = term.kill("killed")
 	m.emitTerminalEnd(term)
-	return acp.KillTerminalResponse{}, nil
+	return acp.KillTerminalResponse{}, errors.Join(err, term.waitReadLoop(ctx))
 }
 
 func (m *terminalManager) TerminalOutput(_ context.Context, p acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
@@ -253,15 +272,19 @@ func (m *terminalManager) TerminalOutput(_ context.Context, p acp.TerminalOutput
 	return acp.TerminalOutputResponse{Output: output, Truncated: truncated, ExitStatus: status}, nil
 }
 
-func (m *terminalManager) ReleaseTerminal(_ context.Context, p acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
-	term, err := m.remove(p.TerminalId)
+func (m *terminalManager) ReleaseTerminal(ctx context.Context, p acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
+	term, err := m.get(p.TerminalId)
 	if err != nil {
 		return acp.ReleaseTerminalResponse{}, err
 	}
 	if !term.waitDone(terminalReleaseGrace) {
-		term.kill("released")
+		err = term.kill("released")
 	}
 	m.emitTerminalEnd(term)
+	if err := errors.Join(err, term.waitReadLoop(ctx)); err != nil {
+		return acp.ReleaseTerminalResponse{}, err
+	}
+	m.removeIfSame(p.TerminalId, term)
 	return acp.ReleaseTerminalResponse{}, nil
 }
 
@@ -277,21 +300,51 @@ func (m *terminalManager) WaitForTerminalExit(ctx context.Context, p acp.WaitFor
 	}
 	code, signal := term.exit()
 	m.emitTerminalEnd(term)
+	if err := term.waitReadLoop(ctx); err != nil {
+		return acp.WaitForTerminalExitResponse{}, err
+	}
 	return acp.WaitForTerminalExitResponse{ExitCode: code, Signal: signal}, nil
 }
 
-func (m *terminalManager) killAll() {
+func (m *terminalManager) killAll(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.mu.Lock()
+	m.stopped = true
 	terms := make([]*terminal, 0, len(m.terminals))
-	for id, term := range m.terminals {
+	for _, term := range m.terminals {
 		terms = append(terms, term)
-		delete(m.terminals, id)
 	}
 	m.mu.Unlock()
+	var errs []error
 	for _, term := range terms {
-		term.kill("closed")
-		m.emitTerminalEnd(term)
+		if err := term.kill("closed"); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	for _, term := range terms {
+		if err := term.waitReadLoop(ctx); err != nil {
+			errs = append(errs, err)
+			break
+		}
+	}
+	if ctx.Err() == nil {
+		m.mu.Lock()
+		for id, term := range m.terminals {
+			for _, closed := range terms {
+				if term == closed {
+					delete(m.terminals, id)
+					break
+				}
+			}
+		}
+		m.mu.Unlock()
+	}
+	return errors.Join(errs...)
 }
 
 func (m *terminalManager) emitToolCallStart(id, name string, input map[string]any) {
@@ -393,18 +446,16 @@ func (m *terminalManager) get(id string) (*terminal, error) {
 	return term, nil
 }
 
-func (m *terminalManager) remove(id string) (*terminal, error) {
+func (m *terminalManager) removeIfSame(id string, term *terminal) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	term := m.terminals[id]
-	if term == nil {
-		return nil, fmt.Errorf("terminal %q not found", id)
+	if m.terminals[id] == term {
+		delete(m.terminals, id)
 	}
-	delete(m.terminals, id)
-	return term, nil
+	m.mu.Unlock()
 }
 
 func (t *terminal) readLoop() {
+	defer close(t.readDone)
 	defer func() {
 		if t.onDone != nil {
 			t.onDone(t)
@@ -513,9 +564,34 @@ func (t *terminal) markReported() bool {
 	return true
 }
 
-func (t *terminal) kill(signal string) {
-	_ = t.stream.Close()
+func (t *terminal) kill(signal string) error {
+	if t == nil {
+		return nil
+	}
+	t.closeOnce.Do(func() {
+		if t.stream != nil {
+			if err := t.stream.Close(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				t.closeErr = err
+			}
+		}
+	})
 	t.finish(nil, &signal)
+	return t.closeErr
+}
+
+func (t *terminal) waitReadLoop(ctx context.Context) error {
+	if t == nil || t.readDone == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-t.readDone:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for terminal %q read loop: %w", t.id, ctx.Err())
+	}
 }
 
 func (t *terminal) finish(code *int, signal *string) {

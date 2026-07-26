@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -163,14 +162,14 @@ func (s *Store) UpsertVideoCatalogModel(ctx context.Context, input videoport.Cat
 
 func providerRecord(row dbsqlc.ModelProvider) videoport.ProviderRecord {
 	return videoport.ProviderRecord{
-		ID: uuidString(row.ID), Name: row.Name, ClientType: modeldomain.ClientType(row.ClientType), Icon: textString(row.Icon),
+		ID: db.UUIDString(row.ID), Name: row.Name, ClientType: modeldomain.ClientType(row.ClientType), Icon: db.TextToString(row.Icon),
 		Enable: row.Enable, Config: cloneBytes(row.Config), CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
 }
 
 func listedModelRecord(row dbsqlc.ListVideoModelsRow) videoport.ModelRecord {
 	return videoport.ModelRecord{
-		ID: uuidString(row.ID), ModelID: row.ModelID, Name: textString(row.Name), ProviderID: uuidString(row.ProviderID),
+		ID: db.UUIDString(row.ID), ModelID: row.ModelID, Name: db.TextToString(row.Name), ProviderID: db.UUIDString(row.ProviderID),
 		ProviderType: modeldomain.ClientType(row.ProviderType), Config: cloneBytes(row.Config),
 		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
@@ -178,7 +177,7 @@ func listedModelRecord(row dbsqlc.ListVideoModelsRow) videoport.ModelRecord {
 
 func modelWithProviderRecord(row dbsqlc.GetVideoModelWithProviderRow) videoport.ModelRecord {
 	return videoport.ModelRecord{
-		ID: uuidString(row.ID), ModelID: row.ModelID, Name: textString(row.Name), ProviderID: uuidString(row.ProviderID),
+		ID: db.UUIDString(row.ID), ModelID: row.ModelID, Name: db.TextToString(row.Name), ProviderID: db.UUIDString(row.ProviderID),
 		Type: modeldomain.ModelType(row.Type), Enable: row.Enable, Config: cloneBytes(row.Config),
 		ProviderType: modeldomain.ClientType(row.ProviderType), CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
@@ -186,24 +185,10 @@ func modelWithProviderRecord(row dbsqlc.GetVideoModelWithProviderRow) videoport.
 
 func modelRecord(row dbsqlc.ModelModel) videoport.ModelRecord {
 	return videoport.ModelRecord{
-		ID: uuidString(row.ID), ModelID: row.ModelID, Name: textString(row.Name), ProviderID: uuidString(row.ProviderID),
+		ID: db.UUIDString(row.ID), ModelID: row.ModelID, Name: db.TextToString(row.Name), ProviderID: db.UUIDString(row.ProviderID),
 		Type: modeldomain.ModelType(row.Type), Enable: row.Enable, Config: cloneBytes(row.Config),
 		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
-}
-
-func uuidString(value pgtype.UUID) string {
-	if !value.Valid {
-		return ""
-	}
-	return uuid.UUID(value.Bytes).String()
-}
-
-func textString(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String
 }
 
 func optionalText(value string) pgtype.Text {

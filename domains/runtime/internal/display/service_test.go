@@ -3,17 +3,200 @@ package display
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/pion/webrtc/v4"
+
+	runtimedisplay "github.com/memohai/memoh/domains/runtime/display"
 )
+
+func TestServiceShutdownStopsPeersAndWaitsForWorkers(t *testing.T) {
+	service := NewService(nil, nil)
+	sess := newSession(service, "bot-1", "gst-launch-1.0", CodecVP8)
+	workerExited := make(chan struct{})
+	if !sess.goWorker(func() {
+		<-sess.ctx.Done()
+		close(workerExited)
+	}) {
+		t.Fatal("worker was not admitted")
+	}
+	peerClosed := make(chan struct{})
+	peer := &peerSession{id: "viewer-1", state: "connected"}
+	peer.close = func() {
+		close(peerClosed)
+		sess.removePeer(peer)
+	}
+	sess.addPeer(peer)
+	service.mu.Lock()
+	service.sessions[sess.botID] = sess
+	service.workers[sess] = struct{}{}
+	service.mu.Unlock()
+
+	if err := service.Shutdown(t.Context()); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	select {
+	case <-workerExited:
+	default:
+		t.Fatal("Shutdown returned before the session worker exited")
+	}
+	select {
+	case <-peerClosed:
+	default:
+		t.Fatal("Shutdown returned before the peer closed")
+	}
+	if sess.goWorker(func() {}) {
+		t.Fatal("session admitted a worker after shutdown")
+	}
+	if _, err := service.session(t.Context(), "bot-2", "gst-launch-1.0", CodecVP8); !errors.Is(err, runtimedisplay.ErrServiceStopped) {
+		t.Fatalf("session() error = %v, want ErrServiceStopped", err)
+	}
+}
+
+func TestServiceShutdownCanRetryAfterDeadline(t *testing.T) {
+	service := NewService(nil, nil)
+	sess := newSession(service, "bot-1", "gst-launch-1.0", CodecVP8)
+	release := make(chan struct{})
+	if !sess.goWorker(func() { <-release }) {
+		t.Fatal("worker was not admitted")
+	}
+	service.mu.Lock()
+	service.sessions[sess.botID] = sess
+	service.workers[sess] = struct{}{}
+	service.mu.Unlock()
+
+	stopCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := service.Shutdown(stopCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first Shutdown() error = %v, want context.Canceled", err)
+	}
+	close(release)
+	if err := service.Shutdown(t.Context()); err != nil {
+		t.Fatalf("retry Shutdown() error = %v", err)
+	}
+	select {
+	case <-sess.done:
+	default:
+		t.Fatal("retry Shutdown returned before the session finished")
+	}
+}
+
+func TestServiceShutdownCancelsAndWaitsForAdmittedOperation(t *testing.T) {
+	service := NewService(nil, nil)
+	opCtx, finish, err := service.beginOperation(t.Context())
+	if err != nil {
+		t.Fatalf("beginOperation() error = %v", err)
+	}
+	canceled := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		<-opCtx.Done()
+		close(canceled)
+		<-release
+		finish()
+	}()
+
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- service.Shutdown(t.Context()) }()
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("Shutdown did not cancel the admitted operation")
+	}
+	select {
+	case err := <-shutdownDone:
+		close(release)
+		t.Fatalf("Shutdown returned before the operation exited: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	if _, _, err := service.beginOperation(t.Context()); !errors.Is(err, runtimedisplay.ErrServiceStopped) {
+		t.Fatalf("beginOperation() after Shutdown error = %v, want ErrServiceStopped", err)
+	}
+}
+
+func TestServiceShutdownDeadlineAndTerminalErrorSurviveRetry(t *testing.T) {
+	service := NewService(nil, nil)
+	sess := newSession(service, "bot-1", "gst-launch-1.0", CodecVP8)
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	closeErr := errors.New("close input failed")
+	sess.input = &rfbInputClient{conn: &closeErrorConn{Conn: client, err: closeErr}}
+	service.mu.Lock()
+	service.workers[sess] = struct{}{}
+	service.mu.Unlock()
+
+	// Hold the same lock used by startup to prove Shutdown observes its own
+	// context instead of synchronously blocking behind session teardown.
+	sess.lifecycleMu.Lock()
+	stopCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- service.Shutdown(stopCtx) }()
+	select {
+	case err := <-shutdownDone:
+		if !errors.Is(err, context.Canceled) {
+			sess.lifecycleMu.Unlock()
+			t.Fatalf("first Shutdown() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		sess.lifecycleMu.Unlock()
+		t.Fatal("Shutdown blocked behind session lifecycle lock past its context")
+	}
+	sess.lifecycleMu.Unlock()
+
+	select {
+	case <-sess.done:
+	case <-time.After(time.Second):
+		t.Fatal("session did not finish after releasing lifecycle lock")
+	}
+	if err := service.Shutdown(t.Context()); !errors.Is(err, closeErr) {
+		t.Fatalf("retry Shutdown() error = %v, want retained close error", err)
+	}
+	if err := service.Shutdown(t.Context()); !errors.Is(err, closeErr) {
+		t.Fatalf("idempotent Shutdown() error = %v, want retained close error", err)
+	}
+}
+
+func TestSessionRequestStopCancelsStartupBeforeLifecycleUnlock(t *testing.T) {
+	service := NewService(nil, nil)
+	sess := newSession(service, "bot-1", "gst-launch-1.0", CodecVP8)
+	runCtx, cancelRun := newSessionRunContext(t.Context(), sess.ctx)
+	defer cancelRun()
+
+	// Model startup holding lifecycleMu in a blocking dial. requestStop must
+	// still cancel the run context before teardown can acquire this lock.
+	sess.lifecycleMu.Lock()
+	sess.requestStop()
+	canceled := false
+	select {
+	case <-runCtx.Done():
+		canceled = true
+	case <-time.After(time.Second):
+	}
+	sess.lifecycleMu.Unlock()
+	if !canceled {
+		t.Fatal("requestStop did not cancel startup while lifecycleMu was held")
+	}
+	select {
+	case <-sess.done:
+	case <-time.After(time.Second):
+		t.Fatal("session teardown did not finish after lifecycleMu was released")
+	}
+}
 
 func TestReadRTCSettings(t *testing.T) {
 	t.Setenv(rtcUDPPortMinEnv, "30000")
@@ -89,6 +272,49 @@ func TestSessionReplacingPeerKeepsNewPeer(t *testing.T) {
 
 	if got := sess.peer("viewer-1"); got != second {
 		t.Fatal("closing a replaced peer must not remove the newer peer for the same display session")
+	}
+}
+
+func TestSessionConcurrentPeerReplacementDoesNotOrphanPeer(t *testing.T) {
+	sess := newSession(NewService(nil, nil), "bot-1", "gst-launch-1.0", CodecVP8)
+	initial := &peerSession{id: "viewer-1"}
+	sess.addPeer(initial)
+
+	const replacementCount = 32
+	all := make([]*peerSession, 0, replacementCount+1)
+	all = append(all, initial)
+	replaced := make(chan *peerSession, replacementCount)
+	var wg sync.WaitGroup
+	for range replacementCount {
+		peer := &peerSession{id: "viewer-1"}
+		all = append(all, peer)
+		wg.Go(func() { replaced <- sess.replacePeer(peer) })
+	}
+	wg.Wait()
+	close(replaced)
+
+	current := sess.peer("viewer-1")
+	if current == nil {
+		t.Fatal("concurrent replacement removed the current peer")
+	}
+	seen := make(map[*peerSession]struct{}, replacementCount)
+	for peer := range replaced {
+		if peer == nil {
+			t.Fatal("atomic replacement returned a nil previous peer")
+		}
+		if _, duplicate := seen[peer]; duplicate {
+			t.Fatal("the same previous peer was displaced more than once")
+		}
+		seen[peer] = struct{}{}
+	}
+	if len(seen) != replacementCount {
+		t.Fatalf("displaced peer count = %d, want %d", len(seen), replacementCount)
+	}
+	for _, peer := range all {
+		_, displaced := seen[peer]
+		if peer != current && !displaced {
+			t.Fatal("peer was neither retained nor returned for cleanup")
+		}
 	}
 }
 
@@ -365,6 +591,62 @@ func TestSessionRemoveTrackDefersEncoderStopUntilIdleHold(t *testing.T) {
 		t.Fatal("encoder must stay warm briefly after the last viewer disconnects")
 	case <-time.After(20 * time.Millisecond):
 	}
+}
+
+func TestRFBInputCloseInterruptsBlockedWrite(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	writeStarted := make(chan struct{})
+	conn := &writeSignalConn{Conn: client, started: writeStarted}
+	input := &rfbInputClient{conn: conn}
+
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- input.Pointer(10, 20, 1) }()
+	select {
+	case <-writeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("pointer write did not start")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- input.Close() }()
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close blocked behind the in-flight RFB write")
+	}
+	select {
+	case err := <-writeDone:
+		if err == nil {
+			t.Fatal("blocked write returned nil after its connection was closed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("closing the RFB input did not interrupt the blocked write")
+	}
+}
+
+type closeErrorConn struct {
+	net.Conn
+	err error
+}
+
+func (c *closeErrorConn) Close() error {
+	_ = c.Conn.Close()
+	return c.err
+}
+
+type writeSignalConn struct {
+	net.Conn
+	started chan struct{}
+	once    sync.Once
+}
+
+func (c *writeSignalConn) Write(p []byte) (int, error) {
+	c.once.Do(func() { close(c.started) })
+	return c.Conn.Write(p)
 }
 
 func containsString(values []string, target string) bool {

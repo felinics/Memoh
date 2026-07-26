@@ -4,16 +4,19 @@ package main
 
 import (
 	"errors"
+	"log/slog"
 	"strings"
 
 	"go.uber.org/fx"
 
+	channelprocess "github.com/memohai/memoh/cmd/internal/channel"
+	channelruntime "github.com/memohai/memoh/cmd/internal/channel/runtime"
 	"github.com/memohai/memoh/domains/channel"
-	channelmodule "github.com/memohai/memoh/domains/channel/assembly"
+	adaptercatalog "github.com/memohai/memoh/domains/channel/adapter/catalog"
 	"github.com/memohai/memoh/domains/channel/gateway"
 	channelhttphost "github.com/memohai/memoh/domains/channel/http"
 	"github.com/memohai/memoh/domains/channel/identity"
-	"github.com/memohai/memoh/domains/channel/platformreg"
+	"github.com/memohai/memoh/domains/media/asset"
 	"github.com/memohai/memoh/internal/config"
 )
 
@@ -32,22 +35,29 @@ func validateProfile(cfg config.Config) error {
 
 func embeddedOptions() fx.Option {
 	return fx.Options(
+		channelprocess.LocalFoundationModule(),
 		fx.Provide(
 			providePlatformChannelRegistry,
 			provideEmbeddedChannelIdentityReader,
-			channelmodule.ProvideConversationProjectionReader,
 		),
-		channelmodule.EmbeddedModule(),
+		channelprocess.ServerLocalModule(),
+		channelruntime.EmbeddedModule(),
+		channelruntime.LifecycleModule(),
 		fx.Provide(
 			provideLocalWebhookTunnelStatus,
 			provideServerHandler(gateway.NewWebhookServerHandler),
-			provideServerHandler(platformreg.NewWeixinQRServerHandler),
+			provideServerHandler(adaptercatalog.NewWeixinQRServerHandler),
 			provideServerHandler(channelhttphost.NewEmailWebhookHandler),
 			provideServerHandler(providePublicMediaHandler),
 		),
+		fx.Invoke(adaptercatalog.WirePersistence),
 	)
 }
 
 func provideEmbeddedChannelIdentityReader(service *identity.Service) channel.IdentityReader {
 	return service
+}
+
+func providePublicMediaHandler(log *slog.Logger, cfg config.Config, mediaService *asset.Service) *channelhttphost.PublicMediaHandler {
+	return channelhttphost.NewConfiguredPublicMediaHandler(log, cfg, mediaService)
 }

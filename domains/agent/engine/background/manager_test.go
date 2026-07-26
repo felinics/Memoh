@@ -274,3 +274,181 @@ func TestRunningTasksSummaryMentionsWaitTools(t *testing.T) {
 	}
 	_ = mgr.Kill(taskID)
 }
+
+func TestShutdownCancelsAndJoinsExecAndAdoptOwners(t *testing.T) {
+	mgr := New(nil)
+	execStarted := make(chan struct{})
+	execExited := make(chan struct{})
+	execTaskID, _ := mgr.Spawn(
+		context.Background(),
+		"bot1",
+		"sess1",
+		"sleep 30",
+		"/data",
+		"Sleep",
+		func(ctx context.Context, _, _ string, _ int32) (*bridge.ExecResult, error) {
+			close(execStarted)
+			<-ctx.Done()
+			close(execExited)
+			return nil, ctx.Err()
+		},
+		nil,
+		nil,
+	)
+	adoptTaskID, _ := mgr.SpawnAdopt(
+		context.Background(),
+		"bot1",
+		"sess1",
+		"sleep 30",
+		"/data",
+		"Adopted sleep",
+		OutputLogDir,
+		make(chan AdoptResult),
+		nil,
+	)
+
+	select {
+	case <-execStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for exec owner to start")
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := mgr.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown returned error: %v", err)
+	}
+	select {
+	case <-execExited:
+	default:
+		t.Fatal("Shutdown returned before exec owner exited")
+	}
+	for _, taskID := range []string{execTaskID, adoptTaskID} {
+		if status := mgr.Get(taskID).Snapshot().Status; status != TaskKilled {
+			t.Fatalf("task %s status = %s, want killed", taskID, status)
+		}
+	}
+}
+
+func TestShutdownDeadlineCanBeRetried(t *testing.T) {
+	mgr := New(nil)
+	taskID, taskCtx, err := mgr.StartSpawnTask(context.Background(), "bot1", "sess1", "slow owner")
+	if err != nil {
+		t.Fatalf("StartSpawnTask returned error: %v", err)
+	}
+	canceled := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		<-taskCtx.Done()
+		close(canceled)
+		<-release
+		mgr.CompleteSpawnTask(taskID, nil)
+	}()
+
+	firstCtx, firstCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	err = mgr.Shutdown(firstCtx)
+	firstCancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first Shutdown error = %v, want deadline exceeded", err)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("Shutdown did not cancel the active task context")
+	}
+
+	close(release)
+	secondCtx, secondCancel := context.WithTimeout(context.Background(), time.Second)
+	defer secondCancel()
+	if err := mgr.Shutdown(secondCtx); err != nil {
+		t.Fatalf("second Shutdown returned error: %v", err)
+	}
+}
+
+func TestTaskContextOutlivesRequestButNotManager(t *testing.T) {
+	mgr := New(nil)
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	taskID, taskCtx, err := mgr.StartSpawnTask(requestCtx, "bot1", "sess1", "detached task")
+	if err != nil {
+		t.Fatalf("StartSpawnTask returned error: %v", err)
+	}
+	cancelRequest()
+	select {
+	case <-taskCtx.Done():
+		t.Fatalf("request cancellation propagated to background task: %v", taskCtx.Err())
+	default:
+	}
+
+	ownerExited := make(chan struct{})
+	go func() {
+		<-taskCtx.Done()
+		mgr.CompleteSpawnTask(taskID, nil)
+		close(ownerExited)
+	}()
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), time.Second)
+	defer cancelShutdown()
+	if err := mgr.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown returned error: %v", err)
+	}
+	select {
+	case <-ownerExited:
+	default:
+		t.Fatal("Shutdown returned before the task owner exited")
+	}
+}
+
+func TestManagerRejectsWorkAfterShutdown(t *testing.T) {
+	mgr := New(nil)
+	queuedID, _, err := mgr.StartAgentTask(context.Background(), "bot1", "sess1", "worker", "child-1", "queued", "queued", true)
+	if err != nil {
+		t.Fatalf("StartAgentTask returned error: %v", err)
+	}
+	if err := mgr.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown returned error: %v", err)
+	}
+
+	called := false
+	if taskID, outputFile := mgr.Spawn(
+		context.Background(),
+		"bot1",
+		"sess1",
+		"echo no",
+		"/data",
+		"rejected",
+		func(context.Context, string, string, int32) (*bridge.ExecResult, error) {
+			called = true
+			return &bridge.ExecResult{}, nil
+		},
+		nil,
+		nil,
+	); taskID != "" || outputFile != "" {
+		t.Fatalf("Spawn after Shutdown = (%q, %q), want empty rejection", taskID, outputFile)
+	}
+	if taskID, outputFile := mgr.SpawnAdopt(
+		context.Background(),
+		"bot1",
+		"sess1",
+		"echo no",
+		"/data",
+		"rejected",
+		OutputLogDir,
+		make(chan AdoptResult),
+		nil,
+	); taskID != "" || outputFile != "" {
+		t.Fatalf("SpawnAdopt after Shutdown = (%q, %q), want empty rejection", taskID, outputFile)
+	}
+	if called {
+		t.Fatal("Spawn invoked exec function after Shutdown")
+	}
+	if _, _, err := mgr.StartAgentTask(context.Background(), "bot1", "sess1", "worker", "child-2", "no", "no", false); !errors.Is(err, ErrManagerStopped) {
+		t.Fatalf("StartAgentTask error = %v, want ErrManagerStopped", err)
+	}
+	if _, _, err := mgr.StartSpawnTask(context.Background(), "bot1", "sess1", "no"); !errors.Is(err, ErrManagerStopped) {
+		t.Fatalf("StartSpawnTask error = %v, want ErrManagerStopped", err)
+	}
+	if _, _, err := mgr.StartVideoTask(context.Background(), "bot1", "sess1", "no"); !errors.Is(err, ErrManagerStopped) {
+		t.Fatalf("StartVideoTask error = %v, want ErrManagerStopped", err)
+	}
+	if _, ok, err := mgr.MarkAgentTaskRunning(context.Background(), queuedID); ok || !errors.Is(err, ErrManagerStopped) {
+		t.Fatalf("MarkAgentTaskRunning after Shutdown ok=%v err=%v, want stopped rejection", ok, err)
+	}
+}

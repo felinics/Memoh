@@ -16,6 +16,8 @@ import (
 	memorydomain "github.com/memohai/memoh/domains/memory"
 	dbsqlc "github.com/memohai/memoh/domains/memory/internal/postgres/sqlc"
 	wikistore "github.com/memohai/memoh/domains/memory/internal/store/wiki"
+
+	"github.com/memohai/memoh/internal/db"
 )
 
 type queries interface {
@@ -315,7 +317,7 @@ func nodeSpecs(rows []dbsqlc.MemoryMemoryNode) []memorydomain.NodeSpec {
 func nodeSpec(row dbsqlc.MemoryMemoryNode) memorydomain.NodeSpec {
 	return memorydomain.NodeSpec{
 		ID:               row.ID,
-		BotID:            uuidString(row.BotID),
+		BotID:            db.UUIDString(row.BotID),
 		Body:             row.Body,
 		Hash:             row.Hash,
 		Layer:            memorydomain.Layer(row.Layer),
@@ -333,7 +335,7 @@ func nodeSpec(row dbsqlc.MemoryMemoryNode) memorydomain.NodeSpec {
 
 func edgeSpec(row dbsqlc.MemoryMemoryEdge) memorydomain.EdgeSpec {
 	return memorydomain.EdgeSpec{
-		BotID:    uuidString(row.BotID),
+		BotID:    db.UUIDString(row.BotID),
 		SrcNode:  row.SrcNode,
 		DstNode:  row.DstNode,
 		Rel:      memorydomain.EdgeRel(row.Rel),
@@ -421,13 +423,6 @@ func pgUUID(value string) pgtype.UUID {
 	var id pgtype.UUID
 	_ = id.Scan(value)
 	return id
-}
-
-func uuidString(value pgtype.UUID) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String()
 }
 
 func pgTimestamptz(value time.Time) pgtype.Timestamptz {

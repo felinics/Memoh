@@ -14,13 +14,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
-	decisionpostgres "github.com/memohai/memoh/domains/agent/decision/postgres"
+	decisionpostgres "github.com/memohai/memoh/domains/agent/internal/postgres/decision"
 	agentsqlc "github.com/memohai/memoh/domains/agent/internal/postgres/sqlc"
-	apiassembly "github.com/memohai/memoh/domains/api/assembly"
-	dbpkg "github.com/memohai/memoh/internal/db"
+	bot "github.com/memohai/memoh/domains/api/bot"
+	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/dbtest"
 )
 
@@ -32,7 +32,7 @@ func TestPostgresRuntimeFenceStaleACPHandleCannotCancelCurrentDecisions(t *testi
 	cluster, err := decisionpostgres.New(
 		pool,
 		func(tx pgx.Tx) decisionpostgres.BotSessionWriteLocker {
-			return apiassembly.NewBotSessionLockerFromTx(tx)
+			return bot.NewSessionLockerFromTx(tx)
 		},
 		decisionpostgres.AllowAllChannelIdentities(),
 	)
@@ -170,7 +170,7 @@ func openACPRuntimeFencePostgresPool(t *testing.T, ctx context.Context) *pgxpool
 		}
 		t.Skip("set TEST_POSTGRES_DSN to run ACP runtime fence integration")
 	}
-	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
+	pool, err := db.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
 		t.Fatalf("create ACP runtime fence pool: %v", err)
 	}
@@ -212,11 +212,11 @@ func createACPRuntimeFenceFixtures(t *testing.T, ctx context.Context, pool *pgxp
 		_, _ = pool.Exec(ctx, "DELETE FROM api.bots WHERE id = $1", botUUID)
 		_, _ = pool.Exec(ctx, "DELETE FROM iam.users WHERE id = $1", userID)
 	})
-	botID, err := dbpkg.ParseUUID(botUUID.String())
+	botID, err := db.ParseUUID(botUUID.String())
 	if err != nil {
 		t.Fatalf("parse ACP runtime fence bot id: %v", err)
 	}
-	sessionID, err := dbpkg.ParseUUID(sessionUUID.String())
+	sessionID, err := db.ParseUUID(sessionUUID.String())
 	if err != nil {
 		t.Fatalf("parse ACP runtime fence session id: %v", err)
 	}

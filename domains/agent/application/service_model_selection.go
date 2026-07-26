@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 	modeldomain "github.com/memohai/memoh/domains/model"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/db"
 )
 
@@ -33,7 +34,9 @@ func (s *Service) selectChatModel(ctx context.Context, req ChatRequest, botSetti
 	}
 
 	if modelID == "" {
-		return modelcatalog.GetResponse{}, modelcatalog.ResolvedProvider{}, errors.New("chat model not configured: specify model in request or bot settings")
+		return modelcatalog.GetResponse{}, modelcatalog.ResolvedProvider{},
+			apperror.FailedPrecondition("select chat model", nil).
+				WithCode(apperror.CodeAgentChatModelRequired, nil)
 	}
 
 	if providerFilter == "" {

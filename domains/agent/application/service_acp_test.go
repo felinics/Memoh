@@ -17,6 +17,7 @@ import (
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	acpagent "github.com/memohai/memoh/domains/agent/acp"
 	acpclient "github.com/memohai/memoh/domains/agent/acp/client"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
@@ -24,8 +25,10 @@ import (
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	chatview "github.com/memohai/memoh/domains/agent/view"
 	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/setting"
-	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	"github.com/memohai/memoh/domains/api/bot/setting"
+	settingpersistence "github.com/memohai/memoh/domains/api/bot/setting/persistence"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
+	memregistry "github.com/memohai/memoh/domains/memory/registry"
 	"github.com/memohai/memoh/internal/apperror"
 )
 
@@ -1187,7 +1190,7 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 
 	messages := &recordingMessageService{}
 	memory := &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 1)}
-	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
+	registry := memregistry.NewRegistry(slog.New(slog.DiscardHandler))
 	registry.Register(storeRoundMemoryProviderID, memory)
 	pool := &recordingACPPrompter{err: errors.New("missing codex-acp")}
 	resolver := &Service{
@@ -1423,7 +1426,7 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 
 	messages := &recordingMessageService{}
 	memory := &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 1)}
-	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
+	registry := memregistry.NewRegistry(slog.New(slog.DiscardHandler))
 	registry.Register(storeRoundMemoryProviderID, memory)
 	pool := &recordingACPPrompter{
 		result: withTranscriptOutput(acpclient.PromptResult{
@@ -1784,8 +1787,8 @@ func (p *storeRoundMemoryProvider) OnAfterChat(_ context.Context, req memprovide
 
 type storeRoundSettingsQueries struct{}
 
-func (*storeRoundSettingsQueries) Get(context.Context, string) (setting.Record, error) {
-	return setting.Record{
+func (*storeRoundSettingsQueries) Get(context.Context, string) (settingpersistence.Record, error) {
+	return settingpersistence.Record{
 		Language:          "auto",
 		ReasoningEffort:   "medium",
 		HeartbeatInterval: 30,
@@ -1794,16 +1797,16 @@ func (*storeRoundSettingsQueries) Get(context.Context, string) (setting.Record, 
 	}, nil
 }
 
-func (*storeRoundSettingsQueries) GetBot(context.Context, string) (setting.BotRecord, error) {
-	return setting.BotRecord{}, nil
+func (*storeRoundSettingsQueries) GetBot(context.Context, string) (settingpersistence.BotRecord, error) {
+	return settingpersistence.BotRecord{}, nil
 }
 
-func (*storeRoundSettingsQueries) GetOverlay(context.Context, string) (setting.OverlayRecord, error) {
-	return setting.OverlayRecord{}, nil
+func (*storeRoundSettingsQueries) GetOverlay(context.Context, string) (settingpersistence.OverlayRecord, error) {
+	return settingpersistence.OverlayRecord{}, nil
 }
 
-func (*storeRoundSettingsQueries) Upsert(context.Context, setting.UpsertInput) (setting.Record, error) {
-	return setting.Record{}, nil
+func (*storeRoundSettingsQueries) Upsert(context.Context, settingpersistence.UpsertInput) (settingpersistence.Record, error) {
+	return settingpersistence.Record{}, nil
 }
 
 func (*storeRoundSettingsQueries) Delete(context.Context, string) error {
@@ -1999,7 +2002,7 @@ func recordedMessages(inputs []messagepkg.PersistInput) []messagepkg.Message {
 
 // transcriptModelMessages builds model messages from streamed ACP events.
 func transcriptModelMessages(result acpclient.PromptResult) []agentdomain.ModelMessage {
-	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents(result.Events, result.Text))
+	output := convert.SDKMessagesToModelMessages(acpclient.TranscriptFromEvents(result.Events, result.Text))
 	if len(output) == 0 {
 		return []agentdomain.ModelMessage{{Role: "assistant", Content: agentdomain.NewTextContent("")}}
 	}

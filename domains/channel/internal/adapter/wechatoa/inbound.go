@@ -13,9 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/echo/v4"
-
 	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Request, w http.ResponseWriter) error {
@@ -61,7 +60,7 @@ func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Reques
 func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityVerifier, mode string, cfg gateway.ChannelConfig, handler gateway.InboundHandler, r *http.Request, w http.ResponseWriter) error {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "read body failed")
+		return apperror.Invalid("read wechatoa body", err)
 	}
 	defer func() { _ = r.Body.Close() }()
 
@@ -77,7 +76,7 @@ func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityV
 
 	var payload wechatEnvelope
 	if err := xml.Unmarshal([]byte(messageXML), &payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid xml payload")
+		return apperror.Invalid("parse wechatoa xml", err)
 	}
 	if handler != nil {
 		msg, ok := buildInboundMessage(payload)

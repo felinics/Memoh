@@ -93,21 +93,14 @@ func (c *ProviderCatalog) UpdateProvider(ctx context.Context, update templatepor
 
 func providerRecord(row dbsqlc.ModelProvider) templateport.ProviderRecord {
 	return templateport.ProviderRecord{
-		ID:         uuidString(row.ID),
+		ID:         db.UUIDString(row.ID),
 		Name:       row.Name,
 		ClientType: row.ClientType,
-		Icon:       textString(row.Icon),
+		Icon:       db.TextToString(row.Icon),
 		Enable:     row.Enable,
 		Config:     cloneBytes(row.Config),
 		Metadata:   cloneBytes(row.Metadata),
 	}
-}
-
-func uuidString(value pgtype.UUID) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String()
 }
 
 func text(value string) pgtype.Text {
@@ -115,13 +108,6 @@ func text(value string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: value, Valid: true}
-}
-
-func textString(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String
 }
 
 func cloneBytes(value []byte) []byte {

@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/memohai/memoh/domains/agent/chat/event"
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 )
 
 // DBService persists and reads bot history messages through Message-owned ports.

@@ -14,6 +14,7 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/application"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const (
@@ -246,7 +247,15 @@ func TestLocalChannelRuntimeContractForwardsInterruptedRunError(t *testing.T) {
 	if events[0]["type"] != "start" || events[1]["type"] != "message" || events[2]["type"] != "error" || events[3]["type"] != "end" {
 		t.Fatalf("unexpected interrupted event sequence: %#v", events)
 	}
-	if events[2]["message"] != "runtime interrupted" {
+	// The runtime reports stream failures as free text we cannot classify, so
+	// the kind stays internal — but the text itself reaches the client as an
+	// upstream quotation, because for provider calls this service is a proxy
+	// and that sentence is the only actionable thing in the response.
+	if events[2]["kind"] != apperror.KindInternal.String() {
 		t.Fatalf("error event = %#v", events[2])
+	}
+	upstream, ok := events[2]["upstream"].(map[string]any)
+	if !ok || upstream["message"] != "runtime interrupted" {
+		t.Fatalf("upstream quote lost: %#v", events[2])
 	}
 }

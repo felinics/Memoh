@@ -9,7 +9,8 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/extension/hooks"
-	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
+	memregistry "github.com/memohai/memoh/domains/memory/registry"
 )
 
 const defaultMemorySearchTimeout = 1200 * time.Millisecond
@@ -112,7 +113,7 @@ func (s *Service) loadMemoryContextMessage(ctx context.Context, req ChatRequest)
 		return s.memoryContextMessageFromResult(ctx, req, builtQuery, nil, "miss", "empty_result")
 	}
 
-	s.getMemoryContextCache().Set(cacheKey, memprovider.MemoryContextCacheValue{
+	s.getMemoryContextCache().Set(cacheKey, memregistry.MemoryContextCacheValue{
 		ContextText:    result.ContextText,
 		RetrievalMode:  result.RetrievalMode,
 		FallbackReason: result.FallbackReason,
@@ -174,7 +175,7 @@ func (s *Service) memoryContextMessageFromResult(ctx context.Context, req ChatRe
 	}
 }
 
-func (s *Service) getMemoryContextCache() *memprovider.MemoryContextCache {
+func (s *Service) getMemoryContextCache() *memregistry.MemoryContextCache {
 	if s == nil {
 		return nil
 	}
@@ -184,7 +185,7 @@ func (s *Service) getMemoryContextCache() *memprovider.MemoryContextCache {
 	s.memoryContextMu.Lock()
 	defer s.memoryContextMu.Unlock()
 	if s.memoryContextCache == nil {
-		s.memoryContextCache = memprovider.NewMemoryContextCache(memprovider.MemoryContextCacheConfig{
+		s.memoryContextCache = memregistry.NewMemoryContextCache(memregistry.MemoryContextCacheConfig{
 			TTL:        time.Minute,
 			StaleTTL:   5 * time.Minute,
 			MaxEntries: 256,
@@ -193,16 +194,16 @@ func (s *Service) getMemoryContextCache() *memprovider.MemoryContextCache {
 	return s.memoryContextCache
 }
 
-func (*Service) memoryContextCacheKey(ctx context.Context, req ChatRequest, providerID string, p memprovider.Instance, query string) memprovider.MemoryContextCacheKey {
+func (*Service) memoryContextCacheKey(ctx context.Context, req ChatRequest, providerID string, p memprovider.Instance, query string) memregistry.MemoryContextCacheKey {
 	memoryVersion := ""
 	if versioned, ok := p.(memprovider.MemoryVersionProvider); ok {
 		memoryVersion = versioned.MemoryVersion(ctx, req.BotID)
 	}
-	return memprovider.MemoryContextCacheKey{
+	return memregistry.MemoryContextCacheKey{
 		BotID:         strings.TrimSpace(req.BotID),
 		ChatID:        strings.TrimSpace(req.ChatID),
 		ProviderID:    strings.TrimSpace(providerID),
-		QueryHash:     memprovider.MemoryContextQueryHash(query),
+		QueryHash:     memregistry.MemoryContextQueryHash(query),
 		MemoryVersion: strings.TrimSpace(memoryVersion),
 	}
 }

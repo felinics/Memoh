@@ -12,20 +12,21 @@ import (
 	"github.com/labstack/echo/v4"
 
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
-	"github.com/memohai/memoh/domains/agent/chat/usage"
+	usagepersistence "github.com/memohai/memoh/domains/agent/chat/usage/persistence"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type TokenUsageHandler struct {
-	reader         usage.Reader
+	reader         usagepersistence.Reader
 	botService     *bot.Service
 	accountService *account.Service
 	logger         *slog.Logger
 }
 
-func NewTokenUsageHandler(log *slog.Logger, reader usage.Reader, botService *bot.Service, accountService *account.Service) *TokenUsageHandler {
+func NewTokenUsageHandler(log *slog.Logger, reader usagepersistence.Reader, botService *bot.Service, accountService *account.Service) *TokenUsageHandler {
 	return &TokenUsageHandler{
 		reader:         reader,
 		botService:     botService,
@@ -100,9 +101,9 @@ type TokenUsageRecordsResponse struct {
 // @Param model_id query string false "Optional model UUID to filter by"
 // @Param session_type query string false "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime."
 // @Success 200 {object} TokenUsageResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/token-usage [get].
 func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
@@ -111,7 +112,7 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID); err != nil {
 		return err
@@ -120,28 +121,28 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	fromStr := strings.TrimSpace(c.QueryParam("from"))
 	toStr := strings.TrimSpace(c.QueryParam("to"))
 	if fromStr == "" || toStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "from and to query parameters are required (YYYY-MM-DD)")
+		return apperror.Required("from")
 	}
 	fromDate, err := time.Parse("2006-01-02", fromStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid from date format, expected YYYY-MM-DD")
+		return apperror.Field("from", apperror.FieldInvalid)
 	}
 	toDate, err := time.Parse("2006-01-02", toStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid to date format, expected YYYY-MM-DD")
+		return apperror.Field("to", apperror.FieldInvalid)
 	}
 	if !toDate.After(fromDate) {
-		return echo.NewHTTPError(http.StatusBadRequest, "to must be after from")
+		return apperror.Field("to", apperror.FieldOutOfRange)
 	}
 
 	if _, err := uuid.Parse(botID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid bot id")
+		return apperror.Field("bot_id", apperror.FieldInvalid)
 	}
 
 	modelID := strings.TrimSpace(c.QueryParam("model_id"))
 	if modelID != "" {
 		if _, err := uuid.Parse(modelID); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid model_id")
+			return apperror.Field("model_id", apperror.FieldInvalid)
 		}
 	}
 	sessionType, err := parseTokenUsageSessionType(c)
@@ -150,7 +151,7 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	filter := usage.Filter{
+	filter := usagepersistence.Filter{
 		BotID:       botID,
 		From:        fromDate,
 		To:          toDate,
@@ -161,13 +162,13 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	chat, discuss, acpAgent, heartbeat, schedule, err := h.fetchUsageByDay(ctx, filter)
 	if err != nil {
 		h.logger.Error("fetch token usage failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage")
+		return apperror.Internal("fetch token usage", err)
 	}
 
 	byModel, err := h.fetchUsageByModel(ctx, filter)
 	if err != nil {
 		h.logger.Error("fetch token usage by model failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage by model")
+		return apperror.Internal("fetch token usage by model", err)
 	}
 
 	resp := TokenUsageResponse{
@@ -181,7 +182,7 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, filter usage.Filter) (chat, discuss, acpAgent, heartbeat, schedule []DailyTokenUsage, err error) {
+func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, filter usagepersistence.Filter) (chat, discuss, acpAgent, heartbeat, schedule []DailyTokenUsage, err error) {
 	rows, err := h.reader.GetDaily(ctx, filter)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
@@ -211,7 +212,7 @@ func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, filter usage.Fi
 	return chat, discuss, acpAgent, heartbeat, schedule, nil
 }
 
-func (h *TokenUsageHandler) fetchUsageByModel(ctx context.Context, filter usage.Filter) ([]ModelTokenUsage, error) {
+func (h *TokenUsageHandler) fetchUsageByModel(ctx context.Context, filter usagepersistence.Filter) ([]ModelTokenUsage, error) {
 	rows, err := h.reader.GetByModel(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -256,9 +257,9 @@ const (
 // @Param limit query int false "Page size (default 20, max 100)"
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} TokenUsageRecordsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/token-usage/records [get].
 func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
@@ -267,7 +268,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID); err != nil {
 		return err
@@ -276,28 +277,28 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	fromStr := strings.TrimSpace(c.QueryParam("from"))
 	toStr := strings.TrimSpace(c.QueryParam("to"))
 	if fromStr == "" || toStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "from and to query parameters are required (YYYY-MM-DD)")
+		return apperror.Required("from")
 	}
 	fromDate, err := time.Parse("2006-01-02", fromStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid from date format, expected YYYY-MM-DD")
+		return apperror.Field("from", apperror.FieldInvalid)
 	}
 	toDate, err := time.Parse("2006-01-02", toStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid to date format, expected YYYY-MM-DD")
+		return apperror.Field("to", apperror.FieldInvalid)
 	}
 	if !toDate.After(fromDate) {
-		return echo.NewHTTPError(http.StatusBadRequest, "to must be after from")
+		return apperror.Field("to", apperror.FieldOutOfRange)
 	}
 
 	if _, err := uuid.Parse(botID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid bot id")
+		return apperror.Field("bot_id", apperror.FieldInvalid)
 	}
 
 	modelID := strings.TrimSpace(c.QueryParam("model_id"))
 	if modelID != "" {
 		if _, err := uuid.Parse(modelID); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid model_id")
+			return apperror.Field("model_id", apperror.FieldInvalid)
 		}
 	}
 
@@ -322,23 +323,23 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	page, err := h.reader.ListRecords(ctx, usage.Filter{
+	page, err := h.reader.ListRecords(ctx, usagepersistence.Filter{
 		BotID:       botID,
 		From:        fromDate,
 		To:          toDate,
 		ModelID:     modelID,
 		SessionType: sessionType,
-	}, usage.Pagination{
+	}, usagepersistence.Pagination{
 		Limit:  int(limit),
 		Offset: int(offset),
 	})
 	if err != nil {
-		if errors.Is(err, usage.ErrCountRecords) {
+		if errors.Is(err, usagepersistence.ErrCountRecords) {
 			h.logger.Error("count token usage records failed", slog.Any("error", err))
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to count token usage records")
+			return apperror.Internal("count token usage records", err)
 		}
 		h.logger.Error("list token usage records failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list token usage records")
+		return apperror.Internal("list token usage records", err)
 	}
 
 	items := make([]TokenUsageRecord, 0, len(page.Items))
@@ -372,7 +373,7 @@ func parseTokenUsageSessionType(c echo.Context) (string, error) {
 	case session.TypeChat, session.TypeDiscuss, session.TypeHeartbeat, session.TypeSchedule, session.TypeACPAgent:
 		return sessionType, nil
 	default:
-		return "", echo.NewHTTPError(http.StatusBadRequest, "invalid session_type, expected one of: chat, discuss, heartbeat, schedule, acp_agent")
+		return "", apperror.Field("session_type", apperror.FieldUnsupported)
 	}
 }
 

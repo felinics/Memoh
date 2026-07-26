@@ -9,6 +9,7 @@ import (
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/chat/context/fragment"
 	"github.com/memohai/memoh/domains/agent/chat/context/history"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 )
 
@@ -25,13 +26,13 @@ func TestHistoryRecordPathPreservesLegacyServiceMessagePipeline(t *testing.T) {
 			},
 		},
 	}
-	assistantToolCall := sdkMessagesToModelMessages([]sdk.Message{assistantToolCallSDK})[0]
+	assistantToolCall := convert.SDKMessagesToModelMessages([]sdk.Message{assistantToolCallSDK})[0]
 	toolResultSDK := sdk.ToolMessage(sdk.ToolResultPart{
 		ToolCallID: "call-1",
 		ToolName:   "lookup",
 		Result:     "tool result",
 	})
-	toolResult := sdkMessagesToModelMessages([]sdk.Message{toolResultSDK})[0]
+	toolResult := convert.SDKMessagesToModelMessages([]sdk.Message{toolResultSDK})[0]
 	rows := []messagepkg.Message{
 		dbHistoryRow(t, "row-compact-user", "user", agentdomain.NewTextContent("old compacted user"), func(msg *messagepkg.Message) {
 			msg.CompactID = "compact-ok"
@@ -91,7 +92,7 @@ func TestHistoryRecordPathPreservesLegacyServiceMessagePipeline(t *testing.T) {
 	}
 
 	repaired := repairToolCallClosures(sanitizeMessages(got), syntheticToolClosureError)
-	assertSameJSON(t, modelMessagesToSDKMessages(nonNilModelMessages(repaired)), []sdk.Message{
+	assertSameJSON(t, convert.ModelMessagesToSDKMessages(nonNilModelMessages(repaired)), []sdk.Message{
 		sdk.UserMessage("<summary>\ncondensed\n</summary>"),
 		sdk.UserMessage("missing summary body"),
 		sdk.UserMessage("plain string content"),

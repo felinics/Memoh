@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/domains/agent/chat/thread"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 )
 
 type fakeThreadGetter struct {

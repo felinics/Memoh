@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 	"github.com/memohai/memoh/domains/agent/decision"
 )
 

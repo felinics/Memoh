@@ -13,8 +13,9 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 	"github.com/memohai/memoh/domains/iam/account"
+	accountpersistence "github.com/memohai/memoh/domains/iam/account/persistence"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 	ctr "github.com/memohai/memoh/domains/runtime/container"
@@ -103,10 +104,7 @@ func TestCreateBotStreamRequiresWorkspaceLifecycle(t *testing.T) {
 	if err == nil {
 		t.Fatal("CreateBot() error = nil, want workspace lifecycle configuration error")
 	}
-	httpErr := requireHTTPError(t, err)
-	if httpErr.Code != http.StatusInternalServerError {
-		t.Fatalf("CreateBot() status = %d, want %d", httpErr.Code, http.StatusInternalServerError)
-	}
+	requireAppErrorStatus(t, err, http.StatusInternalServerError)
 }
 
 func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
@@ -348,10 +346,7 @@ func TestGetMeReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("GetMe() error = nil, want unauthorized")
 	}
-	httpErr := requireHTTPError(t, err)
-	if httpErr.Code != http.StatusUnauthorized {
-		t.Fatalf("GetMe() status = %d, want %d", httpErr.Code, http.StatusUnauthorized)
-	}
+	requireAppErrorStatus(t, err, http.StatusUnauthorized)
 }
 
 func TestCreateBotStreamReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) {
@@ -377,19 +372,17 @@ func TestCreateBotStreamReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) 
 	if err == nil {
 		t.Fatal("CreateBot() error = nil, want unauthorized")
 	}
-	httpErr := requireHTTPError(t, err)
-	if httpErr.Code != http.StatusUnauthorized {
-		t.Fatalf("CreateBot() status = %d, want %d", httpErr.Code, http.StatusUnauthorized)
-	}
+	requireAppErrorStatus(t, err, http.StatusUnauthorized)
 }
 
-func requireHTTPError(t *testing.T, err error) *echo.HTTPError {
+func requireAppErrorStatus(t *testing.T, err error, want int) {
 	t.Helper()
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	if _, ok := apperror.As(err); !ok {
+		t.Fatalf("error type = %T, want *apperror.Error", err)
 	}
-	return httpErr
+	if got := apperror.KindOf(err).HTTPStatus(); got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
 }
 
 func decodeSSEEvents(t *testing.T, raw string) []map[string]any {
@@ -470,23 +463,23 @@ func (w *createBotStreamWorkspace) SetupBotContainerWithProgress(_ context.Conte
 }
 
 type createBotAccountStore struct {
-	account.Store
+	accountpersistence.Store
 	userID string
 }
 
-func (s createBotAccountStore) GetByUserID(_ context.Context, userID string) (account.Record, error) {
+func (s createBotAccountStore) GetByUserID(_ context.Context, userID string) (accountpersistence.Record, error) {
 	if userID != s.userID {
-		return account.Record{}, account.ErrAccountNotFound
+		return accountpersistence.Record{}, account.ErrAccountNotFound
 	}
-	return account.Record{ID: userID, Role: "member", IsActive: true}, nil
+	return accountpersistence.Record{ID: userID, Role: "member", IsActive: true}, nil
 }
 
 type createBotMissingAccountStore struct {
-	account.Store
+	accountpersistence.Store
 }
 
-func (createBotMissingAccountStore) GetByUserID(context.Context, string) (account.Record, error) {
-	return account.Record{}, account.ErrAccountNotFound
+func (createBotMissingAccountStore) GetByUserID(context.Context, string) (accountpersistence.Record, error) {
+	return accountpersistence.Record{}, account.ErrAccountNotFound
 }
 
 func requireStreamLastSetupError(t *testing.T, payload []byte) map[string]any {

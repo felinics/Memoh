@@ -17,10 +17,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/channel/publicmedia"
+	publicmedia "github.com/memohai/memoh/domains/channel/internal/http/media"
 	"github.com/memohai/memoh/domains/channel/webhook"
 	"github.com/memohai/memoh/domains/media"
 	"github.com/memohai/memoh/domains/media/attachment"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/config"
 )
 
@@ -75,10 +76,10 @@ func (h *PublicMediaHandler) Register(e *echo.Echo) {
 func (h *PublicMediaHandler) ServeOriginal(c echo.Context) error {
 	botID, contentHash, ok := publicMediaParams(c)
 	if !ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid media reference")
+		return apperror.Invalid("resolve media reference", nil)
 	}
 	if !h.authorized(c) {
-		return echo.NewHTTPError(http.StatusForbidden, "invalid media signature")
+		return apperror.Forbidden("verify media signature", nil)
 	}
 	reader, asset, err := h.openImage(c, botID, contentHash)
 	if err != nil {
@@ -86,7 +87,7 @@ func (h *PublicMediaHandler) ServeOriginal(c echo.Context) error {
 	}
 	defer func() { _ = reader.Close() }()
 	if asset.SizeBytes > publicmedia.OriginalMaxBytes {
-		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "media is too large")
+		return echo.NewHTTPError(http.StatusRequestEntityTooLarge)
 	}
 	if c.Request().Method == http.MethodHead {
 		setPublicMediaHeaders(c, asset.Mime, asset.SizeBytes)
@@ -103,10 +104,10 @@ func (h *PublicMediaHandler) ServeOriginal(c echo.Context) error {
 func (h *PublicMediaHandler) ServePreview(c echo.Context) error {
 	botID, contentHash, ok := publicMediaParams(c)
 	if !ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid media reference")
+		return apperror.Invalid("resolve media reference", nil)
 	}
 	if !h.authorized(c) {
-		return echo.NewHTTPError(http.StatusForbidden, "invalid media signature")
+		return apperror.Forbidden("verify media signature", nil)
 	}
 	reader, asset, err := h.openImage(c, botID, contentHash)
 	if err != nil {
@@ -114,7 +115,7 @@ func (h *PublicMediaHandler) ServePreview(c echo.Context) error {
 	}
 	defer func() { _ = reader.Close() }()
 	if asset.SizeBytes > publicmedia.OriginalMaxBytes {
-		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "media is too large")
+		return echo.NewHTTPError(http.StatusRequestEntityTooLarge)
 	}
 	if c.Request().Method == http.MethodHead {
 		setPublicMediaHeaders(c, "image/jpeg", 0)
@@ -127,7 +128,7 @@ func (h *PublicMediaHandler) ServePreview(c echo.Context) error {
 	preview, err := encodePublicMediaPreviewJPEG(data)
 	if err != nil {
 		if errors.Is(err, media.ErrAssetTooLarge) {
-			return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "media is too large")
+			return echo.NewHTTPError(http.StatusRequestEntityTooLarge)
 		}
 		if h.logger != nil {
 			h.logger.Warn("public media preview failed",
@@ -136,7 +137,7 @@ func (h *PublicMediaHandler) ServePreview(c echo.Context) error {
 				slog.Any("error", err),
 			)
 		}
-		return echo.NewHTTPError(http.StatusUnsupportedMediaType, "unsupported image preview")
+		return echo.NewHTTPError(http.StatusUnsupportedMediaType)
 	}
 	setPublicMediaHeaders(c, "image/jpeg", int64(len(preview)))
 	return c.Blob(http.StatusOK, "image/jpeg", preview)
@@ -144,19 +145,19 @@ func (h *PublicMediaHandler) ServePreview(c echo.Context) error {
 
 func (h *PublicMediaHandler) openImage(c echo.Context, botID, contentHash string) (io.ReadCloser, media.Asset, error) {
 	if h == nil || h.media == nil {
-		return nil, media.Asset{}, echo.NewHTTPError(http.StatusInternalServerError, "media service unavailable")
+		return nil, media.Asset{}, apperror.Internal("open media", nil)
 	}
 	reader, asset, err := h.media.Open(c.Request().Context(), botID, contentHash)
 	if err != nil {
 		if errors.Is(err, media.ErrAssetNotFound) {
-			return nil, media.Asset{}, echo.NewHTTPError(http.StatusNotFound, "media not found")
+			return nil, media.Asset{}, apperror.NotFound("open media", err)
 		}
-		return nil, media.Asset{}, echo.NewHTTPError(http.StatusInternalServerError, "open media failed")
+		return nil, media.Asset{}, apperror.Internal("open media", err)
 	}
 	asset.Mime = attachment.NormalizeMime(asset.Mime)
 	if asset.Mime != "image/jpeg" && asset.Mime != "image/png" {
 		_ = reader.Close()
-		return nil, media.Asset{}, echo.NewHTTPError(http.StatusUnsupportedMediaType, "unsupported image type")
+		return nil, media.Asset{}, echo.NewHTTPError(http.StatusUnsupportedMediaType)
 	}
 	return reader, asset, nil
 }
@@ -198,9 +199,9 @@ func setPublicMediaHeaders(c echo.Context, mimeType string, size int64) {
 
 func publicMediaTooLargeHTTPError(err error) error {
 	if errors.Is(err, media.ErrAssetTooLarge) {
-		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "media is too large")
+		return echo.NewHTTPError(http.StatusRequestEntityTooLarge)
 	}
-	return echo.NewHTTPError(http.StatusBadRequest, "read media failed")
+	return apperror.Invalid("read media", err)
 }
 
 func encodePublicMediaPreviewJPEG(data []byte) ([]byte, error) {

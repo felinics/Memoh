@@ -3,32 +3,29 @@ package runtime
 import (
 	"context"
 	"errors"
-	"net/http"
 	"testing"
 
-	"github.com/labstack/echo/v4"
-
-	"github.com/memohai/memoh/domains/api/setting"
+	settingpersistence "github.com/memohai/memoh/domains/api/bot/setting/persistence"
 	"github.com/memohai/memoh/domains/runtime/workspace"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
-func TestWorkspaceTargetHTTPError(t *testing.T) {
+func TestWorkspaceTargetError(t *testing.T) {
 	for name, tc := range map[string]struct {
-		err  error
-		code int
+		err      error
+		wantKind apperror.Kind
 	}{
-		"invalid mode":       {workspace.ErrInvalidWorkspaceToolApprovalMode, http.StatusBadRequest},
-		"unusable runtime":   {workspace.ErrRemoteRuntimeNotUsable, http.StatusNotFound},
-		"missing target":     {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
-		"owner mismatch":     {workspace.ErrRemoteRuntimeOwnerMismatch, http.StatusConflict},
-		"client too old":     {workspace.ErrRemoteRuntimeClientUpdateNeeded, http.StatusConflict},
-		"unexpected failure": {errors.New("boom"), http.StatusInternalServerError},
+		"invalid mode":       {workspace.ErrInvalidWorkspaceToolApprovalMode, apperror.KindInvalid},
+		"unusable runtime":   {workspace.ErrRemoteRuntimeNotUsable, apperror.KindNotFound},
+		"missing target":     {workspace.ErrWorkspaceTargetNotFound, apperror.KindNotFound},
+		"owner mismatch":     {workspace.ErrRemoteRuntimeOwnerMismatch, apperror.KindConflict},
+		"client too old":     {workspace.ErrRemoteRuntimeClientUpdateNeeded, apperror.KindConflict},
+		"unexpected failure": {errors.New("boom"), apperror.KindInternal},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := workspaceTargetHTTPError(nil, tc.err)
-			var httpErr *echo.HTTPError
-			if !errors.As(err, &httpErr) || httpErr.Code != tc.code {
-				t.Fatalf("error = %v, want HTTP %d", err, tc.code)
+			err := workspaceTargetError(nil, "mount workspace target", tc.err)
+			if kind := apperror.KindOf(err); kind != tc.wantKind {
+				t.Fatalf("kind = %q, want %q", kind, tc.wantKind)
 			}
 		})
 	}
@@ -48,14 +45,14 @@ func (s *fakeWorkspaceTargetService) GetMount(context.Context, string, string) (
 
 func (*fakeWorkspaceTargetService) SetPrimary(context.Context, string, string) error { return nil }
 
-func (*fakeWorkspaceTargetService) UpdateToolApprovalConfig(context.Context, string, string, setting.ToolApprovalConfig) error {
+func (*fakeWorkspaceTargetService) UpdateToolApprovalConfig(context.Context, string, string, settingpersistence.ToolApprovalConfig) error {
 	return nil
 }
 
 func (*fakeWorkspaceTargetService) DeleteMount(context.Context, string, string) error { return nil }
 
 func TestModeShortcutPreservesAdvancedToolApprovalRules(t *testing.T) {
-	config := setting.DefaultToolApprovalConfig()
+	config := settingpersistence.DefaultToolApprovalConfig()
 	config.Enabled = false
 	config.Write.BypassGlobs = []string{"projects/safe/**"}
 	config.Exec.ForceReviewCommands = []string{"rm *"}
@@ -68,7 +65,7 @@ func TestModeShortcutPreservesAdvancedToolApprovalRules(t *testing.T) {
 		"11111111-1111-4111-8111-111111111111",
 		"44444444-4444-4444-8444-444444444444",
 		workspace.UpdateWorkspaceTargetToolApprovalRequest{
-			Read: setting.ToolApprovalAllow, Write: setting.ToolApprovalAsk, Exec: setting.ToolApprovalDeny,
+			Read: settingpersistence.ToolApprovalAllow, Write: settingpersistence.ToolApprovalAsk, Exec: settingpersistence.ToolApprovalDeny,
 		},
 	)
 	if err != nil {
@@ -80,7 +77,7 @@ func TestModeShortcutPreservesAdvancedToolApprovalRules(t *testing.T) {
 	if len(updated.Exec.ForceReviewCommands) != 1 || updated.Exec.ForceReviewCommands[0] != "rm *" {
 		t.Fatalf("exec force rules were lost: %#v", updated.Exec.ForceReviewCommands)
 	}
-	if updated.Exec.Mode != setting.ToolApprovalDeny {
+	if updated.Exec.Mode != settingpersistence.ToolApprovalDeny {
 		t.Fatalf("exec mode = %q", updated.Exec.Mode)
 	}
 	if updated.Enabled {
@@ -89,7 +86,7 @@ func TestModeShortcutPreservesAdvancedToolApprovalRules(t *testing.T) {
 }
 
 func TestTargetApprovalEnabledCanBeUpdatedWithoutChangingRules(t *testing.T) {
-	config := setting.DefaultToolApprovalConfig()
+	config := settingpersistence.DefaultToolApprovalConfig()
 	config.Enabled = true
 	config.Write.BypassGlobs = []string{"projects/safe/**"}
 	handler := &BotRemoteRuntimeHandler{service: &fakeWorkspaceTargetService{target: workspace.WorkspaceTarget{

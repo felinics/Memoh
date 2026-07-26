@@ -8,9 +8,8 @@ import (
 
 	userruntime "github.com/memohai/memoh/domains/runtime/client"
 	"github.com/memohai/memoh/domains/runtime/container"
-	runtimesqlc "github.com/memohai/memoh/domains/runtime/internal/postgres/sqlc"
+	workspacepostgres "github.com/memohai/memoh/domains/runtime/internal/postgres/workspace"
 	internalworkspace "github.com/memohai/memoh/domains/runtime/internal/workspace"
-	workspacepostgres "github.com/memohai/memoh/domains/runtime/internal/workspace/postgres"
 	workspacetarget "github.com/memohai/memoh/domains/runtime/internal/workspace/target"
 	"github.com/memohai/memoh/domains/runtime/network"
 	runtimeworkspace "github.com/memohai/memoh/domains/runtime/workspace"
@@ -47,7 +46,7 @@ type Workspace struct {
 
 // NewContainerStore constructs Runtime-owned container persistence.
 func NewContainerStore(pool *pgxpool.Pool) runtimeworkspace.ContainerStore {
-	return workspacepostgres.NewStore(runtimesqlc.New(pool), pool)
+	return workspacepostgres.NewStore(pool)
 }
 
 // NewWorkspace constructs the public workspace Service backed by the private
@@ -74,7 +73,7 @@ func NewWorkspace(deps WorkspaceDeps) (*Workspace, func(), error) {
 	customPersistence := deps.Persistence != nil
 	persistence := deps.Persistence
 	if persistence == nil {
-		store := workspacepostgres.NewStore(runtimesqlc.New(deps.Pool), deps.Pool)
+		store := workspacepostgres.NewStore(deps.Pool)
 		persistence = &runtimeworkspace.Persistence{
 			Profiles:       deps.Profiles,
 			Settings:       deps.RuntimeSettings,

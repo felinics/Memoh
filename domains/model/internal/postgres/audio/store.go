@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -216,7 +215,7 @@ func providerRecords(rows []dbsqlc.ModelProvider) []audioport.ProviderRecord {
 
 func providerRecord(row dbsqlc.ModelProvider) audioport.ProviderRecord {
 	return audioport.ProviderRecord{
-		ID: uuidString(row.ID), Name: row.Name, ClientType: row.ClientType, Icon: textString(row.Icon),
+		ID: db.UUIDString(row.ID), Name: row.Name, ClientType: row.ClientType, Icon: db.TextToString(row.Icon),
 		Enable: row.Enable, Config: cloneBytes(row.Config), CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
 }
@@ -231,7 +230,7 @@ func modelRecords(rows []dbsqlc.ModelModel) []audioport.ModelRecord {
 
 func modelRecord(row dbsqlc.ModelModel) audioport.ModelRecord {
 	return audioport.ModelRecord{
-		ID: uuidString(row.ID), ModelID: row.ModelID, Name: textString(row.Name), ProviderID: uuidString(row.ProviderID),
+		ID: db.UUIDString(row.ID), ModelID: row.ModelID, Name: db.TextToString(row.Name), ProviderID: db.UUIDString(row.ProviderID),
 		Type: modeldomain.ModelType(row.Type), Enable: row.Enable, Config: cloneBytes(row.Config),
 		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
@@ -239,7 +238,7 @@ func modelRecord(row dbsqlc.ModelModel) audioport.ModelRecord {
 
 func speechModelRecord(row dbsqlc.GetSpeechModelWithProviderRow) audioport.ModelRecord {
 	return audioport.ModelRecord{
-		ID: uuidString(row.ID), ModelID: row.ModelID, Name: textString(row.Name), ProviderID: uuidString(row.ProviderID),
+		ID: db.UUIDString(row.ID), ModelID: row.ModelID, Name: db.TextToString(row.Name), ProviderID: db.UUIDString(row.ProviderID),
 		ProviderType: row.ProviderType, Type: modeldomain.ModelType(row.Type), Enable: row.Enable, Config: cloneBytes(row.Config),
 		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
@@ -247,7 +246,7 @@ func speechModelRecord(row dbsqlc.GetSpeechModelWithProviderRow) audioport.Model
 
 func transcriptionModelRecord(row dbsqlc.GetTranscriptionModelWithProviderRow) audioport.ModelRecord {
 	return audioport.ModelRecord{
-		ID: uuidString(row.ID), ModelID: row.ModelID, Name: textString(row.Name), ProviderID: uuidString(row.ProviderID),
+		ID: db.UUIDString(row.ID), ModelID: row.ModelID, Name: db.TextToString(row.Name), ProviderID: db.UUIDString(row.ProviderID),
 		ProviderType: row.ProviderType, Type: modeldomain.ModelType(row.Type), Enable: row.Enable, Config: cloneBytes(row.Config),
 		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
@@ -255,7 +254,7 @@ func transcriptionModelRecord(row dbsqlc.GetTranscriptionModelWithProviderRow) a
 
 func speechModelRecordFromList(row dbsqlc.ListSpeechModelsRow) audioport.ModelRecord {
 	return audioport.ModelRecord{
-		ID: uuidString(row.ID), ModelID: row.ModelID, Name: textString(row.Name), ProviderID: uuidString(row.ProviderID),
+		ID: db.UUIDString(row.ID), ModelID: row.ModelID, Name: db.TextToString(row.Name), ProviderID: db.UUIDString(row.ProviderID),
 		ProviderType: row.ProviderType, Type: modeldomain.ModelType(row.Type), Enable: row.Enable, Config: cloneBytes(row.Config),
 		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
@@ -263,24 +262,10 @@ func speechModelRecordFromList(row dbsqlc.ListSpeechModelsRow) audioport.ModelRe
 
 func transcriptionModelRecordFromList(row dbsqlc.ListTranscriptionModelsRow) audioport.ModelRecord {
 	return audioport.ModelRecord{
-		ID: uuidString(row.ID), ModelID: row.ModelID, Name: textString(row.Name), ProviderID: uuidString(row.ProviderID),
+		ID: db.UUIDString(row.ID), ModelID: row.ModelID, Name: db.TextToString(row.Name), ProviderID: db.UUIDString(row.ProviderID),
 		ProviderType: row.ProviderType, Type: modeldomain.ModelType(row.Type), Enable: row.Enable, Config: cloneBytes(row.Config),
 		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
-}
-
-func uuidString(value pgtype.UUID) string {
-	if !value.Valid {
-		return ""
-	}
-	return uuid.UUID(value.Bytes).String()
-}
-
-func textString(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String
 }
 
 func optionalText(value string) pgtype.Text {

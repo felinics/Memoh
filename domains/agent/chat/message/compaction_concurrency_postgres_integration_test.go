@@ -13,10 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	. "github.com/memohai/memoh/domains/agent/chat/message"
-	chatpostgres "github.com/memohai/memoh/domains/agent/chat/postgres"
+	chatpostgres "github.com/memohai/memoh/domains/agent/internal/postgres/chat"
 	agentsqlc "github.com/memohai/memoh/domains/agent/internal/postgres/sqlc"
-	apiassembly "github.com/memohai/memoh/domains/api/assembly"
-	dbpkg "github.com/memohai/memoh/internal/db"
+	bot "github.com/memohai/memoh/domains/api/bot"
+	"github.com/memohai/memoh/internal/db"
 )
 
 type committedCompactionFixture struct {
@@ -35,7 +35,7 @@ func setupCommittedCompactionFixture(t *testing.T) committedCompactionFixture {
 		t.Skip("TEST_POSTGRES_DSN is not set")
 	}
 	ctx := context.Background()
-	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
+	pool, err := db.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect postgres: %v", err)
 	}
@@ -549,14 +549,14 @@ func deleteBotCascade(ctx context.Context, db agentsqlc.DBTX, botID pgtype.UUID)
 
 func newPostgresMessageStore(pool *pgxpool.Pool) *chatpostgres.MessageStore {
 	return chatpostgres.NewMessageStoreWithPool(
-		apiassembly.NewBotSessionLocker(pool),
+		bot.NewSessionLocker(pool),
 		func(tx pgx.Tx) chatpostgres.BotSessionWriteLocker {
-			return apiassembly.NewBotSessionLockerFromTx(tx)
+			return bot.NewSessionLockerFromTx(tx)
 		},
 		pool,
 	)
 }
 
 func newPostgresMessageStoreTx(tx pgx.Tx) *chatpostgres.MessageStore {
-	return chatpostgres.NewMessageStore(apiassembly.NewBotSessionLockerFromTx(tx), tx)
+	return chatpostgres.NewMessageStore(bot.NewSessionLockerFromTx(tx), tx)
 }

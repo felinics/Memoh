@@ -12,7 +12,7 @@ import (
 	"time"
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 // memoryIDSeq is a process-wide monotonic counter appended to memory IDs so
@@ -95,7 +95,7 @@ func runtimeLocalMemoryID(memoryID string) string {
 	return memoryID
 }
 
-func runtimeText(message string, messages []memreg.Message) string {
+func runtimeText(message string, messages []memprovider.Message) string {
 	text := strings.TrimSpace(message)
 	if text == "" && len(messages) > 0 {
 		parts := make([]string, 0, len(messages))

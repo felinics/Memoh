@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/domains/api/auth"
+	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/api/identity/auth"
+	"github.com/memohai/memoh/domains/iam/team"
 )
 
 const emailTriggerTokenTTL = 10 * time.Minute
@@ -19,17 +21,25 @@ type BotOwnerResolver interface {
 	ResolveBotOwner(ctx context.Context, botID string) (ownerUserID string, err error)
 }
 
-// EmailChatGateway implements email.ChatTriggerer by delegating to the Service.
+// TurnStarter is the smallest Agent surface required by proactive email turns.
+// Both the in-process application service and the authenticated RPC client
+// implement it.
+type TurnStarter interface {
+	StartTurn(context.Context, agentdomain.StartTurnCommand) (agentdomain.RunHandle, error)
+}
+
+// EmailChatGateway implements Channel's email trigger contract while keeping
+// Agent turn policy in the Agent application owner.
 type EmailChatGateway struct {
-	service   *Service
+	turns     TurnStarter
 	owners    BotOwnerResolver
 	jwtSecret string
 	logger    *slog.Logger
 }
 
-func NewEmailChatGateway(service *Service, owners BotOwnerResolver, jwtSecret string, logger *slog.Logger) *EmailChatGateway {
+func NewEmailChatGateway(turns TurnStarter, owners BotOwnerResolver, jwtSecret string, logger *slog.Logger) *EmailChatGateway {
 	return &EmailChatGateway{
-		service:   service,
+		turns:     turns,
 		owners:    owners,
 		jwtSecret: jwtSecret,
 		logger:    logger,
@@ -37,8 +47,8 @@ func NewEmailChatGateway(service *Service, owners BotOwnerResolver, jwtSecret st
 }
 
 func (g *EmailChatGateway) TriggerBotChat(ctx context.Context, botID, content string) error {
-	if g == nil || g.service == nil {
-		return errors.New("agent application service not configured")
+	if g == nil || g.turns == nil {
+		return errors.New("agent turn service not configured")
 	}
 
 	ownerUserID, err := g.resolveBotOwner(ctx, botID)
@@ -51,7 +61,10 @@ func (g *EmailChatGateway) TriggerBotChat(ctx context.Context, botID, content st
 		return fmt.Errorf("generate trigger token: %w", err)
 	}
 
-	_, err = g.service.Chat(ctx, ChatRequest{
+	handle, err := g.turns.StartTurn(ctx, agentdomain.StartTurnCommand{
+		SchemaVersion:  1,
+		TeamID:         team.DefaultTeamID,
+		Mode:           agentdomain.ModeChat,
 		BotID:          botID,
 		ChatID:         botID,
 		Query:          content,
@@ -60,11 +73,36 @@ func (g *EmailChatGateway) TriggerBotChat(ctx context.Context, botID, content st
 		CurrentChannel: "email",
 	})
 	if err != nil {
-		return fmt.Errorf("trigger chat: %w", err)
+		return fmt.Errorf("start email turn: %w", err)
+	}
+	if handle == nil {
+		return errors.New("start email turn: nil run handle")
+	}
+	defer handle.Cancel()
+
+	events, errs := handle.Events(), handle.Errs()
+	for events != nil || errs != nil {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				events = nil
+			}
+		case runErr, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			if runErr != nil {
+				return fmt.Errorf("run email turn: %w", runErr)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
-	g.logger.InfoContext(ctx, "email trigger chat completed",
-		slog.String("bot_id", botID))
+	if g.logger != nil {
+		g.logger.InfoContext(ctx, "email trigger chat completed", slog.String("bot_id", botID))
+	}
 	return nil
 }
 

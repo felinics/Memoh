@@ -84,7 +84,7 @@ Memoh/
 │   │   │   ├── acp/            #       ACP pool, client process manager, and profiles
 │   │   │   ├── native/         #       Twilight AI native runtime, prompts, streaming, hooks, and guards
 │   │   │   └── session/        #       Per-thread runtime state and control
-│   │   ├── sessionmode/        #     Session mode resolution
+│   │   ├── chat/session/       #     Session mode resolution and runtime fencing
 │   │   ├── tool/               #     Native tool providers
 │   │       ├── message.go      #       Send message tool
 │   │       ├── contacts.go     #       Contact list tool
@@ -113,10 +113,12 @@ Memoh/
 │   │   └── turn/               #     Pure Turn port plus authenticated gRPC transport
 │   ├── attachment/             #   Attachment normalization (MIME types, base64)
 │   ├── audio/                  #   Audio/TTS processing utilities
-│   ├── auth/                   #   JWT authentication middleware and utilities
+│   ├── identity/auth/          #   JWT authentication middleware and utilities
 │   ├── boot/                   #   Runtime configuration provider (container backend detection)
-│   ├── bots/                   #   Bot management (CRUD, lifecycle)
-│   ├── botbackup/              #   Bot backup/export/import service
+│   ├── bot/                    #   Bot management (CRUD, lifecycle)
+│   │   ├── access/             #     Per-bot Manage capability and ACL policy
+│   │   ├── backup/             #     Bot backup/export/import service
+│   │   └── setting/            #     Bot settings
 │   ├── capabilities/           #   Model reasoning capability derivation (LiteLLM registry)
 │   ├── channel/                #   Channel adapter system
 │   │   ├── adapters/           #     Platform adapters: telegram, discord, feishu, qq, dingtalk, weixin, wecom, wechatoa, matrix, misskey, line, slack, local
@@ -124,7 +126,7 @@ Memoh/
 │   │   ├── inbound/            #     Inbound adaptation and Turn dispatch
 │   │   ├── route/              #     External conversation/thread to internal Thread routing
 │   │   └── identities/         #     Channel identity service
-│   ├── channelaccess/          #   Effective per-bot Manage capability (channel binding + override)
+│   ├── identity/link/          #   Web-account to channel-identity linking
 │   ├── chat/                   #   Chat bounded package
 │   │   ├── event/              #     Persisted chat event hub
 │   │   ├── message/            #     Message persistence
@@ -301,6 +303,71 @@ Optional profile: `webhook-tunnel` (cloudflared for channels behind NAT). Deskto
 
 ## Key Development Rules
 
+### Persistence Layering (project contract)
+
+Every domain closes its PostgreSQL access the same way. This is a contract, not a
+convention — new code follows it, and code that violates it gets fixed rather
+than exempted.
+
+**One shape per domain.** All PostgreSQL adapters live in leaf subpackages of a
+single owner-private tree:
+
+```
+domains/<owner>/internal/postgres/<sub>/    # adapter; the ONLY place sqlc appears
+domains/<owner>/internal/postgres/sqlc/     # generated; one target per owner
+```
+
+There is exactly one such tree per domain, and it holds no Go files at its root —
+only `sqlc/` and leaf subpackages. Each leaf's package name matches its directory
+(`package catalog`, not `package postgres`), so import aliases are unnecessary and
+call sites read unambiguously.
+
+**Three layers, one direction.** Adapter → port ← service. The service never
+learns that PostgreSQL exists:
+
+| Layer | Location | Holds |
+|---|---|---|
+| Service | `domains/<owner>/<sub>/service.go` | business logic; depends only on the port |
+| Port | `persistence/` (public) or `internal/port/` (private) | `Store` interface + record types |
+| Adapter | `internal/postgres/<sub>/` | implementation; the only importer of sqlc and pgx |
+| Seam | `<sub>/constructors.go` | `NewPostgres*` returning the **port**, not the adapter type |
+
+**Port visibility follows type reach.** A port stays in `internal/port/` when its
+record types never leave the domain (model, memory, channel). It goes in a public
+`persistence/` package only when another domain consumes those types — e.g.
+`api/identity/link/persistence.Binding` is read by Agent and Channel. Don't publish a
+port speculatively; a private port is the default.
+
+**Constructors return ports.** `NewPostgresStore(pool)` returns
+`persistence.Store`, never `*postgres.Store`. This is what keeps the adapter
+private: if a constructor leaks the concrete type, every caller must import the
+adapter package and the boundary is gone. When one adapter satisfies several
+ports, declare a bundle interface next to the constructor rather than returning
+the struct.
+
+**`cmd/` never imports an adapter.** Composition roots call `NewPostgres*` seams
+only. The Go compiler enforces this for free once adapters are under `internal/`,
+which is the entire reason they live there — no guard test required.
+
+**Where a seam lives when colocation would cycle.** Some ports are declared in
+the same package their adapter implements (`chat/message`, `chat/thread`,
+`chat/compaction`, `chat/backup`). A `constructors.go` beside those ports would
+close an import cycle, so their seams live in the domain's public composition
+entry — `domains/<owner>/assembly/`. That package is thin constructors only: no
+business policy, no profile selection, no process startup.
+
+**Shared pg conversion helpers belong in `internal/db`.** `UUIDString`,
+`TimeFromPg`, `TextToString`, `ParseUUID`, `ParseUUIDOrEmpty`,
+`TimestamptzFromTime`. Do not re-declare a private copy in an adapter; import
+`internal/db` unaliased as `db`. Write a local helper only when the semantics
+genuinely differ (a distinct error message contract, or UTC normalization), and
+say so in a comment.
+
+**Structural rules are not guarded by tests.** There is deliberately no
+`internal/arch` package. Directory shape and import direction are enforced by the
+Go compiler where possible and by review otherwise; a guard test that merely
+restates a layout is maintenance cost without safety value.
+
 ### Database, sqlc & Migrations
 
 1. **PostgreSQL SQL queries** are defined in `db/postgres/queries/*.sql`.
@@ -385,7 +452,7 @@ The codebase has grown beyond the original agent/channel/container core. When wo
 - **ACP (`domains/agent/acp/`)** — runtime pool, client process manager, profiles, and OAuth integration for external ACP agents such as Claude Code and Codex. Stable user-facing ACP errors live in `domains/agent/decision/feedback/`.
 - **Plugin system (`domains/agent/extension/plugins/`)** — plugin manifests, installations, enable/disable lifecycle, and OAuth client bindings. The web Supermarket pages (`apps/web/src/pages/supermarket/`) consume this API to discover and install plugins/skills.
 - **User input / `ask_user` (`domains/agent/decision/input/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.
-- **Bot backup / import / export (`domains/api/botbackup/`)** — archive-based bot portability with preview and merge/replace/skip strategies.
+- **Bot backup / import / export (`domains/api/bot/backup/`)** — archive-based bot portability with preview and merge/replace/skip strategies.
 - **Workspace resource limits (`internal/workspace/resource_limits.go`)** — per-bot CPU/memory/storage quotas and runtime metrics.
 
 ## Database Tables

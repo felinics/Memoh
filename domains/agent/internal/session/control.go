@@ -9,7 +9,7 @@ import (
 	"time"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 )
 
 func (m *Manager) localControl(streamID string) *runControl {

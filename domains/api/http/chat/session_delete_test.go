@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,13 +10,13 @@ import (
 	"github.com/labstack/echo/v4"
 
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
-	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 )
 
 type sessionDeleteQueries struct {
 	stubThreadStore
-	bot              bot.Record
+	bot              botpersistence.Record
 	session          session.Thread
 	softDeleteCalled bool
 	softDeleteID     string
@@ -142,10 +141,7 @@ func TestDeleteSessionRejectsSubagentForChatUser(t *testing.T) {
 	)
 
 	_, err := callDeleteSessionAs(handler, botID, sessionID, userID)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("DeleteSession() error = %v, want HTTP 403", err)
-	}
+	requireHTTPStatus(t, err, http.StatusForbidden)
 	if queries.softDeleteCalled {
 		t.Fatal("chat user should not be able to delete subagent sessions directly")
 	}

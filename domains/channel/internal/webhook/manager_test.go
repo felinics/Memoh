@@ -1,13 +1,30 @@
 package webhook
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/memohai/memoh/internal/config"
 )
 
 const testDefaultListenAddr = "127.0.0.1:18734"
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type processKillerFunc func() error
+
+func (f processKillerFunc) Kill() error {
+	return f()
+}
 
 func TestNormalizePublicBase(t *testing.T) {
 	t.Parallel()
@@ -231,5 +248,136 @@ func TestTargetURLHonorsExplicitTarget(t *testing.T) {
 	}
 	if got != "http://127.0.0.1:9999" {
 		t.Fatalf("targetURL = %q", got)
+	}
+}
+
+func TestStopWaitsForExternalPollLoop(t *testing.T) {
+	t.Parallel()
+
+	requestStarted := make(chan struct{})
+	requestCanceled := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseRequest) }) }
+	t.Cleanup(release)
+	m := NewManager(nil, config.Config{
+		WebhookTunnel: config.WebhookTunnelConfig{Mode: config.WebhookTunnelModeExternal},
+	}, testDefaultListenAddr)
+	m.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		close(requestStarted)
+		<-req.Context().Done()
+		close(requestCanceled)
+		<-releaseRequest
+		return nil, req.Context().Err()
+	})}
+
+	startupCtx, cancelStartup := context.WithCancel(t.Context())
+	if err := m.Start(startupCtx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := m.Start(startupCtx); err != nil {
+		t.Fatalf("second Start() error = %v", err)
+	}
+	select {
+	case <-requestStarted:
+	case <-t.Context().Done():
+		t.Fatal("poll request did not start")
+	}
+	cancelStartup()
+	select {
+	case <-requestCanceled:
+		t.Fatal("startup context cancellation stopped the application-owned poll loop")
+	default:
+	}
+
+	stopCtx, cancelStop := context.WithCancel(t.Context())
+	stopResult := make(chan error, 1)
+	go func() {
+		stopResult <- m.Stop(stopCtx)
+	}()
+	select {
+	case <-requestCanceled:
+	case <-t.Context().Done():
+		t.Fatal("Stop() did not cancel the poll request")
+	}
+	cancelStop()
+	if err := <-stopResult; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Stop() error = %v, want context.Canceled while poll is still running", err)
+	}
+	if got := m.Snapshot().Status; got == statusStopped {
+		t.Fatalf("status = %q before poll loop exits, want non-stopped", got)
+	}
+
+	release()
+	if err := m.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop() after poll exit error = %v", err)
+	}
+	if got := m.Snapshot().Status; got != statusStopped {
+		t.Fatalf("status = %q after poll loop exits, want %q", got, statusStopped)
+	}
+	if err := m.Start(t.Context()); err == nil {
+		t.Fatal("Start() after Stop() succeeded")
+	}
+}
+
+func TestStopAggregatesManagedProcessAndTaskErrors(t *testing.T) {
+	t.Parallel()
+
+	killErr := assertErr("kill failed")
+	killCalled := make(chan struct{})
+	m := NewManager(nil, config.Config{
+		WebhookTunnel: config.WebhookTunnelConfig{Mode: config.WebhookTunnelModeManaged},
+	}, testDefaultListenAddr)
+	m.managedProcess = processKillerFunc(func() error {
+		close(killCalled)
+		return killErr
+	})
+	m.cmdDone = make(chan struct{})
+	m.pollDone = make(chan struct{})
+	stopCtx, cancelStop := context.WithCancel(t.Context())
+	cancelStop()
+
+	err := m.Stop(stopCtx)
+	if !errors.Is(err, killErr) {
+		t.Fatalf("Stop() error = %v, want kill error", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Stop() error = %v, want context cancellation", err)
+	}
+	select {
+	case <-killCalled:
+	default:
+		t.Fatal("Stop() did not attempt to stop the managed process")
+	}
+	for _, message := range []string{
+		"stop managed webhook tunnel",
+		"wait for managed webhook tunnel",
+		"wait for webhook tunnel polling",
+	} {
+		if !strings.Contains(err.Error(), message) {
+			t.Fatalf("Stop() error = %q, want %q", err, message)
+		}
+	}
+}
+
+func TestStopIgnoresAlreadyFinishedManagedProcess(t *testing.T) {
+	t.Parallel()
+
+	cmdDone := make(chan struct{})
+	pollDone := make(chan struct{})
+	close(cmdDone)
+	close(pollDone)
+	m := NewManager(nil, config.Config{
+		WebhookTunnel: config.WebhookTunnelConfig{Mode: config.WebhookTunnelModeManaged},
+	}, testDefaultListenAddr)
+	m.managedProcess = processKillerFunc(func() error { return os.ErrProcessDone })
+	m.cmdDone = cmdDone
+	m.pollDone = pollDone
+
+	if err := m.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop() error = %v, want nil", err)
+	}
+	if got := m.Snapshot().Status; got != statusStopped {
+		t.Fatalf("status = %q, want %q", got, statusStopped)
 	}
 }

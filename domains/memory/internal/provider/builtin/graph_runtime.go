@@ -13,7 +13,7 @@ import (
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
 	wikistore "github.com/memohai/memoh/domains/memory/internal/store/wiki"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 )
 
@@ -121,17 +121,17 @@ func (r *graphRuntime) semanticUpsertBestEffort(botID string, n memorydomain.Nod
 
 // ---- Runtime: CRUD ----
 
-func (r *graphRuntime) Add(ctx context.Context, req memreg.AddRequest) (memreg.SearchResponse, error) {
+func (r *graphRuntime) Add(ctx context.Context, req memprovider.AddRequest) (memprovider.SearchResponse, error) {
 	if r.store == nil {
-		return memreg.SearchResponse{}, errors.New("graph runtime: wiki store not configured")
+		return memprovider.SearchResponse{}, errors.New("graph runtime: wiki store not configured")
 	}
 	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
 	text := runtimeText(req.Message, req.Messages)
 	if text == "" {
-		return memreg.SearchResponse{}, errors.New("graph runtime: message is required")
+		return memprovider.SearchResponse{}, errors.New("graph runtime: message is required")
 	}
 	now := time.Now().UTC()
 	spec := memoryItemToNodeSpec(memorydomain.Item{
@@ -145,20 +145,20 @@ func (r *graphRuntime) Add(ctx context.Context, req memreg.AddRequest) (memreg.S
 
 	saved, err := r.store.UpsertNode(ctx, spec)
 	if err != nil {
-		return memreg.SearchResponse{}, fmt.Errorf("graph runtime: upsert node: %w", err)
+		return memprovider.SearchResponse{}, fmt.Errorf("graph runtime: upsert node: %w", err)
 	}
 	r.semanticUpsertBestEffort(botID, saved) //nolint:contextcheck // async semantic upsert uses its own bounded context
 	r.syncAndInvalidate(ctx, botID)
-	return memreg.SearchResponse{Results: []memorydomain.Item{nodeSpecToMemoryItem(saved)}}, nil
+	return memprovider.SearchResponse{Results: []memorydomain.Item{nodeSpecToMemoryItem(saved)}}, nil
 }
 
-func (r *graphRuntime) Search(ctx context.Context, req memreg.SearchRequest) (memreg.SearchResponse, error) {
+func (r *graphRuntime) Search(ctx context.Context, req memprovider.SearchRequest) (memprovider.SearchResponse, error) {
 	if r.store == nil {
-		return memreg.SearchResponse{}, errors.New("graph runtime: wiki store not configured")
+		return memprovider.SearchResponse{}, errors.New("graph runtime: wiki store not configured")
 	}
 	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
 	limit := req.Limit
 	if limit <= 0 {
@@ -182,10 +182,10 @@ func (r *graphRuntime) Search(ctx context.Context, req memreg.SearchRequest) (me
 
 // searchGraph runs seed-then-expand: lexical-score nodes -> top-K seeds ->
 // BFS expand along edges -> merge -> populate Relations.
-func (r *graphRuntime) searchGraph(ctx context.Context, botID, query string, limit int) (memreg.SearchResponse, error) {
+func (r *graphRuntime) searchGraph(ctx context.Context, botID, query string, limit int) (memprovider.SearchResponse, error) {
 	graph, err := r.cache.getOrBuild(ctx, botID, r.store)
 	if err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
 	nodes := graph.nodeSlice()
 
@@ -288,19 +288,19 @@ func (r *graphRuntime) searchGraph(ctx context.Context, botID, query string, lim
 			relations = append(relations, map[string]any{"from": parts[0], "to": parts[1], "rel": parts[2]})
 		}
 	}
-	return memreg.SearchResponse{Results: results, Relations: relations, RetrievalMode: "graph"}, nil
+	return memprovider.SearchResponse{Results: results, Relations: relations, RetrievalMode: "graph"}, nil
 }
 
 // searchFileFallback is the reliability fallback: read the derived Markdown via
 // the bridge and score lexically, exactly like fileRuntime. Used when the PG
 // graph is unavailable.
-func (r *graphRuntime) searchFileFallback(ctx context.Context, botID, query string, limit int) (memreg.SearchResponse, error) {
+func (r *graphRuntime) searchFileFallback(ctx context.Context, botID, query string, limit int) (memprovider.SearchResponse, error) {
 	if r.fs == nil {
-		return memreg.SearchResponse{}, nil
+		return memprovider.SearchResponse{}, nil
 	}
 	items, err := r.fs.ReadAllMemoryFiles(ctx, botID)
 	if err != nil {
-		return memreg.SearchResponse{}, fmt.Errorf("graph runtime: file fallback read: %w", err)
+		return memprovider.SearchResponse{}, fmt.Errorf("graph runtime: file fallback read: %w", err)
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
 	results := make([]memorydomain.Item, 0, len(items))
@@ -323,16 +323,16 @@ func (r *graphRuntime) searchFileFallback(ctx context.Context, botID, query stri
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
-	return memreg.SearchResponse{Results: results, RetrievalMode: "file_fallback"}, nil
+	return memprovider.SearchResponse{Results: results, RetrievalMode: "file_fallback"}, nil
 }
 
-func (r *graphRuntime) GetAll(ctx context.Context, req memreg.GetAllRequest) (memreg.SearchResponse, error) {
+func (r *graphRuntime) GetAll(ctx context.Context, req memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
 	if r.store == nil {
-		return memreg.SearchResponse{}, errors.New("graph runtime: wiki store not configured")
+		return memprovider.SearchResponse{}, errors.New("graph runtime: wiki store not configured")
 	}
 	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
-		return memreg.SearchResponse{}, err
+		return memprovider.SearchResponse{}, err
 	}
 	nodes, err := r.store.ListNodes(ctx, botID)
 	if err != nil {
@@ -352,10 +352,10 @@ func (r *graphRuntime) GetAll(ctx context.Context, req memreg.GetAllRequest) (me
 	if req.Limit > 0 && len(out) > req.Limit {
 		out = out[:req.Limit]
 	}
-	return memreg.SearchResponse{Results: out, RetrievalMode: "graph"}, nil
+	return memprovider.SearchResponse{Results: out, RetrievalMode: "graph"}, nil
 }
 
-func (r *graphRuntime) Update(ctx context.Context, req memreg.UpdateRequest) (memorydomain.Item, error) {
+func (r *graphRuntime) Update(ctx context.Context, req memprovider.UpdateRequest) (memorydomain.Item, error) {
 	if r.store == nil {
 		return memorydomain.Item{}, errors.New("graph runtime: wiki store not configured")
 	}
@@ -395,13 +395,13 @@ func (r *graphRuntime) Update(ctx context.Context, req memreg.UpdateRequest) (me
 	return nodeSpecToMemoryItem(saved), nil
 }
 
-func (r *graphRuntime) Delete(ctx context.Context, memoryID string) (memreg.DeleteResponse, error) {
+func (r *graphRuntime) Delete(ctx context.Context, memoryID string) (memprovider.DeleteResponse, error) {
 	return r.DeleteBatch(ctx, []string{memoryID})
 }
 
-func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (memreg.DeleteResponse, error) {
+func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (memprovider.DeleteResponse, error) {
 	if r.store == nil {
-		return memreg.DeleteResponse{}, errors.New("graph runtime: wiki store not configured")
+		return memprovider.DeleteResponse{}, errors.New("graph runtime: wiki store not configured")
 	}
 	seen := map[string]bool{}
 	deletedByBot := map[string][]string{}
@@ -418,12 +418,12 @@ func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (mem
 		_, storedID, err := r.resolveNodeByMemoryID(ctx, botID, memoryID)
 		if err != nil {
 			if !errors.Is(err, wikistore.ErrNodeNotFound) {
-				return memreg.DeleteResponse{}, fmt.Errorf("graph runtime: get node for delete: %w", err)
+				return memprovider.DeleteResponse{}, fmt.Errorf("graph runtime: get node for delete: %w", err)
 			}
 			storedID = memoryID
 		}
 		if err := r.store.DeleteNode(ctx, botID, storedID); err != nil {
-			return memreg.DeleteResponse{}, fmt.Errorf("graph runtime: delete node: %w", err)
+			return memprovider.DeleteResponse{}, fmt.Errorf("graph runtime: delete node: %w", err)
 		}
 		deletedByBot[botID] = append(deletedByBot[botID], storedID)
 		if storedID != memoryID {
@@ -443,7 +443,7 @@ func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (mem
 			}
 		}
 	}
-	return memreg.DeleteResponse{Message: "Memories deleted successfully!"}, nil
+	return memprovider.DeleteResponse{Message: "Memories deleted successfully!"}, nil
 }
 
 func (r *graphRuntime) resolveNodeByMemoryID(ctx context.Context, botID, memoryID string) (memorydomain.NodeSpec, string, error) {
@@ -480,16 +480,16 @@ func (r *graphRuntime) discardSemanticNodes(ctx context.Context, botID string, n
 	}
 }
 
-func (r *graphRuntime) DeleteAll(ctx context.Context, req memreg.DeleteAllRequest) (memreg.DeleteResponse, error) {
+func (r *graphRuntime) DeleteAll(ctx context.Context, req memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
 	if r.store == nil {
-		return memreg.DeleteResponse{}, errors.New("graph runtime: wiki store not configured")
+		return memprovider.DeleteResponse{}, errors.New("graph runtime: wiki store not configured")
 	}
 	botID, err := runtimeBotID(req.BotID, req.Filters)
 	if err != nil {
-		return memreg.DeleteResponse{}, err
+		return memprovider.DeleteResponse{}, err
 	}
 	if err := r.store.DeleteAllNodes(ctx, botID); err != nil {
-		return memreg.DeleteResponse{}, fmt.Errorf("graph runtime: delete all nodes: %w", err)
+		return memprovider.DeleteResponse{}, fmt.Errorf("graph runtime: delete all nodes: %w", err)
 	}
 	if r.fs != nil {
 		if err := r.fs.RemoveAllMemories(ctx, botID); err != nil {
@@ -505,24 +505,24 @@ func (r *graphRuntime) DeleteAll(ctx context.Context, req memreg.DeleteAllReques
 		}
 	}
 	r.cache.invalidate(botID)
-	return memreg.DeleteResponse{Message: "All memories deleted successfully!"}, nil
+	return memprovider.DeleteResponse{Message: "All memories deleted successfully!"}, nil
 }
 
 // ---- Runtime: usage / status / rebuild ----
 
-func (r *graphRuntime) Usage(ctx context.Context, filters map[string]any) (memreg.UsageResponse, error) {
+func (r *graphRuntime) Usage(ctx context.Context, filters map[string]any) (memprovider.UsageResponse, error) {
 	if r.store == nil {
-		return memreg.UsageResponse{}, errors.New("graph runtime: wiki store not configured")
+		return memprovider.UsageResponse{}, errors.New("graph runtime: wiki store not configured")
 	}
 	botID, err := runtimeBotID("", filters)
 	if err != nil {
-		return memreg.UsageResponse{}, err
+		return memprovider.UsageResponse{}, err
 	}
 	nodes, err := r.store.ListNodes(ctx, botID)
 	if err != nil {
-		return memreg.UsageResponse{}, fmt.Errorf("graph runtime: usage list: %w", err)
+		return memprovider.UsageResponse{}, fmt.Errorf("graph runtime: usage list: %w", err)
 	}
-	var usage memreg.UsageResponse
+	var usage memprovider.UsageResponse
 	usage.Count = len(nodes)
 	for _, n := range nodes {
 		usage.TotalTextBytes += int64(len(n.Body))
@@ -534,13 +534,13 @@ func (r *graphRuntime) Usage(ctx context.Context, filters map[string]any) (memre
 	return usage, nil
 }
 
-func (r *graphRuntime) Status(ctx context.Context, botID string) (memreg.MemoryStatusResponse, error) {
+func (r *graphRuntime) Status(ctx context.Context, botID string) (memprovider.MemoryStatusResponse, error) {
 	if r.store == nil {
-		return memreg.MemoryStatusResponse{}, errors.New("graph runtime: wiki store not configured")
+		return memprovider.MemoryStatusResponse{}, errors.New("graph runtime: wiki store not configured")
 	}
 	nodeCount, _ := r.store.CountNodes(ctx, botID)
 	edgeCount, _ := r.store.CountEdges(ctx, botID)
-	resp := memreg.MemoryStatusResponse{
+	resp := memprovider.MemoryStatusResponse{
 		ProviderType:  BuiltinType,
 		MemoryMode:    string(ModeGraph),
 		CanManualSync: true,
@@ -553,9 +553,9 @@ func (r *graphRuntime) Status(ctx context.Context, botID string) (memreg.MemoryS
 	if r.semantic != nil {
 		resp.VectorIndex = r.semantic.Name()
 		if err := r.semantic.Health(ctx); err != nil {
-			resp.Pgvector = &memreg.HealthStatus{Error: err.Error()}
+			resp.Pgvector = &memprovider.HealthStatus{Error: err.Error()}
 		} else {
-			resp.Pgvector = &memreg.HealthStatus{OK: true}
+			resp.Pgvector = &memprovider.HealthStatus{OK: true}
 			if count, err := r.semantic.Count(ctx, botID); err == nil {
 				resp.IndexedCount = count
 			}
@@ -571,9 +571,9 @@ func (r *graphRuntime) Status(ctx context.Context, botID string) (memreg.MemoryS
 	return resp, nil
 }
 
-func (r *graphRuntime) Rebuild(ctx context.Context, botID string) (memreg.RebuildResult, error) {
+func (r *graphRuntime) Rebuild(ctx context.Context, botID string) (memprovider.RebuildResult, error) {
 	if r.store == nil {
-		return memreg.RebuildResult{}, errors.New("graph runtime: wiki store not configured")
+		return memprovider.RebuildResult{}, errors.New("graph runtime: wiki store not configured")
 	}
 	// Ingest agent-authored /data/memory/*.md BEFORE the destructive
 	// derived-view rebuild so their content becomes DB nodes and survives the
@@ -586,11 +586,11 @@ func (r *graphRuntime) Rebuild(ctx context.Context, botID string) (memreg.Rebuil
 	}
 	nodes, err := r.store.ListNodes(ctx, botID)
 	if err != nil {
-		return memreg.RebuildResult{}, fmt.Errorf("graph runtime: rebuild list: %w", err)
+		return memprovider.RebuildResult{}, fmt.Errorf("graph runtime: rebuild list: %w", err)
 	}
 	r.syncAndInvalidate(ctx, botID)
 	count, _ := r.store.CountNodes(ctx, botID)
-	result := memreg.RebuildResult{FsCount: len(nodes), StorageCount: count}
+	result := memprovider.RebuildResult{FsCount: len(nodes), StorageCount: count}
 	if r.semantic != nil {
 		r.retry.discardBot(botID)
 		if err := r.semantic.DeleteBot(ctx, botID); err != nil {

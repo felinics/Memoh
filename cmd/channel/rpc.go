@@ -66,6 +66,7 @@ func provideChannelRPC(log *slog.Logger, cfg config.Config, channelRuntime gatew
 }
 
 func startChannelRPC(lc fx.Lifecycle, log *slog.Logger, rpcServer *channelRPC, shutdowner fx.Shutdowner) {
+	serveDone := make(chan struct{})
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", rpcServer.addr)
@@ -73,17 +74,15 @@ func startChannelRPC(lc fx.Lifecycle, log *slog.Logger, rpcServer *channelRPC, s
 				return fmt.Errorf("listen channel rpc: %w", err)
 			}
 			go func() {
-				log.InfoContext(ctx, "channel rpc listening", slog.String("addr", rpcServer.addr))
-				if err := rpcServer.server.Serve(lis); err != nil {
-					log.ErrorContext(ctx, "channel rpc failed", slog.Any("error", err))
-					_ = shutdowner.Shutdown()
-				}
+				defer close(serveDone)
+				log.Info("channel rpc listening", slog.String("addr", lis.Addr().String()))
+				handleServeError(log, shutdowner, "channel rpc", rpcServer.server.Serve(lis), grpc.ErrServerStopped)
 			}()
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
 			intrpc.StopGracefully(rpcServer.server, ctx.Done(), 10*time.Second)
-			return nil
+			return waitForServe(ctx, serveDone, "channel rpc")
 		},
 	})
 }

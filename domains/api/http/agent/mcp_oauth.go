@@ -11,8 +11,9 @@ import (
 
 	"github.com/memohai/memoh/domains/agent/mcp"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // MCPOAuthHandler handles OAuth-related endpoints for MCP connections.
@@ -55,9 +56,9 @@ type oauthDiscoverRequest struct {
 // @Tags mcp
 // @Param id path string true "MCP connection ID"
 // @Param payload body oauthDiscoverRequest false "Optional URL override"
-// @Success 200 {object} mcp.DiscoveryResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Success 200 {object} mcppersistence.DiscoveryResult
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/discover [post].
 func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -66,8 +67,11 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	connID := strings.TrimSpace(c.Param("id"))
-	if botID == "" || connID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and id are required")
+	if botID == "" {
+		return apperror.Required("bot_id")
+	}
+	if connID == "" {
+		return apperror.Required("id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -88,17 +92,17 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 		}
 	}
 	if serverURL == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "MCP server URL is required for OAuth discovery")
+		return apperror.Required("url")
 	}
 
 	result, err := h.oauthService.Discover(c.Request().Context(), serverURL)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("discover mcp oauth", err)
 	}
 
 	if err := h.oauthService.SaveDiscovery(c.Request().Context(), connID, result); err != nil {
 		h.logger.Error("failed to save discovery result", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save discovery result")
+		return apperror.Internal("save mcp oauth discovery", err)
 	}
 
 	return c.JSON(http.StatusOK, result)
@@ -117,8 +121,8 @@ type oauthAuthorizeRequest struct {
 // @Param id path string true "MCP connection ID"
 // @Param payload body oauthAuthorizeRequest false "Optional client_id"
 // @Success 200 {object} mcp.AuthorizeResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/authorize [post].
 func (h *MCPOAuthHandler) Authorize(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -127,8 +131,11 @@ func (h *MCPOAuthHandler) Authorize(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	connID := strings.TrimSpace(c.Param("id"))
-	if botID == "" || connID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and id are required")
+	if botID == "" {
+		return apperror.Required("bot_id")
+	}
+	if connID == "" {
+		return apperror.Required("id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -139,7 +146,7 @@ func (h *MCPOAuthHandler) Authorize(c echo.Context) error {
 
 	result, err := h.oauthService.StartAuthorization(c.Request().Context(), connID, req.ClientID, req.ClientSecret, req.CallbackURL)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("authorize mcp oauth", err)
 	}
 
 	return c.JSON(http.StatusOK, result)
@@ -156,24 +163,27 @@ type oauthExchangeRequest struct {
 // @Tags mcp
 // @Param payload body oauthExchangeRequest true "Authorization code and state"
 // @Success 200 {object} map[string]bool
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/exchange [post].
 func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 	var req oauthExchangeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		return apperror.Invalid("bind mcp oauth exchange", err)
 	}
 
 	code := strings.TrimSpace(req.Code)
 	state := strings.TrimSpace(req.State)
-	if code == "" || state == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "code and state are required")
+	if code == "" {
+		return apperror.Required("code")
+	}
+	if state == "" {
+		return apperror.Required("state")
 	}
 
 	_, err := h.oauthService.HandleCallback(c.Request().Context(), state, code)
 	if err != nil {
 		h.logger.Warn("oauth exchange failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("exchange mcp oauth", err)
 	}
 
 	return c.JSON(http.StatusOK, map[string]bool{"success": true})
@@ -222,8 +232,8 @@ func (h *MCPOAuthHandler) Callback(c echo.Context) error {
 // @Tags mcp
 // @Param id path string true "MCP connection ID"
 // @Success 200 {object} mcp.OAuthStatus
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/status [get].
 func (h *MCPOAuthHandler) Status(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -232,8 +242,11 @@ func (h *MCPOAuthHandler) Status(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	connID := strings.TrimSpace(c.Param("id"))
-	if botID == "" || connID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and id are required")
+	if botID == "" {
+		return apperror.Required("bot_id")
+	}
+	if connID == "" {
+		return apperror.Required("id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -241,7 +254,7 @@ func (h *MCPOAuthHandler) Status(c echo.Context) error {
 
 	status, err := h.oauthService.GetStatus(c.Request().Context(), connID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("get mcp oauth status", err)
 	}
 
 	return c.JSON(http.StatusOK, status)
@@ -253,7 +266,7 @@ func (h *MCPOAuthHandler) Status(c echo.Context) error {
 // @Tags mcp
 // @Param id path string true "MCP connection ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/token [delete].
 func (h *MCPOAuthHandler) RevokeToken(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -262,15 +275,18 @@ func (h *MCPOAuthHandler) RevokeToken(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	connID := strings.TrimSpace(c.Param("id"))
-	if botID == "" || connID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and id are required")
+	if botID == "" {
+		return apperror.Required("bot_id")
+	}
+	if connID == "" {
+		return apperror.Required("id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 
 	if err := h.oauthService.RevokeToken(c.Request().Context(), connID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("revoke mcp oauth token", err)
 	}
 
 	return c.NoContent(http.StatusNoContent)

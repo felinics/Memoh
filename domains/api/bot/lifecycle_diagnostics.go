@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
 )
 
 const (
@@ -85,12 +87,12 @@ func (s *Service) ClearContainerSetupFailure(ctx context.Context, botID string) 
 	return s.persistBotMetadata(ctx, row, metadata)
 }
 
-func (s *Service) persistBotMetadata(ctx context.Context, row Record, metadata map[string]any) error {
+func (s *Service) persistBotMetadata(ctx context.Context, row botpersistence.Record, metadata map[string]any) error {
 	payload, err := json.Marshal(metadata)
 	if err != nil {
 		return err
 	}
-	_, err = s.bots.UpdateBot(ctx, UpdateInput{
+	_, err = s.bots.UpdateBot(ctx, botpersistence.UpdateInput{
 		ID:          row.ID,
 		Name:        row.Name,
 		DisplayName: row.DisplayName,

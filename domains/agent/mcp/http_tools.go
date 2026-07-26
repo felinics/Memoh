@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
+
 	"github.com/google/uuid"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -248,7 +250,7 @@ func BuildToolCallPayloadFromRaw(params *sdkmcp.CallToolParamsRaw) (ToolCallPayl
 	}, nil
 }
 
-func ConvertGatewayToolsToSDK(items []ToolDescriptor) []*sdkmcp.Tool {
+func ConvertGatewayToolsToSDK(items []mcppersistence.ToolDescriptor) []*sdkmcp.Tool {
 	if len(items) == 0 {
 		return []*sdkmcp.Tool{}
 	}

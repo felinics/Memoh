@@ -7,26 +7,30 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/api/access"
-	"github.com/memohai/memoh/domains/api/access/acl"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	botaccess "github.com/memohai/memoh/domains/api/bot/access"
+	"github.com/memohai/memoh/domains/api/bot/access/acl"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	identitypkg "github.com/memohai/memoh/domains/api/identity"
+	identitylink "github.com/memohai/memoh/domains/api/identity/link"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // ChannelAccessHandler exposes the per-bot Manage capability (Channel Access
 // managers) and the global account-binding flow (Connected Accounts).
 type ChannelAccessHandler struct {
-	service        *access.Service
+	managerService *botaccess.Service
+	linkService    *identitylink.Service
 	botService     *bot.Service
 	accountService *account.Service
 }
 
 // NewChannelAccessHandler constructs a ChannelAccessHandler.
-func NewChannelAccessHandler(service *access.Service, botService *bot.Service, accountService *account.Service) *ChannelAccessHandler {
+func NewChannelAccessHandler(managerService *botaccess.Service, linkService *identitylink.Service, botService *bot.Service, accountService *account.Service) *ChannelAccessHandler {
 	return &ChannelAccessHandler{
-		service:        service,
+		managerService: managerService,
+		linkService:    linkService,
 		botService:     botService,
 		accountService: accountService,
 	}
@@ -51,21 +55,21 @@ func (h *ChannelAccessHandler) Register(e *echo.Echo) {
 // @Description List effective Manage state per channel identity on a bot (inherited + local overrides)
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} access.ListManagersResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Success 200 {object} botaccess.ListManagersResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/channel-managers [get].
 func (h *ChannelAccessHandler) ListManagers(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
 	if err != nil {
 		return err
 	}
-	items, err := h.service.ListManagers(c.Request().Context(), botID)
+	items, err := h.managerService.ListManagers(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list channel managers", err)
 	}
-	return c.JSON(http.StatusOK, access.ListManagersResponse{Items: items})
+	return c.JSON(http.StatusOK, botaccess.ListManagersResponse{Items: items})
 }
 
 // SetManager godoc
@@ -73,30 +77,30 @@ func (h *ChannelAccessHandler) ListManagers(c echo.Context) error {
 // @Description Force the Manage capability ON or OFF for a channel identity on a bot
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
-// @Param payload body access.SetManagerRequest true "Override payload"
+// @Param payload body botaccess.SetManagerRequest true "Override payload"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/channel-managers [post].
 func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 	botID, actorID, err := h.requireManageAccess(c)
 	if err != nil {
 		return err
 	}
-	var req access.SetManagerRequest
+	var req botaccess.SetManagerRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind channel manager", err)
 	}
 	channelIdentityID := strings.TrimSpace(req.ChannelIdentityID)
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("validate channel identity", err)
 	}
-	if err := h.service.SetManager(c.Request().Context(), botID, channelIdentityID, req.Granted, actorID); err != nil {
-		if errors.Is(err, access.ErrInvalidInput) || errors.Is(err, acl.ErrInvalidRuleSubject) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	if err := h.managerService.SetManager(c.Request().Context(), botID, channelIdentityID, req.Granted, actorID); err != nil {
+		if errors.Is(err, acl.ErrInvalidRuleSubject) {
+			return apperror.Invalid("set channel manager", err)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("set channel manager", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -108,9 +112,9 @@ func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param channel_identity_id path string true "Channel Identity ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/channel-managers/{channel_identity_id} [delete].
 func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -119,10 +123,10 @@ func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 	}
 	channelIdentityID := strings.TrimSpace(c.Param("channel_identity_id"))
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("validate channel identity", err)
 	}
-	if err := h.service.ClearManagerOverride(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	if err := h.managerService.ClearManagerOverride(c.Request().Context(), botID, channelIdentityID); err != nil {
+		return apperror.Internal("clear channel manager", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -131,26 +135,26 @@ func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 // @Summary Issue an account link code
 // @Description Generate a one-time code to send as /link <code> in IM to bind that channel identity to your account
 // @Tags users
-// @Param payload body access.IssueLinkCodeRequest false "Link code options"
-// @Success 201 {object} access.LinkCode
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Param payload body identitylink.IssueLinkCodeRequest false "Link code options"
+// @Success 201 {object} identitylink.LinkCode
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/channel-links [post].
 func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
 	if err != nil {
 		return err
 	}
-	var req access.IssueLinkCodeRequest
+	var req identitylink.IssueLinkCodeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind link code", err)
 	}
-	code, err := h.service.IssueLinkCode(c.Request().Context(), userID, strings.TrimSpace(req.ChannelType))
+	code, err := h.linkService.IssueLinkCode(c.Request().Context(), userID, strings.TrimSpace(req.ChannelType))
 	if err != nil {
-		if errors.Is(err, access.ErrInvalidInput) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if errors.Is(err, identitylink.ErrInvalidInput) {
+			return apperror.Invalid("issue link code", err)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("issue link code", err)
 	}
 	return c.JSON(http.StatusCreated, code)
 }
@@ -159,19 +163,19 @@ func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 // @Summary List connected channel identities
 // @Description List the IM channel identities bound to the current user's account
 // @Tags users
-// @Success 200 {object} access.ListBindingsResponse
-// @Failure 500 {object} ErrorResponse
+// @Success 200 {object} identitylink.ListBindingsResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/channel-identities [get].
 func (h *ChannelAccessHandler) ListBindings(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
 	if err != nil {
 		return err
 	}
-	items, err := h.service.ListUserBindings(c.Request().Context(), userID)
+	items, err := h.linkService.ListUserBindings(c.Request().Context(), userID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list channel bindings", err)
 	}
-	return c.JSON(http.StatusOK, access.ListBindingsResponse{Items: items})
+	return c.JSON(http.StatusOK, identitylink.ListBindingsResponse{Items: items})
 }
 
 // Unbind godoc
@@ -180,8 +184,8 @@ func (h *ChannelAccessHandler) ListBindings(c echo.Context) error {
 // @Tags users
 // @Param channel_identity_id path string true "Channel Identity ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/channel-identities/{channel_identity_id} [delete].
 func (h *ChannelAccessHandler) Unbind(c echo.Context) error {
 	userID, err := httpx.RequireChannelIdentityID(c)
@@ -190,10 +194,10 @@ func (h *ChannelAccessHandler) Unbind(c echo.Context) error {
 	}
 	channelIdentityID := strings.TrimSpace(c.Param("channel_identity_id"))
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("validate channel identity", err)
 	}
-	if err := h.service.Unbind(c.Request().Context(), userID, channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	if err := h.linkService.Unbind(c.Request().Context(), userID, channelIdentityID); err != nil {
+		return apperror.Internal("unbind channel identity", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -205,7 +209,7 @@ func (h *ChannelAccessHandler) requireManageAccess(c echo.Context) (string, stri
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return "", "", apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err

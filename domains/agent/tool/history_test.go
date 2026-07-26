@@ -9,6 +9,7 @@ import (
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
+	toolpersistence "github.com/memohai/memoh/domains/agent/tool/persistence"
 )
 
 type fakeHistorySessionLister struct {
@@ -28,12 +29,12 @@ type fakeHistoryMessageReader struct {
 }
 
 type fakeHistorySearcher struct {
-	filter  HistorySearchFilter
-	results []HistorySearchResult
+	filter  toolpersistence.HistorySearchFilter
+	results []toolpersistence.HistorySearchResult
 	err     error
 }
 
-func (f *fakeHistorySearcher) SearchHistory(_ context.Context, filter HistorySearchFilter) ([]HistorySearchResult, error) {
+func (f *fakeHistorySearcher) SearchHistory(_ context.Context, filter toolpersistence.HistorySearchFilter) ([]toolpersistence.HistorySearchResult, error) {
 	f.filter = filter
 	return f.results, f.err
 }
@@ -153,7 +154,7 @@ func TestHistoryProviderSearchMessagesPassesDomainFilterAndFormatsResults(t *tes
 
 	createdAt := time.Date(2026, 6, 14, 9, 30, 0, 0, time.UTC)
 	searcher := &fakeHistorySearcher{
-		results: []HistorySearchResult{{
+		results: []toolpersistence.HistorySearchResult{{
 			ID:        "message-1",
 			SessionID: "session-1",
 			ContactID: "contact-1",

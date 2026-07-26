@@ -7,14 +7,15 @@ import (
 	"testing"
 
 	mcpgw "github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 type testConnectionLister struct {
-	items []mcpgw.Connection
+	items []mcppersistence.Connection
 	err   error
 }
 
-func (l *testConnectionLister) ListActiveByBot(_ context.Context, _ string) ([]mcpgw.Connection, error) {
+func (l *testConnectionLister) ListActiveByBot(_ context.Context, _ string) ([]mcppersistence.Connection, error) {
 	if l.err != nil {
 		return nil, l.err
 	}
@@ -22,43 +23,43 @@ func (l *testConnectionLister) ListActiveByBot(_ context.Context, _ string) ([]m
 }
 
 type testGateway struct {
-	listHTTP  []mcpgw.ToolDescriptor
-	listSSE   []mcpgw.ToolDescriptor
-	listStdio []mcpgw.ToolDescriptor
+	listHTTP  []mcppersistence.ToolDescriptor
+	listSSE   []mcppersistence.ToolDescriptor
+	listStdio []mcppersistence.ToolDescriptor
 
 	lastCallType string
 }
 
-func (g *testGateway) ListHTTPConnectionTools(_ context.Context, _ mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+func (g *testGateway) ListHTTPConnectionTools(_ context.Context, _ mcppersistence.Connection) ([]mcppersistence.ToolDescriptor, error) {
 	return g.listHTTP, nil
 }
 
-func (g *testGateway) CallHTTPConnectionTool(_ context.Context, _ mcpgw.Connection, _ string, _ map[string]any) (map[string]any, error) {
+func (g *testGateway) CallHTTPConnectionTool(_ context.Context, _ mcppersistence.Connection, _ string, _ map[string]any) (map[string]any, error) {
 	g.lastCallType = "http"
 	return map[string]any{"result": map[string]any{"ok": true, "route": "http"}}, nil
 }
 
-func (g *testGateway) ListSSEConnectionTools(_ context.Context, _ mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+func (g *testGateway) ListSSEConnectionTools(_ context.Context, _ mcppersistence.Connection) ([]mcppersistence.ToolDescriptor, error) {
 	return g.listSSE, nil
 }
 
-func (g *testGateway) CallSSEConnectionTool(_ context.Context, _ mcpgw.Connection, _ string, _ map[string]any) (map[string]any, error) {
+func (g *testGateway) CallSSEConnectionTool(_ context.Context, _ mcppersistence.Connection, _ string, _ map[string]any) (map[string]any, error) {
 	g.lastCallType = "sse"
 	return map[string]any{"result": map[string]any{"ok": true, "route": "sse"}}, nil
 }
 
-func (g *testGateway) ListStdioConnectionTools(_ context.Context, _ string, _ mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+func (g *testGateway) ListStdioConnectionTools(_ context.Context, _ string, _ mcppersistence.Connection) ([]mcppersistence.ToolDescriptor, error) {
 	return g.listStdio, nil
 }
 
-func (g *testGateway) CallStdioConnectionTool(_ context.Context, _ string, _ mcpgw.Connection, _ string, _ map[string]any) (map[string]any, error) {
+func (g *testGateway) CallStdioConnectionTool(_ context.Context, _ string, _ mcppersistence.Connection, _ string, _ map[string]any) (map[string]any, error) {
 	g.lastCallType = "stdio"
 	return map[string]any{"result": map[string]any{"ok": true, "route": "stdio"}}, nil
 }
 
 func TestSourceListToolsIncludesSSETools(t *testing.T) {
 	gateway := &testGateway{
-		listSSE: []mcpgw.ToolDescriptor{
+		listSSE: []mcppersistence.ToolDescriptor{
 			{
 				Name:        "search",
 				Description: "search remote data",
@@ -67,7 +68,7 @@ func TestSourceListToolsIncludesSSETools(t *testing.T) {
 		},
 	}
 	lister := &testConnectionLister{
-		items: []mcpgw.Connection{
+		items: []mcppersistence.Connection{
 			{
 				ID:     "conn-1",
 				Name:   "Remote SSE",
@@ -93,7 +94,7 @@ func TestSourceListToolsIncludesSSETools(t *testing.T) {
 
 func TestSourceCallToolRoutesToSSEConnection(t *testing.T) {
 	gateway := &testGateway{
-		listSSE: []mcpgw.ToolDescriptor{
+		listSSE: []mcppersistence.ToolDescriptor{
 			{
 				Name:        "search",
 				Description: "search remote data",
@@ -102,7 +103,7 @@ func TestSourceCallToolRoutesToSSEConnection(t *testing.T) {
 		},
 	}
 	lister := &testConnectionLister{
-		items: []mcpgw.Connection{
+		items: []mcppersistence.Connection{
 			{
 				ID:     "conn-1",
 				Name:   "Remote SSE",
@@ -128,10 +129,10 @@ func TestSourceCallToolRoutesToSSEConnection(t *testing.T) {
 
 func TestSourceCallToolRechecksRuntimeGuardBeforeFederatedEffect(t *testing.T) {
 	guardErr := errors.New("runtime ownership lost")
-	gateway := &testGateway{listSSE: []mcpgw.ToolDescriptor{{
+	gateway := &testGateway{listSSE: []mcppersistence.ToolDescriptor{{
 		Name: "search", InputSchema: map[string]any{"type": "object"},
 	}}}
-	lister := &testConnectionLister{items: []mcpgw.Connection{{
+	lister := &testConnectionLister{items: []mcppersistence.Connection{{
 		ID: "conn-guard", Name: "Remote SSE", Type: "sse", Active: true,
 		Config: map[string]any{"url": "http://example.com/sse"},
 	}}}
@@ -153,7 +154,7 @@ func TestSourceCallToolRechecksRuntimeGuardBeforeFederatedEffect(t *testing.T) {
 
 func TestSourceRenamesReservedToolAliases(t *testing.T) {
 	gateway := &testGateway{
-		listSSE: []mcpgw.ToolDescriptor{
+		listSSE: []mcppersistence.ToolDescriptor{
 			{
 				Name:        "observe",
 				Description: "observe browser state",
@@ -162,7 +163,7 @@ func TestSourceRenamesReservedToolAliases(t *testing.T) {
 		},
 	}
 	lister := &testConnectionLister{
-		items: []mcpgw.Connection{
+		items: []mcppersistence.Connection{
 			{
 				ID:     "conn-1",
 				Name:   "browser",

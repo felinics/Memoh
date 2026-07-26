@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	settingpersistence "github.com/memohai/memoh/domains/api/bot/setting/persistence"
 	"github.com/memohai/memoh/domains/runtime/container"
 )
 
@@ -51,7 +51,7 @@ type BotProfileStore interface {
 }
 
 type BotRuntimeSettings struct {
-	ToolApprovalConfig setting.ToolApprovalConfig
+	ToolApprovalConfig settingpersistence.ToolApprovalConfig
 	DisplayEnabled     bool
 }
 

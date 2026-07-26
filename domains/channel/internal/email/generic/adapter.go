@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,10 +13,13 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 	mail "github.com/wneessen/go-mail"
 
+	emailcatalog "github.com/memohai/memoh/domains/channel/internal/email/catalog"
 	emailport "github.com/memohai/memoh/domains/channel/internal/port/email"
 )
 
-const ProviderName emailport.ProviderName = "generic"
+const ProviderName emailport.ProviderName = emailcatalog.ProviderGeneric
+
+var providerDescriptor = emailcatalog.Generic()
 
 type Adapter struct {
 	logger *slog.Logger
@@ -27,50 +29,12 @@ func New(log *slog.Logger) *Adapter {
 	return &Adapter{logger: log.With(slog.String("adapter", "generic"))}
 }
 
-func (*Adapter) Type() emailport.ProviderName { return ProviderName }
+func (*Adapter) Type() emailport.ProviderName { return providerDescriptor.Type() }
 
-func (*Adapter) Meta() emailport.ProviderMeta {
-	return emailport.ProviderMeta{
-		Provider:    string(ProviderName),
-		DisplayName: "Generic (SMTP/IMAP)",
-		ConfigSchema: emailport.ConfigSchema{
-			Fields: []emailport.FieldSchema{
-				{Key: "username", Type: "string", Title: "Username", Required: true, Example: "user@gmail.com", Order: 1},
-				{Key: "password", Type: "secret", Title: "Password", Required: true, Order: 2},
-				{Key: "smtp_host", Type: "string", Title: "SMTP Host", Required: true, Example: "smtp.gmail.com", Order: 3},
-				{Key: "smtp_port", Type: "number", Title: "SMTP Port", Required: true, Example: 587, Order: 4},
-				{Key: "smtp_security", Type: "enum", Title: "SMTP Security", Enum: []string{"tls", "starttls", "none"}, Example: "starttls", Order: 5},
-				{Key: "imap_host", Type: "string", Title: "IMAP Host", Required: true, Example: "imap.gmail.com", Order: 6},
-				{Key: "imap_port", Type: "number", Title: "IMAP Port", Required: true, Example: 993, Order: 7},
-				{Key: "imap_security", Type: "enum", Title: "IMAP Security", Enum: []string{"tls", "starttls", "none"}, Example: "tls", Order: 8},
-				{Key: "poll_interval_seconds", Type: "number", Title: "Poll Interval (seconds)", Description: "Fallback poll interval when IDLE is not supported", Example: 300, Order: 9},
-			},
-		},
-	}
-}
+func (*Adapter) Meta() emailport.ProviderMeta { return providerDescriptor.Meta() }
 
 func (*Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
-	for _, key := range []string{"smtp_host", "imap_host", "username", "password"} {
-		if v, _ := raw[key].(string); strings.TrimSpace(v) == "" {
-			return nil, fmt.Errorf("%s is required", key)
-		}
-	}
-	if _, ok := raw["smtp_port"]; !ok {
-		raw["smtp_port"] = float64(587)
-	}
-	if _, ok := raw["imap_port"]; !ok {
-		raw["imap_port"] = float64(993)
-	}
-	if _, ok := raw["smtp_security"]; !ok {
-		raw["smtp_security"] = "starttls"
-	}
-	if _, ok := raw["imap_security"]; !ok {
-		raw["imap_security"] = "tls"
-	}
-	if _, ok := raw["poll_interval_seconds"]; !ok {
-		raw["poll_interval_seconds"] = float64(300)
-	}
-	return raw, nil
+	return providerDescriptor.NormalizeConfig(raw)
 }
 
 // ---- Sender ----
@@ -147,8 +111,12 @@ func (a *Adapter) StartReceiving(ctx context.Context, config map[string]any, han
 		providerID:   providerID,
 		handler:      handler,
 		cancel:       cancel,
+		done:         make(chan struct{}),
 	}
-	go conn.run(rctx)
+	go func() {
+		defer close(conn.done)
+		conn.run(rctx)
+	}()
 	return conn, nil
 }
 
@@ -163,13 +131,19 @@ type imapConn struct {
 	providerID   string
 	handler      emailport.InboundHandler
 	cancel       context.CancelFunc
+	done         chan struct{}
 	once         sync.Once
 	lastUID      imap.UID
 }
 
-func (c *imapConn) Stop(_ context.Context) error {
+func (c *imapConn) Stop(ctx context.Context) error {
 	c.once.Do(func() { c.cancel() })
-	return nil
+	select {
+	case <-c.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *imapConn) run(ctx context.Context) {

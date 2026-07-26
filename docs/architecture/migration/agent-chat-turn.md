@@ -174,7 +174,7 @@ postgres adapters
 | `hooks`, `skills`, `plugins` | Workspace bridge、Config、DB/SQLC、彼此 concrete service | RuntimeFileClient、PluginLister、SkillInstaller、MCPManager和各自 Store ports |
 | `schedule`, `heartbeat` | Auth/Boot、DB/SQLC | Triggerer、SessionCreator、Store、RuntimePolicy snapshot；Auth/Boot concrete import删除 |
 
-迁移期每删除一条 broad import就收紧 `internal/arch` exemption；不允许先引入新的
+迁移期每删除一条 broad import 即视为该项收敛；不允许先引入新的
 `domains/agent/internal/common` 来隐藏同样的 fan-out。
 
 ## 4. Package 与生产文件映射
@@ -716,7 +716,7 @@ exported helper。具体规则：
 
 ```bash
 go list ./...
-go test ./domains/agent/... ./internal/arch
+go test ./domains/agent/...
 go test ./domains/agent/internal/postgres/...   # 需要测试数据库的 suite按现有 env gate
 go build ./cmd/agent
 go build -tags split ./cmd/agent

@@ -45,6 +45,8 @@ type ManagerStore interface {
 	ConfigResolver
 }
 
+var errManagerStopped = errors.New("channel manager is stopped")
+
 // ConnectionStatus describes runtime status for one configured channel connection.
 type ConnectionStatus struct {
 	ConfigID    string      `json:"config_id"`
@@ -72,7 +74,14 @@ type Manager struct {
 	inboundOnce    sync.Once
 	inboundCtx     context.Context
 	inboundCancel  context.CancelFunc
+	inboundDone    <-chan struct{}
+	refreshOnce    sync.Once
+	runCtx         context.Context
+	refreshCancel  context.CancelFunc
+	refreshDone    <-chan struct{}
+	lifecycleMu    sync.Mutex
 	mu             sync.Mutex
+	stopped        bool
 	refreshMu      sync.Mutex
 	connections    map[string]*connectionEntry
 	connectionMeta map[string]ConnectionStatus
@@ -155,24 +164,35 @@ func (m *Manager) SetAttachmentStore(store OutboundAttachmentStore) {
 
 // RegisterAdapter adds an adapter to the registry and logs the registration.
 func (m *Manager) RegisterAdapter(adapter Adapter) {
+	m.registerAdapter(adapter)
+}
+
+func (m *Manager) registerAdapter(adapter Adapter) bool {
 	if adapter == nil {
-		return
+		return false
 	}
-	if err := m.registry.Register(adapter); err != nil {
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return false
+	}
+	err := m.registry.Register(adapter)
+	m.mu.Unlock()
+	if err != nil {
 		if m.logger != nil {
 			m.logger.Warn("adapter registration failed", slog.String("channel", adapter.Type().String()), slog.Any("error", err))
 		}
-		return
+		return false
 	}
 	if m.logger != nil {
 		m.logger.Info("adapter registered", slog.String("channel", adapter.Type().String()))
 	}
+	return true
 }
 
 // AddAdapter registers an adapter and triggers an immediate refresh for hot-plug support.
 func (m *Manager) AddAdapter(ctx context.Context, adapter Adapter) {
-	m.RegisterAdapter(adapter)
-	if ctx != nil {
+	if m.registerAdapter(adapter) && ctx != nil {
 		m.refresh(ctx)
 	}
 }
@@ -199,38 +219,56 @@ func (m *Manager) RemoveAdapter(ctx context.Context, channelType ChannelType) {
 // Prefer EnsureConnection / RemoveConnection for targeted changes after API operations.
 // Refresh is mainly used at startup and as a periodic safety net.
 func (m *Manager) Refresh(ctx context.Context) {
-	if ctx != nil {
+	if ctx != nil && !m.isStopped() {
 		m.refresh(ctx)
 	}
 }
 
 // Start begins the periodic config refresh loop and inbound worker pool.
 func (m *Manager) Start(ctx context.Context) {
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return
+	}
+	m.startInboundWorkersLocked(ctx)
+	m.refreshOnce.Do(func() {
+		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		done := make(chan struct{})
+		m.lifecycleMu.Lock()
+		m.runCtx = runCtx
+		m.refreshCancel = cancel
+		m.refreshDone = done
+		m.lifecycleMu.Unlock()
+		go func() {
+			defer close(done)
+			m.refresh(runCtx)
+			ticker := time.NewTicker(m.refreshInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					if m.logger != nil {
+						m.logger.InfoContext(runCtx, "manager stop")
+					}
+					return
+				case <-ticker.C:
+					m.refresh(runCtx)
+				}
+			}
+		}()
+	})
+	m.mu.Unlock()
 	if m.logger != nil {
 		m.logger.InfoContext(ctx, "manager start")
 	}
-	m.startInboundWorkers(ctx)
-	go func() {
-		m.refresh(ctx)
-		ticker := time.NewTicker(m.refreshInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				if m.logger != nil {
-					m.logger.InfoContext(ctx, "manager stop")
-				}
-				m.stopAll(ctx)
-				return
-			case <-ticker.C:
-				m.refresh(ctx)
-			}
-		}
-	}()
 }
 
 // Send delivers an outbound message to the specified channel, resolving target and config automatically.
 func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelType, req SendRequest) error {
+	if m.isStopped() {
+		return errManagerStopped
+	}
 	if m.service == nil {
 		return errors.New("channel manager not configured")
 	}
@@ -306,6 +344,9 @@ func (m *Manager) resolveOutboundTarget(ctx context.Context, channelType Channel
 
 // React adds or removes an emoji reaction on a channel message.
 func (m *Manager) React(ctx context.Context, botID string, channelType ChannelType, req ReactRequest) error {
+	if m.isStopped() {
+		return errManagerStopped
+	}
 	if m.service == nil {
 		return errors.New("channel manager not configured")
 	}
@@ -348,11 +389,53 @@ func (m *Manager) React(ctx context.Context, botID string, channelType ChannelTy
 
 // Shutdown cancels the inbound worker pool and stops all active connections.
 func (m *Manager) Shutdown(ctx context.Context) error {
-	if m.inboundCancel != nil {
-		m.inboundCancel()
+	m.mu.Lock()
+	m.stopped = true
+	m.mu.Unlock()
+	m.lifecycleMu.Lock()
+	refreshCancel := m.refreshCancel
+	refreshDone := m.refreshDone
+	inboundCancel := m.inboundCancel
+	inboundDone := m.inboundDone
+	m.lifecycleMu.Unlock()
+	if refreshCancel != nil {
+		refreshCancel()
 	}
-	m.stopAll(ctx)
-	return nil
+	if inboundCancel != nil {
+		inboundCancel()
+	}
+	var errs []error
+	// Reconciliation can create connections, so join it before taking the
+	// final connection snapshot. Connections are inbound producers and must be
+	// stopped before waiting for the workers that consume their messages.
+	if err := waitForManagerTask(ctx, refreshDone); err != nil {
+		errs = append(errs, fmt.Errorf("wait for channel refresh: %w", err))
+	}
+	if err := m.stopAll(ctx); err != nil {
+		errs = append(errs, err)
+	}
+	if err := waitForManagerTask(ctx, inboundDone); err != nil {
+		errs = append(errs, fmt.Errorf("wait for channel inbound workers: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) isStopped() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.stopped
+}
+
+func waitForManagerTask(ctx context.Context, done <-chan struct{}) error {
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // ConnectionStatusesByBot returns observed channel connection statuses for a bot.

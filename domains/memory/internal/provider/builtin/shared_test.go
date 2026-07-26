@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 func TestRuntimeHash(t *testing.T) {
@@ -102,7 +102,7 @@ func TestRuntimeText_SingleMessage(t *testing.T) {
 
 func TestRuntimeText_MultipleMessages(t *testing.T) {
 	t.Parallel()
-	msgs := []memreg.Message{
+	msgs := []memprovider.Message{
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "hello"},
 	}

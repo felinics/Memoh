@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	runtimeclient "github.com/memohai/memoh/domains/runtime/client"
-	clientpostgres "github.com/memohai/memoh/domains/runtime/internal/client/postgres"
+	clientpostgres "github.com/memohai/memoh/domains/runtime/internal/postgres/client"
 )
 
 // ClientDeps are the explicit public inputs required to assemble the reverse

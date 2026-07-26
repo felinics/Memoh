@@ -16,10 +16,11 @@ import (
 	"github.com/labstack/echo/v4"
 
 	acpclient "github.com/memohai/memoh/domains/agent/acp/client"
-	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 	providers "github.com/memohai/memoh/domains/model/provider"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const (
@@ -476,8 +477,9 @@ func TestACPCodexDeviceHTTPRequiresSessionID(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s status = %d, body = %s", endpoint, rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), "session_id is required") {
-			t.Fatalf("%s body = %s, want session_id validation", endpoint, rec.Body.String())
+		body := rec.Body.String()
+		if !strings.Contains(body, `"/session_id"`) || !strings.Contains(body, `"required"`) {
+			t.Fatalf("%s body = %s, want session_id field required", endpoint, body)
 		}
 	}
 }
@@ -702,6 +704,19 @@ func newACPCodexDeviceHTTPTestEnv(t *testing.T, provider *acpCodexDeviceIntegrat
 		deviceSessions: map[string]*acpCodexDeviceAuthSession{},
 	}
 	e := echo.New()
+	e.HTTPErrorHandler = func(err error, c echo.Context) {
+		if c.Response().Committed {
+			return
+		}
+		if _, ok := apperror.As(err); ok {
+			problem := apperror.ProblemOf(err, "")
+			c.Response().Header().Set(echo.HeaderContentType, "application/problem+json")
+			c.Response().WriteHeader(problem.Status)
+			_ = json.NewEncoder(c.Response()).Encode(problem)
+			return
+		}
+		e.DefaultHTTPErrorHandler(err, c)
+	}
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			c.Set("user", &jwt.Token{
@@ -752,7 +767,7 @@ func decodeACPCodexDeviceStatus(t *testing.T, rec *httptest.ResponseRecorder) AC
 }
 
 type acpCodexDeviceIntegrationQueries struct {
-	bot bot.Record
+	bot botpersistence.Record
 }
 
 type acpCodexDevicePollRequest struct {

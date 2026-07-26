@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	. "github.com/memohai/memoh/domains/agent/chat/message"
-	dbpkg "github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db"
 )
 
 func TestPostgresReplaceTurnRetryHidesSupersededAssistant(t *testing.T) {
@@ -275,7 +275,7 @@ func beginPostgresMessageTestTx(t *testing.T, ctx context.Context) pgx.Tx {
 	if dsn == "" {
 		t.Skip("skip postgres integration test: TEST_POSTGRES_DSN is not set")
 	}
-	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
+	pool, err := db.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect to configured postgres integration database: %v", err)
 	}
@@ -340,7 +340,7 @@ func assertPostgresVisibleMessageIDs(t *testing.T, ctx context.Context, svc *DBS
 
 func assertPostgresMessageVisibility(t *testing.T, ctx context.Context, tx pgx.Tx, messageID string, wantVisible bool, wantSuperseded bool) {
 	t.Helper()
-	pgMessageID, err := dbpkg.ParseUUID(messageID)
+	pgMessageID, err := db.ParseUUID(messageID)
 	if err != nil {
 		t.Fatalf("parse message id: %v", err)
 	}

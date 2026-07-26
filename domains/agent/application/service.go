@@ -18,12 +18,15 @@ import (
 	"sync"
 	"time"
 
+	applicationpersistence "github.com/memohai/memoh/domains/agent/application/persistence"
+
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/chat/compaction"
 	"github.com/memohai/memoh/domains/agent/chat/context/fragment"
 	"github.com/memohai/memoh/domains/agent/chat/context/history"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	messageevent "github.com/memohai/memoh/domains/agent/chat/event"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	sessionpkg "github.com/memohai/memoh/domains/agent/chat/thread"
@@ -33,9 +36,9 @@ import (
 	"github.com/memohai/memoh/domains/agent/engine"
 	"github.com/memohai/memoh/domains/agent/engine/background"
 	"github.com/memohai/memoh/domains/agent/extension/hooks"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
-	"github.com/memohai/memoh/domains/api/setting"
-	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
+	"github.com/memohai/memoh/domains/api/bot/setting"
+	memregistry "github.com/memohai/memoh/domains/memory/registry"
 	modeldomain "github.com/memohai/memoh/domains/model"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
 	modelexecution "github.com/memohai/memoh/domains/model/execution"
@@ -98,10 +101,10 @@ type Service struct {
 	bots                  BotReader
 	accounts              AccountReader
 	channelIdentities     ChannelIdentityReader
-	latestSessionModels   LatestSessionModelReader
+	latestSessionModels   applicationpersistence.LatestSessionModelReader
 	compactionArtifacts   compaction.ArtifactStore
-	compactionMessageRefs CompactionMessageRefReader
-	memoryRegistry        *memprovider.Registry
+	compactionMessageRefs applicationpersistence.CompactionMessageRefReader
+	memoryRegistry        *memregistry.Registry
 	messageService        messagepkg.Service
 	settingsService       SettingsReader
 	sessionService        SessionService
@@ -120,7 +123,7 @@ type Service struct {
 	userInput             userInputService
 	hookService           *hooks.Service
 	memoryContextMu       sync.Mutex
-	memoryContextCache    *memprovider.MemoryContextCache
+	memoryContextCache    *memregistry.MemoryContextCache
 	acpPromptMu           sync.Mutex
 	acpPromptHubs         map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the application resume after a user input
@@ -149,9 +152,9 @@ func NewService(
 	bots BotReader,
 	accounts AccountReader,
 	channelIdentities ChannelIdentityReader,
-	latestSessionModels LatestSessionModelReader,
+	latestSessionModels applicationpersistence.LatestSessionModelReader,
 	compactionArtifacts compaction.ArtifactStore,
-	compactionMessageRefs CompactionMessageRefReader,
+	compactionMessageRefs applicationpersistence.CompactionMessageRefReader,
 	messageService messagepkg.Service,
 	settingsService SettingsReader,
 	a *engine.Agent,
@@ -207,7 +210,7 @@ func NewService(
 }
 
 // SetMemoryRegistry sets the provider registry for memory operations.
-func (s *Service) SetMemoryRegistry(registry *memprovider.Registry) {
+func (s *Service) SetMemoryRegistry(registry *memregistry.Registry) {
 	s.memoryRegistry = registry
 }
 
@@ -504,7 +507,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	forkMessages := nonNilModelMessages(messages)
 	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
-	runCfg.Messages = modelMessagesToSDKMessages(forkMessages)
+	runCfg.Messages = convert.ModelMessagesToSDKMessages(forkMessages)
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
@@ -613,7 +616,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 		return ChatResponse{}, err
 	}
 
-	outputMessages := sdkMessagesToModelMessages(result.Messages)
+	outputMessages := convert.SDKMessagesToModelMessages(result.Messages)
 	storeReq := req
 	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
 	if err := s.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{

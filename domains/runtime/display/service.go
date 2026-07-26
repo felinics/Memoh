@@ -17,6 +17,7 @@ var (
 	ErrDisplayUnavailable = errors.New("display server not reachable")
 	ErrEncoderUnavailable = errors.New("gstreamer unavailable")
 	ErrCodecUnsupported   = errors.New("no compatible video codec offered")
+	ErrServiceStopped     = errors.New("display service stopped")
 )
 
 // Workspace is the consumer port display needs from the workspace manager.

@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -11,10 +10,11 @@ import (
 
 	"github.com/memohai/memoh/domains/agent/chat/compaction"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type CompactionHandler struct {
@@ -62,8 +62,8 @@ func (h *CompactionHandler) Register(e *echo.Echo) {
 // @Param limit query int false "Limit" default(50)
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} compaction.ListLogsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/compaction/logs [get].
 func (h *CompactionHandler) ListLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -72,7 +72,7 @@ func (h *CompactionHandler) ListLogs(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bot.PermissionChat); err != nil {
 		return err
@@ -81,7 +81,7 @@ func (h *CompactionHandler) ListLogs(c echo.Context) error {
 	limit, offset := httpx.ParseOffsetLimit(c)
 	items, total, err := h.service.ListLogs(c.Request().Context(), botID, limit, offset)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list compaction logs", err)
 	}
 	return c.JSON(http.StatusOK, compaction.ListLogsResponse{Items: items, TotalCount: total})
 }
@@ -92,8 +92,8 @@ func (h *CompactionHandler) ListLogs(c echo.Context) error {
 // @Tags compaction
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/compaction/logs [delete].
 func (h *CompactionHandler) DeleteLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -102,13 +102,13 @@ func (h *CompactionHandler) DeleteLogs(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	if err := h.service.DeleteLogs(c.Request().Context(), botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("delete compaction logs", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -127,8 +127,8 @@ type TriggerCompactResponse struct {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} TriggerCompactResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/compact [post].
 func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -137,24 +137,27 @@ func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bot.PermissionChat); err != nil {
 		return err
 	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+		return apperror.Required("session_id")
 	}
 
 	cfg, err := h.buildTriggerConfig(c.Request().Context(), botID, sessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if _, ok := apperror.As(err); ok {
+			return err
+		}
+		return apperror.Invalid("build compaction config", err)
 	}
 
 	res, err := h.service.RunCompactionSync(c.Request().Context(), cfg)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("run compaction", err)
 	}
 	return c.JSON(http.StatusOK, TriggerCompactResponse{
 		Status:       res.Status,
@@ -173,7 +176,7 @@ func (h *CompactionHandler) buildTriggerConfig(ctx context.Context, botID, sessi
 		modelID = botSettings.ChatModelID
 	}
 	if modelID == "" {
-		return compaction.TriggerConfig{}, echo.NewHTTPError(http.StatusBadRequest, "no compaction or chat model configured")
+		return compaction.TriggerConfig{}, apperror.Invalid("resolve compaction model", nil)
 	}
 
 	compactModel, err := h.modelsService.GetByID(ctx, modelID)
@@ -181,7 +184,7 @@ func (h *CompactionHandler) buildTriggerConfig(ctx context.Context, botID, sessi
 		return compaction.TriggerConfig{}, err
 	}
 	if !compactModel.Enable {
-		return compaction.TriggerConfig{}, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("compaction model %s is disabled", compactModel.ModelID))
+		return compaction.TriggerConfig{}, apperror.Field("compaction_model_id", apperror.FieldUnsupported)
 	}
 	compactProvider, err := modelcatalog.FetchProviderByID(ctx, h.providerResolver, compactModel.ProviderID)
 	if err != nil {
@@ -198,19 +201,14 @@ func (h *CompactionHandler) buildTriggerConfig(ctx context.Context, botID, sessi
 		BaseURL:          compactProvider.BaseURL,
 		Ratio:            100,
 		TotalInputTokens: 1,
-		PromptCacheTTL:   compactProvider.PromptCacheTTL,
-		Manual:           true,
-	}
-	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
-		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
 	}
 	return cfg, nil
 }
 
-func (*CompactionHandler) requireUserID(c echo.Context) (string, error) {
+func (h *CompactionHandler) requireUserID(c echo.Context) (string, error) {
 	return httpx.RequireChannelIdentityID(c)
 }
 
 func (h *CompactionHandler) authorizeBotAccess(ctx context.Context, userID, botID string) (bot.Bot, error) {
-	return httpx.AuthorizeBotAccess(ctx, h.botService, h.accountService, userID, botID)
+	return httpx.AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, userID, botID, bot.PermissionManage)
 }

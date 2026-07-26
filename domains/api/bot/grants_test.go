@@ -5,14 +5,16 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
 )
 
 type grantStoreFake struct {
-	GrantStore
-	list func(context.Context, string) ([]GrantRecord, error)
+	botpersistence.GrantStore
+	list func(context.Context, string) ([]botpersistence.GrantRecord, error)
 }
 
-func (f grantStoreFake) ListGrants(ctx context.Context, botID string) ([]GrantRecord, error) {
+func (f grantStoreFake) ListGrants(ctx context.Context, botID string) ([]botpersistence.GrantRecord, error) {
 	return f.list(ctx, botID)
 }
 
@@ -54,8 +56,8 @@ func TestNormalizePermissionsRejectsInvalidPermission(t *testing.T) {
 func TestListUserGrantsEnrichesUsersThroughReader(t *testing.T) {
 	const granteeID = "00000000-0000-0000-0000-000000000003"
 
-	grants := grantStoreFake{list: func(context.Context, string) ([]GrantRecord, error) {
-		return []GrantRecord{{
+	grants := grantStoreFake{list: func(context.Context, string) ([]botpersistence.GrantRecord, error) {
+		return []botpersistence.GrantRecord{{
 			ID:          "grant-1",
 			BotID:       testBotID,
 			SubjectType: GrantSubjectUser,
@@ -63,14 +65,14 @@ func TestListUserGrantsEnrichesUsersThroughReader(t *testing.T) {
 			Permissions: []byte(`["chat"]`),
 		}}, nil
 	}}
-	users := userReaderFake{get: func(_ context.Context, userID string) (UserRecord, error) {
+	users := userReaderFake{get: func(_ context.Context, userID string) (botpersistence.UserRecord, error) {
 		switch userID {
 		case testOwnerID:
-			return UserRecord{ID: userID, Username: "owner", DisplayName: "Owner"}, nil
+			return botpersistence.UserRecord{ID: userID, Username: "owner", DisplayName: "Owner"}, nil
 		case granteeID:
-			return UserRecord{ID: userID, Username: "member", DisplayName: "Member", AvatarURL: "avatar"}, nil
+			return botpersistence.UserRecord{ID: userID, Username: "member", DisplayName: "Member", AvatarURL: "avatar"}, nil
 		default:
-			return UserRecord{}, errors.New("unknown user")
+			return botpersistence.UserRecord{}, errors.New("unknown user")
 		}
 	}}
 	service := NewService(nil, &botStoreFake{}, grants, users, nil)

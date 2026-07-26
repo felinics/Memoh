@@ -9,6 +9,7 @@ import (
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
 	memport "github.com/memohai/memoh/domains/memory/internal/port"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 	"github.com/memohai/memoh/domains/memory/registry"
 )
 
@@ -80,46 +81,48 @@ func (p *bootstrapProvider) Close() error {
 	return nil
 }
 
-func (*bootstrapProvider) OnBeforeChat(context.Context, registry.BeforeChatRequest) (*registry.BeforeChatResult, error) {
+func (*bootstrapProvider) OnBeforeChat(context.Context, memprovider.BeforeChatRequest) (*memprovider.BeforeChatResult, error) {
 	return nil, nil
 }
 
-func (*bootstrapProvider) OnAfterChat(context.Context, registry.AfterChatRequest) error { return nil }
-
-func (*bootstrapProvider) Add(context.Context, registry.AddRequest) (registry.SearchResponse, error) {
-	return registry.SearchResponse{}, nil
+func (*bootstrapProvider) OnAfterChat(context.Context, memprovider.AfterChatRequest) error {
+	return nil
 }
 
-func (*bootstrapProvider) Search(context.Context, registry.SearchRequest) (registry.SearchResponse, error) {
-	return registry.SearchResponse{}, nil
+func (*bootstrapProvider) Add(context.Context, memprovider.AddRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, nil
 }
 
-func (*bootstrapProvider) GetAll(context.Context, registry.GetAllRequest) (registry.SearchResponse, error) {
-	return registry.SearchResponse{}, nil
+func (*bootstrapProvider) Search(context.Context, memprovider.SearchRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, nil
 }
 
-func (*bootstrapProvider) Update(context.Context, registry.UpdateRequest) (memorydomain.Item, error) {
+func (*bootstrapProvider) GetAll(context.Context, memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, nil
+}
+
+func (*bootstrapProvider) Update(context.Context, memprovider.UpdateRequest) (memorydomain.Item, error) {
 	return memorydomain.Item{}, nil
 }
 
-func (*bootstrapProvider) Delete(context.Context, string) (registry.DeleteResponse, error) {
-	return registry.DeleteResponse{}, nil
+func (*bootstrapProvider) Delete(context.Context, string) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, nil
 }
 
-func (*bootstrapProvider) DeleteBatch(context.Context, []string) (registry.DeleteResponse, error) {
-	return registry.DeleteResponse{}, nil
+func (*bootstrapProvider) DeleteBatch(context.Context, []string) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, nil
 }
 
-func (*bootstrapProvider) DeleteAll(context.Context, registry.DeleteAllRequest) (registry.DeleteResponse, error) {
-	return registry.DeleteResponse{}, nil
+func (*bootstrapProvider) DeleteAll(context.Context, memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, nil
 }
 
-func (*bootstrapProvider) Compact(context.Context, map[string]any, float64, int) (registry.CompactResult, error) {
-	return registry.CompactResult{}, nil
+func (*bootstrapProvider) Compact(context.Context, map[string]any, float64, int) (memprovider.CompactResult, error) {
+	return memprovider.CompactResult{}, nil
 }
 
-func (*bootstrapProvider) Usage(context.Context, map[string]any) (registry.UsageResponse, error) {
-	return registry.UsageResponse{}, nil
+func (*bootstrapProvider) Usage(context.Context, map[string]any) (memprovider.UsageResponse, error) {
+	return memprovider.UsageResponse{}, nil
 }
 
 func TestInstantiateAllLoadsConfiguredProvidersIntoRegistry(t *testing.T) {
@@ -127,7 +130,7 @@ func TestInstantiateAllLoadsConfiguredProvidersIntoRegistry(t *testing.T) {
 
 	providerID := "01020300-0000-0000-0000-000000000000"
 	reg := registry.NewRegistry(slog.Default())
-	reg.RegisterFactory(string(ProviderMem0), func(_ context.Context, _, _ string, _ map[string]any) (registry.Instance, error) {
+	reg.RegisterFactory(string(ProviderMem0), func(_ context.Context, _, _ string, _ map[string]any) (memprovider.Instance, error) {
 		return &bootstrapProvider{providerType: string(ProviderMem0)}, nil
 	})
 	service := NewService(slog.Default(), &providerBootstrapStore{
@@ -159,7 +162,7 @@ func TestServiceCRUDMaintainsProviderRegistryLifecycle(t *testing.T) {
 	store := &providerAdminStore{record: memport.ProviderRecord{ID: providerID, Provider: string(ProviderMem0)}}
 	reg := registry.NewRegistry(slog.Default())
 	var instances []*bootstrapProvider
-	reg.RegisterFactory(string(ProviderMem0), func(_ context.Context, _, _ string, cfg map[string]any) (registry.Instance, error) {
+	reg.RegisterFactory(string(ProviderMem0), func(_ context.Context, _, _ string, cfg map[string]any) (memprovider.Instance, error) {
 		provider := &bootstrapProvider{providerType: StringFromConfig(cfg, "version"), closeCalls: &atomic.Int32{}}
 		instances = append(instances, provider)
 		return provider, nil

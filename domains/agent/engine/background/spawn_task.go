@@ -71,6 +71,11 @@ type AgentTaskResult struct {
 // MarkAgentTaskRunning is called.
 func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, agentID, agentSessionID, message, description string, queued bool) (string, context.Context, error) {
 	status := TaskRunning
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return "", nil, ErrManagerStopped
+	}
 	var (
 		ctx    context.Context
 		cancel context.CancelFunc
@@ -78,10 +83,8 @@ func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, ag
 	if queued {
 		status = TaskQueued
 	} else {
-		ctx, cancel = detachedContextWithTimeout(parentCtx, SpawnTaskTimeout)
+		ctx, cancel = m.taskContextLocked(parentCtx, SpawnTaskTimeout)
 	}
-
-	m.mu.Lock()
 	taskID := m.newTaskIDLocked(botID)
 	task := &Task{
 		ID:             taskID,
@@ -98,9 +101,12 @@ func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, ag
 		changed:        make(chan struct{}),
 	}
 	m.tasks[taskID] = task
+	if !queued {
+		m.trackOwnerLocked(task)
+	}
 	m.mu.Unlock()
 
-	m.logger.InfoContext(ctx, "background agent task registered",
+	m.logger.InfoContext(parentCtx, "background agent task registered",
 		slog.String("task_id", taskID),
 		slog.String("bot_id", botID),
 		slog.String("agent_id", agentID),
@@ -118,29 +124,35 @@ func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, ag
 // and returns the cancelable run context. If the task was killed while queued,
 // ok is false and no run should start.
 func (m *Manager) MarkAgentTaskRunning(parentCtx context.Context, taskID string) (context.Context, bool, error) {
-	ctx, cancel := detachedContextWithTimeout(parentCtx, SpawnTaskTimeout)
 	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return nil, false, ErrManagerStopped
+	}
 	task := m.tasks[taskID]
-	m.mu.Unlock()
 	if task == nil || task.Kind != KindAgent {
-		cancel()
+		m.mu.Unlock()
 		return nil, false, fmt.Errorf("agent task %s not found", taskID)
 	}
 	task.mu.Lock()
 	if task.Status == TaskKilled {
 		task.mu.Unlock()
-		cancel()
+		m.mu.Unlock()
 		return nil, false, nil
 	}
 	if task.Status != TaskQueued {
+		status := task.Status
 		task.mu.Unlock()
-		cancel()
-		return nil, false, fmt.Errorf("agent task %s is not queued (status: %s)", taskID, task.Status)
+		m.mu.Unlock()
+		return nil, false, fmt.Errorf("agent task %s is not queued (status: %s)", taskID, status)
 	}
+	ctx, cancel := m.taskContextLocked(parentCtx, SpawnTaskTimeout)
 	task.Status = TaskRunning
 	task.cancel = cancel
 	task.signalChangedLocked()
+	m.trackOwnerLocked(task)
 	task.mu.Unlock()
+	m.mu.Unlock()
 
 	m.emitTaskEvent(task, TaskEventStarted, "", "")
 	return ctx, true, nil
@@ -155,6 +167,7 @@ func (m *Manager) CompleteAgentTask(taskID string, result AgentTaskResult) {
 	if task == nil || task.Kind != KindAgent {
 		return
 	}
+	defer m.finishOwner(task)
 	defer task.Cancel()
 
 	status := result.Status
@@ -202,6 +215,7 @@ func (m *Manager) CompleteSpawnTask(taskID string, branches []SpawnBranch) {
 	if task == nil || task.Kind != KindSpawn {
 		return
 	}
+	defer m.finishOwner(task)
 	defer task.Cancel() // release the safety-timeout context
 
 	branches = clampSpawnBranches(branches)
@@ -278,14 +292,16 @@ func (m *Manager) runningSpawnCountLocked(botID, sessionID string) int {
 // detached, cancelable context that subagent branches must derive from so
 // Kill can stop in-flight work.
 func (m *Manager) StartSpawnTask(parentCtx context.Context, botID, sessionID, description string) (string, context.Context, error) {
-	ctx, cancel := detachedContextWithTimeout(parentCtx, SpawnTaskTimeout)
-
 	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return "", nil, ErrManagerStopped
+	}
 	if m.runningSpawnCountLocked(botID, sessionID) >= MaxRunningSpawnTasks {
 		m.mu.Unlock()
-		cancel()
 		return "", nil, fmt.Errorf("spawn limit reached: max %d concurrently running background spawn tasks per session", MaxRunningSpawnTasks)
 	}
+	ctx, cancel := m.taskContextLocked(parentCtx, SpawnTaskTimeout)
 	taskID := m.newTaskIDLocked(botID)
 	task := &Task{
 		ID:          taskID,
@@ -299,6 +315,7 @@ func (m *Manager) StartSpawnTask(parentCtx context.Context, botID, sessionID, de
 		changed:     make(chan struct{}),
 	}
 	m.tasks[taskID] = task
+	m.trackOwnerLocked(task)
 	m.mu.Unlock()
 
 	m.logger.InfoContext(parentCtx, "background spawn task started",

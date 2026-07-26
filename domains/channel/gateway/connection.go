@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -14,9 +15,15 @@ type connectionEntry struct {
 }
 
 func (m *Manager) refresh(ctx context.Context) {
+	if m.isStopped() {
+		return
+	}
 	// Serialize refresh calls so concurrent callers wait instead of silently skipping.
 	m.refreshMu.Lock()
 	defer m.refreshMu.Unlock()
+	if m.isStopped() {
+		return
+	}
 
 	if m.service == nil {
 		return
@@ -38,11 +45,17 @@ func (m *Manager) refresh(ctx context.Context) {
 func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 	active := map[string]ChannelConfig{}
 	for _, cfg := range configs {
+		if m.isStopped() {
+			return
+		}
 		if cfg.ID == "" || cfg.Disabled {
 			continue
 		}
 		active[cfg.ID] = cfg
 		if err := m.ensureConnection(ctx, cfg); err != nil {
+			if errors.Is(err, errManagerStopped) {
+				return
+			}
 			m.markConnectionStatus(cfg, false, err)
 			if m.logger != nil {
 				m.logger.ErrorContext(ctx,
@@ -58,6 +71,9 @@ func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.stopped {
+		return
+	}
 	for id, entry := range m.connections {
 		if _, ok := active[id]; ok {
 			continue
@@ -71,21 +87,25 @@ func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 					slog.String("config_id", id),
 				)
 			}
-			if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) && m.logger != nil {
-				m.logger.WarnContext(ctx,
-					"adapter stop failed",
-					slog.String("bot_id", entry.config.BotID),
-					slog.String("channel", entry.config.ChannelType.String()),
-					slog.String("config_id", id),
-					slog.Any("error", err),
-				)
+			if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) {
+				m.setConnectionStatusLocked(entry.config, entry.connection.Running(), err)
+				if m.logger != nil {
+					m.logger.WarnContext(ctx,
+						"adapter stop failed",
+						slog.String("bot_id", entry.config.BotID),
+						slog.String("channel", entry.config.ChannelType.String()),
+						slog.String("config_id", id),
+						slog.Any("error", err),
+					)
+				}
+				continue
 			}
 		}
 		delete(m.connections, id)
 		delete(m.connectionMeta, id)
 	}
 	for id := range m.connectionMeta {
-		if _, ok := active[id]; !ok {
+		if _, ok := active[id]; !ok && m.connections[id] == nil {
 			delete(m.connectionMeta, id)
 		}
 	}
@@ -99,6 +119,10 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 	}
 
 	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return errManagerStopped
+	}
 	entry := m.connections[cfg.ID]
 
 	// Config unchanged — nothing to do.
@@ -128,6 +152,13 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 			)
 		}
 		if err := oldConn.Stop(ctx); err != nil {
+			m.mu.Lock()
+			if _, exists := m.connections[cfg.ID]; !exists {
+				m.connections[cfg.ID] = entry
+				running := entry != nil && entry.connection != nil && entry.connection.Running()
+				m.setConnectionStatusLocked(entry.config, running, err)
+			}
+			m.mu.Unlock()
 			if errors.Is(err, ErrStopNotSupported) {
 				if m.logger != nil {
 					m.logger.WarnContext(ctx,
@@ -137,17 +168,8 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 						slog.String("config_id", cfg.ID),
 					)
 				}
-				// Re-insert the entry since we can't restart it.
-				m.mu.Lock()
-				if _, exists := m.connections[cfg.ID]; !exists {
-					m.connections[cfg.ID] = entry
-					running := entry != nil && entry.connection != nil && entry.connection.Running()
-					m.setConnectionStatusLocked(entry.config, running, nil)
-				}
-				m.mu.Unlock()
 				return nil
 			}
-			m.markConnectionStatus(cfg, false, err)
 			return err
 		}
 	}
@@ -181,8 +203,9 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 	for i := len(m.middlewares) - 1; i >= 0; i-- {
 		handler = m.middlewares[i](handler)
 	}
-	// Decouple long-lived adapter connections from short-lived request contexts.
-	connectCtx := context.WithoutCancel(ctx)
+	// Long-lived adapter connections use the Manager's application context when
+	// it has started, while direct pre-start use remains detached from requests.
+	connectCtx := m.connectionContext(ctx)
 	conn, err := receiver.Connect(connectCtx, cfg, handler)
 	if err != nil {
 		m.markConnectionStatus(cfg, false, err)
@@ -193,11 +216,29 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 	// Final check: if another goroutine raced and inserted first, stop our new
 	// connection and keep the existing one.
 	if existing, ok := m.connections[cfg.ID]; ok && existing != nil {
+		stopped := m.stopped
 		running := existing.connection != nil && existing.connection.Running()
 		m.setConnectionStatusLocked(existing.config, running, nil)
 		m.mu.Unlock()
-		_ = conn.Stop(connectCtx)
+		stopErr := conn.Stop(connectCtx)
+		if stopped {
+			return errors.Join(errManagerStopped, stopErr)
+		}
 		return nil
+	}
+	if m.stopped {
+		m.mu.Unlock()
+		stopErr := conn.Stop(connectCtx)
+		if stopErr != nil && !errors.Is(stopErr, ErrStopNotSupported) {
+			entry := &connectionEntry{config: cfg, connection: conn}
+			m.mu.Lock()
+			if _, exists := m.connections[cfg.ID]; !exists {
+				m.connections[cfg.ID] = entry
+				m.setConnectionStatusLocked(cfg, conn.Running(), stopErr)
+			}
+			m.mu.Unlock()
+		}
+		return errors.Join(errManagerStopped, stopErr)
 	}
 	m.connections[cfg.ID] = &connectionEntry{
 		config:     cfg,
@@ -208,9 +249,22 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 	return nil
 }
 
+func (m *Manager) connectionContext(fallback context.Context) context.Context {
+	m.lifecycleMu.Lock()
+	runCtx := m.runCtx
+	m.lifecycleMu.Unlock()
+	if runCtx != nil {
+		return runCtx
+	}
+	return context.WithoutCancel(fallback)
+}
+
 // EnsureConnection starts, restarts, or stops the connection for the given config.
 // Disabled configs are stopped and removed; enabled configs are started or restarted.
 func (m *Manager) EnsureConnection(ctx context.Context, cfg ChannelConfig) error {
+	if m.isStopped() {
+		return errManagerStopped
+	}
 	if cfg.ID == "" {
 		return errors.New("config id is required")
 	}
@@ -293,32 +347,50 @@ func (m *Manager) removeConnection(ctx context.Context, configID string) error {
 	return nil
 }
 
-func (m *Manager) stopAll(ctx context.Context) {
+func (m *Manager) stopAll(ctx context.Context) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	for id, entry := range m.connections {
-		if entry != nil && entry.connection != nil {
-			if m.logger != nil {
-				m.logger.InfoContext(ctx,
-					"adapter stop",
-					slog.String("bot_id", entry.config.BotID),
-					slog.String("channel", entry.config.ChannelType.String()),
-					slog.String("config_id", id),
-				)
-			}
-			if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) && m.logger != nil {
-				m.logger.WarnContext(ctx,
-					"adapter stop failed",
-					slog.String("bot_id", entry.config.BotID),
-					slog.String("channel", entry.config.ChannelType.String()),
-					slog.String("config_id", id),
-					slog.Any("error", err),
-				)
-			}
+	connections := make([]*connectionEntry, 0, len(m.connections))
+	for _, entry := range m.connections {
+		if entry != nil {
+			connections = append(connections, entry)
 		}
-		delete(m.connections, id)
-		delete(m.connectionMeta, id)
 	}
+	m.mu.Unlock()
+
+	var errs []error
+	for _, entry := range connections {
+		if entry.connection == nil {
+			continue
+		}
+		if m.logger != nil {
+			m.logger.InfoContext(ctx,
+				"adapter stop",
+				slog.String("bot_id", entry.config.BotID),
+				slog.String("channel", entry.config.ChannelType.String()),
+				slog.String("config_id", entry.config.ID),
+			)
+		}
+		if err := m.stopConnection(ctx, entry); err != nil {
+			errs = append(errs, fmt.Errorf("stop channel connection %s: %w", entry.config.ID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) stopConnection(ctx context.Context, entry *connectionEntry) error {
+	if entry == nil || entry.connection == nil {
+		return nil
+	}
+	if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) {
+		return err
+	}
+	m.mu.Lock()
+	if current := m.connections[entry.config.ID]; current == entry {
+		delete(m.connections, entry.config.ID)
+		delete(m.connectionMeta, entry.config.ID)
+	}
+	m.mu.Unlock()
+	return nil
 }
 
 // Stop terminates the connection identified by the given config ID.
@@ -380,6 +452,9 @@ func (m *Manager) StopByBot(ctx context.Context, botID string) error {
 func (m *Manager) markConnectionStatus(cfg ChannelConfig, running bool, checkErr error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.stopped {
+		return
+	}
 	m.setConnectionStatusLocked(cfg, running, checkErr)
 }
 

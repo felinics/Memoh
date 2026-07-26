@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -39,7 +40,7 @@ func TestPrepareProcessEnvContainerClaudeWritesManagedSettings(t *testing.T) {
 		t.Fatalf("prepareProcessEnv() error = %v", err)
 	}
 	if cleanup != nil {
-		defer cleanup()
+		defer func() { _ = cleanup(t.Context()) }()
 	}
 	home := envValue(env, "HOME")
 	if home == "" {
@@ -69,7 +70,7 @@ func TestPrepareProcessEnvContainerCodexWritesNoClaudeSettings(t *testing.T) {
 		t.Fatalf("prepareProcessEnv() error = %v", err)
 	}
 	if cleanup != nil {
-		defer cleanup()
+		defer func() { _ = cleanup(t.Context()) }()
 	}
 	for _, write := range server.writes() {
 		if strings.HasSuffix(write.Path, "/.claude/settings.json") {
@@ -119,7 +120,9 @@ func TestPrepareProcessEnvContainerAPIKey(t *testing.T) {
 		t.Fatalf("prepare records = %#v, want no shell command for temporary HOME", records)
 	}
 
-	cleanup()
+	if err := cleanup(t.Context()); err != nil {
+		t.Fatalf("cleanup() error = %v", err)
+	}
 	records = server.records()
 	if len(records) != 0 {
 		t.Fatalf("cleanup records = %#v, want no cleanup for workspace HOME", records)
@@ -624,6 +627,82 @@ func TestStartBridgeProcessCanRunWithoutBridgeHardTimeout(t *testing.T) {
 	assertEnvHas(t, processRecord.Env, "TRACE_ID=trace-1")
 	if envHasKey(processRecord.Env, "CODEX_HOME") {
 		t.Fatalf("process env must not set CODEX_HOME: %v", processRecord.Env)
+	}
+}
+
+func TestBridgeProcessCloseContextWaitsForBothPumpsAndCanRetry(t *testing.T) {
+	stdinDone := make(chan struct{})
+	recvDone := make(chan struct{})
+	proc := &bridgeProcess{
+		stdinDone: stdinDone,
+		recvDone:  recvDone,
+	}
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := proc.CloseContext(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CloseContext() error = %v, want context.Canceled while stdin pump is running", err)
+	}
+
+	close(stdinDone)
+	cancelled, cancel = context.WithCancel(t.Context())
+	cancel()
+	if err := proc.CloseContext(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CloseContext() error = %v, want context.Canceled while recv pump is running", err)
+	}
+
+	close(recvDone)
+	if err := proc.CloseContext(t.Context()); err != nil {
+		t.Fatalf("CloseContext() retry error = %v", err)
+	}
+}
+
+func TestSessionCloseContextCanRetryProcessJoin(t *testing.T) {
+	stdinDone := make(chan struct{})
+	recvDone := make(chan struct{})
+	sess := &Session{proc: &bridgeProcess{stdinDone: stdinDone, recvDone: recvDone}}
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := sess.CloseContext(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CloseContext() error = %v, want context.Canceled", err)
+	}
+	close(stdinDone)
+	close(recvDone)
+	if err := sess.CloseContext(t.Context()); err != nil {
+		t.Fatalf("CloseContext() retry error = %v", err)
+	}
+}
+
+func TestBridgeProcessCloseContextRetriesCanceledCleanup(t *testing.T) {
+	stdinDone := make(chan struct{})
+	recvDone := make(chan struct{})
+	close(stdinDone)
+	close(recvDone)
+	cleanupCalls := 0
+	proc := &bridgeProcess{
+		stdinDone: stdinDone,
+		recvDone:  recvDone,
+		cleanup: func(context.Context) error {
+			cleanupCalls++
+			if cleanupCalls == 1 {
+				return context.Canceled
+			}
+			return nil
+		},
+	}
+
+	if err := proc.CloseContext(t.Context()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CloseContext() cleanup error = %v, want context.Canceled", err)
+	}
+	if err := proc.CloseContext(t.Context()); err != nil {
+		t.Fatalf("CloseContext() cleanup retry error = %v", err)
+	}
+	if err := proc.CloseContext(t.Context()); err != nil {
+		t.Fatalf("CloseContext() completed retry error = %v", err)
+	}
+	if cleanupCalls != 2 {
+		t.Fatalf("cleanup calls = %d, want 2", cleanupCalls)
 	}
 }
 

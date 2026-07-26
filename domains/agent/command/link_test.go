@@ -6,18 +6,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/domains/api/access"
+	identitylink "github.com/memohai/memoh/domains/api/identity/link"
+	accesspersistence "github.com/memohai/memoh/domains/api/identity/link/persistence"
 )
 
 // fakeLinkConsumer records ConsumeLinkCode calls and returns a configured result.
 type fakeLinkConsumer struct {
 	token             string
 	channelIdentityID string
-	binding           access.Binding
+	binding           accesspersistence.Binding
 	err               error
 }
 
-func (f *fakeLinkConsumer) ConsumeLinkCode(_ context.Context, token, channelIdentityID string) (access.Binding, error) {
+func (f *fakeLinkConsumer) ConsumeLinkCode(_ context.Context, token, channelIdentityID string) (accesspersistence.Binding, error) {
 	f.token = token
 	f.channelIdentityID = channelIdentityID
 	return f.binding, f.err
@@ -63,7 +64,7 @@ func TestLink_NoIdentity(t *testing.T) {
 
 func TestLink_Success(t *testing.T) {
 	consumer := &fakeLinkConsumer{
-		binding: access.Binding{UserID: "user-1", ChannelIdentityID: "ci-1"},
+		binding: accesspersistence.Binding{UserID: "user-1", ChannelIdentityID: "ci-1"},
 	}
 	h := newLinkTestHandler(consumer)
 	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
@@ -90,7 +91,7 @@ func TestLink_Success(t *testing.T) {
 }
 
 func TestLink_ExpiredCode(t *testing.T) {
-	consumer := &fakeLinkConsumer{err: access.ErrCodeExpired}
+	consumer := &fakeLinkConsumer{err: identitylink.ErrCodeExpired}
 	h := newLinkTestHandler(consumer)
 	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
 		BotID:             "bot-1",
@@ -107,7 +108,7 @@ func TestLink_ExpiredCode(t *testing.T) {
 }
 
 func TestLink_NotFoundCode(t *testing.T) {
-	consumer := &fakeLinkConsumer{err: access.ErrCodeNotFound}
+	consumer := &fakeLinkConsumer{err: identitylink.ErrCodeNotFound}
 	h := newLinkTestHandler(consumer)
 	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
 		BotID:             "bot-1",
@@ -124,7 +125,7 @@ func TestLink_NotFoundCode(t *testing.T) {
 }
 
 func TestLink_ConsumedCode(t *testing.T) {
-	consumer := &fakeLinkConsumer{err: access.ErrCodeConsumed}
+	consumer := &fakeLinkConsumer{err: identitylink.ErrCodeConsumed}
 	h := newLinkTestHandler(consumer)
 	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
 		BotID:             "bot-1",

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,10 +10,13 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/apperror"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcpgw "github.com/memohai/memoh/domains/agent/mcp"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 )
 
 func TestBuildToolCallPayloadFromRaw(t *testing.T) {
@@ -57,13 +59,8 @@ func TestHandleMCPToolsWithoutGateway(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected service unavailable error")
 	}
-	httpErr := &echo.HTTPError{}
-	ok := errors.As(err, &httpErr)
-	if !ok {
-		t.Fatalf("expected echo HTTP error, got %T", err)
-	}
-	if httpErr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("unexpected status code: %d", httpErr.Code)
+	if kind := apperror.KindOf(err); kind != apperror.KindUnavailable {
+		t.Fatalf("kind = %q, want unavailable", kind)
 	}
 }
 
@@ -71,9 +68,9 @@ type mcpToolsTestExecutor struct {
 	lastSession mcpgw.ToolSessionContext
 }
 
-func (e *mcpToolsTestExecutor) ListTools(_ context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+func (e *mcpToolsTestExecutor) ListTools(_ context.Context, session mcpgw.ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
 	e.lastSession = session
-	return []mcpgw.ToolDescriptor{
+	return []mcppersistence.ToolDescriptor{
 		{
 			Name:        "echo_tool",
 			Description: "echo input",
@@ -252,9 +249,8 @@ func TestHandleMCPToolsRuntimeIDRequiresRuntimeToolToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("runtime tool request without token should fail")
 	}
-	httpErr := &echo.HTTPError{}
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("runtime tool request without token error = %v, want 404", err)
+	if kind := apperror.KindOf(err); kind != apperror.KindNotFound {
+		t.Fatalf("runtime tool request without token error = %v, want not_found", err)
 	}
 }
 

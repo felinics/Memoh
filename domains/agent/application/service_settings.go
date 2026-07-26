@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/domains/agent/engine"
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 )
 
 func (s *Service) loadBotSettings(ctx context.Context, botID string) (setting.Settings, error) {

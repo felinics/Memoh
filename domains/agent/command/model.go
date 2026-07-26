@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 	modeldomain "github.com/memohai/memoh/domains/model"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
 )

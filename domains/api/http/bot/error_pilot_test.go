@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/domains/api/bot"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
 	runtimehttp "github.com/memohai/memoh/domains/api/http/runtime"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
@@ -13,7 +13,7 @@ import (
 )
 
 func TestCreateBotHTTPErrorMapsNameConflictToStableCode(t *testing.T) {
-	err := createBotHTTPError(bot.ErrBotNameTaken, true)
+	err := createBotHTTPError(botpersistence.ErrBotNameTaken, true)
 	if got := apperror.CodeOf(err); got != apperror.CodeBotNameTaken {
 		t.Fatalf("code = %q, want %q", got, apperror.CodeBotNameTaken)
 	}
@@ -37,7 +37,7 @@ func TestCreateBotHTTPErrorMapsWorkspaceContractFailureToStableCode(t *testing.T
 }
 
 func TestUpdateBotHTTPErrorMapsNameConflictToStableCode(t *testing.T) {
-	err := updateBotHTTPError(bot.ErrBotNameTaken)
+	err := updateBotHTTPError(botpersistence.ErrBotNameTaken)
 	if got := apperror.CodeOf(err); got != apperror.CodeBotNameTaken {
 		t.Fatalf("code = %q, want %q", got, apperror.CodeBotNameTaken)
 	}
@@ -57,7 +57,7 @@ func TestFSHTTPErrorKeepsUnavailableCausePrivate(t *testing.T) {
 func TestDisplayPrepareAppErrorUsesSharedWorkspaceCode(t *testing.T) {
 	event := runtimehttp.NewDisplayPrepareAppError(
 		"checking",
-		apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("private cause"), nil),
+		apperror.Unavailable("display prepare", errors.New("private cause")).WithCode(apperror.CodeWorkspaceUnreachable, nil),
 		"req-1",
 	)
 	if event.Code != string(apperror.CodeWorkspaceUnreachable) {
@@ -80,7 +80,7 @@ func TestDisplayPrepareAppErrorUsesSharedWorkspaceCode(t *testing.T) {
 func TestDisplayPrepareStreamBreakUsesPrepareFailedCode(t *testing.T) {
 	event := runtimehttp.NewDisplayPrepareAppError(
 		"installing",
-		apperror.Wrap(apperror.CodeWorkspaceDisplayPrepareFailed, errors.New("rpc error: stream reset"), nil),
+		apperror.Internal("display prepare", errors.New("rpc error: stream reset")).WithCode(apperror.CodeWorkspaceDisplayPrepareFailed, nil),
 		"req-2",
 	)
 	if event.Code != string(apperror.CodeWorkspaceDisplayPrepareFailed) {

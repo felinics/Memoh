@@ -7,11 +7,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/api/auth"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 	"github.com/memohai/memoh/domains/channel/email"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type EmailOutboxHandler struct {
@@ -44,28 +45,28 @@ func (h *EmailOutboxHandler) Register(e *echo.Echo) {
 // @Param limit query int false "Limit" default(20)
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} map[string]any
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/email-outbox [get].
 func (h *EmailOutboxHandler) List(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBot(c, botID); err != nil {
 		return err
 	}
 	limit, err := httpx.ParseInt32Query(c.QueryParam("limit"), 20)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("parse limit", err)
 	}
 	offset, err := httpx.ParseInt32Query(c.QueryParam("offset"), 0)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("parse offset", err)
 	}
 
 	items, total, err := h.outbox.ListByBot(c.Request().Context(), botID, limit, offset)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list email outbox", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"items": items,
@@ -80,26 +81,26 @@ func (h *EmailOutboxHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Email ID"
 // @Success 200 {object} email.OutboxItemResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/email-outbox/{id} [get].
 func (h *EmailOutboxHandler) Get(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBot(c, botID); err != nil {
 		return err
 	}
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	resp, err := h.outbox.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get email outbox", err)
 	}
 	if resp.BotID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "email outbox item not found")
+		return apperror.NotFound("get email outbox", nil)
 	}
 	return c.JSON(http.StatusOK, resp)
 }

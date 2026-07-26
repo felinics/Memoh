@@ -3,7 +3,7 @@ package tool
 import (
 	"context"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 )
 
 // BotSettingsReader is the narrow settings surface used by tool providers.

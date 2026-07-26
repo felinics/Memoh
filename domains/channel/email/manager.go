@@ -19,6 +19,9 @@ type Manager struct {
 
 	mu      sync.Mutex
 	conns   map[string]emailport.Stopper // provider_id -> stopper
+	runCtx  context.Context
+	cancel  context.CancelFunc
+	started bool
 	stopped bool
 }
 
@@ -34,8 +37,22 @@ func NewManager(log *slog.Logger, service *Service, trigger *Trigger, outbox *Ou
 
 // Start initializes receiving for all providers that have readable bindings.
 func (m *Manager) Start(ctx context.Context) error {
+	if err := m.startRuntime(ctx); err != nil {
+		return err
+	}
+	if m.trigger != nil {
+		if err := m.trigger.Start(ctx); err != nil {
+			m.stopRuntime()
+			return err
+		}
+	}
+
 	providers, err := m.service.ListProvidersInternal(ctx, "")
 	if err != nil {
+		if m.trigger != nil {
+			_ = m.trigger.Shutdown(ctx)
+		}
+		m.stopRuntime()
 		return fmt.Errorf("list email providers: %w", err)
 	}
 
@@ -48,19 +65,49 @@ func (m *Manager) Start(ctx context.Context) error {
 		if len(bindings) == 0 {
 			continue
 		}
-		if err := m.startProvider(ctx, p); err != nil {
+		if err := m.startProvider(p); err != nil {
 			m.logger.ErrorContext(ctx, "failed to start provider", slog.String("provider", p.ID), slog.Any("error", err))
 		}
 	}
 	return nil
 }
 
-func (m *Manager) startProvider(ctx context.Context, p ProviderResponse) error {
+func (m *Manager) startRuntime(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.stopped {
 		return errors.New("manager is stopped")
+	}
+	if m.started {
+		return nil
+	}
+	m.runCtx, m.cancel = context.WithCancel(context.WithoutCancel(ctx))
+	m.started = true
+	return nil
+}
+
+func (m *Manager) stopRuntime() {
+	m.mu.Lock()
+	cancel := m.cancel
+	m.cancel = nil
+	m.runCtx = nil
+	m.started = false
+	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (m *Manager) startProvider(p ProviderResponse) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.stopped {
+		return errors.New("manager is stopped")
+	}
+	if !m.started || m.runCtx == nil {
+		return errors.New("manager is not started")
 	}
 	if _, exists := m.conns[p.ID]; exists {
 		return nil
@@ -77,7 +124,7 @@ func (m *Manager) startProvider(ctx context.Context, p ProviderResponse) error {
 	}
 	config["_provider_id"] = p.ID
 
-	stopper, err := receiver.StartReceiving(ctx, config, func(ctx context.Context, providerID string, mail emailport.InboundEmail) error {
+	stopper, err := receiver.StartReceiving(m.runCtx, config, func(ctx context.Context, providerID string, mail emailport.InboundEmail) error {
 		return m.trigger.HandleInbound(ctx, providerID, fromPortInbound(mail))
 	})
 	if err != nil {
@@ -85,7 +132,7 @@ func (m *Manager) startProvider(ctx context.Context, p ProviderResponse) error {
 	}
 
 	m.conns[p.ID] = stopper
-	m.logger.InfoContext(ctx, "started email receiving", slog.String("provider_id", p.ID), slog.String("type", p.Provider))
+	m.logger.InfoContext(m.runCtx, "started email receiving", slog.String("provider_id", p.ID), slog.String("type", p.Provider))
 	return nil
 }
 
@@ -106,7 +153,7 @@ func (m *Manager) RefreshProvider(ctx context.Context, providerID string) error 
 		return nil
 	}
 
-	return m.startProvider(ctx, p)
+	return m.startProvider(p)
 }
 
 func (m *Manager) stopProvider(ctx context.Context, providerID string) {
@@ -125,21 +172,35 @@ func (m *Manager) stopProvider(ctx context.Context, providerID string) {
 }
 
 // Stop gracefully shuts down all receiving connections.
-func (m *Manager) Stop(ctx context.Context) {
+func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	m.stopped = true
+	cancel := m.cancel
+	m.cancel = nil
+	m.runCtx = nil
+	m.started = false
 	conns := make(map[string]emailport.Stopper, len(m.conns))
 	for k, v := range m.conns {
 		conns[k] = v
 	}
 	m.conns = make(map[string]emailport.Stopper)
 	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 
+	var errs []error
 	for id, stopper := range conns {
 		if err := stopper.Stop(ctx); err != nil {
-			m.logger.ErrorContext(ctx, "failed to stop provider", slog.String("provider_id", id), slog.Any("error", err))
+			errs = append(errs, fmt.Errorf("stop email provider %s: %w", id, err))
 		}
 	}
+	if m.trigger != nil {
+		if err := m.trigger.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("stop email triggers: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // SendEmail sends an email through the specified provider, recording to outbox.

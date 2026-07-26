@@ -111,6 +111,7 @@ type Session struct {
 	promptDone   <-chan struct{}
 	promptToken  *struct{}
 	closed       bool
+	closeOnce    sync.Once
 }
 
 //nolint:contextcheck // startup failure closes the owned process through its lifecycle API.
@@ -254,8 +255,8 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		},
 	})
 	if err != nil {
-		callbacks.close()
-		_ = proc.Close()
+		_ = callbacks.closeContext(ctx)
+		_ = proc.CloseContext(ctx)
 		if toolHTTPStop != nil {
 			toolHTTPStop()
 		}
@@ -299,8 +300,8 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		McpServers: mcpServers,
 	})
 	if err != nil {
-		callbacks.close()
-		_ = proc.Close()
+		_ = callbacks.closeContext(ctx)
+		_ = proc.CloseContext(ctx)
 		if toolHTTPStop != nil {
 			toolHTTPStop()
 		}
@@ -308,8 +309,8 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		return nil, fmt.Errorf("create ACP session: %w", err)
 	}
 	if err := pinSessionMode(ctx, conn, sess.SessionId, sess.Modes, req.SessionMode, r.logger, req.AgentID); err != nil {
-		callbacks.close()
-		_ = proc.Close()
+		_ = callbacks.closeContext(ctx)
+		_ = proc.CloseContext(ctx)
 		if toolHTTPStop != nil {
 			toolHTTPStop()
 		}
@@ -350,7 +351,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 				// A failed mutation may have reached the Agent even though its
 				// authoritative config snapshot never reached Memoh. Do not return a
 				// session whose cached equality checks can no longer be trusted.
-				_ = clientSession.Close()
+				_ = clientSession.CloseContext(ctx)
 				return nil, fmt.Errorf("apply default ACP reasoning effort %q: %w", defaultReasoning, err)
 			}
 		}
@@ -848,14 +849,22 @@ func cleanPromptResources(resources []PromptResource) []PromptResource {
 }
 
 func (s *Session) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return s.CloseContext(ctx)
+}
+
+// CloseContext rejects new work, cancels the active prompt, and joins every
+// session-owned terminal and process goroutine. A caller that times out may
+// retry with a fresh context to continue waiting for the same shutdown.
+func (s *Session) CloseContext(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	s.mu.Lock()
 	s.closed = true
 	conn := s.conn
 	sessionID := s.sessionID
@@ -867,38 +876,44 @@ func (s *Session) Close() error {
 	promptDone := s.promptDone
 	s.mu.Unlock()
 
-	if promptCancel != nil {
-		promptCancel()
-	}
-	if promptDone != nil {
-		timer := time.NewTimer(500 * time.Millisecond)
-		select {
-		case <-promptDone:
-		case <-timer.C:
+	s.closeOnce.Do(func() {
+		if promptCancel != nil {
+			promptCancel()
 		}
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
+		if conn != nil && sessionID != "" {
+			// Graceful protocol close is best effort. The owned process and both
+			// I/O pumps below are the authoritative shutdown boundary.
+			_, _ = conn.CloseSession(ctx, acp.CloseSessionRequest{SessionId: sessionID})
 		}
-	}
-	if conn != nil && sessionID != "" {
-		ctx, cancelClose := context.WithTimeout(context.Background(), 2*time.Second)
-		_, _ = conn.CloseSession(ctx, acp.CloseSessionRequest{SessionId: sessionID})
-		cancelClose()
-	}
+		if reverseHTTPStop != nil {
+			reverseHTTPStop()
+		}
+		if cancel != nil {
+			cancel()
+		}
+	})
+
+	var errs []error
 	if callbacks != nil {
-		callbacks.close()
+		errs = append(errs, callbacks.closeContext(ctx))
 	}
-	if reverseHTTPStop != nil {
-		reverseHTTPStop()
-	}
-	if cancel != nil {
-		cancel()
+	if err := waitForSessionWork(ctx, promptDone); err != nil {
+		errs = append(errs, err)
 	}
 	if proc != nil {
-		return proc.Close()
+		errs = append(errs, proc.CloseContext(ctx))
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+func waitForSessionWork(ctx context.Context, done <-chan struct{}) error {
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for active ACP prompt: %w", ctx.Err())
+	}
 }

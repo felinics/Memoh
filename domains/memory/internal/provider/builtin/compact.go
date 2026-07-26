@@ -9,7 +9,7 @@ import (
 	"time"
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 const compactMaxCandidateChars = 24000
@@ -19,7 +19,7 @@ const compactMaxCandidateChars = 24000
 // Compact performs a graph-native cleanup pass without requiring an LLM. It
 // canonicalizes node IDs and merges exact duplicate concept bodies, but avoids
 // semantic rewrites when no LLM is available.
-func (r *graphRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (memreg.CompactResult, error) {
+func (r *graphRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (memprovider.CompactResult, error) {
 	return r.compactConcepts(ctx, filters, ratio, 0, nil)
 }
 
@@ -27,36 +27,36 @@ func (r *graphRuntime) Compact(ctx context.Context, filters map[string]any, rati
 // compactor, graph compaction does not clear the node table and mint fresh IDs:
 // it canonicalizes node IDs, merges nodes that describe the same concept, keeps
 // the representative ID stable, and records source lineage on the merged node.
-func (r *graphRuntime) CompactWithLLM(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm memreg.LLM) (memreg.CompactResult, error) {
+func (r *graphRuntime) CompactWithLLM(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm memprovider.LLM) (memprovider.CompactResult, error) {
 	if llm == nil {
-		return memreg.CompactResult{}, errors.New("graph runtime: llm compact requires an LLM")
+		return memprovider.CompactResult{}, errors.New("graph runtime: llm compact requires an LLM")
 	}
 	return r.compactConcepts(ctx, filters, ratio, decayDays, llm)
 }
 
-func (r *graphRuntime) compactConcepts(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm memreg.LLM) (memreg.CompactResult, error) {
+func (r *graphRuntime) compactConcepts(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm memprovider.LLM) (memprovider.CompactResult, error) {
 	if r.store == nil {
-		return memreg.CompactResult{}, errors.New("graph runtime: wiki store not configured")
+		return memprovider.CompactResult{}, errors.New("graph runtime: wiki store not configured")
 	}
 	botID, err := runtimeBotID("", filters)
 	if err != nil {
-		return memreg.CompactResult{}, err
+		return memprovider.CompactResult{}, err
 	}
 	if ratio <= 0 || ratio > 1 {
-		return memreg.CompactResult{}, errors.New("ratio must be in range (0, 1]")
+		return memprovider.CompactResult{}, errors.New("ratio must be in range (0, 1]")
 	}
 	nodes, err := r.store.ListNodes(ctx, botID)
 	if err != nil {
-		return memreg.CompactResult{}, fmt.Errorf("graph runtime: list nodes: %w", err)
+		return memprovider.CompactResult{}, fmt.Errorf("graph runtime: list nodes: %w", err)
 	}
 	before := len(nodes)
 	if before == 0 {
-		return memreg.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []memorydomain.Item{}}, nil
+		return memprovider.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []memorydomain.Item{}}, nil
 	}
 
 	nodes, changed, err := r.normalizeCompactNodeIDs(ctx, botID, nodes)
 	if err != nil {
-		return memreg.CompactResult{}, err
+		return memprovider.CompactResult{}, err
 	}
 
 	deleteIDs := make([]string, 0)
@@ -71,7 +71,7 @@ func (r *graphRuntime) compactConcepts(ctx context.Context, filters map[string]a
 		}
 		_, superseded, err := r.mergeCompactConcept(ctx, botID, compactable, ratio, decayDays, llm, now)
 		if err != nil {
-			return memreg.CompactResult{}, err
+			return memprovider.CompactResult{}, err
 		}
 		deleteIDs = append(deleteIDs, superseded...)
 		changed = true
@@ -79,7 +79,7 @@ func (r *graphRuntime) compactConcepts(ctx context.Context, filters map[string]a
 
 	for _, id := range uniqueCompactStrings(deleteIDs) {
 		if err := r.store.DeleteNode(ctx, botID, id); err != nil {
-			return memreg.CompactResult{}, fmt.Errorf("graph runtime: compact delete superseded node: %w", err)
+			return memprovider.CompactResult{}, fmt.Errorf("graph runtime: compact delete superseded node: %w", err)
 		}
 	}
 	r.retry.discard(botID, deleteIDs)
@@ -90,14 +90,14 @@ func (r *graphRuntime) compactConcepts(ctx context.Context, filters map[string]a
 
 	keptNodes, err := r.store.ListNodes(ctx, botID)
 	if err != nil {
-		return memreg.CompactResult{}, fmt.Errorf("graph runtime: compact list after merge: %w", err)
+		return memprovider.CompactResult{}, fmt.Errorf("graph runtime: compact list after merge: %w", err)
 	}
 	sort.Slice(keptNodes, func(i, j int) bool { return keptNodes[i].CapturedAt.After(keptNodes[j].CapturedAt) })
 	items := make([]memorydomain.Item, 0, len(keptNodes))
 	for _, n := range keptNodes {
 		items = append(items, nodeSpecToMemoryItem(n))
 	}
-	return memreg.CompactResult{BeforeCount: before, AfterCount: len(keptNodes), Ratio: ratio, Results: items}, nil
+	return memprovider.CompactResult{BeforeCount: before, AfterCount: len(keptNodes), Ratio: ratio, Results: items}, nil
 }
 
 // ---- Canonical IDs ----
@@ -184,14 +184,14 @@ func compactCanonicalMemoryID(botID, memoryID string) string {
 
 // ---- Concept Merge ----
 
-func (r *graphRuntime) mergeCompactConcept(ctx context.Context, botID string, nodes []memorydomain.NodeSpec, ratio float64, decayDays int, llm memreg.LLM, now time.Time) (memorydomain.NodeSpec, []string, error) {
+func (r *graphRuntime) mergeCompactConcept(ctx context.Context, botID string, nodes []memorydomain.NodeSpec, ratio float64, decayDays int, llm memprovider.LLM, now time.Time) (memorydomain.NodeSpec, []string, error) {
 	sortCompactNodes(nodes)
 	representative := completeCompactNode(nodes[0], nodes)
 	body := strings.TrimSpace(representative.Body)
 	if llm != nil {
 		candidates := compactCandidates(nodes)
 		if len(candidates) > 0 {
-			resp, err := llm.Compact(ctx, memreg.CompactRequest{
+			resp, err := llm.Compact(ctx, memprovider.CompactRequest{
 				BotID:       botID,
 				Memories:    candidates,
 				TargetCount: 1,
@@ -329,14 +329,14 @@ func compactSameBody(nodes []memorydomain.NodeSpec) bool {
 	return true
 }
 
-func compactCandidates(nodes []memorydomain.NodeSpec) []memreg.CandidateMemory {
-	candidates := make([]memreg.CandidateMemory, 0, len(nodes))
+func compactCandidates(nodes []memorydomain.NodeSpec) []memprovider.CandidateMemory {
+	candidates := make([]memprovider.CandidateMemory, 0, len(nodes))
 	for _, node := range nodes {
 		body := strings.TrimSpace(node.Body)
 		if body == "" {
 			continue
 		}
-		candidates = append(candidates, memreg.CandidateMemory{
+		candidates = append(candidates, memprovider.CandidateMemory{
 			ID:        node.ID,
 			Memory:    body,
 			CreatedAt: formatNodeTime(node.CapturedAt),
@@ -349,7 +349,7 @@ func compactCandidates(nodes []memorydomain.NodeSpec) []memreg.CandidateMemory {
 	return candidates
 }
 
-func compactCandidateChars(candidates []memreg.CandidateMemory) int {
+func compactCandidateChars(candidates []memprovider.CandidateMemory) int {
 	total := 0
 	for _, candidate := range candidates {
 		total += len(candidate.ID) + len(candidate.Memory) + len(candidate.CreatedAt) + 32

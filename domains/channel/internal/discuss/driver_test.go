@@ -11,6 +11,7 @@ import (
 	sessionpkg "github.com/memohai/memoh/domains/agent/chat/thread"
 	"github.com/memohai/memoh/domains/agent/chat/timeline"
 	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/domains/channel/inbound"
 )
 
 func TestExtractNewImageRefs(t *testing.T) {
@@ -59,7 +60,7 @@ func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config: DiscussSessionConfig{TeamID: "team-1", BotID: "bot-1", ThreadID: "sess-1"},
+		config: inbound.DiscussSessionConfig{TeamID: "team-1", BotID: "bot-1", ThreadID: "sess-1"},
 	}
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
@@ -79,6 +80,35 @@ func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 	}
 }
 
+func TestDiscussDriverUsesConstructionDependencies(t *testing.T) {
+	svc := &fakeTurnService{}
+	broadcaster := &fakeDiscussBroadcaster{}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Turn:        svc,
+		Broadcaster: broadcaster,
+	})
+	sess := &discussSession{
+		config: inbound.DiscussSessionConfig{
+			BotID:            "bot-1",
+			ThreadID:         "sess-1",
+			ConversationType: "private",
+		},
+	}
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">hello</message>`}},
+	}}
+
+	driver.handleReply(context.Background(), sess, rc, driver.logger)
+
+	if svc.calls != 1 {
+		t.Fatalf("StartTurn calls = %d, want 1", svc.calls)
+	}
+	if len(broadcaster.events) != 1 || broadcaster.events[0].Type != gateway.StreamEventAgentEnd {
+		t.Fatalf("broadcast events = %#v, want one agent-end event", broadcaster.events)
+	}
+}
+
 func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 	rc := timeline.RenderedContext{
 		{
@@ -90,7 +120,7 @@ func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config: DiscussSessionConfig{
+		config: inbound.DiscussSessionConfig{
 			BotID:             "bot-1",
 			ThreadID:          "sess-1",
 			RouteID:           "route-1",
@@ -128,7 +158,7 @@ func TestNotifyRCRefreshesExistingDiscussSessionConfig(t *testing.T) {
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	defer driver.StopSession("sess-1")
 
-	driver.NotifyRC(context.Background(), "sess-1", timeline.RenderedContext{}, DiscussSessionConfig{
+	driver.NotifyRC(context.Background(), "sess-1", timeline.RenderedContext{}, inbound.DiscussSessionConfig{
 		BotID:        "bot-1",
 		ThreadID:     "sess-1",
 		RouteID:      "route-old",
@@ -136,7 +166,7 @@ func TestNotifyRCRefreshesExistingDiscussSessionConfig(t *testing.T) {
 		SessionToken: "session-token-old",
 		ToolHTTPURL:  "http://old.example/tools",
 	})
-	driver.NotifyRC(context.Background(), "sess-1", timeline.RenderedContext{}, DiscussSessionConfig{
+	driver.NotifyRC(context.Background(), "sess-1", timeline.RenderedContext{}, inbound.DiscussSessionConfig{
 		BotID:        "bot-1",
 		ThreadID:     "sess-1",
 		RouteID:      "route-new",
@@ -150,6 +180,64 @@ func TestNotifyRCRefreshesExistingDiscussSessionConfig(t *testing.T) {
 	driver.mu.Unlock()
 	if got.RouteID != "route-new" || got.ChatToken != "chat-token-new" || got.SessionToken != "session-token-new" || got.ToolHTTPURL != "http://new.example/tools" {
 		t.Fatalf("config = %#v, want latest NotifyRC config", got)
+	}
+}
+
+func TestShutdownWaitsForDiscussWorkers(t *testing.T) {
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	driver.NotifyRC(t.Context(), "sess-1", nil, inbound.DiscussSessionConfig{
+		BotID:    "bot-1",
+		ThreadID: "sess-1",
+	})
+
+	driver.mu.Lock()
+	done := driver.sessions["sess-1"].done
+	driver.mu.Unlock()
+
+	if err := driver.Shutdown(t.Context()); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("Shutdown returned before the discuss worker stopped")
+	}
+}
+
+func TestShutdownCanRetryAndRejectsNewWorkers(t *testing.T) {
+	turns := &blockingTurnService{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{Turn: turns})
+	driver.NotifyRC(t.Context(), "sess-1", timeline.RenderedContext{{
+		ReceivedAtMs: 1,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: "hello"}},
+	}}, inbound.DiscussSessionConfig{
+		BotID:            "bot-1",
+		ThreadID:         "sess-1",
+		ConversationType: "private",
+	})
+
+	select {
+	case <-turns.started:
+	case <-t.Context().Done():
+		t.Fatal("discuss turn did not start")
+	}
+
+	stopCtx, cancelStop := context.WithCancel(t.Context())
+	cancelStop()
+	if err := driver.Shutdown(stopCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first Shutdown() error = %v, want context.Canceled", err)
+	}
+	driver.NotifyRC(t.Context(), "sess-2", nil, inbound.DiscussSessionConfig{ThreadID: "sess-2"})
+	if driver.HasSession("sess-2") {
+		t.Fatal("NotifyRC admitted a new worker after shutdown")
+	}
+
+	close(turns.release)
+	if err := driver.Shutdown(t.Context()); err != nil {
+		t.Fatalf("retry Shutdown() error = %v", err)
 	}
 }
 
@@ -167,7 +255,7 @@ func TestHandleReplyWithTurnReadsConfigUnderDriverLock(t *testing.T) {
 	}}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config: DiscussSessionConfig{
+		config: inbound.DiscussSessionConfig{
 			BotID:    "bot-old",
 			ThreadID: "sess-1",
 		},
@@ -187,7 +275,7 @@ func TestHandleReplyWithTurnReadsConfigUnderDriverLock(t *testing.T) {
 	case <-time.After(25 * time.Millisecond):
 	}
 
-	sess.config = DiscussSessionConfig{
+	sess.config = inbound.DiscussSessionConfig{
 		BotID:    "bot-new",
 		ThreadID: "sess-1",
 	}
@@ -219,7 +307,7 @@ func TestHandleReplyWithTurn_NoCursorAdvanceOnStartError(t *testing.T) {
 	svc := &fakeTurnService{startErr: errors.New("discuss runtime not configured")}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"},
+		config: inbound.DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"},
 	}
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
@@ -240,7 +328,7 @@ func TestHandleReplyWithTurn_ACPDoesNotAdvanceCursorOnRuntimeError(t *testing.T)
 	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent, streamErr: errors.New("runtime failed")}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"},
+		config: inbound.DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"},
 	}
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
@@ -268,7 +356,7 @@ func TestHandleReplyWithTurn_ACPSkipsRuntimeForPassiveMessage(t *testing.T) {
 	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config: DiscussSessionConfig{
+		config: inbound.DiscussSessionConfig{
 			BotID:            "bot-1",
 			ThreadID:         "sess-1",
 			ConversationType: gateway.ConversationTypeGroup,
@@ -299,7 +387,7 @@ func TestHandleReplyWithTurn_ACPRepliesInDirectConversation(t *testing.T) {
 	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config: DiscussSessionConfig{
+		config: inbound.DiscussSessionConfig{
 			BotID:            "bot-1",
 			ThreadID:         "sess-1",
 			ConversationType: gateway.ConversationTypePrivate,
@@ -348,7 +436,7 @@ func TestHandleReplyWithTurn_ColdStartAnchoredByTR(t *testing.T) {
 		MessageService: nil,
 	})
 	sess := &discussSession{
-		config: DiscussSessionConfig{BotID: "b", ThreadID: "s"},
+		config: inbound.DiscussSessionConfig{BotID: "b", ThreadID: "s"},
 	}
 
 	// Simulate a previously answered round by pre-stuffing a TR newer than
@@ -378,7 +466,7 @@ func TestHandleReplyWithTurn_CursorAdvancesToRCNotWallClock(t *testing.T) {
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config: DiscussSessionConfig{BotID: "b", ThreadID: "s"},
+		config: inbound.DiscussSessionConfig{BotID: "b", ThreadID: "s"},
 	}
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
@@ -398,7 +486,7 @@ func TestHandleReplyWithTurn_UsesPersistedDiscussCursor(t *testing.T) {
 		CursorStore: store,
 	})
 	sess := &discussSession{
-		config: DiscussSessionConfig{
+		config: inbound.DiscussSessionConfig{
 			BotID:           "b",
 			ThreadID:        "s",
 			RouteID:         "route-1",
@@ -487,6 +575,18 @@ type fakeTurnService struct {
 	lastCmd     agentdomain.StartTurnCommand
 }
 
+type blockingTurnService struct {
+	fakeTurnService
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingTurnService) StartTurn(ctx context.Context, cmd agentdomain.StartTurnCommand) (agentdomain.RunHandle, error) {
+	close(s.started)
+	<-s.release
+	return s.fakeTurnService.StartTurn(ctx, cmd)
+}
+
 func (f *fakeTurnService) StartTurn(_ context.Context, cmd agentdomain.StartTurnCommand) (agentdomain.RunHandle, error) {
 	f.calls++
 	f.lastCmd = cmd
@@ -557,6 +657,14 @@ type fakeDiscussCursorStore struct {
 	upsertRouteID  string
 }
 
+type fakeDiscussBroadcaster struct {
+	events []gateway.StreamEvent
+}
+
+func (f *fakeDiscussBroadcaster) PublishEvent(_ string, event gateway.StreamEvent) {
+	f.events = append(f.events, event)
+}
+
 func (f *fakeDiscussCursorStore) GetDiscussCursor(_ context.Context, _, _ string) (timeline.DiscussCursorPosition, error) {
 	return f.position, nil
 }
@@ -574,7 +682,7 @@ func TestHandleReplyWithTurn_TrustsPersistedEventCursor(t *testing.T) {
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{CursorStore: store})
 	sess := &discussSession{
-		config: DiscussSessionConfig{BotID: "b", ThreadID: "s", CurrentPlatform: "telegram"},
+		config: inbound.DiscussSessionConfig{BotID: "b", ThreadID: "s", CurrentPlatform: "telegram"},
 	}
 
 	covered := timeline.RenderedSegment{

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 )
 
 type Store interface {

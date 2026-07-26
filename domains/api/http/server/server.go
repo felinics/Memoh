@@ -3,16 +3,16 @@ package server
 import (
 	"context"
 	"log/slog"
-	"net/http"
+	"net"
 	neturl "net/url"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"github.com/memohai/memoh/domains/api/auth"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
-	"github.com/memohai/memoh/domains/channel/publicmedia"
+	httpx "github.com/memohai/memoh/domains/api/http"
+	"github.com/memohai/memoh/domains/api/identity/auth"
+	channeldomain "github.com/memohai/memoh/domains/channel"
 )
 
 type Server struct {
@@ -46,7 +46,10 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 
 	e := echo.New()
 	e.HideBanner = true
-	e.HTTPErrorHandler = newHTTPErrorHandler(log, e.DefaultHTTPErrorHandler)
+	e.HTTPErrorHandler = newHTTPErrorHandler(log)
+	e.Server.Addr = addr
+	e.Server.ErrorLog = e.StdLogger
+	httpx.HardenServer(e.Server)
 	e.Use(middleware.RequestID())
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
@@ -96,10 +99,22 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 }
 
 func (s *Server) Start() error {
-	//nolint:gosec // G112 false positive: HardenServer sets ReadHeaderTimeout on the next line
-	srv := &http.Server{Addr: s.addr}
-	httpx.HardenServer(srv)
-	return s.echo.StartServer(srv)
+	listener, err := s.Listen(context.Background())
+	if err != nil {
+		return err
+	}
+	return s.Serve(listener)
+}
+
+// Listen binds the configured address. The caller owns the returned listener
+// until it is passed to Serve or explicitly closed.
+func (s *Server) Listen(ctx context.Context) (net.Listener, error) {
+	return (&net.ListenConfig{}).Listen(ctx, "tcp", s.addr)
+}
+
+// Serve serves HTTP traffic and takes ownership of listener.
+func (s *Server) Serve(listener net.Listener) error {
+	return s.echo.Server.Serve(listener)
 }
 
 func (s *Server) Stop(ctx context.Context) error {
@@ -154,7 +169,7 @@ func isPublicChannelWebhookPath(path string) bool {
 }
 
 func isPublicChannelMediaPath(path string) bool {
-	return publicmedia.IsPath(path)
+	return channeldomain.IsPublicMediaPath(path)
 }
 
 func safeRequestLogURI(u *neturl.URL, fallback string) string {

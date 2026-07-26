@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 	"github.com/memohai/memoh/internal/i18n"
 )
 

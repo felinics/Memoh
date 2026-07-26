@@ -6,12 +6,13 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 )
 
 func TestRepairToolCallClosures_AppendsSyntheticToolResultForDanglingAssistantCall(t *testing.T) {
 	t.Parallel()
 
-	messages := sdkMessagesToModelMessages([]sdk.Message{
+	messages := convert.SDKMessagesToModelMessages([]sdk.Message{
 		sdk.UserMessage("fetch this"),
 		{
 			Role: sdk.MessageRoleAssistant,
@@ -53,7 +54,7 @@ func TestRepairToolCallClosures_AppendsSyntheticToolResultForDanglingAssistantCa
 func TestRepairToolCallClosures_DropsOrphanToolMessage(t *testing.T) {
 	t.Parallel()
 
-	orphanTool := sdkMessagesToModelMessages([]sdk.Message{
+	orphanTool := convert.SDKMessagesToModelMessages([]sdk.Message{
 		sdk.ToolMessage(sdk.ToolResultPart{
 			ToolCallID: "web_fetch:10",
 			ToolName:   "web_fetch",
@@ -79,7 +80,7 @@ func TestRepairToolCallClosures_DropsOrphanToolMessage(t *testing.T) {
 func TestRepairToolCallClosures_PreservesValidAssistantToolPair(t *testing.T) {
 	t.Parallel()
 
-	messages := sdkMessagesToModelMessages([]sdk.Message{
+	messages := convert.SDKMessagesToModelMessages([]sdk.Message{
 		{
 			Role: sdk.MessageRoleAssistant,
 			Content: []sdk.MessagePart{

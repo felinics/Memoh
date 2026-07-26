@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	modeldomain "github.com/memohai/memoh/domains/model"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
 	videopkg "github.com/memohai/memoh/domains/model/video"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type VideoHandler struct {
@@ -58,12 +58,12 @@ func (h *VideoHandler) ListMeta(c echo.Context) error {
 // @Tags video-providers
 // @Produce json
 // @Success 200 {array} videopkg.ProviderResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /video-providers [get].
 func (h *VideoHandler) ListProviders(c echo.Context) error {
 	items, err := h.service.ListProviders(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list video providers", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -74,17 +74,17 @@ func (h *VideoHandler) ListProviders(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} videopkg.ProviderResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /video-providers/{id} [get].
 func (h *VideoHandler) GetProvider(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	item, err := h.service.GetProvider(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get video provider", err)
 	}
 	return c.JSON(http.StatusOK, item)
 }
@@ -95,17 +95,17 @@ func (h *VideoHandler) GetProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {array} videopkg.ModelResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /video-providers/{id}/models [get].
 func (h *VideoHandler) ListModelsByProvider(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	items, err := h.service.ListModelsByProvider(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list video models by provider", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -117,17 +117,17 @@ func (h *VideoHandler) ListModelsByProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} videopkg.ImportModelsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /video-providers/{id}/import-models [post].
 func (h *VideoHandler) ImportModels(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	remoteModels, err := h.service.FetchRemoteModels(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote video models: %v", err))
+		return apperror.Internal("fetch remote video models", err)
 	}
 
 	resp := videopkg.ImportModelsResponse{Models: make([]string, 0, len(remoteModels))}
@@ -162,12 +162,12 @@ func (h *VideoHandler) ImportModels(c echo.Context) error {
 // @Tags video-models
 // @Produce json
 // @Success 200 {array} videopkg.ModelResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /video-models [get].
 func (h *VideoHandler) ListModels(c echo.Context) error {
 	items, err := h.service.ListModels(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list video models", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -178,17 +178,17 @@ func (h *VideoHandler) ListModels(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID (UUID)"
 // @Success 200 {object} videopkg.ModelResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /video-models/{id} [get].
 func (h *VideoHandler) GetModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	resp, err := h.service.GetModel(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get video model", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -201,22 +201,22 @@ func (h *VideoHandler) GetModel(c echo.Context) error {
 // @Param id path string true "Model ID (UUID)"
 // @Param request body videopkg.UpdateModelRequest true "Model update payload"
 // @Success 200 {object} videopkg.ModelResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /video-models/{id} [put].
 func (h *VideoHandler) UpdateModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	var req videopkg.UpdateModelRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		return apperror.Invalid("bind video model", err)
 	}
 	resp, err := h.service.UpdateModel(c.Request().Context(), id, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("update video model", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }

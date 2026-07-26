@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -184,6 +185,32 @@ func TestCreateTerminalStopsWhenOwningRunIsCanceled(t *testing.T) {
 	defer cancelWait()
 	if _, err := manager.WaitForTerminalExit(waitCtx, acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
 		t.Fatalf("terminal did not stop with its owning run: %v", err)
+	}
+}
+
+func TestTerminalManagerKillAllWaitsForReadLoopAndCanRetry(t *testing.T) {
+	readDone := make(chan struct{})
+	manager := &terminalManager{
+		terminals: map[string]*terminal{
+			"term-1": {
+				id:       "terminal-1",
+				done:     make(chan struct{}),
+				readDone: readDone,
+			},
+		},
+	}
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := manager.killAll(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("killAll() error = %v, want context.Canceled", err)
+	}
+	close(readDone)
+	if err := manager.killAll(t.Context()); err != nil {
+		t.Fatalf("killAll() retry error = %v", err)
+	}
+	if _, err := manager.CreateTerminal(t.Context(), acp.CreateTerminalRequest{Command: "true"}, nil, terminalRuntimeScope{}); err == nil || !strings.Contains(err.Error(), "stopped") {
+		t.Fatalf("CreateTerminal() after killAll error = %v, want stopped", err)
 	}
 }
 

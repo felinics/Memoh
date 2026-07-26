@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,7 +16,8 @@ import (
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // sessionMessageBacklogSize is the server-fixed number of backlog messages
@@ -44,10 +46,10 @@ const sseHeartbeatInterval = 20 * time.Second
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {string} string "SSE stream"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/messages/events [get].
 func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -57,16 +59,16 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+		return apperror.Required("session_id")
 	}
 	if h.messageService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
+		return apperror.Internal("stream session messages", nil)
 	}
 	if h.messageEvents == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "message events not configured")
+		return apperror.Internal("stream session messages", nil)
 	}
 
 	bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
@@ -87,7 +89,7 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 
 	backlog, err := h.messageService.ListLatestBySession(c.Request().Context(), sessionID, sessionMessageBacklogSize)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list session message backlog", err)
 	}
 
 	writer, flusher, err := beginSSEResponse(c)
@@ -215,9 +217,9 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {string} string "SSE stream"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/events [get].
 func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -226,7 +228,7 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	bot, perms, err := h.authorizeBotMessageAccess(c, channelIdentityID, botID)
 	if err != nil {
@@ -234,10 +236,10 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	}
 	botID = bot.ID
 	if h.messageEvents == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "message events not configured")
+		return apperror.Internal("stream session activity", nil)
 	}
 	if h.sessionService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
+		return apperror.Internal("stream session activity", nil)
 	}
 
 	writer, flusher, err := beginSSEResponse(c)
@@ -419,7 +421,7 @@ func beginSSEResponse(c echo.Context) (io.Writer, http.Flusher, error) {
 	c.Response().WriteHeader(http.StatusOK)
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
-		return nil, nil, echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+		return nil, nil, apperror.Internal("begin sse response", errors.New("response writer is not a flusher"))
 	}
 	return c.Response().Writer, flusher, nil
 }

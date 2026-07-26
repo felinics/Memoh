@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type acpCodexDeviceAuthStatus string
@@ -76,10 +77,10 @@ type acpCodexDeviceAuthSession struct {
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} ACPCodexOAuthDeviceAuthorizeResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp/codex/oauth/device/authorize [post].
 func (h *ACPCodexOAuthHandler) AuthorizeDevice(c echo.Context) error {
 	botID, channelIdentityID, err := h.requireBotAccess(c)
@@ -87,10 +88,10 @@ func (h *ACPCodexOAuthHandler) AuthorizeDevice(c echo.Context) error {
 		return err
 	}
 	if h.provider == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "openai codex oauth provider is not configured")
+		return apperror.Internal("codex device oauth", nil)
 	}
 	if h.acpWorkspace == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace manager is not configured")
+		return apperror.Internal("codex device oauth", nil)
 	}
 	if err := h.ensureManagedWorkspace(c.Request().Context(), botID); err != nil {
 		return err
@@ -98,17 +99,17 @@ func (h *ACPCodexOAuthHandler) AuthorizeDevice(c echo.Context) error {
 
 	device, err := h.provider.StartOpenAICodexACPDeviceAuthorization(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("start codex device oauth", err)
 	}
 	deviceAuthID := strings.TrimSpace(device.DeviceAuthID)
 	userCode := strings.TrimSpace(device.UserCode)
 	verificationURL := strings.TrimSpace(device.VerificationURL)
 	if deviceAuthID == "" || userCode == "" || verificationURL == "" {
-		return echo.NewHTTPError(http.StatusInternalServerError, "codex device authorization response is incomplete")
+		return apperror.Internal("start codex device oauth", nil)
 	}
 	sessionID, err := generateACPCodexDeviceAuthSessionID()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("start codex device oauth", err)
 	}
 	now := time.Now().UTC()
 	interval := time.Duration(device.IntervalSeconds) * time.Second
@@ -153,10 +154,10 @@ func (h *ACPCodexOAuthHandler) AuthorizeDevice(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param request body ACPCodexOAuthDeviceSessionRequest true "Device authorization session"
 // @Success 200 {object} ACPCodexOAuthDeviceStatusResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp/codex/oauth/device/poll [post].
 func (h *ACPCodexOAuthHandler) PollDevice(c echo.Context) error {
 	botID, channelIdentityID, err := h.requireBotAccess(c)
@@ -164,20 +165,20 @@ func (h *ACPCodexOAuthHandler) PollDevice(c echo.Context) error {
 		return err
 	}
 	if h.provider == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "openai codex oauth provider is not configured")
+		return apperror.Internal("codex device oauth", nil)
 	}
 	var req ACPCodexOAuthDeviceSessionRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind codex device oauth", err)
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
+		return apperror.Required("session_id")
 	}
 
 	session, generation, shouldPoll, err := h.prepareDevicePoll(sessionID, botID, channelIdentityID, time.Now().UTC())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("poll codex device oauth", err)
 	}
 	if !shouldPoll {
 		return c.JSON(http.StatusOK, deviceStatusResponse(session))
@@ -206,7 +207,7 @@ func (h *ACPCodexOAuthHandler) PollDevice(c echo.Context) error {
 	if err != nil {
 		updated := h.deviceSessionSnapshot(sessionID)
 		if updated == nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.Invalid("poll codex device oauth", err)
 		}
 		return c.JSON(http.StatusOK, deviceStatusResponse(updated))
 	}
@@ -221,10 +222,10 @@ func (h *ACPCodexOAuthHandler) PollDevice(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param request body ACPCodexOAuthDeviceSessionRequest true "Device authorization session"
 // @Success 200 {object} ACPCodexOAuthDeviceStatusResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp/codex/oauth/device/cancel [post].
 func (h *ACPCodexOAuthHandler) CancelDevice(c echo.Context) error {
 	botID, channelIdentityID, err := h.requireBotAccess(c)
@@ -233,11 +234,11 @@ func (h *ACPCodexOAuthHandler) CancelDevice(c echo.Context) error {
 	}
 	var req ACPCodexOAuthDeviceSessionRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind codex device oauth", err)
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
+		return apperror.Required("session_id")
 	}
 
 	var writeCancel context.CancelFunc
@@ -247,7 +248,7 @@ func (h *ACPCodexOAuthHandler) CancelDevice(c echo.Context) error {
 	session, err := h.requireDeviceSessionLocked(sessionID, botID, channelIdentityID)
 	if err != nil {
 		h.mu.Unlock()
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("cancel codex device oauth", err)
 	}
 	if session.Status == acpCodexDeviceAuthStatusPending || session.Status == acpCodexDeviceAuthStatusWriting {
 		writeCancel = session.WriteCancel

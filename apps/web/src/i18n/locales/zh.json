@@ -93,8 +93,33 @@
     "preview": "预览"
   },
   "errors": {
+    "kind": {
+      "internal": "服务出现异常，请稍后重试。",
+      "invalid": "请求无法处理，请检查输入后重试。",
+      "unauthenticated": "登录状态已失效，请重新登录。",
+      "forbidden": "你没有执行此操作的权限。",
+      "not_found": "该内容不存在，可能已被删除。",
+      "conflict": "当前状态与操作冲突，请刷新后重试。",
+      "failed_precondition": "当前状态下无法执行此操作。",
+      "exhausted": "请求过于频繁，请稍后再试。",
+      "canceled": "请求已取消。",
+      "deadline_exceeded": "操作耗时过长，请重试。",
+      "unavailable": "服务暂时不可用，请稍后重试。",
+      "unimplemented": "该功能暂不可用。"
+    },
+    "field": {
+      "required": "此项为必填。",
+      "invalid": "此项的值无效。",
+      "too_long": "此项的内容过长。",
+      "out_of_range": "此项的值超出允许范围。",
+      "taken": "此项的值已被占用。",
+      "unsupported": "此项的值不受支持。"
+    },
     "bot": {
       "name_taken": "该名称已被占用。"
+    },
+    "agent": {
+      "chat_model_required": "请先为这个 Bot 配置聊天模型，再开始对话。"
     },
     "channel": {
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。"
@@ -133,6 +158,10 @@
       "reasoning_effort_required": "请选择推理强度后重试。",
       "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent。",
       "config_update_failed": "外部 Agent 无法应用所选设置，请重试。"
+    },
+    "upstream": {
+      "attributed": "{provider} 返回：{message}",
+      "anonymous": "模型服务商返回：{message}"
     }
   },
   "auth": {
@@ -736,8 +765,8 @@
       "generic": "调用工具",
       "approve": "允许",
       "reject": "拒绝",
-    "pendingApproval": "等待审核",
-    "executionLocation": "执行位置",
+      "pendingApproval": "等待审核",
+      "executionLocation": "执行位置",
       "pendingUserInput": "等待输入",
       "userInputSubmitted": "已回答",
       "userInputCanceled": "已取消",

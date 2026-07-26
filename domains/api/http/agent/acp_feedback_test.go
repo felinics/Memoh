@@ -1,22 +1,15 @@
 package agent
 
 import (
-	"encoding/json"
+	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
-
 	acpfeedback "github.com/memohai/memoh/domains/agent/decision/feedback"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
-func TestACPFeedbackHTTPErrorPreservesStructuredPayload(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	ctx := e.NewContext(req, rec)
-
+func TestACPFeedbackHTTPErrorUsesContractKind(t *testing.T) {
 	feedback := acpfeedback.New(
 		acpfeedback.CodeNoWorkspaceExec,
 		"missing_permission",
@@ -25,26 +18,11 @@ func TestACPFeedbackHTTPErrorPreservesStructuredPayload(t *testing.T) {
 		"raw backend message",
 		map[string]string{"agent_id": "codex"},
 	)
-	e.DefaultHTTPErrorHandler(echo.NewHTTPError(feedback.HTTPStatus, feedback), ctx)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	err := AcpFeedbackHTTPError(feedback)
+	if kind := apperror.KindOf(err); kind != apperror.KindForbidden {
+		t.Fatalf("kind = %s, want %s", kind, apperror.KindForbidden)
 	}
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if got["code"] != acpfeedback.CodeNoWorkspaceExec {
-		t.Fatalf("code = %#v, want %q", got["code"], acpfeedback.CodeNoWorkspaceExec)
-	}
-	if got["i18n_key"] != "chat.acp.noWorkspaceExec" {
-		t.Fatalf("i18n_key = %#v", got["i18n_key"])
-	}
-	args, ok := got["args"].(map[string]any)
-	if !ok || args["agent_id"] != "codex" {
-		t.Fatalf("args = %#v", got["args"])
-	}
-	if got["message"] != "raw backend message" {
-		t.Fatalf("message = %#v", got["message"])
+	if !errors.Is(err, feedback) {
+		t.Fatalf("cause should unwrap to feedback error")
 	}
 }

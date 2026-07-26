@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/domains/channel/identity"
-	channelpostgres "github.com/memohai/memoh/domains/channel/internal/postgres"
-	dbpkg "github.com/memohai/memoh/internal/db"
+	channelpostgres "github.com/memohai/memoh/domains/channel/internal/postgres/gateway"
+	"github.com/memohai/memoh/internal/db"
 )
 
 func setupIntegrationTest(t *testing.T) (*identity.Service, func()) {
@@ -24,7 +24,7 @@ func setupIntegrationTest(t *testing.T) (*identity.Service, func()) {
 	}
 
 	ctx := context.Background()
-	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
+	pool, err := db.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
 		t.Skipf("skip integration test: cannot connect to database: %v", err)
 	}

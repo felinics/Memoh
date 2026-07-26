@@ -2,12 +2,14 @@ package apple
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/memohai/acgo"
 	"github.com/memohai/acgo/socktainer"
@@ -21,20 +23,56 @@ type ServiceConfig struct {
 	BinaryPath string
 }
 
+var (
+	errServiceNotStarted = fmt.Errorf("%w: apple container service is not started", containerapi.ErrRuntime)
+	errServiceStopped    = fmt.Errorf("%w: apple container service is stopped", containerapi.ErrRuntime)
+)
+
 // ---------------------------------------------------------------------------
 // Service & lifecycle
 // ---------------------------------------------------------------------------
 
 type Service struct {
-	client      *acgo.Client
-	manager     *socktainer.Manager
-	managerOpts []socktainer.Option
-	socketPath  string
-	logger      *slog.Logger
-	mu          sync.Mutex
+	logger         *slog.Logger
+	newManager     managerFactory
+	newClient      clientFactory
+	lifetimeCtx    context.Context
+	lifetimeCancel context.CancelFunc
+	stopped        atomic.Bool
+	closeDone      chan struct{}
+	closeErr       error
+
+	mu                 sync.Mutex
+	started            bool
+	client             appleClient
+	manager            processManager
+	processCancel      context.CancelFunc
+	stopLifetimeCancel func() bool
+	socketPath         string
 }
 
-func NewService(ctx context.Context, log *slog.Logger, cfg ServiceConfig) (*Service, error) {
+type processManager interface {
+	Start(context.Context) error
+	Stop() error
+	SocketPath() string
+}
+
+type appleClient interface {
+	Close() error
+	IsServing(context.Context) (bool, error)
+	Pull(context.Context, string, ...acgo.PullOpt) (acgo.Image, error)
+	GetImage(context.Context, string) (acgo.Image, error)
+	ListImages(context.Context, ...acgo.ImageListOpt) ([]acgo.Image, error)
+	DeleteImage(context.Context, string, ...acgo.ImageDeleteOpt) error
+	NewContainer(context.Context, string, ...acgo.CreateOpt) (acgo.Container, error)
+	LoadContainer(context.Context, string) (acgo.Container, error)
+	Containers(context.Context, ...acgo.ListOpt) ([]acgo.Container, error)
+}
+
+type managerFactory func() processManager
+type clientFactory func(string) (appleClient, error)
+
+func NewService(log *slog.Logger, cfg ServiceConfig) *Service {
 	var managerOpts []socktainer.Option
 	if cfg.BinaryPath != "" {
 		managerOpts = append(managerOpts, socktainer.WithBinary(cfg.BinaryPath))
@@ -42,57 +80,209 @@ func NewService(ctx context.Context, log *slog.Logger, cfg ServiceConfig) (*Serv
 	if cfg.SocketPath != "" {
 		managerOpts = append(managerOpts, socktainer.WithSocket(expandHome(cfg.SocketPath)))
 	}
-
-	svc := &Service{
-		managerOpts: managerOpts,
-		logger:      log.With(slog.String("service", "apple-container")),
-	}
-	if err := svc.startSocktainer(ctx); err != nil {
-		return nil, err
-	}
-	return svc, nil
+	return newService(log, func() processManager {
+		return socktainer.NewManager(managerOpts...)
+	}, func(socketPath string) (appleClient, error) {
+		return acgo.New(acgo.WithSocketPath(socketPath))
+	})
 }
 
-func (s *Service) startSocktainer(ctx context.Context) error {
-	mgr := socktainer.NewManager(s.managerOpts...)
-	if err := mgr.Start(ctx); err != nil {
-		return fmt.Errorf("start socktainer: %w", err)
+func newService(log *slog.Logger, newManager managerFactory, newClient clientFactory) *Service {
+	if log == nil {
+		log = slog.Default()
 	}
-	client, err := acgo.New(acgo.WithSocketPath(mgr.SocketPath()))
-	if err != nil {
-		_ = mgr.Stop()
-		return fmt.Errorf("create acgo client: %w", err)
+	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
+	return &Service{
+		logger:         log.With(slog.String("service", "apple-container")),
+		newManager:     newManager,
+		newClient:      newClient,
+		lifetimeCtx:    lifetimeCtx,
+		lifetimeCancel: lifetimeCancel,
+		closeDone:      make(chan struct{}),
 	}
-	s.manager = mgr
-	s.client = client
-	s.socketPath = mgr.SocketPath()
-	return nil
 }
 
-func (s *Service) ensureHealthy(ctx context.Context) error {
-	if ok, _ := s.client.IsServing(ctx); ok {
-		return nil
+// Start starts Socktainer exactly once. The startup context controls readiness,
+// but its cancellation is detached after Start returns successfully so it does
+// not become the daemon's lifetime context.
+func (s *Service) Start(ctx context.Context) error {
+	if s.stopped.Load() {
+		return errServiceStopped
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if ok, _ := s.client.IsServing(ctx); ok {
+	if s.stopped.Load() {
+		return errServiceStopped
+	}
+	if s.started {
 		return nil
 	}
-	s.logger.WarnContext(ctx, "socktainer not responding, restarting")
-	_ = s.client.Close()
-	_ = s.manager.Stop()
-	_ = os.Remove(s.socketPath)
-	if err := s.startSocktainer(ctx); err != nil {
-		s.logger.ErrorContext(ctx, "socktainer restart failed", slog.Any("error", err))
-		return err
+	return s.startSocktainerLocked(ctx)
+}
+
+func (s *Service) startSocktainerLocked(ctx context.Context) error {
+	mgr := s.newManager()
+	processCtx, processCancel := context.WithCancel(context.WithoutCancel(ctx))
+	stopLifetimeCancel := context.AfterFunc(s.lifetimeCtx, processCancel)
+
+	var startupMu sync.Mutex
+	relayStartupCancel := true
+	stopStartupCancel := context.AfterFunc(ctx, func() {
+		startupMu.Lock()
+		if relayStartupCancel {
+			processCancel()
+		}
+		startupMu.Unlock()
+	})
+
+	startAction := "start socktainer"
+	startErr := mgr.Start(processCtx)
+	var client appleClient
+	if startErr == nil {
+		client, startErr = s.newClient(mgr.SocketPath())
+		if startErr != nil {
+			startAction = "create acgo client"
+		}
 	}
-	s.logger.InfoContext(ctx, "socktainer restarted successfully")
+
+	startupMu.Lock()
+	startupCtxErr := ctx.Err()
+	relayStartupCancel = false
+	startupMu.Unlock()
+	stopStartupCancel()
+
+	if startupCtxErr != nil {
+		startErr = startupCtxErr
+		startAction = "start socktainer"
+	}
+	if startErr == nil && s.stopped.Load() {
+		startErr = errServiceStopped
+	}
+	if startErr != nil {
+		if client != nil {
+			_ = client.Close()
+		}
+		_ = mgr.Stop()
+		processCancel()
+		stopLifetimeCancel()
+		if errors.Is(startErr, errServiceStopped) {
+			return errServiceStopped
+		}
+		return fmt.Errorf("%s: %w", startAction, startErr)
+	}
+
+	s.manager = mgr
+	s.client = client
+	s.processCancel = processCancel
+	s.stopLifetimeCancel = stopLifetimeCancel
+	s.socketPath = mgr.SocketPath()
+	s.started = true
 	return nil
 }
 
-func (s *Service) Close() error {
-	_ = s.client.Close()
-	return s.manager.Stop()
+func (s *Service) ensureHealthy(ctx context.Context) (appleClient, error) {
+	if s.stopped.Load() {
+		return nil, errServiceStopped
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped.Load() {
+		return nil, errServiceStopped
+	}
+	if !s.started || s.client == nil {
+		return nil, errServiceNotStarted
+	}
+	healthCtx, cancelHealth := context.WithCancel(ctx)
+	stopLifetimeCancel := context.AfterFunc(s.lifetimeCtx, cancelHealth)
+	ok, _ := s.client.IsServing(healthCtx)
+	stopLifetimeCancel()
+	cancelHealth()
+	if s.stopped.Load() {
+		return nil, errServiceStopped
+	}
+	if ok {
+		return s.client, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.logger.WarnContext(ctx, "socktainer not responding, restarting")
+	staleSocket := s.socketPath
+	if err := s.stopSocktainerLocked(); err != nil {
+		return nil, fmt.Errorf("stop unhealthy socktainer: %w", err)
+	}
+	_ = os.Remove(staleSocket)
+	if s.stopped.Load() {
+		return nil, errServiceStopped
+	}
+	if err := s.startSocktainerLocked(ctx); err != nil {
+		s.logger.ErrorContext(ctx, "socktainer restart failed", slog.Any("error", err))
+		return nil, err
+	}
+	s.logger.InfoContext(ctx, "socktainer restarted successfully")
+	return s.client, nil
+}
+
+// Close initiates shutdown once and waits for the context-bounded portion of
+// that shutdown. Socktainer's Stop API has no context, but it is internally
+// bounded; keeping it in one owned goroutine lets a timed-out caller retry the
+// join without starting another stop operation.
+func (s *Service) Close(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s.stopped.CompareAndSwap(false, true) {
+		// Cancel immediately so Close racing with startup or a health restart
+		// cannot leave a newly spawned process alive while shutdown waits for the
+		// state lock.
+		s.lifetimeCancel()
+		go func() {
+			s.mu.Lock()
+			s.closeErr = s.stopSocktainerLocked()
+			s.mu.Unlock()
+			close(s.closeDone)
+		}()
+	}
+	select {
+	case <-s.closeDone:
+		return s.closeErr
+	default:
+	}
+	select {
+	case <-s.closeDone:
+		return s.closeErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Service) stopSocktainerLocked() error {
+	client := s.client
+	mgr := s.manager
+	processCancel := s.processCancel
+	stopLifetimeCancel := s.stopLifetimeCancel
+
+	s.started = false
+	s.client = nil
+	s.manager = nil
+	s.processCancel = nil
+	s.stopLifetimeCancel = nil
+	s.socketPath = ""
+
+	var closeErr, stopErr error
+	if client != nil {
+		closeErr = client.Close()
+	}
+	if mgr != nil {
+		stopErr = mgr.Stop()
+	}
+	if processCancel != nil {
+		processCancel()
+	}
+	if stopLifetimeCancel != nil {
+		stopLifetimeCancel()
+	}
+	return errors.Join(closeErr, stopErr)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,10 +293,11 @@ func (s *Service) PullImage(ctx context.Context, ref string, _ *containerapi.Pul
 	if ref == "" {
 		return containerapi.ImageInfo{}, containerapi.ErrInvalidArgument
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return containerapi.ImageInfo{}, err
 	}
-	img, err := s.client.Pull(ctx, ref)
+	img, err := client.Pull(ctx, ref)
 	if err != nil {
 		return containerapi.ImageInfo{}, err
 	}
@@ -117,10 +308,11 @@ func (s *Service) GetImage(ctx context.Context, ref string) (containerapi.ImageI
 	if ref == "" {
 		return containerapi.ImageInfo{}, containerapi.ErrInvalidArgument
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return containerapi.ImageInfo{}, err
 	}
-	img, err := s.client.GetImage(ctx, ref)
+	img, err := client.GetImage(ctx, ref)
 	if err != nil {
 		return containerapi.ImageInfo{}, err
 	}
@@ -128,10 +320,11 @@ func (s *Service) GetImage(ctx context.Context, ref string) (containerapi.ImageI
 }
 
 func (s *Service) ListImages(ctx context.Context) ([]containerapi.ImageInfo, error) {
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return nil, err
 	}
-	imgs, err := s.client.ListImages(ctx)
+	imgs, err := client.ListImages(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -150,10 +343,11 @@ func (s *Service) DeleteImage(ctx context.Context, ref string, _ *containerapi.D
 	if ref == "" {
 		return containerapi.ErrInvalidArgument
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return err
 	}
-	return s.client.DeleteImage(ctx, ref)
+	return client.DeleteImage(ctx, ref)
 }
 
 // ---------------------------------------------------------------------------
@@ -171,16 +365,17 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 	if req.Spec.NetworkJoinTarget.Value != "" || len(req.Spec.AddedCapabilities) > 0 {
 		return containerapi.ContainerInfo{}, containerapi.ErrNotSupported
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return containerapi.ContainerInfo{}, err
 	}
-	if _, err := s.client.GetImage(ctx, req.ImageRef); err != nil {
+	if _, err := client.GetImage(ctx, req.ImageRef); err != nil {
 		s.logger.InfoContext(ctx, "image not found locally, pulling", slog.String("image", req.ImageRef))
-		if _, pullErr := s.client.Pull(ctx, req.ImageRef); pullErr != nil {
+		if _, pullErr := client.Pull(ctx, req.ImageRef); pullErr != nil {
 			return containerapi.ContainerInfo{}, fmt.Errorf("pull image %s: %w", req.ImageRef, pullErr)
 		}
 	}
-	ctr, err := s.client.NewContainer(ctx, req.ID, specToCreateOpts(req)...)
+	ctr, err := client.NewContainer(ctx, req.ID, specToCreateOpts(req)...)
 	if err != nil {
 		return containerapi.ContainerInfo{}, err
 	}
@@ -191,10 +386,11 @@ func (s *Service) GetContainer(ctx context.Context, id string) (containerapi.Con
 	if id == "" {
 		return containerapi.ContainerInfo{}, containerapi.ErrInvalidArgument
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return containerapi.ContainerInfo{}, err
 	}
-	ctr, err := s.client.LoadContainer(ctx, id)
+	ctr, err := client.LoadContainer(ctx, id)
 	if err != nil {
 		return containerapi.ContainerInfo{}, err
 	}
@@ -202,10 +398,11 @@ func (s *Service) GetContainer(ctx context.Context, id string) (containerapi.Con
 }
 
 func (s *Service) ListContainers(ctx context.Context) ([]containerapi.ContainerInfo, error) {
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return nil, err
 	}
-	ctrs, err := s.client.Containers(ctx, acgo.WithListAll())
+	ctrs, err := client.Containers(ctx, acgo.WithListAll())
 	if err != nil {
 		return nil, err
 	}
@@ -224,10 +421,11 @@ func (s *Service) DeleteContainer(ctx context.Context, id string, opts *containe
 	if id == "" {
 		return containerapi.ErrInvalidArgument
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return err
 	}
-	ctr, err := s.client.LoadContainer(ctx, id)
+	ctr, err := client.LoadContainer(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -243,11 +441,12 @@ func (s *Service) ListContainersByLabel(ctx context.Context, key, value string) 
 	if key == "" {
 		return nil, containerapi.ErrInvalidArgument
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return nil, err
 	}
 	filtersJSON := fmt.Sprintf(`{"label":["%s=%s"]}`, key, value)
-	ctrs, err := s.client.Containers(ctx, acgo.WithListAll(), acgo.WithListFilters(filtersJSON))
+	ctrs, err := client.Containers(ctx, acgo.WithListAll(), acgo.WithListFilters(filtersJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -272,10 +471,11 @@ func (s *Service) StartContainer(ctx context.Context, containerID string, _ *con
 	if containerID == "" {
 		return containerapi.ErrInvalidArgument
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return err
 	}
-	ctr, err := s.client.LoadContainer(ctx, containerID)
+	ctr, err := client.LoadContainer(ctx, containerID)
 	if err != nil {
 		return err
 	}
@@ -286,10 +486,11 @@ func (s *Service) StopContainer(ctx context.Context, containerID string, opts *c
 	if containerID == "" {
 		return containerapi.ErrInvalidArgument
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return err
 	}
-	ctr, err := s.client.LoadContainer(ctx, containerID)
+	ctr, err := client.LoadContainer(ctx, containerID)
 	if err != nil {
 		return err
 	}
@@ -316,10 +517,11 @@ func (s *Service) GetTaskInfo(ctx context.Context, containerID string) (containe
 	if containerID == "" {
 		return containerapi.TaskInfo{}, containerapi.ErrInvalidArgument
 	}
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return containerapi.TaskInfo{}, err
 	}
-	ctr, err := s.client.LoadContainer(ctx, containerID)
+	ctr, err := client.LoadContainer(ctx, containerID)
 	if err != nil {
 		return containerapi.TaskInfo{}, err
 	}
@@ -339,10 +541,11 @@ func (*Service) GetContainerMetrics(context.Context, string) (containerapi.Conta
 }
 
 func (s *Service) ListTasks(ctx context.Context, opts *containerapi.ListTasksOptions) ([]containerapi.TaskInfo, error) {
-	if err := s.ensureHealthy(ctx); err != nil {
+	client, err := s.ensureHealthy(ctx)
+	if err != nil {
 		return nil, err
 	}
-	ctrs, err := s.client.Containers(ctx, acgo.WithListAll())
+	ctrs, err := client.Containers(ctx, acgo.WithListAll())
 	if err != nil {
 		return nil, err
 	}

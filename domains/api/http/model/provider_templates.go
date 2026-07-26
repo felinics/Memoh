@@ -38,7 +38,7 @@ func (h *ProviderTemplatesHandler) Register(e *echo.Echo) {
 func (h *ProviderTemplatesHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context(), c.QueryParam("domain"))
 	if err != nil {
-		return mapProviderTemplateError(err)
+		return mapProviderTemplateError("list provider templates", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -56,22 +56,22 @@ func (h *ProviderTemplatesHandler) List(c echo.Context) error {
 func (h *ProviderTemplatesHandler) Get(c echo.Context) error {
 	item, err := h.service.Get(c.Request().Context(), strings.TrimSpace(c.Param("id")), "")
 	if err != nil {
-		return mapProviderTemplateError(err)
+		return mapProviderTemplateError("get provider template", err)
 	}
 	return c.JSON(http.StatusOK, item)
 }
 
-func mapProviderTemplateError(err error) error {
+func mapProviderTemplateError(op string, err error) error {
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, template.ErrDomainInvalid):
-		return apperror.New(apperror.CodeProviderTemplateDomainInvalid, nil)
+		return apperror.Invalid(op, err).WithCode(apperror.CodeProviderTemplateDomainInvalid, nil)
 	case errors.Is(err, template.ErrTemplateNotFound):
-		return apperror.New(apperror.CodeProviderTemplateNotFound, nil)
+		return apperror.NotFound(op, err).WithCode(apperror.CodeProviderTemplateNotFound, nil)
 	case errors.Is(err, template.ErrDomainMismatch):
-		return apperror.New(apperror.CodeProviderTemplateDomainMismatch, nil)
+		return apperror.Invalid(op, err).WithCode(apperror.CodeProviderTemplateDomainMismatch, nil)
 	default:
-		return apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, err, nil)
+		return apperror.Internal(op, err).WithCode(apperror.CodeProviderTemplateOperationFailed, nil)
 	}
 }

@@ -15,18 +15,20 @@ import (
 	"strings"
 	"time"
 
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
+
 	"github.com/memohai/memoh/internal/textutil"
 )
 
 // OAuthService manages OAuth flows for MCP connections.
 type OAuthService struct {
-	store       OAuthStore
+	store       mcppersistence.OAuthStore
 	logger      *slog.Logger
 	httpClient  *http.Client
 	callbackURL string
 }
 
-func NewOAuthService(log *slog.Logger, store OAuthStore, callbackURL string) *OAuthService {
+func NewOAuthService(log *slog.Logger, store mcppersistence.OAuthStore, callbackURL string) *OAuthService {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -36,17 +38,6 @@ func NewOAuthService(log *slog.Logger, store OAuthStore, callbackURL string) *OA
 		httpClient:  &http.Client{Timeout: 15 * time.Second},
 		callbackURL: callbackURL,
 	}
-}
-
-// DiscoveryResult holds the result of an OAuth discovery flow.
-type DiscoveryResult struct {
-	ResourceMetadataURL    string   `json:"resource_metadata_url"`
-	AuthorizationServerURL string   `json:"authorization_server_url"`
-	AuthorizationEndpoint  string   `json:"authorization_endpoint"`
-	TokenEndpoint          string   `json:"token_endpoint"`
-	RegistrationEndpoint   string   `json:"registration_endpoint,omitempty"`
-	ScopesSupported        []string `json:"scopes_supported,omitempty"`
-	ResourceURI            string   `json:"resource_uri"`
 }
 
 // OAuthStatus describes the current OAuth state of a connection.
@@ -69,7 +60,7 @@ type AuthorizeResult struct {
 // 1. Send request to MCP server, expect 401 with WWW-Authenticate
 // 2. Fetch Protected Resource Metadata
 // 3. Fetch Authorization Server Metadata.
-func (s *OAuthService) Discover(ctx context.Context, serverURL string) (*DiscoveryResult, error) {
+func (s *OAuthService) Discover(ctx context.Context, serverURL string) (*mcppersistence.DiscoveryResult, error) {
 	serverURL = strings.TrimSpace(serverURL)
 	if serverURL == "" {
 		return nil, errors.New("server URL is required")
@@ -131,7 +122,7 @@ func (s *OAuthService) Discover(ctx context.Context, serverURL string) (*Discove
 		scopes = []string{}
 	}
 
-	return &DiscoveryResult{
+	return &mcppersistence.DiscoveryResult{
 		ResourceMetadataURL:    resourceMetaURL,
 		AuthorizationServerURL: authServerURL,
 		AuthorizationEndpoint:  asm.AuthorizationEndpoint,
@@ -143,7 +134,7 @@ func (s *OAuthService) Discover(ctx context.Context, serverURL string) (*Discove
 }
 
 // SaveDiscovery persists the discovery result for a connection.
-func (s *OAuthService) SaveDiscovery(ctx context.Context, connectionID string, result *DiscoveryResult) error {
+func (s *OAuthService) SaveDiscovery(ctx context.Context, connectionID string, result *mcppersistence.DiscoveryResult) error {
 	if result == nil {
 		return errors.New("OAuth discovery result is required")
 	}
@@ -190,7 +181,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 		} else {
 			clientID = regResult.ClientID
 			dcrSecret := regResult.ClientSecret
-			if err := s.store.SavePKCEState(ctx, connectionID, PKCEState{
+			if err := s.store.SavePKCEState(ctx, connectionID, mcppersistence.PKCEState{
 				CodeVerifier: "", // will be set below
 				State:        "", // will be set below
 				ClientID:     clientID,
@@ -224,7 +215,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 		return nil, fmt.Errorf("failed to generate state: %w", err)
 	}
 
-	if err := s.store.SavePKCEState(ctx, connectionID, PKCEState{
+	if err := s.store.SavePKCEState(ctx, connectionID, mcppersistence.PKCEState{
 		CodeVerifier: codeVerifier,
 		State:        state,
 		ClientID:     clientID,
@@ -285,7 +276,7 @@ func (s *OAuthService) HandleCallback(ctx context.Context, state, code string) (
 		expiresAt = &t
 	}
 
-	if err := s.store.SaveTokens(ctx, token.ConnectionID, OAuthTokens{
+	if err := s.store.SaveTokens(ctx, token.ConnectionID, mcppersistence.OAuthTokens{
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
 		TokenType:    tokenResp.TokenType,
@@ -331,7 +322,7 @@ func (s *OAuthService) GetValidToken(ctx context.Context, connectionID string) (
 			refreshTokenValue = token.RefreshToken
 		}
 
-		if err := s.store.SaveTokens(ctx, connectionID, OAuthTokens{
+		if err := s.store.SaveTokens(ctx, connectionID, mcppersistence.OAuthTokens{
 			AccessToken:  refreshed.AccessToken,
 			RefreshToken: refreshTokenValue,
 			TokenType:    refreshed.TokenType,

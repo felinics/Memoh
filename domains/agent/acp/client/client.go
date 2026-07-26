@@ -21,7 +21,7 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	"github.com/memohai/memoh/domains/agent/mcp"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
@@ -246,9 +246,14 @@ func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd st
 }
 
 func (c *clientCallbacks) close() {
+	_ = c.closeContext(context.Background())
+}
+
+func (c *clientCallbacks) closeContext(ctx context.Context) error {
 	if c != nil && c.terminals != nil {
-		c.terminals.killAll()
+		return c.terminals.killAll(ctx)
 	}
+	return nil
 }
 
 func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSink, toolSession ToolSessionContext, limits ...ToolOutputLimit) {

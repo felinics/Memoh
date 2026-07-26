@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 const (
@@ -64,7 +66,7 @@ func NewToolGatewayService(log *slog.Logger, sources []ToolSource, opts ...ToolG
 	return svc
 }
 
-func (s *ToolGatewayService) ListTools(ctx context.Context, session ToolSessionContext) ([]ToolDescriptor, error) {
+func (s *ToolGatewayService) ListTools(ctx context.Context, session ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
 	registry, err := s.getRegistry(ctx, session, false)
 	if err != nil {
 		return nil, err
@@ -72,21 +74,21 @@ func (s *ToolGatewayService) ListTools(ctx context.Context, session ToolSessionC
 	return registry.List(), nil
 }
 
-func (s *ToolGatewayService) LookupTool(ctx context.Context, session ToolSessionContext, toolName string) (ToolDescriptor, bool, error) {
+func (s *ToolGatewayService) LookupTool(ctx context.Context, session ToolSessionContext, toolName string) (mcppersistence.ToolDescriptor, bool, error) {
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {
-		return ToolDescriptor{}, false, nil
+		return mcppersistence.ToolDescriptor{}, false, nil
 	}
 	registry, err := s.getRegistry(ctx, session, false)
 	if err != nil {
-		return ToolDescriptor{}, false, err
+		return mcppersistence.ToolDescriptor{}, false, err
 	}
 	if _, desc, ok := registry.Lookup(toolName); ok {
 		return desc, true, nil
 	}
 	registry, err = s.getRegistry(ctx, session, true)
 	if err != nil {
-		return ToolDescriptor{}, false, err
+		return mcppersistence.ToolDescriptor{}, false, err
 	}
 	_, desc, ok := registry.Lookup(toolName)
 	return desc, ok, nil

@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	pluginspersistence "github.com/memohai/memoh/domains/agent/extension/plugins/persistence"
+
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
-	"github.com/memohai/memoh/domains/agent/mcp"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 func TestMissingRequiredVariablesTreatsSelfTemplateDefaultAsMissing(t *testing.T) {
@@ -81,7 +83,7 @@ func TestVariablesFromConfigRestoresSavedInstallVariables(t *testing.T) {
 }
 
 func TestManifestScopesOverrideDiscoveredScopes(t *testing.T) {
-	result := &mcp.DiscoveryResult{ScopesSupported: []string{"repo", "read:org", "workflow"}}
+	result := &mcppersistence.DiscoveryResult{ScopesSupported: []string{"repo", "read:org", "workflow"}}
 	applyRequestedScopes(result, []string{"repo", "read:org"})
 
 	if len(result.ScopesSupported) != 2 || result.ScopesSupported[0] != "repo" || result.ScopesSupported[1] != "read:org" {
@@ -90,7 +92,7 @@ func TestManifestScopesOverrideDiscoveredScopes(t *testing.T) {
 }
 
 func TestPluginSkillRawAddsFrontmatterAndOwnership(t *testing.T) {
-	row := InstallationRecord{
+	row := pluginspersistence.InstallationRecord{
 		ID:         "00000000-0000-0000-0000-000000000001",
 		PluginID:   "github",
 		PluginName: "GitHub",

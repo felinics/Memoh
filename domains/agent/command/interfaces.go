@@ -3,10 +3,10 @@ package command
 import (
 	"context"
 
-	"github.com/memohai/memoh/domains/agent/chat/usage"
-	"github.com/memohai/memoh/domains/api/access/acl"
+	usagepersistence "github.com/memohai/memoh/domains/agent/chat/usage/persistence"
+	aclpersistence "github.com/memohai/memoh/domains/api/bot/access/acl/persistence"
 	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 )
 
 // Skill represents a single skill loaded from a bot's container.
@@ -42,20 +42,20 @@ type ContainerFS interface {
 	ReadFile(ctx context.Context, botID, path string) (string, error)
 }
 
-var ErrNotFound = usage.ErrNotFound
+var ErrNotFound = usagepersistence.ErrNotFound
 
 type (
-	CacheStats   = usage.CacheStats
-	UsageByDay   = usage.Daily
-	UsageByModel = usage.Model
+	CacheStats   = usagepersistence.CacheStats
+	UsageByDay   = usagepersistence.Daily
+	UsageByModel = usagepersistence.Model
 )
 
 // CommandQueries is retained as the composition-root type for slash-command usage reads.
-type CommandQueries = usage.CommandReader
+type CommandQueries = usagepersistence.CommandReader
 
 // AccessEvaluator checks whether the current channel context may trigger chat.
 type AccessEvaluator interface {
-	Evaluate(ctx context.Context, req acl.EvaluateRequest) (bool, error)
+	Evaluate(ctx context.Context, req aclpersistence.EvaluateRequest) (bool, error)
 }
 
 // BotSettings is the narrow settings surface used by slash commands.

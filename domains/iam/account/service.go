@@ -10,13 +10,14 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/memohai/memoh/domains/iam/account/persistence"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
 // Service provides account (credential) management for users.
 type Service struct {
-	store       Store
-	titleModels TitleModelValidator
+	store       persistence.Store
+	titleModels persistence.TitleModelValidator
 	logger      *slog.Logger
 }
 
@@ -25,16 +26,21 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInactiveAccount    = errors.New("account is inactive")
 	ErrInvalidTitleModel  = errors.New("invalid title model")
-	ErrAccountNotFound    = errors.New("account not found")
-	ErrLastActiveAdmin    = errors.New("team must retain at least one active admin")
+
+	// ErrAccountNotFound and ErrLastActiveAdmin are owned by the persistence
+	// port because adapters map storage conditions onto them. They are aliased
+	// here so callers that reason about accounts, not storage, keep a single
+	// import — errors.Is matches either spelling.
+	ErrAccountNotFound = persistence.ErrAccountNotFound
+	ErrLastActiveAdmin = persistence.ErrLastActiveAdmin
 )
 
 // NewService creates a new accounts service.
-func NewService(log *slog.Logger, store Store, titleModels ...TitleModelValidator) *Service {
+func NewService(log *slog.Logger, store persistence.Store, titleModels ...persistence.TitleModelValidator) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	var titleModelValidator TitleModelValidator
+	var titleModelValidator persistence.TitleModelValidator
 	if len(titleModels) > 0 {
 		titleModelValidator = titleModels[0]
 	}
@@ -206,7 +212,7 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 		isActive = *req.IsActive
 	}
 
-	row, err := s.store.CreateAccount(ctx, CreateInput{
+	row, err := s.store.CreateAccount(ctx, persistence.CreateInput{
 		UserID:       userID,
 		Username:     username,
 		Email:        email,
@@ -223,28 +229,37 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 	return account, nil
 }
 
+// Provision creates a new principal and its account in one call, and is the
+// entry point for callers that have no user id yet (first-run bootstrap,
+// self-service signup). Callers that already hold a principal use Create.
+//
+// Password hashing and role normalization stay owned by Create, so no caller
+// needs to reimplement them.
+func (s *Service) Provision(ctx context.Context, req CreateAccountRequest) (Account, error) {
+	if s.store == nil {
+		return Account{}, errors.New("account store not configured")
+	}
+	userRow, err := s.store.CreateUser(ctx, persistence.CreateUserInput{
+		IsActive: true,
+		Metadata: []byte("{}"),
+	})
+	if err != nil {
+		return Account{}, err
+	}
+	if strings.TrimSpace(userRow.ID) == "" {
+		return Account{}, errors.New("create user: invalid id")
+	}
+	return s.Create(ctx, userRow.ID, req)
+}
+
 // CreateHuman keeps compatibility with older call sites.
 //
-// Deprecated: use Create directly.
+// Deprecated: use Create when the principal exists, or Provision when it does not.
 func (s *Service) CreateHuman(ctx context.Context, userID string, req CreateAccountRequest) (Account, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		if s.store == nil {
-			return Account{}, errors.New("account store not configured")
-		}
-		userRow, err := s.store.CreateUser(ctx, CreateUserInput{
-			IsActive: true,
-			Metadata: []byte("{}"),
-		})
-		if err != nil {
-			return Account{}, err
-		}
-		if strings.TrimSpace(userRow.ID) == "" {
-			return Account{}, errors.New("create user: invalid id")
-		}
-		userID = userRow.ID
+	if strings.TrimSpace(userID) == "" {
+		return s.Provision(ctx, req)
 	}
-	return s.Create(ctx, userID, req)
+	return s.Create(ctx, strings.TrimSpace(userID), req)
 }
 
 // UpdateAdmin updates account fields as admin.
@@ -263,7 +278,7 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 			return Account{}, err
 		}
 	}
-	row, err := s.store.UpdateAdmin(ctx, AdminUpdate{
+	row, err := s.store.UpdateAdmin(ctx, persistence.AdminUpdate{
 		UserID:   userID,
 		Role:     role,
 		IsActive: req.IsActive,
@@ -322,7 +337,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdatePr
 			}
 		}
 	}
-	row, err := s.store.UpdateProfile(ctx, ProfileUpdate{
+	row, err := s.store.UpdateProfile(ctx, persistence.ProfileUpdate{
 		UserID:       userID,
 		DisplayName:  displayName,
 		AvatarURL:    avatarURL,
@@ -361,7 +376,7 @@ func (s *Service) UpdatePassword(ctx context.Context, userID, currentPassword, n
 	if err != nil {
 		return err
 	}
-	return s.store.UpdatePassword(ctx, PasswordUpdate{
+	return s.store.UpdatePassword(ctx, persistence.PasswordUpdate{
 		UserID:       userID,
 		PasswordHash: string(hashed),
 	})
@@ -405,7 +420,7 @@ func isAdminRole(role any) bool {
 	}
 }
 
-func toAccount(row Record) Account {
+func toAccount(row persistence.Record) Account {
 	username := strings.TrimSpace(row.Username)
 	email := strings.TrimSpace(row.Email)
 	displayName := strings.TrimSpace(row.DisplayName)

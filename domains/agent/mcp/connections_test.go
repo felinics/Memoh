@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"testing"
+
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 func TestInferTypeAndConfig_Stdio(t *testing.T) {
@@ -93,7 +95,7 @@ func TestInferTypeAndConfig_BothCommandAndURL(t *testing.T) {
 }
 
 func TestConnectionToExportEntry_Stdio(t *testing.T) {
-	conn := Connection{
+	conn := mcppersistence.Connection{
 		Name: "fs",
 		Type: "stdio",
 		Config: map[string]any{
@@ -122,7 +124,7 @@ func TestConnectionToExportEntry_Stdio(t *testing.T) {
 }
 
 func TestConnectionToExportEntry_HTTP(t *testing.T) {
-	conn := Connection{
+	conn := mcppersistence.Connection{
 		Name: "remote",
 		Type: "http",
 		Config: map[string]any{
@@ -143,7 +145,7 @@ func TestConnectionToExportEntry_HTTP(t *testing.T) {
 }
 
 func TestConnectionToExportEntry_SSE(t *testing.T) {
-	conn := Connection{
+	conn := mcppersistence.Connection{
 		Name:   "sse",
 		Type:   "sse",
 		Config: map[string]any{"url": "https://example.com/sse"},

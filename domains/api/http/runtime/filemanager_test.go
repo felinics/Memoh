@@ -18,6 +18,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 func TestResolveContainerPathUsesPOSIXSeparators(t *testing.T) {
@@ -142,8 +144,7 @@ func TestFSWriteRejectsStaleExpectedRevision(t *testing.T) {
 		"content":          "mine",
 		"expectedRevision": "sha256:stale",
 	}, env.handler.FSWrite)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
+	if apperror.KindOf(err) != apperror.KindConflict {
 		t.Fatalf("expected conflict error, got %v", err)
 	}
 	assertLocalFile(t, env.localPath("/data/rev.txt"), "base")
@@ -189,9 +190,8 @@ func TestFSWriteRejectsEmptyExpectedRevision(t *testing.T) {
 		"content":          "mine",
 		"expectedRevision": "",
 	}, env.handler.FSWrite)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 bad request for empty expectedRevision, got %v", err)
+	if apperror.KindOf(err) != apperror.KindInvalid {
+		t.Fatalf("expected invalid error for empty expectedRevision, got %v", err)
 	}
 	// Buffer must not have been written under the ambiguous condition.
 	assertLocalFile(t, env.localPath("/data/rev.txt"), "base")
@@ -294,8 +294,7 @@ func TestFSExtractRejectsExistingDestination(t *testing.T) {
 	}
 
 	_, err := env.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/extract", FSExtractRequest{Path: "/data/bundle.zip"}, env.handler.FSExtract)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
+	if apperror.KindOf(err) != apperror.KindConflict {
 		t.Fatalf("expected conflict error, got %v", err)
 	}
 }
@@ -305,9 +304,8 @@ func TestFSExtractRejectsZipSlipEntry(t *testing.T) {
 	env.writeBinaryFile(t, "/data/bundle.zip", buildZipArchive(t, map[string]string{"../escape.txt": "nope"}, nil))
 
 	_, err := env.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/extract", FSExtractRequest{Path: "/data/bundle.zip"}, env.handler.FSExtract)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("expected bad request error, got %v", err)
+	if apperror.KindOf(err) != apperror.KindInvalid {
+		t.Fatalf("expected invalid error, got %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(env.dataRoot, "escape.txt")); !os.IsNotExist(statErr) {
 		t.Fatalf("zip-slip entry escaped destination: %v", statErr)

@@ -13,7 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
-	"github.com/memohai/memoh/domains/channel/internal/common"
+	"github.com/memohai/memoh/domains/channel/internal/logging"
 	"github.com/memohai/memoh/internal/redact"
 	"github.com/memohai/memoh/internal/textutil"
 )
@@ -188,14 +188,23 @@ func (a *MisskeyAdapter) Connect(ctx context.Context, cfg gateway.ChannelConfig,
 	a.mu.Unlock()
 
 	connCtx, cancel := context.WithCancel(ctx)
-	go a.runStreamLoop(connCtx, cfg, mkCfg, me, handler)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.runStreamLoop(connCtx, cfg, mkCfg, me, handler)
+	}()
 
-	stop := func(_ context.Context) error {
+	stop := func(stopCtx context.Context) error {
 		if a.logger != nil {
 			a.logger.InfoContext(ctx, "stop", slog.String("config_id", cfg.ID))
 		}
 		cancel()
-		return nil
+		select {
+		case <-done:
+			return nil
+		case <-stopCtx.Done():
+			return stopCtx.Err()
+		}
 	}
 	return gateway.NewConnection(cfg, stop), nil
 }
@@ -233,6 +242,15 @@ func (a *MisskeyAdapter) runStream(ctx context.Context, cfg gateway.ChannelConfi
 		return fmt.Errorf("misskey ws dial: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
+	closeWatcherDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-closeWatcherDone:
+		}
+	}()
+	defer close(closeWatcherDone)
 
 	if a.logger != nil {
 		a.logger.InfoContext(ctx, "stream connected", slog.String("config_id", cfg.ID))
@@ -533,7 +551,7 @@ func (a *MisskeyAdapter) logInbound(configID string, msg gateway.InboundMessage)
 		slog.String("config_id", configID),
 		slog.String("user_id", msg.Sender.Attribute("user_id")),
 		slog.String("username", msg.Sender.Attribute("username")),
-		slog.String("text", common.SummarizeText(msg.Message.Text)),
+		slog.String("text", logging.SummarizeText(msg.Message.Text)),
 	)
 }
 

@@ -2,6 +2,7 @@ package application
 
 import (
 	"encoding/json"
+	"strings"
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 )
@@ -100,3 +101,29 @@ type ChatResponse struct {
 
 // StreamChunk is one raw event emitted by the application stream.
 type StreamChunk = json.RawMessage
+
+// modelQueryText is the text actually sent to the model. ModelQuery carries a
+// rewritten form (headers, skill activation) when the raw user text must stay
+// unchanged for persistence and display.
+func modelQueryText(req ChatRequest) string {
+	if strings.TrimSpace(req.ModelQuery) != "" {
+		return req.ModelQuery
+	}
+	return req.Query
+}
+
+// prependTurnUserMessage puts the user message back in front of the model's
+// output. The SDK returns only assistant and tool messages, so the round is
+// incomplete for persistence without it. Skill activations carry no query text
+// yet still open a turn, so they are prepended too.
+func prependTurnUserMessage(req ChatRequest, output []agentdomain.ModelMessage) []agentdomain.ModelMessage {
+	if strings.TrimSpace(req.Query) == "" && req.UserMessageKind != agentdomain.UserMessageKindSkillActivation {
+		return output
+	}
+	round := make([]agentdomain.ModelMessage, 0, 1+len(output))
+	round = append(round, agentdomain.ModelMessage{
+		Role:    "user",
+		Content: agentdomain.NewTextContent(req.Query),
+	})
+	return append(round, output...)
+}

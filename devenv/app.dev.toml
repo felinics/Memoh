@@ -68,8 +68,8 @@ sslmode = "disable"
 
 [pgvector]
 enabled = true
-host = "127.0.0.1"
-port = 5433
+host = "pgvector"
+port = 5432
 user = "memoh"
 password = "memoh123"
 database = "memoh_vector"

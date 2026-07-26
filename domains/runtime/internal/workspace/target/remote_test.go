@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	settingpersistence "github.com/memohai/memoh/domains/api/bot/setting/persistence"
 	"github.com/memohai/memoh/domains/runtime/bridge/bridgepb"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 	userruntime "github.com/memohai/memoh/domains/runtime/client"
@@ -226,7 +226,7 @@ func TestRemoteWorkspaceMountsAreIndependentAndPrimaryIsUnique(t *testing.T) {
 
 func TestRemoteWorkspaceDefaultApprovalDoesNotInheritNativeBypasses(t *testing.T) {
 	config := runtimeworkspace.DefaultRemoteToolApprovalConfig()
-	if config.Read.Mode != setting.ToolApprovalAllow || config.Write.Mode != setting.ToolApprovalAsk || config.Exec.Mode != setting.ToolApprovalAsk {
+	if config.Read.Mode != settingpersistence.ToolApprovalAllow || config.Write.Mode != settingpersistence.ToolApprovalAsk || config.Exec.Mode != settingpersistence.ToolApprovalAsk {
 		t.Fatalf("modes = %#v", config)
 	}
 	if len(config.Read.BypassGlobs) != 0 || len(config.Write.BypassGlobs) != 0 || len(config.Exec.BypassCommands) != 0 {

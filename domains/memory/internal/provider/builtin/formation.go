@@ -7,7 +7,7 @@ import (
 	"time"
 
 	memport "github.com/memohai/memoh/domains/memory/internal/port"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 const (
@@ -32,14 +32,14 @@ type formationResult struct {
 }
 
 // runFormation executes the Extract -> candidate retrieval -> Decide -> apply pipeline.
-func runFormation(ctx context.Context, logger *slog.Logger, llm memreg.LLM, runtime Runtime, req memreg.AfterChatRequest) formationResult {
+func runFormation(ctx context.Context, logger *slog.Logger, llm memprovider.LLM, runtime Runtime, req memprovider.AfterChatRequest) formationResult {
 	ctx, cancel := context.WithTimeout(ctx, formationTimeout)
 	defer cancel()
 
 	botID := strings.TrimSpace(req.BotID)
 	result := formationResult{}
 
-	extracted, err := llm.Extract(ctx, memreg.ExtractRequest{
+	extracted, err := llm.Extract(ctx, memprovider.ExtractRequest{
 		BotID:            botID,
 		Messages:         req.Messages,
 		TimezoneLocation: req.TimezoneLocation,
@@ -56,7 +56,7 @@ func runFormation(ctx context.Context, logger *slog.Logger, llm memreg.LLM, runt
 
 	candidates := gatherCandidates(ctx, logger, runtime, botID, facts)
 
-	decided, err := llm.Decide(ctx, memreg.DecideRequest{
+	decided, err := llm.Decide(ctx, memprovider.DecideRequest{
 		BotID:      botID,
 		Facts:      facts,
 		Candidates: candidates,
@@ -78,9 +78,9 @@ func runFormation(ctx context.Context, logger *slog.Logger, llm memreg.LLM, runt
 }
 
 // gatherCandidates collects existing memories relevant to the extracted facts.
-func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime, botID string, facts []string) []memreg.CandidateMemory {
+func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime, botID string, facts []string) []memprovider.CandidateMemory {
 	seen := make(map[string]struct{})
-	candidates := make([]memreg.CandidateMemory, 0, candidateSearchLimit)
+	candidates := make([]memprovider.CandidateMemory, 0, candidateSearchLimit)
 
 	filters := map[string]any{
 		"namespace": sharedMemoryNamespace,
@@ -92,7 +92,7 @@ func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime,
 		if len(candidates) >= maxCandidatesPerDecide {
 			break
 		}
-		resp, err := runtime.Search(ctx, memreg.SearchRequest{
+		resp, err := runtime.Search(ctx, memprovider.SearchRequest{
 			Query:   fact,
 			BotID:   botID,
 			Limit:   candidateSearchLimit / max(len(facts), 1),
@@ -112,7 +112,7 @@ func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime,
 				continue
 			}
 			seen[id] = struct{}{}
-			candidates = append(candidates, memreg.CandidateMemory{
+			candidates = append(candidates, memprovider.CandidateMemory{
 				ID:        id,
 				Memory:    item.Memory,
 				CreatedAt: item.CreatedAt,
@@ -125,7 +125,7 @@ func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime,
 	}
 
 	if len(candidates) < maxCandidatesPerDecide {
-		resp, err := runtime.GetAll(ctx, memreg.GetAllRequest{
+		resp, err := runtime.GetAll(ctx, memprovider.GetAllRequest{
 			BotID:   botID,
 			Limit:   candidateGetAllLimit,
 			Filters: filters,
@@ -141,7 +141,7 @@ func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime,
 					continue
 				}
 				seen[id] = struct{}{}
-				candidates = append(candidates, memreg.CandidateMemory{
+				candidates = append(candidates, memprovider.CandidateMemory{
 					ID:        id,
 					Memory:    item.Memory,
 					CreatedAt: item.CreatedAt,
@@ -158,7 +158,7 @@ func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime,
 }
 
 // applyActions executes the decided CRUD actions against the runtime.
-func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, botID string, actions []memreg.DecisionAction, filters map[string]any, metadata map[string]any, result *formationResult) {
+func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, botID string, actions []memprovider.DecisionAction, filters map[string]any, metadata map[string]any, result *formationResult) {
 	deleted := make(map[string]struct{})
 	updated := make(map[string]struct{})
 
@@ -172,7 +172,7 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 				result.Skipped++
 				continue
 			}
-			if _, err := runtime.Add(ctx, memreg.AddRequest{
+			if _, err := runtime.Add(ctx, memprovider.AddRequest{
 				Message:  text,
 				BotID:    botID,
 				Metadata: metadata,
@@ -195,7 +195,7 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 				result.Skipped++
 				continue
 			}
-			if _, err := runtime.Update(ctx, memreg.UpdateRequest{
+			if _, err := runtime.Update(ctx, memprovider.UpdateRequest{
 				MemoryID: id,
 				Memory:   text,
 			}); err != nil {

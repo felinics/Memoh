@@ -18,7 +18,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 	"github.com/memohai/memoh/internal/apperror"
 )
@@ -262,24 +262,28 @@ func fsFileInfoFromEntry(containerPath, name string, isDir bool, size int64, mod
 	}
 }
 
-// fsHTTPError maps mcpclient domain errors to HTTP status codes.
+// FSHTTPError maps bridge FS errors to apperror kinds.
 func FSHTTPError(err error) error {
+	return fsError("workspace file operation", err)
+}
+
+func fsError(op string, err error) error {
 	switch {
 	case errors.Is(err, bridge.ErrNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound(op, err)
 	case errors.Is(err, bridge.ErrBadRequest):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid(op, err)
 	case errors.Is(err, bridge.ErrForbidden):
-		return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		return apperror.Forbidden(op, err)
 	case errors.Is(err, bridge.ErrUnavailable):
 		return workspaceUnavailableError(err)
 	default:
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal(op, err)
 	}
 }
 
 func workspaceUnavailableError(cause error) error {
-	return apperror.Wrap(apperror.CodeWorkspaceUnreachable, cause, nil)
+	return apperror.Unavailable("reach workspace", cause).WithCode(apperror.CodeWorkspaceUnreachable, nil)
 }
 
 // ---------- handlers ----------
@@ -291,10 +295,10 @@ func workspaceUnavailableError(cause error) error {
 // @Param bot_id path string true "Bot ID"
 // @Param path query string true "Workspace path"
 // @Success 200 {object} FSFileInfo
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs [get].
 func (h *ContainerdHandler) FSStat(c echo.Context) error {
@@ -309,7 +313,7 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 
 	containerPath, err := resolveContainerPath(rawPath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 
 	ctx := c.Request().Context()
@@ -340,9 +344,9 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param path query string true "Workspace directory path"
 // @Success 200 {object} FSListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/list [get].
 func (h *ContainerdHandler) FSList(c echo.Context) error {
@@ -357,7 +361,7 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 
 	containerPath, err := resolveContainerPath(rawPath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 
 	ctx := c.Request().Context()
@@ -399,9 +403,9 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param path query string true "Workspace file path"
 // @Success 200 {object} FSReadResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/read [get].
 func (h *ContainerdHandler) FSRead(c echo.Context) error {
@@ -411,12 +415,12 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	}
 	rawPath := c.QueryParam("path")
 	if strings.TrimSpace(rawPath) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.Required("path")
 	}
 
 	containerPath, err := resolveContainerPath(rawPath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 
 	ctx := c.Request().Context()
@@ -433,7 +437,7 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read file")
+		return apperror.Internal("read workspace file", nil)
 	}
 
 	return c.JSON(http.StatusOK, FSReadResponse{
@@ -452,20 +456,20 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 // @Param path query string true "Workspace file path"
 // @Produce octet-stream
 // @Success 200 {file} binary
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/download [get].
 func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	rawPath := c.QueryParam("path")
 	if strings.TrimSpace(rawPath) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.Required("path")
 	}
 
 	containerPath, err := resolveContainerPath(rawPath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 
 	requireAccess := func(c echo.Context) (string, error) {
@@ -504,7 +508,7 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read file")
+		return apperror.Internal("read workspace file", nil)
 	}
 
 	fileName := path.Base(containerPath)
@@ -525,10 +529,10 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 // @Param payload body FSArchiveRequest true "Archive request"
 // @Produce octet-stream
 // @Success 200 {file} binary
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/archive [post].
 func (h *ContainerdHandler) FSArchive(c echo.Context) error {
@@ -538,11 +542,11 @@ func (h *ContainerdHandler) FSArchive(c echo.Context) error {
 	}
 	var req FSArchiveRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind archive request", err)
 	}
 	paths, err := dedupeArchivePaths(req.Paths)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("validate archive paths", err)
 	}
 
 	ctx := c.Request().Context()
@@ -569,7 +573,7 @@ func (h *ContainerdHandler) writeArchive(ctx context.Context, client *bridge.Cli
 
 	paths, err := dedupeArchivePaths(containerPaths)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("validate archive paths", err)
 	}
 	usedNames := make(map[string]int, len(paths))
 	for _, containerPath := range paths {
@@ -588,7 +592,7 @@ func (h *ContainerdHandler) writeArchive(ctx context.Context, client *bridge.Cli
 func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridge.Client, tw *tar.Writer, containerPath, archivePath string, isDir bool) error {
 	archivePath, err := safeArchiveEntryPath(archivePath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 	if archivePath == "" {
 		return nil
@@ -609,7 +613,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 		header.Name = strings.TrimRight(archivePath, "/") + "/"
 		header.Size = 0
 		if err := tw.WriteHeader(header); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("archive directory: %v", err))
+			return apperror.Internal("archive directory", err)
 		}
 		entries, err := client.ListDirAll(ctx, containerPath, false)
 		if err != nil {
@@ -632,7 +636,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 	header.Typeflag = tar.TypeReg
 	header.Mode = 0o644
 	if err := tw.WriteHeader(header); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("archive file: %v", err))
+		return apperror.Internal("archive file", err)
 	}
 	rc, err := client.ReadRaw(ctx, containerPath)
 	if err != nil {
@@ -640,7 +644,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 	}
 	defer func() { _ = rc.Close() }()
 	if _, err := io.Copy(tw, rc); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("archive copy: %v", err))
+		return apperror.Internal("archive copy", err)
 	}
 	return nil
 }
@@ -652,9 +656,9 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSWriteRequest true "Write request"
 // @Success 200 {object} fsOpResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/write [post].
 func (h *ContainerdHandler) FSWrite(c echo.Context) error {
@@ -664,15 +668,15 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 	}
 	var req FSWriteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind write request", err)
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.Required("path")
 	}
 
 	containerPath, err := resolveContainerPath(req.Path)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 
 	ctx := c.Request().Context()
@@ -689,14 +693,14 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 		// write. Reject the ambiguous form; clients should omit the field
 		// instead.
 		if *req.ExpectedRevision == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "expectedRevision must be non-empty; omit the field for an unconditional write")
+			return apperror.Field("expectedRevision", apperror.FieldInvalid)
 		}
 		currentRevision, err := readContainerFileRevision(ctx, client, containerPath)
 		if err != nil {
 			return FSHTTPError(err)
 		}
 		if currentRevision != *req.ExpectedRevision {
-			return echo.NewHTTPError(http.StatusConflict, "file changed on disk")
+			return apperror.Conflict("write workspace file", nil)
 		}
 	}
 
@@ -717,9 +721,9 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 // @Param file formData file true "File to upload"
 // @Accept multipart/form-data
 // @Success 200 {object} FSUploadResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/upload [post].
 func (h *ContainerdHandler) FSUpload(c echo.Context) error {
@@ -729,12 +733,12 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	}
 	destPath := strings.TrimSpace(c.FormValue("path"))
 	if destPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.Required("path")
 	}
 
 	containerPath, err := resolveContainerPath(destPath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 
 	ctx := c.Request().Context()
@@ -750,11 +754,11 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	}
 	file, err := c.FormFile("file")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "file is required")
+		return apperror.Required("file")
 	}
 	src, err := file.Open()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("open uploaded file", err)
 	}
 	defer func() { _ = src.Close() }()
 
@@ -776,9 +780,9 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSMkdirRequest true "Mkdir request"
 // @Success 200 {object} fsOpResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/mkdir [post].
 func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
@@ -788,15 +792,15 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 	}
 	var req FSMkdirRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind mkdir request", err)
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.Required("path")
 	}
 
 	containerPath, err := resolveContainerPath(req.Path)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 
 	ctx := c.Request().Context()
@@ -819,10 +823,10 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSDeleteRequest true "Delete request"
 // @Success 200 {object} fsOpResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/delete [post].
 func (h *ContainerdHandler) FSDelete(c echo.Context) error {
@@ -832,19 +836,19 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	}
 	var req FSDeleteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind delete request", err)
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.Required("path")
 	}
 
 	containerPath, err := resolveContainerPath(req.Path)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 
 	if containerPath == "/" {
-		return echo.NewHTTPError(http.StatusForbidden, "cannot delete root directory")
+		return apperror.Forbidden("delete workspace path", nil)
 	}
 
 	ctx := c.Request().Context()
@@ -867,10 +871,10 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSRenameRequest true "Rename request"
 // @Success 200 {object} fsOpResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/rename [post].
 func (h *ContainerdHandler) FSRename(c echo.Context) error {
@@ -880,19 +884,22 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	}
 	var req FSRenameRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind rename request", err)
 	}
 	if strings.TrimSpace(req.OldPath) == "" || strings.TrimSpace(req.NewPath) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "oldPath and newPath are required")
+		return apperror.Invalid("rename workspace path", nil).WithFields(
+			apperror.FieldError{Pointer: "oldPath", Code: apperror.FieldRequired},
+			apperror.FieldError{Pointer: "newPath", Code: apperror.FieldRequired},
+		)
 	}
 
 	oldPath, err := resolveContainerPath(req.OldPath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 	newPath, err := resolveContainerPath(req.NewPath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 
 	ctx := c.Request().Context()
@@ -915,11 +922,11 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSExtractRequest true "Extract request"
 // @Success 200 {object} FSExtractResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 409 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/extract [post].
 func (h *ContainerdHandler) FSExtract(c echo.Context) error {
@@ -929,18 +936,18 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 	}
 	var req FSExtractRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind extract request", err)
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.Required("path")
 	}
 	containerPath, err := resolveContainerPath(req.Path)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("resolve workspace path", err)
 	}
 	lower := strings.ToLower(containerPath)
 	if !strings.HasSuffix(lower, ".zip") && !strings.HasSuffix(lower, ".tar.gz") && !strings.HasSuffix(lower, ".tgz") {
-		return echo.NewHTTPError(http.StatusBadRequest, "unsupported archive format")
+		return apperror.Field("path", apperror.FieldUnsupported)
 	}
 
 	ctx := c.Request().Context()
@@ -953,12 +960,12 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 		return FSHTTPError(err)
 	}
 	if entry.GetIsDir() {
-		return echo.NewHTTPError(http.StatusBadRequest, "path must be an archive file")
+		return apperror.Field("path", apperror.FieldInvalid)
 	}
 
 	destination := defaultExtractDestination(containerPath)
 	if _, err := client.Stat(ctx, destination); err == nil {
-		return echo.NewHTTPError(http.StatusConflict, "destination already exists")
+		return apperror.Conflict("extract archive", nil)
 	} else if !errors.Is(err, bridge.ErrNotFound) {
 		return FSHTTPError(err)
 	}
@@ -990,17 +997,17 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destination string) (int, int, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return 0, 0, echo.NewHTTPError(http.StatusInternalServerError, "failed to read archive")
+		return 0, 0, apperror.Internal("read archive", nil)
 	}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return 0, 0, echo.NewHTTPError(http.StatusBadRequest, "invalid zip archive")
+		return 0, 0, apperror.Invalid("parse zip archive", nil)
 	}
 	files, dirs := 0, 0
 	for _, file := range zr.File {
 		entryPath, err := safeArchiveEntryPath(file.Name)
 		if err != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return files, dirs, apperror.Invalid("extract archive entry", err)
 		}
 		if entryPath == "" {
 			continue
@@ -1015,7 +1022,7 @@ func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destina
 		}
 		src, err := file.Open()
 		if err != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusBadRequest, "invalid zip entry")
+			return files, dirs, apperror.Invalid("parse zip entry", nil)
 		}
 		written, writeErr := client.WriteRaw(ctx, targetPath, src)
 		closeErr := src.Close()
@@ -1023,7 +1030,7 @@ func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destina
 			return files, dirs, FSHTTPError(writeErr)
 		}
 		if closeErr != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusInternalServerError, closeErr.Error())
+			return files, dirs, apperror.Internal("close zip entry", closeErr)
 		}
 		if written >= 0 {
 			files++
@@ -1035,7 +1042,7 @@ func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destina
 func extractTarGz(ctx context.Context, client *bridge.Client, r io.Reader, destination string) (int, int, error) {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
-		return 0, 0, echo.NewHTTPError(http.StatusBadRequest, "invalid gzip archive")
+		return 0, 0, apperror.Invalid("parse gzip archive", nil)
 	}
 	defer func() { _ = gr.Close() }()
 
@@ -1047,11 +1054,11 @@ func extractTarGz(ctx context.Context, client *bridge.Client, r io.Reader, desti
 			break
 		}
 		if err != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusBadRequest, "invalid tar archive")
+			return files, dirs, apperror.Invalid("parse tar archive", nil)
 		}
 		entryPath, err := safeArchiveEntryPath(header.Name)
 		if err != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return files, dirs, apperror.Invalid("extract archive entry", err)
 		}
 		if entryPath == "" {
 			continue

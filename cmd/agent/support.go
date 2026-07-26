@@ -13,12 +13,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
-	"golang.org/x/crypto/bcrypt"
 
 	dbembed "github.com/memohai/memoh/db"
 	emailpkg "github.com/memohai/memoh/domains/channel/email"
 	"github.com/memohai/memoh/domains/iam/account"
-	iamassembly "github.com/memohai/memoh/domains/iam/assembly"
+	accountpersistence "github.com/memohai/memoh/domains/iam/account/persistence"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/epoch"
@@ -144,23 +143,23 @@ func runAccountCommand(args []string, passwordInput io.Reader) error {
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer pool.Close()
-	recovery := iamassembly.NewAccountRecovery(pool)
+	recovery := account.NewPostgresRecovery(pool)
 	return recovery.RecoverAdmin(ctx, identity, password)
 }
 
 func ensureAdminUser(
 	ctx context.Context,
 	log *slog.Logger,
-	counter account.AccountCounter,
-	creator account.Store,
+	counter accountpersistence.AccountCounter,
+	accounts *account.Service,
 	emailService *emailpkg.Service,
 	cfg config.Config,
 ) error {
 	if counter == nil {
 		return errors.New("account counter not configured")
 	}
-	if creator == nil {
-		return errors.New("account creator not configured")
+	if accounts == nil {
+		return errors.New("account service not configured")
 	}
 	count, err := counter.CountAccounts(ctx)
 	if err != nil {
@@ -180,33 +179,23 @@ func ensureAdminUser(
 		log.WarnContext(ctx, "admin password uses default placeholder; please update config.toml")
 	}
 
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("hash admin password: %w", err)
-	}
-
-	user, err := creator.CreateUser(ctx, account.CreateUserInput{
-		IsActive: true,
-		Metadata: []byte("{}"),
-	})
-	if err != nil {
-		return fmt.Errorf("create admin user: %w", err)
-	}
-
-	_, err = creator.CreateAccount(ctx, account.CreateInput{
-		UserID:       user.ID,
-		Username:     username,
-		Email:        email,
-		PasswordHash: string(hashed),
-		Role:         "admin",
-		DisplayName:  username,
-		IsActive:     true,
+	// Provision creates the principal and its account together, and owns
+	// password hashing and role normalization. Bootstrap must not reimplement
+	// those rules.
+	isActive := true
+	created, err := accounts.Provision(ctx, account.CreateAccountRequest{
+		Username:    username,
+		Password:    password,
+		Email:       email,
+		Role:        "admin",
+		DisplayName: username,
+		IsActive:    &isActive,
 	})
 	if err != nil {
 		return fmt.Errorf("create admin account: %w", err)
 	}
 	if emailService != nil {
-		if err := emailService.EnsureDefaultGmailProvider(ctx, user.ID); err != nil {
+		if err := emailService.EnsureDefaultGmailProvider(ctx, created.ID); err != nil {
 			return fmt.Errorf("ensure admin gmail provider: %w", err)
 		}
 	}

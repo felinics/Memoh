@@ -10,6 +10,7 @@ import (
 	"time"
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 type bootstrapProvider struct {
@@ -26,44 +27,48 @@ func (p *bootstrapProvider) Close() error {
 	return nil
 }
 
-func (*bootstrapProvider) OnBeforeChat(context.Context, BeforeChatRequest) (*BeforeChatResult, error) {
+func (*bootstrapProvider) OnBeforeChat(context.Context, memprovider.BeforeChatRequest) (*memprovider.BeforeChatResult, error) {
 	return nil, nil
 }
-func (*bootstrapProvider) OnAfterChat(context.Context, AfterChatRequest) error { return nil }
-func (*bootstrapProvider) Add(context.Context, AddRequest) (SearchResponse, error) {
-	return SearchResponse{}, nil
+
+func (*bootstrapProvider) OnAfterChat(context.Context, memprovider.AfterChatRequest) error {
+	return nil
 }
 
-func (*bootstrapProvider) Search(context.Context, SearchRequest) (SearchResponse, error) {
-	return SearchResponse{}, nil
+func (*bootstrapProvider) Add(context.Context, memprovider.AddRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, nil
 }
 
-func (*bootstrapProvider) GetAll(context.Context, GetAllRequest) (SearchResponse, error) {
-	return SearchResponse{}, nil
+func (*bootstrapProvider) Search(context.Context, memprovider.SearchRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, nil
 }
 
-func (*bootstrapProvider) Update(context.Context, UpdateRequest) (memorydomain.Item, error) {
+func (*bootstrapProvider) GetAll(context.Context, memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, nil
+}
+
+func (*bootstrapProvider) Update(context.Context, memprovider.UpdateRequest) (memorydomain.Item, error) {
 	return memorydomain.Item{}, nil
 }
 
-func (*bootstrapProvider) Delete(context.Context, string) (DeleteResponse, error) {
-	return DeleteResponse{}, nil
+func (*bootstrapProvider) Delete(context.Context, string) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, nil
 }
 
-func (*bootstrapProvider) DeleteBatch(context.Context, []string) (DeleteResponse, error) {
-	return DeleteResponse{}, nil
+func (*bootstrapProvider) DeleteBatch(context.Context, []string) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, nil
 }
 
-func (*bootstrapProvider) DeleteAll(context.Context, DeleteAllRequest) (DeleteResponse, error) {
-	return DeleteResponse{}, nil
+func (*bootstrapProvider) DeleteAll(context.Context, memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, nil
 }
 
-func (*bootstrapProvider) Compact(context.Context, map[string]any, float64, int) (CompactResult, error) {
-	return CompactResult{}, nil
+func (*bootstrapProvider) Compact(context.Context, map[string]any, float64, int) (memprovider.CompactResult, error) {
+	return memprovider.CompactResult{}, nil
 }
 
-func (*bootstrapProvider) Usage(context.Context, map[string]any) (UsageResponse, error) {
-	return UsageResponse{}, nil
+func (*bootstrapProvider) Usage(context.Context, map[string]any) (memprovider.UsageResponse, error) {
+	return memprovider.UsageResponse{}, nil
 }
 
 type registryTeamContextKey struct{}
@@ -83,11 +88,11 @@ func teamRegistryContext(teamID string) context.Context {
 func TestRegistryIsolatesSameProviderIDByTeam(t *testing.T) {
 	t.Parallel()
 	reg := NewRegistry(slog.Default(), registryTeamResolver)
-	reg.RegisterFactory(ProviderMem0, func(_ context.Context, teamID, _ string, _ map[string]any) (Instance, error) {
+	reg.RegisterFactory(memprovider.ProviderMem0, func(_ context.Context, teamID, _ string, _ map[string]any) (memprovider.Instance, error) {
 		return &bootstrapProvider{providerType: teamID}, nil
 	})
 	reg.SetConfigLoader(func(_ context.Context, _ string) (string, map[string]any, error) {
-		return ProviderMem0, map[string]any{}, nil
+		return memprovider.ProviderMem0, map[string]any{}, nil
 	})
 
 	teamA := teamRegistryContext("team-a")
@@ -116,17 +121,17 @@ func TestRegistryConcurrentMissInstantiatesOnce(t *testing.T) {
 	t.Parallel()
 	reg := NewRegistry(slog.Default())
 	var factoryCalls atomic.Int32
-	reg.RegisterFactory(ProviderMem0, func(_ context.Context, _, _ string, _ map[string]any) (Instance, error) {
+	reg.RegisterFactory(memprovider.ProviderMem0, func(_ context.Context, _, _ string, _ map[string]any) (memprovider.Instance, error) {
 		factoryCalls.Add(1)
 		time.Sleep(20 * time.Millisecond)
-		return &bootstrapProvider{providerType: ProviderMem0}, nil
+		return &bootstrapProvider{providerType: memprovider.ProviderMem0}, nil
 	})
 	reg.SetConfigLoader(func(_ context.Context, _ string) (string, map[string]any, error) {
-		return ProviderMem0, map[string]any{}, nil
+		return memprovider.ProviderMem0, map[string]any{}, nil
 	})
 
 	const workers = 24
-	providers := make([]Instance, workers)
+	providers := make([]memprovider.Instance, workers)
 	errs := make([]error, workers)
 	var wg sync.WaitGroup
 	wg.Add(workers)
@@ -155,7 +160,7 @@ func TestRegistryUpdateCannotBeOverwrittenByInflightLoad(t *testing.T) {
 	reg := NewRegistry(slog.Default())
 	oldFactoryStarted := make(chan struct{})
 	releaseOldFactory := make(chan struct{})
-	reg.RegisterFactory(ProviderMem0, func(_ context.Context, _, _ string, config map[string]any) (Instance, error) {
+	reg.RegisterFactory(memprovider.ProviderMem0, func(_ context.Context, _, _ string, config map[string]any) (memprovider.Instance, error) {
 		version, _ := config["version"].(string)
 		if version == "old" {
 			close(oldFactoryStarted)
@@ -164,10 +169,10 @@ func TestRegistryUpdateCannotBeOverwrittenByInflightLoad(t *testing.T) {
 		return &bootstrapProvider{providerType: version}, nil
 	})
 	reg.SetConfigLoader(func(_ context.Context, _ string) (string, map[string]any, error) {
-		return ProviderMem0, map[string]any{"version": "old"}, nil
+		return memprovider.ProviderMem0, map[string]any{"version": "old"}, nil
 	})
 
-	oldResult := make(chan Instance, 1)
+	oldResult := make(chan memprovider.Instance, 1)
 	oldErr := make(chan error, 1)
 	go func() {
 		provider, err := reg.Get(context.Background(), "provider-id")
@@ -182,7 +187,7 @@ func TestRegistryUpdateCannotBeOverwrittenByInflightLoad(t *testing.T) {
 			updateErr <- err
 			return
 		}
-		_, err := reg.Instantiate(context.Background(), "provider-id", ProviderMem0, map[string]any{"version": "new"})
+		_, err := reg.Instantiate(context.Background(), "provider-id", memprovider.ProviderMem0, map[string]any{"version": "new"})
 		updateErr <- err
 	}()
 	close(releaseOldFactory)
@@ -217,7 +222,7 @@ func TestRegistryRemoveClosesProvider(t *testing.T) {
 	t.Parallel()
 	reg := NewRegistry(slog.Default())
 	var closeCalls atomic.Int32
-	provider := &bootstrapProvider{providerType: ProviderMem0, closeCalls: &closeCalls}
+	provider := &bootstrapProvider{providerType: memprovider.ProviderMem0, closeCalls: &closeCalls}
 	if err := reg.RegisterContext(context.Background(), "provider-id", provider); err != nil {
 		t.Fatalf("RegisterContext() error = %v", err)
 	}
@@ -242,13 +247,13 @@ func TestRegistryCloseClosesAllProvidersOnce(t *testing.T) {
 	var firstCloseCalls atomic.Int32
 	var secondCloseCalls atomic.Int32
 	if err := reg.RegisterContext(context.Background(), "first", &bootstrapProvider{
-		providerType: ProviderMem0,
+		providerType: memprovider.ProviderMem0,
 		closeCalls:   &firstCloseCalls,
 	}); err != nil {
 		t.Fatalf("RegisterContext(first) error = %v", err)
 	}
 	if err := reg.RegisterContext(context.Background(), "second", &bootstrapProvider{
-		providerType: ProviderMem0,
+		providerType: memprovider.ProviderMem0,
 		closeCalls:   &secondCloseCalls,
 	}); err != nil {
 		t.Fatalf("RegisterContext(second) error = %v", err)

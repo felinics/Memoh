@@ -10,8 +10,9 @@ import (
 
 	"github.com/memohai/memoh/domains/agent/automation/heartbeat"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type HeartbeatHandler struct {
@@ -44,8 +45,8 @@ func (h *HeartbeatHandler) Register(e *echo.Echo) {
 // @Param limit query int false "Limit" default(50)
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} heartbeat.ListLogsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/heartbeat/logs [get].
 func (h *HeartbeatHandler) ListLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -54,7 +55,7 @@ func (h *HeartbeatHandler) ListLogs(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -63,7 +64,7 @@ func (h *HeartbeatHandler) ListLogs(c echo.Context) error {
 	limit, offset := httpx.ParseOffsetLimit(c)
 	items, total, err := h.service.ListLogs(c.Request().Context(), botID, limit, offset)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list heartbeat logs", err)
 	}
 	return c.JSON(http.StatusOK, heartbeat.ListLogsResponse{Items: items, TotalCount: total})
 }
@@ -74,8 +75,8 @@ func (h *HeartbeatHandler) ListLogs(c echo.Context) error {
 // @Tags heartbeat
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/heartbeat/logs [delete].
 func (h *HeartbeatHandler) DeleteLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -84,13 +85,13 @@ func (h *HeartbeatHandler) DeleteLogs(c echo.Context) error {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	if err := h.service.DeleteLogs(c.Request().Context(), botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("delete heartbeat logs", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

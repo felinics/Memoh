@@ -24,11 +24,10 @@ import (
 	"github.com/memohai/memoh/domains/agent/command/slash"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
-	"github.com/memohai/memoh/domains/api/access/acl"
 	"github.com/memohai/memoh/domains/api/bot"
+	aclpersistence "github.com/memohai/memoh/domains/api/bot/access/acl/persistence"
 	"github.com/memohai/memoh/domains/channel/gateway"
 	"github.com/memohai/memoh/domains/channel/identity"
-	"github.com/memohai/memoh/domains/channel/internal/discuss"
 	"github.com/memohai/memoh/domains/channel/route"
 	"github.com/memohai/memoh/domains/media"
 	mediasvc "github.com/memohai/memoh/domains/media/asset"
@@ -53,6 +52,20 @@ type fakeChatGateway struct {
 type fakeChatResponse struct {
 	Messages []agentdomain.ModelMessage
 }
+
+type fakeDiscussDriver struct {
+	calls     int
+	sessionID string
+	config    DiscussSessionConfig
+}
+
+func (f *fakeDiscussDriver) NotifyRC(_ context.Context, sessionID string, _ timeline.RenderedContext, config DiscussSessionConfig) {
+	f.calls++
+	f.sessionID = sessionID
+	f.config = config
+}
+
+func (*fakeDiscussDriver) Shutdown(context.Context) error { return nil }
 
 type fakeTurnRun struct {
 	events chan agentdomain.Event
@@ -293,7 +306,7 @@ type fakeChatACL struct {
 	allowed bool
 	err     error
 	calls   int
-	lastReq acl.EvaluateRequest
+	lastReq aclpersistence.EvaluateRequest
 }
 
 type fakeCommandRoleResolver struct {
@@ -468,7 +481,7 @@ func (*fakeCommandQueries) GetTokenUsageByModel(_ context.Context, _ string, _, 
 	return nil, nil
 }
 
-func (f *fakeChatACL) Evaluate(_ context.Context, req acl.EvaluateRequest) (bool, error) {
+func (f *fakeChatACL) Evaluate(_ context.Context, req aclpersistence.EvaluateRequest) (bool, error) {
 	f.calls++
 	f.lastReq = req
 	if f.err != nil {
@@ -1367,8 +1380,7 @@ func TestChannelInboundProcessorDiscussACPAllowsNonOwnerMemberThroughACL(t *test
 		"bot-1:" + actorID + ":" + bot.PermissionWorkspaceExec: true,
 	}})
 	pipeline := timeline.NewPipeline(timeline.RenderParams{})
-	driver := discuss.NewDiscussDriver(discuss.DiscussDriverDeps{})
-	defer driver.StopAll()
+	driver := &fakeDiscussDriver{}
 	processor.SetPipeline(pipeline, nil, driver)
 	sender := &fakeReplySender{}
 
@@ -1395,8 +1407,11 @@ func TestChannelInboundProcessorDiscussACPAllowsNonOwnerMemberThroughACL(t *test
 	if len(sender.sent) != 0 {
 		t.Fatalf("non-owner group member should not receive ACP owner feedback in discuss mode, got %+v", sender.sent)
 	}
-	if !driver.HasSession("active-discuss-acp-session") {
-		t.Fatalf("discuss driver did not receive the ACP discuss session")
+	if driver.calls != 1 || driver.sessionID != "active-discuss-acp-session" {
+		t.Fatalf("discuss driver calls = %d, session = %q", driver.calls, driver.sessionID)
+	}
+	if driver.config.BotID != "bot-1" || driver.config.ThreadID != "active-discuss-acp-session" {
+		t.Fatalf("discuss config = %#v", driver.config)
 	}
 	if reactionGW.gotReq.Query != "" {
 		t.Fatalf("discuss mode should not run the regular chat reactionGW, got query %q", reactionGW.gotReq.Query)

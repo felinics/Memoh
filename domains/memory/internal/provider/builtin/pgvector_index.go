@@ -12,7 +12,7 @@ import (
 
 	team "github.com/memohai/memoh/domains/iam/team"
 	memport "github.com/memohai/memoh/domains/memory/internal/port"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 	modelexecution "github.com/memohai/memoh/domains/model/execution"
 )
 
@@ -28,11 +28,11 @@ type pgvectorIndex struct {
 	modelID       string
 	dimensions    int
 	modelRef      string
-	resolveTeam   memreg.TeamIDResolver
+	resolveTeam   memprovider.TeamIDResolver
 	logger        *slog.Logger
 }
 
-func newPGVectorIndex(ctx context.Context, logger *slog.Logger, providerConfig map[string]any, modelResolver EmbeddingModelResolver, vectorStore memport.SemanticEmbeddingStore, resolver memreg.TeamIDResolver) (*pgvectorIndex, error) {
+func newPGVectorIndex(ctx context.Context, logger *slog.Logger, providerConfig map[string]any, modelResolver EmbeddingModelResolver, vectorStore memport.SemanticEmbeddingStore, resolver memprovider.TeamIDResolver) (*pgvectorIndex, error) {
 	modelRef := strings.TrimSpace(memport.StringFromConfig(providerConfig, "embedding_model_id"))
 	if modelRef == "" {
 		return nil, nil
@@ -49,7 +49,7 @@ func newPGVectorIndex(ctx context.Context, logger *slog.Logger, providerConfig m
 		return nil, nil
 	}
 	if resolver == nil {
-		resolver = memreg.FixedTeamIDResolver(team.DefaultTeamID)
+		resolver = memprovider.FixedTeamIDResolver(team.DefaultTeamID)
 	}
 	spec, err := resolveEmbeddingModel(ctx, modelResolver, modelRef)
 	if err != nil {

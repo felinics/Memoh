@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	memcatalog "github.com/memohai/memoh/domains/memory/catalog"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type MemoryProvidersHandler struct {
@@ -51,23 +52,23 @@ func (h *MemoryProvidersHandler) ListMeta(c echo.Context) error {
 // @Produce json
 // @Param request body adapters.ProviderCreateRequest true "Memory provider configuration"
 // @Success 201 {object} adapters.ProviderGetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers [post].
 func (h *MemoryProvidersHandler) Create(c echo.Context) error {
 	var req memcatalog.ProviderCreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind memory provider", err)
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+		return apperror.Required("name")
 	}
 	if strings.TrimSpace(string(req.Provider)) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "provider is required")
+		return apperror.Required("provider")
 	}
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("create memory provider", err)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -78,12 +79,12 @@ func (h *MemoryProvidersHandler) Create(c echo.Context) error {
 // @Tags memory-providers
 // @Produce json
 // @Success 200 {array} adapters.ProviderGetResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers [get].
 func (h *MemoryProvidersHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list memory providers", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -95,17 +96,17 @@ func (h *MemoryProvidersHandler) List(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 200 {object} adapters.ProviderGetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /memory-providers/{id} [get].
 func (h *MemoryProvidersHandler) Get(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	resp, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get memory provider", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -117,18 +118,18 @@ func (h *MemoryProvidersHandler) Get(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 200 {object} adapters.ProviderStatusResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers/{id}/status [get].
 func (h *MemoryProvidersHandler) Status(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	resp, err := h.service.Status(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get memory provider status", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -142,21 +143,21 @@ func (h *MemoryProvidersHandler) Status(c echo.Context) error {
 // @Param id path string true "Provider ID"
 // @Param request body adapters.ProviderUpdateRequest true "Updated configuration"
 // @Success 200 {object} adapters.ProviderGetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers/{id} [put].
 func (h *MemoryProvidersHandler) Update(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	var req memcatalog.ProviderUpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind memory provider", err)
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("update memory provider", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -167,16 +168,16 @@ func (h *MemoryProvidersHandler) Update(c echo.Context) error {
 // @Tags memory-providers
 // @Param id path string true "Provider ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers/{id} [delete].
 func (h *MemoryProvidersHandler) Delete(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("delete memory provider", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

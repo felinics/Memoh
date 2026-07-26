@@ -9,6 +9,8 @@ import (
 	"sync"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/swaggo/swag"
 
 	// Register the generated swagger document for swag.ReadDoc.
@@ -44,7 +46,7 @@ func (*SwaggerHandler) Spec(c echo.Context) error {
 		swaggerSpec = []byte(doc)
 	})
 	if swaggerErr != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, swaggerErr.Error())
+		return apperror.Internal("load swagger spec", swaggerErr)
 	}
 	return c.Blob(http.StatusOK, "application/json", swaggerSpec)
 }

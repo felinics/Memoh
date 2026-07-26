@@ -13,6 +13,7 @@ import (
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	messagepkg "github.com/memohai/memoh/domains/agent/chat/message"
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
+	toolpersistence "github.com/memohai/memoh/domains/agent/tool/persistence"
 )
 
 const defaultMaxLookbackDays = 7
@@ -30,44 +31,15 @@ type HistoryMessageReader interface {
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]messagepkg.Message, error)
 }
 
-// HistorySearchFilter contains persistence-neutral message search criteria.
-type HistorySearchFilter struct {
-	BotID     string
-	SessionID string
-	ContactID string
-	Role      string
-	Keyword   string
-	StartTime time.Time
-	EndTime   time.Time
-	Limit     int32
-}
-
-// HistorySearchResult is a persistence-neutral message search result.
-type HistorySearchResult struct {
-	ID        string
-	SessionID string
-	ContactID string
-	Role      string
-	Content   []byte
-	CreatedAt time.Time
-	Sender    string
-	Platform  string
-}
-
-// HistorySearcher is the minimal interface for searching persisted messages.
-type HistorySearcher interface {
-	SearchHistory(ctx context.Context, filter HistorySearchFilter) ([]HistorySearchResult, error)
-}
-
 // HistoryProvider exposes list_sessions, get_messages, and search_messages tools.
 type HistoryProvider struct {
 	sessions SessionLister
 	messages HistoryMessageReader
-	searcher HistorySearcher
+	searcher toolpersistence.HistorySearcher
 	logger   *slog.Logger
 }
 
-func NewHistoryProvider(log *slog.Logger, sessions SessionLister, messages HistoryMessageReader, searcher HistorySearcher) *HistoryProvider {
+func NewHistoryProvider(log *slog.Logger, sessions SessionLister, messages HistoryMessageReader, searcher toolpersistence.HistorySearcher) *HistoryProvider {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -388,7 +360,7 @@ func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionCo
 		limit = int32(v) //nolint:gosec // bounds-checked above
 	}
 
-	filter := HistorySearchFilter{
+	filter := toolpersistence.HistorySearchFilter{
 		BotID:     botID,
 		SessionID: StringArg(args, "session_id"),
 		ContactID: StringArg(args, "contact_id"),

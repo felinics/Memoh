@@ -2,13 +2,14 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type fakeWebhookAdapter struct {
@@ -147,12 +148,8 @@ func TestGenericWebhookHandlerRejectsUnknownConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected not found error")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected HTTPError, got %T", err)
-	}
-	if httpErr.Code != http.StatusNotFound {
-		t.Fatalf("unexpected status code: %d", httpErr.Code)
+	if apperror.KindOf(err) != apperror.KindNotFound {
+		t.Fatalf("kind = %v, want %v", apperror.KindOf(err), apperror.KindNotFound)
 	}
 }
 
@@ -230,12 +227,8 @@ func TestGenericWebhookHandlerRejectsDisabledConfigByDefault(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected disabled config error")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected HTTPError, got %T", err)
-	}
-	if httpErr.Code != http.StatusForbidden {
-		t.Fatalf("unexpected status code: %d", httpErr.Code)
+	if apperror.KindOf(err) != apperror.KindForbidden {
+		t.Fatalf("kind = %v, want %v", apperror.KindOf(err), apperror.KindForbidden)
 	}
 	if len(adapter.calls) != 0 {
 		t.Fatalf("expected adapter not to be called, got %d calls", len(adapter.calls))

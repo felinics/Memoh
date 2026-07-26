@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/domains/agent/tool"
-	"github.com/memohai/memoh/domains/api/setting"
-	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	"github.com/memohai/memoh/domains/api/bot/setting"
+	settingpersistence "github.com/memohai/memoh/domains/api/bot/setting/persistence"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 	modeldomain "github.com/memohai/memoh/domains/model"
 	modelspkg "github.com/memohai/memoh/domains/model/catalog"
 	"github.com/memohai/memoh/internal/config"
@@ -111,26 +112,26 @@ type lazyLLMSettingsStore struct {
 	queries *lazyLLMTestQueries
 }
 
-func (s lazyLLMSettingsStore) Get(_ context.Context, botID string) (setting.Record, error) {
+func (s lazyLLMSettingsStore) Get(_ context.Context, botID string) (settingpersistence.Record, error) {
 	s.queries.settingsLookups++
 	if botID != s.queries.botID {
-		return setting.Record{}, errors.New("unexpected bot id")
+		return settingpersistence.Record{}, errors.New("unexpected bot id")
 	}
-	return setting.Record{
+	return settingpersistence.Record{
 		CompactionModelID: s.queries.compactionModel,
 	}, nil
 }
 
-func (lazyLLMSettingsStore) GetBot(context.Context, string) (setting.BotRecord, error) {
-	return setting.BotRecord{}, errors.New("not implemented")
+func (lazyLLMSettingsStore) GetBot(context.Context, string) (settingpersistence.BotRecord, error) {
+	return settingpersistence.BotRecord{}, errors.New("not implemented")
 }
 
-func (lazyLLMSettingsStore) GetOverlay(context.Context, string) (setting.OverlayRecord, error) {
-	return setting.OverlayRecord{}, errors.New("not implemented")
+func (lazyLLMSettingsStore) GetOverlay(context.Context, string) (settingpersistence.OverlayRecord, error) {
+	return settingpersistence.OverlayRecord{}, errors.New("not implemented")
 }
 
-func (lazyLLMSettingsStore) Upsert(context.Context, setting.UpsertInput) (setting.Record, error) {
-	return setting.Record{}, errors.New("not implemented")
+func (lazyLLMSettingsStore) Upsert(context.Context, settingpersistence.UpsertInput) (settingpersistence.Record, error) {
+	return settingpersistence.Record{}, errors.New("not implemented")
 }
 
 func (lazyLLMSettingsStore) Delete(context.Context, string) error {

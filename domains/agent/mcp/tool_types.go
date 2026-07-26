@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
+
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 )
 
 // ToolSessionContext carries request-scoped identity for tool execution.
@@ -92,18 +94,11 @@ func ValidateRuntimeGuard(ctx context.Context, session ToolSessionContext) error
 	return guardCtx.Err()
 }
 
-// ToolDescriptor is the MCP tools/list item shape used by the gateway.
-type ToolDescriptor struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"inputSchema"`
-}
-
 // ToolSource represents a tool source surfaced through the MCP gateway.
 // Implementations may wrap federated MCP connections or selected native Memoh
 // ToolProviders.
 type ToolSource interface {
-	ListTools(ctx context.Context, session ToolSessionContext) ([]ToolDescriptor, error)
+	ListTools(ctx context.Context, session ToolSessionContext) ([]mcppersistence.ToolDescriptor, error)
 	CallTool(ctx context.Context, session ToolSessionContext, toolName string, arguments map[string]any) (map[string]any, error)
 }
 

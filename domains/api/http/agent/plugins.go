@@ -9,9 +9,11 @@ import (
 	"github.com/labstack/echo/v4"
 
 	pluginspkg "github.com/memohai/memoh/domains/agent/extension/plugins"
+	pluginspersistence "github.com/memohai/memoh/domains/agent/extension/plugins/persistence"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type PluginsHandler struct {
@@ -52,7 +54,7 @@ func (h *PluginsHandler) requireBotAccess(c echo.Context) (string, error) {
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return "", apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
 		return "", err
@@ -63,7 +65,7 @@ func (h *PluginsHandler) requireBotAccess(c echo.Context) (string, error) {
 func pluginIDParam(c echo.Context) (string, error) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "plugin installation id is required")
+		return "", apperror.Required("id")
 	}
 	return id, nil
 }
@@ -73,9 +75,9 @@ func pluginIDParam(c echo.Context) (string, error) {
 // @Tags plugins
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} plugins.ListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/plugins [get].
 func (h *PluginsHandler) List(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -84,7 +86,7 @@ func (h *PluginsHandler) List(c echo.Context) error {
 	}
 	items, err := h.service.List(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list plugins", err)
 	}
 	return c.JSON(http.StatusOK, pluginspkg.ListResponse{Items: items})
 }
@@ -95,10 +97,10 @@ func (h *PluginsHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Plugin installation ID"
 // @Success 200 {object} plugins.Installation
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/plugins/{id} [get].
 func (h *PluginsHandler) Get(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -122,9 +124,9 @@ func (h *PluginsHandler) Get(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Plugin installation ID"
 // @Success 200 {object} plugins.Installation
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/plugins/{id}/enable [post].
 func (h *PluginsHandler) Enable(c echo.Context) error {
 	return h.setEnabled(c, true)
@@ -136,9 +138,9 @@ func (h *PluginsHandler) Enable(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Plugin installation ID"
 // @Success 200 {object} plugins.Installation
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/plugins/{id}/disable [post].
 func (h *PluginsHandler) Disable(c echo.Context) error {
 	return h.setEnabled(c, false)
@@ -166,9 +168,9 @@ func (h *PluginsHandler) setEnabled(c echo.Context, enabled bool) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Plugin installation ID"
 // @Success 200 {object} plugins.Installation
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/plugins/{id}/uninstall [post].
 func (h *PluginsHandler) Uninstall(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -192,9 +194,9 @@ func (h *PluginsHandler) Uninstall(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Plugin installation ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/plugins/{id} [delete].
 func (h *PluginsHandler) Purge(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -218,9 +220,9 @@ func (h *PluginsHandler) Purge(c echo.Context) error {
 // @Param id path string true "Plugin installation ID"
 // @Param payload body plugins.OAuthAuthorizeRequest false "OAuth authorize request"
 // @Success 200 {object} mcp.AuthorizeResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/plugins/{id}/oauth/authorize [post].
 func (h *PluginsHandler) StartOAuth(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -246,9 +248,9 @@ func (h *PluginsHandler) StartOAuth(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Plugin installation ID"
 // @Success 200 {object} plugins.Installation
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/plugins/{id}/oauth/status [get].
 func (h *PluginsHandler) RefreshOAuthStatus(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -267,8 +269,8 @@ func (h *PluginsHandler) RefreshOAuthStatus(c echo.Context) error {
 }
 
 func pluginServiceError(err error) error {
-	if errors.Is(err, pluginspkg.ErrNotFound) {
-		return echo.NewHTTPError(http.StatusNotFound, "plugin installation not found")
+	if errors.Is(err, pluginspersistence.ErrNotFound) {
+		return apperror.NotFound("get plugin installation", err)
 	}
-	return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	return apperror.Invalid("plugin service", err)
 }

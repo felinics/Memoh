@@ -8,20 +8,26 @@ import (
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	pluginspkg "github.com/memohai/memoh/domains/agent/extension/plugins"
 	"github.com/memohai/memoh/domains/agent/mcp"
-	"github.com/memohai/memoh/domains/api/access"
-	"github.com/memohai/memoh/domains/api/access/policy"
+	botaccess "github.com/memohai/memoh/domains/api/bot/access"
+	"github.com/memohai/memoh/domains/api/bot/access/policy"
+	identitylink "github.com/memohai/memoh/domains/api/identity/link"
 	"github.com/memohai/memoh/internal/oauth"
+)
+
+const (
+	foundationModuleName = "core-foundation"
+	serverModuleName     = "core-server"
 )
 
 // FoundationModule assembles process-neutral domain infrastructure shared by
 // Server and Channel. It intentionally excludes Agent, workspace runtimes,
 // schedulers, and provider bootstrap loops.
 func FoundationModule() fx.Option {
-	return fx.Options(
+	return fx.Module(
+		foundationModuleName,
 		fx.Provide(
 			provideLogger,
 			provideDBConn,
-			provideAccountPersistenceStore,
 			provideAccountCounter,
 			provideAccountTitleModelValidator,
 			provideBotPersistenceStore,
@@ -29,13 +35,16 @@ func FoundationModule() fx.Option {
 			provideBotUserReader,
 			provideBotContainerReader,
 			provideBotService,
+			providePolicyBotReader,
+			provideApplicationBotOwnerResolver,
 			provideAccountService,
 			provideACLStore,
 			provideACLChannelIdentityReader,
 			provideACLService,
-			provideChannelAccessStore,
-			provideChannelAccessIdentityReader,
-			access.NewService,
+			provideIdentityLinkStore,
+			provideIdentityLinkIdentityReader,
+			botaccess.NewService,
+			identitylink.NewService,
 			provideApplicationChannelIdentityReader,
 			provideDecisionCluster,
 			provideUserInputPersistence,
@@ -55,7 +64,8 @@ func FoundationModule() fx.Option {
 // expects FoundationModule and the Channel catalog/runtime interfaces to be
 // provided by the composing command.
 func ServerModule() fx.Option {
-	return fx.Options(
+	return fx.Module(
+		serverModuleName,
 		fx.Provide(
 			provideTokenConfig,
 			provideListenAddr,
@@ -71,6 +81,7 @@ func ServerModule() fx.Option {
 			provideToolApprovalService,
 			provideUserRuntime,
 			provideWorkspaceBotProfiles,
+			provideWorkspaceBotOwners,
 			provideWorkspaceRuntimeSettings,
 			provideWorkspace,
 			provideBridgeProvider,

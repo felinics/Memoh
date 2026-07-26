@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	memport "github.com/memohai/memoh/domains/memory/internal/port"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 func TestParseJSONStringArray_Valid(t *testing.T) {
@@ -190,4 +190,4 @@ func TestExtractJSONBlock_PlainFence(t *testing.T) {
 	}
 }
 
-var _ memport.LLM = (*Client)(nil)
+var _ memprovider.LLM = (*Client)(nil)

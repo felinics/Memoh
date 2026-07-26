@@ -11,6 +11,7 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/chat/context/limit"
+	"github.com/memohai/memoh/domains/agent/chat/convert"
 	sessionpkg "github.com/memohai/memoh/domains/agent/chat/thread"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	"github.com/memohai/memoh/domains/agent/engine"
@@ -278,7 +279,7 @@ func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toola
 	if err != nil {
 		return err
 	}
-	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
+	modelMessages := convert.SDKMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := ChatRequest{
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,

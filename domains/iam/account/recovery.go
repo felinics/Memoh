@@ -7,13 +7,15 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/memohai/memoh/domains/iam/account/persistence"
 )
 
 type Recovery struct {
-	store AdminRecoveryStore
+	store persistence.AdminRecoveryStore
 }
 
-func NewRecovery(store AdminRecoveryStore) *Recovery {
+func NewRecovery(store persistence.AdminRecoveryStore) *Recovery {
 	return &Recovery{store: store}
 }
 

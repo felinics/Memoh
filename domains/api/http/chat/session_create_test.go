@@ -13,13 +13,13 @@ import (
 
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
-	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 )
 
 type sessionCreateQueries struct {
 	stubThreadStore
-	bot          bot.Record
+	bot          botpersistence.Record
 	permissions  []byte
 	createCalled bool
 	createParams session.CreateRecord
@@ -64,10 +64,7 @@ func TestCreateSessionRejectsUnknownTypeAsBadRequest(t *testing.T) {
 	)
 
 	err := callCreateSession(handler, botID, `{"type":"conversation","title":"bad"}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("CreateSession() error = %v, want HTTP 400", err)
-	}
+	requireHTTPStatus(t, err, http.StatusBadRequest)
 	if queries.createCalled {
 		t.Fatalf("CreateSession should reject unknown type before DB insert")
 	}
@@ -88,10 +85,7 @@ func TestCreateSessionAuthorizesFinalDescriptor(t *testing.T) {
 	)
 
 	err := callCreateSession(handler, botID, `{"type":"chat","session_mode":"discuss","title":"discuss"}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("CreateSession() error = %v, want HTTP 403", err)
-	}
+	requireHTTPStatus(t, err, http.StatusForbidden)
 	if queries.createCalled {
 		t.Fatal("CreateSession should authorize the final session descriptor before insert")
 	}
@@ -159,10 +153,7 @@ func TestCreateSessionRejectsSystemACPRuntime(t *testing.T) {
 
 	body := `{"type":"schedule","runtime_type":"acp_agent","metadata":{"acp_agent_id":"codex"}}`
 	err := callCreateSession(handler, botID, body)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("CreateSession() error = %v, want HTTP 400", err)
-	}
+	requireHTTPStatus(t, err, http.StatusBadRequest)
 	if queries.createCalled {
 		t.Fatal("CreateSession should not insert system ACP sessions")
 	}
@@ -182,10 +173,7 @@ func TestCreateSessionRejectsSubagentTypeForChatUser(t *testing.T) {
 	)
 
 	err := callCreateSession(handler, botID, `{"type":"subagent","title":"direct child"}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("CreateSession() error = %v, want HTTP 403", err)
-	}
+	requireHTTPStatus(t, err, http.StatusForbidden)
 	if queries.createCalled {
 		t.Fatal("chat user should not be able to create subagent sessions directly")
 	}

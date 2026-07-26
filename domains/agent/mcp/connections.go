@@ -6,29 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
-)
 
-// Connection represents a stored MCP connection for a bot.
-type Connection struct {
-	ID                            string           `json:"id"`
-	BotID                         string           `json:"bot_id"`
-	Name                          string           `json:"name"`
-	Type                          string           `json:"type"`
-	Config                        map[string]any   `json:"config"`
-	Active                        bool             `json:"is_active"`
-	Status                        string           `json:"status"`
-	ToolsCache                    []ToolDescriptor `json:"tools_cache"`
-	LastProbedAt                  *time.Time       `json:"last_probed_at,omitempty"`
-	StatusMessage                 string           `json:"status_message"`
-	AuthType                      string           `json:"auth_type"`
-	ManagedByPluginInstallationID string           `json:"managed_by_plugin_installation_id,omitempty"`
-	ManagedResourceKey            string           `json:"managed_resource_key,omitempty"`
-	Visible                       bool             `json:"visible"`
-	Metadata                      map[string]any   `json:"metadata,omitempty"`
-	CreatedAt                     time.Time        `json:"created_at"`
-	UpdatedAt                     time.Time        `json:"updated_at"`
-}
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
+)
 
 // UpsertRequest accepts standard mcpServers item format.
 // Type is auto-inferred: command present -> stdio, url present -> http (default) or sse (if transport:"sse").
@@ -63,7 +43,7 @@ type MCPServerEntry struct {
 
 // ListResponse wraps MCP connection list responses.
 type ListResponse struct {
-	Items []Connection `json:"items"`
+	Items []mcppersistence.Connection `json:"items"`
 }
 
 // ExportResponse returns connections in standard mcpServers format.
@@ -80,12 +60,12 @@ type ManagedConnectionRequest struct {
 
 // ConnectionService handles CRUD operations for MCP connections.
 type ConnectionService struct {
-	store  ConnectionStore
+	store  mcppersistence.ConnectionStore
 	logger *slog.Logger
 }
 
 // NewConnectionService creates a ConnectionService backed by its persistence port.
-func NewConnectionService(log *slog.Logger, store ConnectionStore) *ConnectionService {
+func NewConnectionService(log *slog.Logger, store mcppersistence.ConnectionStore) *ConnectionService {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -96,7 +76,7 @@ func NewConnectionService(log *slog.Logger, store ConnectionStore) *ConnectionSe
 }
 
 // ListByBot returns all MCP connections for a bot.
-func (s *ConnectionService) ListByBot(ctx context.Context, botID string) ([]Connection, error) {
+func (s *ConnectionService) ListByBot(ctx context.Context, botID string) ([]mcppersistence.Connection, error) {
 	if s.store == nil {
 		return nil, errors.New("mcp queries not configured")
 	}
@@ -104,12 +84,12 @@ func (s *ConnectionService) ListByBot(ctx context.Context, botID string) ([]Conn
 }
 
 // ListActiveByBot returns active MCP connections for a bot.
-func (s *ConnectionService) ListActiveByBot(ctx context.Context, botID string) ([]Connection, error) {
+func (s *ConnectionService) ListActiveByBot(ctx context.Context, botID string) ([]mcppersistence.Connection, error) {
 	items, err := s.ListByBot(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	active := make([]Connection, 0, len(items))
+	active := make([]mcppersistence.Connection, 0, len(items))
 	for _, item := range items {
 		if item.Active {
 			active = append(active, item)
@@ -119,25 +99,25 @@ func (s *ConnectionService) ListActiveByBot(ctx context.Context, botID string) (
 }
 
 // Get returns a specific MCP connection for a bot.
-func (s *ConnectionService) Get(ctx context.Context, botID, id string) (Connection, error) {
+func (s *ConnectionService) Get(ctx context.Context, botID, id string) (mcppersistence.Connection, error) {
 	if s.store == nil {
-		return Connection{}, errors.New("mcp queries not configured")
+		return mcppersistence.Connection{}, errors.New("mcp queries not configured")
 	}
 	return s.store.GetConnection(ctx, botID, id)
 }
 
 // Create inserts a new MCP connection for a bot.
-func (s *ConnectionService) Create(ctx context.Context, botID string, req UpsertRequest) (Connection, error) {
+func (s *ConnectionService) Create(ctx context.Context, botID string, req UpsertRequest) (mcppersistence.Connection, error) {
 	if s.store == nil {
-		return Connection{}, errors.New("mcp queries not configured")
+		return mcppersistence.Connection{}, errors.New("mcp queries not configured")
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Connection{}, errors.New("name is required")
+		return mcppersistence.Connection{}, errors.New("name is required")
 	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
-		return Connection{}, err
+		return mcppersistence.Connection{}, err
 	}
 	active := true
 	if req.Active != nil {
@@ -147,7 +127,7 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 	if authType == "" {
 		authType = "none"
 	}
-	return s.store.CreateConnection(ctx, ConnectionWrite{
+	return s.store.CreateConnection(ctx, mcppersistence.ConnectionWrite{
 		BotID:    botID,
 		Name:     name,
 		Type:     mcpType,
@@ -157,21 +137,21 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 	})
 }
 
-func (s *ConnectionService) CreateManaged(ctx context.Context, botID string, req UpsertRequest, managed ManagedConnectionRequest) (Connection, error) {
+func (s *ConnectionService) CreateManaged(ctx context.Context, botID string, req UpsertRequest, managed ManagedConnectionRequest) (mcppersistence.Connection, error) {
 	if s.store == nil {
-		return Connection{}, errors.New("mcp queries not configured")
+		return mcppersistence.Connection{}, errors.New("mcp queries not configured")
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Connection{}, errors.New("name is required")
+		return mcppersistence.Connection{}, errors.New("name is required")
 	}
 	resourceKey := strings.TrimSpace(managed.ResourceKey)
 	if resourceKey == "" {
-		return Connection{}, errors.New("managed resource key is required")
+		return mcppersistence.Connection{}, errors.New("managed resource key is required")
 	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
-		return Connection{}, err
+		return mcppersistence.Connection{}, err
 	}
 	active := true
 	if req.Active != nil {
@@ -181,8 +161,8 @@ func (s *ConnectionService) CreateManaged(ctx context.Context, botID string, req
 	if authType == "" {
 		authType = "none"
 	}
-	return s.store.CreateManagedConnection(ctx, ManagedConnectionWrite{
-		ConnectionWrite: ConnectionWrite{
+	return s.store.CreateManagedConnection(ctx, mcppersistence.ManagedConnectionWrite{
+		ConnectionWrite: mcppersistence.ConnectionWrite{
 			BotID:    botID,
 			Name:     name,
 			Type:     mcpType,
@@ -198,17 +178,17 @@ func (s *ConnectionService) CreateManaged(ctx context.Context, botID string, req
 }
 
 // Update modifies an existing MCP connection.
-func (s *ConnectionService) Update(ctx context.Context, botID, id string, req UpsertRequest) (Connection, error) {
+func (s *ConnectionService) Update(ctx context.Context, botID, id string, req UpsertRequest) (mcppersistence.Connection, error) {
 	if s.store == nil {
-		return Connection{}, errors.New("mcp queries not configured")
+		return mcppersistence.Connection{}, errors.New("mcp queries not configured")
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Connection{}, errors.New("name is required")
+		return mcppersistence.Connection{}, errors.New("name is required")
 	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
-		return Connection{}, err
+		return mcppersistence.Connection{}, err
 	}
 	active := true
 	if req.Active != nil {
@@ -218,7 +198,7 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	if authType == "" {
 		authType = "none"
 	}
-	return s.store.UpdateConnection(ctx, ConnectionWrite{
+	return s.store.UpdateConnection(ctx, mcppersistence.ConnectionWrite{
 		BotID:    botID,
 		ID:       id,
 		Name:     name,
@@ -233,14 +213,14 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 // Existing connections (matched by name) get config updated but is_active preserved.
 // New connections are created with is_active=true.
 // Connections not in the input are left untouched.
-func (s *ConnectionService) Import(ctx context.Context, botID string, req ImportRequest) ([]Connection, error) {
+func (s *ConnectionService) Import(ctx context.Context, botID string, req ImportRequest) ([]mcppersistence.Connection, error) {
 	if s.store == nil {
 		return nil, errors.New("mcp queries not configured")
 	}
 	if len(req.MCPServers) == 0 {
-		return []Connection{}, nil
+		return []mcppersistence.Connection{}, nil
 	}
-	results := make([]Connection, 0, len(req.MCPServers))
+	results := make([]mcppersistence.Connection, 0, len(req.MCPServers))
 	for name, entry := range req.MCPServers {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -251,7 +231,7 @@ func (s *ConnectionService) Import(ctx context.Context, botID string, req Import
 		if err != nil {
 			return nil, fmt.Errorf("server %q: %w", name, err)
 		}
-		conn, err := s.store.UpsertConnectionByName(ctx, ConnectionWrite{
+		conn, err := s.store.UpsertConnectionByName(ctx, mcppersistence.ConnectionWrite{
 			BotID:  botID,
 			Name:   name,
 			Type:   mcpType,
@@ -322,11 +302,11 @@ func (s *ConnectionService) BatchDelete(ctx context.Context, botID string, ids [
 }
 
 // UpdateProbeResult persists the result of a probe operation.
-func (s *ConnectionService) UpdateProbeResult(ctx context.Context, botID, id, status string, tools []ToolDescriptor, message string) error {
+func (s *ConnectionService) UpdateProbeResult(ctx context.Context, botID, id, status string, tools []mcppersistence.ToolDescriptor, message string) error {
 	if s.store == nil {
 		return errors.New("mcp queries not configured")
 	}
-	return s.store.SaveConnectionProbe(ctx, ConnectionProbeWrite{
+	return s.store.SaveConnectionProbe(ctx, mcppersistence.ConnectionProbeWrite{
 		BotID:         botID,
 		ConnectionID:  id,
 		Status:        status,
@@ -396,7 +376,7 @@ func entryToUpsertRequest(name string, entry MCPServerEntry) UpsertRequest {
 }
 
 // connectionToExportEntry converts a stored connection to standard mcpServers entry.
-func connectionToExportEntry(conn Connection) MCPServerEntry {
+func connectionToExportEntry(conn mcppersistence.Connection) MCPServerEntry {
 	entry := MCPServerEntry{}
 	switch conn.Type {
 	case "stdio":

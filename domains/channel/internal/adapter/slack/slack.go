@@ -17,7 +17,7 @@ import (
 	"github.com/slack-go/slack/socketmode"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
-	"github.com/memohai/memoh/domains/channel/internal/common"
+	"github.com/memohai/memoh/domains/channel/internal/logging"
 	"github.com/memohai/memoh/domains/media"
 )
 
@@ -41,6 +41,7 @@ type slackConnection struct {
 	api    *slack.Client
 	sm     *socketmode.Client
 	cancel context.CancelFunc
+	done   <-chan struct{}
 }
 
 type cachedSlackChannelName struct {
@@ -261,6 +262,10 @@ func (a *SlackAdapter) Connect(ctx context.Context, cfg gateway.ChannelConfig, h
 
 	smCtx, cancel := context.WithCancel(ctx)
 	conn.cancel = cancel
+	var runners sync.WaitGroup
+	runners.Add(2)
+	done := make(chan struct{})
+	conn.done = done
 	connectedCh := make(chan struct{})
 	startErrCh := make(chan error, 1)
 	var startupOnce sync.Once
@@ -280,6 +285,7 @@ func (a *SlackAdapter) Connect(ctx context.Context, cfg gateway.ChannelConfig, h
 	}
 
 	go func() {
+		defer runners.Done()
 		for {
 			select {
 			case <-smCtx.Done():
@@ -306,6 +312,7 @@ func (a *SlackAdapter) Connect(ctx context.Context, cfg gateway.ChannelConfig, h
 	}()
 
 	go func() {
+		defer runners.Done()
 		socketRun := a.socketRun
 		if socketRun == nil {
 			socketRun = func(ctx context.Context, sm *socketmode.Client) error {
@@ -321,26 +328,37 @@ func (a *SlackAdapter) Connect(ctx context.Context, cfg gateway.ChannelConfig, h
 			}
 		}
 	}()
+	go func() {
+		runners.Wait()
+		close(done)
+	}()
 
 	select {
 	case <-connectedCh:
 	case err := <-startErrCh:
 		cancel()
 		a.clearConnection(cfg.ID)
+		<-done
 		return nil, err
 	case <-ctx.Done():
 		cancel()
 		a.clearConnection(cfg.ID)
+		<-done
 		return nil, ctx.Err()
 	}
 
-	stop := func(_ context.Context) error {
+	stop := func(stopCtx context.Context) error {
 		if a.logger != nil {
 			a.logger.InfoContext(ctx, "stop", slog.String("config_id", cfg.ID))
 		}
 		cancel()
 		a.clearConnection(cfg.ID)
-		return nil
+		select {
+		case <-done:
+			return nil
+		case <-stopCtx.Done():
+			return stopCtx.Err()
+		}
 	}
 
 	return gateway.NewConnection(cfg, stop), nil
@@ -500,7 +518,7 @@ func (a *SlackAdapter) handleMessageEvent(
 			slog.String("config_id", cfg.ID),
 			slog.String("chat_type", chatType),
 			slog.String("user_id", ev.User),
-			slog.String("text", common.SummarizeText(text)),
+			slog.String("text", logging.SummarizeText(text)),
 		)
 	}
 
@@ -581,7 +599,7 @@ func (a *SlackAdapter) handleAppMentionEvent(
 		a.logger.InfoContext(ctx, "app mention received",
 			slog.String("config_id", cfg.ID),
 			slog.String("user_id", ev.User),
-			slog.String("text", common.SummarizeText(text)),
+			slog.String("text", logging.SummarizeText(text)),
 		)
 	}
 

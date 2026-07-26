@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 	"github.com/memohai/memoh/domains/iam/account"
 )
 
@@ -27,16 +27,6 @@ type ChannelIdentityReader interface {
 type ChannelIdentity struct {
 	ID          string
 	DisplayName string
-}
-
-// LatestSessionModelReader supplies the model used by the latest persisted session round.
-type LatestSessionModelReader interface {
-	LatestSessionModelID(context.Context, string) (string, error)
-}
-
-// CompactionMessageRefReader supplies legacy message coverage for a compaction artifact.
-type CompactionMessageRefReader interface {
-	ListCompactionMessageRefs(context.Context, string) ([]string, error)
 }
 
 // SettingsReader supplies bot settings snapshots for agent runs.

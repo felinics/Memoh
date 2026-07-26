@@ -69,13 +69,15 @@ func (f *fakeInboundProcessorIntegration) HandleInbound(ctx context.Context, cfg
 }
 
 type fakeAdapter struct {
-	channelType ChannelType
-	connectErr  error
-	mu          sync.Mutex
-	started     []ChannelConfig
-	connectCtxs []context.Context
-	sent        []OutboundMessage
-	stops       int
+	channelType    ChannelType
+	connectErr     error
+	connectStarted chan struct{}
+	releaseConnect chan struct{}
+	mu             sync.Mutex
+	started        []ChannelConfig
+	connectCtxs    []context.Context
+	sent           []OutboundMessage
+	stops          int
 }
 
 func (f *fakeAdapter) Type() ChannelType {
@@ -99,6 +101,12 @@ func (*fakeAdapter) NormalizeTarget(raw string) string { return strings.TrimSpac
 func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, _ InboundHandler) (Connection, error) {
 	if f.connectErr != nil {
 		return nil, f.connectErr
+	}
+	if f.connectStarted != nil {
+		close(f.connectStarted)
+	}
+	if f.releaseConnect != nil {
+		<-f.releaseConnect
 	}
 	f.mu.Lock()
 	f.started = append(f.started, cfg)

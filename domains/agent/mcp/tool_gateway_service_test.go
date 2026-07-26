@@ -6,25 +6,27 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 type gatewayTestProvider struct {
-	tools      []ToolDescriptor
+	tools      []mcppersistence.ToolDescriptor
 	callResult map[string]map[string]any
 	callErr    map[string]error
 }
 
-func (p *gatewayTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]ToolDescriptor, error) {
+func (p *gatewayTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
 	return p.tools, nil
 }
 
 type sessionAwareGatewayTestProvider struct{}
 
-func (*sessionAwareGatewayTestProvider) ListTools(_ context.Context, session ToolSessionContext) ([]ToolDescriptor, error) {
+func (*sessionAwareGatewayTestProvider) ListTools(_ context.Context, session ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
 	if session.IsSubagent {
-		return []ToolDescriptor{{Name: "subagent_tool", InputSchema: map[string]any{"type": "object"}}}, nil
+		return []mcppersistence.ToolDescriptor{{Name: "subagent_tool", InputSchema: map[string]any{"type": "object"}}}, nil
 	}
-	return []ToolDescriptor{{Name: "agent_tool", InputSchema: map[string]any{"type": "object"}}}, nil
+	return []mcppersistence.ToolDescriptor{{Name: "agent_tool", InputSchema: map[string]any{"type": "object"}}}, nil
 }
 
 func (*sessionAwareGatewayTestProvider) CallTool(context.Context, ToolSessionContext, string, map[string]any) (map[string]any, error) {
@@ -35,9 +37,9 @@ type countingGatewayTestProvider struct {
 	calls int
 }
 
-func (p *countingGatewayTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]ToolDescriptor, error) {
+func (p *countingGatewayTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
 	p.calls++
-	return []ToolDescriptor{{Name: "cached_tool", InputSchema: map[string]any{"type": "object"}}}, nil
+	return []mcppersistence.ToolDescriptor{{Name: "cached_tool", InputSchema: map[string]any{"type": "object"}}}, nil
 }
 
 func (*countingGatewayTestProvider) CallTool(context.Context, ToolSessionContext, string, map[string]any) (map[string]any, error) {
@@ -45,11 +47,11 @@ func (*countingGatewayTestProvider) CallTool(context.Context, ToolSessionContext
 }
 
 type mutableGatewayTestProvider struct {
-	tools []ToolDescriptor
+	tools []mcppersistence.ToolDescriptor
 }
 
-func (p *mutableGatewayTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]ToolDescriptor, error) {
-	return append([]ToolDescriptor(nil), p.tools...), nil
+func (p *mutableGatewayTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
+	return append([]mcppersistence.ToolDescriptor(nil), p.tools...), nil
 }
 
 func (*mutableGatewayTestProvider) CallTool(context.Context, ToolSessionContext, string, map[string]any) (map[string]any, error) {
@@ -248,13 +250,13 @@ func TestToolGatewayServiceCacheSeparatesDiscoveryContext(t *testing.T) {
 
 func TestToolGatewayServiceListTools(t *testing.T) {
 	providerA := &gatewayTestProvider{
-		tools: []ToolDescriptor{
+		tools: []mcppersistence.ToolDescriptor{
 			{Name: "tool_a", InputSchema: map[string]any{"type": "object"}},
 			{Name: "dup_tool", InputSchema: map[string]any{"type": "object"}},
 		},
 	}
 	providerB := &gatewayTestProvider{
-		tools: []ToolDescriptor{
+		tools: []mcppersistence.ToolDescriptor{
 			{Name: "tool_b", InputSchema: map[string]any{"type": "object"}},
 			{Name: "dup_tool", InputSchema: map[string]any{"type": "object"}},
 		},
@@ -272,7 +274,7 @@ func TestToolGatewayServiceListTools(t *testing.T) {
 
 func TestToolGatewayServiceLookupTool(t *testing.T) {
 	provider := &gatewayTestProvider{
-		tools: []ToolDescriptor{
+		tools: []mcppersistence.ToolDescriptor{
 			{Name: "lookup_tool", Description: "Lookup", InputSchema: map[string]any{"type": "object"}},
 		},
 	}
@@ -299,7 +301,7 @@ func TestToolGatewayServiceLookupToolRefreshesAfterCachedMiss(t *testing.T) {
 		t.Fatalf("LookupTool before provider update = ok %v err %v, want cached miss", ok, err)
 	}
 
-	provider.tools = []ToolDescriptor{{Name: "late_tool", Description: "Late", InputSchema: map[string]any{"type": "object"}}}
+	provider.tools = []mcppersistence.ToolDescriptor{{Name: "late_tool", Description: "Late", InputSchema: map[string]any{"type": "object"}}}
 	desc, ok, err := service.LookupTool(context.Background(), session, "late_tool")
 	if err != nil {
 		t.Fatalf("LookupTool after provider update error = %v", err)
@@ -331,7 +333,7 @@ func TestToolGatewayServiceCacheSeparatesSessionToolScopes(t *testing.T) {
 
 func TestToolGatewayServiceCallToolSuccess(t *testing.T) {
 	provider := &gatewayTestProvider{
-		tools: []ToolDescriptor{
+		tools: []mcppersistence.ToolDescriptor{
 			{Name: "echo_tool", InputSchema: map[string]any{"type": "object"}},
 		},
 		callResult: map[string]map[string]any{
@@ -359,7 +361,7 @@ func TestToolGatewayServiceCallToolSuccess(t *testing.T) {
 
 func TestToolGatewayServiceCallToolNotFound(t *testing.T) {
 	provider := &gatewayTestProvider{
-		tools:      []ToolDescriptor{},
+		tools:      []mcppersistence.ToolDescriptor{},
 		callResult: map[string]map[string]any{},
 		callErr:    map[string]error{},
 	}
@@ -380,7 +382,7 @@ func TestToolGatewayServiceCallToolNotFound(t *testing.T) {
 
 func TestToolGatewayServiceCallToolProviderError(t *testing.T) {
 	provider := &gatewayTestProvider{
-		tools: []ToolDescriptor{
+		tools: []mcppersistence.ToolDescriptor{
 			{Name: "broken_tool", InputSchema: map[string]any{"type": "object"}},
 		},
 		callResult: map[string]map[string]any{},
@@ -405,7 +407,7 @@ func TestToolGatewayServiceCallToolProviderError(t *testing.T) {
 
 func TestToolGatewayServiceLimitsProviderResult(t *testing.T) {
 	provider := &gatewayTestProvider{
-		tools: []ToolDescriptor{
+		tools: []mcppersistence.ToolDescriptor{
 			{Name: "big_tool", InputSchema: map[string]any{"type": "object"}},
 		},
 		callResult: map[string]map[string]any{
@@ -432,7 +434,7 @@ func TestToolGatewayServiceLimitsProviderResult(t *testing.T) {
 
 func TestToolGatewayServiceLimitsProviderError(t *testing.T) {
 	provider := &gatewayTestProvider{
-		tools: []ToolDescriptor{
+		tools: []mcppersistence.ToolDescriptor{
 			{Name: "broken_tool", InputSchema: map[string]any{"type": "object"}},
 		},
 		callResult: map[string]map[string]any{},

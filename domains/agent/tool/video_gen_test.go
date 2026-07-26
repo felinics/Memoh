@@ -11,7 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/domains/agent/engine/background"
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 )
 
 func TestVideoGenStartsBackgroundTaskAndCompletes(t *testing.T) {

@@ -1,14 +1,14 @@
 package runtime
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcpgw "github.com/memohai/memoh/domains/agent/mcp"
-	"github.com/memohai/memoh/domains/api/auth"
+	"github.com/memohai/memoh/domains/api/identity/auth"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const (
@@ -51,13 +51,13 @@ func (h *ContainerdHandler) SetACPRuntimeResolver(resolver acpRuntimeContextReso
 // @Param bot_id path string true "Bot ID"
 // @Param payload body object true "JSON-RPC request"
 // @Success 200 {object} object "JSON-RPC response: {jsonrpc,id,result|error}"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/tools [post].
 func (h *ContainerdHandler) HandleMCPTools(c echo.Context) error {
 	if h.toolGateway == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "tool gateway not configured")
+		return apperror.Unavailable("serve mcp tools", nil)
 	}
 	botID, err := h.requireBotAccessWithGuest(c)
 	if err != nil {
@@ -73,11 +73,11 @@ func (h *ContainerdHandler) handleMCPToolsWithBotID(c echo.Context, botID string
 	// foreign runtime never falls back to header-supplied identity.
 	if runtimeID := strings.TrimSpace(c.Request().Header.Get(mcpgw.ToolHeaderRuntimeID)); runtimeID != "" {
 		if h.acpRuntimes == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
+			return apperror.NotFound("resolve acp runtime", nil)
 		}
 		session, ok := h.acpRuntimes.ResolveRuntimeToolContext(botID, runtimeID, c.Request().Header.Get(mcpgw.ToolHeaderRuntimeToken))
 		if !ok {
-			return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
+			return apperror.NotFound("resolve acp runtime", nil)
 		}
 		mcpgw.ServeToolMCPHTTPWithoutContextMerge(c.Response().Writer, c.Request(), h.logger, h.toolGateway, h.toolContexts, session)
 		return nil

@@ -8,7 +8,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/domains/agent/sessionmode"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 	"github.com/memohai/memoh/domains/channel/delivery"
 )
 

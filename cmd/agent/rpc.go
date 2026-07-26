@@ -1,3 +1,5 @@
+//go:build split
+
 package main
 
 import (
@@ -126,12 +128,6 @@ func provideWebhookTunnelStatus(client *channelruntime.Client) webhook.Service {
 	return client
 }
 
-// provideLocalWebhookTunnelStatus is the embedded-mode counterpart: the
-// tunnel manager runs in this process.
-func provideLocalWebhookTunnelStatus(manager webhook.Manager) webhook.Service {
-	return manager
-}
-
 func provideServerRPC(log *slog.Logger, cfg config.Config, turnService agentdomain.Service, commandHandler *command.Handler, skillHandler *runtimehttp.ContainerdHandler, audioService *audio.Service) (*serverRPC, error) {
 	server := intrpc.NewServer(cfg.InternalRPC.SharedSecret)
 	turnpb.RegisterTurnServiceServer(server, turntransport.NewServer(log, turnService))
@@ -143,6 +139,7 @@ func provideServerRPC(log *slog.Logger, cfg config.Config, turnService agentdoma
 }
 
 func startServerRPC(lc fx.Lifecycle, log *slog.Logger, rpcServer *serverRPC, shutdowner fx.Shutdowner) {
+	serveDone := make(chan struct{})
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			lis, err := (&net.ListenConfig{}).Listen(ctx, "tcp", rpcServer.addr)
@@ -150,17 +147,15 @@ func startServerRPC(lc fx.Lifecycle, log *slog.Logger, rpcServer *serverRPC, shu
 				return fmt.Errorf("listen server rpc: %w", err)
 			}
 			go func() {
-				log.InfoContext(ctx, "server rpc listening", slog.String("addr", rpcServer.addr))
-				if err := rpcServer.server.Serve(lis); err != nil {
-					log.ErrorContext(ctx, "server rpc failed", slog.Any("error", err))
-					_ = shutdowner.Shutdown()
-				}
+				defer close(serveDone)
+				log.Info("server rpc listening", slog.String("addr", lis.Addr().String()))
+				handleServeError(log, shutdowner, "server rpc", rpcServer.server.Serve(lis), grpc.ErrServerStopped)
 			}()
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
 			intrpc.StopGracefully(rpcServer.server, ctx.Done(), 10*time.Second)
-			return nil
+			return waitForServe(ctx, serveDone, "server rpc")
 		},
 	})
 }

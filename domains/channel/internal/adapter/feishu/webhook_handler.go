@@ -14,6 +14,7 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const webhookMaxBodyBytes int64 = 1 << 20 // 1 MiB
@@ -21,10 +22,10 @@ const webhookMaxBodyBytes int64 = 1 << 20 // 1 MiB
 // HandleWebhook processes Feishu/Lark event-subscription callbacks.
 func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg gateway.ChannelConfig, handler gateway.InboundHandler, r *http.Request, w http.ResponseWriter) error {
 	if a == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "feishu adapter is nil")
+		return apperror.Internal("configure feishu adapter", nil)
 	}
 	if handler == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "feishu inbound handler is nil")
+		return apperror.Internal("configure feishu inbound handler", nil)
 	}
 	if r.Method == http.MethodGet {
 		w.WriteHeader(http.StatusOK)
@@ -32,23 +33,23 @@ func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg gateway.ChannelCo
 		return nil
 	}
 	if r.Method != http.MethodPost {
-		return echo.NewHTTPError(http.StatusMethodNotAllowed, "method not allowed")
+		return echo.NewHTTPError(http.StatusMethodNotAllowed)
 	}
 
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("parse feishu config", err)
 	}
 	if feishuCfg.InboundMode != inboundModeWebhook {
-		return echo.NewHTTPError(http.StatusBadRequest, "feishu inbound_mode is not webhook")
+		return apperror.Invalid("validate feishu inbound mode", nil)
 	}
 
 	payload, err := io.ReadAll(io.LimitReader(r.Body, webhookMaxBodyBytes+1))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
+		return apperror.Invalid("read feishu webhook body", err)
 	}
 	if int64(len(payload)) > webhookMaxBodyBytes {
-		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, fmt.Sprintf("payload too large: max %d bytes", webhookMaxBodyBytes))
+		return echo.NewHTTPError(http.StatusRequestEntityTooLarge)
 	}
 
 	botOpenID := a.resolveBotOpenID(context.WithoutCancel(ctx), cfg)
@@ -89,12 +90,12 @@ func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg gateway.ChannelCo
 func inspectWebhookRequest(ctx context.Context, eventDispatcher *dispatcher.EventDispatcher, req *http.Request, payload []byte) (larkevent.EventFuzzy, error) {
 	plainPayload, err := parseWebhookPayload(ctx, eventDispatcher, req, payload)
 	if err != nil {
-		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid feishu webhook payload: %v", err))
+		return larkevent.EventFuzzy{}, apperror.Invalid("parse feishu webhook payload", err)
 	}
 
 	var fuzzy larkevent.EventFuzzy
 	if err := json.Unmarshal([]byte(plainPayload), &fuzzy); err != nil {
-		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid feishu webhook payload: %v", err))
+		return larkevent.EventFuzzy{}, apperror.Invalid("parse feishu webhook payload", err)
 	}
 	return fuzzy, nil
 }
@@ -103,7 +104,7 @@ func validateWebhookCallbackAuth(fuzzy larkevent.EventFuzzy, cfg Config) error {
 	expectedToken := strings.TrimSpace(cfg.VerificationToken)
 	encryptKey := strings.TrimSpace(cfg.EncryptKey)
 	if expectedToken == "" && encryptKey == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "feishu webhook requires encrypt_key or verification_token")
+		return apperror.Invalid("validate feishu webhook secrets", nil)
 	}
 
 	requestToken := webhookRequestToken(fuzzy)
@@ -111,7 +112,7 @@ func validateWebhookCallbackAuth(fuzzy larkevent.EventFuzzy, cfg Config) error {
 		return nil
 	}
 	if requestToken == "" || requestToken != expectedToken {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid feishu webhook token")
+		return apperror.Unauthenticated("verify feishu webhook token", nil)
 	}
 	return nil
 }

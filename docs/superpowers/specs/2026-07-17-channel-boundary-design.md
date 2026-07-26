@@ -84,8 +84,9 @@ Memoh/
 │   │   ├── outbound/             # 重组：出站准备、分段、渲染、toolcall格式化
 │   │   ├── identities/           # 原样保留
 │   │   ├── route/                # 原样保留
-│   │   ├── common/               # 原样保留
-│   │   ├── publicmedia/          # 原样保留
+│   │   ├── internal/logging/     # 共享的有界日志预览
+│   │   ├── internal/proxy/       # adapter HTTP 代理配置
+│   │   ├── internal/http/media/  # Channel-owned 公开媒体路径
 │   │   └── （包根）              # 共享类型与工具：types、schema、config、capabilities等
 │   │
 │   ├── chat/
@@ -231,7 +232,7 @@ DiscussDriver留在Channel侧的理由：它的输入是入站观察投影（Cha
 | `internal/rpc/channel/turn`不得import Echo、fx、sqlc、`internal/channel/**`、Application或Runtime | RFC第5节规则的第一条落地 |
 | `team.DefaultTeamID`仅允许`internal/db`、`cmd/**`与测试引用 | 防止业务包hardcode单团队假设 |
 
-以上规则由`internal/arch`的守卫测试机械执行（`go test ./internal/arch/`）。当前记录在案的豁免与规则细化（与守卫测试中的豁免表一一对应）：
+以上规则由 Go compiler 能管的部分（`internal` 可见性）强制，其余由 review 保证；仓库不保留复述布局的守卫测试。当前记录在案的豁免与规则细化：
 
 - `domains/agent/event`视同Turn port的一部分：turn事件payload就是序列化的agent事件，Channel侧消费该纯数据词汇包不构成边界泄漏。
 - `internal/channel/route`已直接路由Bot与内部Thread；旧的伪Conversation生命周期和查询已经删除。

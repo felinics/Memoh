@@ -6,7 +6,7 @@ import (
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/chat/context/fragment"
 	"github.com/memohai/memoh/domains/agent/engine"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 )
 
 func buildContextFragScope(req ChatRequest, displayName string, identity engine.SessionContext) fragment.Scope {

@@ -18,10 +18,13 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
+	emailcatalog "github.com/memohai/memoh/domains/channel/internal/email/catalog"
 	emailport "github.com/memohai/memoh/domains/channel/internal/port/email"
 )
 
-const ProviderName emailport.ProviderName = "gmail"
+const ProviderName emailport.ProviderName = emailcatalog.ProviderGmail
+
+var providerDescriptor = emailcatalog.Gmail()
 
 const (
 	gmailScope     = "https://mail.google.com/"
@@ -42,35 +45,12 @@ func New(log *slog.Logger, tokenStore emailport.OAuthTokenStore, oauthClients em
 	}
 }
 
-func (*Adapter) Type() emailport.ProviderName { return ProviderName }
+func (*Adapter) Type() emailport.ProviderName { return providerDescriptor.Type() }
 
-func (*Adapter) Meta() emailport.ProviderMeta {
-	return emailport.ProviderMeta{
-		Provider:    string(ProviderName),
-		DisplayName: "Gmail (OAuth2)",
-		ConfigSchema: emailport.ConfigSchema{
-			Fields: []emailport.FieldSchema{
-				{Key: "email_address", Type: "string", Title: "Gmail Address", Required: true, Example: "you@gmail.com", Order: 1},
-			},
-		},
-	}
-}
+func (*Adapter) Meta() emailport.ProviderMeta { return providerDescriptor.Meta() }
 
 func (*Adapter) NormalizeConfig(raw map[string]any) (map[string]any, error) {
-	clean := make(map[string]any, len(raw))
-	for key, value := range raw {
-		if key == "client_id" || key == "client_secret" {
-			continue
-		}
-		clean[key] = value
-	}
-	if len(clean) == 0 {
-		return clean, nil
-	}
-	if v, _ := clean["email_address"].(string); strings.TrimSpace(v) == "" {
-		return nil, errors.New("email_address is required")
-	}
-	return clean, nil
+	return providerDescriptor.NormalizeConfig(raw)
 }
 
 func (a *Adapter) HasOAuthClient() bool {
@@ -171,9 +151,13 @@ func (a *Adapter) StartReceiving(ctx context.Context, config map[string]any, han
 		providerID: providerID,
 		handler:    handler,
 		cancel:     cancel,
+		done:       make(chan struct{}),
 		logger:     a.logger,
 	}
-	go conn.run(rctx)
+	go func() {
+		defer close(conn.done)
+		conn.run(rctx)
+	}()
 	return conn, nil
 }
 
@@ -183,14 +167,20 @@ type gmailImapConn struct {
 	providerID string
 	handler    emailport.InboundHandler
 	cancel     context.CancelFunc
+	done       chan struct{}
 	once       sync.Once
 	lastUID    imap.UID
 	logger     *slog.Logger
 }
 
-func (c *gmailImapConn) Stop(_ context.Context) error {
+func (c *gmailImapConn) Stop(ctx context.Context) error {
 	c.once.Do(func() { c.cancel() })
-	return nil
+	select {
+	case <-c.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *gmailImapConn) run(ctx context.Context) {

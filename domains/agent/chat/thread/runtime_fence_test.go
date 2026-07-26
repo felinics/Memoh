@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 )
 
 type runtimeFenceStore struct {

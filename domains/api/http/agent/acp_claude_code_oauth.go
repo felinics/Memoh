@@ -21,8 +21,9 @@ import (
 
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const (
@@ -100,8 +101,8 @@ func (h *ACPClaudeCodeOAuthHandler) Register(e *echo.Echo) {
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} ACPClaudeCodeOAuthAuthorizeResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp/claude-code/oauth/authorize [get].
 func (h *ACPClaudeCodeOAuthHandler) Authorize(c echo.Context) error {
 	bot, channelIdentityID, err := h.requireBotAccess(c)
@@ -109,7 +110,7 @@ func (h *ACPClaudeCodeOAuthHandler) Authorize(c echo.Context) error {
 		return err
 	}
 	if h.acpWorkspace == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace manager is not configured")
+		return apperror.Internal("claude code oauth", nil)
 	}
 	if err := h.ensureManagedWorkspace(c.Request().Context(), bot.ID); err != nil {
 		return err
@@ -117,11 +118,11 @@ func (h *ACPClaudeCodeOAuthHandler) Authorize(c echo.Context) error {
 
 	state, err := generateACPClaudeCodeOAuthState()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("start claude code oauth", err)
 	}
 	codeVerifier, err := generateACPClaudeCodeOAuthCodeVerifier()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("start claude code oauth", err)
 	}
 	authURL := buildACPClaudeCodeOAuthAuthorizeURL(state, generateACPClaudeCodeOAuthCodeChallenge(codeVerifier))
 
@@ -145,8 +146,8 @@ func (h *ACPClaudeCodeOAuthHandler) Authorize(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param request body ACPClaudeCodeOAuthExchangeRequest true "OAuth exchange request"
 // @Success 200 {object} ACPClaudeCodeOAuthStatus
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp/claude-code/oauth/exchange [post].
 func (h *ACPClaudeCodeOAuthHandler) Exchange(c echo.Context) error {
 	bot, _, err := h.requireBotAccess(c)
@@ -155,22 +156,22 @@ func (h *ACPClaudeCodeOAuthHandler) Exchange(c echo.Context) error {
 	}
 	var req ACPClaudeCodeOAuthExchangeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind claude code oauth", err)
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
+		return apperror.Required("session_id")
 	}
 	code := strings.TrimSpace(req.Code)
 	if code == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "code is required")
+		return apperror.Required("code")
 	}
 	oauthState, err := h.takeState(sessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("complete claude code oauth", err)
 	}
 	if oauthState.BotID != bot.ID {
-		return echo.NewHTTPError(http.StatusBadRequest, "oauth session does not match bot")
+		return apperror.Invalid("complete claude code oauth", nil)
 	}
 	if err := h.ensureManagedWorkspace(c.Request().Context(), bot.ID); err != nil {
 		return err
@@ -178,21 +179,21 @@ func (h *ACPClaudeCodeOAuthHandler) Exchange(c echo.Context) error {
 
 	authCode, codeState := parseACPClaudeCodeOAuthCode(code)
 	if authCode == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "code is required")
+		return apperror.Required("code")
 	}
 	if codeState != "" && codeState != oauthState.State {
-		return echo.NewHTTPError(http.StatusBadRequest, "oauth state does not match")
+		return apperror.Invalid("complete claude code oauth", nil)
 	}
 	tokenResp, err := exchangeACPClaudeCodeOAuthToken(c.Request().Context(), h.httpClient, h.tokenURL, authCode, oauthState.CodeVerifier, codeState)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("complete claude code oauth", err)
 	}
 	token := strings.TrimSpace(tokenResp.AccessToken)
 	if token == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "oauth token response did not include an access token")
+		return apperror.Invalid("complete claude code oauth", nil)
 	}
 	if err := h.saveOAuthToken(c.Request().Context(), bot, token); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("save claude code oauth token", err)
 	}
 	return c.JSON(http.StatusOK, ACPClaudeCodeOAuthStatus{Configured: true, HasToken: true})
 }
@@ -202,8 +203,8 @@ func (h *ACPClaudeCodeOAuthHandler) Exchange(c echo.Context) error {
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} ACPClaudeCodeOAuthStatus
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp/claude-code/oauth/status [get].
 func (h *ACPClaudeCodeOAuthHandler) Status(c echo.Context) error {
 	bot, _, err := h.requireBotAccess(c)
@@ -231,7 +232,7 @@ func (h *ACPClaudeCodeOAuthHandler) Status(c echo.Context) error {
 func (h *ACPClaudeCodeOAuthHandler) requireBotAccess(c echo.Context) (bot.Bot, string, error) {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return bot.Bot{}, "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return bot.Bot{}, "", apperror.Required("bot_id")
 	}
 	channelIdentityID, err := httpx.RequireChannelIdentityID(c)
 	if err != nil {
@@ -248,7 +249,7 @@ func (h *ACPClaudeCodeOAuthHandler) ensureManagedWorkspace(ctx context.Context, 
 	// The OAuth token is persisted in bot metadata and injected via
 	// CLAUDE_CODE_OAUTH_TOKEN when the workspace session starts.
 	if _, err := h.acpWorkspace.WorkspaceInfo(ctx, botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("save claude code oauth token", err)
 	}
 	return nil
 }

@@ -63,6 +63,23 @@ func TimeFromPg(value pgtype.Timestamptz) time.Time {
 	return time.Time{}
 }
 
+// TimestamptzFromTime converts a time.Time to a valid pgtype.Timestamptz.
+func TimestamptzFromTime(value time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: value, Valid: true}
+}
+
+// UUIDString renders a pgtype.UUID, returning "" when the value is NULL.
+//
+// Every PostgreSQL adapter needs this to map a nullable UUID column onto a
+// domain record's plain string field, so it lives here rather than as a private
+// copy per adapter.
+func UUIDString(value pgtype.UUID) string {
+	if !value.Valid {
+		return ""
+	}
+	return uuid.UUID(value.Bytes).String()
+}
+
 // TextToString returns the string value of pgtype.Text, or "" when invalid.
 func TextToString(value pgtype.Text) string {
 	if !value.Valid {

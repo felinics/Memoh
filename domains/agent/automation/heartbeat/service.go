@@ -13,7 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 
-	"github.com/memohai/memoh/domains/api/auth"
+	"github.com/memohai/memoh/domains/agent/automation/heartbeat/persistence"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 )
 
 const heartbeatTokenTTL = 10 * time.Minute
@@ -30,7 +31,7 @@ type SessionCreator interface {
 }
 
 type Service struct {
-	store          Store
+	store          persistence.Store
 	cron           *cron.Cron
 	triggerer      Triggerer
 	sessionCreator SessionCreator
@@ -38,9 +39,13 @@ type Service struct {
 	logger         *slog.Logger
 	mu             sync.Mutex
 	jobs           map[string]cron.EntryID
+	runCtx         context.Context
+	cancel         context.CancelFunc
+	started        bool
+	stopped        bool
 }
 
-func NewService(log *slog.Logger, store Store, triggerer Triggerer, sessionCreator SessionCreator, jwtSecret string) *Service {
+func NewService(log *slog.Logger, store persistence.Store, triggerer Triggerer, sessionCreator SessionCreator, jwtSecret string) *Service {
 	c := cron.New()
 	service := &Service{
 		store:          store,
@@ -51,8 +56,52 @@ func NewService(log *slog.Logger, store Store, triggerer Triggerer, sessionCreat
 		logger:         log.With(slog.String("service", "heartbeat")),
 		jobs:           map[string]cron.EntryID{},
 	}
-	c.Start()
 	return service
+}
+
+// Start begins dispatching heartbeat jobs. It is safe to call Start more than
+// once. Call Bootstrap before Start so persisted jobs are registered before
+// the scheduler begins dispatching them.
+func (s *Service) Start(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return errors.New("heartbeat service is stopped")
+	}
+	if s.started {
+		return nil
+	}
+	s.runCtx, s.cancel = context.WithCancel(context.WithoutCancel(ctx))
+	s.started = true
+	s.cron.Start()
+	return nil
+}
+
+// Shutdown stops dispatching new jobs and waits for active jobs to finish.
+// The caller may bound the wait with ctx; the scheduler remains stopped when
+// ctx expires.
+func (s *Service) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	s.stopped = true
+	cancel := s.cancel
+	s.cancel = nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+
+	stopped := s.cron.Stop()
+	select {
+	case <-stopped.Done():
+		return nil
+	default:
+	}
+	select {
+	case <-stopped.Done():
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Service) Bootstrap(ctx context.Context) error {
@@ -122,14 +171,14 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 	}
 
 	var lastHeartbeatAt string
-	if prevLogs, listErr := s.store.ListLogsByBot(ctx, LogPage{
+	if prevLogs, listErr := s.store.ListLogsByBot(ctx, persistence.LogPage{
 		BotID: cfg.BotID,
 		Limit: 1,
 	}); listErr == nil && len(prevLogs) > 0 {
 		lastHeartbeatAt = prevLogs[0].StartedAt.UTC().Format("2006-01-02T15:04:05Z")
 	}
 
-	logID, err := s.store.CreateLog(ctx, CreateLogCommand{
+	logID, err := s.store.CreateLog(ctx, persistence.CreateLogCommand{
 		BotID:     cfg.BotID,
 		SessionID: sessionID,
 	})
@@ -163,7 +212,7 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 }
 
 func (s *Service) completeLog(ctx context.Context, logID, status, resultText, errorMessage string, usageBytes []byte, modelID string) {
-	err := s.store.CompleteLog(ctx, CompleteLogCommand{
+	err := s.store.CompleteLog(ctx, persistence.CompleteLogCommand{
 		ID:           logID,
 		Status:       status,
 		ResultText:   resultText,
@@ -189,7 +238,7 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 		return nil, 0, err
 	}
 
-	rows, err := s.store.ListLogsByBot(ctx, LogPage{
+	rows, err := s.store.ListLogsByBot(ctx, persistence.LogPage{
 		BotID:  botID,
 		Limit:  int32(limit),  //nolint:gosec // capped to 100 above
 		Offset: int32(offset), //nolint:gosec // validated above
@@ -223,7 +272,10 @@ func (s *Service) scheduleJob(ctx context.Context, cfg Config) error {
 	cfg.Interval = normalizeHeartbeatInterval(cfg.Interval)
 	spec := fmt.Sprintf("@every %dm", cfg.Interval)
 	job := func() {
-		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), heartbeatRunTimeout)
+		runCtx, runCancel, ok := s.jobContext(heartbeatRunTimeout)
+		if !ok {
+			return
+		}
 		defer runCancel()
 		s.runHeartbeat(runCtx, cfg)
 	}
@@ -236,6 +288,16 @@ func (s *Service) scheduleJob(ctx context.Context, cfg Config) error {
 	s.mu.Unlock()
 	s.logger.InfoContext(ctx, "heartbeat scheduled", slog.String("bot_id", cfg.BotID), slog.Int("interval_minutes", cfg.Interval))
 	return nil
+}
+
+func (s *Service) jobContext(timeout time.Duration) (context.Context, context.CancelFunc, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.started || s.stopped || s.runCtx == nil {
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithTimeout(s.runCtx, timeout)
+	return ctx, cancel, true
 }
 
 func normalizeHeartbeatInterval(interval int) int {
@@ -255,7 +317,7 @@ func (s *Service) removeJob(botID string) {
 	}
 }
 
-func toLog(row LogRecord) Log {
+func toLog(row persistence.LogRecord) Log {
 	l := Log{
 		ID:           row.ID,
 		BotID:        row.BotID,

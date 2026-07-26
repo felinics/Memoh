@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	usagepersistence "github.com/memohai/memoh/domains/agent/chat/usage/persistence"
 )
 
 const (
@@ -13,19 +15,19 @@ const (
 
 // Service enriches Agent-owned usage rows with Model-owned display fields.
 type Service struct {
-	Reader
-	models ModelProjectionReader
+	usagepersistence.Reader
+	models usagepersistence.ModelProjectionReader
 }
 
-func NewService(reader Reader, models ModelProjectionReader) *Service {
+func NewService(reader usagepersistence.Reader, models usagepersistence.ModelProjectionReader) *Service {
 	return &Service{Reader: reader, models: models}
 }
 
-func (s *Service) GetTokenUsageByModel(ctx context.Context, botID string, from, to time.Time) ([]Model, error) {
-	return s.GetByModel(ctx, Filter{BotID: botID, From: from, To: to})
+func (s *Service) GetTokenUsageByModel(ctx context.Context, botID string, from, to time.Time) ([]usagepersistence.Model, error) {
+	return s.GetByModel(ctx, usagepersistence.Filter{BotID: botID, From: from, To: to})
 }
 
-func (s *Service) GetByModel(ctx context.Context, filter Filter) ([]Model, error) {
+func (s *Service) GetByModel(ctx context.Context, filter usagepersistence.Filter) ([]usagepersistence.Model, error) {
 	items, err := s.Reader.GetByModel(ctx, filter)
 	if err != nil || len(items) == 0 {
 		return items, err
@@ -40,14 +42,14 @@ func (s *Service) GetByModel(ctx context.Context, filter Filter) ([]Model, error
 	return items, nil
 }
 
-func (s *Service) ListRecords(ctx context.Context, filter Filter, pagination Pagination) (Page, error) {
+func (s *Service) ListRecords(ctx context.Context, filter usagepersistence.Filter, pagination usagepersistence.Pagination) (usagepersistence.Page, error) {
 	page, err := s.Reader.ListRecords(ctx, filter, pagination)
 	if err != nil || len(page.Items) == 0 {
 		return page, err
 	}
 	projections, err := s.projections(ctx, modelIDsFromRecords(page.Items))
 	if err != nil {
-		return Page{}, err
+		return usagepersistence.Page{}, err
 	}
 	for i := range page.Items {
 		enrichRecord(&page.Items[i], projections[page.Items[i].ModelID])
@@ -55,7 +57,7 @@ func (s *Service) ListRecords(ctx context.Context, filter Filter, pagination Pag
 	return page, nil
 }
 
-func (s *Service) projections(ctx context.Context, ids []string) (map[string]ModelProjection, error) {
+func (s *Service) projections(ctx context.Context, ids []string) (map[string]usagepersistence.ModelProjection, error) {
 	if len(ids) == 0 || s.models == nil {
 		return nil, nil
 	}
@@ -66,7 +68,7 @@ func (s *Service) projections(ctx context.Context, ids []string) (map[string]Mod
 	return projections, nil
 }
 
-func modelIDsFromModels(items []Model) []string {
+func modelIDsFromModels(items []usagepersistence.Model) []string {
 	ids := make([]string, 0, len(items))
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
@@ -82,7 +84,7 @@ func modelIDsFromModels(items []Model) []string {
 	return ids
 }
 
-func modelIDsFromRecords(items []Record) []string {
+func modelIDsFromRecords(items []usagepersistence.Record) []string {
 	ids := make([]string, 0, len(items))
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
@@ -98,13 +100,13 @@ func modelIDsFromRecords(items []Record) []string {
 	return ids
 }
 
-func enrichModel(item *Model, projection ModelProjection) {
+func enrichModel(item *usagepersistence.Model, projection usagepersistence.ModelProjection) {
 	item.ModelSlug = valueOr(projection.ModelSlug, unknownModelSlug)
 	item.ModelName = valueOr(projection.ModelName, unknownName)
 	item.ProviderName = valueOr(projection.ProviderName, unknownName)
 }
 
-func enrichRecord(item *Record, projection ModelProjection) {
+func enrichRecord(item *usagepersistence.Record, projection usagepersistence.ModelProjection) {
 	item.ModelSlug = valueOr(projection.ModelSlug, unknownModelSlug)
 	item.ModelName = valueOr(projection.ModelName, unknownName)
 	item.ProviderName = valueOr(projection.ProviderName, unknownName)
@@ -117,4 +119,4 @@ func valueOr(value, fallback string) string {
 	return value
 }
 
-var _ Reader = (*Service)(nil)
+var _ usagepersistence.Reader = (*Service)(nil)

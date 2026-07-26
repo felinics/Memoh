@@ -10,9 +10,9 @@ import (
 	"github.com/memohai/memoh/domains/agent/automation/heartbeat"
 	"github.com/memohai/memoh/domains/agent/automation/schedule"
 	"github.com/memohai/memoh/domains/agent/chat/compaction"
-	"github.com/memohai/memoh/domains/agent/chat/usage"
+	usagepersistence "github.com/memohai/memoh/domains/agent/chat/usage/persistence"
 	"github.com/memohai/memoh/domains/agent/mcp"
-	"github.com/memohai/memoh/domains/api/access/acl"
+	aclpersistence "github.com/memohai/memoh/domains/api/bot/access/acl/persistence"
 	emailpkg "github.com/memohai/memoh/domains/channel/email"
 	memcatalog "github.com/memohai/memoh/domains/memory/catalog"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
@@ -77,7 +77,7 @@ type Handler struct {
 	emailOutboxService    *emailpkg.OutboxService
 	heartbeatService      *heartbeat.Service
 	compactionService     *compaction.Service
-	queries               usage.CommandReader
+	queries               usagepersistence.CommandReader
 	modelProviderResolver modelcatalog.ProviderResolver
 	aclEvaluator          AccessEvaluator
 	skillLoader           SkillLoader
@@ -124,7 +124,7 @@ func NewHandler(
 	emailService *emailpkg.Service,
 	emailOutboxService *emailpkg.OutboxService,
 	heartbeatService *heartbeat.Service,
-	queries usage.CommandReader,
+	queries usagepersistence.CommandReader,
 	aclEvaluator AccessEvaluator,
 	skillLoader SkillLoader,
 	containerFS ContainerFS,
@@ -619,11 +619,11 @@ func (h *Handler) chatACLAllows(cc CommandContext) (bool, error) {
 	if h.aclEvaluator == nil {
 		return true, nil
 	}
-	return h.aclEvaluator.Evaluate(cc.Ctx, acl.EvaluateRequest{
+	return h.aclEvaluator.Evaluate(cc.Ctx, aclpersistence.EvaluateRequest{
 		BotID:             cc.BotID,
 		ChannelIdentityID: cc.ChannelIdentityID,
 		ChannelType:       cc.ChannelType,
-		SourceScope: acl.SourceScope{
+		SourceScope: aclpersistence.SourceScope{
 			ConversationType: cc.ConversationType,
 			ConversationID:   cc.ConversationID,
 			ThreadID:         cc.ThreadID,
@@ -664,11 +664,11 @@ func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, 
 	if h.aclEvaluator == nil {
 		return true, nil
 	}
-	return h.aclEvaluator.Evaluate(ctx, acl.EvaluateRequest{
+	return h.aclEvaluator.Evaluate(ctx, aclpersistence.EvaluateRequest{
 		BotID:             input.BotID,
 		ChannelIdentityID: strings.TrimSpace(input.ChannelIdentityID),
 		ChannelType:       strings.TrimSpace(input.ChannelType),
-		SourceScope: acl.SourceScope{
+		SourceScope: aclpersistence.SourceScope{
 			ConversationType: strings.TrimSpace(input.ConversationType),
 			ConversationID:   strings.TrimSpace(input.ConversationID),
 			ThreadID:         strings.TrimSpace(input.ThreadID),

@@ -8,7 +8,7 @@ import (
 	"github.com/memohai/memoh/domains/agent/adapter/acp/profile"
 	messageevent "github.com/memohai/memoh/domains/agent/chat/event"
 	thread "github.com/memohai/memoh/domains/agent/chat/thread"
-	"github.com/memohai/memoh/domains/api/bot"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
 )
 
 var errThreadStoreTestOperationUnsupported = errors.New("thread store test operation unsupported")
@@ -107,7 +107,7 @@ func (stubThreadStore) GetBotMetadata(context.Context, string) (map[string]any, 
 	return nil, nil
 }
 
-func botMetadataMap(record bot.Record) map[string]any {
+func botMetadataMap(record botpersistence.Record) map[string]any {
 	return testJSONMap(record.Metadata)
 }
 

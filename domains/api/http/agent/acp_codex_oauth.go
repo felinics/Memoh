@@ -16,9 +16,10 @@ import (
 
 	acpclient "github.com/memohai/memoh/domains/agent/acp/client"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
 	providers "github.com/memohai/memoh/domains/model/provider"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const (
@@ -99,8 +100,8 @@ func (*ACPCodexOAuthHandler) HandlesCallbackState(state string) bool {
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} ACPCodexOAuthAuthorizeResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp/codex/oauth/authorize [get].
 func (h *ACPCodexOAuthHandler) Authorize(c echo.Context) error {
 	botID, channelIdentityID, err := h.requireBotAccess(c)
@@ -108,10 +109,10 @@ func (h *ACPCodexOAuthHandler) Authorize(c echo.Context) error {
 		return err
 	}
 	if h.provider == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "openai codex oauth provider is not configured")
+		return apperror.Internal("codex oauth", nil)
 	}
 	if h.acpWorkspace == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace manager is not configured")
+		return apperror.Internal("codex oauth", nil)
 	}
 	if err := h.ensureManagedWorkspace(c.Request().Context(), botID); err != nil {
 		return err
@@ -119,14 +120,14 @@ func (h *ACPCodexOAuthHandler) Authorize(c echo.Context) error {
 
 	state, err := generateACPCodexOAuthState()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("start codex oauth", err)
 	}
 	resp, codeVerifier, err := h.provider.StartOpenAICodexACPAuthorization(c.Request().Context(), h.callbackURL, state)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("start codex oauth", err)
 	}
 	if resp == nil || strings.TrimSpace(resp.AuthURL) == "" {
-		return echo.NewHTTPError(http.StatusInternalServerError, "openai codex oauth authorize URL is empty")
+		return apperror.Internal("start codex oauth", nil)
 	}
 
 	h.mu.Lock()
@@ -147,8 +148,8 @@ func (h *ACPCodexOAuthHandler) Authorize(c echo.Context) error {
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} ACPCodexOAuthStatus
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp/codex/oauth/status [get].
 func (h *ACPCodexOAuthHandler) Status(c echo.Context) error {
 	botID, _, err := h.requireBotAccess(c)
@@ -191,28 +192,28 @@ func (h *ACPCodexOAuthHandler) Callback(c echo.Context) error {
 	code := strings.TrimSpace(c.QueryParam("code"))
 	state := strings.TrimSpace(c.QueryParam("state"))
 	if code == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "code is required")
+		return apperror.Required("code")
 	}
 	if state == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "state is required")
+		return apperror.Required("state")
 	}
 	if h.provider == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "openai codex oauth provider is not configured")
+		return apperror.Internal("codex oauth", nil)
 	}
 
 	oauthState, err := h.takeState(state)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("complete codex oauth", err)
 	}
 	if _, err := httpx.AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, oauthState.ChannelIdentityID, oauthState.BotID, bot.PermissionWorkspaceExec); err != nil {
 		return err
 	}
 	creds, err := h.provider.ExchangeOpenAICodexACPCode(c.Request().Context(), h.callbackURL, code, oauthState.CodeVerifier)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("complete codex oauth", err)
 	}
 	if err := h.writeCodexOAuthAuth(c.Request().Context(), oauthState.BotID, creds); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("write codex oauth auth", err)
 	}
 
 	page := template.Must(template.New("acp-codex-oauth-success").Parse(`<!doctype html>
@@ -236,7 +237,7 @@ func (h *ACPCodexOAuthHandler) Callback(c echo.Context) error {
 func (h *ACPCodexOAuthHandler) requireBotAccess(c echo.Context) (string, string, error) {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+		return "", "", apperror.Required("bot_id")
 	}
 	channelIdentityID, err := httpx.RequireChannelIdentityID(c)
 	if err != nil {
@@ -253,7 +254,7 @@ func (h *ACPCodexOAuthHandler) ensureManagedWorkspace(ctx context.Context, botID
 	// Managed Codex auth is stored in the bot-scoped CODEX_HOME inside the
 	// workspace rather than a server host account.
 	if _, err := h.acpWorkspace.WorkspaceInfo(ctx, botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("write codex oauth auth", err)
 	}
 	return nil
 }

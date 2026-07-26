@@ -15,7 +15,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
-	"github.com/memohai/memoh/domains/channel/internal/common"
+	"github.com/memohai/memoh/domains/channel/internal/logging"
 	"github.com/memohai/memoh/domains/media"
 	"github.com/memohai/memoh/internal/redact"
 )
@@ -248,7 +248,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg gateway.ChannelConfig,
 				slog.String("chat_type", chatType),
 				slog.String("user_id", m.Author.ID),
 				slog.String("username", m.Author.Username),
-				slog.String("text", common.SummarizeText(text)),
+				slog.String("text", logging.SummarizeText(text)),
 			)
 		}
 

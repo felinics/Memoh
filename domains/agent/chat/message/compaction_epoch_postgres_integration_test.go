@@ -12,7 +12,7 @@ import (
 
 	. "github.com/memohai/memoh/domains/agent/chat/message"
 	agentsqlc "github.com/memohai/memoh/domains/agent/internal/postgres/sqlc"
-	dbpkg "github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db"
 )
 
 func TestPostgresHistoryMutationsAdvanceCompactionEpoch(t *testing.T) {
@@ -214,7 +214,7 @@ func assertSessionCompactionEpoch(t *testing.T, ctx context.Context, tx pgx.Tx, 
 
 func mustTestUUID(t *testing.T, value string) pgtype.UUID {
 	t.Helper()
-	parsed, err := dbpkg.ParseUUID(value)
+	parsed, err := db.ParseUUID(value)
 	if err != nil {
 		t.Fatalf("parse UUID %q: %v", value, err)
 	}

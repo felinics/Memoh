@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type webhookConfigStore interface {
@@ -53,15 +55,15 @@ func (h *WebhookHandler) Register(e *echo.Echo) {
 // Handle resolves the channel config and delegates the request to the adapter.
 func (h *WebhookHandler) Handle(c echo.Context) error {
 	if h.store == nil || h.manager == nil || h.registry == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "channel webhook dependencies not configured")
+		return apperror.Internal("configure channel webhook", nil)
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("parse channel platform", err)
 	}
 	configID := strings.TrimSpace(c.Param("config_id"))
 	if configID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "config id is required")
+		return apperror.Required("config_id")
 	}
 	cfg, err := h.findConfigByID(c.Request().Context(), channelType, configID)
 	if err != nil {
@@ -80,13 +82,16 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 			c.Response().WriteHeader(http.StatusOK)
 			return nil
 		}
-		return echo.NewHTTPError(http.StatusForbidden, "channel config is disabled")
+		return apperror.Forbidden("check channel config", nil)
 	}
 	receiver, ok := h.registry.GetWebhookReceiver(channelType)
 	if !ok {
-		return echo.NewHTTPError(http.StatusNotFound, "channel webhook receiver not found")
+		return apperror.NotFound("resolve channel webhook receiver", nil)
 	}
 	if err := receiver.HandleWebhook(c.Request().Context(), cfg, h.manager.HandleInbound, c.Request(), c.Response()); err != nil {
+		if _, ok := apperror.As(err); ok {
+			return err
+		}
 		var httpErr *echo.HTTPError
 		if errors.As(err, &httpErr) {
 			return httpErr
@@ -99,7 +104,7 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 				slog.Any("error", err),
 			)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("handle channel webhook", err)
 	}
 	return nil
 }
@@ -107,12 +112,12 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 func (h *WebhookHandler) findConfigByID(ctx context.Context, channelType ChannelType, configID string) (ChannelConfig, error) {
 	items, err := h.store.ListConfigsByType(ctx, channelType)
 	if err != nil {
-		return ChannelConfig{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return ChannelConfig{}, apperror.Internal("list channel configs", err)
 	}
 	for _, item := range items {
 		if item.ChannelType == channelType && strings.TrimSpace(item.ID) == configID {
 			return item, nil
 		}
 	}
-	return ChannelConfig{}, echo.NewHTTPError(http.StatusNotFound, "channel config not found")
+	return ChannelConfig{}, apperror.NotFound("get channel config", nil)
 }

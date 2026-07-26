@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
 )
 
 // Grant permission scopes. manage implies every scoped permission; workspace_write
@@ -26,7 +28,7 @@ const (
 
 var (
 	// ErrGrantNotFound indicates the grant does not exist for the bot.
-	ErrGrantNotFound = errors.New("bot user grant not found")
+	ErrGrantNotFound = botpersistence.ErrGrantNotFound
 	// ErrInvalidPermission indicates an unknown or empty permission set.
 	ErrInvalidPermission = errors.New("invalid permission")
 	// ErrInvalidGrantSubject indicates an unknown subject type.
@@ -36,7 +38,7 @@ var (
 	// ErrGrantOwnerConflict indicates an attempt to grant access to the bot owner.
 	ErrGrantOwnerConflict = errors.New("the bot owner already has full access")
 	// ErrGrantExists indicates a grant for the subject already exists.
-	ErrGrantExists = errors.New("a grant for this subject already exists")
+	ErrGrantExists = botpersistence.ErrGrantExists
 )
 
 // UserGrant represents a workspace user (or everyone) access grant for a bot.
@@ -341,7 +343,7 @@ func (s *Service) CreateUserGrant(ctx context.Context, botID, createdByUserID st
 		return UserGrant{}, err
 	}
 
-	input := CreateGrantInput{
+	input := botpersistence.CreateGrantInput{
 		BotID:       botID,
 		SubjectType: subjectType,
 		Permissions: payload,
@@ -438,7 +440,7 @@ func (s *Service) DeleteUserGrant(ctx context.Context, botID, grantID string) er
 	return s.grants.DeleteGrant(ctx, grantID)
 }
 
-func (s *Service) grantFromRecord(ctx context.Context, row GrantRecord) UserGrant {
+func (s *Service) grantFromRecord(ctx context.Context, row botpersistence.GrantRecord) UserGrant {
 	grant := UserGrant{
 		ID:          row.ID,
 		BotID:       row.BotID,

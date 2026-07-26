@@ -7,6 +7,7 @@ import (
 
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/chat/timeline"
+	"github.com/memohai/memoh/domains/channel/inbound"
 )
 
 const discussIdleTimeout = 10 * time.Minute
@@ -21,6 +22,10 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 		d.mu.Lock()
 		if cur, ok := d.sessions[sessionID]; ok && cur == sess {
 			delete(d.sessions, sessionID)
+		}
+		delete(d.workers, sess)
+		if sess.done != nil {
+			close(sess.done)
 		}
 		d.mu.Unlock()
 	}()
@@ -62,12 +67,12 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 }
 
 func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger) {
-	d.handleReplyWithTurn(ctx, sess, rc, log, d.turnServiceSnapshot())
+	d.handleReplyWithTurn(ctx, sess, rc, log, d.turn)
 }
 
 // loadArtifacts projects the session's active compaction frontier. Failures
 // degrade to uncompacted composition.
-func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg DiscussSessionConfig, log *slog.Logger) []timeline.CompactionArtifact {
+func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg inbound.DiscussSessionConfig, log *slog.Logger) []timeline.CompactionArtifact {
 	if d.artifacts == nil {
 		return nil
 	}
@@ -80,7 +85,7 @@ func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg DiscussSessionCon
 }
 
 // handleReplyWithTurn remains as a narrow seam for parity tests. Production
-// workers obtain the current service through turnServiceSnapshot.
+// workers use the immutable service supplied at construction.
 func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger, turnSvc agentdomain.Service) {
 	cfg := d.sessionConfigSnapshot(sess)
 	trs := d.history.Load(ctx, cfg.ThreadID)

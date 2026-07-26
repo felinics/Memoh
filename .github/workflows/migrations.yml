@@ -111,6 +111,3 @@ jobs:
           fi
           printf 'Packages requiring PostgreSQL:\n%s\n' "$packages"
           printf '%s\n' "$packages" | xargs go test -tags=integration -count=1
-
-      - name: Architecture guards
-        run: go test -count=1 ./internal/arch

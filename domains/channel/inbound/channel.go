@@ -26,11 +26,10 @@ import (
 	"github.com/memohai/memoh/domains/agent/command/slash"
 	acpfeedback "github.com/memohai/memoh/domains/agent/decision/feedback"
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
-	"github.com/memohai/memoh/domains/api/access/acl"
-	"github.com/memohai/memoh/domains/api/auth"
 	"github.com/memohai/memoh/domains/api/bot"
+	aclpersistence "github.com/memohai/memoh/domains/api/bot/access/acl/persistence"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 	"github.com/memohai/memoh/domains/channel/gateway"
-	"github.com/memohai/memoh/domains/channel/internal/discuss"
 	"github.com/memohai/memoh/domains/channel/route"
 	"github.com/memohai/memoh/domains/media"
 	"github.com/memohai/memoh/domains/media/attachment"
@@ -58,7 +57,7 @@ type channelReactor interface {
 }
 
 type chatACL interface {
-	Evaluate(ctx context.Context, req acl.EvaluateRequest) (bool, error)
+	Evaluate(ctx context.Context, req aclpersistence.EvaluateRequest) (bool, error)
 }
 
 type mediaIngestor interface {
@@ -201,7 +200,7 @@ type ChannelInboundProcessor struct {
 	sessionEnsurer      SessionEnsurer
 	pipeline            *timeline.Pipeline
 	eventStore          *timeline.EventStore
-	discussDriver       *discuss.DiscussDriver
+	discussDriver       DiscussDriver
 	imDisplayOptions    IMDisplayOptionsReader
 	defaultChatRuntime  DefaultChatRuntimeReader
 	acpAgentSetup       ACPAgentSetupReader
@@ -332,7 +331,7 @@ func (p *ChannelInboundProcessor) SetRequestedSkillResolver(resolver RequestedSk
 }
 
 // SetPipeline configures the DCP pipeline, event store, and discuss driver.
-func (p *ChannelInboundProcessor) SetPipeline(pipeline *timeline.Pipeline, store *timeline.EventStore, driver *discuss.DiscussDriver) {
+func (p *ChannelInboundProcessor) SetPipeline(pipeline *timeline.Pipeline, store *timeline.EventStore, driver DiscussDriver) {
 	if p == nil {
 		return
 	}
@@ -658,11 +657,11 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg gateway
 	// in-memory pipeline. This applies uniformly to chat and discuss modes.
 	aclAllowed := true
 	if p.acl != nil {
-		allowed, aclErr := p.acl.Evaluate(ctx, acl.EvaluateRequest{
+		allowed, aclErr := p.acl.Evaluate(ctx, aclpersistence.EvaluateRequest{
 			BotID:             identity.BotID,
 			ChannelIdentityID: identity.ChannelIdentityID,
 			ChannelType:       msg.Channel.String(),
-			SourceScope: acl.SourceScope{
+			SourceScope: aclpersistence.SourceScope{
 				ConversationType: gateway.NormalizeConversationType(msg.Conversation.Type),
 				ConversationID:   strings.TrimSpace(msg.Conversation.ID),
 				ThreadID:         threadID,
@@ -872,7 +871,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg gateway
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
 		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 		sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
-		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, discuss.DiscussSessionConfig{
+		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, DiscussSessionConfig{
 			TeamID:            cfg.TeamID,
 			BotID:             identity.BotID,
 			ThreadID:          sessionID,

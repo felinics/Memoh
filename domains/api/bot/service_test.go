@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/domains/api/access/acl"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+
+	"github.com/memohai/memoh/domains/api/bot/access/acl"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 )
 
@@ -17,29 +19,29 @@ const (
 )
 
 type botStoreFake struct {
-	BotStore
-	getByID func(context.Context, string) (Record, error)
-	create  func(context.Context, CreateInput) (Record, error)
-	update  func(context.Context, UpdateInput) (Record, error)
+	botpersistence.BotStore
+	getByID func(context.Context, string) (botpersistence.Record, error)
+	create  func(context.Context, botpersistence.CreateInput) (botpersistence.Record, error)
+	update  func(context.Context, botpersistence.UpdateInput) (botpersistence.Record, error)
 	status  func(context.Context, string, string) error
 	delete  func(context.Context, string) error
 }
 
-func (f *botStoreFake) GetBotByID(ctx context.Context, id string) (Record, error) {
+func (f *botStoreFake) GetBotByID(ctx context.Context, id string) (botpersistence.Record, error) {
 	if f.getByID == nil {
 		return baseRecord(), nil
 	}
 	return f.getByID(ctx, id)
 }
 
-func (f *botStoreFake) CreateBot(ctx context.Context, input CreateInput) (Record, error) {
+func (f *botStoreFake) CreateBot(ctx context.Context, input botpersistence.CreateInput) (botpersistence.Record, error) {
 	if f.create == nil {
 		return baseRecord(), nil
 	}
 	return f.create(ctx, input)
 }
 
-func (f *botStoreFake) UpdateBot(ctx context.Context, input UpdateInput) (Record, error) {
+func (f *botStoreFake) UpdateBot(ctx context.Context, input botpersistence.UpdateInput) (botpersistence.Record, error) {
 	if f.update == nil {
 		row := baseRecord()
 		row.Metadata = input.Metadata
@@ -63,18 +65,18 @@ func (f *botStoreFake) DeleteBot(ctx context.Context, id string) error {
 }
 
 type userReaderFake struct {
-	get func(context.Context, string) (UserRecord, error)
+	get func(context.Context, string) (botpersistence.UserRecord, error)
 }
 
-func (f userReaderFake) GetUser(ctx context.Context, id string) (UserRecord, error) {
+func (f userReaderFake) GetUser(ctx context.Context, id string) (botpersistence.UserRecord, error) {
 	return f.get(ctx, id)
 }
 
 type containerReaderFake struct {
-	get func(context.Context, string) (ContainerRecord, error)
+	get func(context.Context, string) (botpersistence.ContainerRecord, error)
 }
 
-func (f containerReaderFake) GetContainerByBotID(ctx context.Context, id string) (ContainerRecord, error) {
+func (f containerReaderFake) GetContainerByBotID(ctx context.Context, id string) (botpersistence.ContainerRecord, error) {
 	return f.get(ctx, id)
 }
 
@@ -96,8 +98,8 @@ func (*fakeContainerLifecycle) CleanupBotContainer(context.Context, string, bool
 	return nil
 }
 
-func baseRecord() Record {
-	return Record{
+func baseRecord() botpersistence.Record {
+	return botpersistence.Record{
 		ID: testBotID, OwnerUserID: testOwnerID, Name: "test-bot",
 		DisplayName: "Test Bot", IsActive: true, Status: BotStatusCreating,
 		Metadata: []byte(`{}`),
@@ -105,7 +107,7 @@ func baseRecord() Record {
 }
 
 func TestAuthorizeAccess(t *testing.T) {
-	store := &botStoreFake{getByID: func(context.Context, string) (Record, error) {
+	store := &botStoreFake{getByID: func(context.Context, string) (botpersistence.Record, error) {
 		return baseRecord(), nil
 	}}
 	svc := NewService(nil, store, nil, nil, nil)
@@ -131,12 +133,12 @@ func TestAuthorizeAccess(t *testing.T) {
 
 func TestCreateRejectsUnknownACLPreset(t *testing.T) {
 	createCalled := false
-	store := &botStoreFake{create: func(context.Context, CreateInput) (Record, error) {
+	store := &botStoreFake{create: func(context.Context, botpersistence.CreateInput) (botpersistence.Record, error) {
 		createCalled = true
-		return Record{}, nil
+		return botpersistence.Record{}, nil
 	}}
-	users := userReaderFake{get: func(context.Context, string) (UserRecord, error) {
-		return UserRecord{ID: testOwnerID}, nil
+	users := userReaderFake{get: func(context.Context, string) (botpersistence.UserRecord, error) {
+		return botpersistence.UserRecord{ID: testOwnerID}, nil
 	}}
 	svc := NewService(nil, store, nil, users, nil)
 	_, err := svc.Create(t.Context(), testOwnerID, CreateBotRequest{DisplayName: "test", AclPreset: "unknown"})
@@ -149,8 +151,8 @@ func TestCreateRejectsUnknownACLPreset(t *testing.T) {
 }
 
 func TestCreateTreatsMissingOwnerAsError(t *testing.T) {
-	users := userReaderFake{get: func(context.Context, string) (UserRecord, error) {
-		return UserRecord{}, ErrOwnerUserNotFound
+	users := userReaderFake{get: func(context.Context, string) (botpersistence.UserRecord, error) {
+		return botpersistence.UserRecord{}, ErrOwnerUserNotFound
 	}}
 	svc := NewService(nil, &botStoreFake{}, nil, users, nil)
 	_, err := svc.Create(t.Context(), testOwnerID, CreateBotRequest{})
@@ -180,12 +182,12 @@ func TestRunCreateLifecycleRecordsSetupFailureAndLeavesBotReady(t *testing.T) {
 	events := make([]string, 0, 3)
 	var persisted []byte
 	store := &botStoreFake{
-		getByID: func(context.Context, string) (Record, error) {
+		getByID: func(context.Context, string) (botpersistence.Record, error) {
 			row := baseRecord()
 			row.Metadata = []byte(`{"workspace":{"image":"workspace:latest"},"keep":true}`)
 			return row, nil
 		},
-		update: func(_ context.Context, input UpdateInput) (Record, error) {
+		update: func(_ context.Context, input botpersistence.UpdateInput) (botpersistence.Record, error) {
 			events = append(events, "metadata")
 			persisted = append([]byte(nil), input.Metadata...)
 			row := baseRecord()
@@ -234,12 +236,12 @@ func TestRunCreateLifecycleReturnsContractErrorAfterLeavingBotReady(t *testing.T
 func TestClearContainerSetupFailure(t *testing.T) {
 	var persisted []byte
 	store := &botStoreFake{
-		getByID: func(context.Context, string) (Record, error) {
+		getByID: func(context.Context, string) (botpersistence.Record, error) {
 			row := baseRecord()
 			row.Metadata = []byte(`{"workspace":{"image":"workspace:latest","last_setup_error":{"message":"old"}}}`)
 			return row, nil
 		},
-		update: func(_ context.Context, input UpdateInput) (Record, error) {
+		update: func(_ context.Context, input botpersistence.UpdateInput) (botpersistence.Record, error) {
 			persisted = append([]byte(nil), input.Metadata...)
 			return baseRecord(), nil
 		},
@@ -256,14 +258,14 @@ func TestClearContainerSetupFailure(t *testing.T) {
 }
 
 func TestListChecksReportsSetupFailureAsSingleIssue(t *testing.T) {
-	store := &botStoreFake{getByID: func(context.Context, string) (Record, error) {
+	store := &botStoreFake{getByID: func(context.Context, string) (botpersistence.Record, error) {
 		row := baseRecord()
 		row.Status = BotStatusReady
 		row.Metadata = []byte(`{"workspace":{"last_setup_error":{"phase":"setup","message":"image pull failed","at":"2026-06-08T10:00:00Z"}}}`)
 		return row, nil
 	}}
-	containers := containerReaderFake{get: func(context.Context, string) (ContainerRecord, error) {
-		return ContainerRecord{}, ErrContainerNotFound
+	containers := containerReaderFake{get: func(context.Context, string) (botpersistence.ContainerRecord, error) {
+		return botpersistence.ContainerRecord{}, ErrContainerNotFound
 	}}
 	svc := NewService(nil, store, nil, nil, containers)
 	checks, err := svc.ListChecks(t.Context(), testBotID)
@@ -279,8 +281,8 @@ func TestListChecksReportsSetupFailureAsSingleIssue(t *testing.T) {
 func TestRecordContainerSetupFailureTruncatesLongMessages(t *testing.T) {
 	var persisted []byte
 	store := &botStoreFake{
-		getByID: func(context.Context, string) (Record, error) { return baseRecord(), nil },
-		update: func(_ context.Context, input UpdateInput) (Record, error) {
+		getByID: func(context.Context, string) (botpersistence.Record, error) { return baseRecord(), nil },
+		update: func(_ context.Context, input botpersistence.UpdateInput) (botpersistence.Record, error) {
 			persisted = append([]byte(nil), input.Metadata...)
 			return baseRecord(), nil
 		},

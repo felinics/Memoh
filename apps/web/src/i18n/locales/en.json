@@ -93,8 +93,33 @@
     "preview": "Preview"
   },
   "errors": {
+    "kind": {
+      "internal": "Something went wrong on our side. Please try again.",
+      "invalid": "The request could not be processed. Please check your input and try again.",
+      "unauthenticated": "Your session has expired. Please sign in again.",
+      "forbidden": "You do not have permission to do this.",
+      "not_found": "This item no longer exists. It may have been deleted.",
+      "conflict": "This conflicts with the current state. Refresh and try again.",
+      "failed_precondition": "This action is not available right now.",
+      "exhausted": "Too many requests. Please wait a moment and try again.",
+      "canceled": "The request was canceled.",
+      "deadline_exceeded": "This took too long to complete. Please try again.",
+      "unavailable": "The service is temporarily unavailable. Please try again shortly.",
+      "unimplemented": "This feature is not available."
+    },
+    "field": {
+      "required": "This field is required.",
+      "invalid": "This value is not valid.",
+      "too_long": "This value is too long.",
+      "out_of_range": "This value is out of range.",
+      "taken": "This value is already in use.",
+      "unsupported": "This value is not supported."
+    },
     "bot": {
       "name_taken": "This name is already taken."
+    },
+    "agent": {
+      "chat_model_required": "Configure a chat model for this Bot before starting a conversation."
     },
     "channel": {
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly."
@@ -133,6 +158,10 @@
       "reasoning_effort_required": "Choose a reasoning effort and try again.",
       "reasoning_effort_unavailable": "The selected reasoning effort is no longer available for this external agent.",
       "config_update_failed": "The external agent could not apply the selected settings. Please retry."
+    },
+    "upstream": {
+      "attributed": "{provider} reported: {message}",
+      "anonymous": "The model provider reported: {message}"
     }
   },
   "auth": {
@@ -736,8 +765,8 @@
       "generic": "Tool",
       "approve": "Allow",
       "reject": "Reject",
-    "pendingApproval": "pending approval",
-    "executionLocation": "Execution location",
+      "pendingApproval": "pending approval",
+      "executionLocation": "Execution location",
       "pendingUserInput": "waiting for input",
       "userInputSubmitted": "answered",
       "userInputCanceled": "canceled",

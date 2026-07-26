@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -213,11 +212,11 @@ func (s *Store) DeleteOAuthToken(ctx context.Context, providerID string) error {
 
 func providerRecord(row dbsqlc.ModelProvider) providerport.ProviderRecord {
 	return providerport.ProviderRecord{
-		ID:                 uuidString(row.ID),
-		ProviderTemplateID: uuidString(row.ProviderTemplateID),
+		ID:                 db.UUIDString(row.ID),
+		ProviderTemplateID: db.UUIDString(row.ProviderTemplateID),
 		Name:               row.Name,
 		ClientType:         row.ClientType,
-		Icon:               textString(row.Icon),
+		Icon:               db.TextToString(row.Icon),
 		Enable:             row.Enable,
 		Config:             cloneBytes(row.Config),
 		Metadata:           cloneBytes(row.Metadata),
@@ -228,7 +227,7 @@ func providerRecord(row dbsqlc.ModelProvider) providerport.ProviderRecord {
 
 func oauthTokenRecord(row dbsqlc.ModelProviderOauthToken) providerport.OAuthTokenRecord {
 	record := providerport.OAuthTokenRecord{
-		ProviderID:       uuidString(row.ProviderID),
+		ProviderID:       db.UUIDString(row.ProviderID),
 		AccessToken:      row.AccessToken,
 		RefreshToken:     row.RefreshToken,
 		Scope:            row.Scope,
@@ -265,20 +264,6 @@ func mapOAuthError(err error) error {
 
 func text(value string) pgtype.Text {
 	return pgtype.Text{String: value, Valid: value != ""}
-}
-
-func textString(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String
-}
-
-func uuidString(value pgtype.UUID) string {
-	if !value.Valid {
-		return ""
-	}
-	return uuid.UUID(value.Bytes).String()
 }
 
 func cloneBytes(value []byte) []byte {

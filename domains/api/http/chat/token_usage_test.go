@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -12,32 +11,33 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/agent/chat/usage"
-	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	usagepersistence "github.com/memohai/memoh/domains/agent/chat/usage/persistence"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type tokenUsageBotQueries struct {
-	bot bot.Record
+	bot botpersistence.Record
 }
 
 type tokenUsageReader struct {
-	usage.Reader
+	usagepersistence.Reader
 	listCalled  bool
 	usageCalled bool
-	modelFilter usage.Filter
-	listFilter  usage.Filter
-	pagination  usage.Pagination
-	usageFilter usage.Filter
-	usageRows   []usage.Daily
+	modelFilter usagepersistence.Filter
+	listFilter  usagepersistence.Filter
+	pagination  usagepersistence.Pagination
+	usageFilter usagepersistence.Filter
+	usageRows   []usagepersistence.Daily
 }
 
-func (q *tokenUsageReader) ListRecords(_ context.Context, filter usage.Filter, pagination usage.Pagination) (usage.Page, error) {
+func (q *tokenUsageReader) ListRecords(_ context.Context, filter usagepersistence.Filter, pagination usagepersistence.Pagination) (usagepersistence.Page, error) {
 	q.listCalled = true
 	q.listFilter = filter
 	q.pagination = pagination
-	return usage.Page{
-		Items: []usage.Record{{
+	return usagepersistence.Page{
+		Items: []usagepersistence.Record{{
 			ID:          "55555555-5555-5555-5555-555555555555",
 			SessionID:   "66666666-6666-6666-6666-666666666666",
 			SessionType: "acp_agent",
@@ -48,13 +48,13 @@ func (q *tokenUsageReader) ListRecords(_ context.Context, filter usage.Filter, p
 	}, nil
 }
 
-func (q *tokenUsageReader) GetDaily(_ context.Context, filter usage.Filter) ([]usage.Daily, error) {
+func (q *tokenUsageReader) GetDaily(_ context.Context, filter usagepersistence.Filter) ([]usagepersistence.Daily, error) {
 	q.usageCalled = true
 	q.usageFilter = filter
 	return q.usageRows, nil
 }
 
-func (q *tokenUsageReader) GetByModel(_ context.Context, filter usage.Filter) ([]usage.Model, error) {
+func (q *tokenUsageReader) GetByModel(_ context.Context, filter usagepersistence.Filter) ([]usagepersistence.Model, error) {
 	q.modelFilter = filter
 	return nil, nil
 }
@@ -63,7 +63,7 @@ func TestGetTokenUsageSeparatesACPAgentBucket(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	botQueries := &tokenUsageBotQueries{bot: httpfixture.BotRow(botID, map[string]any{})}
 	reader := &tokenUsageReader{
-		usageRows: []usage.Daily{
+		usageRows: []usagepersistence.Daily{
 			{
 				SessionType:  "acp_agent",
 				Day:          time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
@@ -197,9 +197,8 @@ func TestListTokenUsageRecordsRejectsUnknownSessionType(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ListTokenUsageRecords() error = nil, want HTTP 400")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("ListTokenUsageRecords() error = %v, want HTTP 400", err)
+	if apperror.KindOf(err) != apperror.KindInvalid {
+		t.Fatalf("ListTokenUsageRecords() error = %v, want KindInvalid", err)
 	}
 	if reader.listCalled {
 		t.Fatalf("usage queries should not run for invalid session_type")

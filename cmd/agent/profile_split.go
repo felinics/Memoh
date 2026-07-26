@@ -5,8 +5,8 @@ package main
 import (
 	"go.uber.org/fx"
 
+	channelprocess "github.com/memohai/memoh/cmd/internal/channel"
 	"github.com/memohai/memoh/domains/channel"
-	channelmodule "github.com/memohai/memoh/domains/channel/assembly"
 	"github.com/memohai/memoh/internal/config"
 	channelclient "github.com/memohai/memoh/internal/rpc/channel/client"
 )
@@ -23,7 +23,9 @@ func validateProfile(cfg config.Config) error {
 
 func splitOptions() fx.Option {
 	return fx.Options(
-		channelmodule.ServerLocalModule(),
+		channelprocess.FoundationModule(),
+		fx.Provide(channelprocess.NewLocalRegistry),
+		channelprocess.ServerLocalModule(),
 		fx.Provide(
 			provideChannelRPCConn,
 			provideChannelContractClient,

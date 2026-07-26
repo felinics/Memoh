@@ -11,9 +11,12 @@ import (
 // StartVideoTask registers an asynchronous video generation task and returns a
 // detached, cancelable context for the provider polling goroutine.
 func (m *Manager) StartVideoTask(parentCtx context.Context, botID, sessionID, description string) (string, context.Context, error) {
-	ctx, cancel := detachedContextWithTimeout(parentCtx, time.Duration(BackgroundExecTimeout)*time.Second)
-
 	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return "", nil, ErrManagerStopped
+	}
+	ctx, cancel := m.taskContextLocked(parentCtx, time.Duration(BackgroundExecTimeout)*time.Second)
 	taskID := m.newTaskIDLocked(botID)
 	task := &Task{
 		ID:          taskID,
@@ -27,6 +30,7 @@ func (m *Manager) StartVideoTask(parentCtx context.Context, botID, sessionID, de
 		changed:     make(chan struct{}),
 	}
 	m.tasks[taskID] = task
+	m.trackOwnerLocked(task)
 	m.mu.Unlock()
 
 	m.logger.InfoContext(parentCtx, "background video task started",
@@ -84,6 +88,7 @@ func (m *Manager) CompleteVideoTask(taskID string, status TaskStatus, result map
 	if task == nil || task.Kind != KindVideo {
 		return
 	}
+	defer m.finishOwner(task)
 	defer task.Cancel()
 
 	if status == "" {

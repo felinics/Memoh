@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/domains/agent/sessionmode"
-	"github.com/memohai/memoh/domains/api/setting"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 	"github.com/memohai/memoh/domains/channel/delivery"
 )
 

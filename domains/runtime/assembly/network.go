@@ -8,7 +8,7 @@ import (
 
 	"github.com/memohai/memoh/domains/runtime/container"
 	netoverlay "github.com/memohai/memoh/domains/runtime/internal/network/overlay"
-	networkpostgres "github.com/memohai/memoh/domains/runtime/internal/network/postgres"
+	networkpostgres "github.com/memohai/memoh/domains/runtime/internal/postgres/network"
 	runtimenetwork "github.com/memohai/memoh/domains/runtime/network"
 )
 

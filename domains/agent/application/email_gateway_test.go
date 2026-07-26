@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	agentdomain "github.com/memohai/memoh/domains/agent"
 )
 
 type fakeBotOwnerResolver struct {
@@ -18,6 +20,35 @@ func (f *fakeBotOwnerResolver) ResolveBotOwner(_ context.Context, botID string) 
 	f.gotID = botID
 	return f.owner, f.err
 }
+
+type fakeEmailTurnStarter struct {
+	command agentdomain.StartTurnCommand
+	handle  agentdomain.RunHandle
+	err     error
+}
+
+func (f *fakeEmailTurnStarter) StartTurn(_ context.Context, command agentdomain.StartTurnCommand) (agentdomain.RunHandle, error) {
+	f.command = command
+	return f.handle, f.err
+}
+
+type fakeEmailRunHandle struct {
+	events   <-chan agentdomain.Event
+	errs     <-chan error
+	canceled bool
+}
+
+func (*fakeEmailRunHandle) RunID() string { return "email-run" }
+
+func (h *fakeEmailRunHandle) Events() <-chan agentdomain.Event { return h.events }
+
+func (h *fakeEmailRunHandle) Errs() <-chan error { return h.errs }
+
+func (*fakeEmailRunHandle) Inject(context.Context, agentdomain.InjectMessage) error { return nil }
+
+func (*fakeEmailRunHandle) AddOutboundAssets([]agentdomain.OutboundAssetRef) {}
+
+func (h *fakeEmailRunHandle) Cancel() { h.canceled = true }
 
 func TestEmailChatGateway_resolveBotOwner(t *testing.T) {
 	t.Parallel()
@@ -68,5 +99,59 @@ func TestEmailChatGateway_resolveBotOwner(t *testing.T) {
 				t.Fatalf("ResolveBotOwner botID = %q, want bot-1", f.gotID)
 			}
 		})
+	}
+}
+
+func TestEmailChatGatewayTriggerBotChat(t *testing.T) {
+	events := make(chan agentdomain.Event)
+	close(events)
+	errs := make(chan error)
+	close(errs)
+	handle := &fakeEmailRunHandle{events: events, errs: errs}
+	turns := &fakeEmailTurnStarter{handle: handle}
+	gateway := NewEmailChatGateway(
+		turns,
+		&fakeBotOwnerResolver{owner: "owner-1"},
+		"email-test-secret",
+		slog.New(slog.DiscardHandler),
+	)
+
+	if err := gateway.TriggerBotChat(t.Context(), "bot-1", "new email"); err != nil {
+		t.Fatalf("TriggerBotChat() error = %v", err)
+	}
+	if !handle.canceled {
+		t.Fatal("TriggerBotChat() did not release the run handle")
+	}
+	command := turns.command
+	if command.TeamID == "" || command.Mode != agentdomain.ModeChat {
+		t.Fatalf("StartTurn command team/mode = %q/%q", command.TeamID, command.Mode)
+	}
+	if command.BotID != "bot-1" || command.ChatID != "bot-1" || command.UserID != "owner-1" {
+		t.Fatalf("StartTurn command identities = bot %q, chat %q, user %q", command.BotID, command.ChatID, command.UserID)
+	}
+	if command.Query != "new email" || command.CurrentChannel != "email" {
+		t.Fatalf("StartTurn command content/channel = %q/%q", command.Query, command.CurrentChannel)
+	}
+	if !strings.HasPrefix(command.Token, "Bearer ") {
+		t.Fatalf("StartTurn command token = %q, want bearer token", command.Token)
+	}
+}
+
+func TestEmailChatGatewayReturnsRunError(t *testing.T) {
+	events := make(chan agentdomain.Event)
+	close(events)
+	errs := make(chan error, 1)
+	errs <- errors.New("turn failed")
+	close(errs)
+	gateway := NewEmailChatGateway(
+		&fakeEmailTurnStarter{handle: &fakeEmailRunHandle{events: events, errs: errs}},
+		&fakeBotOwnerResolver{owner: "owner-1"},
+		"email-test-secret",
+		slog.New(slog.DiscardHandler),
+	)
+
+	err := gateway.TriggerBotChat(t.Context(), "bot-1", "new email")
+	if err == nil || !strings.Contains(err.Error(), "turn failed") {
+		t.Fatalf("TriggerBotChat() error = %v, want turn failure", err)
 	}
 }

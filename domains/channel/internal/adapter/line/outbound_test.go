@@ -10,7 +10,7 @@ import (
 	"github.com/line/line-bot-sdk-go/v8/linebot/messaging_api"
 
 	"github.com/memohai/memoh/domains/channel/gateway"
-	"github.com/memohai/memoh/domains/channel/publicmedia"
+	publicmedia "github.com/memohai/memoh/domains/channel/internal/http/media"
 )
 
 const testPublicMediaSignSecret = "line-public-media-test-secret"

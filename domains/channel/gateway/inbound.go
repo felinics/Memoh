@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 )
 
 // ErrInboundQueueFull indicates the synchronous inbound queue admission failed
@@ -26,18 +27,22 @@ func (m *Manager) HandleInbound(ctx context.Context, cfg ChannelConfig, msg Inbo
 	if m.processor == nil {
 		return errors.New("inbound processor not configured")
 	}
-	m.startInboundWorkers(ctx)
-	if m.inboundCtx != nil && m.inboundCtx.Err() != nil {
-		return errors.New("inbound dispatcher stopped")
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		return errManagerStopped
 	}
+	m.startInboundWorkersLocked(ctx)
 	task := inboundTask{
 		cfg: cfg,
 		msg: msg,
 	}
 	select {
 	case m.inboundQueue <- task:
+		m.mu.Unlock()
 		return nil
 	default:
+		m.mu.Unlock()
 		return ErrInboundQueueFull
 	}
 }
@@ -56,14 +61,30 @@ func (m *Manager) handleInbound(ctx context.Context, cfg ChannelConfig, msg Inbo
 	return nil
 }
 
-func (m *Manager) startInboundWorkers(ctx context.Context) {
+// startInboundWorkersLocked starts the pool while the caller holds m.mu, so
+// worker setup and shutdown admission are serialized.
+func (m *Manager) startInboundWorkersLocked(ctx context.Context) {
 	m.inboundOnce.Do(func() {
 		workerCtx := context.WithoutCancel(ctx)
 		inboundCtx, inboundCancel := context.WithCancel(workerCtx)
-		m.inboundCtx, m.inboundCancel = inboundCtx, inboundCancel
+		done := make(chan struct{})
+		m.lifecycleMu.Lock()
+		m.inboundCtx = inboundCtx
+		m.inboundCancel = inboundCancel
+		m.inboundDone = done
+		m.lifecycleMu.Unlock()
+		var workers sync.WaitGroup
+		workers.Add(m.inboundWorkers)
 		for i := 0; i < m.inboundWorkers; i++ {
-			go m.runInboundWorker(inboundCtx)
+			go func() {
+				defer workers.Done()
+				m.runInboundWorker(inboundCtx)
+			}()
 		}
+		go func() {
+			workers.Wait()
+			close(done)
+		}()
 	})
 }
 

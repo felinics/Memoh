@@ -7,11 +7,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/domains/api/auth"
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
+	"github.com/memohai/memoh/domains/api/identity/auth"
 	"github.com/memohai/memoh/domains/channel/email"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type EmailBindingsHandler struct {
@@ -48,13 +49,13 @@ func (h *EmailBindingsHandler) Register(e *echo.Echo) {
 // @Param bot_id path string true "Bot ID"
 // @Param request body email.CreateBindingRequest true "Binding configuration"
 // @Success 201 {object} email.BindingResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/email-bindings [post].
 func (h *EmailBindingsHandler) Create(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return apperror.Required("bot_id")
 	}
 	bot, err := h.authorizeBot(c, botID)
 	if err != nil {
@@ -62,20 +63,20 @@ func (h *EmailBindingsHandler) Create(c echo.Context) error {
 	}
 	var req email.CreateBindingRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind email binding", err)
 	}
 	if strings.TrimSpace(req.EmailProviderID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "email_provider_id is required")
+		return apperror.Required("email_provider_id")
 	}
 	if strings.TrimSpace(req.EmailAddress) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "email_address is required")
+		return apperror.Required("email_address")
 	}
 	if err := h.ensureProviderOwnedByBot(c, bot, req.EmailProviderID); err != nil {
 		return err
 	}
 	resp, err := h.service.CreateBinding(c.Request().Context(), botID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("create email binding", err)
 	}
 	// Refresh provider connections after binding change
 	_ = h.manager.RefreshProvider(c.Request().Context(), req.EmailProviderID)
@@ -88,19 +89,19 @@ func (h *EmailBindingsHandler) Create(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {array} email.BindingResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/email-bindings [get].
 func (h *EmailBindingsHandler) List(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return apperror.Required("bot_id")
 	}
 	if _, err := h.authorizeBot(c, botID); err != nil {
 		return err
 	}
 	items, err := h.service.ListBindings(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list email bindings", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -114,13 +115,13 @@ func (h *EmailBindingsHandler) List(c echo.Context) error {
 // @Param id path string true "Binding ID"
 // @Param request body email.UpdateBindingRequest true "Updated binding"
 // @Success 200 {object} email.BindingResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/email-bindings/{id} [put].
 func (h *EmailBindingsHandler) Update(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return apperror.Required("bot_id")
 	}
 	bot, err := h.authorizeBot(c, botID)
 	if err != nil {
@@ -128,25 +129,25 @@ func (h *EmailBindingsHandler) Update(c echo.Context) error {
 	}
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	current, err := h.service.GetBinding(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get email binding", err)
 	}
 	if current.BotID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "email binding not found")
+		return apperror.NotFound("get email binding", nil)
 	}
 	if err := h.ensureProviderOwnedByBot(c, bot, current.EmailProviderID); err != nil {
 		return err
 	}
 	var req email.UpdateBindingRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind email binding", err)
 	}
 	resp, err := h.service.UpdateBinding(c.Request().Context(), id, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("update email binding", err)
 	}
 	_ = h.manager.RefreshProvider(c.Request().Context(), resp.EmailProviderID)
 	return c.JSON(http.StatusOK, resp)
@@ -158,12 +159,12 @@ func (h *EmailBindingsHandler) Update(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Binding ID"
 // @Success 204 "No Content"
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/email-bindings/{id} [delete].
 func (h *EmailBindingsHandler) Delete(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return apperror.Required("bot_id")
 	}
 	bot, err := h.authorizeBot(c, botID)
 	if err != nil {
@@ -171,21 +172,21 @@ func (h *EmailBindingsHandler) Delete(c echo.Context) error {
 	}
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	// Get binding info before delete for refresh
 	binding, err := h.service.GetBinding(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get email binding", err)
 	}
 	if binding.BotID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "email binding not found")
+		return apperror.NotFound("get email binding", nil)
 	}
 	if err := h.ensureProviderOwnedByBot(c, bot, binding.EmailProviderID); err != nil {
 		return err
 	}
 	if err := h.service.DeleteBinding(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("delete email binding", err)
 	}
 	if binding.EmailProviderID != "" {
 		_ = h.manager.RefreshProvider(c.Request().Context(), binding.EmailProviderID)
@@ -203,10 +204,10 @@ func (h *EmailBindingsHandler) authorizeBot(c echo.Context, botID string) (bot.B
 
 func (h *EmailBindingsHandler) ensureProviderOwnedByBot(c echo.Context, record bot.Bot, providerID string) error {
 	if strings.TrimSpace(record.OwnerUserID) == "" {
-		return echo.NewHTTPError(http.StatusForbidden, "bot owner is required")
+		return apperror.Forbidden("authorize email provider owner", nil)
 	}
 	if _, err := h.service.GetProvider(c.Request().Context(), record.OwnerUserID, providerID); err != nil {
-		return echo.NewHTTPError(http.StatusForbidden, "email provider does not belong to this bot owner")
+		return apperror.Forbidden("authorize email provider owner", err)
 	}
 	return nil
 }

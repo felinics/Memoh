@@ -9,7 +9,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	memport "github.com/memohai/memoh/domains/memory/internal/port"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 	modelexecution "github.com/memohai/memoh/domains/model/execution"
 )
 
@@ -29,7 +29,7 @@ type Config struct {
 	PromptCacheTTL string
 }
 
-// Client implements port.LLM using the Twilight AI SDK.
+// Client implements provider.LLM using the Twilight AI SDK.
 type Client struct {
 	cfg Config
 }
@@ -51,9 +51,9 @@ func (c *Client) model() *sdk.Model {
 	})
 }
 
-func (c *Client) Extract(ctx context.Context, req memport.ExtractRequest) (memport.ExtractResponse, error) {
+func (c *Client) Extract(ctx context.Context, req memprovider.ExtractRequest) (memprovider.ExtractResponse, error) {
 	if len(req.Messages) == 0 {
-		return memport.ExtractResponse{}, nil
+		return memprovider.ExtractResponse{}, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
@@ -76,7 +76,7 @@ func (c *Client) Extract(ctx context.Context, req memport.ExtractRequest) (mempo
 	}
 	transcript := strings.TrimSpace(sb.String())
 	if transcript == "" {
-		return memport.ExtractResponse{}, nil
+		return memprovider.ExtractResponse{}, nil
 	}
 
 	now := time.Now()
@@ -96,19 +96,19 @@ func (c *Client) Extract(ctx context.Context, req memport.ExtractRequest) (mempo
 		sdk.WithMessages(messages),
 	)
 	if err != nil {
-		return memport.ExtractResponse{}, fmt.Errorf("extract: %w", err)
+		return memprovider.ExtractResponse{}, fmt.Errorf("extract: %w", err)
 	}
 
 	facts := parseExtractResponse(result.Text)
 	if len(facts) > maxExtractFacts {
 		facts = facts[:maxExtractFacts]
 	}
-	return memport.ExtractResponse{Facts: facts}, nil
+	return memprovider.ExtractResponse{Facts: facts}, nil
 }
 
-func (c *Client) Decide(ctx context.Context, req memport.DecideRequest) (memport.DecideResponse, error) {
+func (c *Client) Decide(ctx context.Context, req memprovider.DecideRequest) (memprovider.DecideResponse, error) {
 	if len(req.Facts) == 0 {
-		return memport.DecideResponse{}, nil
+		return memprovider.DecideResponse{}, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
@@ -127,19 +127,19 @@ func (c *Client) Decide(ctx context.Context, req memport.DecideRequest) (memport
 		sdk.WithMessages(messages),
 	)
 	if err != nil {
-		return memport.DecideResponse{}, fmt.Errorf("decide: %w", err)
+		return memprovider.DecideResponse{}, fmt.Errorf("decide: %w", err)
 	}
 
 	actions := parseUpdateResponse(result.Text)
 	if len(actions) > maxDecideActions {
 		actions = actions[:maxDecideActions]
 	}
-	return memport.DecideResponse{Actions: actions}, nil
+	return memprovider.DecideResponse{Actions: actions}, nil
 }
 
-func (c *Client) Compact(ctx context.Context, req memport.CompactRequest) (memport.CompactResponse, error) {
+func (c *Client) Compact(ctx context.Context, req memprovider.CompactRequest) (memprovider.CompactResponse, error) {
 	if len(req.Memories) == 0 {
-		return memport.CompactResponse{}, nil
+		return memprovider.CompactResponse{}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
 	defer cancel()
@@ -150,7 +150,7 @@ func (c *Client) Compact(ctx context.Context, req memport.CompactRequest) (mempo
 		"decay_days":   req.DecayDays,
 	})
 	if err != nil {
-		return memport.CompactResponse{}, fmt.Errorf("compact: marshal input: %w", err)
+		return memprovider.CompactResponse{}, fmt.Errorf("compact: marshal input: %w", err)
 	}
 	model := c.model()
 	system, messages, _ := modelexecution.ApplyPromptCache(
@@ -163,15 +163,15 @@ func (c *Client) Compact(ctx context.Context, req memport.CompactRequest) (mempo
 		sdk.WithMessages(messages),
 	)
 	if err != nil {
-		return memport.CompactResponse{}, fmt.Errorf("compact: %w", err)
+		return memprovider.CompactResponse{}, fmt.Errorf("compact: %w", err)
 	}
 	facts := parseJSONStringArray(result.Text)
-	return memport.CompactResponse{Facts: facts}, nil
+	return memprovider.CompactResponse{Facts: facts}, nil
 }
 
 // buildUpdateUserMessage formats the Decide user message following Mem0's
 // update prompt convention: current memory + retrieved facts in triple backticks.
-func buildUpdateUserMessage(candidates []memport.CandidateMemory, facts []string) string {
+func buildUpdateUserMessage(candidates []memprovider.CandidateMemory, facts []string) string {
 	var sb strings.Builder
 
 	if len(candidates) > 0 {
@@ -255,20 +255,20 @@ type updateResponseEntry struct {
 }
 
 // parseUpdateResponse parses the {"memory": [...]} response from Decide.
-func parseUpdateResponse(text string) []memport.DecisionAction {
+func parseUpdateResponse(text string) []memprovider.DecisionAction {
 	text = extractJSONBlock(text)
 
 	var wrapper struct {
 		Memory []updateResponseEntry `json:"memory"`
 	}
 	if json.Unmarshal([]byte(text), &wrapper) == nil && len(wrapper.Memory) > 0 {
-		actions := make([]memport.DecisionAction, 0, len(wrapper.Memory))
+		actions := make([]memprovider.DecisionAction, 0, len(wrapper.Memory))
 		for _, entry := range wrapper.Memory {
 			event := strings.ToUpper(strings.TrimSpace(entry.Event))
 			if event == "NONE" {
 				event = "NOOP"
 			}
-			actions = append(actions, memport.DecisionAction{
+			actions = append(actions, memprovider.DecisionAction{
 				Event:     event,
 				ID:        strings.TrimSpace(entry.ID),
 				Text:      strings.TrimSpace(entry.Text),
@@ -278,7 +278,7 @@ func parseUpdateResponse(text string) []memport.DecisionAction {
 		return actions
 	}
 
-	var flat []memport.DecisionAction
+	var flat []memprovider.DecisionAction
 	if json.Unmarshal([]byte(text), &flat) == nil {
 		return flat
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/domains/model/fetch"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type FetchProvidersHandler struct {
@@ -51,23 +52,23 @@ func (h *FetchProvidersHandler) ListMeta(c echo.Context) error {
 // @Produce json
 // @Param request body fetch.CreateRequest true "Fetch provider configuration"
 // @Success 201 {object} fetch.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /fetch-providers [post].
 func (h *FetchProvidersHandler) Create(c echo.Context) error {
 	var req fetch.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind fetch provider", err)
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+		return apperror.Required("name")
 	}
 	if strings.TrimSpace(string(req.Provider)) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "provider is required")
+		return apperror.Required("provider")
 	}
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
-		return fetchProviderHTTPError(err)
+		return fetchProviderError("create fetch provider", err)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -80,12 +81,12 @@ func (h *FetchProvidersHandler) Create(c echo.Context) error {
 // @Produce json
 // @Param provider query string false "Provider filter (native)"
 // @Success 200 {array} fetch.GetResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /fetch-providers [get].
 func (h *FetchProvidersHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context(), c.QueryParam("provider"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list fetch providers", err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -98,17 +99,17 @@ func (h *FetchProvidersHandler) List(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 200 {object} fetch.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /fetch-providers/{id} [get].
 func (h *FetchProvidersHandler) Get(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	resp, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.NotFound("get fetch provider", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -122,21 +123,21 @@ func (h *FetchProvidersHandler) Get(c echo.Context) error {
 // @Param id path string true "Provider ID"
 // @Param request body fetch.UpdateRequest true "Updated configuration"
 // @Success 200 {object} fetch.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /fetch-providers/{id} [put].
 func (h *FetchProvidersHandler) Update(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	var req fetch.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind fetch provider", err)
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
-		return fetchProviderHTTPError(err)
+		return fetchProviderError("update fetch provider", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -149,23 +150,23 @@ func (h *FetchProvidersHandler) Update(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /fetch-providers/{id} [delete].
 func (h *FetchProvidersHandler) Delete(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+		return apperror.Required("id")
 	}
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
-		return fetchProviderHTTPError(err)
+		return fetchProviderError("delete fetch provider", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
-func fetchProviderHTTPError(err error) error {
+func fetchProviderError(op string, err error) error {
 	if errors.Is(err, fetch.ErrManagedNativeProvider) || strings.Contains(err.Error(), "invalid provider") {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid(op, err)
 	}
-	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	return apperror.Internal(op, err)
 }

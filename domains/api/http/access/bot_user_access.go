@@ -8,8 +8,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/domains/api/bot"
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/iam/account"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // BotUserGrantListResponse wraps the list of workspace user access grants for a bot.
@@ -59,9 +61,9 @@ func (h *BotUserAccessHandler) Register(e *echo.Echo) {
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} BotUserGrantListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access [get].
 func (h *BotUserAccessHandler) ListGrants(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -70,7 +72,7 @@ func (h *BotUserAccessHandler) ListGrants(c echo.Context) error {
 	}
 	items, err := h.botService.ListUserGrants(c.Request().Context(), botID)
 	if err != nil {
-		return h.mapGrantError(err)
+		return mapGrantError("list user grants", err)
 	}
 	return c.JSON(http.StatusOK, BotUserGrantListResponse{Items: items})
 }
@@ -82,10 +84,10 @@ func (h *BotUserAccessHandler) ListGrants(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body bot.CreateUserGrantRequest true "Grant payload"
 // @Success 201 {object} bot.UserGrant
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 409 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access [post].
 func (h *BotUserAccessHandler) CreateGrant(c echo.Context) error {
 	botID, actorID, err := h.requireManageAccess(c)
@@ -94,11 +96,11 @@ func (h *BotUserAccessHandler) CreateGrant(c echo.Context) error {
 	}
 	var req bot.CreateUserGrantRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind user grant", err)
 	}
 	item, err := h.botService.CreateUserGrant(c.Request().Context(), botID, actorID, req)
 	if err != nil {
-		return h.mapGrantError(err)
+		return mapGrantError("create user grant", err)
 	}
 	return c.JSON(http.StatusCreated, item)
 }
@@ -111,10 +113,10 @@ func (h *BotUserAccessHandler) CreateGrant(c echo.Context) error {
 // @Param grant_id path string true "Grant ID"
 // @Param payload body bot.UpdateUserGrantRequest true "Grant payload"
 // @Success 200 {object} bot.UserGrant
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access/{grant_id} [put].
 func (h *BotUserAccessHandler) UpdateGrant(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -123,15 +125,15 @@ func (h *BotUserAccessHandler) UpdateGrant(c echo.Context) error {
 	}
 	grantID := strings.TrimSpace(c.Param("grant_id"))
 	if grantID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "grant_id is required")
+		return apperror.Required("grant_id")
 	}
 	var req bot.UpdateUserGrantRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind user grant", err)
 	}
 	item, err := h.botService.UpdateUserGrant(c.Request().Context(), botID, grantID, req)
 	if err != nil {
-		return h.mapGrantError(err)
+		return mapGrantError("update user grant", err)
 	}
 	return c.JSON(http.StatusOK, item)
 }
@@ -143,10 +145,10 @@ func (h *BotUserAccessHandler) UpdateGrant(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param grant_id path string true "Grant ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access/{grant_id} [delete].
 func (h *BotUserAccessHandler) DeleteGrant(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -155,10 +157,10 @@ func (h *BotUserAccessHandler) DeleteGrant(c echo.Context) error {
 	}
 	grantID := strings.TrimSpace(c.Param("grant_id"))
 	if grantID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "grant_id is required")
+		return apperror.Required("grant_id")
 	}
 	if err := h.botService.DeleteUserGrant(c.Request().Context(), botID, grantID); err != nil {
-		return h.mapGrantError(err)
+		return mapGrantError("delete user grant", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -171,9 +173,9 @@ func (h *BotUserAccessHandler) DeleteGrant(c echo.Context) error {
 // @Param q query string false "Search query"
 // @Param limit query int false "Max results"
 // @Success 200 {object} BotUserCandidateListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access/candidates [get].
 func (h *BotUserAccessHandler) ListCandidates(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
@@ -181,7 +183,7 @@ func (h *BotUserAccessHandler) ListCandidates(c echo.Context) error {
 	}
 	accountsList, err := h.accountService.SearchAccounts(c.Request().Context(), strings.TrimSpace(c.QueryParam("q")), parseLimit(c.QueryParam("limit")))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("list grant candidates", err)
 	}
 	items := make([]BotUserCandidate, 0, len(accountsList))
 	for _, account := range accountsList {
@@ -205,7 +207,7 @@ func (h *BotUserAccessHandler) requireManageAccess(c echo.Context) (string, stri
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+		return "", "", apperror.Required("bot_id")
 	}
 	if _, err := httpx.AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err
@@ -213,22 +215,22 @@ func (h *BotUserAccessHandler) requireManageAccess(c echo.Context) (string, stri
 	return botID, actorID, nil
 }
 
-func (*BotUserAccessHandler) mapGrantError(err error) error {
+func mapGrantError(op string, err error) error {
 	switch {
-	case errors.Is(err, bot.ErrGrantNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	case errors.Is(err, botpersistence.ErrGrantNotFound):
+		return apperror.NotFound(op, err)
 	case errors.Is(err, bot.ErrOwnerUserNotFound):
-		return echo.NewHTTPError(http.StatusBadRequest, "user not found")
+		return apperror.Invalid(op, err)
 	case errors.Is(err, bot.ErrInvalidPermission),
 		errors.Is(err, bot.ErrInvalidGrantSubject),
 		errors.Is(err, bot.ErrGrantUserRequired),
 		errors.Is(err, bot.ErrGrantOwnerConflict):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	case errors.Is(err, bot.ErrGrantExists):
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
-	case errors.Is(err, bot.ErrBotNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, "bot not found")
+		return apperror.Invalid(op, err)
+	case errors.Is(err, botpersistence.ErrGrantExists):
+		return apperror.Conflict(op, err)
+	case errors.Is(err, botpersistence.ErrBotNotFound):
+		return apperror.NotFound(op, err)
 	default:
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal(op, err)
 	}
 }

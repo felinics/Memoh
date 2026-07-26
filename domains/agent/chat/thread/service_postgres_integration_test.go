@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	message "github.com/memohai/memoh/domains/agent/chat/message"
-	chatpostgres "github.com/memohai/memoh/domains/agent/chat/postgres"
 	. "github.com/memohai/memoh/domains/agent/chat/thread"
-	apiassembly "github.com/memohai/memoh/domains/api/assembly"
-	dbpkg "github.com/memohai/memoh/internal/db"
+	chatpostgres "github.com/memohai/memoh/domains/agent/internal/postgres/chat"
+	bot "github.com/memohai/memoh/domains/api/bot"
+	"github.com/memohai/memoh/internal/db"
 )
 
 type stubACPPolicyReader struct{}
@@ -129,7 +129,7 @@ func TestPostgresForkFromAssistantMessageCopiesVisibleTurns(t *testing.T) {
 		t.Fatalf("fork anchor asset count = %d, want 1", anchorAssetCount)
 	}
 
-	messageSvc := message.NewService(nil, chatpostgres.NewMessageStore(apiassembly.NewBotSessionLockerFromTx(tx), tx))
+	messageSvc := message.NewService(nil, chatpostgres.NewMessageStore(bot.NewSessionLockerFromTx(tx), tx))
 	newUser, err := messageSvc.Persist(ctx, message.PersistInput{
 		BotID:     postgresSessionTestBotID,
 		SessionID: fork.ID,
@@ -260,7 +260,7 @@ func TestPostgresCreateSubagentStoresForkContextAsHiddenHistory(t *testing.T) {
 		t.Fatalf("unexpected fork context: %+v", contextMessages)
 	}
 
-	messageSvc := message.NewService(nil, chatpostgres.NewMessageStore(apiassembly.NewBotSessionLockerFromTx(tx), tx))
+	messageSvc := message.NewService(nil, chatpostgres.NewMessageStore(bot.NewSessionLockerFromTx(tx), tx))
 	visible, err := messageSvc.ListBySession(ctx, child.ID)
 	if err != nil {
 		t.Fatalf("list visible child history: %v", err)
@@ -804,7 +804,7 @@ func beginPostgresSessionTestTx(t *testing.T, ctx context.Context) pgx.Tx {
 	if dsn == "" {
 		t.Skip("skip postgres integration test: TEST_POSTGRES_DSN is not set")
 	}
-	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
+	pool, err := db.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
 		t.Skipf("skip postgres integration test: cannot connect to database: %v", err)
 	}

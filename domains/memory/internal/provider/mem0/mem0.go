@@ -7,7 +7,7 @@ import (
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
 	storefs "github.com/memohai/memoh/domains/memory/internal/store/fs"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 const Mem0Type = "mem0"
@@ -25,61 +25,61 @@ func NewMem0Provider(_ *slog.Logger, _ map[string]any, _ *storefs.Service) (*Mem
 
 func (*Mem0Provider) Type() string { return Mem0Type }
 
-func (*Mem0Provider) OnBeforeChat(_ context.Context, _ memreg.BeforeChatRequest) (*memreg.BeforeChatResult, error) {
+func (*Mem0Provider) OnBeforeChat(_ context.Context, _ memprovider.BeforeChatRequest) (*memprovider.BeforeChatResult, error) {
 	return nil, nil
 }
 
-func (*Mem0Provider) OnAfterChat(_ context.Context, _ memreg.AfterChatRequest) error {
+func (*Mem0Provider) OnAfterChat(_ context.Context, _ memprovider.AfterChatRequest) error {
 	return nil
 }
 
-func (*Mem0Provider) Add(_ context.Context, _ memreg.AddRequest) (memreg.SearchResponse, error) {
-	return memreg.SearchResponse{}, errMem0Disabled
+func (*Mem0Provider) Add(_ context.Context, _ memprovider.AddRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, errMem0Disabled
 }
 
-func (*Mem0Provider) Search(_ context.Context, _ memreg.SearchRequest) (memreg.SearchResponse, error) {
-	return memreg.SearchResponse{}, errMem0Disabled
+func (*Mem0Provider) Search(_ context.Context, _ memprovider.SearchRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, errMem0Disabled
 }
 
-func (*Mem0Provider) GetAll(_ context.Context, _ memreg.GetAllRequest) (memreg.SearchResponse, error) {
-	return memreg.SearchResponse{}, errMem0Disabled
+func (*Mem0Provider) GetAll(_ context.Context, _ memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, errMem0Disabled
 }
 
-func (*Mem0Provider) Update(_ context.Context, _ memreg.UpdateRequest) (memorydomain.Item, error) {
+func (*Mem0Provider) Update(_ context.Context, _ memprovider.UpdateRequest) (memorydomain.Item, error) {
 	return memorydomain.Item{}, errMem0Disabled
 }
 
-func (*Mem0Provider) Delete(_ context.Context, _ string) (memreg.DeleteResponse, error) {
-	return memreg.DeleteResponse{}, errMem0Disabled
+func (*Mem0Provider) Delete(_ context.Context, _ string) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, errMem0Disabled
 }
 
-func (*Mem0Provider) DeleteBatch(_ context.Context, _ []string) (memreg.DeleteResponse, error) {
-	return memreg.DeleteResponse{}, errMem0Disabled
+func (*Mem0Provider) DeleteBatch(_ context.Context, _ []string) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, errMem0Disabled
 }
 
-func (*Mem0Provider) DeleteAll(_ context.Context, _ memreg.DeleteAllRequest) (memreg.DeleteResponse, error) {
-	return memreg.DeleteResponse{}, errMem0Disabled
+func (*Mem0Provider) DeleteAll(_ context.Context, _ memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, errMem0Disabled
 }
 
-func (*Mem0Provider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (memreg.CompactResult, error) {
-	return memreg.CompactResult{}, errMem0Disabled
+func (*Mem0Provider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (memprovider.CompactResult, error) {
+	return memprovider.CompactResult{}, errMem0Disabled
 }
 
-func (*Mem0Provider) Usage(_ context.Context, _ map[string]any) (memreg.UsageResponse, error) {
-	return memreg.UsageResponse{}, errMem0Disabled
+func (*Mem0Provider) Usage(_ context.Context, _ map[string]any) (memprovider.UsageResponse, error) {
+	return memprovider.UsageResponse{}, errMem0Disabled
 }
 
-func (*Mem0Provider) Status(_ context.Context, _ string) (memreg.MemoryStatusResponse, error) {
-	return memreg.MemoryStatusResponse{
+func (*Mem0Provider) Status(_ context.Context, _ string) (memprovider.MemoryStatusResponse, error) {
+	return memprovider.MemoryStatusResponse{
 		ProviderType:  Mem0Type,
 		MemoryMode:    "disabled",
 		CanManualSync: false,
-		Compact: memreg.MemoryCompactCapability{
+		Compact: memprovider.MemoryCompactCapability{
 			Reason: errMem0Disabled.Error(),
 		},
 	}, nil
 }
 
-func (*Mem0Provider) Rebuild(_ context.Context, _ string) (memreg.RebuildResult, error) {
-	return memreg.RebuildResult{}, errMem0Disabled
+func (*Mem0Provider) Rebuild(_ context.Context, _ string) (memprovider.RebuildResult, error) {
+	return memprovider.RebuildResult{}, errMem0Disabled
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,8 +16,8 @@ import (
 	"github.com/labstack/echo/v4"
 
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
-	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 )
 
 // sessionListQueries records the arguments passed to the paged list queries
@@ -26,7 +25,7 @@ import (
 // behavior without a real database.
 type sessionListQueries struct {
 	stubThreadStore
-	bot                bot.Record
+	bot                botpersistence.Record
 	pagedCall          session.ListRecord
 	pagedCallCount     int
 	pagedRows          []session.Thread
@@ -153,10 +152,7 @@ func TestListSessionsRejectsUnknownType(t *testing.T) {
 	handler := newListSessionHandler(t, queries)
 
 	_, err := callListSessions(handler, botID, "types=chat,bogus")
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("ListSessions() error = %v, want HTTP 400", err)
-	}
+	requireHTTPStatus(t, err, http.StatusBadRequest)
 	if queries.pagedCallCount != 0 {
 		t.Fatalf("query should not run when types validation fails")
 	}
@@ -308,10 +304,7 @@ func TestListSessionsRejectsMalformedCursor(t *testing.T) {
 	handler := newListSessionHandler(t, queries)
 
 	_, err := callListSessions(handler, botID, "cursor=not%20base64%21")
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("ListSessions() error = %v, want HTTP 400", err)
-	}
+	requireHTTPStatus(t, err, http.StatusBadRequest)
 }
 
 // TestListSessionsRejectsCursorWithBadUUID guards against a cursor whose
@@ -325,10 +318,7 @@ func TestListSessionsRejectsCursorWithBadUUID(t *testing.T) {
 
 	cursor := base64.RawURLEncoding.EncodeToString([]byte("2026-06-19T00:00:00Z|not-a-uuid"))
 	_, err := callListSessions(handler, botID, "cursor="+url.QueryEscape(cursor))
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("ListSessions() error = %v, want HTTP 400", err)
-	}
+	requireHTTPStatus(t, err, http.StatusBadRequest)
 }
 
 // TestListSessionsCursorNotTruncatedByPermissionFilter pins down that

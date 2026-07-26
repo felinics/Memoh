@@ -3,11 +3,13 @@ package mcp
 import (
 	"context"
 	"testing"
+
+	mcppersistence "github.com/memohai/memoh/domains/agent/mcp/persistence"
 )
 
 type registryTestProvider struct{}
 
-func (*registryTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]ToolDescriptor, error) {
+func (*registryTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]mcppersistence.ToolDescriptor, error) {
 	return nil, nil
 }
 
@@ -18,7 +20,7 @@ func (*registryTestProvider) CallTool(_ context.Context, _ ToolSessionContext, _
 func TestToolRegistryRegisterAndLookup(t *testing.T) {
 	registry := NewToolRegistry()
 	provider := &registryTestProvider{}
-	if err := registry.Register(provider, ToolDescriptor{
+	if err := registry.Register(provider, mcppersistence.ToolDescriptor{
 		Name:        "tool_a",
 		Description: "test",
 		InputSchema: map[string]any{"type": "object"},
@@ -41,12 +43,12 @@ func TestToolRegistryRegisterAndLookup(t *testing.T) {
 func TestToolRegistryRegisterDuplicate(t *testing.T) {
 	registry := NewToolRegistry()
 	provider := &registryTestProvider{}
-	first := ToolDescriptor{
+	first := mcppersistence.ToolDescriptor{
 		Name:        "dup_tool",
 		Description: "first",
 		InputSchema: map[string]any{"type": "object"},
 	}
-	second := ToolDescriptor{
+	second := mcppersistence.ToolDescriptor{
 		Name:        "dup_tool",
 		Description: "second",
 		InputSchema: map[string]any{"type": "object"},
@@ -62,7 +64,7 @@ func TestToolRegistryRegisterDuplicate(t *testing.T) {
 func TestToolRegistryListStableOrder(t *testing.T) {
 	registry := NewToolRegistry()
 	provider := &registryTestProvider{}
-	tools := []ToolDescriptor{
+	tools := []mcppersistence.ToolDescriptor{
 		{Name: "b_tool", InputSchema: map[string]any{"type": "object"}},
 		{Name: "a_tool", InputSchema: map[string]any{"type": "object"}},
 		{Name: "c_tool", InputSchema: map[string]any{"type": "object"}},

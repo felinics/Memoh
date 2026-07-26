@@ -8,6 +8,7 @@ import (
 
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
 	acpfeedback "github.com/memohai/memoh/domains/agent/decision/feedback"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 func AcpFeedbackHTTPError(err error) error {
@@ -15,7 +16,7 @@ func AcpFeedbackHTTPError(err error) error {
 	if feedback == nil {
 		return nil
 	}
-	return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+	return apperror.OfKind(apperror.KindFromHTTPStatus(feedback.HTTPStatus), "acp feedback", feedback)
 }
 
 func AcpFeedbackError(err error) *acpfeedback.Error {
@@ -33,6 +34,9 @@ func AcpFeedbackError(err error) *acpfeedback.Error {
 }
 
 func IsHTTPStatus(err error, status int) bool {
+	if appErr, ok := apperror.As(err); ok {
+		return appErr != nil && apperror.KindOf(err).HTTPStatus() == status
+	}
 	var httpErr *echo.HTTPError
 	return errors.As(err, &httpErr) && httpErr.Code == status
 }
@@ -82,7 +86,7 @@ func AcpAgentSetupHTTPError(metadata map[string]any, agentID string) error {
 			"Unknown ACP agent",
 			map[string]string{"agent_id": agentID},
 		)
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return AcpFeedbackHTTPError(feedback)
 	}
 	setup := acpprofile.ParseAgentSetup(metadata, agentID)
 	if !setup.Enabled {
@@ -94,7 +98,7 @@ func AcpAgentSetupHTTPError(metadata map[string]any, agentID string) error {
 			"ACP agent is not enabled for this bot",
 			map[string]string{"agent_id": agentID},
 		)
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return AcpFeedbackHTTPError(feedback)
 	}
 	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
 		feedback := acpfeedback.New(
@@ -108,7 +112,7 @@ func AcpAgentSetupHTTPError(metadata map[string]any, agentID string) error {
 				"field":    field.ID,
 			},
 		)
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return AcpFeedbackHTTPError(feedback)
 	}
 	return nil
 }

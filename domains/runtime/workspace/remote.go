@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	settingpersistence "github.com/memohai/memoh/domains/api/bot/setting/persistence"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 	userruntime "github.com/memohai/memoh/domains/runtime/client"
 )
@@ -37,24 +37,24 @@ var (
 )
 
 type WorkspaceTargetToolApproval struct {
-	Read  setting.ToolApprovalMode `json:"read"`
-	Write setting.ToolApprovalMode `json:"write"`
-	Exec  setting.ToolApprovalMode `json:"exec"`
+	Read  settingpersistence.ToolApprovalMode `json:"read"`
+	Write settingpersistence.ToolApprovalMode `json:"write"`
+	Exec  settingpersistence.ToolApprovalMode `json:"exec"`
 }
 
 // WorkspaceTarget is the aggregate shape consumed by clients. Callers address
 // mounts by TargetID; RuntimeID identifies the backing remote Runtime and is
 // empty for the Native target.
 type WorkspaceTarget struct {
-	TargetID           string                      `json:"target_id"`
-	Kind               string                      `json:"kind"`
-	RuntimeID          string                      `json:"runtime_id,omitempty"`
-	Name               string                      `json:"name"`
-	Primary            bool                        `json:"primary"`
-	Online             bool                        `json:"online"`
-	Status             string                      `json:"status"`
-	ToolApproval       WorkspaceTargetToolApproval `json:"tool_approval"`
-	ToolApprovalConfig setting.ToolApprovalConfig  `json:"tool_approval_config"`
+	TargetID           string                                `json:"target_id"`
+	Kind               string                                `json:"kind"`
+	RuntimeID          string                                `json:"runtime_id,omitempty"`
+	Name               string                                `json:"name"`
+	Primary            bool                                  `json:"primary"`
+	Online             bool                                  `json:"online"`
+	Status             string                                `json:"status"`
+	ToolApproval       WorkspaceTargetToolApproval           `json:"tool_approval"`
+	ToolApprovalConfig settingpersistence.ToolApprovalConfig `json:"tool_approval_config"`
 }
 
 type WorkspaceTargetsResponse struct {
@@ -66,11 +66,11 @@ type SetPrimaryWorkspaceTargetRequest struct {
 }
 
 type UpdateWorkspaceTargetToolApprovalRequest struct {
-	Enabled            *bool                       `json:"enabled,omitempty"`
-	Read               setting.ToolApprovalMode    `json:"read,omitempty"`
-	Write              setting.ToolApprovalMode    `json:"write,omitempty"`
-	Exec               setting.ToolApprovalMode    `json:"exec,omitempty"`
-	ToolApprovalConfig *setting.ToolApprovalConfig `json:"tool_approval_config,omitempty"`
+	Enabled            *bool                                  `json:"enabled,omitempty"`
+	Read               settingpersistence.ToolApprovalMode    `json:"read,omitempty"`
+	Write              settingpersistence.ToolApprovalMode    `json:"write,omitempty"`
+	Exec               settingpersistence.ToolApprovalMode    `json:"exec,omitempty"`
+	ToolApprovalConfig *settingpersistence.ToolApprovalConfig `json:"tool_approval_config,omitempty"`
 }
 
 type ResolvedWorkspaceTarget struct {
@@ -80,7 +80,7 @@ type ResolvedWorkspaceTarget struct {
 	Primary  bool
 	Client   *bridge.Client
 	Info     bridge.WorkspaceInfo
-	Approval setting.ToolApprovalConfig
+	Approval settingpersistence.ToolApprovalConfig
 }
 
 // RemoteService owns persistent remote mounts. Live runtime connections remain
@@ -92,32 +92,32 @@ type RemoteService interface {
 	GetPrimaryMount(ctx context.Context, botID string) (WorkspaceTarget, error)
 	SetPrimary(ctx context.Context, botID, targetID string) error
 	UpdateToolApproval(ctx context.Context, botID, targetID string, modes WorkspaceTargetToolApproval) error
-	UpdateToolApprovalConfig(ctx context.Context, botID, targetID string, config setting.ToolApprovalConfig) error
+	UpdateToolApprovalConfig(ctx context.Context, botID, targetID string, config settingpersistence.ToolApprovalConfig) error
 	DeleteMount(ctx context.Context, botID, targetID string) error
 	ResolveMount(ctx context.Context, botID, targetID string) (ResolvedWorkspaceTarget, error)
 	ResolvePrimary(ctx context.Context, botID string) (ResolvedWorkspaceTarget, bool, error)
 	EnsurePrimaryReady(ctx context.Context, botID string) (bool, error)
 }
 
-func DefaultRemoteToolApprovalConfig() setting.ToolApprovalConfig {
-	config := setting.ToolApprovalConfig{
+func DefaultRemoteToolApprovalConfig() settingpersistence.ToolApprovalConfig {
+	config := settingpersistence.ToolApprovalConfig{
 		Enabled: true,
-		Read: setting.ToolApprovalFilePolicy{
-			Mode: setting.ToolApprovalAllow, BypassGlobs: []string{}, ForceReviewGlobs: []string{},
+		Read: settingpersistence.ToolApprovalFilePolicy{
+			Mode: settingpersistence.ToolApprovalAllow, BypassGlobs: []string{}, ForceReviewGlobs: []string{},
 		},
-		Write: setting.ToolApprovalFilePolicy{
-			Mode: setting.ToolApprovalAsk, BypassGlobs: []string{}, ForceReviewGlobs: []string{},
+		Write: settingpersistence.ToolApprovalFilePolicy{
+			Mode: settingpersistence.ToolApprovalAsk, BypassGlobs: []string{}, ForceReviewGlobs: []string{},
 		},
-		Exec: setting.ToolApprovalExecPolicy{
-			Mode: setting.ToolApprovalAsk, BypassCommands: []string{}, ForceReviewCommands: []string{},
+		Exec: settingpersistence.ToolApprovalExecPolicy{
+			Mode: settingpersistence.ToolApprovalAsk, BypassCommands: []string{}, ForceReviewCommands: []string{},
 		},
 	}
-	return setting.NormalizeToolApprovalConfig(config)
+	return settingpersistence.NormalizeToolApprovalConfig(config)
 }
 
-func WorkspaceToolApprovalModes(config setting.ToolApprovalConfig) WorkspaceTargetToolApproval {
+func WorkspaceToolApprovalModes(config settingpersistence.ToolApprovalConfig) WorkspaceTargetToolApproval {
 	if !config.Enabled && config.Read.Mode == "" && config.Write.Mode == "" && config.Exec.Mode == "" {
-		return WorkspaceTargetToolApproval{Read: setting.ToolApprovalAllow, Write: setting.ToolApprovalAllow, Exec: setting.ToolApprovalAllow}
+		return WorkspaceTargetToolApproval{Read: settingpersistence.ToolApprovalAllow, Write: settingpersistence.ToolApprovalAllow, Exec: settingpersistence.ToolApprovalAllow}
 	}
 	return WorkspaceTargetToolApproval{
 		Read:  effectiveFileApprovalMode(config.Read),
@@ -126,38 +126,38 @@ func WorkspaceToolApprovalModes(config setting.ToolApprovalConfig) WorkspaceTarg
 	}
 }
 
-func ApplyWorkspaceToolApprovalModes(config setting.ToolApprovalConfig, modes WorkspaceTargetToolApproval) (setting.ToolApprovalConfig, error) {
+func ApplyWorkspaceToolApprovalModes(config settingpersistence.ToolApprovalConfig, modes WorkspaceTargetToolApproval) (settingpersistence.ToolApprovalConfig, error) {
 	if !validToolApprovalMode(modes.Read) || !validToolApprovalMode(modes.Write) || !validToolApprovalMode(modes.Exec) {
-		return setting.ToolApprovalConfig{}, ErrInvalidWorkspaceToolApprovalMode
+		return settingpersistence.ToolApprovalConfig{}, ErrInvalidWorkspaceToolApprovalMode
 	}
 	config.Read.Mode = modes.Read
 	config.Write.Mode = modes.Write
 	config.Exec.Mode = modes.Exec
-	return setting.NormalizeToolApprovalConfig(config), nil
+	return settingpersistence.NormalizeToolApprovalConfig(config), nil
 }
 
-func effectiveFileApprovalMode(policy setting.ToolApprovalFilePolicy) setting.ToolApprovalMode {
+func effectiveFileApprovalMode(policy settingpersistence.ToolApprovalFilePolicy) settingpersistence.ToolApprovalMode {
 	if validToolApprovalMode(policy.Mode) {
 		return policy.Mode
 	}
 	if policy.RequireApproval {
-		return setting.ToolApprovalAsk
+		return settingpersistence.ToolApprovalAsk
 	}
-	return setting.ToolApprovalAllow
+	return settingpersistence.ToolApprovalAllow
 }
 
-func effectiveExecApprovalMode(policy setting.ToolApprovalExecPolicy) setting.ToolApprovalMode {
+func effectiveExecApprovalMode(policy settingpersistence.ToolApprovalExecPolicy) settingpersistence.ToolApprovalMode {
 	if validToolApprovalMode(policy.Mode) {
 		return policy.Mode
 	}
 	if policy.RequireApproval {
-		return setting.ToolApprovalAsk
+		return settingpersistence.ToolApprovalAsk
 	}
-	return setting.ToolApprovalAllow
+	return settingpersistence.ToolApprovalAllow
 }
 
-func validToolApprovalMode(mode setting.ToolApprovalMode) bool {
-	return mode == setting.ToolApprovalAllow || mode == setting.ToolApprovalAsk || mode == setting.ToolApprovalDeny
+func validToolApprovalMode(mode settingpersistence.ToolApprovalMode) bool {
+	return mode == settingpersistence.ToolApprovalAllow || mode == settingpersistence.ToolApprovalAsk || mode == settingpersistence.ToolApprovalDeny
 }
 
 // CanonicalWorkspaceUUID normalizes a workspace target/runtime UUID.
@@ -178,13 +178,13 @@ func SupportsRemoteWorkspace(capabilities []string) bool {
 }
 
 // ToolApprovalConfigFromRaw decodes persisted tool-approval JSON with defaults.
-func ToolApprovalConfigFromRaw(raw []byte) setting.ToolApprovalConfig {
+func ToolApprovalConfigFromRaw(raw []byte) settingpersistence.ToolApprovalConfig {
 	if len(raw) == 0 {
 		return DefaultRemoteToolApprovalConfig()
 	}
-	var config setting.ToolApprovalConfig
+	var config settingpersistence.ToolApprovalConfig
 	if err := json.Unmarshal(raw, &config); err != nil {
 		return DefaultRemoteToolApprovalConfig()
 	}
-	return setting.NormalizeToolApprovalConfig(config)
+	return settingpersistence.NormalizeToolApprovalConfig(config)
 }

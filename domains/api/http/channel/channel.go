@@ -7,8 +7,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	httpx "github.com/memohai/memoh/domains/api/http/httpx"
+	httpx "github.com/memohai/memoh/domains/api/http"
 	"github.com/memohai/memoh/domains/channel/gateway"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type ChannelHandler struct {
@@ -36,9 +37,9 @@ func (h *ChannelHandler) Register(e *echo.Echo) {
 // @Tags channel
 // @Param platform path string true "Channel platform"
 // @Success 200 {object} gateway.ChannelIdentityBinding
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/channels/{platform} [get].
 func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -47,14 +48,14 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("parse channel platform", err)
 	}
 	resp, err := h.store.GetChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return apperror.NotFound("get channel identity config", err)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("get channel identity config", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -66,8 +67,8 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 // @Param platform path string true "Channel platform"
 // @Param payload body gateway.UpsertChannelIdentityConfigRequest true "Channel user config payload"
 // @Success 200 {object} gateway.ChannelIdentityBinding
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/channels/{platform} [put].
 func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -76,18 +77,18 @@ func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("parse channel platform", err)
 	}
 	var req gateway.UpsertChannelIdentityConfigRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind channel identity config", err)
 	}
 	if req.Config == nil {
 		req.Config = map[string]any{}
 	}
 	resp, err := h.store.UpsertChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("upsert channel identity config", err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -107,7 +108,7 @@ type ChannelMeta struct {
 // @Description List channel meta information including capabilities and schemas
 // @Tags channel
 // @Success 200 {array} ChannelMeta
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /channels [get].
 func (h *ChannelHandler) ListChannels(c echo.Context) error {
 	descs := h.registry.ListDescriptors()
@@ -135,17 +136,17 @@ func (h *ChannelHandler) ListChannels(c echo.Context) error {
 // @Tags channel
 // @Param platform path string true "Channel platform"
 // @Success 200 {object} ChannelMeta
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /channels/{platform} [get].
 func (h *ChannelHandler) GetChannel(c echo.Context) error {
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("parse channel platform", err)
 	}
 	desc, ok := h.registry.GetDescriptor(channelType)
 	if !ok {
-		return echo.NewHTTPError(http.StatusNotFound, "channel not found")
+		return apperror.NotFound("get channel", nil)
 	}
 	resp := ChannelMeta{
 		Type:             desc.Type.String(),

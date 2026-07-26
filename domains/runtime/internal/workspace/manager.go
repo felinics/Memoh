@@ -15,7 +15,7 @@ import (
 	"github.com/memohai/memoh/domains/agent/extension/hooks"
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
 	"github.com/memohai/memoh/domains/api/identity"
-	"github.com/memohai/memoh/domains/api/setting"
+	settingpersistence "github.com/memohai/memoh/domains/api/bot/setting/persistence"
 	runtimedomain "github.com/memohai/memoh/domains/runtime"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 	ctr "github.com/memohai/memoh/domains/runtime/container"
@@ -373,16 +373,16 @@ func (m *Manager) nativeWorkspaceInfo(ctx context.Context, botID string) (bridge
 	return withACPToolsEndpoint(info), nil
 }
 
-func (m *Manager) nativeToolApprovalConfig(ctx context.Context, botID string) (setting.ToolApprovalConfig, error) {
-	config := setting.DefaultToolApprovalConfig()
+func (m *Manager) nativeToolApprovalConfig(ctx context.Context, botID string) (settingpersistence.ToolApprovalConfig, error) {
+	config := settingpersistence.DefaultToolApprovalConfig()
 	if m.settings == nil {
 		return config, nil
 	}
 	row, err := m.settings.FindBotRuntimeSettings(ctx, botID)
 	if err != nil {
-		return setting.ToolApprovalConfig{}, err
+		return settingpersistence.ToolApprovalConfig{}, err
 	}
-	return setting.NormalizeToolApprovalConfig(row.ToolApprovalConfig), nil
+	return settingpersistence.NormalizeToolApprovalConfig(row.ToolApprovalConfig), nil
 }
 
 func (m *Manager) ListWorkspaceTargets(ctx context.Context, botID string) ([]runtimeworkspace.WorkspaceTarget, error) {

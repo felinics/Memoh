@@ -19,7 +19,7 @@ import (
 
 	"github.com/memohai/memoh/domains/channel/gateway"
 	"github.com/memohai/memoh/domains/channel/internal/adapter/feishu/ws"
-	"github.com/memohai/memoh/domains/channel/internal/common"
+	"github.com/memohai/memoh/domains/channel/internal/logging"
 	"github.com/memohai/memoh/domains/media"
 )
 
@@ -492,7 +492,7 @@ func (a *FeishuAdapter) buildEventDispatcher(
 				rawMessageType = strings.TrimSpace(*event.Event.Message.MessageType)
 			}
 			if event.Event.Message.Content != nil {
-				rawContent = common.SummarizeText(*event.Event.Message.Content)
+				rawContent = logging.SummarizeText(*event.Event.Message.Content)
 			}
 		}
 		if a.logger != nil {
@@ -500,7 +500,7 @@ func (a *FeishuAdapter) buildEventDispatcher(
 				slog.String("config_id", cfg.ID),
 				slog.String("message_id", rawMessageID),
 				slog.String("message_type", rawMessageType),
-				slog.String("text", common.SummarizeText(text)),
+				slog.String("text", logging.SummarizeText(text)),
 				slog.Int("attachments", len(msg.Message.Attachments)),
 				slog.String("raw_content_prefix", rawContent),
 			)
@@ -535,7 +535,7 @@ func (a *FeishuAdapter) buildEventDispatcher(
 				slog.String("route_key", msg.RoutingKey()),
 				slog.String("chat_type", msg.Conversation.Type),
 				slog.Bool("is_mentioned", isMentioned),
-				slog.String("text", common.SummarizeText(text)),
+				slog.String("text", logging.SummarizeText(text)),
 			)
 		}
 		go func() {

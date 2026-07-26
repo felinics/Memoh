@@ -3,24 +3,23 @@ package chat
 import (
 	"bytes"
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
 
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
 	session "github.com/memohai/memoh/domains/agent/chat/thread"
-	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type sessionUpdateQueries struct {
 	stubThreadStore
-	bot          bot.Record
+	bot          botpersistence.Record
 	session      session.Thread
 	messageCount int64
 	permissions  []byte
@@ -148,14 +147,11 @@ func TestUpdateSessionRejectsConflictingTypeAndRuntime(t *testing.T) {
 	// type=acp_agent contradicts runtime_type=model; this must 400, not silently
 	// downgrade the session to a plain model chat.
 	_, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","runtime_type":"model"}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateSession() error = %v, want HTTP 400", err)
-	}
+	requireHTTPStatus(t, err, http.StatusBadRequest)
 	// The 400 must come from the conflict guard specifically, not an unrelated
-	// validation, so assert its message.
-	if msg, _ := httpErr.Message.(string); !strings.Contains(msg, "conflicts with runtime_type") {
-		t.Fatalf("error message = %q, want a 'conflicts with runtime_type' conflict error", msg)
+	// validation path.
+	if op := apperror.OpOf(err); op != "resolve session type conflict" {
+		t.Fatalf("op = %q, want resolve session type conflict", op)
 	}
 	if queries.updateCalled {
 		t.Fatal("UpdateSessionTypeAndMetadata must not be called for a contradictory type/runtime payload")
@@ -186,12 +182,9 @@ func TestUpdateSessionRejectsSystemACPRuntimeAsBadRequest(t *testing.T) {
 	)
 
 	_, err := callUpdateSession(handler, botID, sessionID, `{"session_mode":"schedule","runtime_type":"acp_agent","metadata":{"acp_agent_id":"codex"}}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateSession() error = %v, want HTTP 400", err)
-	}
-	if msg, _ := httpErr.Message.(string); !strings.Contains(msg, "only supported") {
-		t.Fatalf("error message = %q, want an unsupported runtime/mode message", msg)
+	requireHTTPStatus(t, err, http.StatusBadRequest)
+	if apperror.KindOf(err) != apperror.KindInvalid {
+		t.Fatalf("kind = %q, want KindInvalid", apperror.KindOf(err))
 	}
 	if queries.updateCalled {
 		t.Fatal("UpdateSessionTypeAndMetadata must not be called for an unsupported runtime/mode payload")
@@ -320,10 +313,7 @@ func TestUpdateSessionSwitchToACPRequiresWorkspaceExec(t *testing.T) {
 	)
 
 	_, err := callUpdateSessionAs(handler, botID, sessionID, userID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex","project_path":"/data/app"}}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("UpdateSession() error = %v, want HTTP 403", err)
-	}
+	requireHTTPStatus(t, err, http.StatusForbidden)
 	if queries.updateCalled {
 		t.Fatal("UpdateSessionTypeAndMetadata should not be called without workspace_exec")
 	}
@@ -444,10 +434,7 @@ func TestUpdateSessionRejectsAgentChangeAfterFirstMessage(t *testing.T) {
 	)
 
 	_, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex","project_path":"/data/app"}}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
-		t.Fatalf("UpdateSession() error = %v, want HTTP 409", err)
-	}
+	requireHTTPStatus(t, err, http.StatusConflict)
 	if queries.updateCalled {
 		t.Fatal("UpdateSessionTypeAndMetadata should not be called after the session is locked")
 	}
@@ -477,10 +464,7 @@ func TestUpdateSessionRejectsRetagToSubagentForChatUser(t *testing.T) {
 	)
 
 	_, err := callUpdateSessionAs(handler, botID, sessionID, userID, `{"type":"subagent","metadata":{"agent_id":"direct"}}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("UpdateSession() error = %v, want HTTP 403", err)
-	}
+	requireHTTPStatus(t, err, http.StatusForbidden)
 	if queries.updateCalled {
 		t.Fatal("chat user should not be able to retag sessions as subagent")
 	}
@@ -542,10 +526,7 @@ func TestUpdateSessionRejectsSubagentTitleUpdateForChatUser(t *testing.T) {
 	)
 
 	_, err := callUpdateSessionAs(handler, botID, sessionID, userID, `{"title":"renamed directly"}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("UpdateSession() error = %v, want HTTP 403", err)
-	}
+	requireHTTPStatus(t, err, http.StatusForbidden)
 	if queries.titleUpdateCalled {
 		t.Fatal("chat user should not be able to title-update subagent sessions directly")
 	}

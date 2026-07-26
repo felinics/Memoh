@@ -14,29 +14,32 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/domains/api/bot"
-	"github.com/memohai/memoh/domains/api/http/httpfixture"
-	"github.com/memohai/memoh/domains/api/setting"
+	botpersistence "github.com/memohai/memoh/domains/api/bot/persistence"
+	settingpersistence "github.com/memohai/memoh/domains/api/bot/setting/persistence"
+	httpfixture "github.com/memohai/memoh/domains/api/http/internal/test"
 	"github.com/memohai/memoh/domains/iam/account"
 	memorydomain "github.com/memohai/memoh/domains/memory"
-	memprovider "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
+	memregistry "github.com/memohai/memoh/domains/memory/registry"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type memoryCapabilityQueries struct {
-	bot      bot.Record
-	settings setting.Record
+	bot      botpersistence.Record
+	settings settingpersistence.Record
 }
 
 type memorySettingsStore struct {
-	setting.Store
-	record setting.Record
-	bot    setting.BotRecord
+	settingpersistence.Store
+	record settingpersistence.Record
+	bot    settingpersistence.BotRecord
 }
 
-func (s *memorySettingsStore) Get(context.Context, string) (setting.Record, error) {
+func (s *memorySettingsStore) Get(context.Context, string) (settingpersistence.Record, error) {
 	return s.record, nil
 }
 
-func (s *memorySettingsStore) GetBot(context.Context, string) (setting.BotRecord, error) {
+func (s *memorySettingsStore) GetBot(context.Context, string) (settingpersistence.BotRecord, error) {
 	return s.bot, nil
 }
 
@@ -101,7 +104,7 @@ func TestChatCompactReturnsNotImplementedWhenProviderDoesNotSupportSemanticCompa
 
 	botID := "11111111-1111-1111-1111-111111111111"
 	userID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-	registry := memprovider.NewRegistry(slog.Default())
+	registry := memregistry.NewRegistry(slog.Default())
 	registry.Register(defaultBuiltinProviderID, &unsupportedCompactProvider{})
 
 	botRow := httpfixture.BotRow(botID, map[string]any{})
@@ -128,15 +131,12 @@ func TestChatCompactReturnsNotImplementedWhenProviderDoesNotSupportSemanticCompa
 	if err == nil {
 		t.Fatal("expected unsupported semantic compact error")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo HTTP error, got %T", err)
+	if kind := apperror.KindOf(err); kind != apperror.KindUnimplemented {
+		t.Fatalf("kind = %q, want %q", kind, apperror.KindUnimplemented)
 	}
-	if httpErr.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501", httpErr.Code)
-	}
-	if !strings.Contains(httpErr.Message.(string), "semantic compact") {
-		t.Fatalf("unexpected error message: %v", httpErr.Message)
+	cause := apperror.CauseOf(err)
+	if cause == nil || !strings.Contains(cause.Error(), "semantic compact") {
+		t.Fatalf("unexpected private cause: %v", cause)
 	}
 }
 
@@ -145,7 +145,7 @@ func TestChatStatusIncludesSemanticCompactCapability(t *testing.T) {
 
 	botID := "11111111-1111-1111-1111-111111111111"
 	userID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-	registry := memprovider.NewRegistry(slog.Default())
+	registry := memregistry.NewRegistry(slog.Default())
 	registry.Register(defaultBuiltinProviderID, &unsupportedCompactProvider{})
 
 	botRow := httpfixture.BotRow(botID, map[string]any{})
@@ -192,7 +192,7 @@ func TestChatStatusDoesNotFallbackToBuiltinWhenConfiguredProviderIsUnavailable(t
 	botID := "11111111-1111-1111-1111-111111111111"
 	userID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	missingProviderID := "22222222-2222-2222-2222-222222222222"
-	registry := memprovider.NewRegistry(slog.Default())
+	registry := memregistry.NewRegistry(slog.Default())
 	registry.Register(defaultBuiltinProviderID, &unsupportedCompactProvider{})
 
 	botRow := httpfixture.BotRow(botID, map[string]any{})
@@ -200,7 +200,7 @@ func TestChatStatusDoesNotFallbackToBuiltinWhenConfiguredProviderIsUnavailable(t
 	botRow.Status = bot.BotStatusReady
 	queries := &memoryCapabilityQueries{
 		bot: botRow,
-		settings: setting.Record{
+		settings: settingpersistence.Record{
 			MemoryProviderID: missingProviderID,
 		},
 	}
@@ -211,8 +211,8 @@ func TestChatStatusDoesNotFallbackToBuiltinWhenConfiguredProviderIsUnavailable(t
 	)
 	handler.SetMemoryRegistry(registry)
 	handler.SetSettingsService(httpfixture.NewSettingsService(slog.Default(), &memorySettingsStore{
-		record: setting.Record{MemoryProviderID: missingProviderID},
-		bot:    setting.BotRecord{OwnerUserID: userID},
+		record: settingpersistence.Record{MemoryProviderID: missingProviderID},
+		bot:    settingpersistence.BotRecord{OwnerUserID: userID},
 	}))
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/memory/status", nil)
@@ -227,11 +227,7 @@ func TestChatStatusDoesNotFallbackToBuiltinWhenConfiguredProviderIsUnavailable(t
 	if err == nil {
 		t.Fatal("expected configured provider lookup error")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo HTTP error, got %T", err)
-	}
-	if httpErr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", httpErr.Code)
+	if kind := apperror.KindOf(err); kind != apperror.KindUnavailable {
+		t.Fatalf("kind = %q, want %q", kind, apperror.KindUnavailable)
 	}
 }

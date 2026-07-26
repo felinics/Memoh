@@ -8,10 +8,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/memohai/memoh/domains/api/setting"
+	"github.com/memohai/memoh/domains/api/bot/setting"
 	modeldomain "github.com/memohai/memoh/domains/model"
 	modelcatalog "github.com/memohai/memoh/domains/model/catalog"
 	modelexecution "github.com/memohai/memoh/domains/model/execution"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 func TestOffEffortFor(t *testing.T) {
@@ -454,8 +455,11 @@ func TestSelectChatModelWithoutAnyModelStillErrors(t *testing.T) {
 		ThreadID: "00000000-0000-0000-0000-000000000701",
 	}
 	_, _, err := resolver.selectChatModel(ctx, req, setting.Settings{})
-	if err == nil || !strings.Contains(err.Error(), "chat model not configured") {
-		t.Fatalf("selectChatModel without any model error = %v, want chat model not configured", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeAgentChatModelRequired {
+		t.Fatalf("selectChatModel error code = %q, want %q", got, apperror.CodeAgentChatModelRequired)
+	}
+	if got := apperror.KindOf(err); got != apperror.KindFailedPrecondition {
+		t.Fatalf("selectChatModel error kind = %s, want %s", got, apperror.KindFailedPrecondition)
 	}
 }
 

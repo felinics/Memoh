@@ -24,12 +24,12 @@ import (
 	agentdomain "github.com/memohai/memoh/domains/agent"
 	"github.com/memohai/memoh/domains/agent/acp/client"
 	acpprofile "github.com/memohai/memoh/domains/agent/acp/profile"
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 	toolapproval "github.com/memohai/memoh/domains/agent/decision/approval"
 	"github.com/memohai/memoh/domains/agent/decision/feedback"
 	userinput "github.com/memohai/memoh/domains/agent/decision/input"
 	"github.com/memohai/memoh/domains/agent/mcp"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
 	"github.com/memohai/memoh/domains/api/bot"
 	bridge "github.com/memohai/memoh/domains/runtime/bridge/client"
 )
@@ -63,6 +63,9 @@ var (
 	// ErrRuntimeConfigUpdateFailed reports a transport or protocol failure
 	// while applying the model/reasoning values requested for a turn.
 	ErrRuntimeConfigUpdateFailed = errors.New("ACP runtime configuration update failed")
+	// ErrSessionPoolStopped reports that process shutdown has begun and the
+	// pool no longer accepts runtime work.
+	ErrSessionPoolStopped = errors.New("ACP session pool is stopped")
 )
 
 const (
@@ -99,6 +102,7 @@ type SessionPool struct {
 	mu        sync.RWMutex
 	runtimes  map[string]*runtimeHandle
 	bySession map[string]string
+	stopped   bool
 }
 
 type sessionRunner interface {
@@ -160,6 +164,7 @@ type runtimeHandle struct {
 	active                   *client.ToolSessionContext
 	persistenceFence         runtimefence.Fence
 	startCancel              context.CancelFunc
+	startDone                <-chan struct{}
 	closed                   bool
 	hadPrompt                bool
 	decisionPreCleanupOnce   sync.Once
@@ -255,6 +260,19 @@ func newSessionPool(log *slog.Logger, runner sessionRunner, botService botGetter
 	}
 }
 
+func (p *SessionPool) admissionError() error {
+	if p == nil {
+		return ErrSessionPoolStopped
+	}
+	p.mu.RLock()
+	stopped := p.stopped
+	p.mu.RUnlock()
+	if stopped {
+		return ErrSessionPoolStopped
+	}
+	return nil
+}
+
 func (p *SessionPool) SetToolGateway(gateway *mcp.ToolGatewayService) {
 	if p != nil {
 		p.tools = gateway
@@ -308,7 +326,13 @@ func (p *SessionPool) owned(botID, runtimeID string) (*runtimeHandle, error) {
 // CreateRuntime starts an unbound runtime for the pre-session model picker.
 // The runtime ID is server-generated; clients can never choose it.
 func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInput) (RuntimeStatus, error) {
-	if p == nil || p.runner == nil || p.bots == nil {
+	if p == nil {
+		return RuntimeStatus{}, errors.New("ACP session pool is not configured")
+	}
+	if err := p.admissionError(); err != nil {
+		return RuntimeStatus{}, err
+	}
+	if p.runner == nil || p.bots == nil {
 		return RuntimeStatus{}, errors.New("ACP session pool is not configured")
 	}
 	botID := strings.TrimSpace(input.BotID)
@@ -338,6 +362,10 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 		lastActive:            time.Now(),
 	}
 	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		return RuntimeStatus{}, ErrSessionPoolStopped
+	}
 	victims, err := p.unboundBudgetLocked(botID)
 	if err != nil {
 		p.mu.Unlock()
@@ -406,6 +434,9 @@ func (p *SessionPool) unboundBudgetLocked(botID string) ([]*runtimeHandle, error
 // when the runtime cannot serve this session; callers fall back to a cold
 // start and must not treat that as fatal.
 func (p *SessionPool) BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+	if err := p.admissionError(); err != nil {
+		return err
+	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return errors.New("session_id is required")
@@ -438,6 +469,10 @@ func (p *SessionPool) BindRuntime(botID, runtimeID, sessionID, agentID, projectP
 	}
 
 	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		return ErrSessionPoolStopped
+	}
 	if existing, taken := p.bySession[sessionID]; taken && existing != h.id {
 		p.mu.Unlock()
 		return ErrRuntimeBindRejected
@@ -606,7 +641,13 @@ func (p *SessionPool) ResolveRuntimeToolContext(botID, runtimeID, toolToken stri
 // prepareInput validates pool wiring and required input fields, returning
 // the input with session metadata applied.
 func (p *SessionPool) prepareInput(ctx context.Context, input PromptInput) (PromptInput, error) {
-	if p == nil || p.runner == nil || p.bots == nil {
+	if p == nil {
+		return PromptInput{}, errors.New("ACP session pool is not configured")
+	}
+	if err := p.admissionError(); err != nil {
+		return PromptInput{}, err
+	}
+	if p.runner == nil || p.bots == nil {
 		return PromptInput{}, errors.New("ACP session pool is not configured")
 	}
 	if strings.TrimSpace(input.SessionID) == "" {
@@ -842,6 +883,10 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 
 	for attempt := 0; attempt < 3; attempt++ {
 		p.mu.Lock()
+		if p.stopped {
+			p.mu.Unlock()
+			return nil, ErrSessionPoolStopped
+		}
 		var h *runtimeHandle
 		if rid, ok := p.bySession[sessionID]; ok {
 			h = p.runtimes[rid]
@@ -917,12 +962,15 @@ type startOptions struct {
 func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts startOptions) error {
 	startCtx, cancelStart := context.WithCancel(ctx)
 	defer cancelStart()
+	startDone := make(chan struct{})
+	defer close(startDone)
 	h.state.Lock()
 	if h.closed {
 		h.state.Unlock()
 		return errors.New("ACP runtime was closed during startup")
 	}
 	h.startCancel = cancelStart
+	h.startDone = startDone
 	h.state.Unlock()
 
 	fail := func(err error) error {
@@ -1118,12 +1166,17 @@ func (p *SessionPool) IsSessionActive(sessionID string) bool {
 	return active
 }
 
-func (p *SessionPool) StartReaper(ctx context.Context) {
+// StartReaper starts the idle-runtime reaper and returns a channel that closes
+// after the reaper has observed ctx cancellation and exited.
+func (p *SessionPool) StartReaper(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	if p == nil {
-		return
+		close(done)
+		return done
 	}
 	ticker := time.NewTicker(time.Minute)
 	go func() {
+		defer close(done)
 		defer ticker.Stop()
 		for {
 			select {
@@ -1134,6 +1187,7 @@ func (p *SessionPool) StartReaper(ctx context.Context) {
 			}
 		}
 	}()
+	return done
 }
 
 // CloseSession tears down the runtime bound to a session (used when the
@@ -1183,7 +1237,7 @@ func (p *SessionPool) closeHandle(h *runtimeHandle) error {
 	if sessionID == "" {
 		sessionID = activeSession
 	}
-	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	p.cancelHandlePendingDecisions(context.Background(), h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
 	var closeErr error
 	if sess != nil {
 		closeErr = sess.Close()
@@ -1251,7 +1305,7 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	if sessionID == "" {
 		sessionID = activeSession
 	}
-	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	p.cancelHandlePendingDecisions(context.Background(), h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
 
 	if cancel != nil {
 		cancel()
@@ -1260,7 +1314,7 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	if sess != nil {
 		closeErr = sess.Close()
 	}
-	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupFinal, "decision cancelled: ACP runtime closed before a response arrived")
+	p.cancelHandlePendingDecisions(context.Background(), h, sessionID, fence, decisionCleanupFinal, "decision cancelled: ACP runtime closed before a response arrived")
 
 	p.mu.Lock()
 	delete(p.runtimes, h.id)
@@ -1278,7 +1332,7 @@ const (
 	decisionCleanupFinal
 )
 
-func (p *SessionPool) cancelHandlePendingDecisions(h *runtimeHandle, sessionID string, fence runtimefence.Fence, phase decisionCleanupPhase, reason string) {
+func (p *SessionPool) cancelHandlePendingDecisions(parent context.Context, h *runtimeHandle, sessionID string, fence runtimefence.Fence, phase decisionCleanupPhase, reason string) {
 	if p == nil || h == nil {
 		return
 	}
@@ -1308,7 +1362,10 @@ func (p *SessionPool) cancelHandlePendingDecisions(h *runtimeHandle, sessionID s
 		return
 	}
 	once.Do(func() {
-		ctx := context.Background()
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx := parent
 		if fence.Valid() {
 			ctx = runtimefence.WithContext(ctx, fence)
 		}
@@ -1333,7 +1390,7 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 		cleanup.Add(1)
 		go func() {
 			defer cleanup.Done()
-			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+			ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 			defer cancel()
 			if _, err := approval.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
 				p.logger.WarnContext(parent, "cancel pending ACP approvals failed",
@@ -1347,7 +1404,7 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 		cleanup.Add(1)
 		go func() {
 			defer cleanup.Done()
-			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+			ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 			defer cancel()
 			if _, err := p.userInput.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
 				p.logger.WarnContext(parent, "cancel pending ACP user inputs failed",
@@ -1360,26 +1417,124 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 	cleanup.Wait()
 }
 
+// CloseAll preserves the legacy cleanup callback shape. Lifecycle owners
+// should use CloseAllContext so their shutdown deadline and errors propagate.
 func (p *SessionPool) CloseAll() {
-	if p == nil {
-		return
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.CloseAllContext(ctx); err != nil && p != nil && p.logger != nil {
+		p.logger.Warn("failed to close all ACP runtimes", slog.Any("error", err))
 	}
-	p.mu.RLock()
+}
+
+// CloseAllContext permanently stops admission, initiates every runtime close,
+// and waits for their owned work. Handles whose close exceeds ctx stay indexed
+// so a later call can retry the join with a fresh deadline.
+func (p *SessionPool) CloseAllContext(ctx context.Context) error {
+	if p == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	p.mu.Lock()
+	p.stopped = true
 	handles := make([]*runtimeHandle, 0, len(p.runtimes))
 	for _, h := range p.runtimes {
 		if h != nil {
 			handles = append(handles, h)
 		}
 	}
-	p.mu.RUnlock()
+	p.mu.Unlock()
+
+	// Stop all runtimes before waiting for any one of them. This prevents an
+	// early timeout from leaving later processes running until a retry.
 	for _, h := range handles {
-		// Shutdown must not wait for in-flight prompts: teardown directly,
-		// the op holder unwinds via the closed flag and its erroring session.
-		if err := p.teardown(h); err != nil {
-			p.logger.Warn("failed to close ACP runtime",
-				slog.Any("error", err), slog.String("runtime_id", h.id))
+		p.beginShutdownHandle(h)
+	}
+
+	var errs []error
+	for _, h := range handles {
+		if err := p.finishShutdownHandle(ctx, h); err != nil {
+			errs = append(errs, fmt.Errorf("close ACP runtime %s: %w", h.id, err))
 		}
 	}
+	return errors.Join(errs...)
+}
+
+func (p *SessionPool) beginShutdownHandle(h *runtimeHandle) {
+	if h == nil {
+		return
+	}
+	h.state.Lock()
+	h.closed = true
+	h.status = stateClosed
+	cancel := h.startCancel
+	h.startCancel = nil
+	sess := h.session
+	h.state.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if sess != nil {
+		cancelled, cancelWait := context.WithCancel(context.Background())
+		cancelWait()
+		_ = sess.CloseContext(cancelled)
+	}
+}
+
+func (p *SessionPool) finishShutdownHandle(ctx context.Context, h *runtimeHandle) error {
+	h.state.Lock()
+	sess := h.session
+	startDone := h.startDone
+	bound := h.boundSession
+	activeSession := ""
+	fence := h.persistenceFence
+	if h.active != nil {
+		activeSession = strings.TrimSpace(h.active.SessionID)
+		if h.active.RuntimeFence.Valid() {
+			fence = h.active.RuntimeFence
+		}
+	}
+	h.state.Unlock()
+
+	var errs []error
+	if sess != nil {
+		errs = append(errs, sess.CloseContext(ctx))
+	}
+	if startDone != nil {
+		select {
+		case <-startDone:
+		case <-ctx.Done():
+			errs = append(errs, fmt.Errorf("wait for ACP runtime startup: %w", ctx.Err()))
+		}
+	}
+	if ctx.Err() != nil {
+		return errors.Join(errs...)
+	}
+
+	sessionID := strings.TrimSpace(bound)
+	if sessionID == "" {
+		sessionID = activeSession
+	}
+	p.cancelHandlePendingDecisions(ctx, h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	p.cancelHandlePendingDecisions(ctx, h, sessionID, fence, decisionCleanupFinal, "decision cancelled: ACP runtime closed before a response arrived")
+	if ctx.Err() != nil {
+		errs = append(errs, ctx.Err())
+		return errors.Join(errs...)
+	}
+
+	h.state.Lock()
+	h.session = nil
+	h.active = nil
+	h.state.Unlock()
+	p.mu.Lock()
+	delete(p.runtimes, h.id)
+	if bound != "" && p.bySession[bound] == h.id {
+		delete(p.bySession, bound)
+	}
+	p.mu.Unlock()
+	return errors.Join(errs...)
 }
 
 func (p *SessionPool) CloseBotAgentRuntimes(botID, agentID string) error {

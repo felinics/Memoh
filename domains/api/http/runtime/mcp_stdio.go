@@ -16,6 +16,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/apperror"
 	sdkjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -611,9 +613,9 @@ type mcpStdioSession struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body MCPStdioRequest true "Stdio MCP payload"
 // @Success 200 {object} MCPStdioResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp-stdio [post].
 func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -622,23 +624,23 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	}
 	var req MCPStdioRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind mcp stdio create", err)
 	}
 	if strings.TrimSpace(req.Command) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "command is required")
+		return apperror.Required("command")
 	}
 	ctx := c.Request().Context()
 	if err := h.manager.EnsureRunning(ctx, botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("ensure mcp stdio workspace", err)
 	}
 	containerID, err := h.manager.ContainerID(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "workspace runtime not found for bot")
+		return apperror.NotFound("resolve mcp stdio workspace", err)
 	}
 
 	sess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Internal("start mcp stdio session", err)
 	}
 	tools := h.probeMCPTools(ctx, sess, botID, strings.TrimSpace(req.Name))
 	connectionID := uuid.NewString()
@@ -677,9 +679,9 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 // @Param connection_id path string true "Connection ID"
 // @Param payload body object true "JSON-RPC request"
 // @Success 200 {object} object "JSON-RPC response: {jsonrpc,id,result|error}"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post].
 func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -688,23 +690,23 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	}
 	connectionID := strings.TrimSpace(c.Param("connection_id"))
 	if connectionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "connection_id is required")
+		return apperror.Required("connection_id")
 	}
 	h.mcpStdioMu.Lock()
 	session := h.mcpStdioSess[connectionID]
 	h.mcpStdioMu.Unlock()
 	if session == nil || session.session == nil || session.botID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
+		return apperror.NotFound("resolve mcp stdio connection", nil)
 	}
 	select {
 	case <-session.session.closed:
-		return echo.NewHTTPError(http.StatusNotFound, "mcp connection closed")
+		return apperror.NotFound("resolve mcp stdio connection", nil)
 	default:
 	}
 
 	var req mcptools.JSONRPCRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Invalid("bind mcp stdio request", err)
 	}
 	if req.JSONRPC != "" && req.JSONRPC != "2.0" {
 		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, -32600, "invalid jsonrpc version"))
@@ -715,7 +717,7 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	session.lastUsedAt = time.Now().UTC()
 	if mcptools.IsNotification(req) {
 		if err := session.session.notify(c.Request().Context(), req); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			return apperror.Internal("notify mcp stdio", err)
 		}
 		return c.NoContent(http.StatusAccepted)
 	}

@@ -12,7 +12,7 @@ import (
 
 	textprune "github.com/memohai/memoh/domains/agent/chat/text/prune"
 	skillset "github.com/memohai/memoh/domains/agent/extension/skills"
-	"github.com/memohai/memoh/domains/agent/sessionmode"
+	sessionmode "github.com/memohai/memoh/domains/agent/chat/session/mode"
 )
 
 //go:embed prompts/*.md

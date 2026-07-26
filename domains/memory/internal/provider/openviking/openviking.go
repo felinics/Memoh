@@ -6,7 +6,7 @@ import (
 	"log/slog"
 
 	memorydomain "github.com/memohai/memoh/domains/memory"
-	memreg "github.com/memohai/memoh/domains/memory/registry"
+	memprovider "github.com/memohai/memoh/domains/memory/provider"
 )
 
 const OpenVikingType = "openviking"
@@ -24,61 +24,61 @@ func NewOpenVikingProvider(_ *slog.Logger, _ map[string]any) (*OpenVikingProvide
 
 func (*OpenVikingProvider) Type() string { return OpenVikingType }
 
-func (*OpenVikingProvider) OnBeforeChat(_ context.Context, _ memreg.BeforeChatRequest) (*memreg.BeforeChatResult, error) {
+func (*OpenVikingProvider) OnBeforeChat(_ context.Context, _ memprovider.BeforeChatRequest) (*memprovider.BeforeChatResult, error) {
 	return nil, nil
 }
 
-func (*OpenVikingProvider) OnAfterChat(_ context.Context, _ memreg.AfterChatRequest) error {
+func (*OpenVikingProvider) OnAfterChat(_ context.Context, _ memprovider.AfterChatRequest) error {
 	return nil
 }
 
-func (*OpenVikingProvider) Add(_ context.Context, _ memreg.AddRequest) (memreg.SearchResponse, error) {
-	return memreg.SearchResponse{}, errOpenVikingDisabled
+func (*OpenVikingProvider) Add(_ context.Context, _ memprovider.AddRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, errOpenVikingDisabled
 }
 
-func (*OpenVikingProvider) Search(_ context.Context, _ memreg.SearchRequest) (memreg.SearchResponse, error) {
-	return memreg.SearchResponse{}, errOpenVikingDisabled
+func (*OpenVikingProvider) Search(_ context.Context, _ memprovider.SearchRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, errOpenVikingDisabled
 }
 
-func (*OpenVikingProvider) GetAll(_ context.Context, _ memreg.GetAllRequest) (memreg.SearchResponse, error) {
-	return memreg.SearchResponse{}, errOpenVikingDisabled
+func (*OpenVikingProvider) GetAll(_ context.Context, _ memprovider.GetAllRequest) (memprovider.SearchResponse, error) {
+	return memprovider.SearchResponse{}, errOpenVikingDisabled
 }
 
-func (*OpenVikingProvider) Update(_ context.Context, _ memreg.UpdateRequest) (memorydomain.Item, error) {
+func (*OpenVikingProvider) Update(_ context.Context, _ memprovider.UpdateRequest) (memorydomain.Item, error) {
 	return memorydomain.Item{}, errOpenVikingDisabled
 }
 
-func (*OpenVikingProvider) Delete(_ context.Context, _ string) (memreg.DeleteResponse, error) {
-	return memreg.DeleteResponse{}, errOpenVikingDisabled
+func (*OpenVikingProvider) Delete(_ context.Context, _ string) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, errOpenVikingDisabled
 }
 
-func (*OpenVikingProvider) DeleteBatch(_ context.Context, _ []string) (memreg.DeleteResponse, error) {
-	return memreg.DeleteResponse{}, errOpenVikingDisabled
+func (*OpenVikingProvider) DeleteBatch(_ context.Context, _ []string) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, errOpenVikingDisabled
 }
 
-func (*OpenVikingProvider) DeleteAll(_ context.Context, _ memreg.DeleteAllRequest) (memreg.DeleteResponse, error) {
-	return memreg.DeleteResponse{}, errOpenVikingDisabled
+func (*OpenVikingProvider) DeleteAll(_ context.Context, _ memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
+	return memprovider.DeleteResponse{}, errOpenVikingDisabled
 }
 
-func (*OpenVikingProvider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (memreg.CompactResult, error) {
-	return memreg.CompactResult{}, errOpenVikingDisabled
+func (*OpenVikingProvider) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (memprovider.CompactResult, error) {
+	return memprovider.CompactResult{}, errOpenVikingDisabled
 }
 
-func (*OpenVikingProvider) Usage(_ context.Context, _ map[string]any) (memreg.UsageResponse, error) {
-	return memreg.UsageResponse{}, errOpenVikingDisabled
+func (*OpenVikingProvider) Usage(_ context.Context, _ map[string]any) (memprovider.UsageResponse, error) {
+	return memprovider.UsageResponse{}, errOpenVikingDisabled
 }
 
-func (*OpenVikingProvider) Status(_ context.Context, _ string) (memreg.MemoryStatusResponse, error) {
-	return memreg.MemoryStatusResponse{
+func (*OpenVikingProvider) Status(_ context.Context, _ string) (memprovider.MemoryStatusResponse, error) {
+	return memprovider.MemoryStatusResponse{
 		ProviderType:  OpenVikingType,
 		MemoryMode:    "disabled",
 		CanManualSync: false,
-		Compact: memreg.MemoryCompactCapability{
+		Compact: memprovider.MemoryCompactCapability{
 			Reason: errOpenVikingDisabled.Error(),
 		},
 	}, nil
 }
 
-func (*OpenVikingProvider) Rebuild(_ context.Context, _ string) (memreg.RebuildResult, error) {
-	return memreg.RebuildResult{}, errOpenVikingDisabled
+func (*OpenVikingProvider) Rebuild(_ context.Context, _ string) (memprovider.RebuildResult, error) {
+	return memprovider.RebuildResult{}, errOpenVikingDisabled
 }

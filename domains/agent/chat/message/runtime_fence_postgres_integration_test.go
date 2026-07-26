@@ -14,9 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	. "github.com/memohai/memoh/domains/agent/chat/message"
-	"github.com/memohai/memoh/domains/agent/chat/runtimefence"
+	runtimefence "github.com/memohai/memoh/domains/agent/chat/session/fence"
 	agentsqlc "github.com/memohai/memoh/domains/agent/internal/postgres/sqlc"
-	dbpkg "github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/dbtest"
 )
 
@@ -370,7 +370,7 @@ func openRuntimeFencePostgresPool(t *testing.T, ctx context.Context) *pgxpool.Po
 		}
 		t.Skip("skip postgres runtime fence test: TEST_POSTGRES_DSN is not set")
 	}
-	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
+	pool, err := db.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
 		if os.Getenv("MEMOH_TEST_POSTGRES_REQUIRED") == "1" {
 			t.Fatalf("create required postgres pool: %v", err)
@@ -420,11 +420,11 @@ func createRuntimeFenceFixtures(t *testing.T, ctx context.Context, pool *pgxpool
 		_, _ = pool.Exec(ctx, "DELETE FROM api.bots WHERE id = $1", botID)
 		_, _ = pool.Exec(ctx, "DELETE FROM iam.users WHERE id = $1", userID)
 	})
-	pgBotID, err := dbpkg.ParseUUID(botID.String())
+	pgBotID, err := db.ParseUUID(botID.String())
 	if err != nil {
 		t.Fatalf("parse runtime fence bot id: %v", err)
 	}
-	pgSessionID, err := dbpkg.ParseUUID(sessionID.String())
+	pgSessionID, err := db.ParseUUID(sessionID.String())
 	if err != nil {
 		t.Fatalf("parse runtime fence session id: %v", err)
 	}
