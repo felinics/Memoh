@@ -600,10 +600,18 @@ function newDraftHasContent(d: DraftState): boolean {
     || Object.keys(d.headers).length > 0
 }
 
+// Stashed rows are user input too: switching transport parks the opposite
+// side's pairs in the stash, so a new draft whose only content sits in the
+// stash (type env → switch to remote → leave) must still trip the guard.
+function stashHasContent(): boolean {
+  const has = (pairs: KeyValuePair[]) => pairs.some((p) => p.key.trim() !== '' || p.value.trim() !== '')
+  return has(envStash.value) || has(headerStash.value)
+}
+
 const hasChanges = computed(() => {
   const snap = savedSnapshot.value
   const cur = captureDraft()
-  return snap ? !draftEqual(snap, cur) : newDraftHasContent(cur)
+  return snap ? !draftEqual(snap, cur) : newDraftHasContent(cur) || stashHasContent()
 })
 
 // The fields a probe depends on — a rename-only save must not re-spawn the
@@ -710,6 +718,19 @@ function pairsToRecord(pairs: KeyValuePair[]): Record<string, string> {
   return out
 }
 
+// Remote url/headers support ${VAR} placeholders resolved at SAVE time from
+// the session's env pairs — the backend never stores env for remote configs,
+// so the resolved value is baked into the saved config and the env rows stay
+// session-only. Restored from the pre-redesign buildRequestBody: dropping the
+// substitution persisted literal "${VAR}" strings that the remote then 401s
+// on. The vars source is the stdio env stash (the only place env rows can
+// exist in a remote editing session — there is no remote env editor by design).
+function substituteTemplateVars(value: string, vars: Record<string, string>) {
+  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, key: string) => vars[key] ?? match)
+}
+
+const TEMPLATE_VAR_RE = /\$\{[A-Za-z_][A-Za-z0-9_]*\}/
+
 // The snapshot mirrors what is STORED (raw cfg), not what the line renders to.
 // For a legacy config whose command token holds a whole line, the stored shape
 // ("npx -y pkg" as one token) differs from the parsed line ("npx" + args) —
@@ -797,7 +818,7 @@ onBeforeUnmount(() => {
   oauthFlowCleanup?.()
 })
 
-function buildBody(draft: DraftState, active: boolean): McpUpsertRequest {
+function buildBody(draft: DraftState, active: boolean, templateVars?: Record<string, string>): McpUpsertRequest {
   const body: McpUpsertRequest = {
     name: draft.name.trim() || t('mcp.unnamedServer'),
     is_active: active,
@@ -808,8 +829,12 @@ function buildBody(draft: DraftState, active: boolean): McpUpsertRequest {
     if (Object.keys(draft.env).length > 0) body.env = draft.env
     if (draft.cwd.trim()) body.cwd = draft.cwd.trim()
   } else {
-    body.url = draft.url.trim()
-    if (Object.keys(draft.headers).length > 0) body.headers = draft.headers
+    body.url = substituteTemplateVars(draft.url.trim(), templateVars ?? {})
+    if (Object.keys(draft.headers).length > 0) {
+      body.headers = Object.fromEntries(
+        Object.entries(draft.headers).map(([key, value]) => [key, substituteTemplateVars(value, templateVars ?? {})]),
+      )
+    }
     if (draft.transport === 'sse') body.transport = 'sse'
   }
   return body
@@ -838,6 +863,19 @@ async function handleSave() {
     toast.error(connectionType.value === 'stdio' ? t('mcp.commandRequired') : t('mcp.urlRequired'))
     return
   }
+  // Remote placeholders resolve from the stashed stdio env rows (the only env
+  // source in a remote session). Block the save on anything still unresolved:
+  // persisting a literal "${VAR}" used to be a silent 401 with no signpost.
+  const templateVars = draft.connectionType === 'remote' ? pairsToRecord(envStash.value) : undefined
+  if (templateVars) {
+    const unresolved = [draft.url, ...Object.values(draft.headers)].some((v) =>
+      TEMPLATE_VAR_RE.test(substituteTemplateVars(v, templateVars)),
+    )
+    if (unresolved) {
+      toast.error(t('mcp.unresolvedTemplateVars'))
+      return
+    }
+  }
   saving.value = true
   try {
     // Probing is expensive (a container process spawn or a network handshake),
@@ -846,7 +884,7 @@ async function handleSave() {
     // server's canonical state (autoProbe), and that mount runs it.
     const needsProbe = !wasNew
       && savedSnapshot.value !== null && connectionFieldsChanged(savedSnapshot.value, draft)
-    const body = buildBody(draft, form.value.active)
+    const body = buildBody(draft, form.value.active, templateVars)
     if (wasNew) {
       const { data } = await postBotsByBotIdMcp({ path: { bot_id: props.botId } as unknown as { bot_id: string }, body, throwOnError: true })
       const id = data?.id ?? ''
@@ -906,10 +944,14 @@ async function handleProbe(id: string) {
   if (!id) return
   probing.value = true
   probeAuthRequired.value = false
-  if (probeAbortController) probeAbortController.abort()
-  probeAbortController = new AbortController()
+  probeAbortController?.abort()
+  // Each probe tracks its own controller: when probes overlap (autoProbe in
+  // flight + OAuth completion re-probe), the older one's finally must not
+  // blank the newer one's spinner/controller — only the latest clears.
+  const controller = new AbortController()
+  probeAbortController = controller
   try {
-    const { data } = await postBotsByBotIdMcpByIdProbe({ path: { bot_id: props.botId, id } as unknown as { bot_id: string, id: string }, throwOnError: true })
+    const { data } = await postBotsByBotIdMcpByIdProbe({ path: { bot_id: props.botId, id } as unknown as { bot_id: string, id: string }, signal: controller.signal, throwOnError: true })
     if (data) {
       status.value = data.status ?? status.value
       tools.value = data.tools ?? []
@@ -925,8 +967,10 @@ async function handleProbe(id: string) {
     sessionProbeResult.value = 'error'
     emit('changed')
   } finally {
-    probing.value = false
-    probeAbortController = null
+    if (probeAbortController === controller) {
+      probing.value = false
+      probeAbortController = null
+    }
   }
 }
 
@@ -1013,6 +1057,16 @@ async function handleOAuthFlow() {
     if (!data?.authorization_url) throw new Error(t('mcp.oauth.flowInitFailed'))
 
     const popup = await openOAuthURL(data.authorization_url)
+    if (!popup && !window.api?.desktop?.openExternalUrl) {
+      // window.open returned null: the browser blocked the popup. Fail fast
+      // with a signpost — with no window handle, the poll below has no close
+      // signal and would spin silently for 120s before a generic failure.
+      // (Desktop returns null by design: the URL went to the system browser
+      // and the token poll is the only completion signal.)
+      toast.error(t('mcp.oauth.popupBlocked'))
+      oauthAuthorizing.value = false
+      return
+    }
     let completed = false
     let pollTimer: ReturnType<typeof setInterval> | undefined
     const finishOAuth = async (result: 'success' | 'error', error?: string) => {

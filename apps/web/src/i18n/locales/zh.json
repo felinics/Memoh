@@ -1497,6 +1497,7 @@
     "statusUnknown": "未测试",
     "commandRequired": "请先填写启动命令。",
     "urlRequired": "请先填写端点 URL。",
+    "unresolvedTemplateVars": "URL 或请求头中还有未解析的 ${VAR} 占位符,请替换成实际值后再保存。",
     "authRequired": "需要授权",
     "oauth": {
       "title": "认证",
@@ -1529,7 +1530,8 @@
       "optionalHint": "仅当此服务器要求登录时才需要。",
       "callbackUrl": "回调地址",
       "callbackUrlHint": "请在 OAuth 应用设置中填入此回调地址。",
-      "callbackMissingParams": "缺少授权码或状态参数"
+      "callbackMissingParams": "缺少授权码或状态参数",
+      "popupBlocked": "授权窗口被浏览器拦截了,请允许此页面的弹出窗口后重试。"
     },
     "servers": "服务器",
     "addNew": "添加服务器",

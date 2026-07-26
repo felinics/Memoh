@@ -1497,6 +1497,7 @@
     "statusUnknown": "Not tested",
     "commandRequired": "Enter a command before saving.",
     "urlRequired": "Enter an endpoint URL before saving.",
+    "unresolvedTemplateVars": "URL or headers still contain unresolved ${VAR} placeholders — replace them with actual values before saving.",
     "authRequired": "Authorization required",
     "oauth": {
       "title": "Authentication",
@@ -1529,7 +1530,8 @@
       "optionalHint": "Only needed if this server asks you to sign in.",
       "callbackUrl": "Callback URL",
       "callbackUrlHint": "Set this as the callback/redirect URL in your OAuth App settings.",
-      "callbackMissingParams": "Missing authorization code or state parameter"
+      "callbackMissingParams": "Missing authorization code or state parameter",
+      "popupBlocked": "The authorization window was blocked — allow popups for this page and try again."
     },
     "servers": "Servers",
     "addNew": "New Server",
