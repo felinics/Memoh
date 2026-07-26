@@ -288,6 +288,7 @@
         >
           <ConfirmPopover
             :message="$t('mcp.oauth.revokeConfirm')"
+            :cancel-text="$t('common.cancel')"
             :confirm-text="$t('mcp.oauth.revoke')"
             :loading="oauthRevoking"
             @confirm="handleOAuthRevoke"
