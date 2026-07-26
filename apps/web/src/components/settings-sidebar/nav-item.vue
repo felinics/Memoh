@@ -1,19 +1,9 @@
-<template>
-  <Button
-    variant="ghost"
-    class="w-full justify-start gap-2.5 pl-3.5! pr-3! font-[430] tracking-[-0.1px] text-foreground/85 [--btn-ghost-hover:var(--sidebar-hover)]"
-    :class="active && 'bg-sidebar-accent text-foreground!'"
-  >
-    <slot />
-  </Button>
-</template>
+<script lang="ts">
+// The implementation now lives in @felinic/ui (src/components/settings) so the
+// component showcase composes the same owner instead of transcribing it. This
+// shim keeps the existing relative imports working; migrate call sites to
+// import { NavItem } from '@felinic/ui' and delete this file.
+import { NavItem } from '@felinic/ui'
 
-<script setup lang="ts">
-import { Button } from '@felinic/ui'
-
-withDefaults(defineProps<{
-  active?: boolean
-}>(), {
-  active: false,
-})
+export default NavItem
 </script>
