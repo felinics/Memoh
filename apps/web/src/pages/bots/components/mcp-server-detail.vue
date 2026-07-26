@@ -244,10 +244,9 @@
       </template>
     </SettingsSection>
 
-    <!-- Advanced: env vars / headers / auth behind a named ActionCard entry
-         opening a focused dialog. The card's description names what's behind
-         the door; the dialog itself carries no subtitle — its section labels
-         already say it. -->
+    <!-- Advanced: env vars / headers behind a named ActionCard entry opening a
+         focused dialog. The card's description names what's behind the door;
+         the dialog itself carries no subtitle — its section label already does. -->
     <ActionCard
       :title="$t('mcp.advancedSettings')"
       :description="advancedHint"
@@ -257,6 +256,116 @@
         <SlidersHorizontal />
       </template>
     </ActionCard>
+
+    <!-- Authentication: a FIRST-CLASS section, not an Advanced knob — when a
+         remote server needs sign-in, authorizing IS the main flow, so it sits
+         on the page as one quiet row that grows in place (AutoHeight) when the
+         flow needs more (credentials, the browser wait). Mirrors the provider
+         detail's OAuth section. Saved remote servers only — OAuth state is
+         stored against the connection row, so a draft has nothing to
+         authorize yet. -->
+    <SettingsSection
+      v-if="connectionType === 'remote' && serverId"
+      :title="$t('mcp.oauth.title')"
+    >
+      <AutoHeight>
+        <!-- First load: borrow the row height so the card doesn't jump when
+             the status lands. -->
+        <div
+          v-if="oauthStatusLoading && !oauthStatus"
+          class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+        >
+          <Spinner class="size-5 text-muted-foreground" />
+        </div>
+
+        <!-- Authorized: the row IS the status. Revoke severs a live
+             authorization the bot may be actively using, so it is
+             confirm-gated. -->
+        <SettingsRow
+          v-else-if="oauthAuthorized"
+          :label="$t('mcp.oauth.signInLabel')"
+          :description="$t('mcp.oauth.authorized')"
+        >
+          <ConfirmPopover
+            :message="$t('mcp.oauth.revokeConfirm')"
+            :confirm-text="$t('mcp.oauth.revoke')"
+            :loading="oauthRevoking"
+            @confirm="handleOAuthRevoke"
+          >
+            <template #trigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="shrink-0 text-muted-foreground"
+              >
+                {{ $t('mcp.oauth.revoke') }}
+              </Button>
+            </template>
+          </ConfirmPopover>
+        </SettingsRow>
+
+        <template v-else>
+          <SettingsRow
+            :label="$t('mcp.oauth.signInLabel')"
+            :description="oauthRowDescription"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              :loading="oauthDiscovering || oauthAuthorizing"
+              :disabled="oauthDiscovering || oauthAuthorizing"
+              loading-mode="manual"
+              @click="handleOAuthFlow"
+            >
+              <Loader2
+                v-if="oauthDiscovering || oauthAuthorizing"
+                class="size-4 animate-spin"
+              />
+              <KeyRound
+                v-else
+                class="size-4"
+              />
+              {{ oauthDiscovering ? $t('mcp.oauth.discovering') : oauthAuthorizing ? $t('mcp.oauth.authorizing') : $t('mcp.oauth.authorize') }}
+            </Button>
+          </SettingsRow>
+
+          <!-- No dynamic registration on the authorization server: the user
+               must bring their own OAuth App credentials. Appears only after a
+               discovery attempt found no registration endpoint. -->
+          <div
+            v-if="oauthNeedsClientId"
+            class="mx-4 space-y-4 border-b border-border pb-4 last:border-b-0"
+          >
+            <Field>
+              <FieldLabel>{{ $t('mcp.oauth.clientId') }}</FieldLabel>
+              <FieldControl>
+                <Input
+                  v-model="oauthClientId"
+                  class="font-mono"
+                  autocomplete="off"
+                  :placeholder="$t('mcp.oauth.clientIdPlaceholder')"
+                />
+              </FieldControl>
+            </Field>
+            <Field>
+              <FieldLabel>{{ $t('mcp.oauth.clientSecret') }}</FieldLabel>
+              <FieldControl>
+                <Input
+                  v-model="oauthClientSecret"
+                  type="password"
+                  class="font-mono"
+                  autocomplete="new-password"
+                  :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
+                />
+              </FieldControl>
+            </Field>
+          </div>
+        </template>
+      </AutoHeight>
+    </SettingsSection>
 
     <Dialog v-model:open="showAdvanced">
       <DialogPanel>
@@ -276,87 +385,17 @@
               :value-placeholder="$t('mcp.placeholders.envValue')"
             />
           </div>
-          <template v-else>
-            <div class="space-y-2">
-              <Label>{{ $t('mcp.httpHeaders') }}</Label>
-              <KeyValueEditor
-                v-model="headerPairs"
-                :key-placeholder="$t('mcp.placeholders.headerKey')"
-                :value-placeholder="$t('mcp.placeholders.headerValue')"
-              />
-            </div>
-
-            <!-- Authentication (remote, saved servers only). Spotlit when a probe
-                 reported it needs authorization and there's no token yet. -->
-            <div
-              v-if="serverId"
-              class="space-y-3 border-t border-border pt-4"
-            >
-              <div class="flex items-center justify-between gap-2">
-                <Label>{{ $t('mcp.oauth.title') }}</Label>
-                <Badge
-                  :variant="oauthStatus?.has_token ? 'success' : 'secondary'"
-                  size="sm"
-                >
-                  {{ oauthStatus?.has_token ? $t('mcp.oauth.authorized') : $t('mcp.oauth.notConfigured') }}
-                </Badge>
-              </div>
-
-              <template v-if="oauthNeedsClientId && (!oauthStatus?.has_token || oauthStatus?.expired)">
-                <p class="text-xs text-muted-foreground">
-                  {{ $t('mcp.oauth.clientIdHint') }}
-                </p>
-                <Field>
-                  <FieldLabel>{{ $t('mcp.oauth.clientId') }}</FieldLabel>
-                  <FieldControl>
-                    <Input
-                      v-model="oauthClientId"
-                      class="font-mono"
-                      autocomplete="off"
-                      :placeholder="$t('mcp.oauth.clientIdPlaceholder')"
-                    />
-                  </FieldControl>
-                </Field>
-                <Field>
-                  <FieldLabel>{{ $t('mcp.oauth.clientSecret') }}</FieldLabel>
-                  <FieldControl>
-                    <Input
-                      v-model="oauthClientSecret"
-                      type="password"
-                      class="font-mono"
-                      autocomplete="new-password"
-                      :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
-                    />
-                  </FieldControl>
-                </Field>
-              </template>
-
-              <Button
-                v-if="!oauthStatus?.has_token"
-                :loading="oauthDiscovering || oauthAuthorizing"
-                :disabled="oauthDiscovering || oauthAuthorizing"
-                loading-mode="manual"
-                @click="handleOAuthFlow"
-              >
-                <Loader2
-                  v-if="oauthDiscovering || oauthAuthorizing"
-                  class="size-4 animate-spin"
-                />
-                <KeyRound
-                  v-else
-                  class="size-4"
-                />
-                {{ oauthDiscovering ? $t('mcp.oauth.discovering') : $t('mcp.oauth.authorize') }}
-              </Button>
-              <Button
-                v-else
-                variant="outline"
-                @click="handleOAuthRevoke"
-              >
-                {{ $t('mcp.oauth.revoke') }}
-              </Button>
-            </div>
-          </template>
+          <div
+            v-else
+            class="space-y-2"
+          >
+            <Label>{{ $t('mcp.httpHeaders') }}</Label>
+            <KeyValueEditor
+              v-model="headerPairs"
+              :key-placeholder="$t('mcp.placeholders.headerKey')"
+              :value-placeholder="$t('mcp.placeholders.headerValue')"
+            />
+          </div>
         </DialogBody>
       </DialogPanel>
     </Dialog>
@@ -398,7 +437,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  ActionCard, Badge, Button, Dialog, DialogBody, DialogHeader,
+  ActionCard, AutoHeight, Badge, Button, Dialog, DialogBody, DialogHeader,
   DialogPanel, DialogTitle, Field, FieldControl, FieldLabel, HoverCard, HoverCardContent,
   HoverCardTrigger, Input, Label, Select, SelectContent,
   SelectItem, SelectTrigger, SelectValue, SegmentedControl, Spinner, Switch, toast,
@@ -414,6 +453,7 @@ import {
 import { client } from '@memohai/sdk/client'
 import type { McpUpsertRequest, McpToolDescriptor, McpOAuthStatus } from '@memohai/sdk'
 import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import KeyValueEditor from '@/components/key-value-editor/index.vue'
@@ -472,6 +512,8 @@ let oauthFlowCleanup: (() => void) | null = null
 const probeAuthRequired = ref(false)
 const oauthDiscovering = ref(false)
 const oauthAuthorizing = ref(false)
+const oauthRevoking = ref(false)
+const oauthStatusLoading = ref(false)
 const oauthStatus = ref<McpOAuthStatus | null>(null)
 const oauthClientId = ref('')
 const oauthClientSecret = ref('')
@@ -598,12 +640,11 @@ function handleTransportChange(v: string) {
   connectionType.value = next
 }
 
-// The advanced card's description must not promise what the dialog can't show:
-// authorization lives there only for a saved remote server.
-const advancedHint = computed(() => {
-  if (connectionType.value === 'stdio') return t('mcp.advancedHintStdio')
-  return serverId.value ? t('mcp.advancedHintRemote') : t('mcp.advancedHintRemoteUnsaved')
-})
+// The advanced card's description names its whole content: per-transport extras
+// only (env vars / headers) — authorization has its own entry above.
+const advancedHint = computed(() =>
+  connectionType.value === 'stdio' ? t('mcp.advancedHintStdio') : t('mcp.advancedHintRemote'),
+)
 
 // ---- Name inline edit (header) ----
 // Commits to the DRAFT (form.name), never to the server — Save owns persistence.
@@ -630,13 +671,18 @@ function cancelNameEdit() {
   nameEditing.value = false
 }
 
-// Open the advanced dialog automatically when a probe says authorization is
-// missing — the probe is a user-initiated action, so the dialog opening in
-// response lands them on the auth section instead of a hidden one.
-const oauthSpotlight = computed(() =>
-  connectionType.value === 'remote' && probeAuthRequired.value && !oauthStatus.value?.has_token,
-)
-watch(oauthSpotlight, (on) => { if (on) showAdvanced.value = true })
+// The row's description is the one place auth state speaks: status when there
+// is something to report (authorized / expired / the probe asked for sign-in /
+// discovery needs manual credentials), and a calm "only if asked" note the
+// rest of the time — most remote servers never need this row touched.
+const oauthAuthorized = computed(() => !!oauthStatus.value?.has_token && !oauthStatus.value?.expired)
+const oauthRowDescription = computed(() => {
+  const s = oauthStatus.value
+  if (s?.has_token && s.expired) return t('mcp.oauth.expired')
+  if (probeAuthRequired.value && !s?.has_token) return t('mcp.oauth.signInRequired')
+  if (oauthNeedsClientId.value) return t('mcp.oauth.clientIdHint')
+  return t('mcp.oauth.optionalHint')
+})
 
 function configValue(config: Record<string, unknown>, key: string): string {
   const val = config?.[key]
@@ -913,11 +959,14 @@ async function loadOAuthStatus() {
     oauthStatus.value = null
     return
   }
+  oauthStatusLoading.value = true
   try {
     const { data } = await getBotsByBotIdMcpByIdOauthStatus({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
     oauthStatus.value = data ?? null
   } catch {
     oauthStatus.value = null
+  } finally {
+    oauthStatusLoading.value = false
   }
 }
 
@@ -977,11 +1026,9 @@ async function handleOAuthFlow() {
       if (result === 'success') {
         // The flow is done — close the authorization popup if it is still
         // around (poll-based completion can win the race against the
-        // callback page's own postMessage + self-close), and close the
-        // advanced dialog: it auto-opened to spotlight the missing auth, so
-        // success returns the user to the detail where the result lives.
+        // callback page's own postMessage + self-close). The section row
+        // flips to Authorized in place; nothing else needs to close.
         popup?.close()
-        showAdvanced.value = false
         toast.success(t('mcp.oauth.authSuccess'))
         void handleProbe(serverId.value)
       } else {
@@ -1038,7 +1085,8 @@ async function openOAuthURL(url: string): Promise<Window | null> {
 }
 
 async function handleOAuthRevoke() {
-  if (!serverId.value) return
+  if (!serverId.value || oauthRevoking.value) return
+  oauthRevoking.value = true
   try {
     await deleteBotsByBotIdMcpByIdOauthToken({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
     toast.success(t('mcp.oauth.revokeSuccess'))
@@ -1049,6 +1097,8 @@ async function handleOAuthRevoke() {
     await loadOAuthStatus()
   } catch {
     toast.error(t('mcp.oauth.revokeFailed'))
+  } finally {
+    oauthRevoking.value = false
   }
 }
 
