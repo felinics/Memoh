@@ -20,7 +20,11 @@ vi.mock('vue-i18n', () => ({
     t: (key: string) => key,
   }),
 }))
-vi.mock('@felinic/ui', () => ({
+// importOriginal keeps the lifted owner components (PanePlaceholder & co.)
+// real — they moved into @felinic/ui, so a total-replacement mock now swallows
+// them through the host shims.
+vi.mock('@felinic/ui', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   Spinner: { template: '<span />' },
   toast: { error: vi.fn() },
 }))

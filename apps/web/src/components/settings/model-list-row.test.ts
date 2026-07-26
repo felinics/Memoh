@@ -20,6 +20,9 @@ describe('ModelListRow', () => {
 
   it('shows a template model as normal read-only content', async () => {
     const onClick = vi.fn()
+    // The shim import pulls the whole @felinic/ui barrel through the transform
+    // pipeline — under full-suite load that first touch can exceed the default
+    // 5s test timeout, so this test gets a wider budget.
     const ModelListRow = (await import('./model-list-row.vue')).default
     root = document.createElement('div')
     document.body.append(root)
@@ -40,5 +43,5 @@ describe('ModelListRow', () => {
 
     button.click()
     expect(onClick).not.toHaveBeenCalled()
-  })
+  }, 15000)
 })

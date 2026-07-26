@@ -99,6 +99,9 @@ vi.mock('@felinic/ui', async () => {
   return {
     Button: Passthrough,
     FORM_ITEM_INJECTION_KEY: Symbol('form-item'),
+    // FieldStack moved into @felinic/ui (host file is a re-export shim) — the
+    // mock must define it or the shim's import fails.
+    FieldStack: Passthrough,
     Input,
     FormField: Field,
     FormControl: Passthrough,
