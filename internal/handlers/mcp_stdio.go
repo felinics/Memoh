@@ -58,6 +58,14 @@ type mcpStdioClient struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	onClose   func()
+
+	// inflight maps the EXTERNAL request ID of each in-flight dispatched call
+	// to its cancel func, so notifications/cancelled from the proxy client can
+	// reach it. Cancelling the call's ctx makes the SDK send the server a
+	// spec-compliant cancelled notification carrying the INTERNAL call ID (the
+	// SDK transport's call() does this on ctx cancel) — the raw-forward path
+	// the pre-migration client used is gone because the SDK owns the transport.
+	inflight sync.Map // string(external request ID) → context.CancelFunc
 }
 
 // Close shuts the SDK session (which closes the stdio pipes), the bridge exec
@@ -208,6 +216,15 @@ func (c *mcpStdioClient) sdkCall(ctx context.Context, req mcptools.JSONRPCReques
 			return nil, fmt.Errorf("invalid %s params: %w", req.Method, err)
 		}
 	}
+	// Register under the external ID BEFORE invoking: notifications/cancelled
+	// arrives on a separate HTTP request while this call is still in flight.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if len(req.ID) > 0 {
+		key := string(req.ID)
+		c.inflight.Store(key, cancel)
+		defer c.inflight.Delete(key)
+	}
 	result, err := invoke(ctx)
 	if err != nil {
 		// A JSON-RPC error from the downstream server must keep its code — the
@@ -224,6 +241,23 @@ func (c *mcpStdioClient) sdkCall(ctx context.Context, req mcptools.JSONRPCReques
 		result = map[string]any{}
 	}
 	return jsonrpcResultPayload(req.ID, result), nil
+}
+
+// cancelInFlight handles notifications/cancelled from the proxy client: the
+// referenced external request ID resolves to an in-flight dispatched call and
+// its ctx is cancelled (the SDK then notifies the server itself, with the
+// internal call ID). Unknown or already-finished IDs are no-ops, matching the
+// spec's allowance to ignore cancellations for requests that no longer exist.
+func (c *mcpStdioClient) cancelInFlight(req mcptools.JSONRPCRequest) {
+	var params struct {
+		RequestID json.RawMessage `json:"requestId"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil || len(params.RequestID) == 0 {
+		return
+	}
+	if cancel, ok := c.inflight.Load(string(params.RequestID)); ok {
+		cancel.(context.CancelFunc)()
+	}
 }
 
 // jsonrpcResultPayload wraps a typed SDK result into a standard JSON-RPC
@@ -368,7 +402,14 @@ type mcpStdioSession struct {
 	containerID string
 	name        string
 	createdAt   time.Time
-	session     *mcpStdioClient
+	// request is retained for the lazy start: the session process spawns on
+	// the FIRST proxied message, so an initialize can drive the handshake with
+	// the external client's own capabilities (see ensureStdioSession). An
+	// eager session would burn the single handshake on memoh's empty one.
+	request MCPStdioRequest
+	// startMu serializes the lazy start across concurrent first messages.
+	startMu sync.Mutex
+	session *mcpStdioClient
 }
 
 // CreateMCPStdio godoc
@@ -410,34 +451,22 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 		containerID: containerID,
 		name:        strings.TrimSpace(req.Name),
 		createdAt:   time.Now().UTC(),
+		request:     req,
 	}
-	sess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req, func() {
-		h.mcpStdioMu.Lock()
-		if current, ok := h.mcpStdioSess[connectionID]; ok && current == record {
-			delete(h.mcpStdioSess, connectionID)
-		}
-		h.mcpStdioMu.Unlock()
-	})
+	// Eager probe on a THROWAWAY process: it validates the command and fills
+	// the response's tool list, then dies. The session process starts lazily
+	// on the first proxied message (see mcpStdioSession.request), so create
+	// keeps its old contract — fail fast on a bad command, return the tool
+	// list — without burning the session's handshake on memoh's capabilities.
+	probeSess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req, nil, defaultStdioSDKClient())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	record.session = sess
-	tools := h.probeMCPTools(ctx, sess, botID, strings.TrimSpace(req.Name))
+	tools := h.probeMCPTools(ctx, probeSess, botID, strings.TrimSpace(req.Name))
+	probeSess.Close()
 	h.mcpStdioMu.Lock()
 	h.mcpStdioSess[connectionID] = record
 	h.mcpStdioMu.Unlock()
-	// The process may already have died before the record landed (onClose then
-	// ran as a no-op against the not-yet-inserted entry). Reap that case here —
-	// after this point every close happens with the entry visible to onClose.
-	select {
-	case <-sess.done:
-		h.mcpStdioMu.Lock()
-		if current, ok := h.mcpStdioSess[connectionID]; ok && current == record {
-			delete(h.mcpStdioSess, connectionID)
-		}
-		h.mcpStdioMu.Unlock()
-	default:
-	}
 
 	return c.JSON(http.StatusOK, MCPStdioResponse{
 		ConnectionID: connectionID,
@@ -458,6 +487,35 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post].
+// ensureStdioSession lazily starts the session process on the first proxied
+// message. An initialize starts it with a client built from the message's own
+// capabilities/clientInfo (the server then negotiates against the REAL client);
+// anything else starts it with memoh's default identity. Concurrent first
+// messages serialize on the record's startMu.
+func (h *ContainerdHandler) ensureStdioSession(ctx context.Context, record *mcpStdioSession, req *mcptools.JSONRPCRequest) (*mcpStdioClient, error) {
+	record.startMu.Lock()
+	defer record.startMu.Unlock()
+	if record.session != nil {
+		return record.session, nil
+	}
+	client := defaultStdioSDKClient()
+	if req != nil && strings.TrimSpace(req.Method) == "initialize" {
+		client = sdkClientForInitialize(req.Params)
+	}
+	sess, err := h.startContainerdMCPCommandSession(ctx, record.botID, record.containerID, record.request, func() {
+		h.mcpStdioMu.Lock()
+		if current, ok := h.mcpStdioSess[record.id]; ok && current == record {
+			delete(h.mcpStdioSess, record.id)
+		}
+		h.mcpStdioMu.Unlock()
+	}, client)
+	if err != nil {
+		return nil, err
+	}
+	record.session = sess
+	return sess, nil
+}
+
 func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -468,15 +526,10 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "connection_id is required")
 	}
 	h.mcpStdioMu.Lock()
-	session := h.mcpStdioSess[connectionID]
+	record := h.mcpStdioSess[connectionID]
 	h.mcpStdioMu.Unlock()
-	if session == nil || session.session == nil || session.botID != botID {
+	if record == nil || record.botID != botID {
 		return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
-	}
-	select {
-	case <-session.session.done:
-		return echo.NewHTTPError(http.StatusNotFound, "mcp connection closed")
-	default:
 	}
 
 	var req mcptools.JSONRPCRequest
@@ -489,18 +542,36 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	if strings.TrimSpace(req.Method) == "" {
 		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, -32601, "method not found"))
 	}
+
+	sess, err := h.ensureStdioSession(c.Request().Context(), record, &req)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	select {
+	case <-sess.done:
+		return echo.NewHTTPError(http.StatusNotFound, "mcp connection closed")
+	default:
+	}
+
 	if mcptools.IsNotification(req) {
 		// The SDK client owns the protocol and offers no generic notify to
-		// forward (the old hand-rolled client could; this is a known fidelity
-		// gap — e.g. notifications/cancelled no longer reaches the server).
-		// Notifications carry no response, so acknowledge, log, and drop.
-		h.logger.Debug("mcp stdio notification dropped",
-			slog.String("connection_id", connectionID),
-			slog.String("method", req.Method),
-		)
+		// forward. cancelled is the one notification with load-bearing
+		// semantics, so it gets a real path: resolving the in-flight call and
+		// cancelling it makes the SDK notify the server itself. Everything
+		// else (progress, custom notifications) is still acknowledged and
+		// dropped — a known fidelity gap, now narrowed to messages no standard
+		// server depends on.
+		if strings.TrimSpace(req.Method) == "notifications/cancelled" {
+			sess.cancelInFlight(req)
+		} else {
+			h.logger.Debug("mcp stdio notification dropped",
+				slog.String("connection_id", connectionID),
+				slog.String("method", req.Method),
+			)
+		}
 		return c.NoContent(http.StatusAccepted)
 	}
-	payload, err := session.session.dispatch(c.Request().Context(), req)
+	payload, err := sess.dispatch(c.Request().Context(), req)
 	if err != nil {
 		code := int64(-32603)
 		var wireErr *jsonrpc.Error
@@ -516,19 +587,68 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	return c.JSON(http.StatusOK, payload)
 }
 
+// defaultStdioSDKClient is the fixed client identity memoh presents when it is
+// the real client itself (create-time probes, federation gateway sessions).
+func defaultStdioSDKClient() *sdkmcp.Client {
+	return sdkmcp.NewClient(&sdkmcp.Implementation{Name: "memoh", Version: "1.0.0"}, nil)
+}
+
+// sdkClientForInitialize builds the SDK client for a lazily-started proxy
+// session from the EXTERNAL client's own initialize params, so the container
+// server sees the real client's capabilities and clientInfo instead of memoh's
+// fixed empty handshake. The pre-migration client raw-forwarded the external
+// initialize as a spec-invalid SECOND initialize on an already-handshaken
+// session; advertising at the single handshake is the spec-valid form of the
+// same intent. Capabilities the proxy cannot fulfill (sampling, elicitation —
+// server→client requests have no channel back to the HTTP client) stay
+// advertised: the SDK answers them with method-not-found, an explicit error
+// instead of the old silent hang.
+func sdkClientForInitialize(rawParams json.RawMessage) *sdkmcp.Client {
+	var params sdkmcp.InitializeParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return defaultStdioSDKClient()
+	}
+	impl := params.ClientInfo
+	if impl == nil || strings.TrimSpace(impl.Name) == "" {
+		impl = &sdkmcp.Implementation{Name: "memoh", Version: "1.0.0"}
+	}
+	opts := &sdkmcp.ClientOptions{}
+	if caps := params.Capabilities; caps != nil {
+		// #607: the SDK's deprecated Roots field is ignored at handshake —
+		// only RootsV2 actually advertises roots. Decode the wire "roots"
+		// member straight into RootCapabilities rather than reading the
+		// deprecated field.
+		var wire struct {
+			Capabilities map[string]json.RawMessage `json:"capabilities"`
+		}
+		if err := json.Unmarshal(rawParams, &wire); err == nil {
+			if rawRoots, hasRoots := wire.Capabilities["roots"]; hasRoots && caps.RootsV2 == nil {
+				roots := &sdkmcp.RootCapabilities{}
+				if err := json.Unmarshal(rawRoots, roots); err == nil {
+					caps.RootsV2 = roots
+				}
+			}
+		}
+		opts.Capabilities = caps
+	}
+	return sdkmcp.NewClient(impl, opts)
+}
+
 // connectStdioClient performs the MCP initialize handshake over the given process
 // pipes and returns the ready session. Split from
 // startContainerdMCPCommandSession so tests can exercise the protocol path over
 // plain in-memory pipes instead of a container.
-func connectStdioClient(ctx context.Context, stdin io.WriteCloser, stdout io.ReadCloser) (*sdkmcp.ClientSession, error) {
-	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "memoh", Version: "1.0.0"}, nil)
-	return client.Connect(ctx, &sdkmcp.IOTransport{Reader: stdout, Writer: stdin}, nil)
+func connectStdioClient(ctx context.Context, stdin io.WriteCloser, stdout io.ReadCloser, sdkClient *sdkmcp.Client) (*sdkmcp.ClientSession, error) {
+	return sdkClient.Connect(ctx, &sdkmcp.IOTransport{Reader: stdout, Writer: stdin}, nil)
 }
 
 // onClose is registered on the client BEFORE connect/Wait can fire Close: a
 // process that dies during the handshake must still run the registry cleanup,
 // otherwise closeOnce is consumed with a nil callback and the entry leaks.
-func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, botID, containerID string, req MCPStdioRequest, onClose func()) (*mcpStdioClient, error) {
+// The client argument chooses the identity presented at the handshake:
+// defaultStdioSDKClient() when memoh is the real client, or
+// sdkClientForInitialize(...) for lazily-started proxy sessions.
+func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, botID, containerID string, req MCPStdioRequest, onClose func(), sdkClient *sdkmcp.Client) (*mcpStdioClient, error) {
 	// Get gRPC client for the bot container via manager
 	client, err := h.manager.MCPClient(ctx, botID)
 	if err != nil {
@@ -603,7 +723,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 
 	startMCPStderrLogger(stderrR, containerID, h.logger, sess.stderrTail)
 
-	session, err := connectStdioClient(ctx, stdinW, stdoutR)
+	session, err := connectStdioClient(ctx, stdinW, stdoutR, sdkClient)
 	if err != nil {
 		// Handshake failed — most commonly the process is not an MCP server and
 		// already exited (e.g. command not found). Report that, not a bare EOF.

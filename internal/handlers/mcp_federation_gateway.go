@@ -286,8 +286,9 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 		Env:     normalizeStringMap(connection.Config["env"]),
 		Cwd:     strings.TrimSpace(anyToString(connection.Config["cwd"])),
 	}
-	// Federation sessions are short-lived and unregistered — no onClose.
-	return g.handler.startContainerdMCPCommandSession(ctx, botID, containerID, request, nil)
+	// Federation sessions are short-lived and unregistered — no onClose. Memoh
+	// is the real client here, so the handshake uses the default identity.
+	return g.handler.startContainerdMCPCommandSession(ctx, botID, containerID, request, nil, defaultStdioSDKClient())
 }
 
 func convertSDKTools(items []*sdkmcp.Tool) []mcpgw.ToolDescriptor {

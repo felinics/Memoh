@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -72,7 +74,7 @@ func newTestStdioClient(t *testing.T) *mcpStdioClient {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := connectStdioClient(ctx, clientStdin, clientStdout)
+	session, err := connectStdioClient(ctx, clientStdin, clientStdout, defaultStdioSDKClient())
 	if err != nil {
 		t.Fatalf("connectStdioClient: %v", err)
 	}
@@ -350,7 +352,7 @@ func TestStdioClientServerDeath(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := connectStdioClient(ctx, clientStdin, clientStdout)
+	session, err := connectStdioClient(ctx, clientStdin, clientStdout, defaultStdioSDKClient())
 	if err != nil {
 		t.Fatalf("connectStdioClient: %v", err)
 	}
@@ -432,5 +434,137 @@ func TestJSONRPCResultPayload(t *testing.T) {
 	result, ok := payload["result"].(map[string]any)
 	if !ok || result["ok"] != true {
 		t.Fatalf("unexpected result: %+v", payload)
+	}
+}
+
+// lockedBuffer serializes writes from the SDK server's read path against test
+// reads — bytes.Buffer alone would race under -race.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+type teeReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// A proxy session started by an external initialize must handshake with THAT
+// client's capabilities and clientInfo — the container server negotiates
+// against the real client, not memoh's fixed empty identity. Asserted at the
+// wire: the SDK exposes no getter for what it advertised.
+func TestSDKClientForInitializeHandshake(t *testing.T) {
+	clientStdin, clientStdout, serverStdin, serverStdout := newStdioPipePair()
+
+	var wire lockedBuffer
+	serveTestMCPServer(t, teeReadCloser{Reader: io.TeeReader(serverStdin, &wire), Closer: serverStdin}, serverStdout)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	initParams := json.RawMessage(`{"protocolVersion":"2025-06-18","capabilities":{"roots":{"listChanged":true},"sampling":{},"experimental":{"x-custom":true}},"clientInfo":{"name":"external-client","version":"2.3.4"}}`)
+	session, err := connectStdioClient(ctx, clientStdin, clientStdout, sdkClientForInitialize(initParams))
+	if err != nil {
+		t.Fatalf("connectStdioClient: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	frame := wire.String()
+	for _, want := range []string{`"external-client"`, `"roots"`, `"listChanged":true`, `"sampling"`, `"x-custom"`} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("initialize frame missing %s:\n%s", want, frame)
+		}
+	}
+}
+
+// notifications/cancelled from the proxy client must reach the in-flight call:
+// the registry cancels its ctx, the SDK forwards a spec-compliant cancelled to
+// the server, and the server's handler observes the cancellation. The whole
+// chain runs over real pipes — each link fails the test on its own.
+func TestCancelInFlightReachesServer(t *testing.T) {
+	clientStdin, clientStdout, serverStdin, serverStdout := newStdioPipePair()
+
+	started := make(chan struct{})
+	handlerDone := make(chan error, 1)
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-mcp", Version: "v0"}, nil)
+	sdkmcp.AddTool(server, &sdkmcp.Tool{Name: "block", Description: "blocks until cancelled"},
+		func(ctx context.Context, _ *sdkmcp.CallToolRequest, _ struct{}) (*sdkmcp.CallToolResult, any, error) {
+			close(started)
+			<-ctx.Done()
+			handlerDone <- ctx.Err()
+			return nil, nil, ctx.Err()
+		})
+	serverSess, err := server.Connect(context.Background(), &sdkmcp.IOTransport{Reader: serverStdin, Writer: serverStdout}, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { _ = serverSess.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := connectStdioClient(ctx, clientStdin, clientStdout, defaultStdioSDKClient())
+	if err != nil {
+		t.Fatalf("connectStdioClient: %v", err)
+	}
+	client := &mcpStdioClient{
+		session:    session,
+		stderrTail: &mcpStderrTail{},
+		done:       make(chan struct{}),
+	}
+	client.exitCode.Store(-1)
+	t.Cleanup(client.Close)
+
+	type callOutcome struct {
+		payload map[string]any
+		err     error
+	}
+	callDone := make(chan callOutcome, 1)
+	go func() {
+		payload, err := client.dispatch(ctx, mcptools.JSONRPCRequest{
+			Method: "tools/call",
+			ID:     json.RawMessage(`42`),
+			Params: json.RawMessage(`{"name":"block","arguments":{}}`),
+		})
+		callDone <- callOutcome{payload, err}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server tool never started")
+	}
+
+	client.cancelInFlight(mcptools.JSONRPCRequest{
+		Method: "notifications/cancelled",
+		Params: json.RawMessage(`{"requestId":42,"reason":"client gave up"}`),
+	})
+
+	select {
+	case outcome := <-callDone:
+		if !errors.Is(outcome.err, context.Canceled) {
+			t.Fatalf("dispatch err = %v, want context.Canceled", outcome.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatch did not return after cancellation")
+	}
+
+	select {
+	case err := <-handlerDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("server handler err = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled notification never reached the server handler")
 	}
 }
