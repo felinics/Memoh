@@ -1497,7 +1497,7 @@
     "statusUnknown": "未测试",
     "commandRequired": "请先填写启动命令。",
     "urlRequired": "请先填写端点 URL。",
-    "unresolvedTemplateVars": "URL 或请求头中还有未解析的 ${VAR} 占位符,请替换成实际值后再保存。",
+    "unresolvedTemplateVars": "URL 或请求头中还有未解析的 {varSyntax} 占位符,请替换成实际值后再保存。",
     "authRequired": "需要授权",
     "oauth": {
       "title": "认证",

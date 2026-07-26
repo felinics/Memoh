@@ -872,7 +872,9 @@ async function handleSave() {
       TEMPLATE_VAR_RE.test(substituteTemplateVars(v, templateVars)),
     )
     if (unresolved) {
-      toast.error(t('mcp.unresolvedTemplateVars'))
+      // "${VAR}" must arrive as a param: literal {VAR} in the message would be
+      // eaten by vue-i18n interpolation and the toast would read "unresolved $".
+      toast.error(t('mcp.unresolvedTemplateVars', { varSyntax: '${VAR}' }))
       return
     }
   }
