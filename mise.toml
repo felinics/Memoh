@@ -129,6 +129,40 @@ run = "docker compose -f devenv/docker-compose.yml down --remove-orphans"
 description = "Stop development environment on SELinux systems"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml down --remove-orphans"
 
+[tasks."test:session-runtime:acceptance:env"]
+description = "Start the isolated two-Server environment for Session Runtime acceptance tests"
+depends = ["//:dev:workspace-image"]
+run = """
+#!/bin/bash
+set -euo pipefail
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.override.yml \
+  up -d --build --wait --wait-timeout 180 postgres pgvector migrate server server_b
+"""
+
+[tasks."test:session-runtime:acceptance:env:down"]
+description = "Stop the Session Runtime acceptance environment without deleting its volumes"
+run = """
+#!/bin/bash
+set -euo pipefail
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.override.yml \
+  down
+"""
+
+[tasks."test:session-runtime:acceptance"]
+description = "Run black-box Session Runtime acceptance tests against two real Server processes"
+env = { MEMOH_SESSION_RUNTIME_ACCEPTANCE = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED = "1" }
+run = """
+go test \
+  -tags=integration \
+  -count=1 \
+  -timeout=5m \
+  ./internal/agent/runtime/session/acceptance
+"""
+
 [tasks."dev:logs"]
 description = "View development logs"
 run = "docker compose -f devenv/docker-compose.yml logs -f"
