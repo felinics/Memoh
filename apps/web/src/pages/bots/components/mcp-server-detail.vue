@@ -718,19 +718,6 @@ function pairsToRecord(pairs: KeyValuePair[]): Record<string, string> {
   return out
 }
 
-// Remote url/headers support ${VAR} placeholders resolved at SAVE time from
-// the session's env pairs — the backend never stores env for remote configs,
-// so the resolved value is baked into the saved config and the env rows stay
-// session-only. Restored from the pre-redesign buildRequestBody: dropping the
-// substitution persisted literal "${VAR}" strings that the remote then 401s
-// on. The vars source is the stdio env stash (the only place env rows can
-// exist in a remote editing session — there is no remote env editor by design).
-function substituteTemplateVars(value: string, vars: Record<string, string>) {
-  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, key: string) => vars[key] ?? match)
-}
-
-const TEMPLATE_VAR_RE = /\$\{[A-Za-z_][A-Za-z0-9_]*\}/
-
 // The snapshot mirrors what is STORED (raw cfg), not what the line renders to.
 // For a legacy config whose command token holds a whole line, the stored shape
 // ("npx -y pkg" as one token) differs from the parsed line ("npx" + args) —
@@ -818,7 +805,7 @@ onBeforeUnmount(() => {
   oauthFlowCleanup?.()
 })
 
-function buildBody(draft: DraftState, active: boolean, templateVars?: Record<string, string>): McpUpsertRequest {
+function buildBody(draft: DraftState, active: boolean): McpUpsertRequest {
   const body: McpUpsertRequest = {
     name: draft.name.trim() || t('mcp.unnamedServer'),
     is_active: active,
@@ -829,11 +816,11 @@ function buildBody(draft: DraftState, active: boolean, templateVars?: Record<str
     if (Object.keys(draft.env).length > 0) body.env = draft.env
     if (draft.cwd.trim()) body.cwd = draft.cwd.trim()
   } else {
-    body.url = substituteTemplateVars(draft.url.trim(), templateVars ?? {})
+    // Remote url/headers are stored verbatim — env is a stdio-only concept
+    // (process environment), so there is no ${VAR} resolution for remote.
+    body.url = draft.url.trim()
     if (Object.keys(draft.headers).length > 0) {
-      body.headers = Object.fromEntries(
-        Object.entries(draft.headers).map(([key, value]) => [key, substituteTemplateVars(value, templateVars ?? {})]),
-      )
+      body.headers = { ...draft.headers }
     }
     if (draft.transport === 'sse') body.transport = 'sse'
   }
@@ -863,21 +850,6 @@ async function handleSave() {
     toast.error(connectionType.value === 'stdio' ? t('mcp.commandRequired') : t('mcp.urlRequired'))
     return
   }
-  // Remote placeholders resolve from the stashed stdio env rows (the only env
-  // source in a remote session). Block the save on anything still unresolved:
-  // persisting a literal "${VAR}" used to be a silent 401 with no signpost.
-  const templateVars = draft.connectionType === 'remote' ? pairsToRecord(envStash.value) : undefined
-  if (templateVars) {
-    const unresolved = [draft.url, ...Object.values(draft.headers)].some((v) =>
-      TEMPLATE_VAR_RE.test(substituteTemplateVars(v, templateVars)),
-    )
-    if (unresolved) {
-      // "${VAR}" must arrive as a param: literal {VAR} in the message would be
-      // eaten by vue-i18n interpolation and the toast would read "unresolved $".
-      toast.error(t('mcp.unresolvedTemplateVars', { varSyntax: '${VAR}' }))
-      return
-    }
-  }
   saving.value = true
   try {
     // Probing is expensive (a container process spawn or a network handshake),
@@ -886,7 +858,7 @@ async function handleSave() {
     // server's canonical state (autoProbe), and that mount runs it.
     const needsProbe = !wasNew
       && savedSnapshot.value !== null && connectionFieldsChanged(savedSnapshot.value, draft)
-    const body = buildBody(draft, form.value.active, templateVars)
+    const body = buildBody(draft, form.value.active)
     if (wasNew) {
       const { data } = await postBotsByBotIdMcp({ path: { bot_id: props.botId } as unknown as { bot_id: string }, body, throwOnError: true })
       const id = data?.id ?? ''

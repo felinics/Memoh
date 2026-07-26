@@ -1497,7 +1497,6 @@
     "statusUnknown": "Not tested",
     "commandRequired": "Enter a command before saving.",
     "urlRequired": "Enter an endpoint URL before saving.",
-    "unresolvedTemplateVars": "URL or headers still contain unresolved {varSyntax} placeholders — replace them with actual values before saving.",
     "authRequired": "Authorization required",
     "oauth": {
       "title": "Authentication",

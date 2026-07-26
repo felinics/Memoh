@@ -1448,7 +1448,6 @@
     "statusError": "エラー",
     "statusUnknown": "テストされていません",
     "authRequired": "許可が必要です",
-    "unresolvedTemplateVars": "URL またはヘッダーに未解決の {varSyntax} プレースホルダーがあります。実際の値に置き換えてから保存してください。",
     "oauth": {
       "title": "認証",
       "status": "OAuth ステータス",
