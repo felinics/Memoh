@@ -37,20 +37,48 @@ import (
 
 // ---------- fake persistence ----------
 
-// fakeOAuthQueries is an in-memory Queries for the OAuth token table. Only the
-// MCP OAuth methods are implemented; anything else panics via the nil embed.
+// fakeOAuthQueries is an in-memory Queries for the OAuth token table plus the
+// connection rows Update reads/writes. Anything else panics via the nil embed.
 type fakeOAuthQueries struct {
 	dbstore.Queries
-	mu        sync.Mutex
-	byConn    map[pgtype.UUID]sqlc.McpOauthToken
-	authTypes map[pgtype.UUID]string
+	mu          sync.Mutex
+	byConn      map[pgtype.UUID]sqlc.McpOauthToken
+	authTypes   map[pgtype.UUID]string
+	connections map[pgtype.UUID]sqlc.McpConnection
 }
 
 func newFakeOAuthQueries() *fakeOAuthQueries {
 	return &fakeOAuthQueries{
-		byConn:    map[pgtype.UUID]sqlc.McpOauthToken{},
-		authTypes: map[pgtype.UUID]string{},
+		byConn:      map[pgtype.UUID]sqlc.McpOauthToken{},
+		authTypes:   map[pgtype.UUID]string{},
+		connections: map[pgtype.UUID]sqlc.McpConnection{},
 	}
+}
+
+func (f *fakeOAuthQueries) GetMCPConnectionByID(_ context.Context, arg sqlc.GetMCPConnectionByIDParams) (sqlc.McpConnection, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	row, ok := f.connections[arg.ID]
+	if !ok || row.BotID != arg.BotID {
+		return sqlc.McpConnection{}, errors.New("no rows in result set")
+	}
+	return row, nil
+}
+
+func (f *fakeOAuthQueries) UpdateMCPConnection(_ context.Context, arg sqlc.UpdateMCPConnectionParams) (sqlc.McpConnection, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	row, ok := f.connections[arg.ID]
+	if !ok {
+		return sqlc.McpConnection{}, errors.New("no rows in result set")
+	}
+	row.Name = arg.Name
+	row.Type = arg.Type
+	row.Config = arg.Config
+	row.IsActive = arg.IsActive
+	row.AuthType = arg.AuthType
+	f.connections[arg.ID] = row
+	return row, nil
 }
 
 func (f *fakeOAuthQueries) UpsertMCPOAuthDiscovery(_ context.Context, arg sqlc.UpsertMCPOAuthDiscoveryParams) (sqlc.McpOauthToken, error) {
