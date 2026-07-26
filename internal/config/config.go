@@ -46,7 +46,6 @@ const (
 	DefaultBaseImage             = DefaultWorkspaceImage
 	DefaultWorkspaceMirrorImage  = "memoh.cn/memohai/workspace:debian"
 	DefaultTimezone              = "UTC"
-	DefaultContainerdRuntimeType = "io.containerd.runc.v2"
 	DefaultAgentToolOutputBytes  = 64 * 1024
 	DefaultAgentToolOutputLines  = 2000
 	DefaultAgentSystemFilesBytes = 32 * 1024
@@ -314,17 +313,8 @@ type ContainerConfig struct {
 }
 
 type ContainerdConfig struct {
-	SocketPath  string `toml:"socket_path"`
-	Namespace   string `toml:"namespace"`
-	RuntimeType string `toml:"runtime_type"`
-}
-
-func (c ContainerdConfig) RuntimeTypeOrDefault() string {
-	runtimeType := strings.TrimSpace(c.RuntimeType)
-	if runtimeType == "" {
-		return DefaultContainerdRuntimeType
-	}
-	return runtimeType
+	SocketPath string `toml:"socket_path"`
+	Namespace  string `toml:"namespace"`
 }
 
 type DockerConfig struct {
@@ -599,9 +589,8 @@ func Load(path string) (Config, error) {
 			WorkspaceConfig: defaultWorkspace,
 		},
 		Containerd: ContainerdConfig{
-			SocketPath:  DefaultSocketPath,
-			Namespace:   DefaultNamespace,
-			RuntimeType: DefaultContainerdRuntimeType,
+			SocketPath: DefaultSocketPath,
+			Namespace:  DefaultNamespace,
 		},
 		Workspace: defaultWorkspace,
 		Postgres: PostgresConfig{

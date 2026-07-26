@@ -134,9 +134,7 @@ func (m *Manager) ensureContainerNetwork(ctx context.Context, containerID, botID
 	if err != nil {
 		return err
 	}
-	// Legacy and VM-backed containers use TCP gRPC because host UDS cannot cross
-	// a VM boundary.
-	if m.usesTCPBridge(ctx, containerID) {
+	if m.IsLegacyContainer(ctx, containerID) {
 		m.SetLegacyIP(botID, ip)
 	}
 	return nil

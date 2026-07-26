@@ -125,7 +125,8 @@ func TestLoadReadsBackendSpecificConfigs(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	data := []byte(`
 [containerd]
-runtime_type = "io.containerd.kata.v2"
+socket_path = "/tmp/containerd.sock"
+namespace = "memoh-test"
 
 [docker]
 host = "unix:///var/run/docker.sock"
@@ -142,8 +143,11 @@ binary_path = "/opt/homebrew/bin/socktainer"
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Containerd.RuntimeType != "io.containerd.kata.v2" {
-		t.Fatalf("containerd runtime type = %q", cfg.Containerd.RuntimeType)
+	if cfg.Containerd.SocketPath != "/tmp/containerd.sock" {
+		t.Fatalf("containerd socket path = %q", cfg.Containerd.SocketPath)
+	}
+	if cfg.Containerd.Namespace != "memoh-test" {
+		t.Fatalf("containerd namespace = %q", cfg.Containerd.Namespace)
 	}
 	if cfg.Docker.Host != "unix:///var/run/docker.sock" {
 		t.Fatalf("docker host = %q", cfg.Docker.Host)
@@ -413,21 +417,6 @@ func TestLoadMemorySessionRuntimeIgnoresOwnerLeaseTTL(t *testing.T) {
 	}
 }
 
-func TestLoadDefaultsContainerdRuntimeType(t *testing.T) {
-	t.Parallel()
-
-	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	if cfg.Containerd.RuntimeType != DefaultContainerdRuntimeType {
-		t.Fatalf("containerd runtime type = %q, want %q", cfg.Containerd.RuntimeType, DefaultContainerdRuntimeType)
-	}
-	if got := cfg.Containerd.RuntimeTypeOrDefault(); got != DefaultContainerdRuntimeType {
-		t.Fatalf("runtime type default = %q, want %q", got, DefaultContainerdRuntimeType)
-	}
-}
-
 func TestLoadAppExampleTemplateKeepsRootKeysOutsideAgentSection(t *testing.T) {
 	t.Parallel()
 
@@ -456,74 +445,6 @@ func TestLoadAppExampleTemplateKeepsRootKeysOutsideAgentSection(t *testing.T) {
 		cfg.Agent.ToolOutputMaxLines != DefaultAgentToolOutputLines ||
 		cfg.Agent.SystemFilesMaxBytes != DefaultAgentSystemFilesBytes {
 		t.Fatalf("agent limits = %#v", cfg.Agent)
-	}
-}
-
-func TestLoadAppKataDevTemplate(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "devenv", "app.kata.dev.toml"))
-	if err != nil {
-		t.Fatalf("read app.kata.dev.toml: %v", err)
-	}
-	configPath := filepath.Join(t.TempDir(), "app.kata.dev.toml")
-	//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
-	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
-		t.Fatalf("write rendered app.kata.dev.toml: %v", err)
-	}
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("load app.kata.dev.toml: %v", err)
-	}
-	if cfg.Container.Backend != "containerd" {
-		t.Fatalf("container backend = %q, want containerd", cfg.Container.Backend)
-	}
-	if cfg.Containerd.RuntimeTypeOrDefault() != "io.containerd.kata.v2" {
-		t.Fatalf("containerd runtime type = %q, want io.containerd.kata.v2", cfg.Containerd.RuntimeTypeOrDefault())
-	}
-	if cfg.Database.DriverOrDefault() != "postgres" {
-		t.Fatalf("database driver = %q, want postgres", cfg.Database.DriverOrDefault())
-	}
-	if !filepath.IsAbs(cfg.Workspace.DataRoot) {
-		t.Fatalf("workspace data_root = %q, want absolute path", cfg.Workspace.DataRoot)
-	}
-	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
-		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
-	}
-	if !filepath.IsAbs(cfg.Workspace.BridgePath) {
-		t.Fatalf("workspace bridge_path = %q, want absolute path", cfg.Workspace.BridgePath)
-	}
-}
-
-func TestLoadAppKataDockerTemplate(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "conf", "app.kata.docker.toml"))
-	if err != nil {
-		t.Fatalf("read app.kata.docker.toml: %v", err)
-	}
-	configPath := filepath.Join(t.TempDir(), "app.kata.docker.toml")
-	//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
-	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
-		t.Fatalf("write rendered app.kata.docker.toml: %v", err)
-	}
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("load app.kata.docker.toml: %v", err)
-	}
-	if cfg.Container.Backend != "containerd" {
-		t.Fatalf("container backend = %q, want containerd", cfg.Container.Backend)
-	}
-	if cfg.Containerd.RuntimeTypeOrDefault() != "io.containerd.kata.v2" {
-		t.Fatalf("containerd runtime type = %q, want io.containerd.kata.v2", cfg.Containerd.RuntimeTypeOrDefault())
-	}
-	if cfg.Database.DriverOrDefault() != "postgres" {
-		t.Fatalf("database driver = %q, want postgres", cfg.Database.DriverOrDefault())
-	}
-	if !filepath.IsAbs(cfg.Workspace.DataRoot) {
-		t.Fatalf("workspace data_root = %q, want absolute path", cfg.Workspace.DataRoot)
-	}
-	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
-		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
-	}
-	if !filepath.IsAbs(cfg.Workspace.BridgePath) {
-		t.Fatalf("workspace bridge_path = %q, want absolute path", cfg.Workspace.BridgePath)
 	}
 }
 

@@ -114,9 +114,6 @@ cni_conf_dir = "/etc/cni/net.d"
 # starts an embedded containerd inside the server container at this socket.
 socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
-# containerd runtime shim used for workspace containers. Use
-# "io.containerd.kata.v2" only on Linux hosts where Kata and KVM are available.
-runtime_type = "io.containerd.runc.v2"
 
 [docker]
 # Used when [container].backend = "docker".
@@ -127,7 +124,7 @@ host = ""
 [bridge_tls]
 # disabled: default for local/open-source deployments.
 # strict: TCP workspace bridge requires mTLS. UDS workspace bridges keep using
-# their socket trust model. Shared Kata/CNI deployments should use strict.
+# their socket trust model.
 # Generate material with:
 #   scripts/gen-bridge-mtls.sh -instance-id <uuid> -out /opt/memoh/bridge-mtls
 mode = "disabled"

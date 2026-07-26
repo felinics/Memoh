@@ -63,8 +63,6 @@ bridge_path = "/opt/memoh/runtime/bridge"
 # Embedded containerd socket inside the memoh-server container.
 socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
-# Set to "io.containerd.kata.v2" only when the host provides Kata and KVM.
-runtime_type = "io.containerd.runc.v2"
 
 [docker]
 # Used only when [container].backend = "docker"; the official Compose stack

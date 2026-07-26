@@ -56,7 +56,6 @@ bridge_path = "/opt/memoh/runtime/bridge"
 # If your environment uses another pipe name or tcp endpoint, change this value.
 socket_path = "npipe:////./pipe/containerd-containerd"
 namespace = "default"
-runtime_type = "io.containerd.runc.v2"
 
 [docker]
 # Used when [container].backend = "docker".

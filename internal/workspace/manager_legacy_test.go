@@ -268,6 +268,7 @@ func TestBuildWorkspaceContainerSpecInjectsBridgeTLSMaterial(t *testing.T) {
 
 	env := envMap(spec.Env)
 	wantEnv := map[string]string{
+		"BRIDGE_SOCKET_PATH":             "/run/memoh/bridge.sock",
 		"BRIDGE_TLS_MODE":                config.BridgeTLSModeStrict,
 		"BRIDGE_TLS_CERT_FILE":           bridgeMTLSMountPath + "/" + bridgeServerCertFile,
 		"BRIDGE_TLS_KEY_FILE":            bridgeMTLSMountPath + "/" + bridgeServerKeyFile,

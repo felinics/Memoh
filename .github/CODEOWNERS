@@ -95,14 +95,9 @@
 # the maintainers default declared above.
 /scripts/db-*.sh                          @memohai/backend
 /scripts/sync-openrouter-models.sh        @memohai/backend
-/scripts/audit-kata-github-verification.sh @memohai/runtime
-/scripts/check-kata-*.sh                  @memohai/runtime
-/scripts/diagnose-kata-dev-stack.sh       @memohai/runtime
 /scripts/display-*                        @memohai/runtime
 /scripts/gen-bridge-mtls.sh                @memohai/runtime
 /scripts/prepare-dev-workspace-image.sh    @memohai/runtime
-/scripts/prepare-kata-github-runner.sh     @memohai/runtime
-/scripts/run-kata-github-e2e.sh            @memohai/runtime
 /scripts/check-patched-deps.mjs            @memohai/web
 /scripts/check-ui-contract.mjs             @memohai/web
 /scripts/ui-*-baseline.json                @memohai/web

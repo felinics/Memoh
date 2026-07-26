@@ -138,7 +138,7 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 				Image:            "debian:bookworm-slim",
 				ContainerID:      "workspace-" + botID,
 				WorkspaceBackend: bridge.WorkspaceBackendContainer,
-				RuntimeBackend:   "io.containerd.kata.v2",
+				RuntimeBackend:   "io.containerd.runc.v2",
 				ContainerPath:    "/data",
 				Started:          true,
 			},
@@ -180,8 +180,8 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 	if got := container["workspace_backend"]; got != bridge.WorkspaceBackendContainer {
 		t.Fatalf("complete workspace_backend = %#v, want %q", got, bridge.WorkspaceBackendContainer)
 	}
-	if got := container["runtime_backend"]; got != "io.containerd.kata.v2" {
-		t.Fatalf("complete runtime_backend = %#v, want io.containerd.kata.v2", got)
+	if got := container["runtime_backend"]; got != "io.containerd.runc.v2" {
+		t.Fatalf("complete runtime_backend = %#v, want io.containerd.runc.v2", got)
 	}
 	if got := container["started"]; got != true {
 		t.Fatalf("complete started = %#v, want true", got)

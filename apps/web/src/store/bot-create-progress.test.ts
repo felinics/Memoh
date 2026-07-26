@@ -44,7 +44,7 @@ describe('useBotCreateProgressStore', () => {
         container: {
           container_id: 'workspace-bot-1',
           workspace_backend: 'container',
-          runtime_backend: 'io.containerd.kata.v2',
+          runtime_backend: 'io.containerd.runc.v2',
           started: true,
         },
       },

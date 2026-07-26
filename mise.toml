@@ -121,22 +121,6 @@ set -e
 docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml up --build
 """
 
-[tasks."dev:kata"]
-description = "Start Linux/KVM development environment with containerd Kata runtime"
-depends = ["//:dev:workspace-image"]
-run = """
-#!/bin/bash
-set -euo pipefail
-scripts/check-kata-dev-env.sh
-docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml build migrate server
-MEMOH_KATA_CHECK_CONTAINER=1 scripts/check-kata-dev-env.sh
-docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml up --build
-"""
-
-[tasks."dev:kata:status"]
-description = "Inspect whether the running development server is the containerd Kata stack"
-run = "scripts/diagnose-kata-dev-stack.sh"
-
 [tasks."dev:down"]
 description = "Stop development environment"
 run = "docker compose -f devenv/docker-compose.yml down --remove-orphans"
@@ -145,10 +129,6 @@ run = "docker compose -f devenv/docker-compose.yml down --remove-orphans"
 description = "Stop development environment on SELinux systems"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml down --remove-orphans"
 
-[tasks."dev:down:kata"]
-description = "Stop Linux/KVM Kata development environment"
-run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml down --remove-orphans"
-
 [tasks."dev:logs"]
 description = "View development logs"
 run = "docker compose -f devenv/docker-compose.yml logs -f"
@@ -156,10 +136,6 @@ run = "docker compose -f devenv/docker-compose.yml logs -f"
 [tasks."dev:logs:selinux"]
 description = "View development logs on SELinux systems"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml logs -f"
-
-[tasks."dev:logs:kata"]
-description = "View Linux/KVM Kata development logs"
-run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml logs -f"
 
 [tasks."dev:restart"]
 description = "Restart a service (usage: mise run dev:restart -- server)"
@@ -170,11 +146,6 @@ run = "docker compose -f devenv/docker-compose.yml restart $@"
 description = "Restart a service on SELinux systems (usage: mise run dev:restart:selinux -- server)"
 depends = ["//:dev:workspace-image"]
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml restart $@"
-
-[tasks."dev:restart:kata"]
-description = "Restart a service in the Linux/KVM Kata dev environment (usage: mise run dev:restart:kata -- server)"
-depends = ["//:dev:workspace-image"]
-run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml restart $@"
 
 [tasks."bridge:build"]
 description = "Manually rebuild bridge binary in dev container (normally auto-triggered by air)"
@@ -197,22 +168,6 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml
 [tasks."bridge:mtls:gen"]
 description = "Generate strict bridge mTLS material (usage: mise run bridge:mtls:gen -- -instance-id <uuid> -out data/bridge-mtls)"
 run = "scripts/gen-bridge-mtls.sh"
-
-[tasks."kata:runner"]
-description = "Check that the current Linux/KVM host is ready to run Kata E2E"
-run = "scripts/check-kata-runner-ready.sh"
-
-[tasks."kata:github"]
-description = "Audit GitHub PR checks for complete Linux/KVM Kata verification"
-run = "scripts/audit-kata-github-verification.sh"
-
-[tasks."kata:github:runner"]
-description = "Prepare a Linux/KVM host for GitHub Kata runner registration"
-run = "scripts/prepare-kata-github-runner.sh"
-
-[tasks."kata:github:readiness"]
-description = "Dispatch, watch, and audit the GitHub Linux/KVM Kata runner readiness workflow"
-run = "scripts/run-kata-github-e2e.sh"
 
 [tasks.db-up]
 description = "Initialize and Migrate Database"

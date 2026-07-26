@@ -51,8 +51,6 @@ cni_conf_dir = "/etc/cni/net.d"
 # Embedded containerd socket inside the dev server container.
 socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
-# Set to "io.containerd.kata.v2" only in a Linux/KVM test environment with Kata installed.
-runtime_type = "io.containerd.runc.v2"
 
 [docker]
 # Used only when [container].backend = "docker"; the dev Compose stack uses containerd.
