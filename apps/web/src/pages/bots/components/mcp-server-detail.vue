@@ -24,6 +24,8 @@
             <ConfirmPopover
               v-if="serverId"
               :message="$t('mcp.deleteConfirm')"
+              :cancel-text="$t('common.cancel')"
+              :confirm-text="$t('common.confirm')"
               :loading="deleting"
               variant="destructive"
               @confirm="handleDelete"

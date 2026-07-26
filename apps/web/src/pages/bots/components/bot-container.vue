@@ -1083,6 +1083,7 @@ watch([activeTab, botId], ([tab]) => {
             <ConfirmPopover
               :title="$t('bots.container.resourceLimits.recreateConfirmTitle')"
               :message="$t('bots.container.resourceLimits.recreateConfirm')"
+              :cancel-text="$t('common.cancel')"
               :confirm-text="$t('bots.container.resourceLimits.recreateNow')"
               :loading="containerAction === 'recreate'"
               @confirm="handleApplyResourceLimitsNow"
@@ -1456,6 +1457,8 @@ watch([activeTab, botId], ([tab]) => {
             </div>
             <ConfirmPopover
               :message="$t('bots.container.restoreConfirm')"
+              :cancel-text="$t('common.cancel')"
+              :confirm-text="$t('common.confirm')"
               :loading="containerAction === 'restore'"
               @confirm="handleRestorePreservedData"
             >
@@ -1536,6 +1539,8 @@ watch([activeTab, botId], ([tab]) => {
                 <ConfirmPopover
                   v-if="canRollbackSnapshot(item)"
                   :message="$t('bots.container.rollbackConfirm')"
+                  :cancel-text="$t('common.cancel')"
+                  :confirm-text="$t('common.confirm')"
                   :loading="containerAction === 'rollback' && rollbackVersion === item.version"
                   @confirm="handleRollbackSnapshot(item)"
                 >

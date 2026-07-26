@@ -62,6 +62,7 @@
         </template>
         <ConfirmPopover
           :message="$t('settings.connectedAccounts.disconnectConfirm')"
+          :cancel-text="$t('common.cancel')"
           :confirm-text="$t('settings.connectedAccounts.disconnect')"
           @confirm="() => onDisconnect(binding)"
         >

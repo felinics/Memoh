@@ -1,25 +1,8 @@
-<template>
-  <span
-    class="inline-block size-2 rounded-full"
-    :class="colorClass"
-  />
-</template>
+<script lang="ts">
+// The implementation now lives in @felinic/ui — this shim keeps the existing
+// relative imports working; migrate call sites to import from '@felinic/ui'
+// and delete this file.
+import { StatusDot } from '@felinic/ui'
 
-<script setup lang="ts">
-import { computed } from 'vue'
-
-const props = withDefaults(defineProps<{
-  status?: 'success' | 'error' | 'warning' | 'idle'
-}>(), {
-  status: 'idle',
-})
-
-const colorClass = computed(() => {
-  switch (props.status) {
-    case 'success': return 'bg-success'
-    case 'error': return 'bg-destructive'
-    case 'warning': return 'bg-warning'
-    default: return 'bg-muted-foreground'
-  }
-})
+export default StatusDot
 </script>

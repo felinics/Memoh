@@ -109,6 +109,8 @@
       <ConfirmPopover
         v-if="!managed"
         :message="$t('models.deleteModelConfirm')"
+        :cancel-text="$t('common.cancel')"
+        :confirm-text="$t('common.confirm')"
         :loading="deleteLoading"
         @confirm="$emit('delete', model.id ?? '')"
       >

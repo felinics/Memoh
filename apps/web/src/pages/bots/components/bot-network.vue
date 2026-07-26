@@ -528,6 +528,7 @@
           <ConfirmPopover
             variant="destructive"
             :message="$t('bots.settings.networkLogoutConfirm')"
+            :cancel-text="$t('common.cancel')"
             :confirm-text="$t('bots.settings.networkLogout')"
             :loading="isLoggingOut"
             @confirm="handleLogout"

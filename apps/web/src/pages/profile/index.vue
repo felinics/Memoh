@@ -103,6 +103,8 @@
           >
             <ConfirmPopover
               :message="$t('auth.logoutConfirm')"
+              :cancel-text="$t('common.cancel')"
+              :confirm-text="$t('common.confirm')"
               @confirm="onLogout"
             >
               <template #trigger>

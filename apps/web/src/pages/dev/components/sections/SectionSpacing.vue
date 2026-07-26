@@ -384,6 +384,8 @@ const primitiveRungs = [
           v-model:open="confirmDeleteOpen"
           title="Delete this session?"
           description="This can't be undone."
+          cancel-label="Cancel"
+          confirm-label="Confirm"
           :loading="confirmDeleteLoading"
           @confirm="onConfirmDeleteDemo"
         />

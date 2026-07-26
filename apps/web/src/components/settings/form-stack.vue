@@ -1,8 +1,8 @@
-<template>
-  <!-- Vertical rhythm for a run of FieldStacks. space-y-4 is the field→field gap
-       in the house form; keeping it in one wrapper stops each caller re-deriving
-       the value and lets the gap change in one place. -->
-  <div class="space-y-4">
-    <slot />
-  </div>
-</template>
+<script lang="ts">
+// The implementation now lives in @felinic/ui — this shim keeps the existing
+// relative imports working; migrate call sites to import from '@felinic/ui'
+// and delete this file.
+import { FormStack } from '@felinic/ui'
+
+export default FormStack
+</script>

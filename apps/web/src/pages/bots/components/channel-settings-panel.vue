@@ -183,6 +183,7 @@
         <ConfirmPopover
           :title="$t('bots.channels.deleteTitle')"
           :message="$t('bots.channels.deleteConfirm')"
+          :cancel-text="$t('common.cancel')"
           :confirm-text="$t('common.delete')"
           variant="destructive"
           :loading="action === 'delete'"

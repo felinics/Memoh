@@ -24,6 +24,8 @@
           <ConfirmPopover
             v-if="curProvider?.id"
             :message="$t('provider.deleteConfirm')"
+            :cancel-text="$t('common.cancel')"
+            :confirm-text="$t('common.confirm')"
             :loading="deleteLoading"
             @confirm="deleteProvider"
           >

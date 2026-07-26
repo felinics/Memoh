@@ -353,6 +353,7 @@
               v-if="editingId"
               :message="$t('bots.memory.deleteConfirm')"
               variant="destructive"
+              :cancel-text="$t('common.cancel')"
               :confirm-text="$t('common.delete')"
               @confirm="handleDelete"
             >

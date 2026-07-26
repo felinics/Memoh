@@ -92,6 +92,7 @@
       :open="!!deleteTarget"
       :title="t('bots.schedule.deleteTitle')"
       :description="t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' })"
+      :cancel-label="t('common.cancel')"
       :confirm-label="t('bots.schedule.delete')"
       :loading="isDeleting"
       @update:open="(v) => { if (!v) deleteTarget = null }"

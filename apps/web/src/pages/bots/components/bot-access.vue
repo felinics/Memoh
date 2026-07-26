@@ -222,6 +222,7 @@
                   :message="member.kind === 'group'
                     ? $t('bots.access.members.removeGroupConfirm')
                     : $t('bots.access.members.removeConfirm')"
+                  :cancel-text="$t('common.cancel')"
                   :confirm-text="$t('common.delete')"
                   @confirm="() => removeMember(member)"
                 >
@@ -414,6 +415,7 @@
                       </Button>
                       <ConfirmPopover
                         :message="$t('bots.access.deleteConfirmDescription')"
+                        :cancel-text="$t('common.cancel')"
                         :confirm-text="$t('common.delete')"
                         @confirm="handleDeleteRule(rule.id!)"
                       >

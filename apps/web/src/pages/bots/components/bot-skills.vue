@@ -176,6 +176,8 @@
             <ConfirmPopover
               v-if="skill.managed"
               :message="$t('bots.skills.deleteConfirm')"
+              :cancel-text="$t('common.cancel')"
+              :confirm-text="$t('common.confirm')"
               :loading="isDeleting && deletingName === skill.name"
               @confirm="handleDelete(skill.name)"
             >

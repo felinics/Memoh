@@ -16,6 +16,7 @@
       <ConfirmPopover
         :message="$t('bots.deleteConfirm')"
         :loading="deleteLoading"
+        :cancel-text="$t('common.cancel')"
         :confirm-text="$t('common.delete')"
         @confirm="$emit('delete')"
       >

@@ -562,6 +562,7 @@ onBeforeUnmount(() => {
           <ConfirmPopover
             :message="$t('bots.compaction.clearConfirm')"
             :loading="isClearing"
+            :cancel-text="$t('common.cancel')"
             :confirm-text="$t('bots.compaction.clearLogs')"
             @confirm="handleClear"
           >

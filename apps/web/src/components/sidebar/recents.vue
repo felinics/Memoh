@@ -111,6 +111,8 @@
       v-model:open="deleteSessionDialogOpen"
       :title="t('chat.deleteSession')"
       :description="t('chat.deleteSessionConfirm')"
+      :cancel-label="t('common.cancel')"
+      :confirm-label="t('common.confirm')"
       :loading="deleteSessionLoading"
       @confirm="handleDeleteSession"
     />

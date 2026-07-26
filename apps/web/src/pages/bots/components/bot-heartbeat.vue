@@ -273,6 +273,7 @@
           <ConfirmPopover
             :message="$t('bots.heartbeat.clearConfirm')"
             :loading="isClearing"
+            :cancel-text="$t('common.cancel')"
             :confirm-text="$t('bots.heartbeat.clearLogs')"
             @confirm="handleClear"
           >

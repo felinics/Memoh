@@ -119,6 +119,7 @@
                   <ConfirmPopover
                     :title="t('people.removeMember')"
                     :message="t('people.removeConfirm', { name: memberName(user) })"
+                    :cancel-text="t('common.cancel')"
                     :confirm-text="t('people.removeMember')"
                     variant="destructive"
                     :loading="isUserPending(user)"

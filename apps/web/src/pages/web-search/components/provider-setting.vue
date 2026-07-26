@@ -20,6 +20,8 @@
           <ConfirmPopover
             v-if="curProvider?.id"
             :message="$t('webSearch.deleteConfirm')"
+            :cancel-text="$t('common.cancel')"
+            :confirm-text="$t('common.confirm')"
             :loading="deleteLoading"
             variant="destructive"
             @confirm="deleteProvider"

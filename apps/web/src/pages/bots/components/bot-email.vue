@@ -96,6 +96,8 @@
               </div>
               <ConfirmPopover
                 :message="$t('bots.email.unbindConfirm')"
+                :cancel-text="$t('common.cancel')"
+                :confirm-text="$t('common.confirm')"
                 :loading="deletingId === binding.id"
                 @confirm="handleDeleteBinding(binding.id!)"
               >

@@ -19,6 +19,8 @@
           <ConfirmPopover
             v-if="!isNative && curProvider?.id"
             :message="$t('webSearch.deleteFetchConfirm')"
+            :cancel-text="$t('common.cancel')"
+            :confirm-text="$t('common.confirm')"
             :loading="deleteLoading"
             variant="destructive"
             @confirm="deleteProvider"

@@ -139,6 +139,7 @@
             <ConfirmPopover
               :title="t('runtimes.revokeTitle')"
               :message="t('runtimes.revokeDescription', { name: runtime.name })"
+              :cancel-text="t('common.cancel')"
               :confirm-text="t('runtimes.revoke')"
               variant="destructive"
               @confirm="revokeRuntime(runtime)"

@@ -233,6 +233,7 @@
         >
           <ConfirmPopover
             :message="$t('provider.oauth.revokeConfirm')"
+            :cancel-text="$t('common.cancel')"
             :confirm-text="$t('provider.oauth.revoke')"
             :loading="revokeLoading"
             @confirm="handleRevoke"
@@ -309,6 +310,11 @@
               :expires-at="oauthStatus?.device?.expires_at ?? ''"
               :hint="$t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubDeviceHint' : 'provider.oauth.openaiDeviceHint')"
               :retry-loading="authorizeLoading"
+              :copy-and-open-label="$t('deviceCode.copyAndOpen')"
+              :retry-label="$t('deviceCode.retry')"
+              :expired-label="$t('deviceCode.codeExpired')"
+              :expires-in-label="(time: string) => $t('deviceCode.expiresIn', { time })"
+              :copy-failed-message="$t('deviceCode.copyFailed')"
               @retry="handleAuthorize"
             />
           </div>

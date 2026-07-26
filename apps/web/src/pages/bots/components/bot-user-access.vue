@@ -180,6 +180,8 @@
           <ConfirmPopover
             v-if="!grant.is_owner"
             :title="$t('bots.access.userAccess.removeConfirm')"
+            :cancel-text="$t('common.cancel')"
+            :confirm-text="$t('common.confirm')"
             @confirm="() => handleDelete(grant)"
           >
             <template #trigger>

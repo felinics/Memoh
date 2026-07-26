@@ -1,80 +1,8 @@
-<template>
-  <Dialog
-    v-model:open="open"
-  >
-    <DialogTrigger as-child>
-      <slot name="trigger" />
-    </DialogTrigger>
-    <DialogContent         
-      :class="maxWidthClass"
-    >
-      <form        
-        @submit.prevent="handleSubmit"
-      >
-        <DialogHeader>
-          <DialogTitle>{{ title }}</DialogTitle>
-          <DialogDescription v-show="description">
-            {{ description }}
-          </DialogDescription>
-        </DialogHeader>
-        <slot name="body" />
-        <DialogFooter class="mt-4">
-          <DialogClose as-child>
-            <Button
-              variant="outline"
-            >
-              {{ cancelText }}
-            </Button>
-          </DialogClose>
-          <Button
-            type="submit"
-            :disabled="submitDisabled"
-            :loading="loading"
-          >
-            {{ submitText }}
-          </Button>
-        </DialogFooter>
-      </form>
-    </DialogContent>
-  </Dialog>
-</template>
+<script lang="ts">
+// The implementation now lives in @felinic/ui — this shim keeps the existing
+// relative imports working; migrate call sites to import from '@felinic/ui'
+// and delete this file.
+import { FormDialogShell } from '@felinic/ui'
 
-<script setup lang="ts">
-import {
-  Button,
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@felinic/ui'
-
-
-withDefaults(defineProps<{
-  title: string
-  description?: string
-  cancelText: string
-  submitText: string
-  submitDisabled?: boolean
-  loading?: boolean
-  maxWidthClass?: string
-}>(), {
-  description: undefined,
-  submitDisabled: false,
-  loading: false,
-  maxWidthClass: 'sm:max-w-106.25',
-})
-
-const open = defineModel<boolean>('open', { default: false })
-
-const emit = defineEmits<{
-  submit: []
-}>()
-
-function handleSubmit() {
-  emit('submit')
-}
+export default FormDialogShell
 </script>

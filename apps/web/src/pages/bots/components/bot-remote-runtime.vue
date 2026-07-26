@@ -214,6 +214,7 @@
     :open="!!pendingDeleteTarget"
     :title="t('bots.remoteRuntime.deleteTitle')"
     :description="deleteDescription"
+    :cancel-label="t('common.cancel')"
     :confirm-label="t('bots.remoteRuntime.removeFromBot')"
     :loading="deletingTarget"
     @update:open="(open) => { if (!open) pendingDeleteTarget = null }"
