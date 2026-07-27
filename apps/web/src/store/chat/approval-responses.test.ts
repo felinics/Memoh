@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createApprovalResponseTracker } from './approval-responses'
 
-function input(streamId: string, approvalId = 'approval-1', silent = false) {
+function input(invocationId: string, approvalId = 'approval-1', silent = false) {
   return {
-    streamId,
+    invocationId,
     approvalId,
     botId: 'bot-1',
     sessionId: 'session-1',
@@ -16,17 +16,17 @@ describe('approval response tracker', () => {
     const rollbackApproval = vi.fn()
     const tracker = createApprovalResponseTracker({ rollbackApproval })
 
-    expect(tracker.beginApprovalResponse(input(' stream-1 ', ' approval-1 ', true))).toBe(true)
-    expect(tracker.getApprovalResponse('stream-1')).toMatchObject({
-      streamId: 'stream-1',
+    expect(tracker.beginApprovalResponse(input(' invocation-1 ', ' approval-1 ', true))).toBe(true)
+    expect(tracker.getApprovalResponse('invocation-1')).toMatchObject({
+      invocationId: 'invocation-1',
       approvalId: 'approval-1',
       botId: 'bot-1',
       sessionId: 'session-1',
       silent: true,
     })
     expect(tracker.hasPendingApprovalResponse('approval-1')).toBe(true)
-    expect(tracker.beginApprovalResponse(input('stream-2', 'approval-1'))).toBe(false)
-    expect(tracker.beginApprovalResponse(input('stream-1', 'approval-2'))).toBe(false)
+    expect(tracker.beginApprovalResponse(input('invocation-2', 'approval-1'))).toBe(false)
+    expect(tracker.beginApprovalResponse(input('invocation-1', 'approval-2'))).toBe(false)
     expect(rollbackApproval).not.toHaveBeenCalled()
     expect(tracker.pendingApprovalResponsesForSession('bot-1', 'session-1')).toHaveLength(1)
     expect(tracker.pendingApprovalResponsesForSession('bot-2', 'session-1')).toEqual([])
@@ -59,10 +59,10 @@ describe('approval response tracker', () => {
     const tracker = createApprovalResponseTracker({ rollbackApproval })
 
     tracker.beginApprovalResponse({
-      ...input('stream-1'),
+      ...input('invocation-1'),
       rollback: rollbackResponse,
     })
-    tracker.settleApprovalResponse('stream-1', 'failed')
+    tracker.settleApprovalResponse('invocation-1', 'failed')
 
     expect(rollbackResponse).toHaveBeenCalledOnce()
     expect(rollbackApproval).not.toHaveBeenCalled()
@@ -76,15 +76,15 @@ describe('approval response tracker', () => {
       now: () => currentTime,
       ttlMs: 100,
     })
-    tracker.beginApprovalResponse(input('stream-1'))
+    tracker.beginApprovalResponse(input('invocation-1'))
 
     currentTime = 1_099
     expect(tracker.hasPendingApprovalResponse('approval-1')).toBe(true)
     currentTime = 1_100
     expect(tracker.hasPendingApprovalResponse('approval-1')).toBe(false)
     expect(rollbackApproval).toHaveBeenCalledWith('approval-1')
-    expect(tracker.beginApprovalResponse(input('stream-1'))).toBe(false)
-    expect(tracker.beginApprovalResponse(input('stream-2'))).toBe(true)
+    expect(tracker.beginApprovalResponse(input('invocation-1'))).toBe(false)
+    expect(tracker.beginApprovalResponse(input('invocation-2'))).toBe(true)
     tracker.resetApprovalResponses()
   })
 
@@ -92,13 +92,13 @@ describe('approval response tracker', () => {
     const tracker = createApprovalResponseTracker({ rollbackApproval: vi.fn() })
 
     expect(tracker.beginApprovalResponse(input(' '))).toBe(false)
-    expect(tracker.beginApprovalResponse({ ...input('stream-1'), sessionId: '' })).toBe(false)
-    expect(tracker.beginApprovalResponse(input('stream-2'))).toBe(true)
+    expect(tracker.beginApprovalResponse({ ...input('invocation-1'), sessionId: '' })).toBe(false)
+    expect(tracker.beginApprovalResponse(input('invocation-2'))).toBe(true)
     expect(tracker.discardAllApprovalResponses()).toHaveLength(1)
-    expect(tracker.isTerminalApprovalResponse('stream-2')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('invocation-2')).toBe(true)
     tracker.resetApprovalResponses()
     expect(tracker.hasPendingApprovalResponse('approval-1')).toBe(false)
-    expect(tracker.isTerminalApprovalResponse('stream-2')).toBe(false)
+    expect(tracker.isTerminalApprovalResponse('invocation-2')).toBe(false)
   })
 
   it('evicts the oldest terminal response at the configured bound', () => {
@@ -106,14 +106,14 @@ describe('approval response tracker', () => {
       rollbackApproval: vi.fn(),
       terminalHistoryLimit: 2,
     })
-    for (const id of ['stream-1', 'stream-2', 'stream-3']) {
+    for (const id of ['invocation-1', 'invocation-2', 'invocation-3']) {
       tracker.beginApprovalResponse(input(id, `approval-${id}`))
       tracker.settleApprovalResponse(id, 'succeeded')
     }
 
-    expect(tracker.isTerminalApprovalResponse('stream-1')).toBe(false)
-    expect(tracker.isTerminalApprovalResponse('stream-2')).toBe(true)
-    expect(tracker.isTerminalApprovalResponse('stream-3')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('invocation-1')).toBe(false)
+    expect(tracker.isTerminalApprovalResponse('invocation-2')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('invocation-3')).toBe(true)
   })
 
   it('automatically expires an abandoned response and reports its captured context', () => {
@@ -132,7 +132,7 @@ describe('approval response tracker', () => {
         return () => { entry.canceled = true }
       },
     })
-    tracker.beginApprovalResponse(input('stream-1', 'approval-1', true))
+    tracker.beginApprovalResponse(input('invocation-1', 'approval-1', true))
 
     expect(scheduled[0]?.delayMs).toBe(100)
     currentTime = 1_099
@@ -144,13 +144,13 @@ describe('approval response tracker', () => {
     scheduled[1]!.callback()
     expect(rollbackApproval).toHaveBeenCalledWith('approval-1')
     expect(onExpired).toHaveBeenCalledWith(expect.objectContaining({
-      streamId: 'stream-1',
+      invocationId: 'invocation-1',
       approvalId: 'approval-1',
       botId: 'bot-1',
       sessionId: 'session-1',
       silent: true,
     }))
-    expect(tracker.getApprovalResponse('stream-1')).toBeUndefined()
-    expect(tracker.isTerminalApprovalResponse('stream-1')).toBe(true)
+    expect(tracker.getApprovalResponse('invocation-1')).toBeUndefined()
+    expect(tracker.isTerminalApprovalResponse('invocation-1')).toBe(true)
   })
 })

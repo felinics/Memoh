@@ -212,13 +212,33 @@ const (
 	DefaultSessionRuntimeRedisURL       = "redis://127.0.0.1:6379/0"
 	DefaultSessionRuntimeRedisKeyPrefix = "memoh:session_runtime:"
 	MinSessionRuntimeOwnerLeaseTTL      = time.Second
+
+	// SessionRuntimeBackendLossGraceFactor derives the default fail-closed
+	// grace from owner_lease_ttl. Three lease periods absorbs a short blip
+	// without letting a genuinely lost backend hold runs open indefinitely.
+	SessionRuntimeBackendLossGraceFactor = 3
 )
 
+// SessionRuntimeConfig exposes only the values that depend on something the
+// process cannot observe. Every other timing in the session runtime is derived
+// from OwnerLeaseTTL or is a package constant in the sessionruntime package;
+// see docs and internal/agent/runtime/session/tuning.go.
 type SessionRuntimeConfig struct {
-	Backend       string                    `toml:"backend"`
-	StateTTL      string                    `toml:"state_ttl"`
-	OwnerLeaseTTL string                    `toml:"owner_lease_ttl"`
-	Redis         SessionRuntimeRedisConfig `toml:"redis"`
+	Backend string `toml:"backend"`
+	// Cluster declares that more than one server instance shares this
+	// deployment. It is a topology statement rather than a tuning value: no
+	// process can infer how many peers it has, and SR-DEP-001 requires
+	// refusing multi-instance mode without a shared live backend.
+	Cluster       bool   `toml:"cluster"`
+	StateTTL      string `toml:"state_ttl"`
+	OwnerLeaseTTL string `toml:"owner_lease_ttl"`
+	// BackendLossGrace is how long to wait after observing a new live backend
+	// generation before the fail-closed sweep marks stale runs lost. This is
+	// the budget for a Redis restart or failover, which varies by deployment
+	// and cannot be derived from anything the server knows. Empty derives
+	// SessionRuntimeBackendLossGraceFactor x OwnerLeaseTTL.
+	BackendLossGrace string                    `toml:"backend_loss_grace"`
+	Redis            SessionRuntimeRedisConfig `toml:"redis"`
 }
 
 type SessionRuntimeRedisConfig struct {
@@ -246,6 +266,47 @@ func (c SessionRuntimeConfig) OwnerLeaseTTLOrDefault() string {
 		return strings.TrimSpace(c.OwnerLeaseTTL)
 	}
 	return DefaultSessionRuntimeOwnerLeaseTTL
+}
+
+// OwnerLeaseTTLDuration is the single tuning dial for the session runtime. It
+// paces owner lease renewal, the reaper tick, the reaper leader lease and the
+// orphan grace, so it matters on both backends: with a memory backend there is
+// no cross-process lease, but the reaper still runs.
+func (c SessionRuntimeConfig) OwnerLeaseTTLDuration() (time.Duration, error) {
+	value := c.OwnerLeaseTTLOrDefault()
+	ttl, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid session_runtime owner_lease_ttl %q: %w", c.OwnerLeaseTTL, err)
+	}
+	if ttl <= 0 {
+		return 0, fmt.Errorf("invalid session_runtime owner_lease_ttl %q: must be positive", value)
+	}
+	if ttl < MinSessionRuntimeOwnerLeaseTTL {
+		return 0, fmt.Errorf("invalid session_runtime owner_lease_ttl %q: must be at least %s", value, MinSessionRuntimeOwnerLeaseTTL)
+	}
+	return ttl, nil
+}
+
+// BackendLossGraceDuration returns the configured grace, or the derived default
+// when unset. A grace shorter than one lease period would start the sweep while
+// a healthy owner could still be renewing, so it is rejected.
+func (c SessionRuntimeConfig) BackendLossGraceDuration() (time.Duration, error) {
+	ownerLeaseTTL, err := c.OwnerLeaseTTLDuration()
+	if err != nil {
+		return 0, err
+	}
+	value := strings.TrimSpace(c.BackendLossGrace)
+	if value == "" {
+		return SessionRuntimeBackendLossGraceFactor * ownerLeaseTTL, nil
+	}
+	grace, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid session_runtime backend_loss_grace %q: %w", c.BackendLossGrace, err)
+	}
+	if grace < ownerLeaseTTL {
+		return 0, fmt.Errorf("invalid session_runtime backend_loss_grace %q: must be greater than or equal to owner_lease_ttl %q", value, c.OwnerLeaseTTLOrDefault())
+	}
+	return grace, nil
 }
 
 func (c SessionRuntimeRedisConfig) URLOrDefault() string {
@@ -276,21 +337,25 @@ func (c SessionRuntimeConfig) Validate() error {
 	if stateTTL <= 0 {
 		return fmt.Errorf("invalid session_runtime state_ttl %q: must be positive", c.StateTTLOrDefault())
 	}
-	if backend == SessionRuntimeBackendMemory {
-		return nil
-	}
-	ownerLeaseTTL, err := time.ParseDuration(c.OwnerLeaseTTLOrDefault())
+	ownerLeaseTTL, err := c.OwnerLeaseTTLDuration()
 	if err != nil {
-		return fmt.Errorf("invalid session_runtime owner_lease_ttl %q: %w", c.OwnerLeaseTTL, err)
+		return err
 	}
-	if ownerLeaseTTL <= 0 {
-		return fmt.Errorf("invalid session_runtime owner_lease_ttl %q: must be positive", c.OwnerLeaseTTLOrDefault())
+	if _, err := c.BackendLossGraceDuration(); err != nil {
+		return err
 	}
-	if ownerLeaseTTL < MinSessionRuntimeOwnerLeaseTTL {
-		return fmt.Errorf("invalid session_runtime owner_lease_ttl %q: must be at least %s", c.OwnerLeaseTTLOrDefault(), MinSessionRuntimeOwnerLeaseTTL)
-	}
+	// Live snapshots must outlive the lease on either backend: state that
+	// expires while a run is still owned would leave an owner with nothing to
+	// attach a reconnecting subscriber to.
 	if stateTTL < ownerLeaseTTL {
 		return fmt.Errorf("invalid session_runtime state_ttl %q: must be greater than or equal to owner_lease_ttl %q", c.StateTTLOrDefault(), c.OwnerLeaseTTLOrDefault())
+	}
+	// SR-DEP-001: a memory backend keeps live state inside one process, so it
+	// cannot arbitrate ownership between instances. Refusing here is the
+	// difference between a clear startup failure and silent concurrent execution
+	// of the same session on two servers.
+	if backend == SessionRuntimeBackendMemory && c.Cluster {
+		return errors.New(`invalid session_runtime cluster: multi-instance mode requires backend = "redis"`)
 	}
 	return nil
 }

@@ -9,6 +9,19 @@ services:
     volumes: !override
       - session_runtime_pgvector_data:/var/lib/postgresql
 
+  server:
+    restart: "no"
+    volumes: !override
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - session_runtime_containerd_a:/var/lib/containerd
+      - session_runtime_cni_a:/var/lib/cni
+      - session_runtime_memoh_data_a:/opt/memoh/data
+      - /etc/cdi:/etc/cdi:ro
+      - /var/run/cdi:/var/run/cdi:ro
+      - ../.cache/memoh/workspace-debian.tar:/opt/memoh/dev-images/workspace-debian.tar:ro
+
   server_b:
     image: memoh-dev-server
     container_name: memoh-runtime-server-b
@@ -53,6 +66,12 @@ volumes:
   session_runtime_postgres_data:
     driver: local
   session_runtime_pgvector_data:
+    driver: local
+  session_runtime_containerd_a:
+    driver: local
+  session_runtime_cni_a:
+    driver: local
+  session_runtime_memoh_data_a:
     driver: local
   session_runtime_containerd_b:
     driver: local

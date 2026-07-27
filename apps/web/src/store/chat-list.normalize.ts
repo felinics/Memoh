@@ -156,7 +156,7 @@ export function isSameLogicalTurn(local: ChatMessage, incoming: ChatMessage): bo
   return Number.isFinite(dt) && dt <= SAME_TURN_TIMESTAMP_TOLERANCE_MS
 }
 
-export function createStreamId(): string {
+export function createInvocationId(): string {
   const randomUUID = globalThis.crypto?.randomUUID
   if (typeof randomUUID === 'function') return randomUUID.call(globalThis.crypto)
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`

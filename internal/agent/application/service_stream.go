@@ -120,9 +120,6 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		}
 		streamReq = preparedReq
 
-		doneTurn := s.enterSessionTurn(streamCtx, streamReq.BotID, streamReq.ThreadID)
-		defer doneTurn()
-
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
@@ -325,9 +322,6 @@ func (s *Service) streamChatWSResultWithHooks(
 	if prepareErr != nil {
 		return nil, prepareErr
 	}
-
-	doneTurn := s.enterSessionTurn(ctx, req.BotID, req.ThreadID)
-	defer doneTurn()
 
 	if preflight != nil {
 		if err := preflight(ctx); err != nil {

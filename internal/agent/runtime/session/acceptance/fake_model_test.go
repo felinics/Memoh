@@ -15,9 +15,17 @@ import (
 	"time"
 )
 
-var acceptanceDirective = regexp.MustCompile(
-	`\[acceptance:([a-zA-Z0-9_-]+)(?:\s+chunks=(\d+))?(?:\s+delay_ms=(\d+))?\]`,
+var (
+	acceptanceDirective = regexp.MustCompile(`\[acceptance:([a-zA-Z0-9_-]+)([^\]]*)\]`)
+	directiveOption     = regexp.MustCompile(`([a-z_]+)=([a-zA-Z0-9_-]+)`)
 )
+
+type modelDirective struct {
+	marker string
+	chunks int
+	delay  time.Duration
+	mode   string
+}
 
 type fakeModel struct {
 	listener net.Listener
@@ -26,6 +34,7 @@ type fakeModel struct {
 	mu           sync.Mutex
 	requestCount map[string]int
 	disconnected map[string]int
+	release      map[string]chan struct{}
 	active       int
 	maxActive    int
 }
@@ -43,6 +52,7 @@ func startFakeModel() (*fakeModel, error) {
 		listener:     listener,
 		requestCount: make(map[string]int),
 		disconnected: make(map[string]int),
+		release:      make(map[string]chan struct{}),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", model.handleHealth)
@@ -74,6 +84,7 @@ func (m *fakeModel) Reset() {
 	defer m.mu.Unlock()
 	m.requestCount = make(map[string]int)
 	m.disconnected = make(map[string]int)
+	m.release = make(map[string]chan struct{})
 	m.active = 0
 	m.maxActive = 0
 }
@@ -129,6 +140,18 @@ func (m *fakeModel) WaitDisconnected(marker string, timeout time.Duration) bool 
 	return false
 }
 
+func (m *fakeModel) Release(marker string) {
+	m.mu.Lock()
+	release := m.release[marker]
+	if release != nil {
+		delete(m.release, marker)
+	}
+	m.mu.Unlock()
+	if release != nil {
+		close(release)
+	}
+}
+
 func (*fakeModel) handleHealth(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]any{"status": "ok"})
 }
@@ -163,8 +186,8 @@ func (m *fakeModel) handleChatCompletions(writer http.ResponseWriter, request *h
 	}
 
 	userText := latestUserText(payload)
-	marker, chunks, delay := parseDirective(userText)
-	m.begin(marker)
+	directive := parseDirective(userText)
+	m.begin(directive.marker)
 	defer m.finish()
 
 	requestID := fmt.Sprintf("acceptance-%d", time.Now().UnixNano())
@@ -196,17 +219,35 @@ func (m *fakeModel) handleChatCompletions(writer http.ResponseWriter, request *h
 	}
 
 	if err := writeSSE(writer, flusher, completionChunk(requestID, map[string]any{"role": "assistant"}, nil)); err != nil {
-		m.markDisconnected(marker)
+		m.markDisconnected(directive.marker)
 		return
 	}
-	for index := 0; index < chunks; index++ {
-		if err := waitForRequest(request.Context(), delay); err != nil {
-			m.markDisconnected(marker)
+	if directive.mode == "block" {
+		if err := m.waitForRelease(request.Context(), directive.marker); err != nil {
+			m.markDisconnected(directive.marker)
 			return
 		}
-		content := fmt.Sprintf("%s-chunk-%02d ", marker, index)
+	}
+	if directive.mode == "ask_user" && !hasToolResult(payload) {
+		if err := writeAskUserCall(writer, flusher, requestID, directive.marker); err != nil {
+			m.markDisconnected(directive.marker)
+		}
+		return
+	}
+	for index := 0; index < directive.chunks; index++ {
+		if err := waitForRequest(request.Context(), directive.delay); err != nil {
+			m.markDisconnected(directive.marker)
+			return
+		}
+		content := fmt.Sprintf("%s-chunk-%02d ", directive.marker, index)
 		if err := writeSSE(writer, flusher, completionChunk(requestID, map[string]any{"content": content}, nil)); err != nil {
-			m.markDisconnected(marker)
+			m.markDisconnected(directive.marker)
+			return
+		}
+	}
+	if directive.mode == "partial_block" {
+		if err := m.waitForRelease(request.Context(), directive.marker); err != nil {
+			m.markDisconnected(directive.marker)
 			return
 		}
 	}
@@ -214,11 +255,11 @@ func (m *fakeModel) handleChatCompletions(writer http.ResponseWriter, request *h
 	terminal := completionChunk(requestID, map[string]any{}, &reason)
 	terminal["usage"] = map[string]any{
 		"prompt_tokens":     10,
-		"completion_tokens": chunks,
-		"total_tokens":      10 + chunks,
+		"completion_tokens": directive.chunks,
+		"total_tokens":      10 + directive.chunks,
 	}
 	if err := writeSSE(writer, flusher, terminal); err != nil {
-		m.markDisconnected(marker)
+		m.markDisconnected(directive.marker)
 		return
 	}
 	_, _ = writer.Write([]byte("data: [DONE]\n\n"))
@@ -247,26 +288,50 @@ func (m *fakeModel) markDisconnected(marker string) {
 	m.disconnected[marker]++
 }
 
-func parseDirective(text string) (string, int, time.Duration) {
+func (m *fakeModel) waitForRelease(ctx context.Context, marker string) error {
+	m.mu.Lock()
+	release := m.release[marker]
+	if release == nil {
+		release = make(chan struct{})
+		m.release[marker] = release
+	}
+	m.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-release:
+		return nil
+	}
+}
+
+func parseDirective(text string) modelDirective {
 	match := acceptanceDirective.FindStringSubmatch(text)
 	if len(match) == 0 {
-		return "unmarked", 2, 10 * time.Millisecond
+		return modelDirective{marker: "unmarked", chunks: 2, delay: 10 * time.Millisecond}
 	}
-	chunks := 2
-	if match[2] != "" {
-		chunks, _ = strconv.Atoi(match[2])
+	directive := modelDirective{
+		marker: match[1],
+		chunks: 2,
+		delay:  10 * time.Millisecond,
 	}
-	delayMS := 10
-	if match[3] != "" {
-		delayMS, _ = strconv.Atoi(match[3])
+	for _, option := range directiveOption.FindAllStringSubmatch(match[2], -1) {
+		switch option[1] {
+		case "chunks":
+			directive.chunks, _ = strconv.Atoi(option[2])
+		case "delay_ms":
+			delayMS, _ := strconv.Atoi(option[2])
+			directive.delay = time.Duration(delayMS) * time.Millisecond
+		case "mode":
+			directive.mode = option[2]
+		}
 	}
-	if chunks < 1 {
-		chunks = 1
+	if directive.chunks < 1 {
+		directive.chunks = 1
 	}
-	if delayMS < 0 {
-		delayMS = 0
+	if directive.delay < 0 {
+		directive.delay = 0
 	}
-	return match[1], chunks, time.Duration(delayMS) * time.Millisecond
+	return directive
 }
 
 func latestUserText(payload map[string]any) string {
@@ -279,6 +344,17 @@ func latestUserText(payload map[string]any) string {
 		return contentText(message["content"])
 	}
 	return ""
+}
+
+func hasToolResult(payload map[string]any) bool {
+	messages, _ := payload["messages"].([]any)
+	for _, raw := range messages {
+		message, _ := raw.(map[string]any)
+		if message["role"] == "tool" {
+			return true
+		}
+	}
+	return false
 }
 
 func contentText(content any) string {
@@ -338,6 +414,42 @@ func completionChunk(requestID string, delta map[string]any, finishReason *strin
 			"finish_reason": reason,
 		}},
 	}
+}
+
+func writeAskUserCall(writer http.ResponseWriter, flusher http.Flusher, requestID, marker string) error {
+	arguments, err := json.Marshal(map[string]any{
+		"questions": []map[string]any{{
+			"text": "Continue the acceptance run?",
+			"kind": "single_select",
+			"options": []map[string]any{
+				{"label": "Continue"},
+				{"label": "Stop"},
+			},
+		}},
+	})
+	if err != nil {
+		return err
+	}
+	if err := writeSSE(writer, flusher, completionChunk(requestID, map[string]any{
+		"tool_calls": []map[string]any{{
+			"index": 0,
+			"id":    "ask-" + marker,
+			"type":  "function",
+			"function": map[string]any{
+				"name":      "ask_user",
+				"arguments": string(arguments),
+			},
+		}},
+	}, nil)); err != nil {
+		return err
+	}
+	reason := "tool_calls"
+	if err := writeSSE(writer, flusher, completionChunk(requestID, map[string]any{}, &reason)); err != nil {
+		return err
+	}
+	_, err = writer.Write([]byte("data: [DONE]\n\n"))
+	flusher.Flush()
+	return err
 }
 
 func writeSSE(writer http.ResponseWriter, flusher http.Flusher, payload any) error {

@@ -216,19 +216,9 @@ func (c *apiClient) history(botID, sessionID string) (map[string]any, error) {
 	return history, err
 }
 
-func countUserText(history map[string]any, text string) int {
-	count := 0
+func historyContainsRoleText(history map[string]any, role, text string) bool {
 	for _, item := range objectList(history) {
-		if stringValue(item["role"]) == "user" && stringValue(item["text"]) == text {
-			count++
-		}
-	}
-	return count
-}
-
-func hasAssistantTurn(history map[string]any) bool {
-	for _, item := range objectList(history) {
-		if stringValue(item["role"]) == "assistant" {
+		if stringValue(item["role"]) == role && valueContainsString(item, text) {
 			return true
 		}
 	}

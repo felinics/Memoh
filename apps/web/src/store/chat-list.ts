@@ -15,7 +15,7 @@ import {
 } from './chat-list.utils'
 import {
   cloneRequestedSkills,
-  createStreamId,
+  createInvocationId,
   hasUserAttachments,
   isPendingBot,
   nextId,
@@ -428,20 +428,22 @@ export const useChatStore = defineStore('chat', () => {
     streaming,
     streamingSessionId,
     assistantStreamsForSession,
-    activeUnboundStreamIds,
+    activeUnboundInvocationIds,
     isSessionStreaming,
     isUnboundComposerStreaming,
-    streamIdForEvent,
+    invocationIdForEvent,
     trackAssistantStream,
+    bindRunId,
+    requestAbort,
     getAssistantStream,
     mapAssistantStreamMessage,
     resolveAssistantStream,
     rejectAssistantStream,
     discardAssistantStream,
-    isTerminalStream,
+    isTerminalInvocation,
     rejectAllStreams,
     recordCreatedSession,
-    createdSessionIdForStream,
+    createdSessionIdForInvocation,
     forgetCreatedSession,
     clearStreamHistory,
   } = assistantStreams
@@ -535,7 +537,7 @@ export const useChatStore = defineStore('chat', () => {
     stopWebSocket,
     ensureWebSocketConnected,
     sendWebSocketMessage,
-    abortWebSocketStream,
+    abortWebSocketRun,
     startSessionMessagesStream,
     stopSessionMessagesStream,
     startBotSessionsActivityStream,
@@ -1080,29 +1082,30 @@ export const useChatStore = defineStore('chat', () => {
   }
 
 
-  function ensureDiscussStream(streamId: string, targetSessionId: string, targetBotId: string) {
-    const id = streamIdForEvent(targetBotId, { stream_id: streamId, session_id: targetSessionId }, targetSessionId)
+  function ensureDiscussStream(invocationId: string, targetSessionId: string, targetBotId: string) {
+    const id = invocationIdForEvent(targetBotId, { invocation_id: invocationId, session_id: targetSessionId }, targetSessionId)
     const existing = getAssistantStream(id)
     if (existing) return existing
-    if (isTerminalStream(id)) return null
+    if (isTerminalInvocation(id)) return null
     const sid = targetSessionId.trim()
     const bid = targetBotId.trim()
     const assistantTurn = createOptimisticAssistantTurn()
     appendTurnToSession(bid, sid, assistantTurn)
-    void trackAssistantStream({ streamId: id, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
+    void trackAssistantStream({ invocationId: id, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
     })
     return getAssistantStream(id)!
   }
 
 
-  function handleWSSessionCreated(event: { stream_id?: string; session_id: string }, sourceBotId = '') {
+  // session_created precedes the run, so it is addressed by the invocation.
+  function handleWSSessionCreated(event: { invocation_id?: string; session_id: string }, sourceBotId = '') {
     const eventSessionId = event.session_id.trim()
-    if (isTerminalStream(event.stream_id) || isTerminalApprovalResponse(event.stream_id)) return
-    const pending = event.stream_id ? getAssistantStream(event.stream_id) : undefined
+    if (isTerminalInvocation(event.invocation_id) || isTerminalApprovalResponse(event.invocation_id)) return
+    const pending = event.invocation_id ? getAssistantStream(event.invocation_id) : undefined
     const bid = (pending?.botId || sourceBotId || currentBotId.value || '').trim()
     if (!bid || !eventSessionId) return
-    const sid = recordCreatedSession(event.stream_id, eventSessionId) || eventSessionId
+    const sid = recordCreatedSession(event.invocation_id, eventSessionId) || eventSessionId
     const viewId = pending?.viewId?.trim() || focusedChatViewId.value
     const promoted = promoteDraftChatView({ botId: bid, sessionId: null, viewId }, sid)
     if ((currentBotId.value ?? '').trim() !== bid) return
@@ -1157,8 +1160,8 @@ export const useChatStore = defineStore('chat', () => {
     startupSendFailures.value = next
   }
 
-  function pruneEmptyAssistantTurnIfPending(streamId: string) {
-    const session = getAssistantStream(streamId)
+  function pruneEmptyAssistantTurnIfPending(invocationId: string) {
+    const session = getAssistantStream(invocationId)
     if (!session) return
     const turn = session.assistantTurn
     if (turn.messages.length > 0) return
@@ -1166,11 +1169,11 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function handleExpiredApprovalResponse(response: ApprovalResponse) {
-    abortWebSocketStream(response.streamId, response.botId)
-    const stream = getAssistantStream(response.streamId)
+    abortRun(response.invocationId)
+    const stream = getAssistantStream(response.invocationId)
     if (stream) {
       const turn = stream.assistantTurn
-      discardAssistantStream(response.streamId)
+      discardAssistantStream(response.invocationId)
       if (turn.messages.length === 0) {
         removeTurnFromSession(response.botId, response.sessionId, turn)
       }
@@ -1183,30 +1186,58 @@ export const useChatStore = defineStore('chat', () => {
       handleWSSessionCreated(event, sourceBotId)
       return
     }
+    // run_accepted is the first event of every turn and the only place the
+    // server's name for it arrives. A stop pressed before this point had no run
+    // to address, so it is replayed here.
+    if (event.type === 'run_accepted') {
+      const accepted = bindRunId(event.invocation_id, event.run_id)
+      if (accepted?.abortRequested) {
+        abortWebSocketRun(accepted.runId, accepted.botId || sourceBotId)
+      }
+      return
+    }
+    // A rejected submission never became a run, so it is answered by invocation.
+    // The event carries a stable code, which is what callers branch on: one of
+    // them is worth retrying unchanged and the other never is.
+    if (event.type === 'run_rejected') {
+      const invocation = event.invocation_id?.trim() ?? ''
+      if (!invocation) return
+      const rejected = getAssistantStream(invocation)
+      // A silent turn has no stream to fail, but it still holds the optimistic
+      // decision that has to roll back.
+      settleApprovalResponse(invocation, 'failed')
+      if (!rejected) return
+      const message = resolveApiErrorMessage(event, event.message || sendFailedMessage())
+      const stage: SendMessageStage = hasVisibleAssistantBlocks(rejected.assistantTurn) ? 'stream' : 'startup'
+      pruneEmptyAssistantTurnIfPending(invocation)
+      rejectAssistantStream(invocation, new StreamFailureError(message, stage, event))
+      loading.value = isActiveSessionStreaming()
+      return
+    }
     if (event.type === 'user_message') {
       const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
       const bid = sourceBotId || currentBotId.value || ''
-      const streamId = streamIdForEvent(bid, event, sid)
-      if (isTerminalStream(streamId) || isTerminalApprovalResponse(streamId)) return
+      const invocationId = invocationIdForEvent(bid, event, sid)
+      if (isTerminalInvocation(invocationId) || isTerminalApprovalResponse(invocationId)) return
       appendTurnToSession(bid, sid, normalizeTurn(event.data))
-      const pending = getAssistantStream(streamId)
+      const pending = getAssistantStream(invocationId)
       if (pending && !hasTurn(pending.assistantTurn)) {
         appendTurnToSession(bid || pending.botId, sid || pending.sessionId, pending.assistantTurn)
       }
       return
     }
     if (event.type === 'command_result' || event.type === 'command_error') {
-      const invocationId = event.invocation_id?.trim() ?? ''
-      const pending = invocationId ? getAssistantStream(invocationId) : undefined
+      const commandInvocationId = event.invocation_id?.trim() ?? ''
+      const pending = commandInvocationId ? getAssistantStream(commandInvocationId) : undefined
       rememberCommandEvent(event, {
         botId: pending?.botId || sourceBotId,
         sessionId: event.session_id || pending?.sessionId || targetSessionId,
         composerScope: pending?.composerScope || event.composer_scope,
       })
-      if (event.type === 'command_error' && invocationId) {
+      if (event.type === 'command_error' && commandInvocationId) {
         if (pending) {
           const message = event.error?.message || 'slash command failed'
-          rejectAssistantStream(invocationId, new CommandStreamError(message))
+          rejectAssistantStream(commandInvocationId, new CommandStreamError(message))
           loading.value = isActiveSessionStreaming()
         }
       }
@@ -1215,18 +1246,18 @@ export const useChatStore = defineStore('chat', () => {
 
     const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
     const bid = sourceBotId || currentBotId.value || ''
-    const streamId = streamIdForEvent(bid, event, sid)
+    const invocationId = invocationIdForEvent(bid, event, sid)
     // The server may emit end after error. It must not recreate the stream, but
     // it still triggers the final authoritative refresh below.
-    if ((isTerminalStream(streamId) || isTerminalApprovalResponse(streamId)) && event.type !== 'end') return
+    if ((isTerminalInvocation(invocationId) || isTerminalApprovalResponse(invocationId)) && event.type !== 'end') return
 
-    if (getApprovalResponse(streamId)?.silent) {
+    if (getApprovalResponse(invocationId)?.silent) {
       if (event.type === 'end' || event.type === 'error') {
         if (event.type === 'error') {
-          settleApprovalResponse(streamId, 'failed')
+          settleApprovalResponse(invocationId, 'failed')
           toast.error(resolveApiErrorMessage(event, event.message || 'tool approval failed'))
         } else {
-          settleApprovalResponse(streamId, 'succeeded')
+          settleApprovalResponse(invocationId, 'succeeded')
         }
         loading.value = isActiveSessionStreaming()
       }
@@ -1235,12 +1266,12 @@ export const useChatStore = defineStore('chat', () => {
 
     switch (event.type) {
       case 'start':
-        ensureDiscussStream(streamId, sid, bid)
+        ensureDiscussStream(invocationId, sid, bid)
         break
       case 'message':
         if (event.data.type === 'tool' && event.data.running && isGuiToolName(event.data.name)) {
           const toolCallId = event.data.tool_call_id?.trim() ?? ''
-          const dedupeKey = `${bid}:${sid}:${toolCallId || `${streamId}:${event.data.id}:${event.data.name}`}`
+          const dedupeKey = `${bid}:${sid}:${toolCallId || `${invocationId}:${event.data.id}:${event.data.name}`}`
           if (!seenGuiToolCalls.has(dedupeKey)) {
             seenGuiToolCalls.add(dedupeKey)
             guiToolUseRequested.value = {
@@ -1252,21 +1283,21 @@ export const useChatStore = defineStore('chat', () => {
             }
           }
         }
-        const messageStream = ensureDiscussStream(streamId, sid, bid)
+        const messageStream = ensureDiscussStream(invocationId, sid, bid)
         if (messageStream) {
           upsertAssistantUIMessage(
             messageStream.assistantTurn,
-            mapAssistantStreamMessage(streamId, event.data),
+            mapAssistantStreamMessage(invocationId, event.data),
           )
         }
         break
       case 'end':
-        const endedSession = getAssistantStream(streamId)
+        const endedSession = getAssistantStream(invocationId)
         const endedBotId = endedSession?.botId ?? currentBotId.value ?? ''
         const endedSessionId = (endedSession?.sessionId || sid || '').trim()
-        settleApprovalResponse(streamId, 'succeeded')
-        pruneEmptyAssistantTurnIfPending(streamId)
-        resolveAssistantStream(streamId)
+        settleApprovalResponse(invocationId, 'succeeded')
+        pruneEmptyAssistantTurnIfPending(invocationId)
+        resolveAssistantStream(invocationId)
         loading.value = isActiveSessionStreaming()
         if (endedSessionId && !isSessionStreaming(endedBotId, endedSessionId)) {
           const endedView = chatViews.getSession(endedBotId, endedSessionId)
@@ -1279,12 +1310,12 @@ export const useChatStore = defineStore('chat', () => {
         }
         break
       case 'error': {
-        const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid, bid)
+        const session = getAssistantStream(invocationId) ?? ensureDiscussStream(invocationId, sid, bid)
         if (!session) break
         const message = resolveApiErrorMessage(event, event.message || 'stream error')
         const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
-        settleApprovalResponse(streamId, 'failed')
-        rejectAssistantStream(streamId, new StreamFailureError(message, stage, event.feedback ?? event))
+        settleApprovalResponse(invocationId, 'failed')
+        rejectAssistantStream(invocationId, new StreamFailureError(message, stage, event.feedback ?? event))
         loading.value = isActiveSessionStreaming()
         releaseHiddenSessionView(chatViews.getSession(session.botId, session.sessionId) ?? null)
         break
@@ -1476,43 +1507,51 @@ export const useChatStore = defineStore('chat', () => {
     const resolved = normalizedChatViewTarget(target)
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
-    const approvalStreamIds = abortApprovalResponses(
+    const approvalInvocationIds = abortApprovalResponses(
       pendingApprovalResponsesForSession(resolved.botId, resolved.sessionId ?? ''),
       'failed',
     )
-    const streamIds = resolved.sessionId
-      ? assistantStreamsForSession(resolved.botId, resolved.sessionId).map(stream => stream.streamId)
-      : activeUnboundStreamIds(
+    const invocationIds = resolved.sessionId
+      ? assistantStreamsForSession(resolved.botId, resolved.sessionId).map(stream => stream.invocationId)
+      : activeUnboundInvocationIds(
           resolved.botId,
           target ? `${resolved.botId}:${resolved.viewId}` : undefined,
         )
-    for (const streamId of streamIds) {
-      if (!approvalStreamIds.has(streamId)) {
-        abortWebSocketStream(streamId, getAssistantStream(streamId)?.botId)
+    for (const invocationId of invocationIds) {
+      if (!approvalInvocationIds.has(invocationId)) {
+        abortRun(invocationId)
       }
-      rejectAssistantStream(streamId, abortError)
+      rejectAssistantStream(invocationId, abortError)
     }
     loading.value = isActiveSessionStreaming()
     chatViews.prune()
   }
 
+  // Stopping addresses the server's run. Before run_accepted there is no such
+  // name, so the request is recorded and replayed the moment one arrives.
+  function abortRun(invocationId: string) {
+    const runId = requestAbort(invocationId)
+    if (!runId) return
+    abortWebSocketRun(runId, getAssistantStream(invocationId)?.botId)
+  }
+
   function abortApprovalResponses(responses: ApprovalResponse[], outcome: ApprovalResponseOutcome): Set<string> {
-    const streamIds = new Set<string>()
+    const invocationIds = new Set<string>()
     for (const response of responses) {
-      streamIds.add(response.streamId)
-      abortWebSocketStream(response.streamId, response.botId)
-      settleApprovalResponse(response.streamId, outcome)
+      invocationIds.add(response.invocationId)
+      abortRun(response.invocationId)
+      settleApprovalResponse(response.invocationId, outcome)
     }
-    return streamIds
+    return invocationIds
   }
 
   function abortAllAssistantStreams() {
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
-    const approvalStreamIds = abortApprovalResponses(pendingApprovalResponses(), 'canceled')
-    rejectAllStreams(abortError, (streamId) => {
-      if (!approvalStreamIds.has(streamId)) {
-        abortWebSocketStream(streamId, getAssistantStream(streamId)?.botId)
+    const approvalInvocationIds = abortApprovalResponses(pendingApprovalResponses(), 'canceled')
+    rejectAllStreams(abortError, (invocationId) => {
+      if (!approvalInvocationIds.has(invocationId)) {
+        abortRun(invocationId)
       }
     })
     loading.value = false
@@ -2327,7 +2366,7 @@ export const useChatStore = defineStore('chat', () => {
     let event: CommandEventResponse | null
     try {
       event = await executeQuickAction(bid, actionID, {
-        invocationId: createStreamId(),
+        invocationId: createInvocationId(),
         composerScope: scope,
         sessionId: sid || undefined,
         skillActivationAllowed,
@@ -2496,7 +2535,7 @@ export const useChatStore = defineStore('chat', () => {
     let userTurn: ChatUserTurn | null = null
     let sendBotId = ''
     let sendSessionId = ''
-    let sendStreamId = ''
+    let sendInvocationId = ''
     let turnAppendStarted = false
 
     const wasDraft = !viewTarget.sessionId
@@ -2526,7 +2565,7 @@ export const useChatStore = defineStore('chat', () => {
       if (!sid && !deferSessionCreation) throw new Error('Session not selected')
       sendBotId = bid
       sendSessionId = sid
-      sendStreamId = createStreamId()
+      sendInvocationId = createInvocationId()
       const sendTranscript = transcriptForTarget(viewTarget)
       // Tell the tab store to pin (and, for a draft, repoint) this session's tab.
       if (sid) {
@@ -2551,7 +2590,7 @@ export const useChatStore = defineStore('chat', () => {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = trackAssistantStream({
-        streamId: sendStreamId,
+        invocationId: sendInvocationId,
         assistantTurn,
         botId: bid,
         sessionId: sid,
@@ -2560,8 +2599,7 @@ export const useChatStore = defineStore('chat', () => {
       })
       if (!sendWebSocketMessage(bid, {
         type: 'message',
-        stream_id: sendStreamId,
-        invocation_id: sendStreamId,
+        invocation_id: sendInvocationId,
         composer_scope: composerScope,
         text: trimmed,
         session_id: sid || undefined,
@@ -2572,12 +2610,12 @@ export const useChatStore = defineStore('chat', () => {
         workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       await completion
-      const createdSessionId = createdSessionIdForStream(sendStreamId)
+      const createdSessionId = createdSessionIdForInvocation(sendInvocationId)
       const fallbackActiveSessionId = !options.target && (currentBotId.value ?? '').trim() === bid
         ? sessionId.value ?? ''
         : ''
       const refreshSessionId = sendSessionId || createdSessionId || fallbackActiveSessionId
-      forgetCreatedSession(sendStreamId)
+      forgetCreatedSession(sendInvocationId)
       if (refreshSessionId) await refreshCurrentSession(bid, refreshSessionId)
 
       loading.value = false
@@ -2591,7 +2629,7 @@ export const useChatStore = defineStore('chat', () => {
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
-      const createdSessionId = sendStreamId ? createdSessionIdForStream(sendStreamId) : ''
+      const createdSessionId = sendInvocationId ? createdSessionIdForInvocation(sendInvocationId) : ''
       const bid = sendBotId || viewTarget.botId || currentBotId.value || ''
       const sid = sendSessionId || createdSessionId
 
@@ -2603,8 +2641,8 @@ export const useChatStore = defineStore('chat', () => {
         await cleanupFailedDeferredSession(bid, createdSessionId, composerScope)
       }
 
-      if (sendStreamId) discardAssistantStream(sendStreamId)
-      if (sendStreamId) forgetCreatedSession(sendStreamId)
+      if (sendInvocationId) discardAssistantStream(sendInvocationId)
+      if (sendInvocationId) forgetCreatedSession(sendInvocationId)
       loading.value = false
 
       if (!isAbort && stage === 'startup' && turnAppendStarted) {
@@ -2646,7 +2684,7 @@ export const useChatStore = defineStore('chat', () => {
     const target = transcript.findTurnByServerId(targetID)
     if (!target || !transcript.isLatestVisibleAssistantTurn(target)) return { ok: false, stage: 'startup' }
 
-    const streamId = createStreamId()
+    const invocationId = createInvocationId()
     const assistantTurn = transcript.createOptimisticAssistantTurn()
     const restoreForkAnchor = updateForkAnchorForReplacedMessage(sid, target, transcript.messages)
     const replacedTurns = transcript.replaceTailFromTurn(target, [assistantTurn])
@@ -2655,10 +2693,10 @@ export const useChatStore = defineStore('chat', () => {
       if (!ensureWebSocketConnected(bid)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
-      const completion = trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid })
+      const completion = trackAssistantStream({ invocationId, assistantTurn, botId: bid, sessionId: sid })
       if (!sendWebSocketMessage(bid, {
         type: 'retry_message',
-        stream_id: streamId,
+        invocation_id: invocationId,
         session_id: sid,
         message_id: targetID,
         model_id: options.modelId?.trim() || overrideModelId.value || undefined,
@@ -2676,7 +2714,7 @@ export const useChatStore = defineStore('chat', () => {
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
-      discardAssistantStream(streamId)
+      discardAssistantStream(invocationId)
       if (stage === 'startup') {
         restoreForkAnchor?.()
         restoreTailFromOptimistic(bid, sid, null, assistantTurn, replacedTurns)
@@ -2705,7 +2743,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!target || !transcript.isLatestVisibleUserTurn(target)) return { ok: false, stage: 'startup' }
     if (hasUserAttachments(target)) return { ok: false, stage: 'startup' }
 
-    const streamId = createStreamId()
+    const invocationId = createInvocationId()
     const userTurn = transcript.createOptimisticUserTurn(trimmed)
     const assistantTurn = transcript.createOptimisticAssistantTurn()
     const restoreForkAnchor = updateForkAnchorForReplacedMessage(sid, target, transcript.messages)
@@ -2715,10 +2753,10 @@ export const useChatStore = defineStore('chat', () => {
       if (!ensureWebSocketConnected(bid)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
-      const completion = trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid })
+      const completion = trackAssistantStream({ invocationId, assistantTurn, botId: bid, sessionId: sid })
       if (!sendWebSocketMessage(bid, {
         type: 'edit_message',
-        stream_id: streamId,
+        invocation_id: invocationId,
         session_id: sid,
         message_id: targetID,
         text: trimmed,
@@ -2737,7 +2775,7 @@ export const useChatStore = defineStore('chat', () => {
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
-      discardAssistantStream(streamId)
+      discardAssistantStream(invocationId)
       if (stage === 'startup') {
         restoreForkAnchor?.()
         restoreTailFromOptimistic(bid, sid, userTurn, assistantTurn, replacedTurns)
@@ -2766,11 +2804,11 @@ export const useChatStore = defineStore('chat', () => {
       toast.error(userInputConnectionLostMessage())
       return false
     }
-    const streamId = createStreamId()
+    const invocationId = createInvocationId()
     const silent = isSessionStreaming(bid, sid)
     const previousApprovalStates = transcript.snapshotToolApprovalStates(approvalId)
     if (!beginApprovalResponse({
-      streamId,
+      invocationId,
       approvalId,
       botId: bid,
       sessionId: sid,
@@ -2784,7 +2822,7 @@ export const useChatStore = defineStore('chat', () => {
       appendedAssistantTurn = !transcript.hasTurn(assistantTurn)
       if (appendedAssistantTurn) transcript.appendToView(assistantTurn)
       assistantTurn.streaming = true
-      void trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
+      void trackAssistantStream({ invocationId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
         finalizeStreamFailure(assistantTurn, bid, sid, error)
       })
       loading.value = true
@@ -2795,7 +2833,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       if (!sendWebSocketMessage(bid, {
         type: 'tool_approval_response',
-        stream_id: streamId,
+        invocation_id: invocationId,
         session_id: sid,
         approval_id: approvalId,
         short_id: approval.short_id,
@@ -2803,9 +2841,9 @@ export const useChatStore = defineStore('chat', () => {
       })) throw new Error('WebSocket is not connected')
     } catch (error) {
       transcript.restoreToolApprovalStates(previousApprovalStates)
-      settleApprovalResponse(streamId, 'canceled')
+      settleApprovalResponse(invocationId, 'canceled')
       if (!silent) {
-        discardAssistantStream(streamId)
+        discardAssistantStream(invocationId)
         if (assistantTurn && appendedAssistantTurn) transcript.removeFromView(assistantTurn)
       }
       loading.value = false
@@ -2829,13 +2867,13 @@ export const useChatStore = defineStore('chat', () => {
       toast.error(userInputConnectionLostMessage())
       return
     }
-    const streamId = createStreamId()
+    const invocationId = createInvocationId()
     const previousUserInputStates = transcript.snapshotUserInputStates(userInput.user_input_id)
     const assistantTurn = transcript.assistantTurnForUserInput(userInput.user_input_id) ?? transcript.createOptimisticAssistantTurn()
     const appendedAssistantTurn = !transcript.hasTurn(assistantTurn)
     if (appendedAssistantTurn) transcript.appendToView(assistantTurn)
     assistantTurn.streaming = true
-    void trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
+    void trackAssistantStream({ invocationId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
       if (error.name === 'AbortError') {
         transcript.restoreUserInputStates(previousUserInputStates)
@@ -2860,7 +2898,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       if (!sendWebSocketMessage(bid, {
         type: 'user_input_response',
-        stream_id: streamId,
+        invocation_id: invocationId,
         session_id: sid,
         user_input_id: userInput.user_input_id,
         short_id: userInput.short_id,
@@ -2870,7 +2908,7 @@ export const useChatStore = defineStore('chat', () => {
       })) throw new Error('WebSocket is not connected')
     } catch (error) {
       transcript.restoreUserInputStates(previousUserInputStates)
-      discardAssistantStream(streamId)
+      discardAssistantStream(invocationId)
       if (appendedAssistantTurn) transcript.removeFromView(assistantTurn)
       loading.value = false
       toast.error(resolveApiErrorMessage(error, 'Failed to send user input response.'))

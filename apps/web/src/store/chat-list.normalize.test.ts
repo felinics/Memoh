@@ -4,7 +4,7 @@ import {
   asRecord,
   cloneRequestedSkills,
   cloneUserInputState,
-  createStreamId,
+  createInvocationId,
   isOptimisticTurn,
   isSameLogicalTurn,
   mergeApprovalState,
@@ -190,9 +190,9 @@ describe('ids', () => {
     expect(serverMessageId(userTurn())).toBe('u1')
   })
 
-  it('createStreamId yields distinct non-empty ids', () => {
-    const a = createStreamId()
-    const b = createStreamId()
+  it('createInvocationId yields distinct non-empty ids', () => {
+    const a = createInvocationId()
+    const b = createInvocationId()
     expect(a).toBeTruthy()
     expect(a).not.toBe(b)
   })

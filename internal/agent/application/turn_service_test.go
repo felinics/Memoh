@@ -3,13 +3,15 @@ package application
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
+	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
 )
 
@@ -23,13 +25,102 @@ type testChatStreamer interface {
 	StreamChat(context.Context, ChatRequest) (<-chan StreamChunk, <-chan error)
 }
 
+// scriptedAdmitter stands in for the session runtime so these tests can exercise
+// what this package owns: the translation of an admission answer into the turn
+// port's vocabulary, and the terminal write a finished run must produce. The
+// answers themselves are scripted because their correctness is established where
+// admission is implemented, not here.
+type scriptedAdmitter struct {
+	mu sync.Mutex
+
+	// admitErr, when set, is what Admit returns instead of an admission.
+	admitErr error
+	// started reports whether the admission owns execution. False models a
+	// replay of a run owned elsewhere or already finished.
+	started bool
+
+	inputs   []sessionruntime.AdmitInput
+	finishes []recordedFinish
+}
+
+type recordedFinish struct {
+	handle  sessionruntime.RunHandle
+	status  string
+	message string
+}
+
+func newScriptedAdmitter() *scriptedAdmitter {
+	return &scriptedAdmitter{started: true}
+}
+
+func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput) (sessionruntime.Admission, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.inputs = append(a.inputs, in)
+	if a.admitErr != nil {
+		return sessionruntime.Admission{}, a.admitErr
+	}
+	runID := "run-" + strconv.Itoa(len(a.inputs))
+	if !a.started {
+		return sessionruntime.Admission{RunID: runID, Replay: true}, nil
+	}
+	return sessionruntime.Admission{
+		RunID:   runID,
+		Started: true,
+		Handle: sessionruntime.RunHandle{
+			BotID:        in.BotID,
+			SessionID:    in.SessionID,
+			RunID:        runID,
+			FencingToken: int64(len(a.inputs)),
+		},
+	}, nil
+}
+
+func (a *scriptedAdmitter) FinishRun(_ context.Context, handle sessionruntime.RunHandle, status, message string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: message})
+	return nil
+}
+
+func (a *scriptedAdmitter) admitted() []sessionruntime.AdmitInput {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.inputs)
+}
+
+// awaitFinish waits for the run's terminal write, which happens in the pump's
+// defer stack and so can trail the closing of the handle's channels.
+func (a *scriptedAdmitter) awaitFinish(t *testing.T) recordedFinish {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		a.mu.Lock()
+		finishes := slices.Clone(a.finishes)
+		a.mu.Unlock()
+		if len(finishes) > 0 {
+			return finishes[len(finishes)-1]
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("run ended without a terminal write: the thread's slot is never released")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func newTurnTestService(streamer testChatStreamer) *Service {
+	service, _ := newAdmittedTurnTestService(streamer)
+	return service
+}
+
+func newAdmittedTurnTestService(streamer testChatStreamer) (*Service, *scriptedAdmitter) {
+	admitter := newScriptedAdmitter()
 	return &Service{
-		turnIdempotency: newIdempotencyRegistry(idempotencyCapacity),
+		sessionRuntime: admitter,
 		turnHooks: &turnRuntimeHooks{
 			streamChat: streamer.StreamChat,
 		},
-	}
+	}, admitter
 }
 
 func (f *fakeRunner) StreamChat(ctx context.Context, req ChatRequest) (<-chan StreamChunk, <-chan error) {
@@ -65,42 +156,22 @@ func TestStartTurnRequiresTeamID(t *testing.T) {
 	}
 }
 
-func TestStartTurnInitializesIdempotencyRegistryConcurrently(t *testing.T) {
+// A command that cannot be admitted must not be started: without a durable
+// admission there is no owner, no fencing token, and nothing that would ever
+// drive the run to a terminal state.
+func TestStartTurnRequiresSessionRuntime(t *testing.T) {
 	service := &Service{
 		turnHooks: &turnRuntimeHooks{
 			streamChat: func(context.Context, ChatRequest) (<-chan StreamChunk, <-chan error) {
-				chunks := make(chan StreamChunk)
-				errs := make(chan error)
-				close(chunks)
-				close(errs)
-				return chunks, errs
+				t.Fatal("unadmitted command must not reach the runtime")
+				return nil, nil
 			},
 		},
 	}
-
-	var wg sync.WaitGroup
-	for i := range 32 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			handle, err := service.StartTurn(context.Background(), turn.StartTurnCommand{
-				TeamID:         "team-1",
-				IdempotencyKey: fmt.Sprintf("message-%d", i),
-			})
-			if err != nil {
-				t.Errorf("start turn: %v", err)
-				return
-			}
-			for range handle.Events() {
-			}
-			for err := range handle.Errs() {
-				t.Errorf("turn error: %v", err)
-			}
-		}()
-	}
-	wg.Wait()
-	if service.turnIdempotency == nil {
-		t.Fatal("idempotency registry was not initialized")
+	if _, err := service.StartTurn(context.Background(), turn.StartTurnCommand{
+		TeamID: "t", Mode: turn.ModeChat, BotID: "b", ThreadID: "s",
+	}); err == nil {
+		t.Fatal("StartTurn() error = nil, want an unconfigured session runtime error")
 	}
 }
 
@@ -343,50 +414,101 @@ func TestStartTurnRejectsForeignTeam(t *testing.T) {
 	}
 }
 
-func TestStartTurnClaimsIdempotencyKey(t *testing.T) {
-	a := newTurnTestService(&fakeRunner{})
-	first, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
-		TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-1",
+// The platform's message identity must reach admission unchanged: it is what
+// makes a webhook redelivery the same invocation instead of a second turn.
+func TestStartTurnAdmitsUnderTheIdempotencyKey(t *testing.T) {
+	a, admitter := newAdmittedTurnTestService(&fakeRunner{})
+	h, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
+		TeamID: "t", Mode: turn.ModeChat, BotID: "b", ThreadID: "s", IdempotencyKey: "telegram:route-1:42",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for range first.Events() {
+	drainHandle(h)
+
+	admitted := admitter.admitted()
+	if len(admitted) != 1 {
+		t.Fatalf("admissions = %d, want 1", len(admitted))
 	}
-	// Redelivery of the same platform message must be rejected even after
-	// the first run completed.
-	if _, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
-		TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-1",
-	}); !errors.Is(err, turn.ErrDuplicateTurn) {
-		t.Fatalf("err = %v, want ErrDuplicateTurn", err)
+	if admitted[0].InvocationID != "telegram:route-1:42" {
+		t.Fatalf("invocation id = %q, want the command's idempotency key", admitted[0].InvocationID)
 	}
-	// Same key under another team is a distinct claim.
-	if _, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
-		TeamID: "t2", Mode: turn.ModeChat, IdempotencyKey: "msg-1",
-	}); err != nil {
-		t.Fatalf("cross-team claim rejected: %v", err)
+	if admitted[0].BotID != "b" || admitted[0].SessionID != "s" {
+		t.Fatalf("admitted %q/%q, want b/s", admitted[0].BotID, admitted[0].SessionID)
 	}
-	// Empty keys are never deduplicated.
-	for range 2 {
-		if _, err := a.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat}); err != nil {
-			t.Fatalf("empty key rejected: %v", err)
-		}
+	if h.RunID() != "run-1" {
+		t.Fatalf("run id = %q, want the admitted run id", h.RunID())
 	}
 }
 
-func TestFailedStartDoesNotClaimIdempotencyKey(t *testing.T) {
-	a := newTurnTestService(&fakeRunner{})
-	cmd := turn.StartTurnCommand{
-		TeamID: "t", Mode: turn.ModeDiscuss, IdempotencyKey: "msg-1",
-	}
+// A source with no stable message identity has nothing to deduplicate against,
+// so each attempt must be admitted as its own submission rather than colliding
+// with the previous one under a shared empty id.
+func TestStartTurnMintsInvocationIDWhenKeyIsAbsent(t *testing.T) {
+	a, admitter := newAdmittedTurnTestService(&fakeRunner{})
 	for range 2 {
-		_, err := a.StartTurn(context.Background(), cmd)
-		if err == nil {
-			t.Fatal("expected unconfigured discuss runtime error")
+		h, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
+			TeamID: "t", Mode: turn.ModeChat, BotID: "b", ThreadID: "s",
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		if errors.Is(err, turn.ErrDuplicateTurn) {
-			t.Fatalf("failed start claimed idempotency key: %v", err)
+		drainHandle(h)
+	}
+	admitted := admitter.admitted()
+	if len(admitted) != 2 {
+		t.Fatalf("admissions = %d, want 2", len(admitted))
+	}
+	for _, in := range admitted {
+		if in.InvocationID == "" {
+			t.Fatal("admission reached the runtime without an invocation id")
 		}
+	}
+	if admitted[0].InvocationID == admitted[1].InvocationID {
+		t.Fatalf("both attempts minted %q: separate submissions must not share a retry identity", admitted[0].InvocationID)
+	}
+}
+
+// Validation that rejects a command must run before admission. Admitting first
+// would persist a run for a turn nothing can execute, and it would hold the
+// thread's only slot until the reaper timed it out.
+func TestStartTurnRejectsUnconfiguredModeBeforeAdmission(t *testing.T) {
+	a, admitter := newAdmittedTurnTestService(&fakeRunner{})
+	_, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
+		TeamID: "t", Mode: turn.ModeDiscuss, BotID: "b", ThreadID: "s", IdempotencyKey: "msg-1",
+	})
+	if err == nil {
+		t.Fatal("expected unconfigured discuss runtime error")
+	}
+	if admitted := admitter.admitted(); len(admitted) != 0 {
+		t.Fatalf("admissions = %d, want 0 for a command that cannot run", len(admitted))
+	}
+}
+
+// The two rejections a channel adapter must tell apart: busy is retryable and
+// nothing was persisted, while a run that already exists has been answered and
+// its redelivery must be dropped.
+func TestStartTurnTranslatesAdmissionRejections(t *testing.T) {
+	cmd := turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat, BotID: "b", ThreadID: "s", IdempotencyKey: "msg-1"}
+
+	for _, tc := range []struct {
+		name     string
+		admitErr error
+		started  bool
+		want     error
+	}{
+		{name: "busy", admitErr: sessionruntime.ErrSessionBusy, want: turn.ErrSessionBusy},
+		{name: "conflict", admitErr: sessionruntime.ErrInvocationConflict, want: turn.ErrDuplicateTurn},
+		{name: "replay of a run this call does not own", started: false, want: turn.ErrDuplicateTurn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, admitter := newAdmittedTurnTestService(&fakeRunner{})
+			admitter.admitErr = tc.admitErr
+			admitter.started = tc.started
+			if _, err := a.StartTurn(context.Background(), cmd); !errors.Is(err, tc.want) {
+				t.Fatalf("StartTurn() error = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -455,27 +577,6 @@ func drainHandle(h turn.RunHandle) {
 	}
 }
 
-// retryStartTurn retries a duplicate-rejected StartTurn until the claim is
-// released (or the deadline passes), returning the final error.
-func retryStartTurn(t *testing.T, a *Service, cmd turn.StartTurnCommand) error {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		h, err := a.StartTurn(context.Background(), cmd)
-		if err == nil {
-			drainHandle(h)
-			return nil
-		}
-		if !errors.Is(err, turn.ErrDuplicateTurn) {
-			return err
-		}
-		if time.Now().After(deadline) {
-			return err
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // TestRunEndClosesInjectChannel pins the fix for the per-turn goroutine
 // leak: the application's inject-forwarding goroutine exits by ranging over
 // InjectCh, so the service must close it when the run ends.
@@ -500,63 +601,63 @@ func TestRunEndClosesInjectChannel(t *testing.T) {
 	}
 }
 
-// TestFailedRunReleasesIdempotencyKey: a run that ends in an error must
-// free its claim so the platform redelivery retries instead of being
-// swallowed as a duplicate.
-func TestFailedRunReleasesIdempotencyKey(t *testing.T) {
-	a := newTurnTestService(&errRunner{err: errors.New("provider exploded")})
-	cmd := turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-1"}
-	h, err := a.StartTurn(context.Background(), cmd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	drainHandle(h)
-	if err := retryStartTurn(t, a, cmd); err != nil {
-		t.Fatalf("claim not released after failed run: %v", err)
-	}
-}
+// Every run must close its durable record, and the three outcomes must stay
+// distinguishable: the record is what releases the thread's single slot, and a
+// run recorded as broken when it was merely stopped misreports the turn.
+func TestRunEndRecordsTerminalState(t *testing.T) {
+	cmd := turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat, BotID: "b", ThreadID: "s", IdempotencyKey: "msg-1"}
 
-// TestCanceledRunReleasesIdempotencyKey: cancellation (consumer stop or a
-// transport disconnect tearing down the run context) must also free the
-// claim — the application reacts to ctx cancellation by closing both channels,
-// which is indistinguishable from clean completion inside the pump loop.
-func TestCanceledRunReleasesIdempotencyKey(t *testing.T) {
-	r := &fakeRunner{chunks: []string{`{"type":"done"}`}, block: make(chan struct{})}
-	a := newTurnTestService(r)
-	cmd := turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-2"}
-	h, err := a.StartTurn(context.Background(), cmd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.Cancel()
-	drainHandle(h)
-	r2 := &fakeRunner{chunks: []string{`{"type":"done"}`}}
-	a.turnHooks.streamChat = r2.StreamChat
-	if err := retryStartTurn(t, a, cmd); err != nil {
-		t.Fatalf("claim not released after canceled run: %v", err)
-	}
-}
+	t.Run("error", func(t *testing.T) {
+		a, admitter := newAdmittedTurnTestService(&errRunner{err: errors.New("provider exploded")})
+		h, err := a.StartTurn(context.Background(), cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		drainHandle(h)
+		if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusErrored {
+			t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusErrored)
+		}
+	})
 
-// TestCompletedRunKeepsIdempotencyKey guards the inverse: clean completion
-// must keep the claim so true redeliveries stay deduplicated.
-func TestCompletedRunKeepsIdempotencyKey(t *testing.T) {
-	a := newTurnTestService(&fakeRunner{chunks: []string{`{"type":"done"}`}})
-	cmd := turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat, IdempotencyKey: "msg-3"}
-	h, err := a.StartTurn(context.Background(), cmd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	drainHandle(h)
-	time.Sleep(50 * time.Millisecond) // give a buggy release a chance to run
-	if _, err := a.StartTurn(context.Background(), cmd); !errors.Is(err, turn.ErrDuplicateTurn) {
-		t.Fatalf("err = %v, want ErrDuplicateTurn after clean completion", err)
-	}
+	t.Run("cancellation", func(t *testing.T) {
+		a, admitter := newAdmittedTurnTestService(&fakeRunner{
+			chunks: []string{`{"type":"done"}`},
+			block:  make(chan struct{}),
+		})
+		h, err := a.StartTurn(context.Background(), cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.Cancel()
+		drainHandle(h)
+		// A canceled run reaches the pump as two closed channels, exactly like a
+		// clean finish; only the run context tells them apart.
+		if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusAborted {
+			t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusAborted)
+		}
+	})
+
+	t.Run("completion", func(t *testing.T) {
+		a, admitter := newAdmittedTurnTestService(&fakeRunner{chunks: []string{`{"type":"done"}`}})
+		h, err := a.StartTurn(context.Background(), cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		drainHandle(h)
+		got := admitter.awaitFinish(t)
+		if got.status != sessionruntime.RunStatusCompleted {
+			t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusCompleted)
+		}
+		if got.handle.FencingToken == 0 {
+			t.Fatal("terminal write carried no fencing token: a superseded owner could close this run")
+		}
+	})
 }
 
 // TestDiscussInjectFailsFast: discuss handles have no inject reader, so
 // Inject must fail immediately instead of blocking until the run ends.
 func TestDiscussInjectFailsFast(t *testing.T) {
-	h := newDiscussHandle(context.Background(), turn.StartTurnCommand{TeamID: "t"}, func() {}, nil)
+	h := newDiscussHandle(context.Background(), turn.StartTurnCommand{TeamID: "t"}, func() {}, "run-1", nil)
 	done := make(chan error, 1)
 	go func() { done <- h.Inject(context.Background(), turn.InjectMessage{Text: "x"}) }()
 	select {

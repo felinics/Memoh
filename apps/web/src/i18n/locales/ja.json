@@ -130,6 +130,10 @@
       "reasoning_effort_required": "推論強度を選択して、もう一度お試しください。",
       "reasoning_effort_unavailable": "選択した推論強度はこの外部Agentで利用できなくなりました。",
       "config_update_failed": "外部Agentに選択した設定を適用できませんでした。もう一度お試しください。"
+    },
+    "session_runtime": {
+      "session_busy": "このセッションはまだ前のメッセージを処理しています。しばらくしてからもう一度お試しください。",
+      "invocation_conflict": "このメッセージは別の内容で既に送信されています。セッションを再読み込みして保存済みの内容を確認してください。"
     }
   },
   "auth": {

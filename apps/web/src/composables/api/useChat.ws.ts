@@ -10,8 +10,11 @@ export interface WSUserInputAnswer {
 
 export interface WSClientMessage {
   type: 'message' | 'abort' | 'tool_approval_response' | 'user_input_response' | 'retry_message' | 'edit_message'
-  stream_id?: string
+  // invocation_id names the submission and is what every turn-starting message
+  // carries. run_id names work the server already accepted, so only abort
+  // carries it — and only after run_accepted told us the id.
   invocation_id?: string
+  run_id?: string
   composer_scope?: string
   text?: string
   session_id?: string
@@ -33,7 +36,7 @@ export interface WSClientMessage {
 
 export interface ChatWebSocket {
   send: (msg: WSClientMessage) => void
-  abort: (streamId: string) => void
+  abort: (runId: string) => void
   close: () => void
   readonly connected: boolean
   onOpen: (() => void) | null
@@ -74,11 +77,11 @@ export function connectWebSocket(
       }
       sendQueue.push(payload)
     },
-    abort(streamId: string) {
-      const id = streamId.trim()
+    abort(runId: string) {
+      const id = runId.trim()
       if (!id) return
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'abort', stream_id: id }))
+        ws.send(JSON.stringify({ type: 'abort', run_id: id }))
       }
     },
     close() {
@@ -130,7 +133,9 @@ export function connectWebSocket(
         if (!parsed || typeof parsed !== 'object') return
         const eventType = String(parsed.type ?? '').trim()
         if (
-          eventType !== 'start'
+          eventType !== 'run_accepted'
+          && eventType !== 'run_rejected'
+          && eventType !== 'start'
           && eventType !== 'message'
           && eventType !== 'end'
           && eventType !== 'error'

@@ -351,7 +351,7 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
 		BotID:             "bot-1",
 		SessionID:         "session-1",
-		StreamID:          "stream-1",
+		RunID:             "run-1",
 		ToolCallID:        "mcp-http-call-1",
 		ChannelIdentityID: "user-1",
 		CurrentPlatform:   "web",
@@ -412,7 +412,7 @@ func TestNativeToolSourceRechecksRuntimeGuardAfterApproval(t *testing.T) {
 	})
 
 	_, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
-		BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1",
+		BotID: "bot-1", SessionID: "session-1", RunID: "run-1",
 		RuntimeGuard: func(context.Context) error { return guardErr },
 	}, ToolExec().String(), map[string]any{"command": "touch stale"})
 	if !errors.Is(err, guardErr) {
@@ -456,7 +456,7 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
 		BotID:     "bot-1",
 		SessionID: "session-1",
-		StreamID:  "stream-1",
+		RunID:     "run-1",
 	}, "write", map[string]any{"path": "file.txt", "content": "x"})
 	if err != nil {
 		t.Fatalf("CallTool() error = %v", err)
@@ -510,7 +510,7 @@ func TestNativeToolSourceApprovalNotDeliveredRejectsWithoutWaiting(t *testing.T)
 	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
 		BotID:             "bot-1",
 		SessionID:         "session-1",
-		StreamID:          "stream-1",
+		RunID:             "run-1",
 		ToolCallID:        "mcp-http-call-1",
 		ChannelIdentityID: "user-1",
 	}, "write", map[string]any{"path": "file.txt", "content": "x"})
@@ -595,7 +595,7 @@ func TestNativeToolSourceAskUserRequiresInteractiveStream(t *testing.T) {
 	tools, err = source.ListTools(context.Background(), mcp.ToolSessionContext{
 		BotID:               "bot-1",
 		SessionID:           "session-1",
-		StreamID:            "stream-1",
+		RunID:               "run-1",
 		CanRequestUserInput: true,
 	})
 	if err != nil {
@@ -613,7 +613,7 @@ func nativeAskUserSession(toolCallID string) mcp.ToolSessionContext {
 	return mcp.ToolSessionContext{
 		BotID:               "bot-1",
 		SessionID:           "session-1",
-		StreamID:            "stream-1",
+		RunID:               "run-1",
 		ToolCallID:          toolCallID,
 		ChannelIdentityID:   "user-1",
 		RuntimeID:           "runtime-1",
@@ -707,7 +707,7 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	if !ok || len(uiPayload.Questions) != 1 || uiPayload.Questions[0].Kind != userinput.QuestionKindMultiSelect {
 		t.Fatalf("tool event ui payload = %#v", event.Metadata["ui_payload"])
 	}
-	if toolEvents.sessions[0].StreamID != "stream-1" || toolEvents.sessions[0].SessionID != "session-1" {
+	if toolEvents.sessions[0].RunID != "run-1" || toolEvents.sessions[0].SessionID != "session-1" {
 		t.Fatalf("tool event session = %#v", toolEvents.sessions[0])
 	}
 	terminal := toolEvents.events[1]
@@ -931,7 +931,7 @@ func TestNativeToolSourceAskUserKeepsMultipleRequestsIndependent(t *testing.T) {
 	session := mcp.ToolSessionContext{
 		BotID:               "bot-1",
 		SessionID:           "session-1",
-		StreamID:            "stream-1",
+		RunID:               "run-1",
 		CanRequestUserInput: true,
 	}
 

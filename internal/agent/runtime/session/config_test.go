@@ -20,7 +20,7 @@ func TestNewManagerFromConfigDefersRedisIOUntilStart(t *testing.T) {
 			URL:       "redis://127.0.0.1:1/0",
 			KeyPrefix: "memoh:test:deferred-start:",
 		},
-	})
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("construct manager without Redis I/O: %v", err)
 	}

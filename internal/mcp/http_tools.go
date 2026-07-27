@@ -19,7 +19,7 @@ const (
 	ToolHeaderRuntimeID          = "X-Memoh-Runtime-Id"
 	ToolHeaderRuntimeToken       = "X-Memoh-Runtime-Token" //nolint:gosec // G101: HTTP header name, not a credential.
 	ToolHeaderSessionID          = "X-Memoh-Session-Id"
-	ToolHeaderStreamID           = "X-Memoh-Stream-Id"
+	ToolHeaderRunID              = "X-Memoh-Run-Id"
 	ToolHeaderSessionType        = "X-Memoh-Session-Type"
 	ToolHeaderRouteID            = "X-Memoh-Route-Id"
 	ToolHeaderChannelIdentityID  = "X-Memoh-Channel-Identity-Id"
@@ -46,7 +46,7 @@ func ToolSessionContextFromHTTP(req *http.Request, fallbackBotID string) ToolSes
 		RuntimeID:          firstNonEmptyHTTPHeader(req, ToolHeaderRuntimeID),
 		RuntimeToken:       strings.TrimSpace(req.Header.Get(ToolHeaderRuntimeToken)),
 		SessionID:          firstNonEmptyHTTPHeader(req, ToolHeaderSessionID),
-		StreamID:           firstNonEmptyHTTPHeader(req, ToolHeaderStreamID),
+		RunID:              firstNonEmptyHTTPHeader(req, ToolHeaderRunID),
 		SessionType:        firstNonEmptyHTTPHeader(req, ToolHeaderSessionType),
 		RouteID:            firstNonEmptyHTTPHeader(req, ToolHeaderRouteID),
 		ChannelIdentityID:  firstNonEmptyHTTPHeader(req, ToolHeaderChannelIdentityID),

@@ -9,6 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
@@ -31,27 +32,28 @@ type turnRuntimeHooks struct {
 // gate for ACP runtimes lives here because it is a property of runtime
 // cost, not of channel policy: the caller supplies DiscussAddressed and
 // the runtime decides whether starting is worth it.
-func (s *Service) startDiscussTurn(ctx context.Context, cmd turn.StartTurnCommand, releaseClaim func()) (turn.RunHandle, error) {
+// The run context and its admission are established by StartTurn, so a discuss
+// turn occupies the thread's single slot on the same terms as a chat turn.
+func (s *Service) startDiscussTurn(runCtx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc, admission sessionruntime.Admission) (turn.RunHandle, error) {
 	if !s.discussRuntimeConfigured() {
 		return nil, errors.New("turn: discuss runtime not configured")
 	}
-	runCtx, cancel := context.WithCancel(ctx)
-	h := newDiscussHandle(runCtx, cmd, cancel, releaseClaim)
+	h := newDiscussHandle(runCtx, cmd, cancel, admission.RunID, s.turnRunFinisher(runCtx, admission))
 	go s.pumpDiscuss(runCtx, cmd, h)
 	return h, nil
 }
 
-func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc, releaseClaim func()) *discussHandle {
+func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc, runID string, finishRun func(status string, cause error)) *discussHandle {
 	return &discussHandle{
 		runHandle: runHandle{
-			id:           newRunID(),
-			events:       make(chan turn.Event, 16),
-			errs:         make(chan error, 1),
-			ctx:          ctx,
-			cancel:       cancel,
-			inject:       make(chan turn.InjectMessage), // unused in discuss mode
-			addAssets:    func([]turn.OutboundAssetRef) {},
-			releaseClaim: releaseClaim,
+			id:        runID,
+			events:    make(chan turn.Event, 16),
+			errs:      make(chan error, 1),
+			ctx:       ctx,
+			cancel:    cancel,
+			inject:    make(chan turn.InjectMessage), // unused in discuss mode
+			addAssets: func([]turn.OutboundAssetRef) {},
+			finishRun: finishRun,
 		},
 		teamID:    cmd.TeamID,
 		sessionID: cmd.ThreadID,
@@ -97,6 +99,11 @@ func (h *discussHandle) emit(kind string, payload []byte) bool {
 // run failed so finish releases the idempotency claim.
 func (h *discussHandle) emitErr(err error) bool {
 	h.failed.Store(true)
+	if h.streamErr == nil {
+		// Keep the first error: without it the terminal record cannot tell a
+		// discuss turn that broke from one that was stopped.
+		h.streamErr = err
+	}
 	select {
 	case h.errs <- err:
 		return true

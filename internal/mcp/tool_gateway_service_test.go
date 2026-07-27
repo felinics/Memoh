@@ -88,7 +88,7 @@ func TestToolGatewayServiceCacheSeparatesSessionID(t *testing.T) {
 	}
 }
 
-func TestToolGatewayServiceCacheSeparatesStreamID(t *testing.T) {
+func TestToolGatewayServiceCacheSeparatesRunID(t *testing.T) {
 	provider := &countingGatewayTestProvider{}
 	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
 	session := ToolSessionContext{
@@ -100,7 +100,7 @@ func TestToolGatewayServiceCacheSeparatesStreamID(t *testing.T) {
 	if _, err := service.ListTools(context.Background(), session); err != nil {
 		t.Fatalf("list tools failed: %v", err)
 	}
-	session.StreamID = "stream-1"
+	session.RunID = "run-1"
 	if _, err := service.ListTools(context.Background(), session); err != nil {
 		t.Fatalf("list tools after stream change failed: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestToolGatewayServiceCacheSeparatesUserInputCapability(t *testing.T) {
 	session := ToolSessionContext{
 		BotID:       "bot-1",
 		SessionID:   "session-1",
-		StreamID:    "stream-1",
+		RunID:       "run-1",
 		SessionType: "chat",
 	}
 

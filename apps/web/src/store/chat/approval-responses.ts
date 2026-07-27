@@ -1,7 +1,7 @@
 export type ApprovalResponseOutcome = 'succeeded' | 'failed' | 'canceled' | 'expired'
 
 export interface ApprovalResponse {
-  readonly streamId: string
+  readonly invocationId: string
   readonly approvalId: string
   readonly botId: string
   readonly sessionId: string
@@ -9,7 +9,7 @@ export interface ApprovalResponse {
 }
 
 export interface BeginApprovalResponseInput {
-  streamId: string
+  invocationId: string
   approvalId: string
   botId: string
   sessionId: string
@@ -53,30 +53,30 @@ export function createApprovalResponseTracker({
   const responses = new Map<string, PendingApprovalResponse>()
   const terminalResponseIds = new Set<string>()
 
-  function rememberTerminalResponse(streamId: string) {
-    terminalResponseIds.add(streamId)
+  function rememberTerminalResponse(invocationId: string) {
+    terminalResponseIds.add(invocationId)
     if (terminalResponseIds.size <= terminalHistoryLimit) return
     const oldest = terminalResponseIds.values().next().value
     if (oldest) terminalResponseIds.delete(oldest)
   }
 
-  function expireResponse(streamId: string) {
-    const response = responses.get(streamId)
+  function expireResponse(invocationId: string) {
+    const response = responses.get(invocationId)
     if (!response) return
     const remaining = ttlMs - (now() - response.startedAt)
     if (remaining > 0) {
-      response.cancelExpiry = scheduleExpiry(() => expireResponse(streamId), remaining)
+      response.cancelExpiry = scheduleExpiry(() => expireResponse(invocationId), remaining)
       return
     }
-    const expired = settleApprovalResponse(streamId, 'expired')
+    const expired = settleApprovalResponse(invocationId, 'expired')
     if (expired) onExpired(expired)
   }
 
   function expireStaleResponses() {
     const currentTime = now()
-    for (const [streamId, response] of responses) {
+    for (const [invocationId, response] of responses) {
       if (currentTime - response.startedAt < ttlMs) continue
-      expireResponse(streamId)
+      expireResponse(invocationId)
     }
   }
 
@@ -91,16 +91,16 @@ export function createApprovalResponseTracker({
   }
 
   function beginApprovalResponse(input: BeginApprovalResponseInput): boolean {
-    const streamId = input.streamId.trim()
+    const invocationId = input.invocationId.trim()
     const approvalId = input.approvalId.trim()
     const botId = input.botId.trim()
     const sessionId = input.sessionId.trim()
-    if (!streamId || !approvalId || !botId || !sessionId) return false
+    if (!invocationId || !approvalId || !botId || !sessionId) return false
     expireStaleResponses()
-    if (responses.has(streamId) || hasPendingApprovalResponse(approvalId)) return false
-    if (terminalResponseIds.has(streamId)) return false
+    if (responses.has(invocationId) || hasPendingApprovalResponse(approvalId)) return false
+    if (terminalResponseIds.has(invocationId)) return false
     const response: PendingApprovalResponse = {
-      streamId,
+      invocationId,
       approvalId,
       botId,
       sessionId,
@@ -108,17 +108,17 @@ export function createApprovalResponseTracker({
       startedAt: now(),
       rollback: input.rollback,
     }
-    responses.set(streamId, response)
-    response.cancelExpiry = scheduleExpiry(() => expireResponse(streamId), ttlMs)
+    responses.set(invocationId, response)
+    response.cancelExpiry = scheduleExpiry(() => expireResponse(invocationId), ttlMs)
     return true
   }
 
-  function getApprovalResponse(streamId: string): ApprovalResponse | undefined {
-    return responses.get(streamId.trim())
+  function getApprovalResponse(invocationId: string): ApprovalResponse | undefined {
+    return responses.get(invocationId.trim())
   }
 
-  function settleApprovalResponse(streamId: string, outcome: ApprovalResponseOutcome): ApprovalResponse | undefined {
-    const id = streamId.trim()
+  function settleApprovalResponse(invocationId: string, outcome: ApprovalResponseOutcome): ApprovalResponse | undefined {
+    const id = invocationId.trim()
     const response = responses.get(id)
     if (!response) return undefined
     responses.delete(id)
@@ -144,12 +144,12 @@ export function createApprovalResponseTracker({
 
   function discardAllApprovalResponses(): ApprovalResponse[] {
     const pending = pendingApprovalResponses()
-    for (const response of pending) settleApprovalResponse(response.streamId, 'canceled')
+    for (const response of pending) settleApprovalResponse(response.invocationId, 'canceled')
     return pending
   }
 
-  function isTerminalApprovalResponse(streamId: string | undefined): boolean {
-    const id = streamId?.trim()
+  function isTerminalApprovalResponse(invocationId: string | undefined): boolean {
+    const id = invocationId?.trim()
     return Boolean(id && terminalResponseIds.has(id))
   }
 

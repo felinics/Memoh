@@ -41,7 +41,7 @@ const (
 var (
 	ErrCommandOwnerUnavailable = errors.New("runtime command owner is unavailable")
 	ErrCommandTargetNotActive  = errors.New("runtime command target is not active")
-	ErrCommandTargetMismatch   = errors.New("stream does not belong to this session")
+	ErrCommandTargetMismatch   = errors.New("run does not belong to this session")
 	ErrCommandExpired          = errors.New("runtime command expired before acknowledgement")
 	ErrCommandBusy             = errors.New("runtime command executor is busy")
 	ErrCommandPayloadConflict  = errors.New("runtime command payload conflicts with an earlier request")
@@ -60,34 +60,57 @@ func (k Key) String() string {
 	return strings.TrimSpace(k.BotID) + ":" + strings.TrimSpace(k.SessionID)
 }
 
-type StreamRef struct {
+type RunRef struct {
 	BotID      string `json:"bot_id"`
 	SessionID  string `json:"session_id"`
-	StreamID   string `json:"stream_id"`
+	RunID      string `json:"run_id"`
 	OwnerID    string `json:"owner_id"`
 	Generation string `json:"generation"`
+	// FencingToken is the durable ownership token this reservation was made
+	// with. It is stored with the ref so the lease index entry can be written
+	// and removed from the backend's own copy, without a caller having to
+	// reconstruct a token it may no longer hold. Zero means the run has no
+	// ledger identity and therefore nothing for the reaper to transition.
+	FencingToken int64 `json:"fencing_token,omitempty"`
 }
 
-// RunHandle identifies one admitted run. Stream IDs may be reused after a run
-// finishes, so owner-side mutations must also carry the run generation.
+// identityMatches compares everything that names a reservation, ignoring the
+// fencing token. Release and validation paths reconstruct a ref from live state
+// that does not carry the token, so requiring it to match would reject the
+// legitimate owner.
+func (r RunRef) identityMatches(other RunRef) bool {
+	return strings.TrimSpace(r.BotID) == strings.TrimSpace(other.BotID) &&
+		strings.TrimSpace(r.SessionID) == strings.TrimSpace(other.SessionID) &&
+		strings.TrimSpace(r.RunID) == strings.TrimSpace(other.RunID) &&
+		strings.TrimSpace(r.OwnerID) == strings.TrimSpace(other.OwnerID) &&
+		strings.TrimSpace(r.Generation) == strings.TrimSpace(other.Generation)
+}
+
+// RunHandle identifies one admitted run. A run id can be reused by a client that
+// replays an old reservation, so owner-side mutations also carry the generation.
 type RunHandle struct {
 	BotID      string
 	SessionID  string
-	StreamID   string
+	RunID      string
 	Generation string
+	// FencingToken is the ledger ownership token for this run. Callers need it
+	// to fence their own durable writes, which is why it travels with the
+	// handle rather than staying inside the runtime. It is zero for runs
+	// started through the pre-ledger entry points.
+	FencingToken int64
 }
 
 func (h RunHandle) normalized() RunHandle {
 	h.BotID = strings.TrimSpace(h.BotID)
 	h.SessionID = strings.TrimSpace(h.SessionID)
-	h.StreamID = strings.TrimSpace(h.StreamID)
+	h.RunID = strings.TrimSpace(h.RunID)
 	h.Generation = strings.TrimSpace(h.Generation)
 	return h
 }
 
 func (h RunHandle) valid() bool {
 	h = h.normalized()
-	return h.BotID != "" && h.SessionID != "" && h.StreamID != "" && h.Generation != ""
+	return h.BotID != "" && h.SessionID != "" && h.RunID != "" && h.Generation != ""
 }
 
 func (h RunHandle) key() Key {
@@ -95,13 +118,15 @@ func (h RunHandle) key() Key {
 	return Key{BotID: h.BotID, SessionID: h.SessionID}
 }
 
+// Snapshot is the authoritative live view of one session. It holds at most one
+// run: admission answers busy rather than queueing, so there is no pending list
+// to project and a subscriber never has to reason about work it cannot see yet.
 type Snapshot struct {
 	BotID          string          `json:"bot_id"`
 	SessionID      string          `json:"session_id"`
 	Epoch          string          `json:"epoch"`
 	Seq            int64           `json:"seq"`
 	CurrentRunView *CurrentRunView `json:"current_run_view,omitempty"`
-	Queue          []QueuedRunView `json:"queue"`
 	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
@@ -110,16 +135,28 @@ func EmptySnapshot(botID, sessionID string) Snapshot {
 	return Snapshot{
 		BotID:     strings.TrimSpace(botID),
 		SessionID: strings.TrimSpace(sessionID),
-		Queue:     []QueuedRunView{},
 	}
 }
 
-type QueuedRunView struct {
-	StreamID string `json:"stream_id,omitempty"`
+// Cursor is a position in one session's observable event stream. Epoch and Seq
+// travel as a pair because Seq restarts whenever the epoch does: a live backend
+// that loses its state hands the session a new epoch, so comparing sequence
+// numbers across epochs would order two unrelated streams against each other.
+//
+// This is the position subscribers dedupe and recover on (SR-OBS-002). It is a
+// different thing from ledger.Cursor, which is a keyset position in the reaper's
+// sweep over durable rows.
+type Cursor struct {
+	Epoch string `json:"epoch,omitempty"`
+	Seq   int64  `json:"seq"`
+}
+
+func (s Snapshot) cursor() Cursor {
+	return Cursor{Epoch: strings.TrimSpace(s.Epoch), Seq: s.Seq}
 }
 
 type CurrentRunView struct {
-	StreamID            string               `json:"stream_id"`
+	RunID               string               `json:"run_id"`
 	Generation          string               `json:"generation"`
 	Status              string               `json:"status"`
 	OwnerID             string               `json:"owner_id,omitempty"`
@@ -162,7 +199,7 @@ type Event struct {
 	BotID     string        `json:"bot_id"`
 	SessionID string        `json:"session_id"`
 	Epoch     string        `json:"epoch,omitempty"`
-	StreamID  string        `json:"stream_id,omitempty"`
+	RunID     string        `json:"run_id,omitempty"`
 	Seq       int64         `json:"seq"`
 	UpdatedAt *time.Time    `json:"updated_at,omitempty"`
 	Snapshot  *Snapshot     `json:"snapshot,omitempty"`
@@ -182,7 +219,7 @@ type RuntimeDelta struct {
 }
 
 type CurrentRunPatch struct {
-	StreamID            string      `json:"stream_id"`
+	RunID               string      `json:"run_id"`
 	Status              *string     `json:"status,omitempty"`
 	Error               *string     `json:"error,omitempty"`
 	Steer               *SteerState `json:"steer,omitempty"`
@@ -208,7 +245,7 @@ type Command struct {
 	ReplyOwnerID string          `json:"reply_owner_id,omitempty"`
 	BotID        string          `json:"bot_id"`
 	SessionID    string          `json:"session_id"`
-	StreamID     string          `json:"stream_id"`
+	RunID        string          `json:"run_id"`
 	Generation   string          `json:"generation"`
 	TargetID     string          `json:"target_id,omitempty"`
 	SteerID      string          `json:"steer_id,omitempty"`
@@ -245,13 +282,13 @@ type Backend interface {
 // MemoryBackend intentionally does not implement this interface.
 type DistributedBackend interface {
 	Backend
-	UpdateActiveRun(ctx context.Context, key Key, streamID, generation string, update ActiveRunUpdate) (Snapshot, bool, error)
-	StartRun(ctx context.Context, key Key, ref StreamRef, update SnapshotUpdate) (Snapshot, bool, error)
-	ReleaseRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error)
-	RenewLease(ctx context.Context, key Key, streamID, ownerID, generation string, renewedAt, expiresAt time.Time) error
-	ValidateRunOwnership(ctx context.Context, key Key, ref StreamRef) error
-	LoadStreamRef(ctx context.Context, key Key, streamID string) (StreamRef, bool, error)
-	DeleteStreamRef(ctx context.Context, ref StreamRef) (bool, error)
+	UpdateActiveRun(ctx context.Context, key Key, runID, generation string, update ActiveRunUpdate) (Snapshot, bool, error)
+	StartRun(ctx context.Context, key Key, ref RunRef, update SnapshotUpdate) (Snapshot, bool, error)
+	ReleaseRun(ctx context.Context, key Key, ref RunRef, update ActiveRunUpdate) (Snapshot, bool, error)
+	RenewLease(ctx context.Context, key Key, runID, ownerID, generation string, renewedAt, expiresAt time.Time) error
+	ValidateRunOwnership(ctx context.Context, key Key, ref RunRef) error
+	LoadRunRef(ctx context.Context, key Key, runID string) (RunRef, bool, error)
+	DeleteRunRef(ctx context.Context, ref RunRef) (bool, error)
 	PublishCommand(ctx context.Context, ownerID string, command Command) error
 	SubscribeCommands(ctx context.Context, ownerID string) (CommandSubscription, error)
 	StoreCommandResult(ctx context.Context, result Command, ttl time.Duration) error

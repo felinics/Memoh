@@ -62,7 +62,7 @@ func acpProducedEvents(t *testing.T) []event.StreamEvent {
 	events := make([]event.StreamEvent, 0, 6)
 
 	// Approval card events come from the Memoh side of the boundary.
-	callbacks, collector := parityCallbacks(&parityApproval{}, "stream-1")
+	callbacks, collector := parityCallbacks(&parityApproval{}, "run-1")
 	pending := toolapproval.Request{
 		ID:         "approval-1",
 		ShortID:    1,

@@ -93,8 +93,8 @@ export function createChatRealtimeController(
     return true
   }
 
-  function abortWebSocketStream(streamId: string, botId?: string): boolean {
-    const id = streamId.trim()
+  function abortWebSocketRun(runId: string, botId?: string): boolean {
+    const id = runId.trim()
     const bid = botId?.trim()
     if (!id || !activeWebSocket?.connected) return false
     if (bid && bid !== activeWebSocketBotId) return false
@@ -190,7 +190,7 @@ export function createChatRealtimeController(
     stopWebSocket,
     ensureWebSocketConnected,
     sendWebSocketMessage,
-    abortWebSocketStream,
+    abortWebSocketRun,
     startSessionMessagesStream,
     stopSessionMessagesStream,
     startBotSessionsActivityStream,

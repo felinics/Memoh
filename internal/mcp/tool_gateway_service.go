@@ -191,7 +191,7 @@ func toolRegistryCacheKey(session ToolSessionContext) string {
 		strings.TrimSpace(session.RuntimeID),
 		hashCacheKeySecret(session.RuntimeToken),
 		strings.TrimSpace(session.SessionID),
-		strings.TrimSpace(session.StreamID),
+		strings.TrimSpace(session.RunID),
 		strings.TrimSpace(session.SessionType),
 		strings.TrimSpace(session.RouteID),
 		strings.TrimSpace(session.ChannelIdentityID),

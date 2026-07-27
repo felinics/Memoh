@@ -133,6 +133,10 @@
       "reasoning_effort_required": "请选择推理强度后重试。",
       "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent。",
       "config_update_failed": "外部 Agent 无法应用所选设置，请重试。"
+    },
+    "session_runtime": {
+      "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
+      "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。"
     }
   },
   "auth": {

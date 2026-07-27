@@ -1,0 +1,445 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/memohai/memoh/internal/agent/application"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	"github.com/memohai/memoh/internal/apperror"
+)
+
+const (
+	wsAdmissionBotID     = "11111111-1111-1111-1111-111111111111"
+	wsAdmissionSessionID = "22222222-2222-2222-2222-222222222222"
+)
+
+// wsTerminalWrite is one release of the session's active slot.
+type wsTerminalWrite struct {
+	handle  sessionruntime.RunHandle
+	status  string
+	message string
+}
+
+// stubWSTurnAdmitter stands in for the session runtime manager. The handler
+// depends on the two-method admission interface rather than the manager, so the
+// entry point is exercisable without PostgreSQL, Redis, or a live backend.
+type stubWSTurnAdmitter struct {
+	admission sessionruntime.Admission
+	admitErr  error
+
+	mu       sync.Mutex
+	admitted []sessionruntime.AdmitInput
+	// terminal reports each terminal write, so a test can wait for the release
+	// that happens on the run's goroutine instead of sleeping for it.
+	terminal chan wsTerminalWrite
+}
+
+func newStubWSTurnAdmitter() *stubWSTurnAdmitter {
+	return &stubWSTurnAdmitter{terminal: make(chan wsTerminalWrite, 4)}
+}
+
+func (a *stubWSTurnAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput) (sessionruntime.Admission, error) {
+	a.mu.Lock()
+	a.admitted = append(a.admitted, in)
+	a.mu.Unlock()
+	if a.admitErr != nil {
+		return sessionruntime.Admission{}, a.admitErr
+	}
+	return a.admission, nil
+}
+
+func (a *stubWSTurnAdmitter) FinishRun(_ context.Context, handle sessionruntime.RunHandle, status, message string) error {
+	select {
+	case a.terminal <- wsTerminalWrite{handle: handle, status: status, message: message}:
+	default:
+	}
+	return nil
+}
+
+func (a *stubWSTurnAdmitter) submissions() []sessionruntime.AdmitInput {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]sessionruntime.AdmitInput(nil), a.admitted...)
+}
+
+func (a *stubWSTurnAdmitter) awaitTerminalWrite(t *testing.T) wsTerminalWrite {
+	t.Helper()
+	select {
+	case write := <-a.terminal:
+		return write
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the run's terminal write")
+		return wsTerminalWrite{}
+	}
+}
+
+// startedWSAdmission is an admission that this process owns and must execute.
+func startedWSAdmission() sessionruntime.Admission {
+	return sessionruntime.Admission{
+		RunID:        "run-1",
+		TurnID:       "turn-1",
+		TurnPosition: 7,
+		State:        "running",
+		Started:      true,
+		Cursor:       sessionruntime.Cursor{Epoch: "epoch-1", Seq: 12},
+		Handle: sessionruntime.RunHandle{
+			BotID:        wsAdmissionBotID,
+			SessionID:    wsAdmissionSessionID,
+			RunID:        "run-1",
+			Generation:   "generation-1",
+			FencingToken: 3,
+		},
+	}
+}
+
+func wsAdmissionTestRef() wsTurnRef {
+	return wsTurn("invocation-1", wsAdmissionSessionID)
+}
+
+func wsAdmissionTestSubmission() []byte {
+	return wsSubmission{Kind: "message", SessionID: wsAdmissionSessionID, Text: "hi"}.encode()
+}
+
+// admitWSTestTurn runs one admission and returns both halves of its outcome:
+// what the handler decided, and what the client was told. The writer's queue is
+// the wire those send helpers actually reach.
+func admitWSTestTurn(t *testing.T, handler *LocalChannelHandler, ref wsTurnRef, submission []byte) (wsRunAdmission, bool, []map[string]any) {
+	t.Helper()
+
+	writer := &wsWriter{ch: make(chan []byte, 4), stop: make(chan struct{}), done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	admission, ok := handler.admitWSTurn(ctx, writer, wsAdmissionBotID, ref, submission, make(chan struct{}, 1), cancel)
+
+	events := make([]map[string]any, 0, len(writer.ch))
+	for len(writer.ch) > 0 {
+		var event map[string]any
+		if err := json.Unmarshal(<-writer.ch, &event); err != nil {
+			t.Fatalf("unmarshal ws event: %v", err)
+		}
+		events = append(events, event)
+	}
+	return admission, ok, events
+}
+
+// The run id, the turn it belongs to, and the position it became observable at
+// all come from admission, and the handler has to carry all three: the ledger
+// decides the first two and the live reservation decides the third, so nothing
+// downstream can reconstruct them.
+func TestAdmitWSTurnCarriesRunTurnAndCursor(t *testing.T) {
+	t.Parallel()
+
+	runtime := newStubWSTurnAdmitter()
+	runtime.admission = startedWSAdmission()
+	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+
+	admission, ok, events := admitWSTestTurn(t, handler, wsAdmissionTestRef(), wsAdmissionTestSubmission())
+	if !ok || !admission.Execute {
+		t.Fatalf("admission = %+v, ok = %v, want an executable run", admission, ok)
+	}
+	if admission.RunID != "run-1" || admission.Handle.FencingToken != 3 {
+		t.Fatalf("admission = %+v, want the ledger's run and its fencing token", admission)
+	}
+	if admission.Accepted.TurnID != "turn-1" {
+		t.Fatalf("accepted turn = %q, want turn-1", admission.Accepted.TurnID)
+	}
+	if admission.Accepted.Cursor != (sessionruntime.Cursor{Epoch: "epoch-1", Seq: 12}) {
+		t.Fatalf("accepted cursor = %+v, want the activation cursor", admission.Accepted.Cursor)
+	}
+	if admission.Accepted.Duplicate {
+		t.Fatalf("a first admission is not a duplicate: %+v", admission.Accepted)
+	}
+	// Acceptance is published once the run is registered, not here: a run the
+	// connection cannot register must not have been announced already.
+	if len(events) != 0 {
+		t.Fatalf("admission wrote %#v, want nothing on the wire yet", events)
+	}
+}
+
+// The wire form is the contract. turn_id, epoch and seq use the names the
+// subscription frames use, so a client that also observes the session orders
+// acceptance against those frames with one comparison instead of two
+// vocabularies (SR-OBS-002, SR-OBS-003).
+func TestSendWSRunAcceptedCarriesTurnAndCursor(t *testing.T) {
+	t.Parallel()
+
+	admission := startedWSAdmission()
+	accepted := decodeWSTestEvent(t, func(writer *wsWriter) {
+		sendWSRunAccepted(writer, wsAdmissionTestRef().withRun(admission.RunID), wsRunAcceptance{
+			TurnID: admission.TurnID,
+			Cursor: admission.Cursor,
+		})
+	})
+	if accepted["type"] != "run_accepted" || accepted["run_id"] != "run-1" || accepted["invocation_id"] != "invocation-1" {
+		t.Fatalf("run_accepted = %#v", accepted)
+	}
+	if accepted["turn_id"] != "turn-1" {
+		t.Fatalf("run_accepted turn_id = %#v, want turn-1", accepted["turn_id"])
+	}
+	if accepted["epoch"] != "epoch-1" || accepted["seq"] != float64(12) {
+		t.Fatalf("run_accepted cursor = %#v, want epoch-1 at seq 12", accepted)
+	}
+	if _, present := accepted["duplicate"]; present {
+		t.Fatalf("a first acceptance marked itself duplicate: %#v", accepted)
+	}
+}
+
+// A replay names the turn the original submission was admitted under, because
+// every subscriber of that run is shown the same turn. It reports no cursor: the
+// call reserved nothing, so it produced no position, and where the session
+// stands now is what a subscription's snapshot answers.
+func TestAdmitWSTurnReplayNamesTheTurnWithoutACursor(t *testing.T) {
+	t.Parallel()
+
+	runtime := newStubWSTurnAdmitter()
+	runtime.admission = sessionruntime.Admission{
+		RunID:   "run-1",
+		TurnID:  "turn-1",
+		State:   "running",
+		Replay:  true,
+		Started: false,
+	}
+	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+
+	admission, ok, events := admitWSTestTurn(t, handler, wsAdmissionTestRef(), wsAdmissionTestSubmission())
+	if !ok || admission.Execute {
+		t.Fatalf("admission = %+v, ok = %v, want an answered replay that executes nothing", admission, ok)
+	}
+	if admission.Handle.FencingToken != 0 {
+		t.Fatalf("replay claims ownership: %+v", admission.Handle)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one acceptance", events)
+	}
+	accepted := events[0]
+	if accepted["type"] != "run_accepted" || accepted["run_id"] != "run-1" || accepted["duplicate"] != true {
+		t.Fatalf("replay acceptance = %#v", accepted)
+	}
+	if accepted["turn_id"] != "turn-1" {
+		t.Fatalf("replay acceptance turn_id = %#v, want turn-1", accepted["turn_id"])
+	}
+	if _, present := accepted["epoch"]; present {
+		t.Fatalf("replay reported a cursor it did not produce: %#v", accepted)
+	}
+	if _, present := accepted["seq"]; present {
+		t.Fatalf("replay reported a cursor it did not produce: %#v", accepted)
+	}
+}
+
+// What the client submitted is what gets fingerprinted, and the run must be
+// interruptible once it exists: an admission without abort plumbing is a turn
+// nobody can stop.
+func TestAdmitWSTurnSubmitsTheClientsIdentityAndAbortPlumbing(t *testing.T) {
+	t.Parallel()
+
+	runtime := newStubWSTurnAdmitter()
+	runtime.admission = startedWSAdmission()
+	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+
+	submission := wsAdmissionTestSubmission()
+	if _, ok, _ := admitWSTestTurn(t, handler, wsAdmissionTestRef(), submission); !ok {
+		t.Fatal("admission failed")
+	}
+
+	submitted := runtime.submissions()
+	if len(submitted) != 1 {
+		t.Fatalf("admit calls = %d, want 1", len(submitted))
+	}
+	in := submitted[0]
+	if in.BotID != wsAdmissionBotID || in.SessionID != wsAdmissionSessionID || in.InvocationID != "invocation-1" {
+		t.Fatalf("admit input = %+v, want the connection's bot, session and invocation", in)
+	}
+	if string(in.Payload) != string(submission) {
+		t.Fatalf("admit payload = %q, want the canonical submission %q", in.Payload, submission)
+	}
+	if in.Execution.Admission == nil || in.Execution.AbortCh == nil || in.Execution.Cancel == nil {
+		t.Fatalf("execution plumbing = %+v, want a builder, an abort channel and a cancel", in.Execution)
+	}
+}
+
+// A refusal is not a run. The client is given the stable code it branches on —
+// one of these is worth retrying unchanged, the other never is — and no run id,
+// because none exists.
+func TestAdmitWSTurnRejectionsCarryStableCodes(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want apperror.Code
+	}{
+		{name: "busy", err: sessionruntime.ErrSessionBusy, want: apperror.CodeSessionBusy},
+		{name: "conflict", err: sessionruntime.ErrInvocationConflict, want: apperror.CodeSessionInvocationConflict},
+	} {
+		runtime := newStubWSTurnAdmitter()
+		runtime.admitErr = tc.err
+		handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+
+		admission, ok, events := admitWSTestTurn(t, handler, wsAdmissionTestRef(), wsAdmissionTestSubmission())
+		if ok || admission.Execute {
+			t.Fatalf("%s: admission = %+v, ok = %v, want a refusal", tc.name, admission, ok)
+		}
+		if len(events) != 1 {
+			t.Fatalf("%s: events = %#v, want one rejection", tc.name, events)
+		}
+		rejected := events[0]
+		if rejected["type"] != "run_rejected" || rejected["code"] != string(tc.want) {
+			t.Fatalf("%s: rejection = %#v, want run_rejected %s", tc.name, rejected, tc.want)
+		}
+		if _, present := rejected["run_id"]; present {
+			t.Fatalf("%s: rejection named a run: %#v", tc.name, rejected)
+		}
+	}
+}
+
+// A decision answer continues a turn that was already admitted. Admitting it
+// again would spend a second run on one turn and, because a session admits one
+// run at a time, would be refused as busy by the turn it is resuming.
+func TestAdmitWSTurnDecisionAnswerTakesALocalNameWithoutAdmission(t *testing.T) {
+	t.Parallel()
+
+	runtime := newStubWSTurnAdmitter()
+	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+
+	admission, ok, events := admitWSTestTurn(t, handler, wsAdmissionTestRef(), nil)
+	if !ok || !admission.Execute || admission.RunID == "" {
+		t.Fatalf("admission = %+v, ok = %v, want a locally named executable run", admission, ok)
+	}
+	if admission.Handle.FencingToken != 0 || admission.Accepted != (wsRunAcceptance{}) {
+		t.Fatalf("admission = %+v, want no durable ownership and nothing to report", admission)
+	}
+	if len(runtime.submissions()) != 0 {
+		t.Fatalf("decision answer consumed an admission: %+v", runtime.submissions())
+	}
+	if len(events) != 0 {
+		t.Fatalf("decision answer wrote %#v, want nothing", events)
+	}
+}
+
+// Without durable admission there is no single-active-run guarantee to fall back
+// on, so the turn is refused rather than run unprotected.
+func TestAdmitWSTurnRequiresConfiguredRuntime(t *testing.T) {
+	t.Parallel()
+
+	handler := &LocalChannelHandler{logger: slog.Default()}
+	admission, ok, events := admitWSTestTurn(t, handler, wsAdmissionTestRef(), wsAdmissionTestSubmission())
+	if ok || admission.Execute {
+		t.Fatalf("admission = %+v, ok = %v, want a refusal", admission, ok)
+	}
+	if len(events) != 1 || events[0]["type"] != "error" {
+		t.Fatalf("events = %#v, want one error", events)
+	}
+}
+
+// The terminal write is how the session's single active slot is released. Only
+// the stable code reaches the run's published state; the error itself is a
+// private diagnostic that stays in the log.
+func TestFinishWSRunReleasesTheSlotUnderTheAdmittedToken(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name        string
+		aborted     bool
+		runErr      error
+		wantStatus  string
+		wantMessage string
+	}{
+		{name: "completed", wantStatus: sessionruntime.RunStatusCompleted},
+		{name: "aborted", aborted: true, wantStatus: sessionruntime.RunStatusAborted},
+		{
+			name:        "errored",
+			runErr:      apperror.New(apperror.CodeSessionBusy, nil),
+			wantStatus:  sessionruntime.RunStatusErrored,
+			wantMessage: string(apperror.CodeSessionBusy),
+		},
+		{
+			name:       "errored without a catalog code",
+			runErr:     errors.New("model exploded"),
+			wantStatus: sessionruntime.RunStatusErrored,
+		},
+	} {
+		runtime := newStubWSTurnAdmitter()
+		handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+		admitted := startedWSAdmission()
+
+		handler.finishWSRun(context.Background(), wsRunAdmission{RunID: admitted.RunID, Handle: admitted.Handle}, tc.aborted, tc.runErr)
+
+		write := runtime.awaitTerminalWrite(t)
+		if write.status != tc.wantStatus || write.message != tc.wantMessage {
+			t.Fatalf("%s: terminal write = %+v, want %s %q", tc.name, write, tc.wantStatus, tc.wantMessage)
+		}
+		if write.handle.FencingToken != admitted.Handle.FencingToken || write.handle.RunID != admitted.RunID {
+			t.Fatalf("%s: terminal write handle = %+v, want the admitted one", tc.name, write.handle)
+		}
+	}
+}
+
+// A stream that never owned the run owns no terminal transition either. Writing
+// one would either fail the fence or, worse, end a turn another owner is still
+// executing.
+func TestFinishWSRunSkipsRunsThisProcessDoesNotOwn(t *testing.T) {
+	t.Parallel()
+
+	runtime := newStubWSTurnAdmitter()
+	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+
+	handler.finishWSRun(context.Background(), wsRunAdmission{RunID: "run-1"}, false, nil)
+
+	select {
+	case write := <-runtime.terminal:
+		t.Fatalf("unowned run wrote a terminal state: %+v", write)
+	default:
+	}
+}
+
+// The end-to-end shape of one accepted turn: admission names the run and its
+// turn, the client is told both plus the cursor the run became observable at,
+// and the run's end releases the session under the token admission handed out.
+func TestStartWSStreamPublishesAdmittedTurnAndReleasesTheSession(t *testing.T) {
+	t.Parallel()
+
+	runtime := newStubWSTurnAdmitter()
+	runtime.admission = startedWSAdmission()
+	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+
+	writer := &wsWriter{ch: make(chan []byte, 16), stop: make(chan struct{}), done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ref, started := handler.startWSStream(ctx, ctx, newWSStreamRegistry(), writer, wsAdmissionBotID, wsAdmissionTestRef(), "test", wsAdmissionTestSubmission(),
+		nil,
+		func(context.Context, wsTurnRef, chan<- application.WSStreamEvent, <-chan struct{}) error {
+			return nil
+		})
+	if !started || ref.RunID != "run-1" {
+		t.Fatalf("stream started = %v, ref = %+v, want the admitted run", started, ref)
+	}
+
+	var accepted map[string]any
+	select {
+	case data := <-writer.ch:
+		if err := json.Unmarshal(data, &accepted); err != nil {
+			t.Fatalf("unmarshal acceptance: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for run_accepted")
+	}
+	if accepted["type"] != "run_accepted" || accepted["run_id"] != "run-1" {
+		t.Fatalf("first event = %#v, want run_accepted naming the admitted run", accepted)
+	}
+	if accepted["turn_id"] != "turn-1" || accepted["epoch"] != "epoch-1" || accepted["seq"] != float64(12) {
+		t.Fatalf("run_accepted = %#v, want the admitted turn and cursor", accepted)
+	}
+
+	write := runtime.awaitTerminalWrite(t)
+	if write.status != sessionruntime.RunStatusCompleted || write.handle.FencingToken != 3 {
+		t.Fatalf("terminal write = %+v, want a completed run fenced by the admitted token", write)
+	}
+}

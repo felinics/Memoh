@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	chatview "github.com/memohai/memoh/internal/agent/view"
 )
 
@@ -81,6 +83,9 @@ type MemoryBackend struct {
 	snapshotExpiresAt map[string]time.Time
 	subscribers       *subscriberSet[Event]
 	closed            bool
+	// generation is this process's liveness incarnation. It is minted once and
+	// never changes, so it dies with the heap that holds the live state.
+	generation string
 }
 
 func NewMemoryBackend() *MemoryBackend {
@@ -96,6 +101,7 @@ func NewMemoryBackendWithTTL(stateTTL time.Duration) *MemoryBackend {
 		snapshots:         make(map[string]Snapshot),
 		snapshotExpiresAt: make(map[string]time.Time),
 		subscribers:       newSubscriberSet[Event](),
+		generation:        uuid.NewString(),
 	}
 }
 
@@ -152,7 +158,6 @@ func (b *MemoryBackend) Update(ctx context.Context, key Key, update SnapshotUpda
 	if err != nil || !changed {
 		return next, changed, err
 	}
-	next.Queue = nonNilQueue(next.Queue)
 	stored, err := cloneSnapshot(next)
 	if err != nil {
 		return Snapshot{}, false, err
@@ -256,7 +261,6 @@ func cloneSnapshot(snapshot Snapshot) (Snapshot, error) {
 		}
 		out.CurrentRunView.Messages = clonedMessages
 	}
-	out.Queue = nonNilQueue(out.Queue)
 	return out, nil
 }
 

@@ -16,7 +16,7 @@ import (
 )
 
 // TriggerSchedule executes a scheduled command via the internal agent.
-func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (schedule.TriggerResult, error) {
+func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (triggerResult schedule.TriggerResult, err error) {
 	if strings.TrimSpace(botID) == "" {
 		return schedule.TriggerResult{}, errors.New("bot id is required")
 	}
@@ -24,10 +24,29 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		return schedule.TriggerResult{}, errors.New("schedule command is required")
 	}
 
+	submission, err := json.Marshal(scheduleSubmission{
+		Kind:       "schedule",
+		ScheduleID: strings.TrimSpace(payload.ID),
+		Command:    payload.Command,
+	})
+	if err != nil {
+		return schedule.TriggerResult{}, err
+	}
+	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, payload.SessionID, scheduleInvocationID(payload), submission)
+	if err != nil {
+		// Including a busy answer: a fire that cannot take the thread's slot has
+		// no value once the next one is due, so it is reported and dropped rather
+		// than retried here.
+		return schedule.TriggerResult{}, err
+	}
+	defer func() { finish(err) }()
+	ctx = runCtx
+
 	req := ChatRequest{
 		BotID:       botID,
 		ChatID:      botID,
 		ThreadID:    payload.SessionID,
+		RunID:       admission.RunID,
 		Query:       payload.Command,
 		UserID:      payload.OwnerUserID,
 		Token:       token,
@@ -73,10 +92,27 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 }
 
 // TriggerHeartbeat executes a heartbeat check via the internal agent.
-func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload heartbeat.TriggerPayload, token string) (heartbeat.TriggerResult, error) {
+func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload heartbeat.TriggerPayload, token string) (triggerResult heartbeat.TriggerResult, err error) {
 	if strings.TrimSpace(botID) == "" {
 		return heartbeat.TriggerResult{}, errors.New("bot id is required")
 	}
+
+	submission, err := json.Marshal(heartbeatSubmission{
+		Kind:     "heartbeat",
+		BotID:    strings.TrimSpace(botID),
+		Interval: payload.Interval,
+	})
+	if err != nil {
+		return heartbeat.TriggerResult{}, err
+	}
+	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, payload.SessionID, heartbeatInvocationID(payload), submission)
+	if err != nil {
+		// A tick that cannot take the thread's slot is dropped: the next tick is
+		// already scheduled and a stale check has nothing to report.
+		return heartbeat.TriggerResult{}, err
+	}
+	defer func() { finish(err) }()
+	ctx = runCtx
 
 	var heartbeatModel string
 	if botSettings, err := s.loadBotSettings(ctx, botID); err == nil {
@@ -87,6 +123,7 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 		BotID:       botID,
 		ChatID:      botID,
 		ThreadID:    payload.SessionID,
+		RunID:       admission.RunID,
 		Query:       "heartbeat",
 		UserID:      payload.OwnerUserID,
 		Token:       token,
@@ -144,6 +181,37 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 		ModelID:    rc.model.ID,
 		SessionID:  payload.SessionID,
 	}, nil
+}
+
+// scheduleSubmission and heartbeatSubmission are the canonical fingerprint
+// inputs for a triggered turn. They carry what the trigger asked for and nothing
+// about when it ran, so re-running one tick's work is recognized as the same
+// submission rather than a new one.
+type scheduleSubmission struct {
+	Kind       string `json:"kind"`
+	ScheduleID string `json:"schedule_id"`
+	Command    string `json:"command"`
+}
+
+type heartbeatSubmission struct {
+	Kind     string `json:"kind"`
+	BotID    string `json:"bot_id"`
+	Interval int    `json:"interval_minutes"`
+}
+
+// scheduleInvocationID and heartbeatInvocationID name one fire.
+//
+// Each fire runs in a thread of its own, and invocation uniqueness is already
+// scoped per thread, so the thread id is what distinguishes consecutive fires.
+// Naming it explicitly also keeps these ids correct if a schedule ever reuses one
+// thread across fires, which would otherwise make every fire after the first look
+// like a replay of the first.
+func scheduleInvocationID(payload schedule.TriggerPayload) string {
+	return "schedule:" + strings.TrimSpace(payload.ID) + ":" + strings.TrimSpace(payload.SessionID)
+}
+
+func heartbeatInvocationID(payload heartbeat.TriggerPayload) string {
+	return "heartbeat:" + strings.TrimSpace(payload.SessionID)
 }
 
 func isHeartbeatOK(text string) bool {

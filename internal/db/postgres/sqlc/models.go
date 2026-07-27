@@ -173,6 +173,7 @@ type BotHistoryMessage struct {
 	TurnSupersededReason    pgtype.Text        `json:"turn_superseded_reason"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	TeamID                  pgtype.UUID        `json:"team_id"`
+	RunID                   pgtype.UUID        `json:"run_id"`
 }
 
 type BotHistoryMessageAsset struct {
@@ -669,6 +670,28 @@ type SearchProvider struct {
 	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
+type SessionRun struct {
+	RunID            pgtype.UUID        `json:"run_id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	SessionID        pgtype.UUID        `json:"session_id"`
+	InvocationID     string             `json:"invocation_id"`
+	TurnID           pgtype.UUID        `json:"turn_id"`
+	TurnPosition     int64              `json:"turn_position"`
+	State            string             `json:"state"`
+	InputJson        []byte             `json:"input_json"`
+	InputFingerprint string             `json:"input_fingerprint"`
+	OwnerID          pgtype.Text        `json:"owner_id"`
+	FencingToken     int64              `json:"fencing_token"`
+	OwnerSince       pgtype.Timestamptz `json:"owner_since"`
+	LiveGeneration   pgtype.Text        `json:"live_generation"`
+	AbortRequestedAt pgtype.Timestamptz `json:"abort_requested_at"`
+	ErrorCode        pgtype.Text        `json:"error_code"`
+	ErrorMessage     pgtype.Text        `json:"error_message"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Snapshot struct {
 	ID                        pgtype.UUID        `json:"id"`
 	ContainerID               string             `json:"container_id"`
@@ -817,6 +840,8 @@ type ToolApprovalRequest struct {
 	CreatedAt                    pgtype.Timestamptz `json:"created_at"`
 	DecidedAt                    pgtype.Timestamptz `json:"decided_at"`
 	TeamID                       pgtype.UUID        `json:"team_id"`
+	RunID                        pgtype.UUID        `json:"run_id"`
+	TurnID                       pgtype.UUID        `json:"turn_id"`
 }
 
 type TtsModel struct {
@@ -908,6 +933,8 @@ type UserInputRequest struct {
 	CanceledAt                   pgtype.Timestamptz `json:"canceled_at"`
 	UpdatedAt                    pgtype.Timestamptz `json:"updated_at"`
 	TeamID                       pgtype.UUID        `json:"team_id"`
+	RunID                        pgtype.UUID        `json:"run_id"`
+	TurnID                       pgtype.UUID        `json:"turn_id"`
 }
 
 type UserProviderOauthToken struct {

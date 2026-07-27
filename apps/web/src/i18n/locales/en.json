@@ -133,6 +133,10 @@
       "reasoning_effort_required": "Choose a reasoning effort and try again.",
       "reasoning_effort_unavailable": "The selected reasoning effort is no longer available for this external agent.",
       "config_update_failed": "The external agent could not apply the selected settings. Please retry."
+    },
+    "session_runtime": {
+      "session_busy": "This conversation is still working on your previous message. Please try again in a moment.",
+      "invocation_conflict": "This message was already sent with different content. Reload the conversation to see what was saved."
     }
   },
   "auth": {

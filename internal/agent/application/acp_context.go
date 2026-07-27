@@ -18,7 +18,7 @@ type acpContextRenderInput struct {
 	BotID                     string
 	ChatID                    string
 	SessionID                 string
-	StreamID                  string
+	RunID                     string
 	RouteID                   string
 	AgentID                   string
 	ProjectPath               string
@@ -70,7 +70,7 @@ func (s *Service) buildACPContextMarkdown(ctx context.Context, req ChatRequest, 
 		BotID:                     req.BotID,
 		ChatID:                    req.ChatID,
 		SessionID:                 req.ThreadID,
-		StreamID:                  req.StreamID,
+		RunID:                     req.RunID,
 		RouteID:                   req.RouteID,
 		AgentID:                   agentID,
 		ProjectPath:               projectPath,
@@ -101,7 +101,7 @@ func renderACPContextMarkdown(input acpContextRenderInput) string {
 		{"Timezone", timezoneName},
 		{"Bot ID", input.BotID},
 		{"Session ID", input.SessionID},
-		{"Stream ID", input.StreamID},
+		{"Run ID", input.RunID},
 		{"ACP agent", input.AgentID},
 		{"Workspace", input.ProjectPath},
 	}))

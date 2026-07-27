@@ -351,28 +351,50 @@ export interface UISystemTurn {
 
 export type UITurn = UIUserTurn | UIAssistantTurn | UISystemTurn
 
+// Turn events are named by the server's run_id. Events that precede the run —
+// acceptance, rejection, session creation, and validation errors — are named by
+// the invocation_id the client sent, since that is the only name shared yet.
+export interface UIStreamRunAcceptedEvent {
+  type: 'run_accepted'
+  run_id: string
+  invocation_id?: string
+  session_id?: string
+  // Set when this acceptance names a run the invocation had already started,
+  // which is how a redelivered send avoids producing a second turn.
+  duplicate?: boolean
+}
+
+export interface UIStreamRunRejectedEvent {
+  type: 'run_rejected'
+  invocation_id?: string
+  session_id?: string
+  code?: string
+  message?: string
+}
+
 export interface UIStreamStartEvent {
   type: 'start'
-  stream_id?: string
+  run_id?: string
   session_id?: string
 }
 
 export interface UIStreamMessageEvent {
   type: 'message'
-  stream_id?: string
+  run_id?: string
   session_id?: string
   data: UIMessage
 }
 
 export interface UIStreamEndEvent {
   type: 'end'
-  stream_id?: string
+  run_id?: string
   session_id?: string
 }
 
 export interface UIStreamErrorEvent {
   type: 'error'
-  stream_id?: string
+  run_id?: string
+  invocation_id?: string
   session_id?: string
   message: string
   feedback?: unknown
@@ -380,18 +402,21 @@ export interface UIStreamErrorEvent {
 
 export interface UIStreamSessionCreatedEvent {
   type: 'session_created'
-  stream_id?: string
+  invocation_id?: string
   session_id: string
 }
 
 export interface UIStreamUserMessageEvent {
   type: 'user_message'
-  stream_id?: string
+  run_id?: string
+  invocation_id?: string
   session_id?: string
   data: UIUserTurn
 }
 
 export type UIStreamEvent =
+  | UIStreamRunAcceptedEvent
+  | UIStreamRunRejectedEvent
   | UIStreamStartEvent
   | UIStreamMessageEvent
   | UIStreamEndEvent

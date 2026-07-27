@@ -187,7 +187,7 @@ func TestHandleMCPToolsRuntimeIDUsesTrustedRuntimeContext(t *testing.T) {
 		RuntimeID:          "runtime-1",
 		RuntimeToken:       "runtime-token-1",
 		SessionID:          "trusted-session",
-		StreamID:           "trusted-stream",
+		RunID:              "trusted-run",
 		ChannelIdentityID:  "trusted-user",
 		SupportsImageInput: true,
 		RuntimeActive:      true,
@@ -217,7 +217,7 @@ func TestHandleMCPToolsRuntimeIDUsesTrustedRuntimeContext(t *testing.T) {
 	}
 	if executor.lastSession.ChatID != trusted.ChatID ||
 		executor.lastSession.SessionID != trusted.SessionID ||
-		executor.lastSession.StreamID != trusted.StreamID ||
+		executor.lastSession.RunID != trusted.RunID ||
 		executor.lastSession.ChannelIdentityID != trusted.ChannelIdentityID ||
 		!executor.lastSession.SupportsImageInput ||
 		!executor.lastSession.RuntimeActive {
@@ -266,7 +266,7 @@ func TestHandleMCPToolsCallRoutesPublicEventHeadersWithoutTrustingIdentity(t *te
 	unregister := toolContexts.RegisterToolEventSink(mcpgw.ToolSessionContext{
 		BotID:     "bot-1",
 		SessionID: "session-1",
-		StreamID:  "stream-1",
+		RunID:     "run-1",
 	}, func(event mcpgw.ToolStreamEvent) {
 		delivered = append(delivered, event)
 	})
@@ -283,7 +283,7 @@ func TestHandleMCPToolsCallRoutesPublicEventHeadersWithoutTrustingIdentity(t *te
 	callReq.Header.Set(headerBotID, "bot-1")
 	callReq.Header.Set(headerChatID, "chat-1")
 	callReq.Header.Set(headerSessionID, "session-1")
-	callReq.Header.Set(headerStreamID, "stream-1")
+	callReq.Header.Set(headerRunID, "run-1")
 	callReq.Header.Set(headerSessionType, "acp_agent")
 	callReq.Header.Set(headerChannelIdentityID, "user-1")
 	callRec := httptest.NewRecorder()
@@ -314,7 +314,7 @@ func TestBuildToolSessionContextPreservesRoutingHeadersAndIgnoresIdentityHeaders
 	req.Header.Set(headerChatID, "chat-1")
 	req.Header.Set(mcpgw.ToolHeaderRuntimeToken, "runtime-token-1")
 	req.Header.Set(headerSessionID, "session-1")
-	req.Header.Set(headerStreamID, "stream-1")
+	req.Header.Set(headerRunID, "run-1")
 	req.Header.Set(headerSessionType, "acp_agent")
 	req.Header.Set(headerRouteID, "route-1")
 	req.Header.Set(headerChannelIdentityID, "user-1")
@@ -332,7 +332,7 @@ func TestBuildToolSessionContextPreservesRoutingHeadersAndIgnoresIdentityHeaders
 		t.Fatalf("unexpected base ids: %#v", session)
 	}
 	if session.SessionID != "session-1" ||
-		session.StreamID != "stream-1" ||
+		session.RunID != "run-1" ||
 		session.SessionType != "acp_agent" ||
 		session.RouteID != "route-1" ||
 		session.CurrentPlatform != "web" ||
@@ -370,7 +370,7 @@ func TestBuildToolSessionContextDoesNotMergeStoredACPContextForPublicEndpoint(t 
 	store.Put(mcpgw.ToolSessionContext{
 		BotID:            "bot-1",
 		SessionID:        "session-1",
-		StreamID:         "stream-latest",
+		RunID:            "run-latest",
 		CurrentPlatform:  "web",
 		ReplyTarget:      "reply-latest",
 		ConversationType: "private",
@@ -384,7 +384,7 @@ func TestBuildToolSessionContextDoesNotMergeStoredACPContextForPublicEndpoint(t 
 	c := e.NewContext(req, rec)
 
 	session := (&ContainerdHandler{toolContexts: store}).buildToolSessionContext(c, "bot-1")
-	if session.StreamID != "" || session.CurrentPlatform != "" || session.ReplyTarget != "" || session.ConversationType != "" {
+	if session.RunID != "" || session.CurrentPlatform != "" || session.ReplyTarget != "" || session.ConversationType != "" {
 		t.Fatalf("public endpoint merged ACP context: %#v", session)
 	}
 }

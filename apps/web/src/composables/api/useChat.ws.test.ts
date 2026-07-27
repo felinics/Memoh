@@ -69,7 +69,7 @@ describe('useChat.ws', () => {
     const socket = MockWebSocket.instances[0]!
 
     expect(socket).toBeDefined()
-    ws.send({ type: 'message', stream_id: 'stream-1', text: 'hello', session_id: 'session-1' })
+    ws.send({ type: 'message', invocation_id: 'invocation-1', text: 'hello', session_id: 'session-1' })
     expect(socket.sent).toEqual([])
 
     socket.open()
@@ -77,7 +77,7 @@ describe('useChat.ws', () => {
     expect(socket.sent).toHaveLength(1)
     expect(JSON.parse(socket.sent[0]!)).toEqual({
       type: 'message',
-      stream_id: 'stream-1',
+      invocation_id: 'invocation-1',
       text: 'hello',
       session_id: 'session-1',
     })
@@ -88,11 +88,11 @@ describe('useChat.ws', () => {
     const socket = MockWebSocket.instances[0]!
     socket.open()
 
-    ws.abort('stream-1')
+    ws.abort('run-1')
 
     expect(JSON.parse(socket.sent[0]!)).toEqual({
       type: 'abort',
-      stream_id: 'stream-1',
+      run_id: 'run-1',
     })
   })
 
@@ -106,13 +106,13 @@ describe('useChat.ws', () => {
     first.open()
     second.open()
 
-    first.emit({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' })
-    second.emit({ type: 'message', stream_id: 'stream-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
+    first.emit({ type: 'start', run_id: 'run-a', session_id: 'session-1' })
+    second.emit({ type: 'message', run_id: 'run-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
 
     expect(firstHandler).toHaveBeenCalledTimes(1)
-    expect(firstHandler).toHaveBeenCalledWith({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' })
+    expect(firstHandler).toHaveBeenCalledWith({ type: 'start', run_id: 'run-a', session_id: 'session-1' })
     expect(secondHandler).toHaveBeenCalledTimes(1)
-    expect(secondHandler).toHaveBeenCalledWith({ type: 'message', stream_id: 'stream-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
+    expect(secondHandler).toHaveBeenCalledWith({ type: 'message', run_id: 'run-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
   })
 
   it('reconnects after disconnect and flushes queued messages on the new socket', () => {
@@ -126,7 +126,7 @@ describe('useChat.ws', () => {
 
     ws.send({
       type: 'message',
-      stream_id: 'stream-after-reconnect',
+      invocation_id: 'invocation-after-reconnect',
       session_id: 'session-1',
       text: 'resume',
     })
@@ -140,7 +140,7 @@ describe('useChat.ws', () => {
 
     expect(JSON.parse(second.sent[0]!)).toEqual({
       type: 'message',
-      stream_id: 'stream-after-reconnect',
+      invocation_id: 'invocation-after-reconnect',
       session_id: 'session-1',
       text: 'resume',
     })

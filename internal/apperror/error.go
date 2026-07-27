@@ -36,6 +36,8 @@ const (
 	CodeACPReasoningEffortRequired       Code = "acp.reasoning_effort_required"
 	CodeACPReasoningUnavailable          Code = "acp.reasoning_effort_unavailable"
 	CodeACPConfigUpdateFailed            Code = "acp.config_update_failed"
+	CodeSessionBusy                      Code = "session_runtime.session_busy"
+	CodeSessionInvocationConflict        Code = "session_runtime.invocation_conflict"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -152,6 +154,19 @@ var catalog = map[Code]Definition{
 	CodeACPConfigUpdateFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The external agent could not apply the selected settings. Please retry.",
+	},
+	// A session runs one turn at a time, so this is ordinary backpressure and
+	// the same submission succeeds once the session frees up. It is the one
+	// conflict in this catalog that a client should retry unchanged.
+	CodeSessionBusy: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This conversation is still working on the previous message. Please try again shortly.",
+	},
+	// Distinct from session_busy: retrying changes nothing, because the same
+	// retry identity was already used for different input.
+	CodeSessionInvocationConflict: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This request was already submitted with different content.",
 	},
 }
 

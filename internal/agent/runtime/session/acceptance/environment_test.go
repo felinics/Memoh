@@ -17,12 +17,15 @@ const (
 	enableEnv        = "MEMOH_SESSION_RUNTIME_ACCEPTANCE"
 	requiredEnv      = "MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED"
 	crashEnv         = "MEMOH_SESSION_RUNTIME_ACCEPTANCE_CRASH"
+	backendLossEnv   = "MEMOH_SESSION_RUNTIME_ACCEPTANCE_BACKEND_LOSS"
+	modeEnv          = "MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE"
 	primaryURLEnv    = "MEMOH_SESSION_RUNTIME_PRIMARY_URL"
 	secondaryURLEnv  = "MEMOH_SESSION_RUNTIME_SECONDARY_URL"
 	usernameEnv      = "MEMOH_SESSION_RUNTIME_USERNAME"
 	passwordEnv      = "MEMOH_SESSION_RUNTIME_PASSWORD" //nolint:gosec // environment variable name, not a credential
 	containerEnv     = "MEMOH_SESSION_RUNTIME_PRIMARY_CONTAINER"
 	fakeModelPortEnv = "MEMOH_SESSION_RUNTIME_FAKE_MODEL_PORT"
+	redisURLEnv      = "MEMOH_SESSION_RUNTIME_REDIS_URL"
 )
 
 type acceptanceEnvironment struct {
@@ -31,6 +34,8 @@ type acceptanceEnvironment struct {
 	username         string
 	password         string
 	primaryContainer string
+	redisURL         string
+	mode             string
 }
 
 type acceptanceFixture struct {
@@ -60,6 +65,7 @@ func TestMain(m *testing.M) {
 	globalFakeModel = model
 	code := m.Run()
 	model.Close()
+	closeLedger()
 	os.Exit(code)
 }
 
@@ -70,10 +76,14 @@ func requireFixture(t *testing.T, needsSecondary bool) acceptanceFixture {
 	}
 
 	env := loadEnvironment()
+	if needsSecondary && env.mode == "single" {
+		t.Skip("scenario requires the cluster acceptance topology")
+	}
 	requireHealthy(t, env.primaryURL, "primary")
 	if needsSecondary {
 		requireHealthy(t, env.secondaryURL, "secondary")
 	}
+	requireLedger(t)
 	if globalFakeModel == nil {
 		t.Fatal("fake model was not started")
 	}
@@ -150,6 +160,8 @@ func loadEnvironment() acceptanceEnvironment {
 		username:         envOr(usernameEnv, "admin"),
 		password:         envOr(passwordEnv, "admin123"),
 		primaryContainer: envOr(containerEnv, "memoh-dev-server"),
+		redisURL:         envOr(redisURLEnv, "redis://127.0.0.1:16379/0"),
+		mode:             strings.ToLower(envOr(modeEnv, "cluster")),
 	}
 }
 

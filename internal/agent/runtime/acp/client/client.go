@@ -635,7 +635,7 @@ func (c *clientCallbacks) requireToolApproval(ctx context.Context, toolCallID, t
 			ReplyTarget:                  session.ReplyTarget,
 			ConversationType:             session.ConversationType,
 		},
-		Interactive:    strings.TrimSpace(session.StreamID) != "",
+		Interactive:    strings.TrimSpace(session.RunID) != "",
 		RegisterWaiter: c.approval.RegisterWaiter,
 		Emit:           c.emitToolApprovalRequest,
 	})

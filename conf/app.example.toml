@@ -75,8 +75,18 @@ system_files_max_bytes = 32768
 # Redis or Valkey servers to share state and commands across servers.
 backend = "memory"
 state_ttl = "24h"
-# Used only when backend = "redis".
+# How long a run owner may go silent before another server may take the run
+# over. It also paces the reaper and defines how long an unclaimed admission
+# waits before it is given up on, so it applies to both backends.
 owner_lease_ttl = "30s"
+# Declare a multi-server deployment. Startup refuses cluster = true with
+# backend = "memory", because two servers cannot arbitrate ownership through a
+# per-process heap.
+cluster = false
+# How long to wait after the live backend is replaced (a Redis or Valkey
+# restart or failover) before in-flight runs are recorded as lost. Defaults to
+# 3 x owner_lease_ttl and must not be shorter than owner_lease_ttl.
+# backend_loss_grace = "90s"
 
 [session_runtime.redis]
 # Redis or Valkey server URL. Keep the redis:// scheme.

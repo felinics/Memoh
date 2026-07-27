@@ -10,10 +10,13 @@ import (
 // turn. Transport callers should prefer turn.StartTurnCommand; the additional
 // channel and function fields below are strictly in-process runtime state.
 type ChatRequest struct {
-	BotID                        string                `json:"-"`
-	ChatID                       string                `json:"-"`
-	ThreadID                     string                `json:"-"`
-	StreamID                     string                `json:"-"`
+	BotID    string `json:"-"`
+	ChatID   string `json:"-"`
+	ThreadID string `json:"-"`
+	// RunID is the server-minted identity of this turn's run. Downstream state
+	// that must agree on "which turn is this" — the compaction barrier, the ACP
+	// session, interactive tool headers — keys on it.
+	RunID                        string                `json:"-"`
 	Token                        string                `json:"-"`
 	UserID                       string                `json:"-"`
 	SourceChannelIdentityID      string                `json:"-"`

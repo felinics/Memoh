@@ -19,7 +19,7 @@ import (
 const (
 	runtimeContractBotID     = "11111111-1111-1111-1111-111111111111"
 	runtimeContractSessionID = "22222222-2222-2222-2222-222222222222"
-	runtimeContractStreamID  = "stream-runtime-contract"
+	runtimeContractRunID     = "run-runtime-contract"
 )
 
 func rawRuntimeContractEvent(t *testing.T, ev native.StreamEvent) application.WSStreamEvent {
@@ -133,8 +133,7 @@ func collectRuntimeContractWSEvents(t *testing.T, script []application.WSStreamE
 			r.Context(),
 			writer,
 			runtimeContractBotID,
-			runtimeContractSessionID,
-			runtimeContractStreamID,
+			wsTurnRef{RunID: runtimeContractRunID, SessionID: runtimeContractSessionID},
 			eventCh,
 		)
 
@@ -192,6 +191,16 @@ func TestLocalChannelRuntimeContractForwardsRichActiveRunUIState(t *testing.T) {
 	}
 	if events[0]["type"] != "start" {
 		t.Fatalf("first event = %#v, want start", events[0])
+	}
+	// Everything a run emits names the run, and names it the same way, so a
+	// subscriber that never sent the submission can still follow it.
+	for _, event := range events {
+		if _, present := event["stream_id"]; present {
+			t.Fatalf("event still carries stream_id: %#v", event)
+		}
+		if event["run_id"] != runtimeContractRunID {
+			t.Fatalf("event run_id = %#v, want %q", event["run_id"], runtimeContractRunID)
+		}
 	}
 
 	var reasoning, text, execTool, approvalTool, askUserTool map[string]any

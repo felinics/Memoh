@@ -132,7 +132,7 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		slog.String("model_id", cfg.ModelID),
 	)
 
-	done := s.enterSessionCompactionForStream(req.BotID, req.ThreadID, strings.TrimSpace(req.StreamID))
+	done := s.enterSessionCompactionForRun(req.BotID, req.ThreadID, strings.TrimSpace(req.RunID))
 	defer done()
 	res, err := s.compactionService.RunCompactionSync(ctx, cfg)
 	if err != nil {

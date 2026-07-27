@@ -147,7 +147,7 @@ func (s *ToolSessionContextStore) AppendToolEvent(session ToolSessionContext, ev
 	if s == nil {
 		return false
 	}
-	key := toolStreamEventKey(session.BotID, session.SessionID, session.StreamID)
+	key := toolRunEventKey(session.BotID, session.SessionID, session.RunID)
 	if key == "" {
 		return false
 	}
@@ -171,7 +171,7 @@ func (s *ToolSessionContextStore) RegisterToolEventSink(session ToolSessionConte
 	if s == nil || sink == nil {
 		return func() {}
 	}
-	key := toolStreamEventKey(session.BotID, session.SessionID, session.StreamID)
+	key := toolRunEventKey(session.BotID, session.SessionID, session.RunID)
 	if key == "" {
 		return func() {}
 	}
@@ -197,13 +197,13 @@ func toolSessionContextKey(botID, sessionID string) string {
 	return botID + "\x00" + sessionID
 }
 
-func toolStreamEventKey(botID, sessionID, streamID string) string {
+func toolRunEventKey(botID, sessionID, runID string) string {
 	sessionKey := toolSessionContextKey(botID, sessionID)
-	streamID = strings.TrimSpace(streamID)
-	if sessionKey == "" || streamID == "" {
+	runID = strings.TrimSpace(runID)
+	if sessionKey == "" || runID == "" {
 		return ""
 	}
-	return sessionKey + "\x00" + streamID
+	return sessionKey + "\x00" + runID
 }
 
 func toolSessionKeyHasSessionID(key, sessionID string) bool {
@@ -237,8 +237,8 @@ func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext
 	if value := strings.TrimSpace(latest.SessionID); value != "" {
 		merged.SessionID = value
 	}
-	if value := strings.TrimSpace(latest.StreamID); value != "" {
-		merged.StreamID = value
+	if value := strings.TrimSpace(latest.RunID); value != "" {
+		merged.RunID = value
 	}
 	if value := strings.TrimSpace(latest.SessionType); value != "" {
 		merged.SessionType = value

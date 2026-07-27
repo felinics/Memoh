@@ -124,9 +124,6 @@ type Service struct {
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
-	sessionTurnMu       sync.Mutex
-	sessionTurnRefs     map[string]int // key: "botID:sessionID" → active turn refcount
-	sessionTurnLocks    map[string]*sync.Mutex
 	sessionCompactionMu sync.Mutex
 	sessionCompactions  map[string]*sessionCompactionGate
 	timeout             time.Duration
@@ -134,8 +131,7 @@ type Service struct {
 	clockLocation       *time.Location
 	logger              *slog.Logger
 	allowedTeam         string
-	turnIdempotencyOnce sync.Once
-	turnIdempotency     *idempotencyRegistry
+	sessionRuntime      turnAdmitter
 	turnHooks           *turnRuntimeHooks
 }
 
@@ -184,13 +180,10 @@ func NewService(
 		settingsService:     settingsService,
 		accountService:      accountService,
 		streamHTTPClient:    streamHTTPClient,
-		sessionTurnRefs:     make(map[string]int),
-		sessionTurnLocks:    make(map[string]*sync.Mutex),
 		timeout:             timeout,
 		memorySearchTimeout: defaultMemorySearchTimeout,
 		clockLocation:       clockLocation,
 		logger:              log.With(slog.String("service", "agent/application")),
-		turnIdempotency:     newIdempotencyRegistry(idempotencyCapacity),
 	}
 }
 
@@ -571,9 +564,6 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			return ChatResponse{}, err
 		}
 	}
-
-	doneTurn := s.enterSessionTurn(ctx, req.BotID, req.ThreadID)
-	defer doneTurn()
 
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)

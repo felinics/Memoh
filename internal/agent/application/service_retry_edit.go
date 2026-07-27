@@ -17,7 +17,7 @@ import (
 type RetryLatestMessageInput struct {
 	BotID                  string
 	SessionID              string
-	StreamID               string
+	RunID                  string
 	MessageID              string
 	ActorChannelIdentityID string
 	ActorUserID            string
@@ -31,7 +31,7 @@ type RetryLatestMessageInput struct {
 type EditLatestMessageInput struct {
 	BotID                  string
 	SessionID              string
-	StreamID               string
+	RunID                  string
 	MessageID              string
 	Text                   string
 	Attachments            []ChatAttachment
@@ -87,7 +87,7 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 		BotID:                        strings.TrimSpace(input.BotID),
 		ChatID:                       strings.TrimSpace(input.BotID),
 		ThreadID:                     sessionID,
-		StreamID:                     strings.TrimSpace(input.StreamID),
+		RunID:                        strings.TrimSpace(input.RunID),
 		UserID:                       strings.TrimSpace(input.ActorUserID),
 		SourceChannelIdentityID:      strings.TrimSpace(input.ActorChannelIdentityID),
 		ConversationType:             turnpkg.ConversationTypePrivate,
@@ -146,7 +146,7 @@ func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessa
 		BotID:                        strings.TrimSpace(input.BotID),
 		ChatID:                       strings.TrimSpace(input.BotID),
 		ThreadID:                     sessionID,
-		StreamID:                     strings.TrimSpace(input.StreamID),
+		RunID:                        strings.TrimSpace(input.RunID),
 		UserID:                       strings.TrimSpace(input.ActorUserID),
 		SourceChannelIdentityID:      strings.TrimSpace(input.ActorChannelIdentityID),
 		ConversationType:             turnpkg.ConversationTypePrivate,

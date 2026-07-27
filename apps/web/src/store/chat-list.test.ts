@@ -148,24 +148,24 @@ function approvalTurn(approval: UIToolApproval, blockId = 1) {
   }
 }
 
-function richActiveRunStoreScript(sessionId = 'session-1', streamId = 'stream-rich'): UIStreamEvent[] {
+function richActiveRunStoreScript(sessionId = 'session-1', runId = 'run-rich'): UIStreamEvent[] {
   return [
-    { type: 'start', stream_id: streamId, session_id: sessionId } as UIStreamEvent,
+    { type: 'start', run_id: runId, session_id: sessionId } as UIStreamEvent,
     {
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: sessionId,
       data: { id: 0, type: 'reasoning', content: 'I need to inspect the workspace.' },
     } as UIStreamEvent,
     {
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: sessionId,
       data: { id: 1, type: 'text', content: 'I will check the current state.' },
     } as UIStreamEvent,
     {
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: sessionId,
       data: {
         id: 2,
@@ -179,7 +179,7 @@ function richActiveRunStoreScript(sessionId = 'session-1', streamId = 'stream-ri
     } as UIStreamEvent,
     {
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: sessionId,
       data: {
         id: 2,
@@ -194,7 +194,7 @@ function richActiveRunStoreScript(sessionId = 'session-1', streamId = 'stream-ri
     } as UIStreamEvent,
     {
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: sessionId,
       data: {
         id: 3,
@@ -213,7 +213,7 @@ function richActiveRunStoreScript(sessionId = 'session-1', streamId = 'stream-ri
     } as UIStreamEvent,
     {
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: sessionId,
       data: {
         id: 4,
@@ -242,16 +242,16 @@ function richActiveRunStoreScript(sessionId = 'session-1', streamId = 'stream-ri
   ]
 }
 
-function interruptedRunStoreScript(sessionId = 'session-1', streamId = 'stream-interrupted'): UIStreamEvent[] {
+function interruptedRunStoreScript(sessionId = 'session-1', runId = 'run-interrupted'): UIStreamEvent[] {
   return [
-    { type: 'start', stream_id: streamId, session_id: sessionId } as UIStreamEvent,
+    { type: 'start', run_id: runId, session_id: sessionId } as UIStreamEvent,
     {
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: sessionId,
       data: { id: 0, type: 'text', content: 'partial output' },
     } as UIStreamEvent,
-    { type: 'error', stream_id: streamId, session_id: sessionId, message: 'runtime interrupted' } as UIStreamEvent,
+    { type: 'error', run_id: runId, session_id: sessionId, message: 'runtime interrupted' } as UIStreamEvent,
   ]
 }
 
@@ -264,9 +264,28 @@ describe('chat-list store', () => {
   let sessionsActivityHandler: ((event: BotSessionActivityEvent) => void) | null
   let sendEvents: UIStreamEvent[]
   let sentWSMessages: Array<Record<string, unknown>>
-  let abortedWSStreams: string[]
-  let lastStreamId = ''
+  // wsRunIds[i] is the run the fake server minted for sentWSMessages[i].
+  let wsRunIds: string[]
+  let abortedWSRuns: string[]
+  let lastRunId = ''
   let lastSessionId = ''
+  let wsRunSeq = 0
+
+  // The invocation the client minted for an outbound message, and the run the
+  // fake server named in reply. Negative indexes count from the newest send.
+  function wsInvocationId(index = 0): string {
+    const message = index < 0 ? sentWSMessages.at(index) : sentWSMessages[index]
+    return (message?.invocation_id as string | undefined) ?? ''
+  }
+
+  function wsRunId(index = 0): string {
+    return (index < 0 ? wsRunIds.at(index) : wsRunIds[index]) ?? ''
+  }
+
+  function wsRunIdForType(type: string): string {
+    const index = sentWSMessages.findIndex(message => message.type === type)
+    return index < 0 ? '' : wsRunId(index)
+  }
 
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -274,10 +293,12 @@ describe('chat-list store', () => {
     _sessionMessageHandler = null
     sessionMessageHandlers = new Map()
     sessionsActivityHandler = null
-    lastStreamId = ''
+    lastRunId = ''
     lastSessionId = ''
+    wsRunSeq = 0
     sentWSMessages = []
-    abortedWSStreams = []
+    wsRunIds = []
+    abortedWSRuns = []
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
       { type: 'error', message: 'model failed' } as UIStreamEvent,
@@ -427,20 +448,32 @@ describe('chat-list store', () => {
         get connected() {
           return true
         },
-        send: vi.fn((message: { stream_id?: string; session_id?: string }) => {
+        send: vi.fn((message: { invocation_id?: string; session_id?: string }) => {
           sentWSMessages.push(message as Record<string, unknown>)
-          lastStreamId = message.stream_id ?? ''
           lastSessionId = message.session_id ?? ''
+          // The server names the run and announces it before any turn output,
+          // so every later event is addressed by run_id.
+          const invocationId = message.invocation_id ?? ''
+          lastRunId = invocationId ? `run-${++wsRunSeq}` : ''
+          wsRunIds.push(lastRunId)
+          if (lastRunId) {
+            onStreamEvent({
+              type: 'run_accepted',
+              run_id: lastRunId,
+              invocation_id: invocationId,
+              session_id: lastSessionId,
+            } as UIStreamEvent)
+          }
           for (const event of sendEvents) {
             onStreamEvent({
               ...event,
-              stream_id: lastStreamId,
+              run_id: lastRunId,
               session_id: lastSessionId,
             } as UIStreamEvent)
           }
         }),
-        abort: vi.fn((streamId: string) => {
-          abortedWSStreams.push(streamId)
+        abort: vi.fn((runId: string) => {
+          abortedWSRuns.push(runId)
         }),
         close: vi.fn(),
         onOpen: null,
@@ -497,7 +530,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'message',
-      stream_id: lastStreamId,
+      run_id: lastRunId,
       session_id: 'session-1',
       data: {
         id: 1,
@@ -512,7 +545,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'message',
-      stream_id: lastStreamId,
+      run_id: lastRunId,
       session_id: 'session-1',
       data: {
         id: 2,
@@ -531,7 +564,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'end',
-      stream_id: lastStreamId,
+      run_id: lastRunId,
       session_id: 'session-1',
     } as UIStreamEvent)
     await expect(sending).resolves.toMatchObject({ ok: true })
@@ -1000,10 +1033,10 @@ describe('chat-list store', () => {
       can_approve: false,
     })
 
-    const originalStreamId = sentWSMessages[0]?.stream_id as string
+    const originalRunId = wsRunId(0)
     streamHandler?.({
       type: 'message',
-      stream_id: originalStreamId,
+      run_id: originalRunId,
       session_id: 'session-1',
       data: {
         id: 1,
@@ -1031,7 +1064,7 @@ describe('chat-list store', () => {
       can_approve: false,
     })
 
-    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: originalRunId, session_id: 'session-1' } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
@@ -1102,8 +1135,8 @@ describe('chat-list store', () => {
       can_approve: false,
     })
 
-    const originalStreamId = sentWSMessages[0]?.stream_id as string
-    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    const originalRunId = wsRunId(0)
+    streamHandler?.({ type: 'end', run_id: originalRunId, session_id: 'session-1' } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
@@ -1147,11 +1180,11 @@ describe('chat-list store', () => {
 
     sendEvents = [{ type: 'start' } as UIStreamEvent]
     await store.respondToolApproval(tool.approval, 'approve')
-    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    const responseRunId = wsRunId(-1)
     await store.selectSession('session-2')
     streamHandler?.({
       type: 'error',
-      stream_id: responseStreamId,
+      run_id: responseRunId,
       session_id: 'session-1',
       message: 'approval failed',
     } as UIStreamEvent)
@@ -1223,10 +1256,10 @@ describe('chat-list store', () => {
     const approvalResponses = sentWSMessages.filter(message => message.type === 'tool_approval_response')
     expect(approvalResponses).toHaveLength(1)
 
-    const approvalStreamId = approvalResponses[0]?.stream_id as string
-    streamHandler?.({ type: 'end', stream_id: approvalStreamId, session_id: 'session-1' } as UIStreamEvent)
-    const originalStreamId = sentWSMessages[0]?.stream_id as string
-    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    const approvalRunId = wsRunIdForType('tool_approval_response')
+    streamHandler?.({ type: 'end', run_id: approvalRunId, session_id: 'session-1' } as UIStreamEvent)
+    const originalRunId = wsRunId(0)
+    streamHandler?.({ type: 'end', run_id: originalRunId, session_id: 'session-1' } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
@@ -1246,15 +1279,14 @@ describe('chat-list store', () => {
     }
     store.messages.push(approvalTurn(approval))
     await expect(store.respondToolApproval(approval, 'approve')).resolves.toBe(true)
-    const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
-    const responseStreamId = responseMessage?.stream_id as string
+    const responseRunId = wsRunIdForType('tool_approval_response')
     const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
 
     store.abort()
     await flushPromises()
 
     expect(ws.abort).toHaveBeenCalledTimes(1)
-    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(ws.abort).toHaveBeenCalledWith(responseRunId)
     expect(store.streaming).toBe(false)
     const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
     expect(block?.type).toBe('tool')
@@ -1282,10 +1314,10 @@ describe('chat-list store', () => {
     store.messages.push(approvalTurn(approval, 0))
 
     await expect(store.respondToolApproval(approval, 'approve')).resolves.toBe(true)
-    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    const responseRunId = wsRunId(-1)
     streamHandler?.({
       type: 'message',
-      stream_id: responseStreamId,
+      run_id: responseRunId,
       session_id: 'session-1',
       data: { id: 0, type: 'reasoning', content: 'Running the approved tool' },
     } as UIStreamEvent)
@@ -1299,7 +1331,7 @@ describe('chat-list store', () => {
     const tool = assistant.messages.find(block => block.type === 'tool')
     expect(tool?.approval).toMatchObject({ status: 'approved', can_approve: false })
 
-    streamHandler?.({ type: 'end', stream_id: responseStreamId, session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: responseRunId, session_id: 'session-1' } as UIStreamEvent)
     await flushPromises()
   })
 
@@ -1333,12 +1365,11 @@ describe('chat-list store', () => {
     if (!assistant || assistant.role !== 'assistant') throw new Error('assistant turn missing')
     const tool = assistant.messages.find(block => block.type === 'tool')
     if (!tool?.approval) throw new Error('approval block missing')
-    const originalStreamId = sentWSMessages[0]?.stream_id as string
+    const originalRunId = wsRunId(0)
 
     sendEvents = [{ type: 'start' } as UIStreamEvent]
     await expect(store.respondToolApproval(tool.approval, 'approve')).resolves.toBe(true)
-    const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
-    const responseStreamId = responseMessage?.stream_id as string
+    const responseRunId = wsRunIdForType('tool_approval_response')
     const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
     const messageCount = store.messages.length
 
@@ -1347,20 +1378,20 @@ describe('chat-list store', () => {
     await flushPromises()
 
     expect(ws.abort).toHaveBeenCalledTimes(2)
-    expect(ws.abort).toHaveBeenCalledWith(originalStreamId)
-    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(ws.abort).toHaveBeenCalledWith(originalRunId)
+    expect(ws.abort).toHaveBeenCalledWith(responseRunId)
     expect(tool.approval).toMatchObject({ status: 'pending', can_approve: true })
     expect(store.messages).toHaveLength(messageCount)
 
     streamHandler?.({
       type: 'message',
-      stream_id: responseStreamId,
+      run_id: responseRunId,
       session_id: 'session-1',
       data: { id: 99, type: 'text', content: 'late approval output' },
     } as UIStreamEvent)
     streamHandler?.({
       type: 'error',
-      stream_id: responseStreamId,
+      run_id: responseRunId,
       session_id: 'session-1',
       message: 'late approval error',
     } as UIStreamEvent)
@@ -2273,10 +2304,10 @@ describe('chat-list store', () => {
     store.messages.push(askUserTurn(userInput, 'call-ask', 0))
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
-    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    const responseRunId = wsRunId(-1)
     streamHandler?.({
       type: 'message',
-      stream_id: responseStreamId,
+      run_id: responseRunId,
       session_id: 'session-1',
       data: { id: 0, type: 'reasoning', content: 'Continuing after your answer' },
     } as UIStreamEvent)
@@ -2292,7 +2323,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'message',
-      stream_id: responseStreamId,
+      run_id: responseRunId,
       session_id: 'session-1',
       data: { id: 0, type: 'reasoning', content: 'Still continuing' },
     } as UIStreamEvent)
@@ -2302,7 +2333,7 @@ describe('chat-list store', () => {
     ])
     expect(assistant.messages[1]).toMatchObject({ content: 'Still continuing' })
 
-    streamHandler?.({ type: 'end', stream_id: responseStreamId, session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: responseRunId, session_id: 'session-1' } as UIStreamEvent)
     await flushPromises()
   })
 
@@ -2493,7 +2524,7 @@ describe('chat-list store', () => {
     await store.selectBot('bot-1')
     api.fetchMessagesUI.mockClear()
 
-    streamHandler?.({ type: 'start', stream_id: 'main-stream', session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'start', run_id: 'run-main', session_id: 'session-1' } as UIStreamEvent)
     expect(store.isSessionStreaming('bot-1', 'session-1')).toBe(true)
 
     const userInput = singleSelectUserInput()
@@ -2506,7 +2537,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'message',
-      stream_id: 'main-stream',
+      run_id: 'run-main',
       session_id: 'session-1',
       data: {
         id: 2,
@@ -2525,7 +2556,7 @@ describe('chat-list store', () => {
     expect(hasSecondPendingInput).toBe(true)
     expect(api.fetchMessagesUI).not.toHaveBeenCalled()
 
-    streamHandler?.({ type: 'end', stream_id: 'main-stream', session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: 'run-main', session_id: 'session-1' } as UIStreamEvent)
     await flushPromises()
 
     expect(api.fetchMessagesUI).toHaveBeenCalledTimes(1)
@@ -2913,12 +2944,12 @@ describe('chat-list store', () => {
     api.fetchMessagesUI.mockClear()
 
     await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
-    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    const responseRunId = wsRunId(-1)
     const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
     store.abort()
     await flushPromises()
 
-    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(ws.abort).toHaveBeenCalledWith(responseRunId)
     expect(api.fetchMessagesUI).not.toHaveBeenCalled()
     expect(store.messages).toHaveLength(1)
     const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
@@ -3134,7 +3165,7 @@ describe('chat-list store', () => {
     store.abort()
 
     await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
-    expect(ws.abort).toHaveBeenCalledWith(lastStreamId)
+    expect(ws.abort).toHaveBeenCalledWith(lastRunId)
     expect(store.streaming).toBe(false)
     expect(assistant?.streaming).toBe(false)
   })
@@ -3159,7 +3190,7 @@ describe('chat-list store', () => {
       text: 'hello',
       timestamp: '2026-05-17T08:00:00.000Z',
     }])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: lastRunId, session_id: lastSessionId } as UIStreamEvent)
     await flushPromises()
 
     expect(store.messages).toHaveLength(2)
@@ -3230,7 +3261,7 @@ describe('chat-list store', () => {
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: lastRunId, session_id: lastSessionId } as UIStreamEvent)
     await retry
     await flushPromises()
 
@@ -3328,7 +3359,7 @@ describe('chat-list store', () => {
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: lastRunId, session_id: lastSessionId } as UIStreamEvent)
     await retry
     await flushPromises()
 
@@ -3402,7 +3433,7 @@ describe('chat-list store', () => {
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: lastRunId, session_id: lastSessionId } as UIStreamEvent)
     await retry
     await flushPromises()
 
@@ -3500,7 +3531,7 @@ describe('chat-list store', () => {
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: lastRunId, session_id: lastSessionId } as UIStreamEvent)
     await edit
     await flushPromises()
 
@@ -3589,7 +3620,7 @@ describe('chat-list store', () => {
     const retry = store.retryLatestAssistant('assistant-old')
     await flushPromises()
     expect(store.messages.map(message => message.id)).toEqual(['user-a', expect.any(String)])
-    const retryStreamId = lastStreamId
+    const retryRunId = lastRunId
 
     await store.selectSession('session-b')
     await flushPromises()
@@ -3597,7 +3628,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'error',
-      stream_id: retryStreamId,
+      run_id: retryRunId,
       session_id: 'session-a',
       message: 'model failed',
     } as UIStreamEvent)
@@ -3675,7 +3706,7 @@ describe('chat-list store', () => {
         streaming: false,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: lastRunId, session_id: lastSessionId } as UIStreamEvent)
     await edit
     await flushPromises()
 
@@ -3768,7 +3799,7 @@ describe('chat-list store', () => {
     await flushPromises()
     expect(store.messages.map(message => message.role)).toEqual(['user', 'assistant'])
     expect(store.messages[0]).toMatchObject({ role: 'user', text: 'new prompt' })
-    const editStreamId = lastStreamId
+    const editRunId = lastRunId
 
     await store.selectSession('session-b')
     await flushPromises()
@@ -3776,7 +3807,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'error',
-      stream_id: editStreamId,
+      run_id: editRunId,
       session_id: 'session-a',
       message: 'model failed',
     } as UIStreamEvent)
@@ -4055,9 +4086,9 @@ describe('chat-list store', () => {
     await store.respondUserInput(userInput, {
       answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
     })
-    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    const responseRunId = wsRunId(-1)
     streamHandler?.({
-      type: 'message', stream_id: responseStreamId, session_id: 'fork-session',
+      type: 'message', run_id: responseRunId, session_id: 'fork-session',
       data: { id: 2, type: 'text', content: 'continuation' },
     } as UIStreamEvent)
 
@@ -4076,7 +4107,7 @@ describe('chat-list store', () => {
     })
 
     api.fetchMessagesUI.mockResolvedValueOnce(forkTurns)
-    streamHandler?.({ type: 'end', stream_id: responseStreamId, session_id: 'fork-session' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: responseRunId, session_id: 'fork-session' } as UIStreamEvent)
     await flushPromises()
   })
 
@@ -4224,17 +4255,24 @@ describe('chat-list store', () => {
 
   it('sends disable as an explicit reasoning effort override', async () => {
     sendEvents = []
-    const sent: Array<{ reasoning_effort?: string; stream_id?: string; session_id?: string }> = []
+    const sent: Array<{ reasoning_effort?: string; invocation_id?: string; session_id?: string }> = []
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
       streamHandler = onStreamEvent
       return {
         get connected() {
           return true
         },
-        send: vi.fn((message: { reasoning_effort?: string; stream_id?: string; session_id?: string }) => {
+        send: vi.fn((message: { reasoning_effort?: string; invocation_id?: string; session_id?: string }) => {
           sent.push(message)
-          onStreamEvent({ type: 'start', stream_id: message.stream_id, session_id: message.session_id } as UIStreamEvent)
-          onStreamEvent({ type: 'end', stream_id: message.stream_id, session_id: message.session_id } as UIStreamEvent)
+          const runId = `run-${++wsRunSeq}`
+          onStreamEvent({
+            type: 'run_accepted',
+            run_id: runId,
+            invocation_id: message.invocation_id,
+            session_id: message.session_id,
+          } as UIStreamEvent)
+          onStreamEvent({ type: 'start', run_id: runId, session_id: message.session_id } as UIStreamEvent)
+          onStreamEvent({ type: 'end', run_id: runId, session_id: message.session_id } as UIStreamEvent)
         }),
         abort: vi.fn(),
         close: vi.fn(),
@@ -4516,7 +4554,7 @@ describe('chat-list store', () => {
       composerScope: 'bot-1:panel-a',
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const runId = wsRunId(0)
 
     expect(store.messages).toHaveLength(0)
     expect(sentWSMessages[0]).toMatchObject({
@@ -4527,7 +4565,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'user_message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: 'session-a',
       data: {
         id: 'msg-skill',
@@ -4564,7 +4602,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: 'session-a',
       data: { id: 1, type: 'text', content: 'Done' },
     } as UIStreamEvent)
@@ -4574,7 +4612,7 @@ describe('chat-list store', () => {
       streaming: true,
     })
 
-    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runId, session_id: 'session-a' } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
@@ -4588,7 +4626,7 @@ describe('chat-list store', () => {
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const runId = wsRunId(0)
 
     expect(store.streaming).toBe(true)
     const secondResult = await store.sendMessage('second activation', undefined, {
@@ -4598,7 +4636,7 @@ describe('chat-list store', () => {
     expect(secondResult).toMatchObject({ ok: false, stage: 'startup' })
     expect(sentWSMessages).toHaveLength(1)
 
-    streamHandler?.({ type: 'end', stream_id: streamId } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runId } as UIStreamEvent)
     await expect(firstSend).resolves.toMatchObject({ ok: true })
     expect(store.streaming).toBe(false)
   })
@@ -4613,12 +4651,101 @@ describe('chat-list store', () => {
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const runId = wsRunId(0)
 
     store.abort()
 
     await expect(sending).resolves.toMatchObject({ ok: false })
-    expect(abortedWSStreams).toContain(streamId)
+    expect(abortedWSRuns).toContain(runId)
+    expect(store.streaming).toBe(false)
+  })
+
+  it('names an outbound turn by invocation and never sends a stream id', async () => {
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('hello')
+    await flushPromises()
+
+    const sent = sentWSMessages[0]!
+    expect(sent).toMatchObject({ type: 'message', invocation_id: expect.any(String) })
+    expect(sent).not.toHaveProperty('stream_id')
+    // The client mints the invocation; only the server names the run, and it is
+    // that name a stop has to address.
+    expect(sent.invocation_id).not.toBe(wsRunId(0))
+
+    store.abort()
+    await expect(sending).resolves.toMatchObject({ ok: false })
+    expect(abortedWSRuns).toEqual([wsRunId(0)])
+  })
+
+  it('replays a stop pressed before the run was accepted', async () => {
+    sendEvents = []
+    // Withhold acceptance so the stop lands while the turn has no run id.
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      streamHandler = onStreamEvent
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn((message: Record<string, unknown>) => {
+          sentWSMessages.push(message)
+        }),
+        abort: vi.fn((runId: string) => {
+          abortedWSRuns.push(runId)
+        }),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('hello')
+    await flushPromises()
+    const invocationId = sentWSMessages[0]!.invocation_id as string
+
+    store.abort()
+    expect(abortedWSRuns).toEqual([])
+
+    streamHandler?.({
+      type: 'run_accepted',
+      run_id: 'run-late',
+      invocation_id: invocationId,
+      session_id: 'session-1',
+    } as UIStreamEvent)
+
+    await expect(sending).resolves.toMatchObject({ ok: false })
+    expect(abortedWSRuns).toEqual(['run-late'])
+  })
+
+  it('fails a rejected submission with the code the server refused it by', async () => {
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('hello')
+    await flushPromises()
+    const invocationId = wsInvocationId(0)
+
+    streamHandler?.({
+      type: 'run_rejected',
+      invocation_id: invocationId,
+      session_id: 'session-1',
+      code: 'session_runtime.session_busy',
+      message: 'This conversation is still working on the previous message.',
+    } as UIStreamEvent)
+
+    // The turn never started, so the composer gets its input back along with the
+    // stable code it needs to decide whether retrying is worth offering.
+    await expect(sending).resolves.toMatchObject({
+      ok: false,
+      stage: 'startup',
+      errorCode: 'session_runtime.session_busy',
+      restoreInput: 'hello',
+    })
     expect(store.streaming).toBe(false)
   })
 
@@ -4632,16 +4759,17 @@ describe('chat-list store', () => {
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const invocationId = wsInvocationId(0)
+    const runId = wsRunId(0)
 
-    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-first' } as UIStreamEvent)
-    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-conflict' } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'session-first' } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'session-conflict' } as UIStreamEvent)
 
     expect(store.sessionId).toBe('session-first')
     expect(store.knownSessionSummary('session-first')).not.toBeNull()
     expect(store.knownSessionSummary('session-conflict')).toBeNull()
 
-    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-first' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runId, session_id: 'session-first' } as UIStreamEvent)
     await expect(sending).resolves.toMatchObject({ ok: true })
   })
 
@@ -4655,7 +4783,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'message',
-      stream_id: lastStreamId,
+      run_id: lastRunId,
       session_id: lastSessionId,
       data: { id: 1, type: 'text', content: 'late' },
     } as UIStreamEvent)
@@ -4680,10 +4808,11 @@ describe('chat-list store', () => {
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const invocationId = wsInvocationId(0)
+    const runId = wsRunId(0)
 
     await store.selectSession('session-b')
-    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' } as UIStreamEvent)
     await flushPromises()
 
     expect(store.sessionId).toBe('session-b')
@@ -4691,7 +4820,7 @@ describe('chat-list store', () => {
     // remembered without stealing global focus from session-b.
     expect(store.knownSessionSummary('created-session')).not.toBeNull()
 
-    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runId, session_id: 'created-session' } as UIStreamEvent)
     await sendPromise
 
     expect(store.sessionId).toBe('session-b')
@@ -4714,16 +4843,15 @@ describe('chat-list store', () => {
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const invocationId = wsInvocationId(0)
 
-    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' } as UIStreamEvent)
     await flushPromises()
     expect(store.sessionId).toBe('created-session')
 
     streamHandler?.({
       type: 'command_error',
-      invocation_id: streamId,
-      stream_id: streamId,
+      invocation_id: invocationId,
       session_id: 'created-session',
       composer_scope: 'bot-1:draft-a',
       terminal: true,
@@ -4787,14 +4915,13 @@ describe('chat-list store', () => {
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const invocationId = wsInvocationId(0)
 
     await store.selectSession('session-b')
-    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' } as UIStreamEvent)
     streamHandler?.({
       type: 'command_error',
-      invocation_id: streamId,
-      stream_id: streamId,
+      invocation_id: invocationId,
       session_id: 'created-session',
       composer_scope: 'bot-1:draft-a',
       terminal: true,
@@ -4833,11 +4960,12 @@ describe('chat-list store', () => {
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const invocationId = wsInvocationId(0)
+    const runId = wsRunId(0)
 
     await store.selectSession('session-b')
-    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
-    streamHandler?.({ type: 'error', stream_id: streamId, session_id: 'created-session', message: 'model failed' } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' } as UIStreamEvent)
+    streamHandler?.({ type: 'error', run_id: runId, session_id: 'created-session', message: 'model failed' } as UIStreamEvent)
     const result = await sendPromise
 
     expect(result).toMatchObject({ ok: false, stage: 'startup', composerScope: 'bot-1:draft-a' })
@@ -4911,10 +5039,10 @@ describe('chat-list store', () => {
     expect(staleHandler).toBeDefined()
 
     await store.selectBot('bot-2')
-    staleHandler?.({ type: 'start', stream_id: 'old-stream', session_id: 'old-session' } as UIStreamEvent)
+    staleHandler?.({ type: 'start', run_id: 'old-stream', session_id: 'old-session' } as UIStreamEvent)
     staleHandler?.({
       type: 'message',
-      stream_id: 'old-stream',
+      run_id: 'old-stream',
       session_id: 'old-session',
       data: { id: 0, type: 'text', content: 'late old-bot output' },
     } as UIStreamEvent)
@@ -4949,10 +5077,10 @@ describe('chat-list store', () => {
     await flushPromises()
     const sending = store.sendMessage('first')
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const runId = wsRunId(0)
     streamHandler?.({
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: 'session-a',
       data: { id: 0, type: 'text', content: 'before switch' },
     } as UIStreamEvent)
@@ -4974,7 +5102,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: 'session-a',
       data: { id: 1, type: 'text', content: 'after return' },
     } as UIStreamEvent)
@@ -4986,7 +5114,7 @@ describe('chat-list store', () => {
       ],
     })
 
-    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runId, session_id: 'session-a' } as UIStreamEvent)
     await expect(sending).resolves.toMatchObject({ ok: true })
   })
 
@@ -5014,9 +5142,9 @@ describe('chat-list store', () => {
     await store.selectBot('bot-1')
     const sending = store.sendMessage('first')
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const runId = wsRunId(0)
     streamHandler?.({
-      type: 'message', stream_id: streamId, session_id: 'session-a',
+      type: 'message', run_id: runId, session_id: 'session-a',
       data: { id: 0, type: 'text', content: 'live' },
     } as UIStreamEvent)
 
@@ -5033,7 +5161,7 @@ describe('chat-list store', () => {
       messages: [{ type: 'text', content: 'live' }],
     })
 
-    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runId, session_id: 'session-a' } as UIStreamEvent)
     await sending
   })
 
@@ -5053,9 +5181,9 @@ describe('chat-list store', () => {
     await store.selectBot('bot-1')
     const sending = store.sendMessage('first')
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const runId = wsRunId(0)
     streamHandler?.({
-      type: 'message', stream_id: streamId, session_id: 'session-a',
+      type: 'message', run_id: runId, session_id: 'session-a',
       data: { id: 0, type: 'text', content: 'live' },
     } as UIStreamEvent)
 
@@ -5071,7 +5199,7 @@ describe('chat-list store', () => {
     expect(store.messages[1]).toMatchObject({ role: 'assistant', streaming: true })
 
     returningToSessionA = false
-    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runId, session_id: 'session-a' } as UIStreamEvent)
     await sending
   })
 
@@ -5090,15 +5218,22 @@ describe('chat-list store', () => {
     ], nextCursor: null })
     api.fetchMessagesUI.mockResolvedValue([])
 
-    const sent: Array<{ stream_id?: string; session_id?: string }> = []
+    const sent: Array<{ invocation_id?: string; session_id?: string; run_id?: string }> = []
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
       streamHandler = onStreamEvent
       return {
         get connected() {
           return true
         },
-        send: vi.fn((message: { stream_id?: string; session_id?: string }) => {
-          sent.push(message)
+        send: vi.fn((message: { invocation_id?: string; session_id?: string; run_id?: string }) => {
+          const runId = `run-${++wsRunSeq}`
+          sent.push({ ...message, run_id: runId })
+          onStreamEvent({
+            type: 'run_accepted',
+            run_id: runId,
+            invocation_id: message.invocation_id,
+            session_id: message.session_id,
+          } as UIStreamEvent)
         }),
         abort: vi.fn(),
         close: vi.fn(),
@@ -5118,22 +5253,22 @@ describe('chat-list store', () => {
     const second = store.sendMessage('second')
     await flushPromises()
 
-    const streamA = sent.find(item => item.session_id === 'session-a')?.stream_id
-    const streamB = sent.find(item => item.session_id === 'session-b')?.stream_id
-    expect(streamA).toBeTruthy()
-    expect(streamB).toBeTruthy()
+    const runA = sent.find(item => item.session_id === 'session-a')?.run_id
+    const runB = sent.find(item => item.session_id === 'session-b')?.run_id
+    expect(runA).toBeTruthy()
+    expect(runB).toBeTruthy()
     expect(store.isSessionStreaming('bot-1', 'session-a')).toBe(true)
     expect(store.isSessionStreaming('bot-1', 'session-b')).toBe(true)
 
     streamHandler?.({
       type: 'message',
-      stream_id: streamA,
+      run_id: runA,
       session_id: 'session-a',
       data: { id: 0, type: 'text', content: 'answer A' },
     } as UIStreamEvent)
     streamHandler?.({
       type: 'message',
-      stream_id: streamB,
+      run_id: runB,
       session_id: 'session-b',
       data: { id: 0, type: 'text', content: 'answer B' },
     } as UIStreamEvent)
@@ -5146,8 +5281,8 @@ describe('chat-list store', () => {
       }),
     ]))
 
-    streamHandler?.({ type: 'end', stream_id: streamA, session_id: 'session-a' } as UIStreamEvent)
-    streamHandler?.({ type: 'end', stream_id: streamB, session_id: 'session-b' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runA, session_id: 'session-a' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runB, session_id: 'session-b' } as UIStreamEvent)
     await first
     await second
   })
@@ -5371,7 +5506,7 @@ describe('chat-list store', () => {
         timestamp: past,
       },
     ])
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: lastRunId, session_id: lastSessionId } as UIStreamEvent)
     await sendPromise
     await flushPromises()
 
@@ -5660,8 +5795,8 @@ describe('chat-list store', () => {
 
     const sending = store.sendMessage('stream in A')
     await flushPromises()
-    const streamId = lastStreamId
-    expect(streamId).not.toBe('')
+    const runId = lastRunId
+    expect(runId).not.toBe('')
 
     await store.selectSession('session-2')
     api.deleteSession.mockResolvedValueOnce(undefined)
@@ -5670,18 +5805,18 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'message',
-      stream_id: streamId,
+      run_id: runId,
       session_id: 'session-1',
       data: { id: 1, type: 'text', content: 'late A output' },
     } as UIStreamEvent)
     streamHandler?.({
       type: 'end',
-      stream_id: streamId,
+      run_id: runId,
       session_id: 'session-1',
     } as UIStreamEvent)
     await flushPromises()
 
-    expect(abortedWSStreams).toContain(streamId)
+    expect(abortedWSRuns).toContain(runId)
     expect(store.sessionId).toBe('session-2')
     expect(store.messages).toEqual([])
     expect(store.sessions.map(session => session.id)).toEqual(['session-2'])
@@ -5778,7 +5913,7 @@ describe('chat-list store', () => {
     sendEvents = [{ type: 'start' } as UIStreamEvent]
     const botTwoSend = store.sendMessage('keep bot two streaming')
     await flushPromises()
-    const botTwoStreamId = lastStreamId
+    const botTwoRunId = lastRunId
 
     expect(store.isChatViewStreaming({
       botId: 'bot-1',
@@ -5798,7 +5933,7 @@ describe('chat-list store', () => {
     expect(store.sessions.map(session => session.id)).toEqual(['shared-session', 'session-b2'])
     expect(store.sessionId).toBe('shared-session')
     expect(store.messages.slice(0, 2).map(message => message.id)).toEqual(['bot-2-user', 'bot-2-assistant'])
-    expect(abortedWSStreams).not.toContain(botTwoStreamId)
+    expect(abortedWSRuns).not.toContain(botTwoRunId)
     expect(store.deletedSession).toEqual({
       id: 'shared-session',
       botId: 'bot-1',
@@ -5806,7 +5941,7 @@ describe('chat-list store', () => {
     })
     streamHandler?.({
       type: 'end',
-      stream_id: botTwoStreamId,
+      run_id: botTwoRunId,
       session_id: 'shared-session',
     } as UIStreamEvent)
     await expect(botTwoSend).resolves.toMatchObject({ ok: true })
@@ -6349,13 +6484,14 @@ describe('chat-list store', () => {
       requestedSkills: [{ name: 'alpha' }],
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const invocationId = wsInvocationId(0)
+    const runId = wsRunId(0)
 
     store.focusChatView(targetB.viewId)
     store.selectDraft({ explicitSelection: true })
     streamHandler?.({
       type: 'session_created',
-      stream_id: streamId,
+      invocation_id: invocationId,
       session_id: 'session-a',
     } as UIStreamEvent)
 
@@ -6363,7 +6499,7 @@ describe('chat-list store', () => {
     expect(store.chatView({ ...targetA, sessionId: 'session-a' }).sessionId).toBe('session-a')
     expect(store.chatView(targetB).kind).toBe('draft')
 
-    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: runId, session_id: 'session-a' } as UIStreamEvent)
     await expect(sending).resolves.toMatchObject({ ok: true })
   })
 
@@ -6388,13 +6524,13 @@ describe('chat-list store', () => {
       composerScope: 'bot-1:chat:draft-a',
     })
     await flushPromises()
-    const streamId = sentWSMessages[0]?.stream_id as string
+    const invocationId = wsInvocationId(0)
     store.focusChatView(targetB.viewId)
     store.selectDraft({ explicitSelection: true })
 
     streamHandler?.({
       type: 'session_created',
-      stream_id: streamId,
+      invocation_id: invocationId,
       session_id: 'created-a',
     } as UIStreamEvent)
     await flushPromises()
@@ -6402,8 +6538,7 @@ describe('chat-list store', () => {
 
     streamHandler?.({
       type: 'command_error',
-      invocation_id: streamId,
-      stream_id: streamId,
+      invocation_id: invocationId,
       session_id: 'created-a',
       composer_scope: 'bot-1:chat:draft-a',
       terminal: true,
@@ -6679,7 +6814,7 @@ describe('chat-list store', () => {
       },
     })
 
-    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: lastRunId, session_id: lastSessionId } as UIStreamEvent)
     await sendPromise
   })
 
@@ -6725,17 +6860,17 @@ describe('chat-list store', () => {
     expect(store.sessionId).toBe('session-2')
     expect(store.messages).toEqual([])
 
-    streamHandler?.({ type: 'start', stream_id: 'stream-old', session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'start', run_id: 'run-old', session_id: 'session-1' } as UIStreamEvent)
     streamHandler?.({
       type: 'message',
-      stream_id: 'stream-old',
+      run_id: 'run-old',
       session_id: 'session-1',
       data: { id: 0, type: 'text', content: 'old session output' },
     } as UIStreamEvent)
 
     expect(store.messages).toEqual([])
 
-    streamHandler?.({ type: 'end', stream_id: 'stream-old', session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', run_id: 'run-old', session_id: 'session-1' } as UIStreamEvent)
   })
 
 })

@@ -199,6 +199,7 @@ func TestRedisValkeyRuntimeManagerContractOptional(t *testing.T) {
 			runRedisDurableCommandResultContract(t, target.url)
 			runRedisBoundedCommandWorkersContract(t, target.url)
 			runRedisDuplicateCommandSaturationContract(t, target.url)
+			runRedisLeaseIndexContract(t, target.url)
 		})
 	}
 	if !ran {
@@ -331,13 +332,13 @@ func runRedisDurableCommandResultContract(t *testing.T, redisURL string) {
 	})
 	const (
 		sessionID  = "session-durable-result"
-		streamID   = "stream-durable-result"
+		runID      = "stream-durable-result"
 		approvalID = "approval-durable-result"
 	)
-	if err := owner.StartRun(context.Background(), testBotID, sessionID, streamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := owner.StartRun(context.Background(), testBotID, sessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, streamID), native.StreamEvent{
+	if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, runID), native.StreamEvent{
 		Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-durable-result", ApprovalID: approvalID, Status: "pending",
 	}); err != nil {
 		t.Fatalf("record approval: %v", err)
@@ -368,7 +369,7 @@ func runRedisDurableCommandResultContract(t *testing.T, redisURL string) {
 		t.Fatalf("dispatch after requester restart = handled:%v err:%v", handledResult, err)
 	}
 	const barrierApprovalID = "approval-durable-result-barrier"
-	if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, streamID), native.StreamEvent{
+	if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, runID), native.StreamEvent{
 		Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-durable-result-barrier", ApprovalID: barrierApprovalID, Status: "pending",
 	}); err != nil {
 		t.Fatalf("record barrier approval: %v", err)
@@ -385,7 +386,7 @@ func runRedisDurableCommandResultContract(t *testing.T, redisURL string) {
 	}
 
 	const localApprovalID = "approval-durable-result-local-owner"
-	if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, streamID), native.StreamEvent{
+	if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, runID), native.StreamEvent{
 		Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-durable-result-local-owner", ApprovalID: localApprovalID, Status: "pending",
 	}); err != nil {
 		t.Fatalf("record owner-local approval: %v", err)
@@ -400,7 +401,7 @@ func runRedisDurableCommandResultContract(t *testing.T, redisURL string) {
 		}
 	}
 	const localBarrierApprovalID = "approval-durable-result-local-barrier"
-	if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, streamID), native.StreamEvent{
+	if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, runID), native.StreamEvent{
 		Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-durable-result-local-barrier", ApprovalID: localBarrierApprovalID, Status: "pending",
 	}); err != nil {
 		t.Fatalf("record owner-local barrier approval: %v", err)
@@ -442,12 +443,12 @@ func runRedisBoundedCommandWorkersContract(t *testing.T, redisURL string) {
 	const commandCount = 8
 	for i := range commandCount {
 		sessionID := fmt.Sprintf("session-bounded-worker-%d", i)
-		streamID := fmt.Sprintf("stream-bounded-worker-%d", i)
+		runID := fmt.Sprintf("stream-bounded-worker-%d", i)
 		approvalID := fmt.Sprintf("approval-bounded-worker-%d", i)
-		if err := owner.StartRun(context.Background(), testBotID, sessionID, streamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+		if err := owner.StartRun(context.Background(), testBotID, sessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 			t.Fatalf("start run %d: %v", i, err)
 		}
-		if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, streamID), native.StreamEvent{
+		if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, runID), native.StreamEvent{
 			Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: fmt.Sprintf("call-bounded-worker-%d", i), ApprovalID: approvalID, Status: "pending",
 		}); err != nil {
 			t.Fatalf("record approval %d: %v", i, err)
@@ -579,12 +580,12 @@ func runRedisDuplicateCommandSaturationContract(t *testing.T, redisURL string) {
 		streamB   = "stream-duplicate-saturation-b"
 		approvalB = "approval-duplicate-saturation-b"
 	)
-	startApproval := func(sessionID, streamID, approvalID string) {
+	startApproval := func(sessionID, runID, approvalID string) {
 		t.Helper()
-		if err := owner.StartRun(context.Background(), testBotID, sessionID, streamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
-			t.Fatalf("start %s: %v", streamID, err)
+		if err := owner.StartRun(context.Background(), testBotID, sessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+			t.Fatalf("start %s: %v", runID, err)
 		}
-		if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, streamID), native.StreamEvent{
+		if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, sessionID, runID), native.StreamEvent{
 			Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-" + approvalID, ApprovalID: approvalID, Status: "pending",
 		}); err != nil {
 			t.Fatalf("record %s: %v", approvalID, err)
@@ -825,7 +826,7 @@ func runRedisSubscriptionReconnectContract(t *testing.T, redisURL string) {
 	}
 	active := waitRuntimeEvent(t, sub.C, func(event Event) bool {
 		return event.Delta != nil && event.Delta.CurrentRunView != nil &&
-			event.Delta.CurrentRunView.StreamID == "stream-reconnect" &&
+			event.Delta.CurrentRunView.RunID == "stream-reconnect" &&
 			event.Delta.CurrentRunView.Status == RunStatusRunning
 	})
 

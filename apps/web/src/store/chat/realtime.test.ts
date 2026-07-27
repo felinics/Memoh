@@ -93,11 +93,11 @@ describe('chat realtime controller', () => {
     controller.startWebSocket('bot-2')
 
     expect(first.socket.close).toHaveBeenCalledOnce()
-    first.handler({ type: 'start', stream_id: 'stale' } as UIStreamEvent)
-    sockets[1]!.handler({ type: 'start', stream_id: 'current' } as UIStreamEvent)
+    first.handler({ type: 'start', run_id: 'stale' } as UIStreamEvent)
+    sockets[1]!.handler({ type: 'start', run_id: 'current' } as UIStreamEvent)
 
     expect(callbacks.onWebSocketEvent).toHaveBeenCalledOnce()
-    expect(callbacks.onWebSocketEvent).toHaveBeenCalledWith('bot-2', expect.objectContaining({ stream_id: 'current' }))
+    expect(callbacks.onWebSocketEvent).toHaveBeenCalledWith('bot-2', expect.objectContaining({ run_id: 'current' }))
   })
 
   it('does not expose a socket and sends only through the matching connected bot', () => {
@@ -118,10 +118,10 @@ describe('chat realtime controller', () => {
     const { controller, sockets } = makeController()
     controller.startWebSocket('bot-1')
 
-    expect(controller.abortWebSocketStream('stream-1', 'bot-2')).toBe(false)
-    expect(controller.abortWebSocketStream('stream-1', 'bot-1')).toBe(true)
+    expect(controller.abortWebSocketRun('run-1', 'bot-2')).toBe(false)
+    expect(controller.abortWebSocketRun('run-1', 'bot-1')).toBe(true)
     expect(sockets[0]!.socket.abort).toHaveBeenCalledOnce()
-    expect(sockets[0]!.socket.abort).toHaveBeenCalledWith('stream-1')
+    expect(sockets[0]!.socket.abort).toHaveBeenCalledWith('run-1')
   })
 
   it('starts the same session once and prepares every retry attempt', async () => {

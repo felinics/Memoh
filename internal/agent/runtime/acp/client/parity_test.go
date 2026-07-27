@@ -119,17 +119,17 @@ func (p *parityToolEvents) snapshot() []mcp.ToolStreamEvent {
 	return append([]mcp.ToolStreamEvent(nil), p.events...)
 }
 
-func parityNativeSession(streamID string) mcp.ToolSessionContext {
+func parityNativeSession(runID string) mcp.ToolSessionContext {
 	return mcp.ToolSessionContext{
 		BotID:             "bot-1",
 		SessionID:         "session-1",
-		StreamID:          streamID,
+		RunID:             runID,
 		ChannelIdentityID: "channel-1",
 		ToolCallID:        "call-1",
 	}
 }
 
-func parityCallbacks(approval ToolApprovalService, streamID string, nativeTools ...string) (*clientCallbacks, *eventCollector) {
+func parityCallbacks(approval ToolApprovalService, runID string, nativeTools ...string) (*clientCallbacks, *eventCollector) {
 	callbacks := &clientCallbacks{
 		root:     "/data",
 		cwd:      "/data",
@@ -137,7 +137,7 @@ func parityCallbacks(approval ToolApprovalService, streamID string, nativeTools 
 		baseSession: ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
-			StreamID:          streamID,
+			RunID:             runID,
 			ChannelIdentityID: "channel-1",
 		},
 		events: &toolEventEmitter{},

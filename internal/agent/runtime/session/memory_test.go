@@ -48,7 +48,7 @@ func TestMemoryBackendRejectsUnserializableSnapshotWithoutCorruptingState(t *tes
 	backend := NewMemoryBackend()
 	key := Key{BotID: "bot-1", SessionID: "session-1"}
 	if _, changed, err := backend.Update(context.Background(), key, func(Snapshot, bool) (Snapshot, bool, error) {
-		return Snapshot{BotID: key.BotID, SessionID: key.SessionID, Seq: 1, Queue: []QueuedRunView{}}, true, nil
+		return Snapshot{BotID: key.BotID, SessionID: key.SessionID, Seq: 1}, true, nil
 	}); err != nil || !changed {
 		t.Fatalf("seed snapshot: changed=%v err=%v", changed, err)
 	}
@@ -56,7 +56,7 @@ func TestMemoryBackendRejectsUnserializableSnapshotWithoutCorruptingState(t *tes
 	if _, changed, err := backend.Update(context.Background(), key, func(snapshot Snapshot, _ bool) (Snapshot, bool, error) {
 		snapshot.Seq = 2
 		snapshot.CurrentRunView = &CurrentRunView{
-			StreamID: "stream-1",
+			RunID:    "run-1",
 			Status:   RunStatusRunning,
 			Messages: []chatview.UIMessage{{ID: 1, Type: chatview.UIMessageTool, Input: make(chan struct{})}},
 		}
