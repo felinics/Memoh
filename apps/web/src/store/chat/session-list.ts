@@ -97,6 +97,7 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     const hasCutoff = Number.isFinite(cutoff)
     for (let i = turns.length - 1; i >= 0; i--) {
       const turn = turns[i]
+      if (!turn) continue
       if (turn.role !== 'assistant') continue
       const id = String(turn.id ?? '').trim()
       if (!id) continue

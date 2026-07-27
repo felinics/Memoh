@@ -3,7 +3,6 @@ package workspace
 import (
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -65,13 +64,20 @@ func TestValidateWorkspaceContractPayloadRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestWorkspaceExecutableCheckCommandCoversContractRuntime(t *testing.T) {
+func TestWorkspaceModeIsExecutable(t *testing.T) {
 	t.Parallel()
 
-	command := workspaceExecutableCheckCommand()
-	for _, executable := range requiredWorkspaceExecutables {
-		if !strings.Contains(command, executable) {
-			t.Fatalf("command does not check %s: %s", executable, command)
+	tests := map[string]bool{
+		"-rwxr-xr-x": true,
+		"-rwsr-xr-x": true,
+		"-rw-r--r-x": true,
+		"-rw-r--r--": false,
+		"drwxr-xr-x": true,
+		"invalid":    false,
+	}
+	for mode, want := range tests {
+		if got := workspaceModeIsExecutable(mode); got != want {
+			t.Errorf("workspaceModeIsExecutable(%q) = %t, want %t", mode, got, want)
 		}
 	}
 }

@@ -68,12 +68,14 @@ func validateWorkspaceContract(ctx context.Context, client *bridge.Client) error
 		return err
 	}
 
-	result, err := client.Exec(ctx, workspaceExecutableCheckCommand(), "/", 30)
-	if err != nil {
-		return fmt.Errorf("%w: validate runtime executables: %w", ErrWorkspaceImageIncompatible, err)
-	}
-	if result == nil || result.ExitCode != 0 {
-		return fmt.Errorf("%w: one or more runtime executables are missing", ErrWorkspaceImageIncompatible)
+	for _, executable := range requiredWorkspaceExecutables {
+		entry, err := client.Stat(ctx, executable)
+		if err != nil {
+			return fmt.Errorf("%w: stat runtime executable %s: %w", ErrWorkspaceImageIncompatible, executable, err)
+		}
+		if entry.GetIsDir() || !workspaceModeIsExecutable(entry.GetMode()) {
+			return fmt.Errorf("%w: runtime executable is not executable: %s", ErrWorkspaceImageIncompatible, executable)
+		}
 	}
 	return nil
 }
@@ -106,6 +108,16 @@ func validateWorkspaceContractPayload(payload []byte) error {
 	return nil
 }
 
-func workspaceExecutableCheckCommand() string {
-	return "test -x " + strings.Join(requiredWorkspaceExecutables, " -a -x ")
+func workspaceModeIsExecutable(mode string) bool {
+	mode = strings.TrimSpace(mode)
+	if len(mode) != 10 {
+		return false
+	}
+	for _, index := range []int{3, 6, 9} {
+		switch mode[index] {
+		case 'x', 's', 't':
+			return true
+		}
+	}
+	return false
 }

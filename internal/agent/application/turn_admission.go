@@ -38,6 +38,8 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 		return
 	}
 	s.sessionRuntime = manager
+	s.decisionRuntime = manager
+	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
 }
 
 // admitTurnRun puts a StartTurnCommand through durable admission and answers in
@@ -129,13 +131,37 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 		}
 		ctx, cancel := context.WithTimeout(writeCtx, terminalWriteTimeout)
 		defer cancel()
-		if err := s.sessionRuntime.FinishRun(ctx, handle, status, message); err != nil && s.logger != nil {
+		err := s.sessionRuntime.FinishRun(ctx, handle, status, message)
+		switch {
+		case err == nil || s.logger == nil:
+		case errors.Is(err, sessionruntime.ErrRunOwnershipLost):
+			// Expected, not a failure: this process was superseded mid-run, so the
+			// terminal write was refused and the reaper names the outcome instead.
+			s.logger.Warn("skip finishing turn run after ownership loss",
+				slog.String("run_id", handle.RunID))
+		default:
 			s.logger.Error("finish turn run failed",
 				slog.Any("error", err),
 				slog.String("run_id", handle.RunID),
 				slog.String("status", status))
 		}
 	}
+}
+
+// runOwnershipLost reports that this process was told, mid-run, that it no
+// longer owns the run.
+//
+// It is the one interruption whose output must not be written. Every other stop
+// — client disconnect, idle timeout, user abort — leaves this process still
+// entitled to say how the turn ended, so persisting what it has is the honest
+// record. Ownership loss does not: another incarnation of the runtime now
+// decides that run's outcome, and a superseded owner writing history would
+// attach output to a turn whose ending it can no longer name (SR-DUR-002).
+//
+// The distinction only survives because the revocation carries a cause. On the
+// wire both arrive as the same cancelled context.
+func runOwnershipLost(ctx context.Context) bool {
+	return ctx != nil && errors.Is(context.Cause(ctx), sessionruntime.ErrRunOwnershipLost)
 }
 
 // admitTriggeredRun admits a non-interactive turn — a schedule fire, a heartbeat

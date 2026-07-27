@@ -41,6 +41,22 @@ func runHandleForCommand(cmd Command) RunHandle {
 	return RunHandle{BotID: cmd.BotID, SessionID: cmd.SessionID, RunID: cmd.RunID, Generation: cmd.Generation}.normalized()
 }
 
+// DecisionContinuationContext detaches the model continuation from the short
+// command acknowledgement deadline while keeping it tied to the run owner's
+// lifecycle and persistence fence.
+func (m *Manager) DecisionContinuationContext(parent context.Context, cmd Command) (context.Context, context.CancelFunc, error) {
+	ctrl := m.localControlForScope(cmd.BotID, cmd.SessionID, cmd.RunID)
+	if ctrl == nil || ctrl.generation != strings.TrimSpace(cmd.Generation) || !ctrl.commandsActive() {
+		return nil, func() {}, ErrCommandTargetNotActive
+	}
+	ctx, cancel := ctrl.commandContext(context.WithoutCancel(parent))
+	if err := m.ValidateRunOwnership(ctx, runHandleForCommand(cmd)); err != nil {
+		cancel()
+		return nil, func() {}, err
+	}
+	return ctx, cancel, nil
+}
+
 // ValidateRunOwnership fails closed before durable side effects when this
 // process no longer owns the active runtime run.
 func (m *Manager) ValidateRunOwnership(ctx context.Context, handle RunHandle) error {
@@ -89,6 +105,95 @@ func (m *Manager) Abort(ctx context.Context, botID, sessionID, runID string) (bo
 	return m.abort(ctx, botID, sessionID, runID, "")
 }
 
+// AbortControl aborts a run on behalf of a client that named the request with
+// its own control id. Two things follow from that id and neither is available
+// to plain Abort:
+//
+// The abort becomes idempotent across instances. A client that retries — or
+// that reconnects to a different server and retries there — gets the answer the
+// first attempt produced rather than a second execution, because the control id
+// keys the shared command result. Without it a retry after the run terminalized
+// would report "not active" and contradict the ack the client already holds.
+//
+// The intent is recorded durably before anything is routed, so a run that is
+// aborted survives as aborted-on-purpose rather than as an unexplained
+// cancellation, even if the owner never answers (SR-CTL-001).
+func (m *Manager) AbortControl(ctx context.Context, botID, sessionID, runID, controlID string) (bool, error) {
+	controlID = strings.TrimSpace(controlID)
+	if controlID == "" {
+		return m.abort(ctx, botID, sessionID, runID, "")
+	}
+	commandID := abortControlCommandID(strings.TrimSpace(sessionID), strings.TrimSpace(runID), controlID)
+	if applied, replayed, err := m.replayControlResult(ctx, commandID); replayed {
+		return applied, err
+	}
+	m.recordAbortIntent(ctx, strings.TrimSpace(runID))
+	applied, err := m.abortWithCommandID(ctx, botID, sessionID, runID, "", commandID)
+	m.rememberControlResult(ctx, commandID, botID, sessionID, runID, err)
+	return applied, err
+}
+
+// abortControlCommandID namespaces the client's control id by the run it
+// addresses. A control id is only unique to the client that minted it, so
+// keying the shared result on it alone would let two clients collide.
+func abortControlCommandID(sessionID, runID, controlID string) string {
+	return "abort:" + sessionID + ":" + runID + ":" + controlID
+}
+
+// replayControlResult answers from the shared command result when this control
+// id was already resolved. It runs before the run is resolved at all: once a run
+// terminalizes its live reference is gone, so a retry that looked the run up
+// first would report it missing instead of replaying the abort that ended it.
+func (m *Manager) replayControlResult(ctx context.Context, commandID string) (bool, bool, error) {
+	if m == nil || m.distributed == nil {
+		return false, false, nil
+	}
+	stored, ok, err := m.distributed.LoadCommandResult(ctx, commandID)
+	if err != nil || !ok {
+		return false, false, nil
+	}
+	if resultErr := commandResultError(stored); resultErr != nil {
+		return false, true, resultErr
+	}
+	return true, true, nil
+}
+
+func (m *Manager) rememberControlResult(ctx context.Context, commandID, botID, sessionID, runID string, err error) {
+	// Only a successful transition is safe to pin: a transport failure says
+	// nothing about the run, and pinning it would make a retry replay the
+	// failure forever instead of reaching the owner.
+	if err != nil || m == nil || m.distributed == nil {
+		return
+	}
+	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.commandTimeout())
+	defer cancel()
+	result := Command{
+		Type:      CommandResult,
+		ID:        commandID,
+		BotID:     strings.TrimSpace(botID),
+		SessionID: strings.TrimSpace(sessionID),
+		RunID:     strings.TrimSpace(runID),
+	}
+	if storeErr := m.distributed.StoreCommandResult(storeCtx, result, m.commandResultTTL()); storeErr != nil {
+		m.logger.Warn("store runtime abort control result failed",
+			slog.Any("error", storeErr), slog.String("command_id", commandID))
+	}
+}
+
+// recordAbortIntent persists that a human asked for this run to stop. It is
+// best effort on purpose: the ledger row is the record of intent, not the
+// mechanism, so failing to write it must not stop the abort from reaching the
+// owner that can actually honour it.
+func (m *Manager) recordAbortIntent(ctx context.Context, runID string) {
+	if m == nil || m.runs == nil || runID == "" {
+		return
+	}
+	if _, _, err := m.runs.RequestAbort(ctx, runID); err != nil {
+		m.logger.Warn("record runtime abort intent failed",
+			slog.Any("error", err), slog.String("run_id", runID))
+	}
+}
+
 func (m *Manager) AbortRun(ctx context.Context, handle RunHandle) (bool, error) {
 	handle = handle.normalized()
 	if !handle.valid() {
@@ -98,6 +203,13 @@ func (m *Manager) AbortRun(ctx context.Context, handle RunHandle) (bool, error) 
 }
 
 func (m *Manager) abort(ctx context.Context, botID, sessionID, runID, expectedGeneration string) (bool, error) {
+	return m.abortWithCommandID(ctx, botID, sessionID, runID, expectedGeneration, "")
+}
+
+// abortWithCommandID is abort with the routed command's identity supplied. A
+// caller-stable id is what makes a retry resolve to the first attempt's result
+// instead of executing twice; an empty one falls back to a fresh id.
+func (m *Manager) abortWithCommandID(ctx context.Context, botID, sessionID, runID, expectedGeneration, commandID string) (bool, error) {
 	botID = strings.TrimSpace(botID)
 	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
@@ -140,9 +252,12 @@ func (m *Manager) abort(ctx context.Context, botID, sessionID, runID, expectedGe
 	if err != nil {
 		return false, fmt.Errorf("load runtime command time: %w", err)
 	}
+	if strings.TrimSpace(commandID) == "" {
+		commandID = "abort-" + uuid.NewString()
+	}
 	cmd := Command{
 		Type:       CommandAbort,
-		ID:         "abort-" + uuid.NewString(),
+		ID:         commandID,
 		BotID:      ref.BotID,
 		SessionID:  ref.SessionID,
 		RunID:      ref.RunID,
@@ -159,6 +274,11 @@ func (m *Manager) abort(ctx context.Context, botID, sessionID, runID, expectedGe
 func (m *Manager) abortLocal(ctx context.Context, ctrl *runControl) (bool, error) {
 	if ctrl == nil || m.localControlForHandle(ctrl.handle()) != ctrl {
 		return false, ErrCommandTargetNotActive
+	}
+	waitingDecision := false
+	if snapshot, ok, err := m.backend.Load(ctx, Key{BotID: ctrl.botID, SessionID: ctrl.sessionID}); err == nil && ok &&
+		runMatchesHandle(snapshot.CurrentRunView, ctrl.handle()) {
+		waitingDecision = strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusWaitingDecision)
 	}
 	phase, abortOwner := ctrl.requestAbortPhase()
 	if phase != runAbortPhasePreClaim && m.distributed != nil && !ctrl.leaseIsValidAt(time.Now()) {
@@ -218,6 +338,11 @@ func (m *Manager) abortLocal(ctx context.Context, ctrl *runControl) (bool, error
 	}
 	if ctrl.cancel != nil {
 		ctrl.cancel()
+	}
+	if waitingDecision {
+		if err := m.FinishRun(context.WithoutCancel(ctx), ctrl.handle(), RunStatusAborted, ""); err != nil {
+			return false, err
+		}
 	}
 	return true, nil
 }
@@ -410,6 +535,24 @@ func (m *Manager) DispatchActiveCommand(ctx context.Context, botID, sessionID, c
 		}
 	}
 	return true, dispatchErr
+}
+
+// DispatchRunCommand is the transport-facing decision route. In addition to
+// the canonical decision id it checks the server-issued run id, preventing a
+// stale UI response from being applied to a newer run in the same session.
+func (m *Manager) DispatchRunCommand(ctx context.Context, botID, sessionID, runID, commandType, targetID string, payload []byte) (bool, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return false, nil
+	}
+	snapshot, err := m.Snapshot(ctx, botID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if snapshot.CurrentRunView == nil || strings.TrimSpace(snapshot.CurrentRunView.RunID) != runID {
+		return false, nil
+	}
+	return m.DispatchActiveCommand(ctx, botID, sessionID, commandType, targetID, payload)
 }
 
 func (m *Manager) dispatchRemoteCommand(ctx context.Context, ownerID string, cmd Command) error {

@@ -92,6 +92,19 @@ type PersistInput struct {
 	DisplayText             string
 	TurnRequestMessageID    string
 	SkipHistoryTurn         bool
+	// RunID links this row to the admitted run that produced it. It is
+	// traceability only: history is read by turn, never by run.
+	RunID string
+	// TurnID and TurnPosition carry a turn this message must be filed under
+	// because admission already allocated it (SR-TURN-001). Both empty means no
+	// admission decided the turn and the history layer allocates one, which is
+	// still the case for channel inbound, schedules and heartbeats.
+	//
+	// They travel together: a turn id without its position would file the row
+	// under the right turn at the wrong place in the session's order, and a
+	// position without its id would take a slot the client cannot name.
+	TurnID       string
+	TurnPosition *int64
 }
 
 type LocateResult struct {

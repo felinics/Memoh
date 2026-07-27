@@ -216,6 +216,39 @@ func (c *apiClient) history(botID, sessionID string) (map[string]any, error) {
 	return history, err
 }
 
+func (c *apiClient) setToolApprovalRequired(botID string, required bool) error {
+	execMode := "allow"
+	if required {
+		execMode = "ask"
+	}
+	var response map[string]any
+	return c.request(
+		http.MethodPut,
+		"/bots/"+url.PathEscape(botID)+"/settings",
+		map[string]any{
+			"tool_approval_config": map[string]any{
+				"enabled": required,
+				"read":    map[string]any{"mode": "allow"},
+				"write":   map[string]any{"mode": "allow"},
+				"exec":    map[string]any{"mode": execMode},
+			},
+		},
+		&response,
+		http.StatusOK,
+	)
+}
+
+func (c *apiClient) approveTool(botID, approvalID string) error {
+	var response map[string]any
+	return c.request(
+		http.MethodPost,
+		"/bots/"+url.PathEscape(botID)+"/tool-approvals/"+url.PathEscape(approvalID)+"/approve",
+		map[string]any{},
+		&response,
+		http.StatusOK,
+	)
+}
+
 func historyContainsRoleText(history map[string]any, role, text string) bool {
 	for _, item := range objectList(history) {
 		if stringValue(item["role"]) == role && valueContainsString(item, text) {

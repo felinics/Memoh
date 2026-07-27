@@ -234,6 +234,12 @@ func (m *fakeModel) handleChatCompletions(writer http.ResponseWriter, request *h
 		}
 		return
 	}
+	if directive.mode == "tool_approval" && !hasToolResult(payload) {
+		if err := writeApprovalRequiredToolCall(writer, flusher, requestID, directive.marker); err != nil {
+			m.markDisconnected(directive.marker)
+		}
+		return
+	}
 	for index := 0; index < directive.chunks; index++ {
 		if err := waitForRequest(request.Context(), directive.delay); err != nil {
 			m.markDisconnected(directive.marker)
@@ -437,6 +443,35 @@ func writeAskUserCall(writer http.ResponseWriter, flusher http.Flusher, requestI
 			"type":  "function",
 			"function": map[string]any{
 				"name":      "ask_user",
+				"arguments": string(arguments),
+			},
+		}},
+	}, nil)); err != nil {
+		return err
+	}
+	reason := "tool_calls"
+	if err := writeSSE(writer, flusher, completionChunk(requestID, map[string]any{}, &reason)); err != nil {
+		return err
+	}
+	_, err = writer.Write([]byte("data: [DONE]\n\n"))
+	flusher.Flush()
+	return err
+}
+
+func writeApprovalRequiredToolCall(writer http.ResponseWriter, flusher http.Flusher, requestID, marker string) error {
+	arguments, err := json.Marshal(map[string]any{
+		"command": "printf 'session-runtime-approval-" + marker + "'",
+	})
+	if err != nil {
+		return err
+	}
+	if err := writeSSE(writer, flusher, completionChunk(requestID, map[string]any{
+		"tool_calls": []map[string]any{{
+			"index": 0,
+			"id":    "approval-" + marker,
+			"type":  "function",
+			"function": map[string]any{
+				"name":      "exec",
 				"arguments": string(arguments),
 			},
 		}},

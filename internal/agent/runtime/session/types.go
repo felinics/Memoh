@@ -17,11 +17,14 @@ const (
 
 	RunStatusRunning   = "running"
 	RunStatusAdmitting = "admitting"
-	RunStatusAborting  = "aborting"
-	RunStatusCompleted = "completed"
-	RunStatusAborted   = "aborted"
-	RunStatusErrored   = "errored"
-	RunStatusLost      = "lost"
+	// RunStatusWaitingDecision keeps the admitted run active while its native
+	// execution is parked on a durable approval or ask_user decision.
+	RunStatusWaitingDecision = "waiting_decision"
+	RunStatusAborting        = "aborting"
+	RunStatusCompleted       = "completed"
+	RunStatusAborted         = "aborted"
+	RunStatusErrored         = "errored"
+	RunStatusLost            = "lost"
 
 	SteerStatusPending  = "pending"
 	SteerStatusQueued   = "queued"
@@ -156,7 +159,12 @@ func (s Snapshot) cursor() Cursor {
 }
 
 type CurrentRunView struct {
-	RunID               string               `json:"run_id"`
+	RunID string `json:"run_id"`
+	// TurnID is the durable turn this run writes into, allocated at admission.
+	// It is part of the observable view because SR-OBS-003 requires every
+	// subscriber to agree on the run's turn, and a subscriber that only learns
+	// the run id cannot line the run up against persisted history.
+	TurnID              string               `json:"turn_id,omitempty"`
 	Generation          string               `json:"generation"`
 	Status              string               `json:"status"`
 	OwnerID             string               `json:"owner_id,omitempty"`

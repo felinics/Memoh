@@ -6,7 +6,21 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	"github.com/memohai/memoh/internal/agent/turn"
+	chatview "github.com/memohai/memoh/internal/agent/view"
+	attachmentpkg "github.com/memohai/memoh/internal/attachment"
+)
+
+// Each half is reached by asserting the one injected session runtime, and a
+// failed assertion degrades silently — a subscription that never delivers, an
+// abort that never routes. These assertions turn that into a build failure, so
+// renaming or resignaturing a manager method cannot quietly unwire the handler.
+var (
+	_ runtimeSubscriptionSource = (*sessionruntime.Manager)(nil)
+	_ runtimeRunEventPublisher  = (*sessionruntime.Manager)(nil)
+	_ runtimeControlRouter      = (*sessionruntime.Manager)(nil)
 )
 
 // runtimeSubscriptionSource is the observation half of the session runtime.
@@ -36,6 +50,114 @@ func (h *LocalChannelHandler) sessionRuntimeObserver() runtimeSubscriptionSource
 		return nil
 	}
 	return source
+}
+
+// runtimeRunEventPublisher is the publication half of the session runtime: it
+// folds one agent event into the run's authoritative state so every subscriber
+// of the session sees it, including subscribers on another server. It is
+// declared as the single method this handler calls for the same reason as
+// runtimeSubscriptionSource — publishing must not become a route to admission
+// or ownership.
+type runtimeRunEventPublisher interface {
+	HandleAgentEvent(ctx context.Context, handle sessionruntime.RunHandle, event native.StreamEvent) ([]chatview.UIMessage, error)
+}
+
+// runtimeControlRouter routes a client's control request to whichever process
+// owns the run. The connection that receives an abort is frequently not the one
+// executing the run — a reconnect lands anywhere, and in a cluster that is
+// routinely a different server — so a control that only reached local state
+// would silently do nothing (SR-CTL-001).
+type runtimeControlRouter interface {
+	AbortControl(ctx context.Context, botID, sessionID, runID, controlID string) (bool, error)
+	DispatchRunCommand(ctx context.Context, botID, sessionID, runID, commandType, targetID string, payload []byte) (bool, error)
+}
+
+// sessionRuntimePublisher and sessionRuntimeController narrow the one injected
+// session runtime to the half each caller needs, for the reason given on
+// sessionRuntimeObserver: admission, observation, publication, and control are
+// all the same process-wide *Manager, and reading the existing dependency is
+// what keeps them from being wired to different ones.
+func (h *LocalChannelHandler) sessionRuntimePublisher() runtimeRunEventPublisher {
+	if h == nil || h.sessionRuntime == nil {
+		return nil
+	}
+	publisher, ok := h.sessionRuntime.(runtimeRunEventPublisher)
+	if !ok {
+		return nil
+	}
+	return publisher
+}
+
+func (h *LocalChannelHandler) sessionRuntimeController() runtimeControlRouter {
+	if h == nil || h.sessionRuntime == nil {
+		return nil
+	}
+	controller, ok := h.sessionRuntime.(runtimeControlRouter)
+	if !ok {
+		return nil
+	}
+	return controller
+}
+
+// wsMessageAdmission owns the one prepared attachment set shared by the
+// runtime projection and the eventual history write. Normal uploads are
+// ingested only after admission wins; skill activations pass an already
+// prepared set.
+type wsMessageAdmission struct {
+	handler             *LocalChannelHandler
+	botID               string
+	request             chatview.UITurn
+	attachments         []turn.Attachment
+	attachmentsPrepared bool
+}
+
+func (a *wsMessageAdmission) build(ctx context.Context, _ sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+	if !a.attachmentsPrepared {
+		a.attachments = a.handler.ingestWSInboundAttachments(ctx, a.botID, a.attachments)
+		a.attachmentsPrepared = true
+	}
+	request := a.request
+	request.Attachments = wsRuntimeUIAttachments(a.botID, a.attachments)
+	return sessionruntime.RunAdmissionView{RequestUserTurn: &request}, nil
+}
+
+func (a *wsMessageAdmission) preparedAttachments() []turn.Attachment {
+	return a.attachments
+}
+
+func wsRuntimeUIAttachments(botID string, attachments []turn.Attachment) []chatview.UIAttachment {
+	uiAttachments := make([]chatview.UIAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		kind := strings.ToLower(strings.TrimSpace(attachment.Type))
+		if kind == "" {
+			switch mime := strings.ToLower(strings.TrimSpace(attachment.Mime)); {
+			case strings.HasPrefix(mime, "image/"):
+				kind = "image"
+			case strings.HasPrefix(mime, "audio/"):
+				kind = "audio"
+			case strings.HasPrefix(mime, "video/"):
+				kind = "video"
+			default:
+				kind = "file"
+			}
+		}
+		contentHash := strings.TrimSpace(attachment.ContentHash)
+		// Runtime state carries media references, not the uploaded bytes. Copying
+		// Base64 here would duplicate every attachment into the live backend.
+		uiAttachments = append(uiAttachments, chatview.UIAttachment{
+			ID:          contentHash,
+			Type:        kind,
+			Path:        strings.TrimSpace(attachment.Path),
+			URL:         strings.TrimSpace(attachment.URL),
+			Name:        strings.TrimSpace(attachment.Name),
+			ContentHash: contentHash,
+			BotID:       strings.TrimSpace(botID),
+			Mime:        strings.TrimSpace(attachment.Mime),
+			Size:        attachment.Size,
+			StorageKey:  attachmentpkg.MetadataString(attachment.Metadata, attachmentpkg.MetadataKeyStorageKey),
+		})
+	}
+	return uiAttachments
 }
 
 // runtimeSubscribeAuthorizer re-checks this connection's read access to one

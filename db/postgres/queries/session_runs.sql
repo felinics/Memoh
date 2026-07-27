@@ -141,9 +141,18 @@ RETURNING *;
 -- failed) and the reaper (lost). Zero rows affected means the transition was
 -- already applied or a newer owner superseded this token; neither is an error.
 UPDATE session_runs
-SET state = sqlc.arg(state)::text,
-    error_code = sqlc.narg(error_code)::text,
-    error_message = sqlc.narg(error_message)::text,
+SET state = CASE
+        WHEN sqlc.arg(state)::text = 'lost' AND abort_requested_at IS NOT NULL THEN 'aborted'
+        ELSE sqlc.arg(state)::text
+    END,
+    error_code = CASE
+        WHEN sqlc.arg(state)::text = 'lost' AND abort_requested_at IS NOT NULL THEN NULL
+        ELSE sqlc.narg(error_code)::text
+    END,
+    error_message = CASE
+        WHEN sqlc.arg(state)::text = 'lost' AND abort_requested_at IS NOT NULL THEN NULL
+        ELSE sqlc.narg(error_message)::text
+    END,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
@@ -167,6 +176,11 @@ RETURNING *;
 -- than one specific old value means a backend lost twice in quick succession
 -- cannot strand rows from the older incarnation. Orphans are excluded by
 -- live_generation IS NOT NULL: they were never claimed.
+--
+-- A NULL cursor means "start from the beginning" and must be spelled out: the
+-- keyset comparison below is NULL for every row when the cursor is NULL, so
+-- without this branch the first batch of every sweep matches nothing, and a
+-- sweep that never returns a full batch never advances past it either.
 SELECT *
 FROM session_runs
 WHERE team_id = public.memoh_current_team_id()
@@ -174,8 +188,9 @@ WHERE team_id = public.memoh_current_team_id()
   AND live_generation IS NOT NULL
   AND live_generation <> sqlc.arg(current_generation)
   AND (
-    live_generation > sqlc.arg(cursor_generation)
-    OR (live_generation = sqlc.arg(cursor_generation) AND run_id > sqlc.arg(cursor_run_id))
+    sqlc.narg(cursor_generation)::text IS NULL
+    OR live_generation > sqlc.narg(cursor_generation)
+    OR (live_generation = sqlc.narg(cursor_generation) AND run_id > sqlc.narg(cursor_run_id))
   )
 ORDER BY live_generation, run_id
 LIMIT sqlc.arg(batch_size);

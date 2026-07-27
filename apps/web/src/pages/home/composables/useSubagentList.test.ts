@@ -30,7 +30,6 @@ const api = vi.hoisted(() => ({
   setACPRuntimeModel: vi.fn(),
   setACPRuntimeModelByID: vi.fn(),
   streamBotSessionsActivityEvents: vi.fn(),
-  streamSessionMessageEvents: vi.fn(),
 }))
 
 const colada = vi.hoisted(() => ({
@@ -80,7 +79,6 @@ describe('useSubagentList', () => {
       type: 'chat',
     })
     api.streamBotSessionsActivityEvents.mockResolvedValue(undefined)
-    api.streamSessionMessageEvents.mockResolvedValue(undefined)
   })
 
   it('shows active subagent tasks enriched from current session child sessions', async () => {

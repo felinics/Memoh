@@ -2822,7 +2822,7 @@ func runRuntimeManagerSnapshotsRichActiveRunContract(t *testing.T, suite runtime
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.RunID != testRunID || snapshot.CurrentRunView.Status != RunStatusRunning {
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.RunID != testRunID || snapshot.CurrentRunView.Status != RunStatusWaitingDecision {
 		t.Fatalf("current run = %#v", snapshot.CurrentRunView)
 	}
 	if snapshot.Epoch == "" || snapshot.CurrentRunView.Generation == "" {

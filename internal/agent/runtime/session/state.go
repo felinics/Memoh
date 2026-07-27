@@ -12,6 +12,8 @@ import (
 
 func runtimeDeltaForAgentEvent(event native.StreamEvent, messages []chatview.UIMessage) (RuntimeDelta, bool) {
 	switch event.Type {
+	case native.EventAgentStart:
+		return RuntimeDelta{}, true
 	case native.EventAgentEnd, native.EventAgentAbort, native.EventError:
 		return RuntimeDelta{MessageUpserts: append([]chatview.UIMessage(nil), messages...)}, true
 	case native.EventRetry:
@@ -42,6 +44,20 @@ func runtimeDeltaForAgentEvent(event native.StreamEvent, messages []chatview.UIM
 		}
 		return RuntimeDelta{MessageUpserts: append([]chatview.UIMessage(nil), messages...)}, true
 	}
+}
+
+// pendingDecisionEvent distinguishes the initial request from a later
+// authoritative status update for the same decision. Both use the same stream
+// event vocabulary so the UI converter can update one tool block in place, but
+// only the initial pending event parks the run in waiting_decision.
+func pendingDecisionEvent(event native.StreamEvent) bool {
+	switch event.Type {
+	case native.EventToolApprovalRequest, native.EventUserInputRequest:
+	default:
+		return false
+	}
+	status := strings.TrimSpace(event.Status)
+	return status == "" || strings.EqualFold(status, "pending")
 }
 
 func runtimeRunPatch(snapshot Snapshot, status, runError, steer, lease bool) RuntimeDelta {
@@ -86,11 +102,16 @@ func (*Manager) leaseExpired(run *CurrentRunView, now time.Time) bool {
 }
 
 func isActiveRunStatus(status string) bool {
-	return strings.EqualFold(status, RunStatusAdmitting) || strings.EqualFold(status, RunStatusRunning) || strings.EqualFold(status, RunStatusAborting)
+	return strings.EqualFold(status, RunStatusAdmitting) ||
+		strings.EqualFold(status, RunStatusRunning) ||
+		strings.EqualFold(status, RunStatusWaitingDecision) ||
+		strings.EqualFold(status, RunStatusAborting)
 }
 
 func isEventAcceptingRunStatus(status string) bool {
-	return strings.EqualFold(status, RunStatusRunning) || strings.EqualFold(status, RunStatusAborting)
+	return strings.EqualFold(status, RunStatusRunning) ||
+		strings.EqualFold(status, RunStatusWaitingDecision) ||
+		strings.EqualFold(status, RunStatusAborting)
 }
 
 func (m *Manager) markLostIfExpired(snapshot *Snapshot, now time.Time) bool {

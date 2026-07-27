@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import type { UITurn } from '@/composables/api/useChat.types'
 import { createTranscriptController, type TranscriptDeps } from './transcript'
 import type {

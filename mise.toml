@@ -148,6 +148,14 @@ depends = ["//:dev:workspace-image"]
 run = """
 #!/bin/bash
 set -euo pipefail
+# A second Server left over from the cluster topology shares this PostgreSQL but
+# has its own liveness generation, so each reaper reads the other's live runs as
+# stranded and condemns them. Removing it is what makes "single" mean single.
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.override.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.cluster.override.yml \
+  rm -sf valkey server_b
 docker compose \
   -f devenv/docker-compose.yml \
   -f internal/agent/runtime/session/acceptance/testdata/compose.override.yml \
@@ -209,6 +217,18 @@ go test \
   -tags=integration \
   -count=1 \
   -timeout=5m \
+  ./internal/agent/runtime/session/acceptance
+"""
+
+[tasks."test:session-runtime:acceptance:cluster:destructive"]
+description = "Run the isolated owner-restart decision black-box serially against the cluster topology"
+env = { MEMOH_SESSION_RUNTIME_ACCEPTANCE = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE = "cluster", MEMOH_SESSION_RUNTIME_ACCEPTANCE_CRASH = "1" }
+run = """
+go test \
+  -tags=integration \
+  -count=1 \
+  -timeout=5m \
+  -run '^TestSRDEC001DecisionPersistsRunAndTurnAcrossRestart$' \
   ./internal/agent/runtime/session/acceptance
 """
 

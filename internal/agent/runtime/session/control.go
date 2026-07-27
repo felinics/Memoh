@@ -408,10 +408,25 @@ func (*Manager) cancelRunControl(ctrl *runControl) {
 }
 
 func (c *runControl) revokeOwnership(cause error) {
-	if c == nil || c.ownershipCancel == nil {
+	if c == nil {
+		return
+	}
+	// Recorded before the nil check on the cancel func, so the flag means the
+	// same thing for a control that never carried one.
+	if errors.Is(cause, ErrRunOwnershipLost) {
+		c.ownershipLost.Store(true)
+	}
+	if c.ownershipCancel == nil {
 		return
 	}
 	c.ownershipOnce.Do(func() { c.ownershipCancel(cause) })
+}
+
+// ownershipWasLost reports that this process was told it no longer owns the run.
+// Ordinary teardown revokes with context.Canceled and does not set it, so the
+// answer distinguishes "the run ended" from "the run was taken away".
+func (c *runControl) ownershipWasLost() bool {
+	return c != nil && c.ownershipLost.Load()
 }
 
 func (m *Manager) stopLeaseRenewal(ctrl *runControl) {

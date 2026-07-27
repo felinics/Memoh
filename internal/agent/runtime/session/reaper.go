@@ -40,11 +40,13 @@ type Reaper struct {
 	ownerID  string
 	logger   *slog.Logger
 
-	// generation is the liveness incarnation observed at start. Runs stamped
-	// with anything else were claimed by a backend that no longer exists.
+	// generation is the liveness incarnation last observed. Runs stamped with
+	// anything else were claimed by a backend that no longer exists.
 	generation string
-	// generationObservedAt starts the fail-closed grace. Sweeping immediately
-	// after a restart would condemn runs whose owners are merely reconnecting.
+	// generationObservedAt starts the fail-closed grace, measured from when this
+	// incarnation was first seen rather than from process start. Sweeping
+	// immediately after a replacement would condemn runs whose owners are merely
+	// reconnecting.
 	generationObservedAt time.Time
 	// sweepCursor carries recovery progress across ticks, so a long outage is
 	// worked through in bounded slices instead of restarted every tick. Only the
@@ -72,10 +74,9 @@ func NewReaper(runs ledger.Store, liveness LivenessBackend, tune tuning, ownerID
 	}
 }
 
-// Start records the current liveness generation and begins ticking. Reading the
-// generation here, once, is what makes the fail-closed sweep decidable: every
-// later comparison is against a value this process knows was live when it
-// booted.
+// Start seeds the liveness generation and begins ticking. Reading it here also
+// proves the backend is reachable before the reaper claims it can decide runs
+// unrecoverable; the sweep re-reads it every pass from then on.
 func (r *Reaper) Start(ctx context.Context) error {
 	if r == nil {
 		return nil
@@ -198,6 +199,11 @@ func (r *Reaper) reapExpiredLeases(ctx context.Context) error {
 // proportional to traffic during the outage: one unbounded scan would turn
 // recovery into a second incident.
 func (r *Reaper) recoverLostBackendGeneration(ctx context.Context) error {
+	if err := r.refreshGeneration(ctx); err != nil {
+		// Comparing against an incarnation this pass could not confirm is how a
+		// recovery sweep becomes the incident, so it declines to run.
+		return err
+	}
 	// A brief blip must not condemn owners that are merely reconnecting, so the
 	// sweep waits out the configured restart budget first.
 	if time.Since(r.generationObservedAt) < r.tuning.backendLossGrace {
@@ -233,6 +239,41 @@ func (r *Reaper) recoverLostBackendGeneration(ctx context.Context) error {
 		r.sweepCursor = ledger.Cursor{LiveGeneration: last.LiveGeneration, RunID: last.RunID}
 	}
 	return errors.Join(errs...)
+}
+
+// refreshGeneration re-reads the live incarnation before each sweep.
+//
+// Reading it once at start is wrong in exactly the case the sweep exists for.
+// When a running backend is replaced, the runs stranded by that replacement
+// carry the generation this process booted with, while the runs admitted
+// afterwards carry the new one — so a frozen comparison excludes every casualty
+// and matches every survivor. The sweep does not merely miss; it inverts.
+//
+// A change also restarts the grace, because the restart budget is measured from
+// the replacement rather than from this process's boot: owners reconnecting to a
+// new backend need that budget just as much as owners reconnecting after one.
+// The cursor resets for the same reason — it keys on the generation column, so a
+// position taken under the previous incarnation says nothing about this one.
+func (r *Reaper) refreshGeneration(ctx context.Context) error {
+	generation, err := r.liveness.LivenessGeneration(ctx)
+	if err != nil {
+		return fmt.Errorf("read session runtime liveness generation: %w", err)
+	}
+	generation = strings.TrimSpace(generation)
+	if generation == "" {
+		return errors.New("session runtime liveness generation is empty")
+	}
+	if generation == r.generation {
+		return nil
+	}
+	r.logger.Info("session runtime liveness generation changed",
+		slog.String("previous_generation", r.generation),
+		slog.String("current_generation", generation),
+	)
+	r.generation = generation
+	r.generationObservedAt = time.Now()
+	r.sweepCursor = ledger.Cursor{}
+	return nil
 }
 
 // repairOrphanedAdmissions covers the one gap the other two duties cannot see: a
@@ -279,6 +320,13 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 	if !applied {
 		// Already terminal, or a newer owner holds the run. Both mean this
 		// reaper has nothing to decide.
+		return nil
+	}
+	if run.State == ledger.StateAborted {
+		r.logger.Info("session run finalized after abort intent",
+			slog.String("run_id", run.RunID),
+			slog.String("session_id", run.SessionID),
+		)
 		return nil
 	}
 	r.logger.Info("session run marked lost",

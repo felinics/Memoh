@@ -81,11 +81,20 @@ type historyRunSummary struct {
 }
 
 type userInputRecord struct {
-	ID        string
-	RunID     string
-	TurnID    string
-	Status    string
-	UIPayload json.RawMessage
+	ID                  string
+	RunID               string
+	TurnID              string
+	Status              string
+	RuntimeFencingToken int64
+	UIPayload           json.RawMessage
+}
+
+type toolApprovalRecord struct {
+	ID                  string
+	RunID               string
+	TurnID              string
+	Status              string
+	RuntimeFencingToken int64
 }
 
 type ledgerProbe struct {
@@ -229,6 +238,15 @@ WHERE session_id = $1::uuid
 	return count, err
 }
 
+func (p *ledgerProbe) sessionRunCount(ctx context.Context, sessionID string) (int, error) {
+	var count int
+	err := p.pool.QueryRow(ctx, `
+SELECT count(*)
+FROM session_runs
+WHERE session_id = $1::uuid`, sessionID).Scan(&count)
+	return count, err
+}
+
 func (p *ledgerProbe) activeRunCount(ctx context.Context, sessionID string) (int, error) {
 	var count int
 	err := p.pool.QueryRow(ctx, `
@@ -297,6 +315,7 @@ SELECT
   COALESCE(run_id::text, ''),
   COALESCE(turn_id::text, ''),
   status,
+  COALESCE(runtime_fencing_token, 0),
   ui_payload_json
 FROM user_input_requests
 WHERE run_id = $1::uuid
@@ -309,6 +328,7 @@ LIMIT 1`
 		&decision.RunID,
 		&decision.TurnID,
 		&decision.Status,
+		&decision.RuntimeFencingToken,
 		&decision.UIPayload,
 	)
 	return decision, err
@@ -338,6 +358,58 @@ func (p *ledgerProbe) userInputStatus(ctx context.Context, decisionID string) (s
 	err := p.pool.QueryRow(ctx, `
 SELECT status
 FROM user_input_requests
+WHERE id = $1::uuid`, decisionID).Scan(&status)
+	return status, err
+}
+
+func (p *ledgerProbe) pendingToolApproval(ctx context.Context, runID string) (toolApprovalRecord, error) {
+	const query = `
+SELECT
+  id::text,
+  COALESCE(run_id::text, ''),
+  COALESCE(turn_id::text, ''),
+  status,
+  COALESCE(runtime_fencing_token, 0)
+FROM tool_approval_requests
+WHERE run_id = $1::uuid
+  AND status = 'pending'
+ORDER BY created_at DESC
+LIMIT 1`
+	var decision toolApprovalRecord
+	err := p.pool.QueryRow(ctx, query, runID).Scan(
+		&decision.ID,
+		&decision.RunID,
+		&decision.TurnID,
+		&decision.Status,
+		&decision.RuntimeFencingToken,
+	)
+	return decision, err
+}
+
+func (p *ledgerProbe) waitPendingToolApproval(ctx context.Context, runID string) (toolApprovalRecord, error) {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		decision, err := p.pendingToolApproval(ctx, runID)
+		switch {
+		case err == nil:
+			return decision, nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return toolApprovalRecord{}, err
+		}
+		select {
+		case <-ctx.Done():
+			return toolApprovalRecord{}, fmt.Errorf("wait for pending tool approval: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (p *ledgerProbe) toolApprovalStatus(ctx context.Context, decisionID string) (string, error) {
+	var status string
+	err := p.pool.QueryRow(ctx, `
+SELECT status
+FROM tool_approval_requests
 WHERE id = $1::uuid`, decisionID).Scan(&status)
 	return status, err
 }

@@ -196,7 +196,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					snap.visibleOutput = hasVisibleOutput
 					lastSnapshot = snap
 					hasSnapshot = true
-					if !stored {
+					if !stored && !runOwnershipLost(streamCtx) {
 						// Use WithoutCancel so persistence still succeeds even
 						// when the parent ctx has already been cancelled by a
 						// client disconnect or idle timeout.
@@ -228,6 +228,11 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		// without polluting history.
 		if !stored {
 			switch {
+			case runOwnershipLost(streamCtx):
+				s.logger.Warn("skip persisting stream after run ownership loss",
+					slog.String("bot_id", streamReq.BotID),
+					slog.String("chat_id", streamReq.ChatID),
+				)
 			case hasSnapshot:
 				_ = s.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 			default:
@@ -416,7 +421,7 @@ func (s *Service) streamChatWSResultWithHooks(
 				snap.visibleOutput = hasVisibleOutput
 				lastSnapshot = snap
 				hasSnapshot = true
-				if !stored {
+				if !stored && !runOwnershipLost(ctx) {
 					persisted, storeErr := s.persistTerminalSnapshotResult(context.WithoutCancel(ctx), req, rc, snap)
 					if storeErr != nil {
 						s.logger.Error("ws persist failed", slog.Any("error", storeErr))
@@ -447,6 +452,11 @@ func (s *Service) streamChatWSResultWithHooks(
 	// Intermediate persistence on abort/error
 	if !stored {
 		switch {
+		case runOwnershipLost(ctx):
+			s.logger.Warn("skip persisting ws stream after run ownership loss",
+				slog.String("bot_id", req.BotID),
+				slog.String("chat_id", req.ChatID),
+			)
 		case hasSnapshot:
 			persistedMessages = s.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 		default:

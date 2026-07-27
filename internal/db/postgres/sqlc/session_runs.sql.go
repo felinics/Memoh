@@ -189,9 +189,18 @@ func (q *Queries) ClaimSessionRun(ctx context.Context, arg ClaimSessionRunParams
 
 const finalizeSessionRun = `-- name: FinalizeSessionRun :one
 UPDATE session_runs
-SET state = $1::text,
-    error_code = $2::text,
-    error_message = $3::text,
+SET state = CASE
+        WHEN $1::text = 'lost' AND abort_requested_at IS NOT NULL THEN 'aborted'
+        ELSE $1::text
+    END,
+    error_code = CASE
+        WHEN $1::text = 'lost' AND abort_requested_at IS NOT NULL THEN NULL
+        ELSE $2::text
+    END,
+    error_message = CASE
+        WHEN $1::text = 'lost' AND abort_requested_at IS NOT NULL THEN NULL
+        ELSE $3::text
+    END,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = $4
@@ -457,7 +466,8 @@ WHERE team_id = public.memoh_current_team_id()
   AND live_generation IS NOT NULL
   AND live_generation <> $1
   AND (
-    live_generation > $2
+    $2::text IS NULL
+    OR live_generation > $2
     OR (live_generation = $2 AND run_id > $3)
   )
 ORDER BY live_generation, run_id
@@ -475,6 +485,11 @@ type ListStaleGenerationSessionRunsParams struct {
 // than one specific old value means a backend lost twice in quick succession
 // cannot strand rows from the older incarnation. Orphans are excluded by
 // live_generation IS NOT NULL: they were never claimed.
+//
+// A NULL cursor means "start from the beginning" and must be spelled out: the
+// keyset comparison below is NULL for every row when the cursor is NULL, so
+// without this branch the first batch of every sweep matches nothing, and a
+// sweep that never returns a full batch never advances past it either.
 func (q *Queries) ListStaleGenerationSessionRuns(ctx context.Context, arg ListStaleGenerationSessionRunsParams) ([]SessionRun, error) {
 	rows, err := q.db.Query(ctx, listStaleGenerationSessionRuns,
 		arg.CurrentGeneration,

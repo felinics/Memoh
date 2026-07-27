@@ -15,6 +15,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 const (
@@ -320,7 +322,12 @@ func TestSRADM001FingerprintConflictIsStableAndDoesNotCreateRun(t *testing.T) {
 	if err := sendChat(secondary, sessionID, invocationID, original+" changed"); err != nil {
 		t.Fatalf("send conflicting invocation: %v", err)
 	}
-	events, rejected, err := readRejected(secondary, invocationID, "invocation_conflict", 5*time.Second)
+	events, rejected, err := readRejected(
+		secondary,
+		invocationID,
+		string(apperror.CodeSessionInvocationConflict),
+		5*time.Second,
+	)
 	if err != nil {
 		t.Fatalf("SR-ADM-001: conflicting replay was not rejected: %v; events=%#v", err, events)
 	}
@@ -330,7 +337,12 @@ func TestSRADM001FingerprintConflictIsStableAndDoesNotCreateRun(t *testing.T) {
 	if err := sendChat(secondary, sessionID, invocationID, original+" changed again"); err != nil {
 		t.Fatalf("repeat conflicting invocation: %v", err)
 	}
-	retryEvents, retryRejected, retryErr := readRejected(secondary, invocationID, "invocation_conflict", 5*time.Second)
+	retryEvents, retryRejected, retryErr := readRejected(
+		secondary,
+		invocationID,
+		string(apperror.CodeSessionInvocationConflict),
+		5*time.Second,
+	)
 	if retryErr != nil {
 		t.Fatalf("SR-ADM-001: repeated conflict was not stable: %v; events=%#v", retryErr, retryEvents)
 	}
@@ -388,7 +400,12 @@ func TestSROWN001BusyWritesNothingAndRetryLaterSucceeds(t *testing.T) {
 	if err := sendChat(secondary, sessionID, secondInvocation, secondText); err != nil {
 		t.Fatalf("send busy invocation: %v", err)
 	}
-	events, _, err := readRejected(secondary, secondInvocation, "session_busy", 5*time.Second)
+	events, _, err := readRejected(
+		secondary,
+		secondInvocation,
+		string(apperror.CodeSessionBusy),
+		5*time.Second,
+	)
 	if err != nil {
 		t.Fatalf("SR-OWN-001: second invocation was not rejected busy: %v; events=%#v", err, events)
 	}
@@ -597,23 +614,24 @@ func TestSRDEC001DecisionPersistsRunAndTurnAcrossRestart(t *testing.T) {
 	run := mustWaitRunState(t, sessionID, invocationID, func(run sessionRunRecord) bool {
 		return run.State == "waiting_decision"
 	})
-
-	ledger := requireLedger(t)
-	ctx, cancel := context.WithTimeout(context.Background(), databaseTimeout)
-	decision, err := ledger.waitPendingUserInput(ctx, run.RunID)
-	cancel()
-	if err != nil {
-		t.Fatalf("SR-DEC-001: pending decision not persisted: %v", err)
-	}
-	if decision.RunID != run.RunID || decision.TurnID != run.TurnID {
-		t.Fatalf("SR-DEC-001: decision linkage = run %q turn %q, want %q %q", decision.RunID, decision.TurnID, run.RunID, run.TurnID)
-	}
+	decision := mustPendingUserInput(t, run)
 
 	if err := killAndRestartPrimary(env); err != nil {
 		_ = primary.Close()
 		t.Fatalf("kill and restart owner with pending decision: %v", err)
 	}
 	_ = primary.Close()
+
+	statusCtx, statusCancel := context.WithTimeout(context.Background(), databaseTimeout)
+	status, err := requireLedger(t).userInputStatus(statusCtx, decision.ID)
+	statusCancel()
+	if err != nil || status != "pending" {
+		t.Fatalf("SR-DEC-001: decision after owner restart = %q, err=%v, want pending", status, err)
+	}
+	recovered := mustWaitRunState(t, sessionID, invocationID, func(candidate sessionRunRecord) bool {
+		return candidate.State == "waiting_decision" && candidate.FencingToken > run.FencingToken
+	})
+	decision = mustPendingUserInput(t, recovered)
 
 	answers, err := firstDecisionAnswer(decision.UIPayload)
 	if err != nil {
@@ -632,31 +650,26 @@ func TestSRDEC001DecisionPersistsRunAndTurnAcrossRestart(t *testing.T) {
 		t.Fatalf("SR-DEC-001: decision answer was not acknowledged: %v; events=%#v", err, ackEvents)
 	}
 	firstAck := ackEvents[len(ackEvents)-1]
-	if err := sendUserInputResponse(secondary, sessionID, admitted.RunID, decision.ID, controlID, answers); err != nil {
-		t.Fatalf("repeat decision answer through secondary: %v", err)
+	if !firstAck.Applied || firstAck.Control != "user_input_response" || eventRunID(firstAck) != admitted.RunID {
+		t.Fatalf("SR-DEC-001: restarted-owner decision ack = %#v, want applied response", firstAck)
 	}
-	retryEvents, retryErr := readUntil(secondary, 8*time.Second, func(event wsEvent) bool {
+	completed := mustWaitRunState(t, sessionID, invocationID, func(run sessionRunRecord) bool {
+		return run.State == "completed"
+	})
+	assertDecisionRunCompletedOnce(t, completed, decision.ID, marker, "submitted")
+
+	replayer := mustDial(t, env.primaryURL, fixture)
+	defer closeWebSocket(replayer)
+	if err := sendUserInputResponse(replayer, sessionID, admitted.RunID, decision.ID, controlID, answers); err != nil {
+		t.Fatalf("repeat decision after recovered run completed: %v", err)
+	}
+	retryEvents, retryErr := readUntil(replayer, 8*time.Second, func(event wsEvent) bool {
 		return event.Type == "control_ack" && event.ControlID == controlID
 	})
 	if retryErr != nil {
-		t.Fatalf("SR-DEC-001: repeated decision answer was not acknowledged: %v; events=%#v", retryErr, retryEvents)
+		t.Fatalf("SR-DEC-001: terminal decision retry was not acknowledged: %v; events=%#v", retryErr, retryEvents)
 	}
-	retryAck := retryEvents[len(retryEvents)-1]
-	if retryAck.Applied != firstAck.Applied || eventCode(retryAck) != eventCode(firstAck) {
-		t.Errorf("SR-DEC-001: repeated decision ack changed: first=%#v retry=%#v", firstAck, retryAck)
-	}
-	statusCtx, statusCancel := context.WithTimeout(context.Background(), databaseTimeout)
-	defer statusCancel()
-	status, err := ledger.userInputStatus(statusCtx, decision.ID)
-	if err != nil || status != "submitted" {
-		t.Errorf("SR-DEC-001: decision status = %q, err=%v, want submitted", status, err)
-	}
-	mustWaitRunState(t, sessionID, invocationID, func(run sessionRunRecord) bool {
-		return run.State == "completed"
-	})
-	if count := globalFakeModel.RequestCount(marker); count != 2 {
-		t.Errorf("SR-DEC-001: model calls = %d, want initial tool call + resumed completion", count)
-	}
+	assertSameControlAck(t, firstAck, retryEvents[len(retryEvents)-1])
 }
 
 func TestBackendLossMarksOldGenerationLostAndPreservesNewRuns(t *testing.T) {
@@ -710,7 +723,12 @@ func TestBackendLossMarksOldGenerationLostAndPreservesNewRuns(t *testing.T) {
 	if err := sendChat(secondary, sessionID, newInvocation, newText); err != nil {
 		t.Fatalf("submit while stale generation is inside grace: %v", err)
 	}
-	busyEvents, _, busyErr := readRejected(secondary, newInvocation, "session_busy", 5*time.Second)
+	busyEvents, _, busyErr := readRejected(
+		secondary,
+		newInvocation,
+		string(apperror.CodeSessionBusy),
+		5*time.Second,
+	)
 	if busyErr != nil {
 		t.Fatalf("backend-loss grace did not preserve the active admission gate: %v; events=%#v", busyErr, busyEvents)
 	}

@@ -11,6 +11,12 @@ services:
 
   server:
     restart: "no"
+    # Single-Server tuning by default; compose.cluster.override.yml replaces this
+    # key when the two-Server topology is layered on top.
+    environment:
+      CONFIG_PATH: /workspace/internal/agent/runtime/session/acceptance/testdata/app.single.toml
+    ports:
+      - "19091:9090"
     volumes: !override
       - ..:/workspace
       - go_mod_cache:/go/pkg/mod
@@ -48,6 +54,7 @@ services:
       - ../.cache/memoh/workspace-debian.tar:/opt/memoh/dev-images/workspace-debian.tar:ro
     ports:
       - "18083:8080"
+      - "19092:9090"
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1"]
       interval: 5s

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
 )
 
@@ -456,6 +458,41 @@ func TestAdmitClaimsFencesAndStarts(t *testing.T) {
 	}
 }
 
+// Every subscriber must agree on the run's turn, not just the caller that
+// admitted it (SR-OBS-003). A snapshot naming only the run leaves a reconnecting
+// client unable to line the run up against persisted history, which is the one
+// thing it reconnects to do.
+func TestAdmitPublishesTheTurnInTheObservableSnapshot(t *testing.T) {
+	t.Parallel()
+	f := newAdmitFixture(t)
+
+	admission, err := f.manager.Admit(context.Background(), f.input("inv-turn", `{"text":"hi"}`))
+	if err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if strings.TrimSpace(admission.TurnID) == "" {
+		t.Fatal("admission allocated no turn id")
+	}
+
+	snapshot, err := f.manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snapshot.CurrentRunView == nil {
+		t.Fatal("snapshot has no current run view")
+	}
+	if snapshot.CurrentRunView.TurnID != admission.TurnID {
+		t.Errorf(
+			"snapshot turn_id = %q, want the admitted %q",
+			snapshot.CurrentRunView.TurnID,
+			admission.TurnID,
+		)
+	}
+	if snapshot.CurrentRunView.RunID != admission.RunID {
+		t.Errorf("snapshot run_id = %q, want %q", snapshot.CurrentRunView.RunID, admission.RunID)
+	}
+}
+
 // The cursor handed back is the session's position at the moment the run became
 // observable. A caller that both starts runs and subscribes uses it to place the
 // run in the stream it is already reading, so it has to be the same position a
@@ -730,5 +767,70 @@ func TestAdmitRequiresExecutionBuilder(t *testing.T) {
 	}
 	if admits, _ := f.runs.counts(); admits != 0 {
 		t.Fatalf("admits = %d, want 0; validation must precede persistence", admits)
+	}
+}
+
+func TestAdmittedRunParksAndResumesOnUserInputDecision(t *testing.T) {
+	t.Parallel()
+
+	fixture := newAdmitFixture(t)
+	admission, err := fixture.manager.Admit(context.Background(), fixture.input(
+		"invocation-user-input",
+		`{"text":"ask before continuing"}`,
+	))
+	if err != nil {
+		t.Fatalf("admit run: %v", err)
+	}
+	handle := admission.Handle
+
+	if _, err := fixture.manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
+		Type:        native.EventUserInputRequest,
+		ToolName:    "ask_user",
+		ToolCallID:  "call-input",
+		UserInputID: "input-1",
+		Status:      "pending",
+	}); err != nil {
+		t.Fatalf("publish user input request: %v", err)
+	}
+	if got := fixture.runs.state(admission.RunID); got != ledger.StateWaitingDecision {
+		t.Fatalf("ledger state = %q, want waiting_decision", got)
+	}
+
+	// The native stream ends when ask_user defers. Neither its terminal event
+	// nor the runner cleanup may release the active run.
+	if _, err := fixture.manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
+		Type: native.EventAgentEnd,
+	}); err != nil {
+		t.Fatalf("publish deferred stream end: %v", err)
+	}
+	if err := fixture.manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+		t.Fatalf("finish deferred stream: %v", err)
+	}
+	snapshot, err := fixture.manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("snapshot waiting run: %v", err)
+	}
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusWaitingDecision {
+		t.Fatalf("waiting run = %#v", snapshot.CurrentRunView)
+	}
+
+	if _, err := fixture.manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
+		Type: native.EventAgentStart,
+	}); err != nil {
+		t.Fatalf("resume decision run: %v", err)
+	}
+	if got := fixture.runs.state(admission.RunID); got != ledger.StateRunning {
+		t.Fatalf("ledger state after resume = %q, want running", got)
+	}
+	if _, err := fixture.manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
+		Type: native.EventAgentEnd,
+	}); err != nil {
+		t.Fatalf("publish resumed stream end: %v", err)
+	}
+	if err := fixture.manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+		t.Fatalf("finish resumed run: %v", err)
+	}
+	if got := fixture.runs.state(admission.RunID); got != ledger.StateCompleted {
+		t.Fatalf("ledger state after completion = %q, want completed", got)
 	}
 }

@@ -679,6 +679,126 @@ func openLocalChannelTestWS(t *testing.T, handler *LocalChannelHandler, botID, u
 	return client
 }
 
+type wsDecisionDispatch struct {
+	botID       string
+	sessionID   string
+	runID       string
+	commandType string
+	targetID    string
+	payload     []byte
+}
+
+type testWSDecisionRuntime struct {
+	dispatches chan wsDecisionDispatch
+}
+
+func (*testWSDecisionRuntime) Admit(context.Context, sessionruntime.AdmitInput) (sessionruntime.Admission, error) {
+	return sessionruntime.Admission{}, errors.New("unexpected admission")
+}
+
+func (*testWSDecisionRuntime) FinishRun(context.Context, sessionruntime.RunHandle, string, string) error {
+	return nil
+}
+
+func (*testWSDecisionRuntime) AbortControl(context.Context, string, string, string, string) (bool, error) {
+	return false, nil
+}
+
+func (r *testWSDecisionRuntime) DispatchRunCommand(_ context.Context, botID, sessionID, runID, commandType, targetID string, payload []byte) (bool, error) {
+	r.dispatches <- wsDecisionDispatch{
+		botID:       botID,
+		sessionID:   sessionID,
+		runID:       runID,
+		commandType: commandType,
+		targetID:    targetID,
+		payload:     append([]byte(nil), payload...),
+	}
+	return true, nil
+}
+
+func TestLocalChannelWSRoutesUserInputResponseByRunAndDecision(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID       = "11111111-1111-1111-1111-111111111111"
+		sessionID   = "22222222-2222-2222-2222-222222222222"
+		runID       = "33333333-3333-3333-3333-333333333333"
+		decisionID  = "44444444-4444-4444-4444-444444444444"
+		currentUser = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+		controlID   = "control-user-input"
+	)
+	queries := localChannelSessionAuthQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            sessionpkg.TypeChat,
+			SessionMode:     sessionpkg.TypeChat,
+			CreatedByUserID: testUUID(currentUser),
+			Metadata:        []byte(`{}`),
+		},
+		grants: []sqlc.ListBotUserGrantsForUserRow{{
+			ID:          testUUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+			BotID:       testUUID(botID),
+			SubjectType: bots.GrantSubjectUser,
+			UserID:      testUUID(currentUser),
+			Permissions: []byte(`["chat","workspace_exec"]`),
+		}},
+	}
+	runtime := &testWSDecisionRuntime{dispatches: make(chan wsDecisionDispatch, 1)}
+	handler := &LocalChannelHandler{
+		channelType:    channel.ChannelTypeLocal,
+		botService:     bots.NewService(nil, queries),
+		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		sessionService: sessionpkg.NewService(nil, queries, nil),
+		sessionRuntime: runtime,
+		agentService:   &application.Service{},
+		logger:         slog.Default(),
+	}
+
+	client := openLocalChannelTestWS(t, handler, botID, currentUser)
+	if err := client.WriteJSON(map[string]any{
+		"type":        "user_input_response",
+		"session_id":  sessionID,
+		"run_id":      runID,
+		"decision_id": decisionID,
+		"control_id":  controlID,
+		"answers": []map[string]any{{
+			"question_id": "q1",
+			"option_ids":  []string{"yes"},
+		}},
+	}); err != nil {
+		t.Fatalf("write user input response: %v", err)
+	}
+
+	var ack wsOutboundEvent
+	if err := client.ReadJSON(&ack); err != nil {
+		t.Fatalf("read user input ack: %v", err)
+	}
+	if ack.Type != "control_ack" || ack.RunID != runID || ack.ControlID != controlID || !ack.Applied {
+		t.Fatalf("control ack = %#v", ack)
+	}
+
+	select {
+	case call := <-runtime.dispatches:
+		if call.botID != botID || call.sessionID != sessionID || call.runID != runID {
+			t.Fatalf("decision scope = %#v", call)
+		}
+		if call.commandType != sessionruntime.CommandUserInputResponse || call.targetID != decisionID {
+			t.Fatalf("decision route = %#v", call)
+		}
+		var input application.UserInputResponseInput
+		if err := json.Unmarshal(call.payload, &input); err != nil {
+			t.Fatalf("decode routed payload: %v", err)
+		}
+		if input.ActorUserID != currentUser || input.UserInputID != decisionID || len(input.Answers) != 1 {
+			t.Fatalf("routed input = %#v", input)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("user input response was not routed")
+	}
+}
+
 func TestLocalChannelAuthorizeWSSessionScopesChatToCreator(t *testing.T) {
 	t.Parallel()
 

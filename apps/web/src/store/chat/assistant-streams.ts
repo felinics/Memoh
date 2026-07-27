@@ -1,4 +1,4 @@
-import { computed, reactive, toRaw, type Ref } from 'vue'
+import { reactive, toRaw } from 'vue'
 import type { ChatAssistantTurn } from './types'
 
 export interface AssistantStream {
@@ -18,6 +18,7 @@ export interface AcceptedRun {
   readonly invocationId: string
   readonly runId: string
   readonly botId: string
+  readonly sessionId: string
   readonly abortRequested: boolean
 }
 
@@ -52,17 +53,12 @@ export interface TrackAssistantStreamInput {
 }
 
 interface AssistantStreamRegistryDeps {
-  currentBotId: Ref<string | null>
-  sessionId: Ref<string | null>
   finishAssistantTurn: (turn: ChatAssistantTurn) => void
 }
 
 type BeforeReject = (invocationId: string) => void
 
-const TERMINAL_STREAM_HISTORY_LIMIT = 512
-const RUN_ID_HISTORY_LIMIT = 512
-
-export function createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn }: AssistantStreamRegistryDeps) {
+export function createAssistantStreamRegistry({ finishAssistantTurn }: AssistantStreamRegistryDeps) {
   // Keyed by invocation id, because a turn is registered before it is sent and
   // therefore before the server has named the run. The run id arrives later and
   // is indexed alongside so inbound events can be resolved by either name.
@@ -70,9 +66,11 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
   const invocationIdsByRunId = new Map<string, string>()
   const runIdsByInvocation = new Map<string, string>()
   // Stops pressed before the server named the run, replayed by bindRunId.
-  const abortRequestedInvocations = new Set<string>()
+  const abortRequestedInvocations = new Map<string, {
+    botId: string
+    sessionId: string
+  }>()
   const createdSessionsByInvocation = new Map<string, string>()
-  const terminalInvocationIds = new Set<string>()
 
   function activeStreams(): PendingAssistantStream[] {
     return [...streams.values()]
@@ -99,45 +97,13 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     return activeStreams().filter(stream => stream.botId === bid && stream.sessionId === sid)
   }
 
-  function isSessionStreaming(
-    botId: string | null | undefined,
-    targetSessionId: string | null | undefined,
-  ): boolean {
-    return assistantStreamsForSession(botId, targetSessionId).length > 0
-  }
-
   function isUnboundComposerStreaming(botId: string | null | undefined, composerScope?: string): boolean {
     return activeUnboundInvocationIds(botId, composerScope).length > 0
   }
 
-  const streamingSessionId = computed(() => {
-    const bid = (currentBotId.value ?? '').trim()
-    const activeSid = (sessionId.value ?? '').trim()
-    const activeSessionIds = activeStreams()
-      .filter(stream => stream.botId === bid)
-      .map(stream => stream.sessionId)
-      .filter(Boolean)
-    if (activeSid && activeSessionIds.includes(activeSid)) return activeSid
-    return activeSessionIds[0] ?? null
-  })
-
-  const streaming = computed(() => {
-    const bid = (currentBotId.value ?? '').trim()
-    const activeSid = (sessionId.value ?? '').trim()
-    return activeSid
-      ? isSessionStreaming(bid, activeSid)
-      : isUnboundComposerStreaming(bid)
-  })
-
-  function fallbackInvocationId(botId: string, targetSessionId?: string | null): string {
-    const bid = botId.trim() || 'unbound'
-    const sid = (targetSessionId ?? '').trim()
-    return sid ? `session:${bid}:${sid}:agent-run` : `bot:${bid}:orphan-run`
-  }
-
   // Resolves an event to the local key for its turn. A run id is authoritative
   // once it exists; before that only the invocation names the turn.
-  function invocationIdForEvent(botId: string, event: StreamIdentity, targetSessionId?: string): string {
+  function invocationIdForEvent(event: StreamIdentity): string {
     const runId = (event.run_id ?? '').trim()
     if (runId) {
       const known = invocationIdsByRunId.get(runId)
@@ -145,12 +111,9 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     }
     const invocationId = (event.invocation_id ?? '').trim()
     if (invocationId) return invocationId
-    // A run we never submitted (another tab, or a reconnect) has no local
-    // invocation, so fall back to the session's single active turn.
-    const sid = (event.session_id ?? targetSessionId ?? '').trim()
-    const activeIds = assistantStreamsForSession(botId, sid).map(stream => stream.invocationId)
-    if (activeIds.length === 1) return activeIds[0]!
-    return runId || fallbackInvocationId(botId, sid)
+    // A run from another subscriber has no local invocation. Never attach it to
+    // whichever local submission happens to be active in the same session.
+    return runId
   }
 
   // Promise construction registers synchronously. Callers rely on the stream
@@ -164,10 +127,6 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
       }
       if (streams.has(id)) {
         reject(new Error(`invocation_id ${id} is already active`))
-        return
-      }
-      if (terminalInvocationIds.has(id)) {
-        reject(new Error(`invocation_id ${id} is already terminal`))
         return
       }
       streams.set(id, {
@@ -186,31 +145,27 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     })
   }
 
-  // bindRunId records the server's name for a turn we submitted. The mapping is
-  // kept even when no local stream is tracking that turn — a silent approval
-  // response, for instance — so its events are never re-pointed at an unrelated
-  // turn by the session fallback above, and a deferred stop can still reach it.
-  function bindRunId(invocationId: string | undefined, runId: string | undefined): AcceptedRun | undefined {
-    const invocation = invocationId?.trim()
-    const run = runId?.trim()
+  // bindRunId records the server's name only while the local turn is active.
+  // Epoch/seq projection ordering rejects late terminal frames, so no terminal
+  // run-id history is needed here.
+  function bindRunId(invocationId: string, runId: string): AcceptedRun | undefined {
+    const invocation = invocationId.trim()
+    const run = runId.trim()
     if (!invocation || !run) return undefined
-    rememberRunId(run, invocation)
     const stream = streams.get(invocation)
-    if (stream && !stream.runId) stream.runId = run
+    if (stream) {
+      if (!stream.runId) stream.runId = run
+      invocationIdsByRunId.set(run, invocation)
+      runIdsByInvocation.set(invocation, run)
+    }
+    const deferredAbort = abortRequestedInvocations.get(invocation)
     const abortRequested = abortRequestedInvocations.delete(invocation)
-    return { invocationId: invocation, runId: run, botId: stream?.botId ?? '', abortRequested }
-  }
-
-  function rememberRunId(runId: string, invocationId: string) {
-    invocationIdsByRunId.set(runId, invocationId)
-    runIdsByInvocation.set(invocationId, runId)
-    if (invocationIdsByRunId.size <= RUN_ID_HISTORY_LIMIT) return
-    const oldestRun = invocationIdsByRunId.keys().next().value
-    if (!oldestRun) return
-    const oldestInvocation = invocationIdsByRunId.get(oldestRun)
-    invocationIdsByRunId.delete(oldestRun)
-    if (oldestInvocation && runIdsByInvocation.get(oldestInvocation) === oldestRun) {
-      runIdsByInvocation.delete(oldestInvocation)
+    return {
+      invocationId: invocation,
+      runId: run,
+      botId: stream?.botId ?? deferredAbort?.botId ?? '',
+      sessionId: stream?.sessionId ?? deferredAbort?.sessionId ?? '',
+      abortRequested,
     }
   }
 
@@ -222,7 +177,11 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     if (!invocation) return ''
     const runId = runIdsByInvocation.get(invocation) ?? ''
     if (runId) return runId
-    abortRequestedInvocations.add(invocation)
+    const stream = streams.get(invocation)
+    abortRequestedInvocations.set(invocation, {
+      botId: stream?.botId ?? '',
+      sessionId: stream?.sessionId ?? '',
+    })
     return ''
   }
 
@@ -269,28 +228,14 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
   function finishAssistantStream(invocationId: string): PendingAssistantStream | undefined {
     const stream = streams.get(invocationId.trim())
     if (!stream) return undefined
-    rememberTerminalInvocation(stream.invocationId)
     streams.delete(stream.invocationId)
-    // The run keeps its mapping past terminal so late events for it resolve to
-    // a known-terminal invocation instead of resurrecting another turn.
+    // Keep the accepted invocation/run correlation for the lifetime of this
+    // user scope. A late frame must resolve to its own terminal invocation,
+    // never to whichever run happens to be active now.
     if (!activeStreams().some(active => active.assistantTurn === stream.assistantTurn)) {
       finishAssistantTurn(stream.assistantTurn)
     }
     return stream
-  }
-
-  function rememberTerminalInvocation(invocationId: string) {
-    const id = invocationId.trim()
-    if (!id) return
-    terminalInvocationIds.add(id)
-    if (terminalInvocationIds.size <= TERMINAL_STREAM_HISTORY_LIMIT) return
-    const oldest = terminalInvocationIds.values().next().value
-    if (oldest) terminalInvocationIds.delete(oldest)
-  }
-
-  function isTerminalInvocation(invocationId: string | undefined): boolean {
-    const id = invocationId?.trim()
-    return Boolean(id && terminalInvocationIds.has(id))
   }
 
   function resolveAssistantStream(invocationId: string) {
@@ -314,8 +259,8 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
 
   // Deferred draft streams start unbound and may be assigned exactly once by
   // session_created. A duplicate or late event cannot move them to a new session.
-  function recordCreatedSession(invocationId: string | undefined, targetSessionId: string): string {
-    const id = invocationId?.trim()
+  function recordCreatedSession(invocationId: string, targetSessionId: string): string {
+    const id = invocationId.trim()
     const sid = targetSessionId.trim()
     if (!id || !sid) return ''
     const stream = streams.get(id)
@@ -335,18 +280,14 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
 
   function clearStreamHistory() {
     createdSessionsByInvocation.clear()
-    terminalInvocationIds.clear()
     invocationIdsByRunId.clear()
     runIdsByInvocation.clear()
     abortRequestedInvocations.clear()
   }
 
   return {
-    streaming,
-    streamingSessionId,
     activeUnboundInvocationIds,
     assistantStreamsForSession,
-    isSessionStreaming,
     isUnboundComposerStreaming,
     invocationIdForEvent,
     trackAssistantStream,
@@ -357,7 +298,6 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     resolveAssistantStream,
     rejectAssistantStream,
     discardAssistantStream,
-    isTerminalInvocation,
     rejectAllStreams,
     recordCreatedSession,
     createdSessionIdForInvocation,

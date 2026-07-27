@@ -11,6 +11,8 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/application"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	"github.com/memohai/memoh/internal/agent/turn"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 	"github.com/memohai/memoh/internal/apperror"
 )
 
@@ -109,14 +111,21 @@ func wsAdmissionTestSubmission() []byte {
 // admitWSTestTurn runs one admission and returns both halves of its outcome:
 // what the handler decided, and what the client was told. The writer's queue is
 // the wire those send helpers actually reach.
-func admitWSTestTurn(t *testing.T, handler *LocalChannelHandler, ref wsTurnRef, submission []byte) (wsRunAdmission, bool, []map[string]any) {
+func admitWSTestTurn(t *testing.T, handler *LocalChannelHandler, ref wsTurnRef, submission []byte, builders ...wsRunAdmissionBuilder) (wsRunAdmission, bool, []map[string]any) {
 	t.Helper()
 
 	writer := &wsWriter{ch: make(chan []byte, 4), stop: make(chan struct{}), done: make(chan struct{})}
-	ctx, cancel := context.WithCancel(context.Background())
+	// Cause-carrying like the real stream context, so the admission registers the
+	// same revocation the handler would hand it.
+	ctx, cancelCause := context.WithCancelCause(context.Background())
+	cancel := func() { cancelCause(context.Canceled) }
 	defer cancel()
 
-	admission, ok := handler.admitWSTurn(ctx, writer, wsAdmissionBotID, ref, submission, make(chan struct{}, 1), cancel)
+	var builder wsRunAdmissionBuilder
+	if len(builders) > 0 {
+		builder = builders[0]
+	}
+	admission, ok := handler.admitWSTurn(ctx, writer, wsAdmissionBotID, ref, submission, builder, make(chan struct{}, 1), cancel, cancelCause)
 
 	events := make([]map[string]any, 0, len(writer.ch))
 	for len(writer.ch) > 0 {
@@ -160,6 +169,66 @@ func TestAdmitWSTurnCarriesRunTurnAndCursor(t *testing.T) {
 	// connection cannot register must not have been announced already.
 	if len(events) != 0 {
 		t.Fatalf("admission wrote %#v, want nothing on the wire yet", events)
+	}
+}
+
+func TestAdmitWSTurnBuildsNormalMessageRequestUserTurn(t *testing.T) {
+	t.Parallel()
+
+	runtime := newStubWSTurnAdmitter()
+	runtime.admission = startedWSAdmission()
+	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+	timestamp := time.Date(2026, time.July, 28, 12, 0, 0, 0, time.UTC)
+	messageAdmission := &wsMessageAdmission{
+		handler: handler,
+		botID:   wsAdmissionBotID,
+		request: chatview.UITurn{
+			Role:              "user",
+			Text:              "hello",
+			UserMessageKind:   "text",
+			Timestamp:         timestamp,
+			Platform:          "local",
+			SenderUserID:      "user-1",
+			ExternalMessageID: "invocation-1",
+		},
+		attachments: []turn.Attachment{{
+			Type:   "file",
+			Name:   "notes.txt",
+			Mime:   "text/plain",
+			Base64: "not-runtime-state",
+		}},
+	}
+
+	_, ok, _ := admitWSTestTurn(t, handler, wsAdmissionTestRef(), wsAdmissionTestSubmission(),
+		messageAdmission.build)
+	if !ok {
+		t.Fatal("admission failed")
+	}
+
+	admitted := runtime.submissions()
+	if len(admitted) != 1 || admitted[0].Execution.Admission == nil {
+		t.Fatalf("admitted = %#v, want one request user turn builder", admitted)
+	}
+	view, err := admitted[0].Execution.Admission(context.Background(), startedWSAdmission().Handle)
+	if err != nil {
+		t.Fatalf("build admission view: %v", err)
+	}
+	if view.RequestUserTurn == nil {
+		t.Fatalf("request user turn = %#v", view.RequestUserTurn)
+	}
+	requestTurn := view.RequestUserTurn
+	if requestTurn.Role != "user" || requestTurn.Text != "hello" || requestTurn.UserMessageKind != "text" ||
+		requestTurn.Timestamp != timestamp || requestTurn.Platform != "local" ||
+		requestTurn.SenderUserID != "user-1" || requestTurn.ExternalMessageID != "invocation-1" {
+		t.Fatalf("request user turn = %#v", requestTurn)
+	}
+	if len(requestTurn.Attachments) != 1 || requestTurn.Attachments[0].Name != "notes.txt" ||
+		requestTurn.Attachments[0].Mime != "text/plain" {
+		t.Fatalf("request user turn attachments = %#v", requestTurn.Attachments)
+	}
+	prepared := messageAdmission.preparedAttachments()
+	if len(prepared) != 1 || prepared[0].Base64 != "not-runtime-state" {
+		t.Fatalf("prepared execution attachments = %#v", prepared)
 	}
 }
 
@@ -299,30 +368,6 @@ func TestAdmitWSTurnRejectionsCarryStableCodes(t *testing.T) {
 	}
 }
 
-// A decision answer continues a turn that was already admitted. Admitting it
-// again would spend a second run on one turn and, because a session admits one
-// run at a time, would be refused as busy by the turn it is resuming.
-func TestAdmitWSTurnDecisionAnswerTakesALocalNameWithoutAdmission(t *testing.T) {
-	t.Parallel()
-
-	runtime := newStubWSTurnAdmitter()
-	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
-
-	admission, ok, events := admitWSTestTurn(t, handler, wsAdmissionTestRef(), nil)
-	if !ok || !admission.Execute || admission.RunID == "" {
-		t.Fatalf("admission = %+v, ok = %v, want a locally named executable run", admission, ok)
-	}
-	if admission.Handle.FencingToken != 0 || admission.Accepted != (wsRunAcceptance{}) {
-		t.Fatalf("admission = %+v, want no durable ownership and nothing to report", admission)
-	}
-	if len(runtime.submissions()) != 0 {
-		t.Fatalf("decision answer consumed an admission: %+v", runtime.submissions())
-	}
-	if len(events) != 0 {
-		t.Fatalf("decision answer wrote %#v, want nothing", events)
-	}
-}
-
 // Without durable admission there is no single-active-run guarantee to fall back
 // on, so the turn is refused rather than run unprotected.
 func TestAdmitWSTurnRequiresConfiguredRuntime(t *testing.T) {
@@ -341,6 +386,14 @@ func TestAdmitWSTurnRequiresConfiguredRuntime(t *testing.T) {
 // The terminal write is how the session's single active slot is released. Only
 // the stable code reaches the run's published state; the error itself is a
 // private diagnostic that stays in the log.
+//
+// The status it carries is only ever what this process can actually testify to.
+// A run that returns cleanly, or returns a bare cancellation, is reported with
+// no status at all: an abort routed in from another connection or another server
+// unblocks the runner and cancels its context, so both of those are exactly what
+// a stopped run looks like from here. Naming them would overwrite the intent
+// already recorded against the run — which is how a routed abort used to
+// finalize as a successful turn (SR-CTL-001).
 func TestFinishWSRunReleasesTheSlotUnderTheAdmittedToken(t *testing.T) {
 	t.Parallel()
 
@@ -351,7 +404,12 @@ func TestFinishWSRunReleasesTheSlotUnderTheAdmittedToken(t *testing.T) {
 		wantStatus  string
 		wantMessage string
 	}{
-		{name: "completed", wantStatus: sessionruntime.RunStatusCompleted},
+		{name: "clean return leaves the outcome to the manager", wantStatus: ""},
+		{
+			name:       "bare cancellation blames nothing",
+			runErr:     context.Canceled,
+			wantStatus: "",
+		},
 		{name: "aborted", aborted: true, wantStatus: sessionruntime.RunStatusAborted},
 		{
 			name:        "errored",
@@ -413,9 +471,9 @@ func TestStartWSStreamPublishesAdmittedTurnAndReleasesTheSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ref, started := handler.startWSStream(ctx, ctx, newWSStreamRegistry(), writer, wsAdmissionBotID, wsAdmissionTestRef(), "test", wsAdmissionTestSubmission(),
+	ref, started := handler.startWSStream(ctx, ctx, newWSStreamRegistry(), writer, wsAdmissionBotID, wsAdmissionTestRef(), "test", wsAdmissionTestSubmission(), nil,
 		nil,
-		func(context.Context, wsTurnRef, chan<- application.WSStreamEvent, <-chan struct{}) error {
+		func(context.Context, wsTurnRef, wsAdmittedTurn, chan<- application.WSStreamEvent, <-chan struct{}) error {
 			return nil
 		})
 	if !started || ref.RunID != "run-1" {
@@ -438,8 +496,12 @@ func TestStartWSStreamPublishesAdmittedTurnAndReleasesTheSession(t *testing.T) {
 		t.Fatalf("run_accepted = %#v, want the admitted turn and cursor", accepted)
 	}
 
+	// The runner returned cleanly, which this process cannot tell apart from a
+	// run something else stopped, so it releases the slot without naming an
+	// outcome. What is asserted here is that the release happened at all and
+	// carried the admitted fence.
 	write := runtime.awaitTerminalWrite(t)
-	if write.status != sessionruntime.RunStatusCompleted || write.handle.FencingToken != 3 {
-		t.Fatalf("terminal write = %+v, want a completed run fenced by the admitted token", write)
+	if write.status != "" || write.handle.FencingToken != 3 {
+		t.Fatalf("terminal write = %+v, want an unnamed outcome fenced by the admitted token", write)
 	}
 }

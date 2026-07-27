@@ -29,6 +29,7 @@ import (
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	messageevent "github.com/memohai/memoh/internal/chat/event"
@@ -132,6 +133,7 @@ type Service struct {
 	logger              *slog.Logger
 	allowedTeam         string
 	sessionRuntime      turnAdmitter
+	decisionRuntime     *sessionruntime.Manager
 	turnHooks           *turnRuntimeHooks
 }
 

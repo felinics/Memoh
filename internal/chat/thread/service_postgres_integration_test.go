@@ -824,8 +824,8 @@ func setupPostgresSessionForkFixtures(t *testing.T, ctx context.Context, tx pgx.
 		t.Fatalf("insert user: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO bots (id, owner_user_id, name)
-		VALUES ($1, $2, $3)
+		INSERT INTO bots (id, owner_user_id, name, type)
+		VALUES ($1, $2, $3, 'personal')
 	`, postgresSessionTestBotID, postgresSessionTestUserID, name); err != nil {
 		t.Fatalf("insert bot: %v", err)
 	}

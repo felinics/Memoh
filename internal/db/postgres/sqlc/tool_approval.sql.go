@@ -216,10 +216,24 @@ next_short_id AS (
   FROM locked_session
   LEFT JOIN tool_approval_requests ON tool_approval_requests.session_id = locked_session.id
     AND tool_approval_requests.team_id = public.memoh_current_team_id()
+),
+runtime_scope AS (
+  SELECT session_runs.run_id, session_runs.turn_id
+  FROM session_runs
+  WHERE session_runs.team_id = public.memoh_current_team_id()
+    AND session_runs.bot_id = $1
+    AND session_runs.session_id = $2
+    AND session_runs.fencing_token = $10::bigint
+    AND session_runs.state IN ('running', 'waiting_decision')
+  UNION ALL
+  SELECT NULL::uuid, NULL::uuid
+  WHERE $10::bigint IS NULL
 )
 INSERT INTO tool_approval_requests (
   bot_id,
   session_id,
+  run_id,
+  turn_id,
   route_id,
   channel_identity_id,
   workspace_target_id,
@@ -237,6 +251,8 @@ INSERT INTO tool_approval_requests (
 ) SELECT
   $1,
   $2,
+  runtime_scope.run_id,
+  runtime_scope.turn_id,
   $3,
   $4,
   $5,
@@ -253,10 +269,13 @@ INSERT INTO tool_approval_requests (
   $15
 FROM locked_session
 CROSS JOIN next_short_id
+CROSS JOIN runtime_scope
 ON CONFLICT (team_id, session_id, tool_call_id) DO UPDATE
 SET tool_input = tool_approval_requests.tool_input
 WHERE tool_approval_requests.status = 'pending'
   AND tool_approval_requests.runtime_fencing_token IS NOT DISTINCT FROM EXCLUDED.runtime_fencing_token
+  AND tool_approval_requests.run_id IS NOT DISTINCT FROM EXCLUDED.run_id
+  AND tool_approval_requests.turn_id IS NOT DISTINCT FROM EXCLUDED.turn_id
   AND tool_approval_requests.tool_name = EXCLUDED.tool_name
   AND tool_approval_requests.operation = EXCLUDED.operation
   AND tool_approval_requests.tool_input = EXCLUDED.tool_input

@@ -4,10 +4,11 @@ This package verifies the public Session Runtime contract in
 `docs/design/session-runtime-requirements.md` against the current durable
 `session_runs` schema.
 
-The tests drive only public HTTP and WebSocket APIs. They do not construct a
-`session.Manager`, handler, sqlc query set, or database adapter. A read-only SQL
-probe observes the deployment database after public operations so the suite can
-verify facts that must survive process loss:
+The tests drive public HTTP and WebSocket APIs plus the authenticated Turn gRPC
+process boundary used by a standalone Channel service. They do not construct a
+`session.Manager`, handler, application service, sqlc query set, or database
+adapter. A read-only SQL probe observes the deployment database after public
+operations so the suite can verify facts that must survive process loss:
 
 - one `session_id + invocation_id` maps to one `run_id` and `turn_id`;
 - busy submissions leave no `session_runs` row and do not advance
@@ -44,6 +45,7 @@ mise run test:session-runtime:acceptance:env:down
 ```bash
 mise run test:session-runtime:acceptance:env:cluster
 mise run test:session-runtime:acceptance:cluster
+mise run test:session-runtime:acceptance:cluster:destructive
 mise run test:session-runtime:acceptance:env:down
 ```
 
@@ -62,7 +64,8 @@ The compatibility aliases `test:session-runtime:acceptance:env` and
 | `SR-CTL-001` | abort through the non-owner Server returns `control_ack`, cancels the model call and commits `aborted` |
 | `SR-DUR-001` | after `SIGKILL`, input and identity remain in `session_runs` and the run becomes queryable as `lost` |
 | `SR-DUR-002` | replaying a completed invocation does not call the model or add history rows |
-| `SR-DEC-001` | a pending `ask_user` decision stores run/turn linkage and remains answerable after owner restart |
+| `SR-DEC-001` | live `ask_user` and tool approval decisions retain one run/turn/fence across WebSocket, HTTP and Turn gRPC; owner restart preserves and resumes the same decision |
+| `SR-CTL-001` decision replay | a decision `control_id` returns the same acknowledgement after the run terminalizes; a stale new control resolves as `applied=false` without a retry code |
 | PostgreSQL write budget | several owner-lease renewals leave `session_runs.updated_at`, owner, token and generation unchanged |
 | backend loss | `FLUSHDB` preserves the grace interval and admission gate; old-generation runs become `lost` without replaying partial text; new-generation runs complete |
 
@@ -74,6 +77,7 @@ blocking and decision modes:
 [acceptance:marker mode=block]
 [acceptance:marker chunks=3 mode=partial_block]
 [acceptance:marker mode=ask_user]
+[acceptance:marker mode=tool_approval]
 ```
 
 ## Direct invocation
@@ -93,6 +97,9 @@ Useful environment variables:
 | --- | --- | --- |
 | `MEMOH_SESSION_RUNTIME_PRIMARY_URL` | `http://127.0.0.1:18080` | Primary Server API |
 | `MEMOH_SESSION_RUNTIME_SECONDARY_URL` | `http://127.0.0.1:18083` | Secondary Server API |
+| `MEMOH_SESSION_RUNTIME_PRIMARY_RPC_TARGET` | `127.0.0.1:19091` | Primary authenticated Turn gRPC endpoint |
+| `MEMOH_SESSION_RUNTIME_SECONDARY_RPC_TARGET` | `127.0.0.1:19092` | Secondary authenticated Turn gRPC endpoint |
+| `MEMOH_SESSION_RUNTIME_RPC_SECRET` | acceptance config value | Shared secret for the test-only Turn gRPC connection |
 | `MEMOH_SESSION_RUNTIME_POSTGRES_URL` | `postgres://memoh:…@127.0.0.1:15432/memoh` | Read-only acceptance probe target |
 | `MEMOH_SESSION_RUNTIME_REDIS_URL` | `redis://127.0.0.1:16379/0` | Isolated Valkey used by backend-loss injection |
 | `MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE` | `cluster` | `single` skips two-Server scenarios |
@@ -102,8 +109,10 @@ Useful environment variables:
 | `MEMOH_SESSION_RUNTIME_FAKE_MODEL_PORT` | `19090` | Host port reachable by both Servers |
 
 Crash and backend-loss cases are guarded because they intentionally kill a
-container or erase the configured Redis database. Do not enable them against a
-shared development or production environment.
+container or erase the configured Redis database. The dedicated
+`acceptance:cluster:destructive` task runs only the owner-restart contract and
+sets the crash guard explicitly. Do not enable either fault against a shared
+development or production environment.
 
 ## Current implementation boundary
 

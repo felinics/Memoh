@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
 	"github.com/memohai/memoh/internal/agent/turn"
 	chatview "github.com/memohai/memoh/internal/agent/view"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 type Manager struct {
@@ -105,6 +107,11 @@ type runControl struct {
 	finishRetryOnce   sync.Once
 	ownershipCancel   context.CancelCauseFunc
 	ownershipOnce     sync.Once
+	// ownershipLost records that ownership was revoked *with cause*, as opposed
+	// to the ordinary teardown that also revokes. Only the former means this
+	// process may no longer speak for the run, and the runner cannot tell the two
+	// apart: both reach it as a cancelled context.
+	ownershipLost atomic.Bool
 }
 
 type runControlKey struct {
@@ -531,7 +538,11 @@ type runStart struct {
 	// fencingToken is the durable ownership token from the ledger claim. Zero
 	// means this reservation has no ledger row, so it gets no lease index entry
 	// either: there would be nothing for the reaper to transition.
-	fencingToken    int64
+	fencingToken int64
+	// turnID is the durable turn this run writes into. It reaches the published
+	// run view so every subscriber can line the run up against history, not just
+	// the caller that admitted it.
+	turnID          string
 	builder         func(context.Context, RunHandle) (RunAdmissionView, error)
 	ownershipCancel context.CancelCauseFunc
 	abortCh         chan<- struct{}
@@ -588,6 +599,13 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 
 	runGeneration := m.newGeneration()
 	handle := RunHandle{BotID: botID, SessionID: sessionID, RunID: runID, Generation: runGeneration, FencingToken: start.fencingToken}
+	if handle.FencingToken > 0 {
+		ctx = runtimefence.WithContext(ctx, runtimefence.Fence{
+			BotID:     handle.BotID,
+			SessionID: handle.SessionID,
+			Token:     handle.FencingToken,
+		})
+	}
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.WithoutCancel(ctx))
 	ctrl := &runControl{
 		botID:           botID,
@@ -664,6 +682,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		snapshot.UpdatedAt = now
 		snapshot.CurrentRunView = &CurrentRunView{
 			RunID:               runID,
+			TurnID:              start.turnID,
 			Generation:          runGeneration,
 			Status:              RunStatusAdmitting,
 			OwnerID:             ownerID,
@@ -852,11 +871,40 @@ func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, messa
 		return ErrRunOwnershipLost
 	}
 	ctrl := m.localControlForHandle(handle)
+	if ctrl != nil && handle.FencingToken <= 0 {
+		handle.FencingToken = ctrl.fencingToken
+	}
+	if strings.TrimSpace(status) == "" && strings.TrimSpace(message) == "" {
+		snapshot, ok, err := m.backend.Load(ctx, handle.key())
+		if err != nil {
+			return err
+		}
+		if ok && runMatchesHandle(snapshot.CurrentRunView, handle) &&
+			strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusWaitingDecision) {
+			// The native stream ends after emitting a deferred decision. That is
+			// a parked execution, not a terminal run: retain ownership and the
+			// command executor so the response can resume this same run.
+			return nil
+		}
+	}
 	if ctrl != nil {
 		ctrl.stopCommands()
+		if ctrl.ownershipWasLost() {
+			// Ownership was revoked with cause while the run was executing, so the
+			// runner's return describes a cancelled execution, not an outcome. It
+			// arrives as a clean stop and would otherwise be stamped `completed`.
+			//
+			// Failing closed here is what keeps the run reapable. The fencing token
+			// is still nominally valid, so a terminal write would land, and once the
+			// row is terminal the reaper's transition is a no-op it reports as
+			// "nothing to decide" — the run would be durably successful precisely
+			// because the process that could not finish it said so last.
+			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), handle)
+			return ErrRunOwnershipLost
+		}
 	}
-	status = strings.TrimSpace(status)
 	finishMessage := strings.TrimSpace(message)
+	status = m.resolveTerminalStatus(ctx, handle, status, finishMessage)
 	if err := m.finalizeLedgerRun(ctx, handle, status, finishMessage); err != nil {
 		// The lease is deliberately left alone: it is the only pointer the
 		// reaper has to this run, and the durable row still says the run is
@@ -884,6 +932,43 @@ func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, messa
 		})
 	}
 	return err
+}
+
+// resolveTerminalStatus decides once, for both terminal writes, how a run ended.
+//
+// An owner is allowed to finish a run without naming an outcome, and that is the
+// normal case for a run stopped by something the owner did not do: an abort
+// routed in from another server cancels the execution context, so all the owner
+// ever sees is a cancellation, and reporting that as this run's own failure
+// would contradict the intent already recorded (SR-CTL-001).
+//
+// Resolving here rather than inside each write is what keeps the two agreeing.
+// The durable and live paths derive an unnamed outcome by different rules — an
+// empty status with no message reads as `completed` to the ledger, while the
+// live release reads `aborting` off the projection — so leaving both to derive
+// it independently is how a run ends up durably `completed` and live `aborted`.
+func (m *Manager) resolveTerminalStatus(ctx context.Context, handle RunHandle, status, message string) string {
+	if status = strings.TrimSpace(status); status != "" {
+		return status
+	}
+	snapshot, ok, err := m.backend.Load(ctx, handle.key())
+	if err != nil || !ok || !runMatchesHandle(snapshot.CurrentRunView, handle) {
+		// Without the projection there is nothing to derive from, so fall back to
+		// the rule the ledger would have applied on its own.
+		if strings.TrimSpace(message) != "" {
+			return RunStatusErrored
+		}
+		return RunStatusCompleted
+	}
+	run := snapshot.CurrentRunView
+	switch {
+	case strings.EqualFold(run.Status, RunStatusAborting), strings.EqualFold(run.Status, RunStatusAborted):
+		return RunStatusAborted
+	case strings.TrimSpace(run.Error) != "", strings.TrimSpace(message) != "":
+		return RunStatusErrored
+	default:
+		return RunStatusCompleted
+	}
 }
 
 const steerRunFinishedError = "runtime run finished before steer was applied"
@@ -1003,11 +1088,26 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	if ctrl == nil {
 		return nil, ErrRunOwnershipLost
 	}
+	if handle.FencingToken <= 0 {
+		handle.FencingToken = ctrl.fencingToken
+	}
 	if err := waitRunControlReady(ctx, ctrl); err != nil {
 		return nil, err
 	}
 	if m.localControlForHandle(handle) != ctrl {
 		return nil, ErrRunOwnershipLost
+	}
+	switch event.Type {
+	case native.EventToolApprovalRequest, native.EventUserInputRequest:
+		if pendingDecisionEvent(event) {
+			if err := m.setWaitingDecision(ctx, handle); err != nil {
+				return nil, err
+			}
+		}
+	case native.EventAgentStart:
+		if err := m.resumeWaitingDecision(ctx, handle); err != nil {
+			return nil, err
+		}
 	}
 
 	var messages []chatview.UIMessage
@@ -1039,7 +1139,18 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 			run.Messages = upsertUIMessage(run.Messages, msg)
 		}
 		switch event.Type {
+		case native.EventToolApprovalRequest, native.EventUserInputRequest:
+			if pendingDecisionEvent(event) {
+				run.Status = RunStatusWaitingDecision
+			}
+		case native.EventAgentStart:
+			if strings.EqualFold(run.Status, RunStatusWaitingDecision) {
+				run.Status = RunStatusRunning
+			}
 		case native.EventAgentEnd:
+			if strings.EqualFold(run.Status, RunStatusWaitingDecision) {
+				return snapshot, true, nil
+			}
 			switch {
 			case strings.TrimSpace(run.Error) != "":
 				run.Status = RunStatusErrored
@@ -1068,7 +1179,11 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	}, func(snapshot Snapshot) RuntimeDelta {
 		switch event.Type {
 		case native.EventAgentEnd, native.EventAgentAbort:
-			delta.Run = runtimeRunPatch(snapshot, true, true, true, m.distributed != nil).Run
+			waiting := snapshot.CurrentRunView != nil &&
+				strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusWaitingDecision)
+			delta.Run = runtimeRunPatch(snapshot, true, !waiting, !waiting, m.distributed != nil).Run
+		case native.EventAgentStart, native.EventToolApprovalRequest, native.EventUserInputRequest:
+			delta.Run = runtimeRunPatch(snapshot, true, false, false, false).Run
 		case native.EventError:
 			delta.Run = runtimeRunPatch(snapshot, false, true, false, false).Run
 		}
@@ -1086,10 +1201,57 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	return messages, nil
 }
 
+func (m *Manager) setWaitingDecision(ctx context.Context, handle RunHandle) error {
+	if m == nil || m.runs == nil || handle.FencingToken <= 0 {
+		return nil
+	}
+	_, applied, err := m.runs.SetWaitingDecision(ctx, handle.RunID, handle.FencingToken)
+	if err != nil {
+		return fmt.Errorf("set runtime run waiting decision: %w", err)
+	}
+	if !applied {
+		return ErrRunOwnershipLost
+	}
+	return nil
+}
+
+func (m *Manager) resumeWaitingDecision(ctx context.Context, handle RunHandle) error {
+	if m == nil || m.runs == nil || handle.FencingToken <= 0 {
+		return nil
+	}
+	snapshot, ok, err := m.backend.Load(ctx, handle.key())
+	if err != nil {
+		return fmt.Errorf("load live runtime before decision resume: %w", err)
+	}
+	if !ok || !runMatchesHandle(snapshot.CurrentRunView, handle) ||
+		!strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusWaitingDecision) {
+		return nil
+	}
+	_, applied, err := m.runs.Resume(ctx, handle.RunID, handle.FencingToken)
+	if err != nil {
+		return fmt.Errorf("resume runtime run after decision: %w", err)
+	}
+	if !applied {
+		return ErrRunOwnershipLost
+	}
+	return nil
+}
+
+// Snapshot returns the session's authoritative runtime view. The live backend
+// answers first because it is the only place a run in flight exists; the ledger
+// fallback below covers the case where it cannot answer at all.
 func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
 	if m == nil || m.backend == nil {
 		return EmptySnapshot(botID, sessionID), nil
 	}
+	snapshot, err := m.liveSnapshot(ctx, botID, sessionID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return m.hydrateSnapshotFromLedger(ctx, snapshot), nil
+}
+
+func (m *Manager) liveSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
 	key := Key{BotID: strings.TrimSpace(botID), SessionID: strings.TrimSpace(sessionID)}
 	snapshot, ok, err := m.backend.Load(ctx, key)
 	if err != nil {
@@ -1151,6 +1313,76 @@ func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapsh
 		}
 	}
 	return snapshot, nil
+}
+
+// hydrateSnapshotFromLedger answers SR-OBS-001 in the one case the live backend
+// cannot: it no longer holds the run. A replaced backend takes the projection a
+// reconnecting client would have read with it, and that is exactly when the
+// client most needs the authoritative answer — a run whose owner is gone must
+// report `lost`, not appear never to have existed.
+//
+// PostgreSQL can prove the run's identity, its turn and its durable state, and
+// this returns that and nothing more. The streamed text is genuinely gone,
+// which is what makes `lost` honest rather than a pretence of resumption.
+//
+// Nothing is written back. The live projection is derived state, and re-seeding
+// it would put a run back into the structure other reads treat as live — the
+// snapshot would stop being a report and start being a claim.
+func (m *Manager) hydrateSnapshotFromLedger(ctx context.Context, snapshot Snapshot) Snapshot {
+	if m.runs == nil || snapshot.CurrentRunView != nil {
+		return snapshot
+	}
+	sessionID := strings.TrimSpace(snapshot.SessionID)
+	if sessionID == "" {
+		return snapshot
+	}
+	run, err := m.runs.LatestRun(ctx, sessionID)
+	if err != nil {
+		// A session that never ran is the ordinary case, not a failure.
+		if !errors.Is(err, ledger.ErrRunNotFound) {
+			m.logger.Warn("hydrate runtime snapshot from ledger failed",
+				slog.Any("error", err),
+				slog.String("session_id", sessionID))
+		}
+		return snapshot
+	}
+	snapshot.CurrentRunView = &CurrentRunView{
+		RunID:      run.RunID,
+		TurnID:     run.TurnID,
+		Generation: run.LiveGeneration,
+		Status:     liveRunStatus(run.State),
+		OwnerID:    run.OwnerID,
+		StartedAt:  run.CreatedAt,
+		UpdatedAt:  run.UpdatedAt,
+		Error:      strings.TrimSpace(run.ErrorMessage),
+	}
+	if snapshot.CurrentRunView.Error == "" {
+		snapshot.CurrentRunView.Error = strings.TrimSpace(run.ErrorCode)
+	}
+	return snapshot
+}
+
+// liveRunStatus maps a durable state back to the live vocabulary. It is the
+// inverse of terminalLedgerState over the states that survive the round trip;
+// `admitting` and `aborting` do not, because they are transitions an owner
+// passes through and the ledger never records them.
+func liveRunStatus(state ledger.State) string {
+	switch state {
+	case ledger.StateAccepted:
+		return RunStatusAdmitting
+	case ledger.StateRunning:
+		return RunStatusRunning
+	case ledger.StateWaitingDecision:
+		return RunStatusWaitingDecision
+	case ledger.StateAborted:
+		return RunStatusAborted
+	case ledger.StateFailed:
+		return RunStatusErrored
+	case ledger.StateLost:
+		return RunStatusLost
+	default:
+		return RunStatusCompleted
+	}
 }
 
 func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subscription, error) {

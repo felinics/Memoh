@@ -14,6 +14,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/application"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 )
 
 const (
@@ -134,6 +135,10 @@ func collectRuntimeContractWSEvents(t *testing.T, script []application.WSStreamE
 			writer,
 			runtimeContractBotID,
 			wsTurnRef{RunID: runtimeContractRunID, SessionID: runtimeContractSessionID},
+			// A zero handle: this asserts the contract the *socket* sees, which
+			// must hold on its own. Publication to the session runtime is a
+			// separate obligation and must not be what makes these frames appear.
+			sessionruntime.RunHandle{},
 			eventCh,
 		)
 

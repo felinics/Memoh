@@ -132,28 +132,7 @@ export function sortChatMessages(items: ChatMessage[]): ChatMessage[] {
 // turns from fetchMessagesUI and SSE never carry this flag, so an opaque id
 // shape (numeric, UUID, slug) is irrelevant here.
 export function isOptimisticTurn(turn: ChatMessage): boolean {
-  return turn.__optimistic === true
-}
-
-export const SAME_TURN_TIMESTAMP_TOLERANCE_MS = 5_000
-
-export function isSameLogicalTurn(local: ChatMessage, incoming: ChatMessage): boolean {
-  if (local.role !== incoming.role) return false
-  const localExt = (local as { externalMessageId?: string }).externalMessageId
-  const incomingExt = (incoming as { externalMessageId?: string }).externalMessageId
-  if (localExt && incomingExt) return localExt === incomingExt
-  if (local.role === 'user' && incoming.role === 'user') {
-    if (local.text.trim() !== incoming.text.trim()) return false
-  } else if (local.role === 'assistant' && incoming.role === 'assistant') {
-    // Assistant turns rarely overlap as optimistic + server in this path
-    // because optimistic assistants stay attached to a live stream; bail
-    // out conservatively rather than guessing on opaque content blocks.
-    return false
-  } else {
-    return false
-  }
-  const dt = Math.abs(new Date(local.timestamp).getTime() - new Date(incoming.timestamp).getTime())
-  return Number.isFinite(dt) && dt <= SAME_TURN_TIMESTAMP_TOLERANCE_MS
+  return '__optimistic' in turn && turn.__optimistic === true
 }
 
 export function createInvocationId(): string {
