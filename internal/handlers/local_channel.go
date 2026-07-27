@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -767,37 +766,9 @@ func (r wsTurnRef) event(eventType string) wsOutboundEvent {
 	return out
 }
 
-type activeWSStream struct {
-	runID        string
-	invocationID string
-	sessionID    string
-	cancel       context.CancelFunc
-	abortCh      chan struct{}
-	// aborted records that the stop came from the client rather than from a
-	// failure, so the run's durable terminal state says `aborted` instead of
-	// blaming the cancellation it caused.
-	aborted atomic.Bool
-}
-
-// wsStreamRegistry indexes live runs both ways: by run id because that is how
-// abort arrives, and by invocation id because that is how a duplicate send is
-// recognised as a replay rather than admitted as a second run.
-type wsStreamRegistry struct {
-	mu             sync.Mutex
-	byID           map[string]*activeWSStream
-	byInvocationID map[string]*activeWSStream
-}
-
 type wsRequestedSkillTurnRegistry struct {
 	mu     sync.Mutex
 	active map[string]int
-}
-
-func newWSStreamRegistry() *wsStreamRegistry {
-	return &wsStreamRegistry{
-		byID:           make(map[string]*activeWSStream),
-		byInvocationID: make(map[string]*activeWSStream),
-	}
 }
 
 func newWSRequestedSkillTurnRegistry() *wsRequestedSkillTurnRegistry {
@@ -891,107 +862,6 @@ func (h *LocalChannelHandler) enterWSMessageTurn(botID, sessionID, invocationID 
 	registry := h.wsSkillTurns
 	h.wsSkillTurnsMu.Unlock()
 	return registry.enter(botID, sessionID, invocationID)
-}
-
-// errWSInvocationActive is the replay answer: this invocation already started a
-// run, so starting a second one would duplicate the turn the client is watching.
-// The run it did start is returned alongside, because "that one" is a more
-// useful answer to a redelivered send than a failure.
-var errWSInvocationActive = errors.New("invocation is already running")
-
-func (r *wsStreamRegistry) register(stream *activeWSStream) (string, error) {
-	runID := strings.TrimSpace(stream.runID)
-	if runID == "" {
-		return "", errors.New("run_id is required")
-	}
-	invocationID := strings.TrimSpace(stream.invocationID)
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.byID[runID]; exists {
-		return "", fmt.Errorf("run_id %q is already active", runID)
-	}
-	if invocationID != "" {
-		if existing, exists := r.byInvocationID[invocationID]; exists {
-			return existing.runID, errWSInvocationActive
-		}
-	}
-	stream.runID = runID
-	stream.invocationID = invocationID
-	stream.sessionID = strings.TrimSpace(stream.sessionID)
-	r.byID[runID] = stream
-	if invocationID != "" {
-		r.byInvocationID[invocationID] = stream
-	}
-	return runID, nil
-}
-
-func (r *wsStreamRegistry) hasSession(sessionID string) bool {
-	sessionID = strings.TrimSpace(sessionID)
-	if r == nil || sessionID == "" {
-		return false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, stream := range r.byID {
-		if stream != nil && stream.sessionID == sessionID {
-			return true
-		}
-	}
-	return false
-}
-
-// shouldRejectWSSkillActivationForActiveStream refuses a skill activation while
-// this connection is already streaming the session.
-//
-// It is a local fast path, not the guarantee. A turn already running elsewhere —
-// another connection, another instance — is refused durably by admission with a
-// retryable session_busy, which is why this no longer consults an in-process
-// turn registry: one would answer only for this process and disagree with the
-// ledger everywhere else.
-func shouldRejectWSSkillActivationForActiveStream(activeStreams *wsStreamRegistry, sessionID string, hasSkillActivation bool) bool {
-	if !hasSkillActivation {
-		return false
-	}
-	return activeStreams != nil && activeStreams.hasSession(sessionID)
-}
-
-func (r *wsStreamRegistry) finish(runID string) {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	stream := r.byID[runID]
-	if stream == nil {
-		return
-	}
-	delete(r.byID, runID)
-	if stream.invocationID != "" && r.byInvocationID[stream.invocationID] == stream {
-		delete(r.byInvocationID, stream.invocationID)
-	}
-}
-
-func (r *wsStreamRegistry) abort(runID string) bool {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return false
-	}
-
-	r.mu.Lock()
-	stream := r.byID[runID]
-	r.mu.Unlock()
-	if stream == nil {
-		return false
-	}
-	stream.aborted.Store(true)
-	select {
-	case stream.abortCh <- struct{}{}:
-	default:
-	}
-	stream.cancel()
-	return true
 }
 
 // wsWriter serialises all WebSocket writes through a single goroutine to
@@ -1199,27 +1069,22 @@ func sendWSErrorFromError(writer *wsWriter, ref wsTurnRef, err error) {
 	writer.SendJSON(event)
 }
 
-// forwardWSStreamEvents does two things with one decoded event, and they are
-// deliberately not the same thing.
+// forwardWSStreamEvents publishes the run's events to the session runtime,
+// which folds each one into the run's authoritative state so every subscriber
+// of the session sees it — including one attached to a different connection or
+// a different server, and including this client after it reconnects
+// (SR-OBS-003).
 //
-// It publishes the event to the session runtime, which folds it into the run's
-// authoritative state so every subscriber of the session sees it — including one
-// attached to a different connection or a different server, and including this
-// client after it reconnects (SR-OBS-003). Publication is the durable record and
-// survives this socket.
-//
-// It also renders the event onto this socket directly. That is not redundant
-// with publication: the manager suppresses events that change nothing observable
-// and returns no messages for them, whereas the initiator has to receive every
-// partial it produced. The two converters are independent state machines fed the
-// same events, which is what keeps a dropped publication from silently blanking
-// the stream the client is watching.
+// The initiating socket is not a special case and receives nothing here beyond
+// errors. It reads the run the same way every other subscriber does, through
+// the snapshot and deltas of the session it subscribed to; rendering a second,
+// connection-local copy of the same events would be a projection only this
+// client can see, which is exactly the divergence SR-OBS-003 forbids.
 func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Context, writer *wsWriter, botID string, ref wsTurnRef, handle sessionruntime.RunHandle, eventCh <-chan application.WSStreamEvent) {
-	converter := chatview.NewUIMessageStreamConverter()
 	publisher := h.sessionRuntimePublisher()
 	if handle.FencingToken <= 0 {
-		// Pre-ledger test and compatibility entry points have no durable
-		// ownership to publish against.
+		// No admitted ownership, so there is nothing this process is allowed to
+		// write for the run. Only a caller that bypasses admission gets here.
 		publisher = nil
 	}
 	outboundAssetRefs := make([]messagepkg.AssetRef, 0)
@@ -1236,9 +1101,10 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 			}
 
 			if publisher != nil {
-				// Published before the frame reaches this socket so the session's
-				// state never lags behind what a client has already been shown: a
-				// reconnecting subscriber must not be handed less than it saw.
+				// Published before anything is said on this socket, so the
+				// session's state never lags behind what a client has already
+				// been told: a reconnecting subscriber must not be handed less
+				// than it saw.
 				//
 				// assetCtx, not ctx: an aborted run cancels ctx and its last
 				// events arrive after that, which is exactly when publishing them
@@ -1257,32 +1123,15 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 				}
 			}
 
-			switch streamEvent.Type {
-			case native.EventAgentStart:
-				writer.SendJSON(ref.event("start"))
-				continue
-			case native.EventAgentEnd, native.EventAgentAbort:
-				for _, uiMessage := range converter.ConvertTerminalMessages(streamEvent.Messages) {
-					message := ref.event("message")
-					message.Data = uiMessage
-					writer.SendJSON(message)
-				}
-				writer.SendJSON(ref.event("end"))
-				continue
-			case native.EventError:
+			// An error is the one thing the run's published state cannot carry on
+			// its own: it names the run as failed but not what to tell this
+			// caller, which is still waiting on the send it made.
+			if streamEvent.Type == native.EventError {
 				message := strings.TrimSpace(streamEvent.Error)
 				if message == "" {
 					message = "stream error"
 				}
 				sendWSError(writer, ref, message)
-				continue
-			}
-
-			uiEvents := converter.HandleEvent(chatview.UIStreamEventFromAgentEvent(streamEvent))
-			for _, uiMessage := range uiEvents {
-				message := ref.event("message")
-				message.Data = uiMessage
-				writer.SendJSON(message)
 			}
 		}
 	}
@@ -1431,26 +1280,23 @@ func (h *LocalChannelHandler) admitWSTurn(ctx context.Context, writer *wsWriter,
 //
 // Only the stable error code reaches the run's published state. The underlying
 // error is a private diagnostic and stays in the log.
-func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAdmission, aborted bool, runErr error) {
+func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAdmission, runErr error) {
 	if h.sessionRuntime == nil || admission.Handle.FencingToken <= 0 {
 		return
 	}
-	// This process reports only what it actually knows. It knows the run failed,
-	// because it holds the error; it knows the client on *this* connection asked
-	// it to stop. It does not know why an execution it was told to stop was
-	// stopped: an abort routed in from another connection or another server
+	// This process reports only what it actually knows, which is whether the run
+	// failed: it holds the error. It does not know why an execution it was told
+	// to stop was stopped. Every abort now arrives as a routed control, which
 	// unblocks the runner and cancels its context, so the owner sees either a
 	// clean return or a bare cancellation and neither says "aborted".
 	//
-	// So anything else is left unnamed, and the manager resolves it from the
-	// intent already recorded against the run. Reporting a clean return as
-	// `completed` is what made a routed abort finalize as a successful turn
-	// (SR-CTL-001); a cancellation reported as `errored` blames the symptom.
+	// Anything that is not a failure is therefore left unnamed, and the manager
+	// resolves it from the intent already recorded against the run. Reporting a
+	// clean return as `completed` is what made a routed abort finalize as a
+	// successful turn (SR-CTL-001); a cancellation reported as `errored` blames
+	// the symptom.
 	status, message := "", ""
-	switch {
-	case aborted:
-		status = sessionruntime.RunStatusAborted
-	case runErr != nil && !errors.Is(runErr, context.Canceled):
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		status = sessionruntime.RunStatusErrored
 		message = string(apperror.CodeOf(runErr))
 	}
@@ -1470,43 +1316,39 @@ func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAd
 
 // abortWSRun stops a run the client named.
 //
-// It routes through the session runtime first, and the per-connection registry
-// is only the fallback. That order is the whole point: the registry indexes runs
-// *this socket* started, so a client that reconnected — in a cluster, routinely
-// onto a server that has never heard of the run — would otherwise have its abort
-// silently do nothing. The manager knows which process owns the run and can
-// reach it (SR-CTL-001).
+// It routes through the session runtime, which is the only way that works: a
+// run belongs to a session, not to a socket, so a client that reconnected — in
+// a cluster, routinely onto a server that has never heard of the run — has no
+// local execution to cancel. The manager knows which process owns the run and
+// can reach it (SR-CTL-001).
 //
-// Routing first also decides what the run's terminal state says. The manager
-// records the abort intent and moves the run to `aborting` before anything is
-// cancelled, so the cancellation that follows is already explained; cancelling
-// locally first would race that write and let the run finish as `completed`.
-//
-// The registry remains a fallback for pre-ledger runs that have no manager
-// ownership record.
-func (h *LocalChannelHandler) abortWSRun(ctx context.Context, activeStreams *wsStreamRegistry, writer *wsWriter, botID string, msg wsClientMessage, runID string) {
+// Routing is also what decides the run's terminal state. The manager records
+// the abort intent and moves the run to `aborting` before anything is
+// cancelled, so the cancellation that follows is already explained; a local
+// cancel would race that write and let the run finish as `completed`.
+func (h *LocalChannelHandler) abortWSRun(ctx context.Context, writer *wsWriter, botID string, msg wsClientMessage, runID string) {
 	sessionID := strings.TrimSpace(msg.SessionID)
 	controlID := strings.TrimSpace(msg.ControlID)
 	ref := wsTurn(msg.InvocationID, sessionID).withRun(runID)
 
-	applied := false
-	if controller := h.sessionRuntimeController(); controller != nil && sessionID != "" {
-		routed, err := controller.AbortControl(ctx, botID, sessionID, runID, controlID)
-		if err != nil {
-			h.logger.Warn("route ws abort failed",
-				slog.Any("error", err),
-				slog.String("bot_id", botID),
-				slog.String("run_id", runID),
-				slog.String("session_id", sessionID))
-			if controlID != "" {
-				sendWSControlAck(writer, ref, "abort", controlID, false, string(apperror.CodeOf(err)))
-			}
-			return
+	controller := h.sessionRuntimeController()
+	if controller == nil || sessionID == "" {
+		if controlID != "" {
+			sendWSControlAck(writer, ref, "abort", controlID, false, "")
 		}
-		applied = routed
+		return
 	}
-	if !applied {
-		applied = activeStreams.abort(runID)
+	applied, err := controller.AbortControl(ctx, botID, sessionID, runID, controlID)
+	if err != nil {
+		h.logger.Warn("route ws abort failed",
+			slog.Any("error", err),
+			slog.String("bot_id", botID),
+			slog.String("run_id", runID),
+			slog.String("session_id", sessionID))
+		if controlID != "" {
+			sendWSControlAck(writer, ref, "abort", controlID, false, string(apperror.CodeOf(err)))
+		}
+		return
 	}
 	if controlID != "" {
 		sendWSControlAck(writer, ref, "abort", controlID, applied, "")
@@ -1526,7 +1368,7 @@ func (h *LocalChannelHandler) abortWSRun(ctx context.Context, activeStreams *wsS
 //
 // The returned ref carries the run id so callers describing the same turn — a
 // persisted user message, a late error — name it the way the client will.
-func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, activeStreams *wsStreamRegistry, writer *wsWriter, botID string, ref wsTurnRef, logLabel string, submission []byte, admissionBuilder wsRunAdmissionBuilder, onFinish func(), runner wsStreamRunner) (wsTurnRef, bool) {
+func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, writer *wsWriter, botID string, ref wsTurnRef, logLabel string, submission []byte, admissionBuilder wsRunAdmissionBuilder, onFinish func(), runner wsStreamRunner) (wsTurnRef, bool) {
 	// Cause-carrying so a lost owner lease is distinguishable downstream from an
 	// ordinary stop: both cancel this context, and only one of them means this
 	// process may no longer write for the run.
@@ -1558,34 +1400,6 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 		})
 	}
 
-	stream := &activeWSStream{
-		runID:        ref.RunID,
-		invocationID: ref.InvocationID,
-		sessionID:    ref.SessionID,
-		cancel:       streamCancel,
-		abortCh:      abortCh,
-	}
-	existingRunID, err := activeStreams.register(stream)
-	if err != nil {
-		streamCancel()
-		if onFinish != nil {
-			onFinish()
-		}
-		// This process owns an admitted run it is not going to execute, so it
-		// releases the session's slot instead of leaving the row for the reaper.
-		h.finishWSRun(context.WithoutCancel(baseCtx), admission, false, err)
-		if errors.Is(err, errWSInvocationActive) {
-			// A redelivered send is answered with the run it already started, so
-			// the client attaches to that turn instead of producing a second one
-			// or seeing a failure it cannot act on. Only the run id is named: the
-			// turn and cursor reported above belong to the admission this call is
-			// releasing, not to the run the client is being pointed at.
-			sendWSRunAccepted(writer, ref.withRun(existingRunID), wsRunAcceptance{Duplicate: true})
-			return ref, false
-		}
-		sendWSError(writer, ref, err.Error())
-		return ref, false
-	}
 	sendWSRunAccepted(writer, ref, admission.Accepted)
 
 	eventCh := make(chan application.WSStreamEvent, 64)
@@ -1594,7 +1408,6 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 	go func() {
 		defer streamCancel()
 		err := func() error {
-			defer activeStreams.finish(ref.RunID)
 			if onFinish != nil {
 				defer onFinish()
 			}
@@ -1610,7 +1423,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 		// The terminal write outlives the connection: a client that disappears
 		// mid-turn must still free the session, and baseCtx is already gone by
 		// the time an aborted run returns.
-		h.finishWSRun(context.WithoutCancel(baseCtx), admission, stream.aborted.Load(), err)
+		h.finishWSRun(context.WithoutCancel(baseCtx), admission, err)
 		if err != nil && connCtx.Err() == nil {
 			privateErr := err
 			if cause := apperror.CauseOf(err); cause != nil {
@@ -1680,7 +1493,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	connCtx, connCancel := context.WithCancel(context.Background())
 	defer connCancel()
 	streamBaseCtx := context.WithoutCancel(c.Request().Context())
-	activeStreams := newWSStreamRegistry()
 
 	// Subscriptions observe sessions; they never own the runs behind them, so
 	// closing them on disconnect leaves a run executing for its other
@@ -1728,7 +1540,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, wsTurn("", msg.SessionID), "run_id is required")
 				continue
 			}
-			h.abortWSRun(streamBaseCtx, activeStreams, writer, botID, msg, runID)
+			h.abortWSRun(streamBaseCtx, writer, botID, msg, runID)
 
 		case "tool_approval_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
@@ -1971,10 +1783,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			if sessionID != "" {
 				sessionAuthorized = true
 				if hasSkillActivation {
-					if shouldRejectWSSkillActivationForActiveStream(activeStreams, sessionID, true) {
-						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
-						continue
-					}
 					supported, supportErr := h.wsSessionSupportsRequestedSkills(streamBaseCtx, sessionID)
 					if supportErr != nil {
 						sendWSErrorFromError(writer, ref, supportErr)
@@ -2121,12 +1929,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				preparedActivationReq = &preparedReq
 				persistedUserMessageID = persisted.ID
-				turns := chatview.ConvertMessagesToUITurns([]messagepkg.Message{persisted})
-				if len(turns) > 0 {
-					userMessage := ref.event("user_message")
-					userMessage.Data = turns[0]
-					writer.SendJSON(userMessage)
-				}
 				userMessagePersisted = true
 			}
 			submission := wsSubmission{
@@ -2154,7 +1956,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				messageAdmission.attachments = ingestedActivationAttachments
 				messageAdmission.attachmentsPrepared = true
 			}
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, ref, "ws stream error", submission, messageAdmission.build, releaseActiveWSTurn,
+			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws stream error", submission, messageAdmission.build, releaseActiveWSTurn,
 				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
 					req := application.ChatRequest{
 						BotID:                   botID,
@@ -2242,7 +2044,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				SessionID: sessionID,
 				MessageID: messageID,
 			}.encode()
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, ref, "ws retry stream error", retrySubmission, nil, nil,
+			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws retry stream error", retrySubmission, nil, nil,
 				func(ctx context.Context, runRef wsTurnRef, _ wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
 					return h.agentService.RetryLatestMessageWS(ctx, application.RetryLatestMessageInput{
 						BotID:                  botID,
@@ -2313,7 +2115,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				MessageID:   messageID,
 				Attachments: digestWSAttachments(msg.Attachments),
 			}.encode()
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, ref, "ws edit stream error", editSubmission, nil, nil,
+			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws edit stream error", editSubmission, nil, nil,
 				func(ctx context.Context, runRef wsTurnRef, _ wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
 					ingestedAttachments := h.ingestWSInboundAttachments(ctx, botID, chatAttachments)
 					return h.agentService.EditLatestMessageWS(ctx, application.EditLatestMessageInput{

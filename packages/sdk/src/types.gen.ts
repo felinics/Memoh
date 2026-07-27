@@ -8846,52 +8846,6 @@ export type PostBotsByBotIdSessionsBySessionIdForkResponses = {
 
 export type PostBotsByBotIdSessionsBySessionIdForkResponse = PostBotsByBotIdSessionsBySessionIdForkResponses[keyof PostBotsByBotIdSessionsBySessionIdForkResponses];
 
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Session ID
-         */
-        session_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/sessions/{session_id}/messages/events';
-};
-
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsError = GetBotsByBotIdSessionsBySessionIdMessagesEventsErrors[keyof GetBotsByBotIdSessionsBySessionIdMessagesEventsErrors];
-
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses = {
-    /**
-     * SSE stream
-     */
-    200: string;
-};
-
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponse = GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses[keyof GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses];
-
 export type GetBotsByBotIdSessionsBySessionIdStatusData = {
     body?: never;
     path: {

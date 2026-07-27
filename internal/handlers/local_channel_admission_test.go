@@ -399,7 +399,6 @@ func TestFinishWSRunReleasesTheSlotUnderTheAdmittedToken(t *testing.T) {
 
 	for _, tc := range []struct {
 		name        string
-		aborted     bool
 		runErr      error
 		wantStatus  string
 		wantMessage string
@@ -410,7 +409,6 @@ func TestFinishWSRunReleasesTheSlotUnderTheAdmittedToken(t *testing.T) {
 			runErr:     context.Canceled,
 			wantStatus: "",
 		},
-		{name: "aborted", aborted: true, wantStatus: sessionruntime.RunStatusAborted},
 		{
 			name:        "errored",
 			runErr:      apperror.New(apperror.CodeSessionBusy, nil),
@@ -427,7 +425,7 @@ func TestFinishWSRunReleasesTheSlotUnderTheAdmittedToken(t *testing.T) {
 		handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
 		admitted := startedWSAdmission()
 
-		handler.finishWSRun(context.Background(), wsRunAdmission{RunID: admitted.RunID, Handle: admitted.Handle}, tc.aborted, tc.runErr)
+		handler.finishWSRun(context.Background(), wsRunAdmission{RunID: admitted.RunID, Handle: admitted.Handle}, tc.runErr)
 
 		write := runtime.awaitTerminalWrite(t)
 		if write.status != tc.wantStatus || write.message != tc.wantMessage {
@@ -448,7 +446,7 @@ func TestFinishWSRunSkipsRunsThisProcessDoesNotOwn(t *testing.T) {
 	runtime := newStubWSTurnAdmitter()
 	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
 
-	handler.finishWSRun(context.Background(), wsRunAdmission{RunID: "run-1"}, false, nil)
+	handler.finishWSRun(context.Background(), wsRunAdmission{RunID: "run-1"}, nil)
 
 	select {
 	case write := <-runtime.terminal:
@@ -471,7 +469,7 @@ func TestStartWSStreamPublishesAdmittedTurnAndReleasesTheSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ref, started := handler.startWSStream(ctx, ctx, newWSStreamRegistry(), writer, wsAdmissionBotID, wsAdmissionTestRef(), "test", wsAdmissionTestSubmission(), nil,
+	ref, started := handler.startWSStream(ctx, ctx, writer, wsAdmissionBotID, wsAdmissionTestRef(), "test", wsAdmissionTestSubmission(), nil,
 		nil,
 		func(context.Context, wsTurnRef, wsAdmittedTurn, chan<- application.WSStreamEvent, <-chan struct{}) error {
 			return nil

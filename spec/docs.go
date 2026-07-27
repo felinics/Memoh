@@ -7127,66 +7127,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/sessions/{session_id}/messages/events": {
-            "get": {
-                "description": "SSE stream that pushes a server-fixed backlog of the last 50\nmessages, then streams future message_created and\nsession_title_updated events scoped to this session only.",
-                "produces": [
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "messages"
-                ],
-                "summary": "Stream message events for one session",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Session ID",
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "SSE stream",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/sessions/{session_id}/status": {
             "get": {
                 "description": "Get aggregated info for a chat session including message count, context usage, cache stats, and used skills",

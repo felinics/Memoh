@@ -519,8 +519,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 			}
 			// The wire shape lives in internal/agent/event/payload — see its
 			// BackgroundTask helper and the tests there that pin the
-			// top-level `session_id` placement the per-session SSE handler
-			// routes on.
+			// top-level `session_id` placement consumers route on.
 			data, err := json.Marshal(agentpayload.BackgroundTask(evt))
 			if err != nil {
 				return

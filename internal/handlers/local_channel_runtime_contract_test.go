@@ -187,80 +187,46 @@ func collectRuntimeContractWSEvents(t *testing.T, script []application.WSStreamE
 	return events
 }
 
-func TestLocalChannelRuntimeContractForwardsRichActiveRunUIState(t *testing.T) {
+// A run's output belongs to its session, not to the socket that started it, so
+// the initiating connection is fed nothing here that a second subscriber would
+// not also receive — it reads the run through the same snapshot and deltas.
+//
+// The script is a full rich run followed by an error. Reading exactly one frame
+// is what makes the negative deterministic: every other event was queued ahead
+// of the error, so anything that still rendered to the socket would have
+// arrived first.
+func TestLocalChannelRuntimeContractSendsOnlyErrorsToTheInitiatingSocket(t *testing.T) {
 	t.Parallel()
 
-	events := collectRuntimeContractWSEvents(t, richActiveRunWSContractScript(t), "end")
-	if len(events) < 8 {
-		t.Fatalf("got %d events, want rich stream events: %#v", len(events), events)
+	script := append(
+		richActiveRunWSContractScript(t),
+		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventError, Error: "runtime interrupted"}),
+	)
+	events := collectRuntimeContractWSEvents(t, script, "error")
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want the error alone", events)
 	}
-	if events[0]["type"] != "start" {
-		t.Fatalf("first event = %#v, want start", events[0])
+	if events[0]["message"] != "runtime interrupted" {
+		t.Fatalf("error event = %#v", events[0])
 	}
-	// Everything a run emits names the run, and names it the same way, so a
-	// subscriber that never sent the submission can still follow it.
-	for _, event := range events {
-		if _, present := event["stream_id"]; present {
-			t.Fatalf("event still carries stream_id: %#v", event)
-		}
-		if event["run_id"] != runtimeContractRunID {
-			t.Fatalf("event run_id = %#v, want %q", event["run_id"], runtimeContractRunID)
-		}
+	// The frame names the run, and only the run: a subscriber that never sent
+	// the submission still has to recognise which turn failed.
+	if events[0]["run_id"] != runtimeContractRunID {
+		t.Fatalf("error run_id = %#v, want %q", events[0]["run_id"], runtimeContractRunID)
 	}
-
-	var reasoning, text, execTool, approvalTool, askUserTool map[string]any
-	for _, event := range events {
-		data, _ := event["data"].(map[string]any)
-		switch {
-		case data["type"] == "reasoning":
-			reasoning = data
-		case data["type"] == "text":
-			text = data
-		case data["type"] == "tool" && data["tool_call_id"] == "call-exec":
-			execTool = data
-		case data["type"] == "tool" && data["tool_call_id"] == "call-approval":
-			approvalTool = data
-		case data["type"] == "tool" && data["tool_call_id"] == "call-ask":
-			askUserTool = data
-		}
-	}
-
-	if reasoning["content"] != "I need to inspect the workspace." {
-		t.Fatalf("reasoning = %#v", reasoning)
-	}
-	if text["content"] != "I will check the current state." {
-		t.Fatalf("text = %#v", text)
-	}
-	if execTool["running"] != false {
-		t.Fatalf("exec tool = %#v, want completed running=false", execTool)
-	}
-	if progress, _ := execTool["progress"].([]any); len(progress) != 2 {
-		t.Fatalf("exec progress = %#v, want two entries", execTool["progress"])
-	}
-	approval, _ := approvalTool["approval"].(map[string]any)
-	if approval["approval_id"] != "approval-1" || approval["can_approve"] != true {
-		t.Fatalf("approval tool = %#v", approvalTool)
-	}
-	userInput, _ := askUserTool["user_input"].(map[string]any)
-	if userInput["user_input_id"] != "input-1" || userInput["can_respond"] != true {
-		t.Fatalf("ask_user tool = %#v", askUserTool)
-	}
-	if events[len(events)-1]["type"] != "end" {
-		t.Fatalf("last event = %#v, want end", events[len(events)-1])
+	if _, present := events[0]["invocation_id"]; present {
+		t.Fatalf("error event names two ids: %#v", events[0])
 	}
 }
 
+// An error still reaches the caller when the run produced output first: the
+// published state names the run as failed, but only this frame tells the
+// connection that made the send what went wrong.
 func TestLocalChannelRuntimeContractForwardsInterruptedRunError(t *testing.T) {
 	t.Parallel()
 
-	events := collectRuntimeContractWSEvents(t, interruptedRunWSContractScript(t), "end")
-	if len(events) != 4 {
-		t.Fatalf("events = %#v, want start, partial message, error, end", events)
-	}
-	if events[0]["type"] != "start" || events[1]["type"] != "message" || events[2]["type"] != "error" || events[3]["type"] != "end" {
-		t.Fatalf("unexpected interrupted event sequence: %#v", events)
-	}
-	if events[2]["message"] != "runtime interrupted" {
-		t.Fatalf("error event = %#v", events[2])
+	events := collectRuntimeContractWSEvents(t, interruptedRunWSContractScript(t), "error")
+	if len(events) != 1 || events[0]["message"] != "runtime interrupted" {
+		t.Fatalf("events = %#v, want the interruption reported once", events)
 	}
 }

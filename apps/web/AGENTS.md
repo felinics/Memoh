@@ -489,17 +489,13 @@ Stores use Composition API style (`defineStore(() => { ... })`), with persistenc
 
 ### Streaming (Chat)
 
-Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket**.
+A conversation is read over the **WebSocket** only. SSE is left with one job that has nothing to do with conversation contents: telling the sidebar which sessions moved.
 
-#### SSE Streaming
-#### SSE Streaming
-- **Endpoints**:
-  - `GET /bots/{bot_id}/local/stream` — local-channel send + stream pipe.
-  - `GET /bots/{bot_id}/sessions/{session_id}/messages/events` — per-session messages SSE; server-fixed last-50 backlog + live `message_created` / `session_title_updated` / `background_task` / `agent_stream` filtered to the subscribed session.
-  - `GET /bots/{bot_id}/sessions/events` — bot-wide lightweight activity SSE; `session_touched` / `session_title_updated` / `session_created` for sidebar live-sort. Never carries message bodies.
-- **Parsing**: handled by the generated SDK (`@memohai/sdk` `sse.get`); wrappers live in `composables/api/useChat.message-api.ts`. The hand-rolled `useChat.sse.ts` parser has been removed.
-- **Events**: `text_delta`, `reasoning_delta`, `tool_call_start/end`, `attachment_delta`, `processing_completed/failed` on the message SSE; lightweight session-activity events on the bot-wide SSE.
+#### Sessions activity SSE
+- **Endpoint**: `GET /bots/{bot_id}/sessions/events` — bot-wide lightweight activity stream; `session_touched` / `session_title_changed` / `session_created` for sidebar live-sort. Never carries message bodies.
+- **Parsing**: handled by the generated SDK (`@memohai/sdk` `sse.get`); wrappers live in `composables/api/useChat.message-api.ts`.
 - **Retry**: `useRetryingStream` composable drives reconnection with exponential backoff.
+- There is no per-session SSE. A session's messages and run state come from the session runtime over the WebSocket, so that every subscriber of a session — this tab, another tab, another device — is reading the same projection instead of each building its own.
 
 #### WebSocket
 - **Endpoint**: `/bots/{bot_id}/local/ws` (with token query param)

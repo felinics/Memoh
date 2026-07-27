@@ -74,7 +74,7 @@ func TestWSTurnRefNamesATurnByOneIDAtATime(t *testing.T) {
 		t.Fatalf("pre-run event session = %q, want session-1", before.SessionID)
 	}
 
-	after := ref.withRun(" run-1 ").event("start")
+	after := ref.withRun(" run-1 ").event("error")
 	if after.RunID != "run-1" || after.InvocationID != "" {
 		t.Fatalf("post-run event = %#v, want run only", after)
 	}
@@ -276,104 +276,6 @@ func TestWSWriterIgnoresLateSendsAfterClose(t *testing.T) {
 	}
 }
 
-func TestWSStreamRegistryAbortsOnlyTargetRun(t *testing.T) {
-	t.Parallel()
-
-	registry := newWSStreamRegistry()
-	ctxA, cancelA := context.WithCancel(context.Background())
-	defer cancelA()
-	ctxB, cancelB := context.WithCancel(context.Background())
-	defer cancelB()
-	abortA := make(chan struct{}, 1)
-	abortB := make(chan struct{}, 1)
-
-	if _, err := registry.register(&activeWSStream{runID: "run-a", cancel: cancelA, abortCh: abortA}); err != nil {
-		t.Fatalf("register run-a: %v", err)
-	}
-	if _, err := registry.register(&activeWSStream{runID: "run-b", cancel: cancelB, abortCh: abortB}); err != nil {
-		t.Fatalf("register run-b: %v", err)
-	}
-
-	if !registry.abort("run-a") {
-		t.Fatal("expected run-a abort to succeed")
-	}
-
-	select {
-	case <-abortA:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for run-a abort signal")
-	}
-	select {
-	case <-ctxA.Done():
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for run-a context cancellation")
-	}
-	select {
-	case <-abortB:
-		t.Fatal("run-b received abort signal")
-	default:
-	}
-	select {
-	case <-ctxB.Done():
-		t.Fatal("run-b context was cancelled")
-	default:
-	}
-}
-
-func TestWSStreamRegistryRejectsDuplicateRunID(t *testing.T) {
-	t.Parallel()
-
-	registry := newWSStreamRegistry()
-	_, cancelA := context.WithCancel(context.Background())
-	defer cancelA()
-	_, cancelB := context.WithCancel(context.Background())
-	defer cancelB()
-
-	if _, err := registry.register(&activeWSStream{runID: "run-a", cancel: cancelA, abortCh: make(chan struct{}, 1)}); err != nil {
-		t.Fatalf("register run-a: %v", err)
-	}
-	if _, err := registry.register(&activeWSStream{runID: "run-a", cancel: cancelB, abortCh: make(chan struct{}, 1)}); err == nil {
-		t.Fatal("expected duplicate run id registration to fail")
-	}
-}
-
-// A resend of the same submission must resolve to the run it already started.
-// Distinguishing that from an ordinary collision is what lets the client tell
-// "you are already watching this" apart from "something went wrong".
-func TestWSStreamRegistryRejectsReplayedInvocation(t *testing.T) {
-	t.Parallel()
-
-	registry := newWSStreamRegistry()
-	_, cancelA := context.WithCancel(context.Background())
-	defer cancelA()
-	_, cancelB := context.WithCancel(context.Background())
-	defer cancelB()
-
-	first := &activeWSStream{runID: "run-a", invocationID: "invocation-1", cancel: cancelA, abortCh: make(chan struct{}, 1)}
-	if _, err := registry.register(first); err != nil {
-		t.Fatalf("register run-a: %v", err)
-	}
-	existing, err := registry.register(&activeWSStream{runID: "run-b", invocationID: "invocation-1", cancel: cancelB, abortCh: make(chan struct{}, 1)})
-	if !errors.Is(err, errWSInvocationActive) {
-		t.Fatalf("replayed invocation error = %v, want errWSInvocationActive", err)
-	}
-	// The replay is answerable: it reports the run this invocation already
-	// started, which is what the client is told to attach to.
-	if existing != "run-a" {
-		t.Fatalf("replayed invocation run = %q, want run-a", existing)
-	}
-
-	// The replay must not have displaced the original run, and finishing that
-	// run has to free the invocation so a genuine later turn can reuse it.
-	if !registry.abort("run-a") {
-		t.Fatal("expected the original run to still be abortable")
-	}
-	registry.finish("run-a")
-	if _, err := registry.register(&activeWSStream{runID: "run-c", invocationID: "invocation-1", cancel: cancelB, abortCh: make(chan struct{}, 1)}); err != nil {
-		t.Fatalf("register after finish: %v", err)
-	}
-}
-
 func TestLocalChannelHandlerIssueRuntimeOwnerBearerToken(t *testing.T) {
 	t.Parallel()
 
@@ -403,70 +305,6 @@ func TestLocalChannelHandlerIssueRuntimeOwnerBearerToken(t *testing.T) {
 	handler.SetAuthTokenConfig("", time.Hour)
 	if fallback := handler.issueRuntimeOwnerBearerToken("runtime-owner", "Bearer caller-token"); fallback != "Bearer caller-token" {
 		t.Fatalf("fallback token = %q, want original bearer", fallback)
-	}
-}
-
-func TestWSStreamRegistryHasSessionTracksActiveRuns(t *testing.T) {
-	t.Parallel()
-
-	registry := newWSStreamRegistry()
-	_, cancelA := context.WithCancel(context.Background())
-	defer cancelA()
-	_, cancelB := context.WithCancel(context.Background())
-	defer cancelB()
-
-	if registry.hasSession("session-1") {
-		t.Fatal("empty registry reported active session")
-	}
-	if _, err := registry.register(&activeWSStream{runID: "run-a", sessionID: " session-1 ", cancel: cancelA, abortCh: make(chan struct{}, 1)}); err != nil {
-		t.Fatalf("register run-a: %v", err)
-	}
-	if _, err := registry.register(&activeWSStream{runID: "run-b", sessionID: "session-2", cancel: cancelB, abortCh: make(chan struct{}, 1)}); err != nil {
-		t.Fatalf("register run-b: %v", err)
-	}
-
-	if !registry.hasSession("session-1") {
-		t.Fatal("expected session-1 to be active")
-	}
-	if !registry.hasSession(" session-2 ") {
-		t.Fatal("expected trimmed session-2 to be active")
-	}
-	if registry.hasSession("session-3") {
-		t.Fatal("unexpected session-3 activity")
-	}
-
-	registry.finish("run-a")
-	if registry.hasSession("session-1") {
-		t.Fatal("session-1 should be inactive after finish")
-	}
-	if !registry.hasSession("session-2") {
-		t.Fatal("session-2 should remain active")
-	}
-}
-
-func TestShouldRejectWSRequestedSkillsForActiveStream(t *testing.T) {
-	t.Parallel()
-
-	registry := newWSStreamRegistry()
-	_, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if _, err := registry.register(&activeWSStream{runID: "run-a", sessionID: "session-1", cancel: cancel, abortCh: make(chan struct{}, 1)}); err != nil {
-		t.Fatalf("register run-a: %v", err)
-	}
-
-	if !shouldRejectWSSkillActivationForActiveStream(registry, "session-1", true) {
-		t.Fatal("expected requested skills to reject against an active session")
-	}
-	if shouldRejectWSSkillActivationForActiveStream(registry, "session-1", false) {
-		t.Fatal("ordinary messages should not reject against an active session")
-	}
-	if shouldRejectWSSkillActivationForActiveStream(registry, "", true) {
-		t.Fatal("empty session should not reject as active")
-	}
-	// A turn running on another connection or another instance is not this
-	// registry's business: admission answers that durably with session_busy.
-	if shouldRejectWSSkillActivationForActiveStream(newWSStreamRegistry(), "session-elsewhere", true) {
-		t.Fatal("a session with no local stream should not reject locally")
 	}
 }
 

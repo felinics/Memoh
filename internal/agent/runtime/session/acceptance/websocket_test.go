@@ -147,8 +147,12 @@ func readUntil(connection *websocket.Conn, timeout time.Duration, predicate func
 	return events, fmt.Errorf("event predicate not satisfied within %s", timeout)
 }
 
+// isTerminal reads the run's published state, which is the only place a turn
+// ends now: the socket that sent the message is not told anything the session's
+// other subscribers are not also told. An `error` frame still counts, since a
+// failure the caller is waiting on is reported to it directly.
 func isTerminal(event wsEvent) bool {
-	if event.Type == "end" || event.Type == "error" {
+	if event.Type == "error" {
 		return true
 	}
 	switch eventState(event) {
@@ -160,10 +164,6 @@ func isTerminal(event wsEvent) bool {
 }
 
 func isPartialText(event wsEvent) bool {
-	if event.Type == "message" {
-		return stringValue(event.Data["type"]) == "text" &&
-			stringValue(event.Data["content"]) != ""
-	}
 	if event.Type != "runtime_delta" {
 		return false
 	}

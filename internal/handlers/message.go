@@ -83,10 +83,10 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 	botGroup.DELETE("/messages", h.DeleteMessages)
 	botGroup.GET("/media/:content_hash", h.ServeMedia)
 
-	// SSE streams. Per-session messages are subscribed explicitly by the
-	// client; bot-wide activity carries only lightweight session metadata
-	// (no message bodies) for sidebar live-sort.
-	botGroup.GET("/sessions/:session_id/messages/events", h.StreamSessionMessageEvents)
+	// Bot-wide activity SSE, carrying only lightweight session metadata (no
+	// message bodies) for sidebar live-sort. A session's own contents are read
+	// through the session runtime over the chat WebSocket, which is what lets
+	// every subscriber of a session agree on what it has seen.
 	botGroup.GET("/sessions/events", h.StreamSessionsActivityEvents)
 }
 
@@ -569,10 +569,6 @@ func reverseMessages(m []messagepkg.Message) {
 	}
 }
 
-// StreamMessageEvents was removed in favor of two narrower streams: a
-// per-session messages SSE (see message_stream.go) and a bot-wide lightweight
-// sessions activity SSE. Resolves a catch-up explosion where a stale client
-// `since=` cursor could force a multi-megabyte replay of bot history.
 // extendToUITurnHead prepends older session messages (oldest-first) until the
 // slice starts on a real UI turn boundary — a visible user message or a
 // background-task system turn. A turn is the unit of an action bar, so when a
