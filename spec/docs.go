@@ -18687,6 +18687,9 @@ const docTemplate = `{
         "handlers.ToolApprovalDecisionRequest": {
             "type": "object",
             "properties": {
+                "control_id": {
+                    "type": "string"
+                },
                 "reason": {
                     "type": "string"
                 }

@@ -19,6 +19,7 @@ import (
 )
 
 type ToolApprovalResponseInput struct {
+	ControlID                  string
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string

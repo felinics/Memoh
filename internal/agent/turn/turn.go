@@ -153,6 +153,7 @@ type DiscussRunResolvedPayload struct {
 // ToolApprovalResponse resumes a thread's turn deferred on tool approval
 // (RFC ResumeApprovalCommand).
 type ToolApprovalResponse struct {
+	ControlID                  string
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string
@@ -169,6 +170,7 @@ type ToolApprovalResponse struct {
 // UserInputResponse resumes a thread's turn deferred on ask_user
 // (RFC ResumeUserInputCommand).
 type UserInputResponse struct {
+	ControlID                  string
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string

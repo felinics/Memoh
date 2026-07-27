@@ -26,7 +26,7 @@ WHERE team_id = public.memoh_current_team_id()
     runtime_fencing_token = $4::bigint
     OR (runtime_fencing_token IS NULL AND (expires_at IS NULL OR expires_at > now()))
   )
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type CancelPendingUserInputsBySessionParams struct {
@@ -62,6 +62,8 @@ func (q *Queries) CancelPendingUserInputsBySession(ctx context.Context, arg Canc
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
+			&i.ResponseControlID,
+			&i.ResponsePayloadHash,
 			&i.InputJson,
 			&i.UiPayloadJson,
 			&i.InteractionJson,
@@ -101,22 +103,26 @@ UPDATE user_input_requests
 SET status = 'canceled',
     result_json = $1,
     responded_by_channel_identity_id = $2,
+    response_control_id = $3::text,
+    response_payload_hash = $4::text,
     responded_at = now(),
     canceled_at = now(),
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND id = $3
+  AND id = $5
   AND status = 'pending'
   AND (
-    runtime_fencing_token = $4::bigint
+    runtime_fencing_token = $6::bigint
     OR (runtime_fencing_token IS NULL AND (expires_at IS NULL OR expires_at > now()))
   )
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type CancelUserInputRequestParams struct {
 	ResultJson                   []byte      `json:"result_json"`
 	RespondedByChannelIdentityID pgtype.UUID `json:"responded_by_channel_identity_id"`
+	ResponseControlID            pgtype.Text `json:"response_control_id"`
+	ResponsePayloadHash          pgtype.Text `json:"response_payload_hash"`
 	ID                           pgtype.UUID `json:"id"`
 	RuntimeFencingToken          pgtype.Int8 `json:"runtime_fencing_token"`
 }
@@ -125,6 +131,8 @@ func (q *Queries) CancelUserInputRequest(ctx context.Context, arg CancelUserInpu
 	row := q.db.QueryRow(ctx, cancelUserInputRequest,
 		arg.ResultJson,
 		arg.RespondedByChannelIdentityID,
+		arg.ResponseControlID,
+		arg.ResponsePayloadHash,
 		arg.ID,
 		arg.RuntimeFencingToken,
 	)
@@ -141,6 +149,8 @@ func (q *Queries) CancelUserInputRequest(ctx context.Context, arg CancelUserInpu
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -184,7 +194,7 @@ WHERE team_id = public.memoh_current_team_id()
       AND (expires_at IS NULL OR expires_at > now())
     )
   )
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type ClaimUserInputRequestForRuntimeParams struct {
@@ -214,6 +224,8 @@ func (q *Queries) ClaimUserInputRequestForRuntime(ctx context.Context, arg Claim
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -326,7 +338,7 @@ WHERE user_input_requests.status = 'pending'
   AND user_input_requests.provider_metadata = EXCLUDED.provider_metadata
   AND user_input_requests.workspace_target_id = EXCLUDED.workspace_target_id
   AND (user_input_requests.expires_at IS NULL OR user_input_requests.expires_at > now())
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type CreateUserInputRequestParams struct {
@@ -380,6 +392,8 @@ func (q *Queries) CreateUserInputRequest(ctx context.Context, arg CreateUserInpu
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -419,7 +433,7 @@ WHERE team_id = public.memoh_current_team_id()
     runtime_fencing_token = $3::bigint
     OR (runtime_fencing_token IS NULL AND (expires_at IS NULL OR expires_at > now()))
   )
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type FailUserInputRequestParams struct {
@@ -443,6 +457,8 @@ func (q *Queries) FailUserInputRequest(ctx context.Context, arg FailUserInputReq
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -471,7 +487,7 @@ func (q *Queries) FailUserInputRequest(ctx context.Context, arg FailUserInputReq
 }
 
 const getLatestPendingUserInputBySession = `-- name: GetLatestPendingUserInputBySession :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -502,6 +518,8 @@ func (q *Queries) GetLatestPendingUserInputBySession(ctx context.Context, arg Ge
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -530,7 +548,7 @@ func (q *Queries) GetLatestPendingUserInputBySession(ctx context.Context, arg Ge
 }
 
 const getPendingUserInputByReplyMessage = `-- name: GetPendingUserInputByReplyMessage :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -563,6 +581,63 @@ func (q *Queries) GetPendingUserInputByReplyMessage(ctx context.Context, arg Get
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
+		&i.InputJson,
+		&i.UiPayloadJson,
+		&i.InteractionJson,
+		&i.InteractionRevision,
+		&i.ResultJson,
+		&i.ProviderMetadata,
+		&i.RequestedByChannelIdentityID,
+		&i.RespondedByChannelIdentityID,
+		&i.AssistantMessageID,
+		&i.ToolResultMessageID,
+		&i.PromptMessageID,
+		&i.PromptExternalMessageID,
+		&i.SourcePlatform,
+		&i.ReplyTarget,
+		&i.ConversationType,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.RespondedAt,
+		&i.CanceledAt,
+		&i.UpdatedAt,
+		&i.TeamID,
+		&i.RunID,
+		&i.TurnID,
+	)
+	return i, err
+}
+
+const getPendingUserInputByRun = `-- name: GetPendingUserInputByRun :one
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+FROM user_input_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
+ORDER BY created_at DESC, short_id DESC
+LIMIT 1
+`
+
+func (q *Queries) GetPendingUserInputByRun(ctx context.Context, runID pgtype.UUID) (UserInputRequest, error) {
+	row := q.db.QueryRow(ctx, getPendingUserInputByRun, runID)
+	var i UserInputRequest
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.RouteID,
+		&i.ChannelIdentityID,
+		&i.WorkspaceTargetID,
+		&i.ToolCallID,
+		&i.ToolName,
+		&i.ShortID,
+		&i.Status,
+		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -591,7 +666,7 @@ func (q *Queries) GetPendingUserInputByReplyMessage(ctx context.Context, arg Get
 }
 
 const getPendingUserInputBySessionShortID = `-- name: GetPendingUserInputBySessionShortID :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -622,6 +697,8 @@ func (q *Queries) GetPendingUserInputBySessionShortID(ctx context.Context, arg G
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -650,7 +727,7 @@ func (q *Queries) GetPendingUserInputBySessionShortID(ctx context.Context, arg G
 }
 
 const getRespondableUserInputRequest = `-- name: GetRespondableUserInputRequest :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id()
   AND id = $1
@@ -688,6 +765,8 @@ func (q *Queries) GetRespondableUserInputRequest(ctx context.Context, arg GetRes
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -716,7 +795,7 @@ func (q *Queries) GetRespondableUserInputRequest(ctx context.Context, arg GetRes
 }
 
 const getUserInputRequest = `-- name: GetUserInputRequest :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
@@ -736,6 +815,8 @@ func (q *Queries) GetUserInputRequest(ctx context.Context, id pgtype.UUID) (User
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -764,7 +845,7 @@ func (q *Queries) GetUserInputRequest(ctx context.Context, id pgtype.UUID) (User
 }
 
 const getUserInputRequestBySessionToolCall = `-- name: GetUserInputRequestBySessionToolCall :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id()
   AND session_id = $1
@@ -791,6 +872,8 @@ func (q *Queries) GetUserInputRequestBySessionToolCall(ctx context.Context, arg 
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -819,7 +902,7 @@ func (q *Queries) GetUserInputRequestBySessionToolCall(ctx context.Context, arg 
 }
 
 const listPendingUserInputsBySession = `-- name: ListPendingUserInputsBySession :many
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -855,6 +938,8 @@ func (q *Queries) ListPendingUserInputsBySession(ctx context.Context, arg ListPe
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
+			&i.ResponseControlID,
+			&i.ResponsePayloadHash,
 			&i.InputJson,
 			&i.UiPayloadJson,
 			&i.InteractionJson,
@@ -890,7 +975,7 @@ func (q *Queries) ListPendingUserInputsBySession(ctx context.Context, arg ListPe
 }
 
 const listUserInputsBySession = `-- name: ListUserInputsBySession :many
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -924,6 +1009,8 @@ func (q *Queries) ListUserInputsBySession(ctx context.Context, arg ListUserInput
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
+			&i.ResponseControlID,
+			&i.ResponsePayloadHash,
 			&i.InputJson,
 			&i.UiPayloadJson,
 			&i.InteractionJson,
@@ -959,7 +1046,7 @@ func (q *Queries) ListUserInputsBySession(ctx context.Context, arg ListUserInput
 }
 
 const listUserInputsBySessionToolCalls = `-- name: ListUserInputsBySessionToolCalls :many
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -995,6 +1082,8 @@ func (q *Queries) ListUserInputsBySessionToolCalls(ctx context.Context, arg List
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
+			&i.ResponseControlID,
+			&i.ResponsePayloadHash,
 			&i.InputJson,
 			&i.UiPayloadJson,
 			&i.InteractionJson,
@@ -1034,21 +1123,25 @@ UPDATE user_input_requests
 SET status = 'submitted',
     result_json = $1,
     responded_by_channel_identity_id = $2,
+    response_control_id = $3::text,
+    response_payload_hash = $4::text,
     responded_at = now(),
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND id = $3
+  AND id = $5
   AND status = 'pending'
   AND (
-    runtime_fencing_token = $4::bigint
+    runtime_fencing_token = $6::bigint
     OR (runtime_fencing_token IS NULL AND (expires_at IS NULL OR expires_at > now()))
   )
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type SubmitUserInputRequestParams struct {
 	ResultJson                   []byte      `json:"result_json"`
 	RespondedByChannelIdentityID pgtype.UUID `json:"responded_by_channel_identity_id"`
+	ResponseControlID            pgtype.Text `json:"response_control_id"`
+	ResponsePayloadHash          pgtype.Text `json:"response_payload_hash"`
 	ID                           pgtype.UUID `json:"id"`
 	RuntimeFencingToken          pgtype.Int8 `json:"runtime_fencing_token"`
 }
@@ -1057,6 +1150,8 @@ func (q *Queries) SubmitUserInputRequest(ctx context.Context, arg SubmitUserInpu
 	row := q.db.QueryRow(ctx, submitUserInputRequest,
 		arg.ResultJson,
 		arg.RespondedByChannelIdentityID,
+		arg.ResponseControlID,
+		arg.ResponsePayloadHash,
 		arg.ID,
 		arg.RuntimeFencingToken,
 	)
@@ -1073,6 +1168,8 @@ func (q *Queries) SubmitUserInputRequest(ctx context.Context, arg SubmitUserInpu
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -1113,7 +1210,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND status = 'pending'
   AND runtime_fencing_token IS NOT NULL
   AND id IS DISTINCT FROM $4::uuid
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type SupersedePendingUserInputsBySessionParams struct {
@@ -1149,6 +1246,8 @@ func (q *Queries) SupersedePendingUserInputsBySession(ctx context.Context, arg S
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
+			&i.ResponseControlID,
+			&i.ResponsePayloadHash,
 			&i.InputJson,
 			&i.UiPayloadJson,
 			&i.InteractionJson,
@@ -1188,7 +1287,7 @@ UPDATE user_input_requests
 SET assistant_message_id = $1,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $2
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type UpdateUserInputAssistantMessageParams struct {
@@ -1211,6 +1310,8 @@ func (q *Queries) UpdateUserInputAssistantMessage(ctx context.Context, arg Updat
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -1247,7 +1348,7 @@ WHERE id = $2
   AND status = 'pending'
   AND interaction_revision = $3
   AND (expires_at IS NULL OR expires_at > now())
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type UpdateUserInputInteractionParams struct {
@@ -1271,6 +1372,8 @@ func (q *Queries) UpdateUserInputInteraction(ctx context.Context, arg UpdateUser
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -1304,7 +1407,7 @@ SET prompt_message_id = $1,
     prompt_external_message_id = $2,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $3
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type UpdateUserInputPromptMessageParams struct {
@@ -1328,6 +1431,8 @@ func (q *Queries) UpdateUserInputPromptMessage(ctx context.Context, arg UpdateUs
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,
@@ -1360,7 +1465,7 @@ UPDATE user_input_requests
 SET tool_result_message_id = $1,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $2
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type UpdateUserInputToolResultMessageParams struct {
@@ -1383,6 +1488,8 @@ func (q *Queries) UpdateUserInputToolResultMessage(ctx context.Context, arg Upda
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
 		&i.InputJson,
 		&i.UiPayloadJson,
 		&i.InteractionJson,

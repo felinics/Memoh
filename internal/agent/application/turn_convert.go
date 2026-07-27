@@ -72,6 +72,7 @@ func questionAnswersToUserInput(in []turn.QuestionAnswer) []userinput.QuestionAn
 
 func toolApprovalInputFromResponse(in turn.ToolApprovalResponse) ToolApprovalResponseInput {
 	return ToolApprovalResponseInput{
+		ControlID:                  in.ControlID,
 		BotID:                      in.BotID,
 		ThreadID:                   in.ThreadID,
 		ActorChannelIdentityID:     in.ActorChannelIdentityID,
@@ -88,6 +89,7 @@ func toolApprovalInputFromResponse(in turn.ToolApprovalResponse) ToolApprovalRes
 
 func userInputInputFromResponse(in turn.UserInputResponse) UserInputResponseInput {
 	return UserInputResponseInput{
+		ControlID:                  in.ControlID,
 		BotID:                      in.BotID,
 		ThreadID:                   in.ThreadID,
 		ActorChannelIdentityID:     in.ActorChannelIdentityID,

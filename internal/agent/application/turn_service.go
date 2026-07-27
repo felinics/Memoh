@@ -192,12 +192,20 @@ func (h *runHandle) finish() {
 
 // RespondToolApproval resumes a turn deferred on tool approval.
 func (s *Service) RespondToolApproval(ctx context.Context, input turn.ToolApprovalResponse, eventCh chan<- json.RawMessage) error {
-	return s.respondToolApproval(ctx, toolApprovalInputFromResponse(input), eventCh)
+	converted := toolApprovalInputFromResponse(input)
+	if handled, err := s.routeToolApprovalResponse(ctx, converted); handled || err != nil {
+		return err
+	}
+	return s.respondToolApproval(ctx, converted, eventCh)
 }
 
 // RespondUserInput resumes a turn deferred on ask_user.
 func (s *Service) RespondUserInput(ctx context.Context, input turn.UserInputResponse, eventCh chan<- json.RawMessage) error {
-	return s.respondUserInput(ctx, userInputInputFromResponse(input), eventCh)
+	converted := userInputInputFromResponse(input)
+	if handled, err := s.routeUserInputResponse(ctx, converted); handled || err != nil {
+		return err
+	}
+	return s.respondUserInput(ctx, converted, eventCh)
 }
 
 func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {

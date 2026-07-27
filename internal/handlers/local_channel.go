@@ -1762,6 +1762,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			payload, err := json.Marshal(application.ToolApprovalResponseInput{
+				ControlID:                  controlID,
 				BotID:                      botID,
 				ThreadID:                   sessionID,
 				ActorChannelIdentityID:     channelIdentityID,
@@ -1776,15 +1777,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeOf(err)))
 				continue
 			}
-			applied, err := controller.DispatchRunCommand(
-				streamBaseCtx,
-				botID,
-				sessionID,
-				runID,
-				sessionruntime.CommandToolApprovalResponse,
-				decisionID,
-				payload,
-			)
+			result, err := controller.RouteDecisionResponse(streamBaseCtx, sessionruntime.DecisionResponse{
+				ControlID: controlID, Type: sessionruntime.CommandToolApprovalResponse,
+				DecisionID: decisionID, BotID: botID, SessionID: sessionID, RunID: runID,
+				Payload: payload,
+			})
 			code := ""
 			if err != nil {
 				code = string(apperror.CodeOf(err))
@@ -1795,7 +1792,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					slog.String("session_id", sessionID),
 					slog.String("decision_id", decisionID))
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, applied && err == nil, code)
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied && err == nil, code)
 
 		case "user_input_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
@@ -1829,6 +1826,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			payload, err := json.Marshal(application.UserInputResponseInput{
+				ControlID:                  controlID,
 				BotID:                      botID,
 				ThreadID:                   sessionID,
 				ActorChannelIdentityID:     channelIdentityID,
@@ -1844,15 +1842,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeOf(err)))
 				continue
 			}
-			applied, err := controller.DispatchRunCommand(
-				streamBaseCtx,
-				botID,
-				sessionID,
-				runID,
-				sessionruntime.CommandUserInputResponse,
-				decisionID,
-				payload,
-			)
+			result, err := controller.RouteDecisionResponse(streamBaseCtx, sessionruntime.DecisionResponse{
+				ControlID: controlID, Type: sessionruntime.CommandUserInputResponse,
+				DecisionID: decisionID, BotID: botID, SessionID: sessionID, RunID: runID,
+				Payload: payload,
+			})
 			code := ""
 			if err != nil {
 				code = string(apperror.CodeOf(err))
@@ -1863,7 +1857,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					slog.String("session_id", sessionID),
 					slog.String("decision_id", decisionID))
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, applied && err == nil, code)
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied && err == nil, code)
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)

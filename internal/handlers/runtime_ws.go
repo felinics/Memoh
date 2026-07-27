@@ -69,7 +69,7 @@ type runtimeRunEventPublisher interface {
 // would silently do nothing (SR-CTL-001).
 type runtimeControlRouter interface {
 	AbortControl(ctx context.Context, botID, sessionID, runID, controlID string) (bool, error)
-	DispatchRunCommand(ctx context.Context, botID, sessionID, runID, commandType, targetID string, payload []byte) (bool, error)
+	RouteDecisionResponse(ctx context.Context, response sessionruntime.DecisionResponse) (sessionruntime.DecisionResponseResult, error)
 }
 
 // sessionRuntimePublisher and sessionRuntimeController narrow the one injected

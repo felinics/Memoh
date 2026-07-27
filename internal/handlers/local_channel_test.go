@@ -704,16 +704,16 @@ func (*testWSDecisionRuntime) AbortControl(context.Context, string, string, stri
 	return false, nil
 }
 
-func (r *testWSDecisionRuntime) DispatchRunCommand(_ context.Context, botID, sessionID, runID, commandType, targetID string, payload []byte) (bool, error) {
+func (r *testWSDecisionRuntime) RouteDecisionResponse(_ context.Context, response sessionruntime.DecisionResponse) (sessionruntime.DecisionResponseResult, error) {
 	r.dispatches <- wsDecisionDispatch{
-		botID:       botID,
-		sessionID:   sessionID,
-		runID:       runID,
-		commandType: commandType,
-		targetID:    targetID,
-		payload:     append([]byte(nil), payload...),
+		botID:       response.BotID,
+		sessionID:   response.SessionID,
+		runID:       response.RunID,
+		commandType: response.Type,
+		targetID:    response.DecisionID,
+		payload:     append([]byte(nil), response.Payload...),
 	}
-	return true, nil
+	return sessionruntime.DecisionResponseResult{Handled: true, Applied: true}, nil
 }
 
 func TestLocalChannelWSRoutesUserInputResponseByRunAndDecision(t *testing.T) {

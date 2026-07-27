@@ -34,11 +34,12 @@ const (
 // The reaper is the only component that can decide a run is unrecoverable,
 // because it is the only one that reads liveness and durable state together.
 type Reaper struct {
-	runs     ledger.Store
-	liveness LivenessBackend
-	tuning   tuning
-	ownerID  string
-	logger   *slog.Logger
+	runs                   ledger.Store
+	liveness               LivenessBackend
+	tuning                 tuning
+	ownerID                string
+	logger                 *slog.Logger
+	recoverWaitingDecision func(context.Context, LeaseCandidate) (bool, error)
 
 	// generation is the liveness incarnation last observed. Runs stamped with
 	// anything else were claimed by a backend that no longer exists.
@@ -56,6 +57,16 @@ type Reaper struct {
 	startOnce sync.Once
 	stop      context.CancelFunc
 	done      chan struct{}
+}
+
+// SetWaitingDecisionRecoverer installs the owner-local half of parked-run
+// recovery. It is set before Start, so the reaper never observes a partially
+// configured callback.
+func (r *Reaper) SetWaitingDecisionRecoverer(recoverer func(context.Context, LeaseCandidate) (bool, error)) {
+	if r == nil {
+		return
+	}
+	r.recoverWaitingDecision = recoverer
 }
 
 // NewReaper builds a reaper for one manager. It shares the manager's derived
@@ -171,6 +182,25 @@ func (r *Reaper) reapExpiredLeases(ctx context.Context) error {
 	}
 	var errs []error
 	for _, candidate := range candidates {
+		run, getErr := r.runs.Get(ctx, candidate.RunID)
+		if getErr != nil && !errors.Is(getErr, ledger.ErrRunNotFound) {
+			errs = append(errs, fmt.Errorf("load expired session runtime run: %w", getErr))
+			continue
+		}
+		if getErr == nil && run.State == ledger.StateWaitingDecision &&
+			run.FencingToken == candidate.FencingToken && r.recoverWaitingDecision != nil {
+			recovered, recoverErr := r.recoverWaitingDecision(ctx, candidate)
+			if recoverErr != nil {
+				errs = append(errs, fmt.Errorf("recover waiting-decision runtime run: %w", recoverErr))
+				continue
+			}
+			if recovered {
+				if _, err := r.liveness.ReleaseLeaseCandidate(ctx, candidate); err != nil {
+					errs = append(errs, fmt.Errorf("release reclaimed session runtime lease candidate: %w", err))
+				}
+				continue
+			}
+		}
 		if err := r.markLost(ctx, candidate.RunID, candidate.FencingToken, runErrorOwnerLeaseExpired); err != nil {
 			errs = append(errs, err)
 			// Keep the index entry so the next tick retries. Releasing an entry

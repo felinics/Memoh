@@ -17,3 +17,16 @@ import "context"
 type FenceActivator interface {
 	Activate(ctx context.Context, botID, sessionID string, token int64) error
 }
+
+// DecisionFenceActivator advances a parked run's persistence fence while
+// preserving the one pending decision that will resume it. Implementations
+// must update the decision row to token in the same transaction that activates
+// the session fence.
+type DecisionFenceActivator interface {
+	ReclaimWaitingDecision(
+		ctx context.Context,
+		botID, sessionID, runID, ownerID, liveGeneration string,
+		previousToken, newToken int64,
+		decisionKind, decisionID string,
+	) error
+}

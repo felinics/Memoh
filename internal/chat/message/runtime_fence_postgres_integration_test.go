@@ -410,7 +410,7 @@ func createRuntimeFenceFixtures(t *testing.T, ctx context.Context, pool *pgxpool
 		SELECT id, 'admin' FROM created_user`, userID, name); err != nil {
 		t.Fatalf("create runtime fence user: %v", err)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO bots (id, owner_user_id, name, type) VALUES ($1, $2, $3, 'personal')", botID, userID, name); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO bots (id, owner_user_id, name) VALUES ($1, $2, $3)", botID, userID, name); err != nil {
 		t.Fatalf("create runtime fence bot: %v", err)
 	}
 	if _, err := pool.Exec(ctx, "INSERT INTO bot_sessions (id, bot_id, channel_type) VALUES ($1, $2, 'local')", sessionID, botID); err != nil {

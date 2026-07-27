@@ -54,10 +54,12 @@ type Manager struct {
 	controls               map[runControlKey]*runControl
 	commandHandler         func(context.Context, Command) error
 	commandReconciler      func(context.Context, Command) (bool, error)
+	decisionStore          DecisionStore
 	pendingCommands        map[string]map[*commandWaiter]struct{}
 	inflightCommandTargets map[string]struct{}
 	commandExecutions      map[string]chan struct{}
 	admittedCommands       map[string]struct{}
+	localCommandResults    map[string]localCommandResult
 
 	commandCancel       context.CancelFunc
 	commandDone         chan struct{}
@@ -74,6 +76,11 @@ type Manager struct {
 type commandWaiter struct {
 	result      chan error
 	payloadHash string
+}
+
+type localCommandResult struct {
+	result    Command
+	expiresAt time.Time
 }
 
 type runControl struct {
@@ -99,6 +106,9 @@ type runControl struct {
 	leaseChanged      chan struct{}
 	ready             chan struct{}
 	readyOnce         sync.Once
+	decisionMu        sync.Mutex
+	decisionReady     chan struct{}
+	decisionReadyOnce sync.Once
 	abortStateMu      sync.Mutex
 	claimEstablished  bool
 	admissionComplete bool
@@ -140,6 +150,37 @@ func (c *runControl) handle() RunHandle {
 		return RunHandle{}
 	}
 	return RunHandle{BotID: c.botID, SessionID: c.sessionID, RunID: c.runID, Generation: c.generation, FencingToken: c.fencingToken}
+}
+
+func (c *runControl) beginDecisionWait() {
+	if c == nil {
+		return
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	c.decisionReady = make(chan struct{})
+	c.decisionReadyOnce = sync.Once{}
+}
+
+func (c *runControl) markDecisionReady() {
+	if c == nil {
+		return
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	if c.decisionReady == nil {
+		c.decisionReady = make(chan struct{})
+	}
+	c.decisionReadyOnce.Do(func() { close(c.decisionReady) })
+}
+
+func (c *runControl) decisionReadySignal() <-chan struct{} {
+	if c == nil {
+		return nil
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	return c.decisionReady
 }
 
 type Options struct {
@@ -229,6 +270,7 @@ func NewManager(backend Backend, opts Options) *Manager {
 		inflightCommandTargets: make(map[string]struct{}),
 		commandExecutions:      make(map[string]chan struct{}),
 		admittedCommands:       make(map[string]struct{}),
+		localCommandResults:    make(map[string]localCommandResult),
 		closeCh:                make(chan struct{}),
 		shutdownDone:           make(chan struct{}),
 	}
@@ -272,6 +314,17 @@ func (m *Manager) SetCommandReconciler(reconciler func(context.Context, Command)
 	}
 	m.mu.Lock()
 	m.commandReconciler = reconciler
+	m.mu.Unlock()
+}
+
+// SetDecisionStore installs the PostgreSQL-backed decision authority used by
+// every response transport and by waiting-decision recovery.
+func (m *Manager) SetDecisionStore(store DecisionStore) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.decisionStore = store
 	m.mu.Unlock()
 }
 
@@ -402,6 +455,7 @@ func (m *Manager) startReaper(ctx context.Context) error {
 		return nil
 	}
 	reaper := NewReaper(m.runs, m.liveness, m.tuning, m.ownerID, m.logger)
+	reaper.SetWaitingDecisionRecoverer(m.recoverWaitingDecision)
 	if err := reaper.Start(ctx); err != nil {
 		return err
 	}
@@ -884,6 +938,9 @@ func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, messa
 			// The native stream ends after emitting a deferred decision. That is
 			// a parked execution, not a terminal run: retain ownership and the
 			// command executor so the response can resume this same run.
+			if ctrl != nil {
+				ctrl.markDecisionReady()
+			}
 			return nil
 		}
 	}
@@ -1100,6 +1157,7 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	switch event.Type {
 	case native.EventToolApprovalRequest, native.EventUserInputRequest:
 		if pendingDecisionEvent(event) {
+			ctrl.beginDecisionWait()
 			if err := m.setWaitingDecision(ctx, handle); err != nil {
 				return nil, err
 			}

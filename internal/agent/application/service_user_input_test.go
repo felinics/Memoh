@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -347,9 +348,12 @@ func TestRuntimeUserInputCommandCommitsAndResumesSameRun(t *testing.T) {
 		resolved: chatResolvedRequest(),
 	}
 	releaseContinuation := make(chan struct{})
+	continuationStarted := make(chan struct{})
+	var continuationStartedOnce sync.Once
 	resolver := &Service{
 		userInput: fake,
 		continueUserInputFn: func(ctx context.Context, _ userinput.Request, _ UserInputResponseInput, _ sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+			continuationStartedOnce.Do(func() { close(continuationStarted) })
 			select {
 			case <-releaseContinuation:
 			case <-ctx.Done():
@@ -449,6 +453,19 @@ func TestRuntimeUserInputCommandCommitsAndResumesSameRun(t *testing.T) {
 		t.Fatalf("acknowledged decision projection = status:%q can_respond:%v, want submitted/false", projectedStatus, projectedCanRespond)
 	}
 
+	select {
+	case <-continuationStarted:
+		t.Fatal("continuation started before the deferred producer finished persistence")
+	case <-time.After(25 * time.Millisecond):
+	}
+	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+		t.Fatalf("park deferred producer: %v", err)
+	}
+	select {
+	case <-continuationStarted:
+	case <-time.After(time.Second):
+		t.Fatal("continuation did not start after the deferred producer finished")
+	}
 	close(releaseContinuation)
 	deadline := time.Now().Add(time.Second)
 	for {

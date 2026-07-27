@@ -97,6 +97,11 @@ type toolApprovalRecord struct {
 	RuntimeFencingToken int64
 }
 
+type decisionResponseIdentityRecord struct {
+	ControlID   string
+	PayloadHash string
+}
+
 type ledgerProbe struct {
 	pool *pgxpool.Pool
 }
@@ -412,6 +417,18 @@ SELECT status
 FROM tool_approval_requests
 WHERE id = $1::uuid`, decisionID).Scan(&status)
 	return status, err
+}
+
+func (p *ledgerProbe) userInputResponseIdentity(ctx context.Context, decisionID string) (decisionResponseIdentityRecord, error) {
+	var record decisionResponseIdentityRecord
+	err := p.pool.QueryRow(ctx, `
+SELECT COALESCE(response_control_id, ''), COALESCE(response_payload_hash, '')
+FROM user_input_requests
+WHERE id = $1::uuid`, decisionID).Scan(
+		&record.ControlID,
+		&record.PayloadHash,
+	)
+	return record, err
 }
 
 func jsonContainsString(encoded []byte, needle string) bool {

@@ -737,6 +737,8 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   short_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   runtime_fencing_token BIGINT,
+  response_control_id TEXT,
+  response_payload_hash TEXT,
   decision_reason TEXT NOT NULL DEFAULT '',
   requested_by_channel_identity_id UUID REFERENCES channel_identities(id) ON DELETE SET NULL,
   decided_by_channel_identity_id UUID REFERENCES channel_identities(id) ON DELETE SET NULL,
@@ -750,6 +752,9 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   decided_at TIMESTAMPTZ,
   CONSTRAINT tool_approval_operation_check CHECK (operation IN ('read', 'write', 'exec')),
   CONSTRAINT tool_approval_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
+  CONSTRAINT tool_approval_response_identity_check CHECK (
+    (response_control_id IS NULL) = (response_payload_hash IS NULL)
+  ),
   CONSTRAINT tool_approval_short_id_unique UNIQUE (session_id, short_id),
   CONSTRAINT tool_approval_tool_call_unique UNIQUE (session_id, tool_call_id)
 );
@@ -774,6 +779,8 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   short_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   runtime_fencing_token BIGINT,
+  response_control_id TEXT,
+  response_payload_hash TEXT,
   input_json JSONB NOT NULL,
   ui_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   interaction_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -796,6 +803,9 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
   CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
+  CONSTRAINT user_input_response_identity_check CHECK (
+    (response_control_id IS NULL) = (response_payload_hash IS NULL)
+  ),
   CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id),
   CONSTRAINT user_input_tool_call_unique UNIQUE (session_id, tool_call_id)
 );

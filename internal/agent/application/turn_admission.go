@@ -39,6 +39,7 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 	}
 	s.sessionRuntime = manager
 	s.decisionRuntime = manager
+	manager.SetDecisionStore(s)
 	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
 }
 
@@ -220,6 +221,29 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 		}
 	}
 	return runCtx, admission, finish, nil
+}
+
+// AdmitSubagentRun puts a spawned agent's turn through the same durable
+// admission every other turn takes, and answers in the vocabulary of the turn
+// port so the tool layer never sees a runtime type.
+//
+// The slot a subagent takes is its own thread's, not its parent's: a parent may
+// have several agents working at once, and each of those threads still runs one
+// turn at a time. Busy therefore means *this agent* is already working — a fact
+// the parent model can act on — rather than a failure to report.
+func (s *Service) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, func(error), error) {
+	runCtx, _, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission)
+	switch {
+	case errors.Is(err, sessionruntime.ErrSessionBusy):
+		return nil, nil, fmt.Errorf("%w: thread %s", turn.ErrSessionBusy, threadID)
+	case errors.Is(err, sessionruntime.ErrInvocationConflict):
+		// This task already has a run. Executing it again would answer one
+		// message twice, so it is dropped exactly like a channel redelivery.
+		return nil, nil, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, invocationID)
+	case err != nil:
+		return nil, nil, fmt.Errorf("admit subagent turn: %w", err)
+	}
+	return runCtx, finish, nil
 }
 
 // turnInvocationID resolves the command's retry identity.

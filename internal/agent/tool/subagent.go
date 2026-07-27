@@ -213,6 +213,7 @@ type SpawnProvider struct {
 	systemPromptFn func(sessionType string) string
 	bgManager      *background.Manager
 	hookService    *hooks.Service
+	admitter       SubagentAdmitter
 	modelResolver  subagentModelResolver
 	coord          *agentCoordinator
 	logger         *slog.Logger
@@ -647,6 +648,11 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 	if p.bgManager == nil {
 		return nil, errors.New("background task manager not available")
 	}
+	// Checked before a task record exists, so an unwired runtime is one clean
+	// error instead of a task that is created only to be failed.
+	if p.admitter == nil {
+		return nil, errors.New("session runtime is not available")
+	}
 	runtime, err := p.modelResolver(context.WithoutCancel(ctx), session, config.ModelUUID, config.ModelID, config.ProviderName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model: %w", err)
@@ -726,13 +732,31 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 }
 
 func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *agentRequest) agentRunResult {
-	req.messagePersisted = p.persistUserMessage(context.WithoutCancel(ctx), req.parentSession.BotID, req.agentSessionID, req.message)
-	result := p.runSubagentTask(ctx, req)
+	runCtx, finishRun, admitErr := p.admitAgentRun(ctx, req)
+	if admitErr != nil {
+		// Nothing was started and nothing was persisted, but the task record has
+		// to close anyway: a caller waiting on it would otherwise wait on a run
+		// that will never exist.
+		return p.completeAgentRequest(ctx, key, req, rejectedAgentRun(req, admitErr))
+	}
+	req.messagePersisted = p.persistUserMessage(context.WithoutCancel(runCtx), req.parentSession.BotID, req.agentSessionID, req.message)
+	result := p.runSubagentTask(runCtx, req)
 	if task := p.bgManager.Get(req.taskID); task != nil {
 		if snap := task.Snapshot(); snap.Status == background.TaskKilled {
 			result.Status = string(background.TaskKilled)
 		}
 	}
+	// Release the thread's slot before the queue promotes the next message, or
+	// the successor's admission finds this run still active and is told the
+	// agent is busy.
+	finishRun(result)
+	return p.completeAgentRequest(ctx, key, req, result)
+}
+
+// completeAgentRequest closes the background record and hands the agent's queue
+// to whatever is next. Both the executed and the refused path end here, so a
+// task can never be left running in the manager's view.
+func (p *SpawnProvider) completeAgentRequest(ctx context.Context, key string, req *agentRequest, result agentRunResult) agentRunResult {
 	status := background.TaskCompleted
 	switch {
 	case result.Status == string(background.TaskKilled):

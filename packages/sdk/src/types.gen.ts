@@ -1921,6 +1921,7 @@ export type HandlersTokenUsageResponse = {
 };
 
 export type HandlersToolApprovalDecisionRequest = {
+    control_id?: string;
     reason?: string;
 };
 

@@ -90,6 +90,16 @@ SELECT *
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
+-- name: GetPendingUserInputByRun :one
+SELECT *
+FROM user_input_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
+ORDER BY created_at DESC, short_id DESC
+LIMIT 1;
+
 -- name: GetRespondableUserInputRequest :one
 SELECT *
 FROM user_input_requests
@@ -204,6 +214,8 @@ UPDATE user_input_requests
 SET status = 'submitted',
     result_json = sqlc.arg(result_json),
     responded_by_channel_identity_id = sqlc.narg(responded_by_channel_identity_id),
+    response_control_id = sqlc.narg(response_control_id)::text,
+    response_payload_hash = sqlc.narg(response_payload_hash)::text,
     responded_at = now(),
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
@@ -220,6 +232,8 @@ UPDATE user_input_requests
 SET status = 'canceled',
     result_json = sqlc.arg(result_json),
     responded_by_channel_identity_id = sqlc.narg(responded_by_channel_identity_id),
+    response_control_id = sqlc.narg(response_control_id)::text,
+    response_payload_hash = sqlc.narg(response_payload_hash)::text,
     responded_at = now(),
     canceled_at = now(),
     updated_at = now()

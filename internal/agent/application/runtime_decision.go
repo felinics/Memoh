@@ -4,12 +4,197 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/agent/decision"
+	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	"github.com/memohai/memoh/internal/db"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
+
+// ResolveRuntimeDecision reads the authoritative decision row before any live
+// owner lookup. Terminal rows are returned too: the router needs to distinguish
+// a known, already-decided request from an unfenced ACP/MCP request.
+func (s *Service) ResolveRuntimeDecision(ctx context.Context, commandType, decisionID string) (sessionruntime.DecisionTarget, error) {
+	if s == nil || s.queries == nil {
+		return sessionruntime.DecisionTarget{}, errors.New("runtime decision store is not configured")
+	}
+	id, err := db.ParseUUID(decisionID)
+	if err != nil {
+		return sessionruntime.DecisionTarget{}, fmt.Errorf("%w: %w", sessionruntime.ErrDecisionNotFound, err)
+	}
+	switch commandType {
+	case sessionruntime.CommandToolApprovalResponse:
+		row, err := s.queries.GetToolApprovalRequest(ctx, id)
+		if err != nil {
+			return sessionruntime.DecisionTarget{}, runtimeDecisionReadError(err)
+		}
+		return toolApprovalDecisionTarget(row), nil
+	case sessionruntime.CommandUserInputResponse:
+		row, err := s.queries.GetUserInputRequest(ctx, id)
+		if err != nil {
+			return sessionruntime.DecisionTarget{}, runtimeDecisionReadError(err)
+		}
+		return userInputDecisionTarget(row), nil
+	default:
+		return sessionruntime.DecisionTarget{}, fmt.Errorf("unsupported runtime decision command %q", commandType)
+	}
+}
+
+// PendingRuntimeDecision resolves the one durable decision that parked runID.
+// It is used only by expired-owner recovery, where preserving the exact row is
+// required before advancing the run's fencing token.
+func (s *Service) PendingRuntimeDecision(ctx context.Context, runID string) (sessionruntime.DecisionTarget, bool, error) {
+	if s == nil || s.queries == nil {
+		return sessionruntime.DecisionTarget{}, false, errors.New("runtime decision store is not configured")
+	}
+	id, err := db.ParseUUID(runID)
+	if err != nil {
+		return sessionruntime.DecisionTarget{}, false, err
+	}
+	approval, approvalErr := s.queries.GetPendingToolApprovalByRun(ctx, id)
+	input, inputErr := s.queries.GetPendingUserInputByRun(ctx, id)
+	approvalFound := approvalErr == nil
+	inputFound := inputErr == nil
+	if approvalErr != nil && !errors.Is(approvalErr, pgx.ErrNoRows) {
+		return sessionruntime.DecisionTarget{}, false, fmt.Errorf("read pending tool approval for run: %w", approvalErr)
+	}
+	if inputErr != nil && !errors.Is(inputErr, pgx.ErrNoRows) {
+		return sessionruntime.DecisionTarget{}, false, fmt.Errorf("read pending user input for run: %w", inputErr)
+	}
+	if approvalFound && inputFound {
+		return sessionruntime.DecisionTarget{}, false, errors.New("run has multiple pending runtime decisions")
+	}
+	if approvalFound {
+		return toolApprovalDecisionTarget(approval), true, nil
+	}
+	if inputFound {
+		return userInputDecisionTarget(input), true, nil
+	}
+	return sessionruntime.DecisionTarget{}, false, nil
+}
+
+func runtimeDecisionReadError(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return sessionruntime.ErrDecisionNotFound
+	}
+	return err
+}
+
+func toolApprovalDecisionTarget(row dbsqlc.ToolApprovalRequest) sessionruntime.DecisionTarget {
+	return sessionruntime.DecisionTarget{
+		Type: sessionruntime.CommandToolApprovalResponse, ID: decisionUUIDString(row.ID),
+		BotID: decisionUUIDString(row.BotID), SessionID: decisionUUIDString(row.SessionID),
+		RunID: decisionUUIDString(row.RunID), TurnID: decisionUUIDString(row.TurnID),
+		Status: row.Status, FencingToken: pgInt64(row.RuntimeFencingToken),
+		ControlID: pgText(row.ResponseControlID), PayloadHash: pgText(row.ResponsePayloadHash),
+	}
+}
+
+func userInputDecisionTarget(row dbsqlc.UserInputRequest) sessionruntime.DecisionTarget {
+	return sessionruntime.DecisionTarget{
+		Type: sessionruntime.CommandUserInputResponse, ID: decisionUUIDString(row.ID),
+		BotID: decisionUUIDString(row.BotID), SessionID: decisionUUIDString(row.SessionID),
+		RunID: decisionUUIDString(row.RunID), TurnID: decisionUUIDString(row.TurnID),
+		Status: row.Status, FencingToken: pgInt64(row.RuntimeFencingToken),
+		ControlID: pgText(row.ResponseControlID), PayloadHash: pgText(row.ResponsePayloadHash),
+	}
+}
+
+func decisionUUIDString(value pgtype.UUID) string {
+	if !value.Valid {
+		return ""
+	}
+	return uuid.UUID(value.Bytes).String()
+}
+
+func pgInt64(value pgtype.Int8) int64 {
+	if !value.Valid {
+		return 0
+	}
+	return value.Int64
+}
+
+func pgText(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
+}
+
+func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput) (bool, error) {
+	if s == nil || s.decisionRuntime == nil {
+		return false, nil
+	}
+	if input.ControlID == "" {
+		input.ControlID = implicitDecisionControlID(sessionruntime.CommandToolApprovalResponse, firstNonEmpty(input.ExplicitID, input.ApprovalID))
+	}
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return true, err
+	}
+	result, err := s.decisionRuntime.RouteDecisionResponse(ctx, sessionruntime.DecisionResponse{
+		ControlID: input.ControlID, Type: sessionruntime.CommandToolApprovalResponse,
+		DecisionID: firstNonEmpty(input.ExplicitID, input.ApprovalID),
+		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
+	})
+	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	if !result.Handled {
+		return false, nil
+	}
+	if !result.Applied {
+		return true, toolapproval.ErrAlreadyDecided
+	}
+	return true, nil
+}
+
+func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputResponseInput) (bool, error) {
+	if s == nil || s.decisionRuntime == nil {
+		return false, nil
+	}
+	if input.ControlID == "" {
+		input.ControlID = implicitDecisionControlID(sessionruntime.CommandUserInputResponse, firstNonEmpty(input.ExplicitID, input.UserInputID))
+	}
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return true, err
+	}
+	result, err := s.decisionRuntime.RouteDecisionResponse(ctx, sessionruntime.DecisionResponse{
+		ControlID: input.ControlID, Type: sessionruntime.CommandUserInputResponse,
+		DecisionID: firstNonEmpty(input.ExplicitID, input.UserInputID),
+		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
+	})
+	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	if !result.Handled {
+		return false, nil
+	}
+	if !result.Applied {
+		return true, userinput.ErrAlreadyDecided
+	}
+	return true, nil
+}
+
+func implicitDecisionControlID(commandType, decisionID string) string {
+	return "implicit:" + commandType + ":" + decisionID
+}
 
 // handleRuntimeDecisionCommand commits on the routed-command deadline, then
 // continues independently on the owning run. The command result therefore
@@ -36,6 +221,9 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 		input.ReplyExternalMessageID = ""
 		input.ChatToken = ""
 		input.SuppressActivePromptAttach = true
+		ctx = decision.WithResponseIdentity(ctx, decision.ResponseIdentity{
+			ControlID: input.ControlID, PayloadHash: command.PayloadHash,
+		})
 
 		committed, err := s.CommitUserInputResponse(ctx, input)
 		if err != nil {
@@ -72,6 +260,9 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 		input.ReplyExternalMessageID = ""
 		input.ChatToken = ""
 		input.SuppressActivePromptAttach = true
+		ctx = decision.WithResponseIdentity(ctx, decision.ResponseIdentity{
+			ControlID: input.ControlID, PayloadHash: command.PayloadHash,
+		})
 
 		committed, err := s.CommitToolApprovalResponse(ctx, input)
 		if err != nil {
@@ -131,6 +322,10 @@ func (s *Service) continueRuntimeDecision(ctx context.Context, command sessionru
 		SessionID:  command.SessionID,
 		RunID:      command.RunID,
 		Generation: command.Generation,
+	}
+	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
+		_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, sessionruntime.RunStatusErrored, err.Error())
+		return
 	}
 	eventCh := make(chan WSStreamEvent, 64)
 	runDone := make(chan error, 1)

@@ -71,8 +71,8 @@ func TestSRDEC001LiveDecisionContinuesSameRun(t *testing.T) {
 // TestSRCTL001DecisionControlIDReplaysAfterTerminal proves that control_id,
 // rather than the currently active projection, is the request identity. The
 // replay intentionally happens after the run has disappeared from live state
-// and through a fresh connection, which is the boundary a per-decision command
-// key cannot satisfy.
+// and its Redis result was removed, so PostgreSQL must answer from the decision
+// row itself.
 func TestSRCTL001DecisionControlIDReplaysAfterTerminal(t *testing.T) {
 	fixture := requireFixture(t, false)
 	prepareFakeModel(t)
@@ -111,8 +111,31 @@ func TestSRCTL001DecisionControlIDReplaysAfterTerminal(t *testing.T) {
 		return run.State == "completed"
 	})
 	assertDecisionRunCompletedOnce(t, completed, decision.ID, marker, "submitted")
+	controlCtx, cancelControl := context.WithTimeout(context.Background(), databaseTimeout)
+	storedControl, err := requireLedger(t).userInputResponseIdentity(controlCtx, decision.ID)
+	cancelControl()
+	if err != nil {
+		t.Fatalf("read persisted decision response identity: %v", err)
+	}
+	if storedControl.ControlID != controlID || storedControl.PayloadHash == "" {
+		t.Fatalf("persisted decision response identity = %#v", storedControl)
+	}
 	closeWebSocket(responder)
 
+	if env.mode != "single" {
+		// Remove the fast Redis replay cache. The retry below must still return
+		// the original applied result from PostgreSQL.
+		if err := deleteAcceptanceDecisionResult(
+			context.Background(),
+			env.redisURL,
+			"user_input_response",
+			fixture.botID,
+			decision.ID,
+			controlID,
+		); err != nil {
+			t.Fatalf("remove live decision result cache: %v", err)
+		}
+	}
 	replayer := mustDial(t, env.primaryURL, fixture)
 	defer closeWebSocket(replayer)
 	if err := sendUserInputResponse(replayer, sessionID, admitted.RunID, decision.ID, controlID, answers); err != nil {

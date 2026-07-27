@@ -126,6 +126,24 @@ WHERE team_id = public.memoh_current_team_id()
   AND state IN ('running', 'waiting_decision')
 RETURNING *;
 
+-- name: ReclaimWaitingDecisionSessionRun :one
+-- Recovery advances both durable ownership and the backend incarnation while
+-- preserving waiting_decision. The previous token is the CAS guard; the new
+-- token must be strictly newer so a stale reaper can never move ownership
+-- backwards.
+UPDATE session_runs
+SET owner_id = sqlc.arg(owner_id),
+    owner_since = now(),
+    fencing_token = sqlc.arg(new_fencing_token),
+    live_generation = sqlc.arg(live_generation),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = sqlc.arg(run_id)
+  AND state = 'waiting_decision'
+  AND fencing_token = sqlc.arg(previous_fencing_token)
+  AND fencing_token < sqlc.arg(new_fencing_token)
+RETURNING *;
+
 -- name: ResumeSessionRun :one
 UPDATE session_runs
 SET state = 'running',

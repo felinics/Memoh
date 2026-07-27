@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
 	"github.com/memohai/memoh/internal/agent/turn"
 )
 
@@ -38,7 +39,10 @@ func (m *Manager) RunRef(ctx context.Context, botID, sessionID, runID string) (R
 }
 
 func runHandleForCommand(cmd Command) RunHandle {
-	return RunHandle{BotID: cmd.BotID, SessionID: cmd.SessionID, RunID: cmd.RunID, Generation: cmd.Generation}.normalized()
+	return RunHandle{
+		BotID: cmd.BotID, SessionID: cmd.SessionID, RunID: cmd.RunID,
+		Generation: cmd.Generation, FencingToken: cmd.FencingToken,
+	}.normalized()
 }
 
 // DecisionContinuationContext detaches the model continuation from the short
@@ -55,6 +59,27 @@ func (m *Manager) DecisionContinuationContext(parent context.Context, cmd Comman
 		return nil, func() {}, err
 	}
 	return ctx, cancel, nil
+}
+
+// WaitDecisionContinuationReady holds the resumed model call until the stream
+// that produced the deferred decision has finished its terminal persistence.
+// The decision itself is already committed and acknowledged; this barrier only
+// prevents its tool result from racing the assistant tool-call write.
+func (m *Manager) WaitDecisionContinuationReady(ctx context.Context, cmd Command) error {
+	ctrl := m.localControlForScope(cmd.BotID, cmd.SessionID, cmd.RunID)
+	if ctrl == nil || ctrl.generation != strings.TrimSpace(cmd.Generation) || !ctrl.commandsActive() {
+		return ErrCommandTargetNotActive
+	}
+	ready := ctrl.decisionReadySignal()
+	if ready == nil {
+		return nil
+	}
+	select {
+	case <-ready:
+		return m.ValidateRunOwnership(ctx, runHandleForCommand(cmd))
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // ValidateRunOwnership fails closed before durable side effects when this
@@ -447,9 +472,162 @@ func (m *Manager) abortClaimedAdmission(ctx context.Context, ctrl *runControl) e
 	return m.FinishRun(ctx, ctrl.handle(), RunStatusAborted, "")
 }
 
-// DispatchActiveCommand routes a response for a UI request embedded in the
-// current run to that run's owner. A false handled result means the target is
-// not part of the active run and the caller may use its deferred flow.
+// RouteDecisionResponse is the single decision entry point for WebSocket, HTTP,
+// and gRPC callers. PostgreSQL resolves the decision before live ownership is
+// consulted, while the client control id is checked first so a successful
+// command remains replayable after the run terminalizes.
+func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionResponse) (DecisionResponseResult, error) {
+	if m == nil || m.backend == nil {
+		return DecisionResponseResult{}, nil
+	}
+	response.ControlID = strings.TrimSpace(response.ControlID)
+	response.Type = strings.TrimSpace(response.Type)
+	response.DecisionID = strings.TrimSpace(response.DecisionID)
+	response.BotID = strings.TrimSpace(response.BotID)
+	response.SessionID = strings.TrimSpace(response.SessionID)
+	response.RunID = strings.TrimSpace(response.RunID)
+	if response.ControlID == "" {
+		return DecisionResponseResult{}, errors.New("decision control_id is required")
+	}
+	if response.DecisionID == "" || response.BotID == "" {
+		return DecisionResponseResult{}, errors.New("decision_id and bot_id are required")
+	}
+	if response.Type != CommandToolApprovalResponse && response.Type != CommandUserInputResponse {
+		return DecisionResponseResult{}, fmt.Errorf("unsupported runtime decision command %q", response.Type)
+	}
+
+	commandID := decisionControlCommandID(response.Type, response.BotID, response.DecisionID, response.ControlID)
+	requestHash := decisionResponsePayloadHash(response.Type, response.DecisionID, response.Payload)
+	if stored, ok, err := m.loadCommandResult(ctx, commandID); err != nil {
+		return DecisionResponseResult{Handled: true}, err
+	} else if ok {
+		err := commandResultErrorFor(Command{PayloadHash: requestHash}, stored)
+		return DecisionResponseResult{Handled: true, Applied: err == nil}, err
+	}
+
+	m.mu.Lock()
+	decisions := m.decisionStore
+	m.mu.Unlock()
+	if decisions == nil {
+		return DecisionResponseResult{}, nil
+	}
+	target, err := decisions.ResolveRuntimeDecision(ctx, response.Type, response.DecisionID)
+	if err != nil {
+		return DecisionResponseResult{}, err
+	}
+	target = target.normalized()
+	if !target.runtimeOwned() {
+		// ACP/MCP and other unfenced decisions retain their waiter-backed path.
+		return DecisionResponseResult{}, nil
+	}
+	result := DecisionResponseResult{Handled: true}
+	if target.Type != response.Type ||
+		target.BotID != response.BotID ||
+		response.SessionID != "" && target.SessionID != response.SessionID ||
+		response.RunID != "" && target.RunID != response.RunID {
+		return result, ErrCommandTargetMismatch
+	}
+	if target.ControlID != "" {
+		if target.ControlID == response.ControlID {
+			if target.PayloadHash != requestHash {
+				return result, ErrCommandPayloadConflict
+			}
+			return DecisionResponseResult{Handled: true, Applied: true}, nil
+		}
+		return result, nil
+	}
+	if !strings.EqualFold(target.Status, "pending") {
+		return result, nil
+	}
+	if m.runs == nil {
+		return result, ErrLedgerUnavailable
+	}
+	run, err := m.runs.Get(ctx, target.RunID)
+	if err != nil {
+		if errors.Is(err, ledger.ErrRunNotFound) {
+			return result, nil
+		}
+		return result, fmt.Errorf("load decision runtime run: %w", err)
+	}
+	if run.BotID != target.BotID || run.SessionID != target.SessionID ||
+		run.TurnID != target.TurnID || run.FencingToken != target.FencingToken {
+		return result, ErrCommandTargetMismatch
+	}
+	if run.State != ledger.StateWaitingDecision {
+		return result, nil
+	}
+
+	ref, ok, err := m.decisionRunRef(ctx, target)
+	if err != nil {
+		return result, err
+	}
+	if !ok || strings.TrimSpace(ref.OwnerID) == "" && m.distributed != nil {
+		return result, ErrCommandOwnerUnavailable
+	}
+	createdAt, err := m.backend.Now(ctx)
+	if err != nil {
+		return result, fmt.Errorf("load runtime command time: %w", err)
+	}
+	cmd := Command{
+		Type: response.Type, ID: commandID,
+		BotID: target.BotID, SessionID: target.SessionID, RunID: target.RunID,
+		Generation: ref.Generation, FencingToken: target.FencingToken,
+		TargetID: target.ID, DecisionResolved: true,
+		Payload: append([]byte(nil), response.Payload...), PayloadHash: requestHash,
+		CreatedAt: createdAt, ExpiresAt: createdAt.Add(m.commandTimeout()),
+	}
+	if m.distributed == nil || ref.OwnerID == m.ownerID {
+		stored := m.executeRoutedCommand(ctx, cmd)
+		err := commandResultErrorFor(cmd, stored)
+		result.Applied = err == nil
+		return result, err
+	}
+	err = m.dispatchRemoteCommand(ctx, ref.OwnerID, cmd)
+	result.Applied = err == nil
+	return result, err
+}
+
+func decisionControlCommandID(commandType, botID, decisionID, controlID string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		strings.TrimSpace(commandType),
+		strings.TrimSpace(botID),
+		strings.TrimSpace(decisionID),
+		strings.TrimSpace(controlID),
+	}, "\x00")))
+	return fmt.Sprintf("decision-control-%x", sum[:])
+}
+
+func decisionResponsePayloadHash(commandType, decisionID string, payload []byte) string {
+	semantic := activeCommandPayloadHash(commandType, payload)
+	return commandPayloadHash([]byte(strings.Join([]string{
+		strings.TrimSpace(commandType),
+		strings.TrimSpace(decisionID),
+		semantic,
+	}, "\x00")))
+}
+
+func (m *Manager) decisionRunRef(ctx context.Context, target DecisionTarget) (RunRef, bool, error) {
+	key := Key{BotID: target.BotID, SessionID: target.SessionID}
+	if m.distributed != nil {
+		return m.distributed.LoadRunRef(ctx, key, target.RunID)
+	}
+	snapshot, ok, err := m.backend.Load(ctx, key)
+	if err != nil || !ok || snapshot.CurrentRunView == nil {
+		return RunRef{}, false, err
+	}
+	run := snapshot.CurrentRunView
+	if strings.TrimSpace(run.RunID) != target.RunID || !isActiveRunStatus(run.Status) {
+		return RunRef{}, false, nil
+	}
+	return RunRef{
+		BotID: target.BotID, SessionID: target.SessionID, RunID: target.RunID,
+		Generation: strings.TrimSpace(run.Generation), FencingToken: target.FencingToken,
+	}, true, nil
+}
+
+// DispatchActiveCommand is the legacy projection-based compatibility entry
+// point used by older internal callers. New transports use
+// RouteDecisionResponse and never use CurrentRunView.Messages for routing.
 func (m *Manager) DispatchActiveCommand(ctx context.Context, botID, sessionID, commandType, targetID string, payload []byte) (bool, error) {
 	if m == nil || m.backend == nil {
 		return false, nil
@@ -896,7 +1074,7 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 		_, err := m.abortLocal(commandCtx, ctrl)
 		return err
 	}
-	if !runtimeCommandTargetPresent(run, cmd.Type, cmd.TargetID) {
+	if !cmd.DecisionResolved && !runtimeCommandTargetPresent(run, cmd.Type, cmd.TargetID) {
 		return ErrCommandTargetNotActive
 	}
 	m.mu.Lock()
@@ -975,7 +1153,8 @@ func (m *Manager) reconcileRoutedCommand(ctx context.Context, cmd Command) (bool
 func newCommandResult(request Command, err error) Command {
 	result := Command{
 		Type: CommandResult, ID: request.ID, BotID: request.BotID, SessionID: request.SessionID,
-		RunID: request.RunID, Generation: request.Generation, TargetID: request.TargetID,
+		RunID: request.RunID, Generation: request.Generation, FencingToken: request.FencingToken,
+		TargetID: request.TargetID, DecisionResolved: request.DecisionResolved,
 		PayloadHash: request.PayloadHash, CreatedAt: time.Now().UTC(),
 	}
 	if err == nil {
@@ -1009,16 +1188,16 @@ func (m *Manager) persistCommandResult(ctx context.Context, request Command, err
 	if err != nil {
 		return result
 	}
-	if m == nil || m.distributed == nil || strings.TrimSpace(request.ID) == "" {
+	if m == nil || strings.TrimSpace(request.ID) == "" {
 		return result
 	}
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.commandTimeout())
 	defer cancel()
-	if storeErr := m.distributed.StoreCommandResult(persistCtx, result, m.commandResultTTL()); storeErr != nil {
+	if storeErr := m.storeCommandResult(persistCtx, result); storeErr != nil {
 		m.logger.Warn("store runtime command result failed", slog.Any("error", storeErr), slog.String("command_id", request.ID))
 		return result
 	}
-	stored, ok, loadErr := m.distributed.LoadCommandResult(persistCtx, request.ID)
+	stored, ok, loadErr := m.loadCommandResult(persistCtx, request.ID)
 	if loadErr != nil {
 		m.logger.Warn("reload runtime command result failed", slog.Any("error", loadErr), slog.String("command_id", request.ID))
 		return result
@@ -1080,7 +1259,10 @@ func (m *Manager) commandTimeout() time.Duration {
 func (m *Manager) commandResultTTL() time.Duration {
 	ttl := 4 * m.commandTimeout()
 	if ttl < 30*time.Second {
-		return 30 * time.Second
+		ttl = 30 * time.Second
+	}
+	if m != nil && m.stateTTL > ttl {
+		return m.stateTTL
 	}
 	return ttl
 }
@@ -1138,10 +1320,51 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 }
 
 func (m *Manager) loadCommandResult(ctx context.Context, commandID string) (Command, bool, error) {
-	if m == nil || m.distributed == nil || strings.TrimSpace(commandID) == "" {
+	if m == nil || strings.TrimSpace(commandID) == "" {
 		return Command{}, false, nil
 	}
-	return m.distributed.LoadCommandResult(ctx, commandID)
+	if m.distributed != nil {
+		return m.distributed.LoadCommandResult(ctx, commandID)
+	}
+	now, err := m.backend.Now(ctx)
+	if err != nil {
+		return Command{}, false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	stored, ok := m.localCommandResults[strings.TrimSpace(commandID)]
+	if !ok {
+		return Command{}, false, nil
+	}
+	if !stored.expiresAt.After(now) {
+		delete(m.localCommandResults, strings.TrimSpace(commandID))
+		return Command{}, false, nil
+	}
+	return stored.result, true, nil
+}
+
+func (m *Manager) storeCommandResult(ctx context.Context, result Command) error {
+	if m == nil || strings.TrimSpace(result.ID) == "" {
+		return nil
+	}
+	if m.distributed != nil {
+		return m.distributed.StoreCommandResult(ctx, result, m.commandResultTTL())
+	}
+	now, err := m.backend.Now(ctx)
+	if err != nil {
+		return err
+	}
+	id := strings.TrimSpace(result.ID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if stored, ok := m.localCommandResults[id]; ok && stored.expiresAt.After(now) {
+		return nil
+	}
+	m.localCommandResults[id] = localCommandResult{
+		result:    result,
+		expiresAt: now.Add(m.commandResultTTL()),
+	}
+	return nil
 }
 
 func (m *Manager) completePendingCommand(result Command) {

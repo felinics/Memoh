@@ -828,6 +828,8 @@ type ToolApprovalRequest struct {
 	ShortID                      int32              `json:"short_id"`
 	Status                       string             `json:"status"`
 	RuntimeFencingToken          pgtype.Int8        `json:"runtime_fencing_token"`
+	ResponseControlID            pgtype.Text        `json:"response_control_id"`
+	ResponsePayloadHash          pgtype.Text        `json:"response_payload_hash"`
 	DecisionReason               string             `json:"decision_reason"`
 	RequestedByChannelIdentityID pgtype.UUID        `json:"requested_by_channel_identity_id"`
 	DecidedByChannelIdentityID   pgtype.UUID        `json:"decided_by_channel_identity_id"`
@@ -912,6 +914,8 @@ type UserInputRequest struct {
 	ShortID                      int32              `json:"short_id"`
 	Status                       string             `json:"status"`
 	RuntimeFencingToken          pgtype.Int8        `json:"runtime_fencing_token"`
+	ResponseControlID            pgtype.Text        `json:"response_control_id"`
+	ResponsePayloadHash          pgtype.Text        `json:"response_payload_hash"`
 	InputJson                    []byte             `json:"input_json"`
 	UiPayloadJson                []byte             `json:"ui_payload_json"`
 	InteractionJson              []byte             `json:"interaction_json"`

@@ -546,6 +546,66 @@ func (q *Queries) NextSessionRunFencingToken(ctx context.Context) (int64, error)
 	return token, err
 }
 
+const reclaimWaitingDecisionSessionRun = `-- name: ReclaimWaitingDecisionSessionRun :one
+UPDATE session_runs
+SET owner_id = $1,
+    owner_since = now(),
+    fencing_token = $2,
+    live_generation = $3,
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $4
+  AND state = 'waiting_decision'
+  AND fencing_token = $5
+  AND fencing_token < $2
+RETURNING run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, error_code, error_message, created_at, updated_at
+`
+
+type ReclaimWaitingDecisionSessionRunParams struct {
+	OwnerID              pgtype.Text `json:"owner_id"`
+	NewFencingToken      int64       `json:"new_fencing_token"`
+	LiveGeneration       pgtype.Text `json:"live_generation"`
+	RunID                pgtype.UUID `json:"run_id"`
+	PreviousFencingToken int64       `json:"previous_fencing_token"`
+}
+
+// Recovery advances both durable ownership and the backend incarnation while
+// preserving waiting_decision. The previous token is the CAS guard; the new
+// token must be strictly newer so a stale reaper can never move ownership
+// backwards.
+func (q *Queries) ReclaimWaitingDecisionSessionRun(ctx context.Context, arg ReclaimWaitingDecisionSessionRunParams) (SessionRun, error) {
+	row := q.db.QueryRow(ctx, reclaimWaitingDecisionSessionRun,
+		arg.OwnerID,
+		arg.NewFencingToken,
+		arg.LiveGeneration,
+		arg.RunID,
+		arg.PreviousFencingToken,
+	)
+	var i SessionRun
+	err := row.Scan(
+		&i.RunID,
+		&i.TeamID,
+		&i.BotID,
+		&i.SessionID,
+		&i.InvocationID,
+		&i.TurnID,
+		&i.TurnPosition,
+		&i.State,
+		&i.InputJson,
+		&i.InputFingerprint,
+		&i.OwnerID,
+		&i.FencingToken,
+		&i.OwnerSince,
+		&i.LiveGeneration,
+		&i.AbortRequestedAt,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const requestSessionRunAbort = `-- name: RequestSessionRunAbort :one
 UPDATE session_runs
 SET abort_requested_at = COALESCE(abort_requested_at, now()),

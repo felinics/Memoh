@@ -437,7 +437,7 @@ func agentLimitsFromConfig(cfg config.AgentConfig) native.Limits {
 	)
 }
 
-func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, providers []agenttools.ToolProvider) {
+func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, providers []agenttools.ToolProvider) {
 	a.SetToolProviders(providers)
 	for _, p := range providers {
 		if cp, ok := p.(*agenttools.ContainerProvider); ok {
@@ -448,6 +448,9 @@ func injectToolProviders(a *native.Agent, msgService *message.DBService, hookSer
 			sp.SetMessageService(msgService)
 			sp.SetSystemPromptFunc(native.SpawnSystemPrompt)
 			sp.SetHookService(hookService)
+			// A spawned turn takes its thread's single run slot like any other,
+			// so without admission this provider starts nothing.
+			sp.SetSubagentAdmitter(agentService)
 		}
 	}
 }

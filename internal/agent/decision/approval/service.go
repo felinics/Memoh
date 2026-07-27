@@ -264,6 +264,7 @@ func (s *Service) Approve(ctx context.Context, approvalID, actorID, reason strin
 		return Request{}, err
 	}
 	runtimeToken := runtimeFencingToken(ctx)
+	responseControlID, responsePayloadHash := decisionResponseIdentity(ctx)
 	var row sqlc.ToolApprovalRequest
 	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
 		if err := validateToolApprovalFence(ctx, queries, id); err != nil {
@@ -275,6 +276,8 @@ func (s *Service) Approve(ctx context.Context, approvalID, actorID, reason strin
 			Reason:                     strings.TrimSpace(reason),
 			DecidedByChannelIdentityID: decidedBy,
 			RuntimeFencingToken:        runtimeToken,
+			ResponseControlID:          responseControlID,
+			ResponsePayloadHash:        responsePayloadHash,
 		})
 		return approveErr
 	})
@@ -298,6 +301,7 @@ func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string
 		return Request{}, err
 	}
 	runtimeToken := runtimeFencingToken(ctx)
+	responseControlID, responsePayloadHash := decisionResponseIdentity(ctx)
 	var row sqlc.ToolApprovalRequest
 	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
 		if err := validateToolApprovalFence(ctx, queries, id); err != nil {
@@ -309,6 +313,8 @@ func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string
 			Reason:                     strings.TrimSpace(reason),
 			DecidedByChannelIdentityID: decidedBy,
 			RuntimeFencingToken:        runtimeToken,
+			ResponseControlID:          responseControlID,
+			ResponsePayloadHash:        responsePayloadHash,
 		})
 		return rejectErr
 	})
@@ -320,6 +326,15 @@ func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string
 		_ = s.runApprovalHook(ctx, hooks.EventApprovalResolved, CreatePendingInput{}, req, false)
 	}
 	return req, err
+}
+
+func decisionResponseIdentity(ctx context.Context) (pgtype.Text, pgtype.Text) {
+	identity, ok := decision.ResponseIdentityFromContext(ctx)
+	if !ok {
+		return pgtype.Text{}, pgtype.Text{}
+	}
+	return pgtype.Text{String: identity.ControlID, Valid: true},
+		pgtype.Text{String: identity.PayloadHash, Valid: true}
 }
 
 // CancelPendingForSession closes pending approvals that belonged to an ended

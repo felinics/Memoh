@@ -36,6 +36,7 @@ func (s *Service) AdvancePlainTextUserInput(ctx context.Context, input userinput
 }
 
 type UserInputResponseInput struct {
+	ControlID                  string
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string

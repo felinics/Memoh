@@ -107,7 +107,8 @@ if ref.bot_id ~= ARGV[1] or ref.session_id ~= ARGV[2] or
   return 0
 end
 
-if run.status ~= 'admitting' and run.status ~= 'running' and run.status ~= 'aborting' then
+if run.status ~= 'admitting' and run.status ~= 'running' and
+   run.status ~= 'waiting_decision' and run.status ~= 'aborting' then
   return 0
 end
 

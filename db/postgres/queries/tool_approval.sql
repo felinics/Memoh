@@ -82,6 +82,15 @@ SELECT *
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
+-- name: GetPendingToolApprovalByRun :one
+SELECT *
+FROM tool_approval_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND status = 'pending'
+ORDER BY created_at DESC, short_id DESC
+LIMIT 1;
+
 -- name: ClaimToolApprovalRequestForRuntime :one
 UPDATE tool_approval_requests
 SET runtime_fencing_token = sqlc.arg(runtime_fencing_token)
@@ -135,6 +144,8 @@ UPDATE tool_approval_requests
 SET status = 'approved',
     decision_reason = sqlc.arg(reason),
     decided_by_channel_identity_id = sqlc.narg(decided_by_channel_identity_id),
+    response_control_id = sqlc.narg(response_control_id)::text,
+    response_payload_hash = sqlc.narg(response_payload_hash)::text,
     decided_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(id)
@@ -147,6 +158,8 @@ UPDATE tool_approval_requests
 SET status = 'rejected',
     decision_reason = sqlc.arg(reason),
     decided_by_channel_identity_id = sqlc.narg(decided_by_channel_identity_id),
+    response_control_id = sqlc.narg(response_control_id)::text,
+    response_payload_hash = sqlc.narg(response_payload_hash)::text,
     decided_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(id)
