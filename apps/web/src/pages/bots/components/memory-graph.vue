@@ -1,11 +1,9 @@
 <template>
-  <!-- Graph section: a muted-tier SectionGroup (same level as the dated
-       SettingsSections below, so the tones must match). The chart card is the
-       group's BARE body — it carries its own border, the group adds no card. -->
-  <SectionGroup
-    tone="muted"
-    :title="$t('memory.graphTitle')"
-  >
+  <!-- Graph section: a plain SettingsSection like every other tab section
+       (Status/Events on Hooks, the dated groups below) — same muted label,
+       same min-h-7 header row, same px-2 inset for the counts. The chart
+       fills the card body; the card's overflow-hidden clips its corners. -->
+  <SettingsSection :title="$t('memory.graphTitle')">
     <template #actions>
       <div
         v-if="graphData"
@@ -16,7 +14,7 @@
       </div>
     </template>
 
-    <div class="relative h-[30rem] overflow-hidden rounded-menu-shell border border-border bg-card">
+    <div class="relative h-[30rem]">
       <PanePlaceholder
         v-if="loading"
         loading
@@ -72,7 +70,7 @@
         </div>
       </DialogScrollContent>
     </Dialog>
-  </SectionGroup>
+  </SettingsSection>
 </template>
 
 <script setup lang="ts">
@@ -84,7 +82,7 @@ import type { ECElementEvent } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
-import { Badge, Dialog, DialogHeader, DialogScrollContent, DialogTitle, PanePlaceholder, SectionGroup } from '@felinic/ui'
+import { Badge, Dialog, DialogHeader, DialogScrollContent, DialogTitle, PanePlaceholder, SettingsSection } from '@felinic/ui'
 import {
   getBotsByBotIdMemoryGraph,
   type HandlersGraphEdge,
@@ -107,7 +105,7 @@ interface ChartNodeData extends GraphNode {
   name: string
   displayName: string
   symbolSize: number
-  itemStyle: { color: string; borderColor: string; borderWidth: number }
+  itemStyle: { color: string }
 }
 
 interface GraphEdgeCandidate extends GraphEdge {
@@ -116,20 +114,13 @@ interface GraphEdgeCandidate extends GraphEdge {
   strength: number
 }
 
-interface AccentPair {
-  /** Soft-tint fill (the badge soft-active rung). */
-  fill: string
-  /** Saturated ring (the icon/text accent rung). */
-  ring: string
-}
-
 interface ChartTheme {
   label: string
   line: string
-  /** Neutral pair for subjects that hash to nothing. */
-  fallback: AccentPair
+  /** Neutral color for subjects that hash to nothing. */
+  fallback: string
   fontFamily: string
-  palette: AccentPair[]
+  palette: string[]
   // Tooltip surface tokens — echarts' default tooltip picks the node's own
   // accent color for its border and a translucent white for the fill, which
   // reads as a random colored frame. Pin it to the popover language instead.
@@ -182,24 +173,17 @@ const chartTheme = computed<ChartTheme>(() => {
   return {
     label: readColor('--foreground', '#18181b'),
     line: readColor('--border', '#d4d4d8'),
-    fallback: {
-      fill: readColor('--accent-gray-soft-active', '#e9e9e7'),
-      ring: readColor('--accent-gray', '#5f5e59'),
-    },
+    fallback: readColor('--accent-gray', '#5f5e59'),
     fontFamily: typeof document !== 'undefined' ? getComputedStyle(document.body).fontFamily : 'inherit',
-    // Nodes speak the badge language — a soft-tint fill ringed by the
-    // saturated accent — because large SOLID fills of the icon/text-grade
-    // accents read murky on a white canvas (they were tuned for 16px glyphs,
-    // not 40px discs).
     palette: [
-      { fill: readColor('--accent-blue-soft-active', '#cee3f7'), ring: readColor('--accent-blue', '#2383e2') },
-      { fill: readColor('--accent-green-soft-active', '#d7e6dd'), ring: readColor('--accent-green', '#448361') },
-      { fill: readColor('--accent-teal-soft-active', '#cae9f0'), ring: readColor('--accent-teal', '#2c8b9e') },
-      { fill: readColor('--accent-orange-soft-active', '#f3ddcb'), ring: readColor('--accent-orange', '#d9730d') },
-      { fill: readColor('--accent-pink-soft-active', '#f4d8e4'), ring: readColor('--accent-pink', '#c14c8a') },
-      { fill: readColor('--accent-red-soft-active', '#f7d9d5'), ring: readColor('--accent-red', '#cd3c3a') },
-      { fill: readColor('--accent-yellow-soft-active', '#f2e3b7'), ring: readColor('--accent-yellow', '#cb912f') },
-      { fill: readColor('--accent-purple-soft-active', '#e8dbf2'), ring: readColor('--accent-purple', '#9065b0') },
+      readColor('--accent-blue', '#2383e2'),
+      readColor('--accent-green', '#448361'),
+      readColor('--accent-teal', '#2c8b9e'),
+      readColor('--accent-orange', '#d9730d'),
+      readColor('--accent-pink', '#c14c8a'),
+      readColor('--accent-red', '#cd3c3a'),
+      readColor('--accent-yellow', '#cb912f'),
+      readColor('--accent-purple', '#9065b0'),
     ],
     popover: readColor('--popover', '#ffffff'),
     foreground: readColor('--foreground', '#18181b'),
@@ -256,6 +240,15 @@ const chartOption = computed(() => {
       borderColor: theme.border,
       borderWidth: 1,
       padding: [8, 10],
+      // The default 0.4s transitionDuration makes the tooltip CHASE the
+      // cursor: it is mid-animation on every mousemove, and Chromium moves
+      // the composited layer at fractional offsets instead of re-rasterizing
+      // the text — visible as motion blur (worst on CJK glyphs) until the
+      // animation settles. Snapping to the cursor keeps the text sharp.
+      transitionDuration: 0,
+      // Keep the tooltip inside the chart so a node near the edge can't push
+      // it under the card's rounded clip.
+      confine: true,
       textStyle: {
         color: theme.foreground,
         fontSize: 12,
@@ -315,20 +308,15 @@ const chartOption = computed(() => {
         lineStyle: { opacity: 0.15 },
         label: { opacity: 0.25 },
       },
-      data: nodes.map((node): ChartNodeData => {
-        const accent = subjectAccent(node.subject || node.slug || node.topic, theme)
-        return {
-          ...node,
-          name: node.id,
-          displayName: displayName(node),
-          symbolSize: graphNodeSize(node.count),
-          itemStyle: {
-            color: accent.fill,
-            borderColor: accent.ring,
-            borderWidth: 2,
-          },
-        }
-      }),
+      data: nodes.map((node): ChartNodeData => ({
+        ...node,
+        name: node.id,
+        displayName: displayName(node),
+        symbolSize: graphNodeSize(node.count),
+        itemStyle: {
+          color: subjectColor(node.subject || node.slug || node.topic, theme),
+        },
+      })),
       links: edges.map((edge) => ({
         source: edge.source,
         target: edge.target,
@@ -397,7 +385,7 @@ function displayName(node: GraphNode): string {
   return node.slug || node.subject || node.label || node.id || ''
 }
 
-function subjectAccent(subject: string | undefined, theme: ChartTheme): AccentPair {
+function subjectColor(subject: string | undefined, theme: ChartTheme): string {
   if (!subject || theme.palette.length === 0) return theme.fallback
   let hash = 0
   for (let i = 0; i < subject.length; i++) {
