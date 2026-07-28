@@ -123,6 +123,13 @@ interface ChartTheme {
   fallback: string
   fontFamily: string
   palette: string[]
+  // Tooltip surface tokens — echarts' default tooltip picks the node's own
+  // accent color for its border and a translucent white for the fill, which
+  // reads as a random colored frame. Pin it to the popover language instead.
+  popover: string
+  foreground: string
+  muted: string
+  border: string
 }
 
 const props = defineProps<{ botId: string }>()
@@ -180,6 +187,10 @@ const chartTheme = computed<ChartTheme>(() => {
       readColor('--accent-yellow', '#cb912f'),
       readColor('--accent-purple', '#9065b0'),
     ],
+    popover: readColor('--popover', '#ffffff'),
+    foreground: readColor('--foreground', '#18181b'),
+    muted: readColor('--muted-foreground', '#71717a'),
+    border: readColor('--border', '#e4e4e7'),
   }
 })
 
@@ -227,13 +238,24 @@ const chartOption = computed(() => {
     animationDurationUpdate: 0,
     tooltip: {
       trigger: 'item',
+      backgroundColor: theme.popover,
+      borderColor: theme.border,
+      borderWidth: 1,
+      padding: [8, 10],
+      textStyle: {
+        color: theme.foreground,
+        fontSize: 12,
+        fontFamily: theme.fontFamily,
+      },
+      // Radius/shadow can stay as CSS vars — the tooltip mounts inside our DOM.
+      extraCssText: 'border-radius: var(--radius-menu); box-shadow: var(--shadow-dropdown); max-width: 18rem;',
       formatter: (params: { dataType?: string; data?: ChartNodeData }) => {
         if (params.dataType !== 'node' || !params.data) return ''
         const text = params.data.memory || params.data.label || ''
-        return escapeTooltip([
-          params.data.displayName,
-          text.length > 100 ? `${text.slice(0, 97)}...` : text,
-        ].filter(Boolean).join('\n'))
+        const preview = text.length > 100 ? `${text.slice(0, 97)}...` : text
+        const title = `<div style="font-weight:500">${escapeTooltip(params.data.displayName)}</div>`
+        if (!preview) return title
+        return `${title}<div style="margin-top:2px;color:${theme.muted}">${escapeTooltip(preview)}</div>`
       },
     },
     series: [{
@@ -248,6 +270,9 @@ const chartOption = computed(() => {
         fontFamily: theme.fontFamily,
         formatter: (params: { data?: ChartNodeData }) => params.data?.displayName ?? '',
       },
+      // Without this every label paints even when nodes cluster, producing the
+      // unreadable overlapping-label soup on dense graphs.
+      labelLayout: { hideOverlap: true },
       force: {
         initLayout: 'circular',
         repulsion: 200,
