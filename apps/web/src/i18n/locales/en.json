@@ -1297,7 +1297,6 @@
       "mem0": "Mem0",
       "openviking": "OpenViking"
     },
-    "graphViewHint": "Browse the connections between memories — hubs, clusters, and orphans.",
     "graphEmpty": "No memories yet — add some to see the graph."
   },
   "network": {

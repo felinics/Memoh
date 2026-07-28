@@ -1297,7 +1297,6 @@
       "mem0": "Mem0",
       "openviking": "OpenViking"
     },
-    "graphViewHint": "浏览记忆之间的关联——枢纽、集群和孤立节点。",
     "graphEmpty": "还没有记忆——添加一些以查看图谱。"
   },
   "network": {

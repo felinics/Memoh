@@ -5,7 +5,6 @@
   <SectionGroup
     tone="muted"
     :title="$t('memory.graphTitle')"
-    :description="$t('memory.graphViewHint')"
   >
     <template #actions>
       <div
@@ -123,6 +122,7 @@ interface ChartTheme {
   fallback: string
   fontFamily: string
   palette: string[]
+  background: string
   // Tooltip surface tokens — echarts' default tooltip picks the node's own
   // accent color for its border and a translucent white for the fill, which
   // reads as a random colored frame. Pin it to the popover language instead.
@@ -173,7 +173,7 @@ function readColor(token: string, fallback: string): string {
 const chartTheme = computed<ChartTheme>(() => {
   void isDark.value
   return {
-    label: readColor('--muted-foreground', '#71717a'),
+    label: readColor('--foreground', '#18181b'),
     line: readColor('--border', '#d4d4d8'),
     fallback: readColor('--muted-foreground', '#71717a'),
     fontFamily: typeof document !== 'undefined' ? getComputedStyle(document.body).fontFamily : 'inherit',
@@ -187,6 +187,7 @@ const chartTheme = computed<ChartTheme>(() => {
       readColor('--accent-yellow', '#cb912f'),
       readColor('--accent-purple', '#9065b0'),
     ],
+    background: readColor('--background', '#ffffff'),
     popover: readColor('--popover', '#ffffff'),
     foreground: readColor('--foreground', '#18181b'),
     muted: readColor('--muted-foreground', '#71717a'),
@@ -248,14 +249,19 @@ const chartOption = computed(() => {
         fontFamily: theme.fontFamily,
       },
       // Radius/shadow can stay as CSS vars — the tooltip mounts inside our DOM.
-      extraCssText: 'border-radius: var(--radius-menu); box-shadow: var(--shadow-dropdown); max-width: 18rem;',
+      // Wrapping is NOT the container's job: echarts sizes the tooltip to the
+      // content's intrinsic width, so a max-width here never engages. The
+      // formatter owns its own width cap instead.
+      extraCssText: 'border-radius: var(--radius-menu); box-shadow: var(--shadow-dropdown);',
       formatter: (params: { dataType?: string; data?: ChartNodeData }) => {
         if (params.dataType !== 'node' || !params.data) return ''
         const text = params.data.memory || params.data.label || ''
         const preview = text.length > 100 ? `${text.slice(0, 97)}...` : text
         const title = `<div style="font-weight:500">${escapeTooltip(params.data.displayName)}</div>`
-        if (!preview) return title
-        return `${title}<div style="margin-top:2px;color:${theme.muted}">${escapeTooltip(preview)}</div>`
+        const body = preview
+          ? `<div style="margin-top:2px;color:${theme.muted}">${escapeTooltip(preview)}</div>`
+          : ''
+        return `<div style="max-width:16rem;white-space:normal;word-break:break-word">${title}${body}</div>`
       },
     },
     series: [{
@@ -273,6 +279,13 @@ const chartOption = computed(() => {
       // Without this every label paints even when nodes cluster, producing the
       // unreadable overlapping-label soup on dense graphs.
       labelLayout: { hideOverlap: true },
+      // Halo stroke in the surface color: edges terminate against the stroke
+      // instead of cutting into the node fill. No drop shadow on nodes —
+      // elevation is reserved for overlays in the house language.
+      itemStyle: {
+        borderColor: theme.background,
+        borderWidth: 2,
+      },
       force: {
         initLayout: 'circular',
         repulsion: 200,
@@ -288,6 +301,13 @@ const chartOption = computed(() => {
       emphasis: {
         focus: 'adjacency',
         lineStyle: { width: 3 },
+      },
+      // Echarts' default blur state crushes non-adjacent nodes to ~0.1 opacity,
+      // which reads as a washed-out, half-broken graph on hover. Own the fade.
+      blur: {
+        itemStyle: { opacity: 0.2 },
+        lineStyle: { opacity: 0.15 },
+        label: { opacity: 0.25 },
       },
       data: nodes.map((node): ChartNodeData => ({
         ...node,
