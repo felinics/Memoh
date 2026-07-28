@@ -21,6 +21,8 @@
 </template>
 
 <script setup lang="ts">
+import type { HTMLAttributes } from 'vue'
+
 withDefaults(defineProps<{
   title?: string
   visible?: boolean
@@ -31,8 +33,10 @@ withDefaults(defineProps<{
   // of the page-level StepExitShell). Currently Step3-only; other steps
   // leave it unset. Passed through as-is (array/object/string, same as a
   // native :class binding) so the caller's literal Tailwind classes stay
-  // scannable — never built by string concatenation.
-  bodyClass?: unknown
+  // scannable — never built by string concatenation. Typed as the native
+  // class binding's own type rather than unknown: vue-tsc 3.3 rejects
+  // unknown here, and this is what the binding actually accepts.
+  bodyClass?: HTMLAttributes['class']
 }>(), {
   title: '',
   visible: false,
