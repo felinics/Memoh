@@ -2812,7 +2812,6 @@
       "compactSuccess": "记忆压缩成功",
       "compactFailed": "记忆压缩失败",
       "compactUnsupported": "当前记忆提供方不支持语义记忆压缩。",
-      "compactStatusUnavailable": "无法检查记忆压缩支持状态。",
       "compactNoMemories": "没有可压缩的记忆",
       "deleteConfirm": "确定要删除这条记忆吗？此操作无法撤销。",
       "saveSuccess": "记忆已保存",

@@ -2812,7 +2812,6 @@
       "compactSuccess": "Memory compacted successfully",
       "compactFailed": "Memory compaction failed",
       "compactUnsupported": "The selected memory provider does not support semantic memory compaction.",
-      "compactStatusUnavailable": "Memory compaction support is unavailable.",
       "compactNoMemories": "No memories to compact",
       "deleteConfirm": "Are you sure you want to delete this memory? This cannot be undone.",
       "saveSuccess": "Memory saved",

@@ -1,30 +1,29 @@
 <template>
-  <div class="space-y-4">
-    <div class="flex items-center justify-between gap-3">
-      <div>
-        <h2 class="text-sm font-medium text-foreground">
-          {{ $t('memory.graphTitle') }}
-        </h2>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('memory.graphViewHint') }}
-        </p>
-      </div>
+  <!-- Graph section: a muted-tier SectionGroup (same level as the dated
+       SettingsSections below, so the tones must match). The chart card is the
+       group's BARE body — it carries its own border, the group adds no card. -->
+  <SectionGroup
+    tone="muted"
+    :title="$t('memory.graphTitle')"
+    :description="$t('memory.graphViewHint')"
+  >
+    <template #actions>
       <div
         v-if="graphData"
-        class="flex shrink-0 gap-4 text-xs text-muted-foreground"
+        class="flex shrink-0 gap-4 text-body text-muted-foreground"
       >
         <span>{{ graphData.nodes.length }} {{ $t('memory.graphNodes') }}</span>
         <span>{{ visibleGraphEdges.length }} {{ $t('memory.graphEdges') }}</span>
       </div>
-    </div>
+    </template>
 
-    <div class="relative h-[30rem] overflow-hidden rounded-[var(--radius-card)] border border-border bg-card">
-      <div
+    <div class="relative h-[30rem] overflow-hidden rounded-menu-shell border border-border bg-card">
+      <PanePlaceholder
         v-if="loading"
-        class="flex size-full items-center justify-center text-sm text-muted-foreground"
+        loading
       >
         {{ $t('common.loading') }}
-      </div>
+      </PanePlaceholder>
       <VChart
         v-else-if="graphData && graphData.nodes.length > 0"
         :option="chartOption"
@@ -33,13 +32,9 @@
         class="size-full"
         @click="handleNodeClick"
       />
-
-      <div
-        v-else
-        class="flex size-full items-center justify-center text-sm text-muted-foreground"
-      >
+      <PanePlaceholder v-else>
         {{ $t('memory.graphEmpty') }}
-      </div>
+      </PanePlaceholder>
     </div>
 
     <Dialog
@@ -57,26 +52,28 @@
           class="space-y-3"
         >
           <div class="flex flex-wrap gap-2">
-            <span
+            <Badge
               v-if="selectedNode.slug"
-              class="rounded-full bg-[var(--accent-blue-soft-active)] px-2 py-0.5 text-xs font-medium text-[var(--accent-blue-deep)]"
+              variant="info"
+              size="sm"
             >
               {{ selectedNode.slug }}
-            </span>
-            <span
+            </Badge>
+            <Badge
               v-if="selectedNode.topic"
-              class="rounded-full bg-[var(--accent-green-soft-active)] px-2 py-0.5 text-xs font-medium text-[var(--accent-green-deep)]"
+              variant="success"
+              size="sm"
             >
               {{ selectedNode.topic }}
-            </span>
+            </Badge>
           </div>
-          <p class="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+          <p class="whitespace-pre-wrap text-control leading-relaxed text-foreground">
             {{ selectedNode.memory }}
           </p>
         </div>
       </DialogScrollContent>
     </Dialog>
-  </div>
+  </SectionGroup>
 </template>
 
 <script setup lang="ts">
@@ -88,7 +85,7 @@ import type { ECElementEvent } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
-import { Dialog, DialogHeader, DialogScrollContent, DialogTitle } from '@felinic/ui'
+import { Badge, Dialog, DialogHeader, DialogScrollContent, DialogTitle, PanePlaceholder, SectionGroup } from '@felinic/ui'
 import {
   getBotsByBotIdMemoryGraph,
   type HandlersGraphEdge,

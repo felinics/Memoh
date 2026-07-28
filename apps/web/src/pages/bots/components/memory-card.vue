@@ -1,7 +1,14 @@
 <template>
-  <div class="group relative flex items-start gap-3 rounded-[var(--radius-card)] border border-border bg-card px-4 py-3">
-    <div class="min-w-0 flex-1">
-      <p class="text-sm leading-snug text-foreground whitespace-pre-wrap wrap-break-word">
+  <!-- One memory entry as a SettingsRow inside the date/search section card.
+       Composing the owner (instead of a standalone bordered card) is what keeps
+       the stream hairline-separated and kills the card-in-card nesting — the
+       section card is the only frame. -->
+  <SettingsRow
+    align="start"
+    class="group"
+  >
+    <template #content>
+      <p class="text-control leading-snug text-foreground whitespace-pre-wrap wrap-break-word">
         {{ item.memory }}
       </p>
 
@@ -44,7 +51,7 @@
           {{ formatRelativeTime(item.created_at, { locale }) }}
         </span>
       </div>
-    </div>
+    </template>
 
     <Button
       variant="ghost"
@@ -55,13 +62,13 @@
     >
       <Pencil class="size-4" />
     </Button>
-  </div>
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { Pencil } from 'lucide-vue-next'
 import { computed } from 'vue'
-import { Badge, Button } from '@felinic/ui'
+import { Badge, Button, SettingsRow } from '@felinic/ui'
 import type { AdaptersMemoryItem } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { formatRelativeTime } from '@/utils/date-time'

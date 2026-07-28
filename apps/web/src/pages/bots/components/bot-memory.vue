@@ -4,108 +4,85 @@
     :title="$t('bots.memory.title')"
   >
     <template #actions>
-      <!-- Compact: low-frequency maintenance action, kept as a quiet icon
+      <!-- Compact: low-frequency maintenance action, kept as a quiet outline
            button so it doesn't compete with the primary CTA. -->
       <Popover
         v-if="canSemanticCompact && memories.length > 0"
         v-model:open="compactPopoverOpen"
       >
-        <PopoverAnchor as-child>
-          <div class="inline-flex">
-            <TooltipProvider>
-              <Tooltip :delay-duration="300">
-                <TooltipTrigger as-child>
-                  <Button
-                    variant="outline"
-                    type="button"
-                    :disabled="compactLoading"
-                    @click="compactPopoverOpen = !compactPopoverOpen"
-                  >
-                    <Brain class="size-4" />
-                    {{ $t('bots.memory.compact') }}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent
-                  side="bottom"
-                  align="center"
-                >
-                  <p class="text-caption">
-                    {{ $t('bots.memory.compact') }}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-        </PopoverAnchor>
+        <PopoverTrigger as-child>
+          <Button
+            variant="outline"
+            type="button"
+            :disabled="compactLoading"
+          >
+            <Brain class="size-4" />
+            {{ $t('bots.memory.compact') }}
+          </Button>
+        </PopoverTrigger>
 
         <PopoverContent
           side="bottom"
           align="end"
-          class="w-72 p-3 flex flex-col gap-3"
+          class="w-72 p-3"
           :side-offset="4"
         >
-          <div class="space-y-1">
-            <h4 class="text-label font-medium text-foreground leading-none">
-              {{ $t('bots.memory.compact') }}
-            </h4>
-            <p class="text-body text-muted-foreground leading-snug">
-              {{ $t('bots.memory.compactConfirm') }}
-            </p>
-          </div>
+          <FormStack>
+            <FieldStack :label="$t('bots.memory.compactRatio')">
+              <Select v-model="compactRatio">
+                <SelectTrigger
+                  size="sm"
+                  class="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0.8">
+                    {{ $t('bots.memory.compactRatioLight') }}
+                  </SelectItem>
+                  <SelectItem value="0.5">
+                    {{ $t('bots.memory.compactRatioMedium') }}
+                  </SelectItem>
+                  <SelectItem value="0.3">
+                    {{ $t('bots.memory.compactRatioAggressive') }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FieldStack>
 
-          <div class="space-y-1.5">
-            <Label class="text-caption font-semibold text-muted-foreground uppercase tracking-wider">{{ $t('bots.memory.compactRatio') }}</Label>
-            <Select v-model="compactRatio">
-              <SelectTrigger
-                size="sm"
-                class="w-full"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="0.8">
-                  {{ $t('bots.memory.compactRatioLight') }}
-                </SelectItem>
-                <SelectItem value="0.5">
-                  {{ $t('bots.memory.compactRatioMedium') }}
-                </SelectItem>
-                <SelectItem value="0.3">
-                  {{ $t('bots.memory.compactRatioAggressive') }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            <FieldStack>
+              <template #label>
+                <Label>
+                  {{ $t('bots.memory.compactDecayDate') }}
+                  <span class="text-muted-foreground">({{ $t('common.optional') }})</span>
+                </Label>
+              </template>
+              <Popover>
+                <PopoverTrigger
+                  type="button"
+                  data-slot="select-trigger"
+                  data-size="sm"
+                  :data-placeholder="compactDecayRange ? undefined : ''"
+                  :class="[selectTriggerClass, 'w-full']"
+                >
+                  <span class="flex min-w-0 items-center gap-2">
+                    <CalendarDays class="size-4" />
+                    <span class="truncate">{{ compactDecayLabel }}</span>
+                  </span>
+                </PopoverTrigger>
+                <PopoverContent
+                  class="w-auto p-0"
+                  align="start"
+                >
+                  <div class="p-3">
+                    <RangeCalendar v-model="compactDecayRange" />
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </FieldStack>
+          </FormStack>
 
-          <div class="space-y-1.5">
-            <Label class="text-caption font-semibold text-muted-foreground uppercase tracking-wider">
-              {{ $t('bots.memory.compactDecayDate') }}
-              <span class="text-caption normal-case tracking-normal text-muted-foreground">({{ $t('common.optional') }})</span>
-            </Label>
-            <Popover>
-              <PopoverTrigger
-                type="button"
-                data-slot="select-trigger"
-                data-size="sm"
-                :data-placeholder="compactDecayRange ? undefined : ''"
-                :class="[selectTriggerClass, 'w-full']"
-              >
-                <span class="flex min-w-0 items-center gap-2">
-                  <CalendarDays class="size-4" />
-                  <span class="truncate">{{ compactDecayLabel }}</span>
-                </span>
-              </PopoverTrigger>
-              <PopoverContent
-                class="w-auto p-0"
-                align="start"
-              >
-                <div class="p-3">
-                  <RangeCalendar v-model="compactDecayRange" />
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 pt-2 mt-1 border-t">
+          <div class="mt-3 flex items-center justify-end gap-2 border-t pt-3">
             <Button
               variant="ghost"
               @click="compactPopoverOpen = false"
@@ -148,39 +125,29 @@
       </MetricReadout>
     </section>
 
-    <!-- Degraded / index health banner: the semantic seed index is behind the
-         wiki store (failed upserts queued for retry) or pgvector is down. Graph
-         recall still works, but surface the state so the user understands why
-         semantic recall may be weaker. -->
-    <section
+    <!-- Index health banner: the semantic seed index is behind the wiki store
+         (failed upserts queued for retry) or pgvector is down. Graph recall
+         still works, but surface the state so the user understands why semantic
+         recall may be weaker. -->
+    <CalloutBanner
       v-if="showDegradedBanner"
+      tone="warning"
       class="mb-6"
+      :title="$t('bots.memory.degradedTitle')"
+      :description="$t('bots.memory.degradedDesc')"
     >
-      <div class="flex items-start gap-3 rounded-[var(--radius-card)] border border-[var(--accent-yellow-border)] bg-[var(--accent-yellow-soft-active)] px-4 py-3">
-        <AlertTriangle class="mt-0.5 size-4 shrink-0 text-[var(--accent-yellow-deep)]" />
-        <div class="min-w-0 flex-1">
-          <p class="text-label font-medium text-[var(--accent-yellow-deep)]">
-            {{ $t('bots.memory.degradedTitle') }}
-          </p>
-          <p class="mt-0.5 text-caption text-[var(--accent-yellow-deep)]/80">
-            {{ $t('bots.memory.degradedDesc') }}
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          :loading="ingestLoading"
-          @click="handleIngest"
-        >
-          <RefreshCw class="size-3.5" />
-          {{ $t('bots.memory.ingestAction') }}
-        </Button>
-      </div>
-    </section>
+      <Button
+        variant="outline"
+        size="sm"
+        :loading="ingestLoading"
+        @click="handleIngest"
+      >
+        <RefreshCw class="size-3.5" />
+        {{ $t('bots.memory.ingestAction') }}
+      </Button>
+    </CalloutBanner>
 
-    <!-- Memory graph view: see the shape of the wiki — hubs, clusters, orphans.
-         Mirrors the LLM Wiki pattern where cross-references are compiled and
-         browsable, not re-derived on every query. -->
+    <!-- Memory graph: the shape of the wiki — hubs, clusters, orphans. -->
     <section class="mb-6">
       <MemoryGraph
         ref="graphRef"
@@ -188,36 +155,38 @@
       />
     </section>
 
-    <!-- Search bar: server-side recall over the wiki store. Mirrors LobeHub's
-         dedicated search input; results render in place of the dated stream. -->
+    <!-- Server-side recall over the wiki store; results render in place of the
+         dated stream. -->
     <section class="mb-4">
-      <div class="relative">
-        <Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <input
+      <InputGroup>
+        <InputGroupAddon align="inline-start">
+          <Search class="size-4 text-muted-foreground" />
+        </InputGroupAddon>
+        <InputGroupInput
           v-model="searchInput"
-          type="text"
-          class="h-9 w-full rounded-[var(--radius-control)] border border-border bg-background pl-9 pr-9 text-control text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-foreground"
           :placeholder="$t('bots.memory.searchPlaceholder')"
           @input="onSearchInput"
           @keydown.enter.prevent="runSearch"
-        >
-        <Button
+        />
+        <InputGroupAddon
           v-if="searchInput"
-          variant="ghost"
-          size="icon-sm"
-          class="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-          :aria-label="$t('common.clear')"
-          @click="clearSearch"
+          align="inline-end"
         >
-          <X class="size-3.5" />
-        </Button>
-      </div>
+          <InputGroupButton
+            :aria-label="$t('common.clear')"
+            @click="clearSearch"
+          >
+            <X class="size-3.5" />
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
     </section>
 
     <!-- Layer filter chips: local filter over the loaded list. Hidden while a
-         server search is active (search results are already query-scoped). The
-         active state is a blue soft-fill (the one-blue selection rule); inactive
-         chips sit muted, no per-chip hover (chrome belongs to a component). -->
+         server search is active (search results are already query-scoped).
+         Stays hand-written: a wrapping row of count-bearing filter chips is a
+         different relationship from the single-track SegmentedControl. The
+         active state is a blue soft-fill (the one-blue selection rule). -->
     <section
       v-if="!searchActive && memories.length > 0"
       class="mb-6 flex flex-wrap items-center gap-1.5"
@@ -239,17 +208,23 @@
       </button>
     </section>
 
-    <!-- Loading skeleton: matches the card shape so the swap does not jump. -->
-    <div
+    <!-- Loading skeleton: one block mirroring the section-card frame so the
+         swap does not jump. -->
+    <Skeleton
       v-if="loading && memories.length === 0"
-      class="space-y-3"
-    >
-      <Skeleton
-        v-for="n in 3"
-        :key="n"
-        class="h-[5.5rem] w-full rounded-[var(--radius-card)]"
-      />
-    </div>
+      class="h-44 w-full rounded-menu-shell"
+    />
+
+    <!-- Load failure: an honest error state. Without it a failed fetch renders
+         the "no memories yet" empty state, which lies about the bot's data. -->
+    <SettingsSection v-else-if="loadError">
+      <Empty class="py-12">
+        <EmptyHeader>
+          <EmptyTitle>{{ $t('common.loadFailed') }}</EmptyTitle>
+          <EmptyDescription>{{ loadError }}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    </SettingsSection>
 
     <!-- Empty: the section card is the frame, so the Empty is borderless,
          no icon-tile (skill: in-card Empty rule). -->
@@ -270,31 +245,29 @@
       </Empty>
     </SettingsSection>
 
-    <!-- Search results: a flat list of matched memories with a match-score
-         badge (mono, per the tool-call-detail convention). -->
-    <div
+    <!-- Search results: matched memories with a match-score badge (mono, per
+         the tool-call-detail convention). -->
+    <SettingsSection
       v-else-if="searchActive"
-      class="space-y-3"
+      :title="$t('bots.memory.searchResults')"
     >
-      <SettingsSection :title="$t('bots.memory.searchResults')">
-        <Empty v-if="searchResults.length === 0">
-          <EmptyHeader>
-            <EmptyDescription>{{ $t('bots.memory.noResults') }}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-        <MemoryCard
-          v-for="item in searchResults"
-          :key="item.id ?? item.memory"
-          :item="item"
-          :locale="locale"
-          :show-score="typeof item.score === 'number'"
-          @edit="openEditDialog(item)"
-        />
-      </SettingsSection>
-    </div>
+      <Empty v-if="searchResults.length === 0">
+        <EmptyHeader>
+          <EmptyDescription>{{ $t('bots.memory.noResults') }}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+      <MemoryCard
+        v-for="item in searchResults"
+        :key="item.id ?? item.memory"
+        :item="item"
+        :locale="locale"
+        :show-score="typeof item.score === 'number'"
+        @edit="openEditDialog(item)"
+      />
+    </SettingsSection>
 
-    <!-- Memory stream: dated groups, newest first. Each memory is a 16px-radius
-         bordered card (LobeHub pattern) carrying layer/confidence/tags badges. -->
+    <!-- Memory stream: dated groups, newest first; rows are hairline-separated
+         inside each section card. -->
     <div
       v-else
       class="space-y-6"
@@ -335,10 +308,10 @@
           class="space-y-4"
           @submit.prevent="handleSave"
         >
-          <div class="space-y-1.5">
-            <Label for="memory-content">
-              {{ $t('bots.memory.contentLabel') }}
-            </Label>
+          <FieldStack
+            :label="$t('bots.memory.contentLabel')"
+            for="memory-content"
+          >
             <Textarea
               id="memory-content"
               v-model="dialogContent"
@@ -346,7 +319,7 @@
               rows="3"
               class="min-h-[4.5rem] resize-y"
             />
-          </div>
+          </FieldStack>
 
           <DialogFooter class="gap-2 sm:justify-between">
             <ConfirmPopover
@@ -399,7 +372,7 @@
 </template>
 
 <script setup lang="ts">
-import { AlertTriangle, Brain, CalendarDays, Plus, RefreshCw, Search, Trash2, X } from 'lucide-vue-next'
+import { Brain, CalendarDays, Plus, RefreshCw, Search, Trash2, X } from 'lucide-vue-next'
 import type { DateRange } from 'reka-ui'
 import { DateFormatter, getLocalTimeZone, today } from '@internationalized/date'
 import { useIntersectionObserver } from '@vueuse/core'
@@ -407,14 +380,20 @@ import { computed, ref, watch } from 'vue'
 import {
   Button,
   Textarea,
+  CalloutBanner,
   Dialog,
   DialogScrollContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
   DialogClose,
+  FieldStack,
+  FormStack,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
   Popover,
-  PopoverAnchor,
   PopoverTrigger,
   PopoverContent,
   Label,
@@ -424,10 +403,6 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
-  Tooltip,
-  TooltipProvider,
-  TooltipTrigger,
-  TooltipContent,
   Empty,
   EmptyTitle,
   EmptyDescription,
@@ -484,7 +459,7 @@ const compactLoading = ref(false)
 const ingestLoading = ref(false)
 const memories = ref<MemoryItem[]>([])
 const memoryStatus = ref<AdaptersMemoryStatusResponse | null>(null)
-const memoryStatusError = ref('')
+const loadError = ref('')
 
 const graphRef = ref<InstanceType<typeof MemoryGraph> | null>(null)
 
@@ -564,10 +539,12 @@ async function loadMemories() {
   const botId = props.botId.trim()
   if (!botId) {
     memories.value = []
+    loadError.value = ''
     return
   }
 
   loading.value = true
+  loadError.value = ''
   try {
     const { data } = await getBotsByBotIdMemory({
       path: { bot_id: botId },
@@ -588,7 +565,7 @@ async function loadMemories() {
       }))
   } catch (error) {
     console.error('Failed to load memories:', error)
-    toast.error(t('common.loadFailed'))
+    loadError.value = resolveApiErrorMessage(error, t('common.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -598,7 +575,6 @@ async function loadMemoryStatus() {
   const botId = props.botId.trim()
   if (!botId) {
     memoryStatus.value = null
-    memoryStatusError.value = ''
     return
   }
 
@@ -608,11 +584,11 @@ async function loadMemoryStatus() {
       throwOnError: true,
     })
     memoryStatus.value = data ?? null
-    memoryStatusError.value = ''
   } catch (error) {
+    // Status failure only hides the compact action and the health banner; the
+    // list itself reports its own loadError, so there is nothing to surface.
     console.error('Failed to load memory status:', error)
     memoryStatus.value = null
-    memoryStatusError.value = resolveApiErrorMessage(error, t('bots.memory.compactStatusUnavailable'))
   }
 }
 
@@ -784,6 +760,7 @@ async function handleCompact() {
 
 watch(() => props.botId, () => {
   memories.value = []
+  loadError.value = ''
   clearSearch()
   activeLayer.value = 'all'
   void loadMemories()

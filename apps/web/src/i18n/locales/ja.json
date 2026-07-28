@@ -2790,7 +2790,6 @@
       "compactSuccess": "Memoryは正常に圧縮されました",
       "compactFailed": "Memory圧縮に失敗しました",
       "compactUnsupported": "選択したMemory Providerはセマンティック Memory圧縮をサポートしていません。",
-      "compactStatusUnavailable": "Memory圧縮のサポートは利用できません。",
       "compactNoMemories": "圧縮するMemoryがありません",
       "deleteConfirm": "このMemoryを削除してもよろしいですか?これを元に戻すことはできません。",
       "emptyTitle": "emptyTitle",
