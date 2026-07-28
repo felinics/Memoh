@@ -261,6 +261,36 @@ declare module '@memohai/web/lib/desktop-shell' {
     onRuntimeStateChanged(listener: (state: DesktopRuntimeState) => void): () => void
   }
   export const DesktopRuntimeKey: InjectionKey<DesktopRuntimeBridge | undefined>
+  export type DesktopUpdateStatus =
+    | 'idle'
+    | 'checking'
+    | 'up-to-date'
+    | 'available'
+    | 'downloading'
+    | 'downloaded'
+    | 'error'
+    | 'unavailable'
+  export interface DesktopUpdateInfo {
+    version: string
+    platform: string
+    enabled: boolean
+  }
+  export interface DesktopUpdateState {
+    status: DesktopUpdateStatus
+    currentVersion: string
+    latestVersion: string | null
+    progress: number | null
+    error: string | null
+  }
+  export interface DesktopUpdateBridge {
+    getInfo(): Promise<DesktopUpdateInfo>
+    getState(): Promise<DesktopUpdateState>
+    check(): Promise<DesktopUpdateState>
+    download(): Promise<DesktopUpdateState>
+    install(): Promise<DesktopUpdateState>
+    onStateChanged(listener: (state: DesktopUpdateState) => void): () => void
+  }
+  export const DesktopUpdatesKey: InjectionKey<DesktopUpdateBridge | undefined>
 }
 
 declare module '@memohai/web/lib/auth-session' {

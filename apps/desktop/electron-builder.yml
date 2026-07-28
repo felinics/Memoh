@@ -20,11 +20,14 @@ files:
 mac:
   category: public.app-category.productivity
   minimumSystemVersion: '12.0'
+  hardenedRuntime: true
+  # Signing and notarization are opt-in and configured by scripts/build.mjs.
+  # Unsigned local/CI smoke builds disable identity auto-discovery.
   target:
     - dmg
+    - zip
   icon: build/icon.icon
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
-  notarize: true
 dmg:
   icon: build/icon.icns
   sign: true

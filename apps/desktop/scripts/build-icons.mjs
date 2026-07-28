@@ -9,7 +9,7 @@
 //   resources/icon.png      512x512 runtime BrowserWindow.icon / dock.setIcon
 //   resources/tray-icon.png transparent runtime system tray/menu bar icon
 //
-// Run:  pnpm --filter @memohai/desktop icons
+// Run: pnpm --filter @memohai/desktop icons
 //
 // The app icon keeps the existing brand mark on a clean white enclosure, then
 // adds a restrained glass-like rim to the mark itself. The source logo remains

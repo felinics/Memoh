@@ -38,18 +38,60 @@ defaults to `http://localhost:18080`.
 ```bash
 pnpm --filter @memohai/desktop build           # full platform installer
 pnpm --filter @memohai/desktop build:dir       # unpacked app dir (CI smoke test)
+pnpm --filter @memohai/desktop build:mac       # macOS DMG + ZIP, arm64 + x64
+pnpm --filter @memohai/desktop build:linux:x64 # Linux AppImage + deb + rpm
+pnpm --filter @memohai/desktop build:win:x64   # Windows NSIS installer
 ```
 
 Output goes to `apps/desktop/dist/`.
 
+All packaging commands run through `scripts/build.mjs`. It loads
+`apps/desktop/.env` first, but only fills missing values, so an invoking shell
+or CI environment always wins. Copy `.env.example` when building locally.
+The script validates release metadata, maps signing aliases, materializes an
+App Store Connect key when necessary, and invokes `electron-builder` with
+`--publish never`. Builds never upload artifacts themselves.
+
+When `MEMOH_DESKTOP_UPDATE_BASE_URL` is set, electron-builder emits
+`latest.yml`, `latest-mac.yml`, or `latest-linux.yml` plus blockmaps and embeds
+an `app-update.yml` pointing at that public HTTP(S) directory. The packaged app
+then checks that feed on startup; download and restart/install remain explicit
+actions on the About page. Without this variable, the updater is disabled and
+does not fall back to an OSS or vendor feed.
+
+The OSS Release workflow intentionally does not build or attach Desktop
+installers. Clone the repository and run the platform build command above, or
+use a downstream distribution workflow that signs and publishes the generated
+files.
+
+### Build environment
+
+| Variable | Purpose | GitHub setting |
+|---|---|---|
+| `MEMOH_DESKTOP_BASE_URL` | Hosted server compiled into the app | Variable |
+| `MEMOH_DESKTOP_VERSION` | Installer/app version override (`v1.2.3` or `1.2.3`) | Variable |
+| `MEMOH_DESKTOP_APP_ID` | Reverse-DNS bundle/application id override | Variable |
+| `MEMOH_DESKTOP_UPDATE_BASE_URL` | Public generic update-feed URL; also enables update metadata | Variable |
+| `MEMOH_DESKTOP_REQUIRE_MAC_SIGNING` | Fail macOS release builds unless signing and notarization inputs are complete | Variable |
+| `APPLE_CERTIFICATE` / `CSC_LINK` | `.p12` path/URL or base64 certificate | Secret in CI |
+| `APPLE_CERTIFICATE_PASSWORD` / `CSC_KEY_PASSWORD` | `.p12` password | Secret |
+| `APPLE_API_KEY` | App Store Connect `.p8` path, PEM, or base64 PEM | Secret |
+| `APPLE_API_KEY_ID` | App Store Connect key id | Variable |
+| `APPLE_API_ISSUER` | App Store Connect issuer id | Variable |
+| `WIN_CSC_LINK` | Windows signing certificate input understood by electron-builder | Secret in CI |
+| `WIN_CSC_KEY_PASSWORD` | Windows signing certificate password | Secret |
+
+GitHub Variables are appropriate for non-sensitive identifiers, URLs, versions,
+and boolean switches. Certificate/key bodies and passwords belong in GitHub
+Secrets. A local filesystem path is not itself sensitive, but CI normally
+stores the certificate body in the corresponding Secret.
+
 ## Icons
 
 All app icons are checked in under `build/` and `resources/`. They are generated
-from `apps/web/public/logo.svg` (the brand mark) by `icon-tools/build-icons.mjs`,
-but the generator's image-processing dependencies are not part of the default
-workspace install because normal development and packaging only consume the
-checked-in assets. Re-run the generator after the logo changes; this installs
-the generator dependencies in `apps/desktop/icon-tools/`:
+from `apps/web/public/logo.svg` (the brand mark) by `scripts/build-icons.mjs`.
+The generator and its dependencies are part of `@memohai/desktop`; there is no
+separate icon-tools package. Re-run it after the logo changes:
 
 ```bash
 pnpm --filter @memohai/desktop icons

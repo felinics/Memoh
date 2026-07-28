@@ -3,11 +3,12 @@ import { computed, onBeforeUnmount, onMounted, provide } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@memohai/web/store/settings'
-import { useUpdateStore } from '@memohai/web/store/update'
 import {
   DesktopRuntimeKey,
   DesktopShellKey,
+  DesktopUpdatesKey,
   type DesktopRuntimeBridge,
+  type DesktopUpdateBridge,
 } from '@memohai/web/lib/desktop-shell'
 import MainSection from '@memohai/web/pages/main-section/index.vue'
 
@@ -17,8 +18,15 @@ provide(DesktopRuntimeKey, {
   configureRuntime: window.api.desktop.configureRuntime,
   onRuntimeStateChanged: window.api.desktop.onRuntimeStateChanged,
 } satisfies DesktopRuntimeBridge)
+provide(DesktopUpdatesKey, {
+  getInfo: window.api.desktop.updates.getInfo,
+  getState: window.api.desktop.updates.getState,
+  check: window.api.desktop.updates.check,
+  download: window.api.desktop.updates.download,
+  install: window.api.desktop.updates.install,
+  onStateChanged: window.api.desktop.updates.onStateChanged,
+} satisfies DesktopUpdateBridge)
 useSettingsStore()
-const updateStore = useUpdateStore()
 
 // Mirror apps/web App.vue: keep chat dockview/scroll alive (DOM attached,
 // full-size) while in settings, so returning has no black flash / re-scroll /
@@ -41,10 +49,6 @@ function onDevKey(e: KeyboardEvent) {
 }
 onMounted(() => {
   if (import.meta.env.DEV) window.addEventListener('keydown', onDevKey)
-  // Check for updates once at app launch (only when signed in), so detection no
-  // longer depends on the user opening the About page. Surfaces a toast only if
-  // a newer release exists; failures are silent.
-  if (localStorage.getItem('token')) void updateStore.checkAtStartup()
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onDevKey))
 </script>

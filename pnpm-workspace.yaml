@@ -5,12 +5,14 @@ packages:
 allowBuilds:
   electron-winstaller: true
   esbuild: true
+  sharp: true
   vue-demi: true
 
 onlyBuiltDependencies:
   - electron
   - electron-winstaller
   - esbuild
+  - sharp
 
 patchedDependencies:
   dockview-core@7.0.2: patches/dockview-core@7.0.2.patch

@@ -24,6 +24,7 @@ import { dispatchRendererNavigate } from './window-navigation'
 import { maybeSelfInstallMacOS } from './self-install'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
 import { isTrustedRendererUrl } from './renderer-trust'
+import { registerDesktopUpdates } from './updates'
 import {
   normalizeBaseUrl,
   normalizeServerInput,
@@ -70,8 +71,8 @@ let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
 let sessionBaseUrlOverride = ''
 let remoteRuntimeManager: DesktopRemoteRuntimeManager | null = null
-let quitCleanupStarted = false
 let quitCleanupFinished = false
+let quitCleanupPromise: Promise<void> | null = null
 
 function windowStatePath(): string {
   return join(app.getPath('userData'), 'window-state.json')
@@ -224,19 +225,23 @@ async function connectToServer(rawBaseUrl: unknown): Promise<ServerConnectResult
   }
 }
 
+async function finishQuitCleanup(): Promise<void> {
+  if (quitCleanupFinished) return
+  if (!quitCleanupPromise) {
+    quitCleanupPromise = (remoteRuntimeManager?.stop() ?? Promise.resolve())
+      .catch(error => console.warn('failed to stop desktop runtime during quit', error))
+      .then(() => {
+        quitCleanupFinished = true
+      })
+  }
+  await quitCleanupPromise
+}
+
 app.on('before-quit', (event) => {
   isQuitting = true
   if (quitCleanupFinished) return
   event.preventDefault()
-  if (quitCleanupStarted) return
-  quitCleanupStarted = true
-  const cleanup = remoteRuntimeManager?.stop() ?? Promise.resolve()
-  void cleanup
-    .catch(error => console.warn('failed to stop desktop runtime during quit', error))
-    .finally(() => {
-      quitCleanupFinished = true
-      app.quit()
-    })
+  void finishQuitCleanup().then(() => app.quit())
 })
 
 function applyExternalLinkHandler(window: BrowserWindow): void {
@@ -629,7 +634,7 @@ async function rebuildAppMenu(): Promise<void> {
 app.whenReady().then(async () => {
   if (maybeSelfInstallMacOS()) return
 
-  electronApp.setAppUserModelId('ai.memoh.desktop')
+  electronApp.setAppUserModelId(process.env.MEMOH_DESKTOP_APP_ID?.trim() || 'ai.memoh.desktop')
 
   if (process.platform === 'darwin' && app.dock && is.dev) {
     app.dock.setIcon(iconPng)
@@ -734,6 +739,16 @@ app.whenReady().then(async () => {
       if (target.webContents.id === senderId) continue
       target.webContents.send('desktop:invalidate', payload)
     }
+  })
+  registerDesktopUpdates({
+    assertTrustedRenderer,
+    markQuitting: () => {
+      isQuitting = true
+    },
+    prepareToInstall: async () => {
+      isQuitting = true
+      await finishQuitCleanup()
+    },
   })
 
   chatWindow = createChatWindow()
