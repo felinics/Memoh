@@ -107,7 +107,7 @@ interface ChartNodeData extends GraphNode {
   name: string
   displayName: string
   symbolSize: number
-  itemStyle: { color: string }
+  itemStyle: { color: string; borderColor: string; borderWidth: number }
 }
 
 interface GraphEdgeCandidate extends GraphEdge {
@@ -116,13 +116,20 @@ interface GraphEdgeCandidate extends GraphEdge {
   strength: number
 }
 
+interface AccentPair {
+  /** Soft-tint fill (the badge soft-active rung). */
+  fill: string
+  /** Saturated ring (the icon/text accent rung). */
+  ring: string
+}
+
 interface ChartTheme {
   label: string
   line: string
-  fallback: string
+  /** Neutral pair for subjects that hash to nothing. */
+  fallback: AccentPair
   fontFamily: string
-  palette: string[]
-  background: string
+  palette: AccentPair[]
   // Tooltip surface tokens — echarts' default tooltip picks the node's own
   // accent color for its border and a translucent white for the fill, which
   // reads as a random colored frame. Pin it to the popover language instead.
@@ -175,19 +182,25 @@ const chartTheme = computed<ChartTheme>(() => {
   return {
     label: readColor('--foreground', '#18181b'),
     line: readColor('--border', '#d4d4d8'),
-    fallback: readColor('--muted-foreground', '#71717a'),
+    fallback: {
+      fill: readColor('--accent-gray-soft-active', '#e9e9e7'),
+      ring: readColor('--accent-gray', '#5f5e59'),
+    },
     fontFamily: typeof document !== 'undefined' ? getComputedStyle(document.body).fontFamily : 'inherit',
+    // Nodes speak the badge language — a soft-tint fill ringed by the
+    // saturated accent — because large SOLID fills of the icon/text-grade
+    // accents read murky on a white canvas (they were tuned for 16px glyphs,
+    // not 40px discs).
     palette: [
-      readColor('--accent-blue', '#2383e2'),
-      readColor('--accent-green', '#448361'),
-      readColor('--accent-teal', '#2c8b9e'),
-      readColor('--accent-orange', '#d9730d'),
-      readColor('--accent-pink', '#c14c8a'),
-      readColor('--accent-red', '#cd3c3a'),
-      readColor('--accent-yellow', '#cb912f'),
-      readColor('--accent-purple', '#9065b0'),
+      { fill: readColor('--accent-blue-soft-active', '#cee3f7'), ring: readColor('--accent-blue', '#2383e2') },
+      { fill: readColor('--accent-green-soft-active', '#d7e6dd'), ring: readColor('--accent-green', '#448361') },
+      { fill: readColor('--accent-teal-soft-active', '#cae9f0'), ring: readColor('--accent-teal', '#2c8b9e') },
+      { fill: readColor('--accent-orange-soft-active', '#f3ddcb'), ring: readColor('--accent-orange', '#d9730d') },
+      { fill: readColor('--accent-pink-soft-active', '#f4d8e4'), ring: readColor('--accent-pink', '#c14c8a') },
+      { fill: readColor('--accent-red-soft-active', '#f7d9d5'), ring: readColor('--accent-red', '#cd3c3a') },
+      { fill: readColor('--accent-yellow-soft-active', '#f2e3b7'), ring: readColor('--accent-yellow', '#cb912f') },
+      { fill: readColor('--accent-purple-soft-active', '#e8dbf2'), ring: readColor('--accent-purple', '#9065b0') },
     ],
-    background: readColor('--background', '#ffffff'),
     popover: readColor('--popover', '#ffffff'),
     foreground: readColor('--foreground', '#18181b'),
     muted: readColor('--muted-foreground', '#71717a'),
@@ -279,13 +292,6 @@ const chartOption = computed(() => {
       // Without this every label paints even when nodes cluster, producing the
       // unreadable overlapping-label soup on dense graphs.
       labelLayout: { hideOverlap: true },
-      // Halo stroke in the surface color: edges terminate against the stroke
-      // instead of cutting into the node fill. No drop shadow on nodes —
-      // elevation is reserved for overlays in the house language.
-      itemStyle: {
-        borderColor: theme.background,
-        borderWidth: 2,
-      },
       force: {
         initLayout: 'circular',
         repulsion: 200,
@@ -309,15 +315,20 @@ const chartOption = computed(() => {
         lineStyle: { opacity: 0.15 },
         label: { opacity: 0.25 },
       },
-      data: nodes.map((node): ChartNodeData => ({
-        ...node,
-        name: node.id,
-        displayName: displayName(node),
-        symbolSize: graphNodeSize(node.count),
-        itemStyle: {
-          color: subjectColor(node.subject || node.slug || node.topic, theme),
-        },
-      })),
+      data: nodes.map((node): ChartNodeData => {
+        const accent = subjectAccent(node.subject || node.slug || node.topic, theme)
+        return {
+          ...node,
+          name: node.id,
+          displayName: displayName(node),
+          symbolSize: graphNodeSize(node.count),
+          itemStyle: {
+            color: accent.fill,
+            borderColor: accent.ring,
+            borderWidth: 2,
+          },
+        }
+      }),
       links: edges.map((edge) => ({
         source: edge.source,
         target: edge.target,
@@ -386,7 +397,7 @@ function displayName(node: GraphNode): string {
   return node.slug || node.subject || node.label || node.id || ''
 }
 
-function subjectColor(subject: string | undefined, theme: ChartTheme): string {
+function subjectAccent(subject: string | undefined, theme: ChartTheme): AccentPair {
   if (!subject || theme.palette.length === 0) return theme.fallback
   let hash = 0
   for (let i = 0; i < subject.length; i++) {
