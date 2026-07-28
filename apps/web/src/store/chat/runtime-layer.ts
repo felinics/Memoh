@@ -34,12 +34,13 @@ export function createChatRuntimeLayer(deps: ChatRuntimeLayerDeps) {
   let forwardPrepareSessionRuntime: (
     botId: string,
     sessionId: string,
+    applyBufferedProjections: () => void,
   ) => Promise<void> = async () => {}
 
   const realtime = createChatRealtimeController({
     onWebSocketEvent: (botId, event) => forwardWebSocketEvent(botId, event),
-    prepareSessionRuntime: (botId, sessionId) =>
-      forwardPrepareSessionRuntime(botId, sessionId),
+    prepareSessionRuntime: (botId, sessionId, applyBufferedProjections) =>
+      forwardPrepareSessionRuntime(botId, sessionId, applyBufferedProjections),
     onRuntimeProjection: (botId, sessionId, change) =>
       forwardRuntimeProjection(botId, sessionId, change),
     onBotSessionsActivityEvent: deps.onBotSessionsActivityEvent,

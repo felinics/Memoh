@@ -111,10 +111,12 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
   if (userTurn) {
     turns.push({
       ...userTurn,
+      turn_id: turnId,
       id: `runtime:${turnId}:user`,
     })
   }
   turns.push({
+    turn_id: turnId,
     role: 'assistant',
     id: `runtime:${turnId}:assistant`,
     timestamp: run.started_at,

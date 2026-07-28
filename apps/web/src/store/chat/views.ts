@@ -2,7 +2,6 @@ import { computed, reactive, ref, type Ref } from 'vue'
 import {
   fetchMessagesUI,
   locateMessageUI,
-  type UITurn,
 } from '@/composables/api/useChat'
 import type { RuntimeProjectionState } from './runtime-projection'
 import { isRuntimeRunActive } from './runtime-projection'
@@ -30,11 +29,6 @@ export function createChatViews(deps: ChatViewsDeps) {
   const focusedViewId = ref('chat')
   let runtimeProjectionProbe: (sessionId: string) => RuntimeProjectionState | undefined =
     () => undefined
-  let snapshotHook: (
-    view: ChatViewEntry,
-    sessionId: string | undefined,
-    turns: UITurn[],
-  ) => void = () => {}
   let refreshAppliedHook: (
     view: ChatViewEntry,
     sessionId: string,
@@ -56,7 +50,6 @@ export function createChatViews(deps: ChatViewsDeps) {
     fetchMessages: fetchMessagesUI,
     locateMessage: locateMessageUI,
     isSessionStreaming: (botId, sessionId) => isSessionStreaming(botId, sessionId),
-    onSnapshot: (view, sessionId, turns) => snapshotHook(view, sessionId, turns),
     onRefreshApplied: (view, sessionId, latestTimestamp) => {
       refreshAppliedHook(view, sessionId, latestTimestamp)
     },
@@ -144,13 +137,17 @@ export function createChatViews(deps: ChatViewsDeps) {
     await sessionTranscript(resolvedBotId, resolvedSessionId)
       .refreshCurrentSession(resolvedBotId, resolvedSessionId)
   }
-  async function loadInitialMessages(botId: string, sessionId: string) {
+  async function loadInitialMessages(
+    botId: string,
+    sessionId: string,
+    afterApply?: () => void,
+  ) {
     const view = chatViews.getOrCreate({
       botId,
       sessionId,
       viewId: focusedViewId.value,
     })
-    await view.transcript.loadInitialMessages(botId, sessionId)
+    await view.transcript.loadInitialMessages(botId, sessionId, afterApply)
     view.initialized = true
   }
   const fetchSessionWindow = (botId: string, sessionId: string) =>
@@ -340,7 +337,6 @@ export function createChatViews(deps: ChatViewsDeps) {
     invalidateDraftCommand: (target: ChatViewTarget) => void
     saveDraftACP: () => void
     activateDraftACP: (target: ChatViewTarget) => void
-    snapshotHook: typeof snapshotHook
     refreshAppliedHook: typeof refreshAppliedHook
     ensureVisibleSummary: (botId: string, sessionId: string) => void
   }) {
@@ -351,7 +347,6 @@ export function createChatViews(deps: ChatViewsDeps) {
     invalidateDraftCommand = options.invalidateDraftCommand
     saveDraftACP = options.saveDraftACP
     activateDraftACP = options.activateDraftACP
-    snapshotHook = options.snapshotHook
     refreshAppliedHook = options.refreshAppliedHook
     ensureVisibleSummary = options.ensureVisibleSummary
   }

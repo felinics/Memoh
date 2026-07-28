@@ -129,7 +129,7 @@ func (m *Manager) reserveRecoveredWaitingDecision(ctx context.Context, run ledge
 	generation := m.newGeneration()
 	handle := RunHandle{
 		BotID: run.BotID, SessionID: run.SessionID, RunID: run.RunID,
-		Generation: generation, FencingToken: run.FencingToken,
+		TurnID: run.TurnID, Generation: generation, FencingToken: run.FencingToken,
 	}.normalized()
 	lifecycleBase := runtimefence.WithContext(context.Background(), runtimefence.Fence{
 		BotID: handle.BotID, SessionID: handle.SessionID, Token: handle.FencingToken,
@@ -137,7 +137,7 @@ func (m *Manager) reserveRecoveredWaitingDecision(ctx context.Context, run ledge
 	lifecycleCtx, lifecycleCancel := context.WithCancel(lifecycleBase)
 	ctrl := &runControl{
 		botID: handle.BotID, sessionID: handle.SessionID, runID: handle.RunID,
-		generation: handle.Generation, fencingToken: handle.FencingToken,
+		turnID: handle.TurnID, generation: handle.Generation, fencingToken: handle.FencingToken,
 		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel,
 		converter:    chatview.NewUIMessageStreamConverter(),
 		leaseChanged: make(chan struct{}, 1),

@@ -136,7 +136,8 @@
     },
     "session_runtime": {
       "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
-      "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。"
+      "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。",
+      "history_inconsistent": "会话历史无法正确合并，请刷新后重试。"
     }
   },
   "auth": {

@@ -96,6 +96,7 @@ type RunHandle struct {
 	BotID      string
 	SessionID  string
 	RunID      string
+	TurnID     string
 	Generation string
 	// FencingToken is the ledger ownership token for this run. Callers need it
 	// to fence their own durable writes, which is why it travels with the
@@ -108,6 +109,7 @@ func (h RunHandle) normalized() RunHandle {
 	h.BotID = strings.TrimSpace(h.BotID)
 	h.SessionID = strings.TrimSpace(h.SessionID)
 	h.RunID = strings.TrimSpace(h.RunID)
+	h.TurnID = strings.TrimSpace(h.TurnID)
 	h.Generation = strings.TrimSpace(h.Generation)
 	return h
 }
@@ -160,12 +162,12 @@ func (s Snapshot) cursor() Cursor {
 }
 
 type CurrentRunView struct {
-	RunID string `json:"run_id"`
+	RunID string `json:"run_id" validate:"required" format:"uuid"`
 	// TurnID is the durable turn this run writes into, allocated at admission.
 	// It is part of the observable view because SR-OBS-003 requires every
 	// subscriber to agree on the run's turn, and a subscriber that only learns
 	// the run id cannot line the run up against persisted history.
-	TurnID              string               `json:"turn_id,omitempty"`
+	TurnID              string               `json:"turn_id" validate:"required" format:"uuid"`
 	Generation          string               `json:"generation"`
 	Status              string               `json:"status"`
 	OwnerID             string               `json:"owner_id,omitempty"`

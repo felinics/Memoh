@@ -66,15 +66,11 @@ func (s *stubMessageService) ListBeforeMessageBySession(_ context.Context, sid s
 }
 
 func msg(role string, t time.Time) messagepkg.Message {
-	return messagepkg.Message{ID: role + "-" + t.Format("150405.000000000"), Role: role, CreatedAt: t, Content: []byte(`{}`)}
+	return messagepkg.Message{ID: role + "-" + t.Format("150405.000000000"), TurnID: "turn-1", Role: role, CreatedAt: t, Content: []byte(`{}`)}
 }
 
-// userMsg builds a visible user message — IsUITurnBoundary requires non-empty
-// text (DisplayContent is the first source it checks), otherwise the row is
-// treated as an invisible user ping and NOT a boundary, which would defeat the
-// test.
 func userMsg(t time.Time, text string) messagepkg.Message {
-	return messagepkg.Message{ID: "user-" + t.Format("150405.000000000"), Role: "user", CreatedAt: t, Content: []byte(`{}`), DisplayContent: text}
+	return messagepkg.Message{ID: "user-" + t.Format("150405.000000000"), TurnID: "turn-1", Role: "user", CreatedAt: t, Content: []byte(`{}`), DisplayContent: text}
 }
 
 // TestExtendToUITurnHead_PreservesMonotonicOrder is the regression test for the

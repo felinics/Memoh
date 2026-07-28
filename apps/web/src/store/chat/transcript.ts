@@ -32,12 +32,13 @@ export interface TranscriptDeps {
   locateMessage: (botId: string, sessionId: string, externalMessageId: string, before?: number, after?: number) => Promise<LocateMessageResult>
 }
 
-type SnapshotHook = (targetSessionId: string | undefined, turns: UITurn[]) => void
 type RefreshAppliedHook = (targetSessionId: string, latestTimestamp?: string) => void
+type AfterHistoryApply = () => void
 
 export interface LocateMessageResult {
   items: UITurn[]
-  target_id?: string
+  target_id: string
+  target_external_message_id: string
 }
 
 // Owns the single active transcript view and every mutation of that view.
@@ -57,16 +58,15 @@ export function createTranscriptController({
   const loadingOlder = ref(false)
   const hasMoreOlder = ref(true)
   const hasLoadedOlder = ref(false)
-  let onSnapshot: SnapshotHook = () => {}
   let onRefreshApplied: RefreshAppliedHook = () => {}
-  let refreshPromise: { key: string; promise: Promise<void> } | null = null
+  let refreshPromise: {
+    key: string
+    promise: Promise<void>
+    afterApply: AfterHistoryApply[]
+  } | null = null
   let historyGeneration = 0
   let loadingMessagesVersion = 0
   let loadingOlderVersion = 0
-
-  function setSnapshotHook(hook: SnapshotHook) {
-    onSnapshot = hook
-  }
 
   function setRefreshAppliedHook(hook: RefreshAppliedHook) {
     onRefreshApplied = hook
@@ -74,11 +74,8 @@ export function createTranscriptController({
 
   const history = createTranscriptHistory({
     messages,
-    sessionId,
     rememberBackgroundTask,
     applyPendingBackgroundEventsToTool,
-    onSnapshot: (targetSessionId, turns) => onSnapshot(targetSessionId, turns),
-    nextAssistantMessageId,
   })
   const {
     normalizeUIMessage,
@@ -86,7 +83,6 @@ export function createTranscriptController({
     normalizeTurns,
     replaceMessages,
     mergeMessages,
-    rememberAssistantError,
   } = history
   const {
     snapshotToolApprovalStates,
@@ -142,7 +138,11 @@ export function createTranscriptController({
     loadingOlder.value = false
   }
 
-  async function refreshCurrentSession(targetBotId?: string, targetSessionId?: string) {
+  async function refreshCurrentSession(
+    targetBotId?: string,
+    targetSessionId?: string,
+    afterApply?: AfterHistoryApply,
+  ) {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid) return
@@ -151,12 +151,14 @@ export function createTranscriptController({
 
     if (refreshPromise) {
       if (refreshPromise.key === key) {
+        if (afterApply) refreshPromise.afterApply.push(afterApply)
         await refreshPromise.promise
         return
       }
       await refreshPromise.promise
     }
 
+    const afterApplyCallbacks = afterApply ? [afterApply] : []
     const promise = (async () => {
       const turns = await fetchMessages(bid, sid, { limit: PAGE_SIZE })
       if (!isCurrentHistoryContext(bid, sid, generation)) return
@@ -168,22 +170,27 @@ export function createTranscriptController({
         // page is not proof that history ended. Only pagination can settle it.
         hasMoreOlder.value = true
       }
+      for (const callback of afterApplyCallbacks.splice(0)) callback()
       onRefreshApplied(sid, messages[messages.length - 1]?.timestamp)
     })().finally(() => {
       if (refreshPromise?.promise === promise) refreshPromise = null
     })
-    refreshPromise = { key, promise }
+    refreshPromise = { key, promise, afterApply: afterApplyCallbacks }
     await promise
   }
 
-  async function loadInitialMessages(botId: string, targetSessionId: string) {
+  async function loadInitialMessages(
+    botId: string,
+    targetSessionId: string,
+    afterApply?: AfterHistoryApply,
+  ) {
     const bid = botId.trim()
     const sid = targetSessionId.trim()
     if (!bid || !sid) return
     loadingMessages.value = true
     const version = ++loadingMessagesVersion
     try {
-      await refreshCurrentSession(bid, sid)
+      await refreshCurrentSession(bid, sid, afterApply)
     } finally {
       if (version === loadingMessagesVersion) loadingMessages.value = false
     }
@@ -268,7 +275,7 @@ export function createTranscriptController({
       mergeMessages(result.items, sid)
       hasMoreOlder.value = true
       hasLoadedOlder.value = true
-      return result.target_id?.trim() || findMessageIdByExternalId(target)
+      return result.target_id.trim() || null
     } catch (error) {
       console.error('Failed to locate message:', error)
       return null
@@ -295,10 +302,16 @@ export function createTranscriptController({
       messages.splice(adoptedIndex, 1, turn)
       return
     }
-    const tailIndex = messages.length - 1
-    const hydratedTail = messages[tailIndex]
-    if (hydratedTail?.role === 'assistant' && !hydratedTail.streaming) {
-      messages.splice(tailIndex, 1, turn)
+    const turnId = turn.role === 'system' ? '' : turn.turnId?.trim() ?? ''
+    const turnIndex = turnId
+      ? messages.findIndex(message =>
+          message.role === turn.role
+          && message.role !== 'system'
+          && message.turnId === turnId,
+        )
+      : -1
+    if (turnIndex >= 0) {
+      messages.splice(turnIndex, 1, turn)
       return
     }
     messages.push(turn)
@@ -402,7 +415,7 @@ export function createTranscriptController({
     if (!invocation || !turn || !run) return
     for (const message of messages) {
       if (message.role === 'system' || message.invocationId !== invocation) continue
-      message.runtimeTurnId = turn
+      message.turnId = turn
       message.runtimeRunId = run
     }
   }
@@ -411,22 +424,22 @@ export function createTranscriptController({
     normalized: ChatUserTurn | ChatAssistantTurn,
     slice: RuntimeTranscriptSlice,
   ): ChatUserTurn | ChatAssistantTurn {
-    normalized.runtimeTurnId = slice.turnId
+    normalized.turnId = slice.turnId
     normalized.runtimeRunId = slice.runId
     normalized.__optimistic = false
     if (normalized.role === 'assistant') normalized.streaming = slice.streaming
     return normalized
   }
 
-  function applyRuntimeTranscript(slice: RuntimeTranscriptSlice) {
-    if (!slice.turnId || slice.turns.length === 0) return
+  function applyRuntimeTranscript(slice: RuntimeTranscriptSlice): boolean {
+    if (!slice.turnId || slice.turns.length === 0) return true
     const incoming = slice.turns
       .map(normalizeTurn)
       .filter((turn): turn is ChatUserTurn | ChatAssistantTurn => turn.role !== 'system')
       .map(turn => runtimeMessage(turn, slice))
     const existing = messages.filter((turn): turn is ChatUserTurn | ChatAssistantTurn =>
       turn.role !== 'system'
-      && turn.runtimeTurnId === slice.turnId,
+      && turn.turnId === slice.turnId,
     )
     const resolved = (['user', 'assistant'] as const).flatMap((role) => {
       const current = existing.find(turn => turn.role === role)
@@ -439,16 +452,20 @@ export function createTranscriptController({
     })
 
     const operationAnchor = slice.operation?.replace_from_message_id?.trim() ?? ''
+    const anchor = operationAnchor
+      ? messages.find(turn => serverMessageId(turn) === operationAnchor)
+      : undefined
+    if (anchor) {
+      replaceTailFromTurn(anchor, resolved)
+      return true
+    }
     if (operationAnchor && existing.length === 0) {
-      const anchor = messages.find(turn => serverMessageId(turn) === operationAnchor)
-      if (anchor) replaceTailFromTurn(anchor, resolved)
-      else appendToView(...resolved)
-      return
+      return false
     }
 
     if (existing.length === 0) {
       appendToView(...resolved)
-      return
+      return true
     }
     const indices = existing
       .map(turn => messages.indexOf(turn))
@@ -459,6 +476,7 @@ export function createTranscriptController({
       messages.splice(indices[index]!, 1)
     }
     messages.splice(insertAt, 0, ...resolved)
+    return true
   }
 
   // Tool updates are partial snapshots. Preserve fields that an earlier stream
@@ -509,25 +527,17 @@ export function createTranscriptController({
     turn.streaming = false
   }
 
-  function appendAssistantError(assistantTurn: ChatAssistantTurn, targetSessionId: string, errorMessage: string) {
+  function appendAssistantError(assistantTurn: ChatAssistantTurn, errorMessage: string) {
     const text = errorMessage.trim()
     if (!text) return
-    rememberAssistantError(text, targetSessionId, assistantTurn)
     assistantTurn.messages.push({ id: nextAssistantMessageId(assistantTurn), type: 'error', content: text })
   }
 
   function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) {
     if (!hasVisibleAssistantBlocks(assistantTurn)) {
-      const runtimeTurnId = assistantTurn.runtimeTurnId?.trim()
-      if (runtimeTurnId) {
-        for (let index = messages.length - 1; index >= 0; index -= 1) {
-          const turn = messages[index]
-          if (!turn) continue
-          if (
-            turn.role !== 'system'
-            && turn.runtimeTurnId === runtimeTurnId
-          ) messages.splice(index, 1)
-        }
+      const turnId = assistantTurn.turnId?.trim()
+      if (turnId) {
+        removeRuntimeTurn(turnId)
         return
       }
       removeTurnFromSession(botId, targetSessionId, assistantTurn)
@@ -535,7 +545,16 @@ export function createTranscriptController({
     }
     if (error.name === 'AbortError') return
     if (assistantTurn.messages.some(block => block.type === 'error')) return
-    appendAssistantError(assistantTurn, targetSessionId, error.message)
+    appendAssistantError(assistantTurn, error.message)
+  }
+
+  function removeRuntimeTurn(turnId: string) {
+    const id = turnId.trim()
+    if (!id) return
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const turn = messages[index]
+      if (turn && turn.role !== 'system' && turn.turnId === id) messages.splice(index, 1)
+    }
   }
 
   function latestOptimisticUserText(): string {
@@ -585,7 +604,6 @@ export function createTranscriptController({
 
   function resetUserScope() {
     clearHistoryView({ hasMoreOlder: true })
-    history.reset()
   }
 
   return {
@@ -594,7 +612,6 @@ export function createTranscriptController({
     loadingOlder,
     hasMoreOlder,
     hasLoadedOlder,
-    setSnapshotHook,
     setRefreshAppliedHook,
     normalizeUIMessage,
     normalizeTurn,
@@ -634,6 +651,7 @@ export function createTranscriptController({
     assistantTurnForUserInput,
     restoreUserInputStates,
     finalizeStreamFailure,
+    removeRuntimeTurn,
     latestOptimisticUserText,
     hasTurn,
     findTurnByServerId,

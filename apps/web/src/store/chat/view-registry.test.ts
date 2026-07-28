@@ -79,7 +79,11 @@ function makeRegistry(options: { cacheLimit?: number, streaming?: Set<string> } 
     applyPendingBackgroundEventsToTool: () => {},
     bumpFsChangedAtIfFsMutation: () => {},
     fetchMessages: vi.fn().mockResolvedValue([]),
-    locateMessage: vi.fn().mockResolvedValue({ items: [] }),
+      locateMessage: vi.fn().mockResolvedValue({
+        items: [],
+        target_id: '',
+        target_external_message_id: '',
+      }),
     isSessionStreaming: (botId, sessionId) => options.streaming?.has(`${botId}:${sessionId}`) === true,
     onEvict,
   })

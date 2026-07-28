@@ -25,7 +25,11 @@ interface SessionRuntimeConnection {
 
 export interface ChatRealtimeCallbacks {
   onWebSocketEvent: (botId: string, event: UIStreamEvent) => void
-  prepareSessionRuntime: (botId: string, sessionId: string) => Promise<void>
+  prepareSessionRuntime: (
+    botId: string,
+    sessionId: string,
+    applyBufferedProjections: () => void,
+  ) => Promise<void>
   onRuntimeProjection: (
     botId: string,
     sessionId: string,
@@ -185,15 +189,18 @@ export function createChatRealtimeController(
     sessionRuntimeConnections.set(key, connection)
     runtimeClient.subscribe(sid)
 
-    void callbacks.prepareSessionRuntime(bid, sid)
+    const applyBufferedProjections = () => {
+      const pending = connection.pending.splice(0)
+      for (const change of pending) {
+        callbacks.onRuntimeProjection(bid, sid, change)
+      }
+    }
+    void callbacks.prepareSessionRuntime(bid, sid, applyBufferedProjections)
       .catch(error => console.error('Failed to load session messages:', error))
       .finally(() => {
         if (sessionRuntimeConnections.get(key) !== connection) return
         connection.prepared = true
-        for (const change of connection.pending) {
-          callbacks.onRuntimeProjection(bid, sid, change)
-        }
-        connection.pending = []
+        applyBufferedProjections()
       })
   }
 

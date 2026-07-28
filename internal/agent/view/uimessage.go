@@ -90,7 +90,8 @@ type UIUserInput struct {
 
 // UITurn is the normalized chat turn used by the web frontend.
 type UITurn struct {
-	Role              string                `json:"role"`
+	TurnID            string                `json:"turn_id" validate:"required" format:"uuid"`
+	Role              string                `json:"role" validate:"required" enums:"user,assistant,system"`
 	Kind              string                `json:"kind,omitempty"`
 	Messages          []UIMessage           `json:"messages,omitempty"`
 	Text              string                `json:"text,omitempty"`
@@ -100,7 +101,7 @@ type UITurn struct {
 	Reply             *UIReplyRef           `json:"reply,omitempty"`
 	Forward           *UIForwardRef         `json:"forward,omitempty"`
 	BackgroundTask    *UIBackgroundTask     `json:"background_task,omitempty"`
-	Timestamp         time.Time             `json:"timestamp"`
+	Timestamp         time.Time             `json:"timestamp" validate:"required" format:"date-time"`
 	Platform          string                `json:"platform,omitempty"`
 	SenderDisplayName string                `json:"sender_display_name,omitempty"`
 	SenderAvatarURL   string                `json:"sender_avatar_url,omitempty"`

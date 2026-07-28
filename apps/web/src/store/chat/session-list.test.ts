@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ref } from 'vue'
-import type { SessionSummary, UITurn } from '@/composables/api/useChat.types'
+import type { SessionSummary } from '@/composables/api/useChat.types'
 import { createSessionList } from './session-list'
 import type { ChatAssistantTurn, ChatMessage, ChatUserTurn } from './types'
 
@@ -68,7 +68,7 @@ describe('session list registry', () => {
     expect(registry.activeSession.value?.id).toBe('session-1')
   })
 
-  it('preserves a provisional title and fork anchor across a stale list snapshot', () => {
+  it('preserves a provisional title but accepts authoritative fork metadata', () => {
     const { registry } = makeRegistry()
     registry.replaceSessions([session('session-1', {
       title: 'Local provisional title',
@@ -82,7 +82,7 @@ describe('session list registry', () => {
 
     const known = registry.knownSessionSummary('session-1')
     expect(known?.title).toBe('Local provisional title')
-    expect(forkAnchor(known)).toBe('assistant-1')
+    expect(forkAnchor(known)).toBe('')
   })
 
   it('updates listed and remembered copies through one title operation', () => {
@@ -148,18 +148,4 @@ describe('session list registry', () => {
     expect(forkAnchor(registry.knownSessionSummary('session-1'))).toBe('assistant-replaced')
   })
 
-  it('derives a missing fork anchor from inherited raw assistant turns', () => {
-    const { registry } = makeRegistry()
-    registry.replaceSessions([session('session-1', {
-      metadata: { forked_from: { session_id: 'parent' } },
-    })])
-    const turns = [
-      { id: 'assistant-old', role: 'assistant', timestamp: '2026-01-01T00:00:00.000Z', messages: [] },
-      { id: 'assistant-new', role: 'assistant', timestamp: '2026-01-03T00:00:00.000Z', messages: [] },
-    ] as UITurn[]
-
-    registry.syncForkAnchorFromUITurns('session-1', turns)
-
-    expect(forkAnchor(registry.knownSessionSummary('session-1'))).toBe('assistant-old')
-  })
 })

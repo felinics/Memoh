@@ -148,13 +148,20 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
   // bindRunId records the server's name only while the local turn is active.
   // Epoch/seq projection ordering rejects late terminal frames, so no terminal
   // run-id history is needed here.
-  function bindRunId(invocationId: string, runId: string): AcceptedRun | undefined {
+  function bindRunId(
+    invocationId: string,
+    runId: string,
+    turnId: string,
+  ): AcceptedRun | undefined {
     const invocation = invocationId.trim()
     const run = runId.trim()
-    if (!invocation || !run) return undefined
+    const turn = turnId.trim()
+    if (!invocation || !run || !turn) return undefined
     const stream = streams.get(invocation)
     if (stream) {
       if (!stream.runId) stream.runId = run
+      stream.assistantTurn.turnId = turn
+      stream.assistantTurn.runtimeRunId = run
       invocationIdsByRunId.set(run, invocation)
       runIdsByInvocation.set(invocation, run)
     }

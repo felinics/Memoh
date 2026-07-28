@@ -290,7 +290,7 @@ func (*fakeAgentMessageService) GetLatestVisibleTurnBySession(context.Context, s
 	return messagepkg.HistoryTurn{}, nil
 }
 
-func (*fakeAgentMessageService) ReplaceTurn(context.Context, string, string, string, string, string) (messagepkg.HistoryTurn, error) {
+func (*fakeAgentMessageService) ReplaceTurn(context.Context, string, string, string, *int64, string, string, string) (messagepkg.HistoryTurn, error) {
 	return messagepkg.HistoryTurn{}, nil
 }
 

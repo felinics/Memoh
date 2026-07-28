@@ -200,6 +200,41 @@ describe('chat realtime controller', () => {
     })
   })
 
+  it('lets history apply buffered runtime state before hydration completes', async () => {
+    const { controller, callbacks, sockets } = makeController()
+    let applyBufferedProjections: (() => void) | undefined
+    let finishPreparation: (() => void) | undefined
+    callbacks.prepareSessionRuntime = vi.fn((_botId, _sessionId, applyBuffered) => {
+      applyBufferedProjections = applyBuffered
+      return new Promise<void>((resolve) => {
+        finishPreparation = resolve
+      })
+    })
+    controller.startWebSocket('bot-1')
+    controller.startSessionRuntime('bot-1', 'session-1')
+
+    sockets[0]!.handler({
+      type: 'runtime_snapshot',
+      session_id: 'session-1',
+      epoch: 'epoch-1',
+      seq: 1,
+      snapshot: {
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        epoch: 'epoch-1',
+        seq: 1,
+        updated_at: '2026-07-27T08:00:00.000Z',
+      },
+    })
+    expect(callbacks.onRuntimeProjection).not.toHaveBeenCalled()
+
+    applyBufferedProjections?.()
+    expect(callbacks.onRuntimeProjection).toHaveBeenCalledOnce()
+
+    finishPreparation?.()
+    await flushPromises()
+  })
+
   it('unsubscribes a hidden session without stopping another session', async () => {
     const { controller, sockets } = makeController()
     controller.startWebSocket('bot-1')

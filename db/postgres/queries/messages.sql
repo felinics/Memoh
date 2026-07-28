@@ -1194,6 +1194,7 @@ replacement_input AS (
           AND (
             request_message.turn_id IS NULL
             OR request_message.turn_id = old_turn.id
+            OR request_message.turn_id = sqlc.arg(replacement_turn_id)::uuid
           )
         FOR UPDATE
       )
@@ -1227,10 +1228,9 @@ affected_compaction_sessions AS MATERIALIZED (
     AND compact.session_id = locked.session_id
     AND compact.compaction_epoch = session.compaction_epoch
 ),
-next_position AS (
+session_update AS (
   UPDATE bot_sessions s
-  SET next_turn_position = next_turn_position + 1,
-      compaction_epoch = compaction_epoch + CASE
+  SET compaction_epoch = compaction_epoch + CASE
         WHEN EXISTS (
           SELECT 1
           FROM affected_compaction_sessions affected
@@ -1240,14 +1240,14 @@ next_position AS (
       END
   FROM replacement_input
   WHERE s.team_id = public.memoh_current_team_id() AND s.id = replacement_input.session_id
-  RETURNING s.next_turn_position - 1 AS position
+  RETURNING s.id
 ),
 replacement AS (
   SELECT
-    gen_random_uuid() AS id,
+    sqlc.arg(replacement_turn_id)::uuid AS id,
     replacement_input.bot_id,
     replacement_input.session_id,
-    next_position.position::bigint AS position,
+    sqlc.arg(replacement_position)::bigint AS position,
     replacement_input.replacement_request_message_id AS request_message_id,
     replacement_input.replacement_assistant_message_id AS assistant_message_id,
     NULL::uuid AS superseded_by_turn_id,
@@ -1256,7 +1256,8 @@ replacement AS (
     now()::timestamptz AS created_at,
     now()::timestamptz AS updated_at
   FROM replacement_input
-  CROSS JOIN next_position
+  CROSS JOIN session_update
+  WHERE sqlc.arg(replacement_position)::bigint > 0
 ),
 updated AS (
   UPDATE bot_history_messages old
@@ -1752,6 +1753,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -1858,6 +1860,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -1890,6 +1893,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -2099,6 +2103,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -2206,6 +2211,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -2294,6 +2300,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,

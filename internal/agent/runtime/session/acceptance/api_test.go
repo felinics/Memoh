@@ -203,7 +203,6 @@ func (c *apiClient) history(botID, sessionID string) (map[string]any, error) {
 	query := url.Values{
 		"session_id": []string{sessionID},
 		"limit":      []string{"100"},
-		"format":     []string{"ui"},
 	}
 	var history map[string]any
 	err := c.request(
@@ -256,6 +255,15 @@ func historyContainsRoleText(history map[string]any, role, text string) bool {
 		}
 	}
 	return false
+}
+
+func historyMessageIDByRole(history map[string]any, role string) string {
+	for _, item := range objectList(history) {
+		if stringValue(item["role"]) == role {
+			return stringValue(item["id"])
+		}
+	}
+	return ""
 }
 
 func (c *apiClient) request(method, path string, body any, result any, statuses ...int) error {

@@ -5498,6 +5498,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "format": "uuid",
                         "description": "Bot ID",
                         "name": "bot_id",
                         "in": "path",
@@ -5505,13 +5506,17 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "format": "uuid",
                         "description": "Session ID",
                         "name": "session_id",
                         "in": "query",
                         "required": true
                     },
                     {
+                        "maximum": 100,
+                        "minimum": 1,
                         "type": "integer",
+                        "default": 30,
                         "description": "Limit",
                         "name": "limit",
                         "in": "query"
@@ -5524,28 +5529,17 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "format": "uuid",
                         "description": "Message ID cursor before which to page",
                         "name": "before_message_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Response format: ui returns normalized chat UI turns",
-                        "name": "format",
                         "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "when format=ui",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "array",
-                                "items": {
-                                    "$ref": "#/definitions/conversation.UITurn"
-                                }
-                            }
+                            "$ref": "#/definitions/handlers.UIMessageListResponse"
                         }
                     },
                     "400": {
@@ -5630,6 +5624,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "format": "uuid",
                         "description": "Bot ID",
                         "name": "bot_id",
                         "in": "path",
@@ -5637,6 +5632,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "format": "uuid",
                         "description": "Session ID",
                         "name": "session_id",
                         "in": "query",
@@ -5650,13 +5646,19 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "maximum": 100,
+                        "minimum": 0,
                         "type": "integer",
+                        "default": 30,
                         "description": "Messages before target",
                         "name": "before",
                         "in": "query"
                     },
                     {
+                        "maximum": 100,
+                        "minimum": 0,
                         "type": "integer",
+                        "default": 30,
                         "description": "Messages after target",
                         "name": "after",
                         "in": "query"
@@ -5666,8 +5668,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/handlers.UILocateMessageResponse"
                         }
                     },
                     "400": {
@@ -16590,6 +16591,11 @@ const docTemplate = `{
         },
         "conversation.UITurn": {
             "type": "object",
+            "required": [
+                "role",
+                "timestamp",
+                "turn_id"
+            ],
             "properties": {
                 "attachments": {
                     "type": "array",
@@ -16625,7 +16631,12 @@ const docTemplate = `{
                     "$ref": "#/definitions/conversation.UIReplyRef"
                 },
                 "role": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "assistant",
+                        "system"
+                    ]
                 },
                 "sender_avatar_url": {
                     "type": "string"
@@ -16643,7 +16654,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "timestamp": {
-                    "type": "string"
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "turn_id": {
+                    "type": "string",
+                    "format": "uuid"
                 },
                 "user_message_kind": {
                     "type": "string"
@@ -18649,6 +18665,43 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.UILocateMessageResponse": {
+            "type": "object",
+            "required": [
+                "items",
+                "target_external_message_id",
+                "target_id"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UITurn"
+                    }
+                },
+                "target_external_message_id": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string",
+                    "format": "uuid"
+                }
+            }
+        },
+        "handlers.UIMessageListResponse": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UITurn"
+                    }
+                }
+            }
+        },
         "handlers.UpdateContainerMetricsRequest": {
             "type": "object",
             "properties": {
@@ -19499,114 +19552,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "url": {
-                    "type": "string"
-                }
-            }
-        },
-        "message.Message": {
-            "type": "object",
-            "properties": {
-                "assets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/message.MessageAsset"
-                    }
-                },
-                "bot_id": {
-                    "type": "string"
-                },
-                "compact_id": {
-                    "type": "string"
-                },
-                "content": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "display_content": {
-                    "type": "string"
-                },
-                "event_id": {
-                    "type": "string"
-                },
-                "external_message_id": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "platform": {
-                    "type": "string"
-                },
-                "role": {
-                    "type": "string"
-                },
-                "runtime_type": {
-                    "type": "string"
-                },
-                "sender_avatar_url": {
-                    "type": "string"
-                },
-                "sender_channel_identity_id": {
-                    "type": "string"
-                },
-                "sender_display_name": {
-                    "type": "string"
-                },
-                "sender_user_id": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "session_mode": {
-                    "type": "string"
-                },
-                "source_reply_to_message_id": {
-                    "type": "string"
-                },
-                "usage": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                }
-            }
-        },
-        "message.MessageAsset": {
-            "type": "object",
-            "properties": {
-                "content_hash": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "mime": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "ordinal": {
-                    "type": "integer"
-                },
-                "role": {
-                    "type": "string"
-                },
-                "size_bytes": {
-                    "type": "integer"
-                },
-                "storage_key": {
                     "type": "string"
                 }
             }

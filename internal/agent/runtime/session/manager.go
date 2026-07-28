@@ -87,6 +87,7 @@ type runControl struct {
 	botID             string
 	sessionID         string
 	runID             string
+	turnID            string
 	generation        string
 	fencingToken      int64
 	abortCh           chan<- struct{}
@@ -149,7 +150,7 @@ func (c *runControl) handle() RunHandle {
 	if c == nil {
 		return RunHandle{}
 	}
-	return RunHandle{BotID: c.botID, SessionID: c.sessionID, RunID: c.runID, Generation: c.generation, FencingToken: c.fencingToken}
+	return RunHandle{BotID: c.botID, SessionID: c.sessionID, RunID: c.runID, TurnID: c.turnID, Generation: c.generation, FencingToken: c.fencingToken}
 }
 
 func (c *runControl) beginDecisionWait() {
@@ -652,7 +653,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 	ctx = admissionCtx
 
 	runGeneration := m.newGeneration()
-	handle := RunHandle{BotID: botID, SessionID: sessionID, RunID: runID, Generation: runGeneration, FencingToken: start.fencingToken}
+	handle := RunHandle{BotID: botID, SessionID: sessionID, RunID: runID, TurnID: start.turnID, Generation: runGeneration, FencingToken: start.fencingToken}
 	if handle.FencingToken > 0 {
 		ctx = runtimefence.WithContext(ctx, runtimefence.Fence{
 			BotID:     handle.BotID,
@@ -665,6 +666,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		botID:           botID,
 		sessionID:       sessionID,
 		runID:           runID,
+		turnID:          start.turnID,
 		generation:      runGeneration,
 		fencingToken:    start.fencingToken,
 		abortCh:         abortCh,

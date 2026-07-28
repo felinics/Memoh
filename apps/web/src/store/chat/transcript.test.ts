@@ -10,11 +10,11 @@ vi.mock('@/store/user', () => ({
 }))
 
 function rawUser(id: string, text = 'hello', timestamp = '2026-01-01T00:00:00.000Z'): UITurn {
-  return { id, role: 'user', text, timestamp, platform: 'local' }
+  return { id, turn_id: `turn-${id}`, role: 'user', text, timestamp, platform: 'local' }
 }
 
 function rawAssistant(id: string, messages: UIMessage[] = [], timestamp = '2026-01-01T00:00:01.000Z'): UITurn {
-  return { id, role: 'assistant', messages, timestamp }
+  return { id, turn_id: `turn-${id}`, role: 'assistant', messages, timestamp }
 }
 
 function assistant(id: string, messages: ChatAssistantTurn['messages'] = []): ChatAssistantTurn {
@@ -34,7 +34,11 @@ function makeTranscript() {
   const backgroundTasks = createBackgroundTaskTracker()
   const bumpFsChangedAtIfFsMutation = vi.fn()
   const fetchMessages = vi.fn().mockResolvedValue([])
-  const locateMessage = vi.fn().mockResolvedValue({ items: [] })
+  const locateMessage = vi.fn().mockResolvedValue({
+    items: [],
+    target_id: '',
+    target_external_message_id: '',
+  })
   const transcript = createTranscriptController({
     currentBotId,
     sessionId,
@@ -109,8 +113,6 @@ describe('chat transcript controller', () => {
 
   it('does not guess optimistic identity from matching text and timestamps', () => {
     const { transcript } = makeTranscript()
-    const snapshotHook = vi.fn()
-    transcript.setSnapshotHook(snapshotHook)
     const optimistic: ChatUserTurn = {
       id: 'local-user',
       role: 'user',
@@ -125,7 +127,6 @@ describe('chat transcript controller', () => {
 
     transcript.replaceMessages([rawUser('server-user')], 'session-1')
 
-    expect(snapshotHook).toHaveBeenCalledWith('session-1', expect.any(Array))
     expect(transcript.messages[0]).toMatchObject({ id: 'server-user' })
   })
 
@@ -191,19 +192,14 @@ describe('chat transcript controller', () => {
     expect(block.userInput).toMatchObject({ status: 'pending', can_respond: true })
   })
 
-  it('replays ephemeral stream errors after refresh until user-scope reset', () => {
+  it('does not inject browser-memory stream errors into authoritative history', () => {
     const { transcript } = makeTranscript()
     transcript.replaceMessages([rawUser('user-1')], 'session-1')
     const failed = assistant('assistant-local', [{ id: 1, type: 'text', content: 'partial' }])
+    failed.turnId = 'turn-user-1'
     transcript.appendToView(failed)
     transcript.finalizeStreamFailure(failed, 'bot-1', 'session-1', new Error('stream failed'))
 
-    transcript.replaceMessages([rawUser('user-1')], 'session-1')
-    expect(transcript.messages.some(turn =>
-      turn.role === 'assistant' && turn.messages.some(block => block.type === 'error' && block.content === 'stream failed'),
-    )).toBe(true)
-
-    transcript.resetUserScope()
     transcript.replaceMessages([rawUser('user-1')], 'session-1')
     expect(transcript.messages).toHaveLength(1)
   })
@@ -232,6 +228,7 @@ describe('chat transcript controller', () => {
       }]),
       {
         id: 'system-1',
+        turn_id: 'turn-system-1',
         role: 'system',
         kind: 'background_task',
         timestamp: '2026-01-01T00:00:02.000Z',
@@ -290,6 +287,104 @@ describe('chat transcript controller', () => {
     expect(transcript.messages.filter(turn => turn.role === 'user')).toHaveLength(1)
   })
 
+  it('merges initial history and buffered runtime by authoritative turn id', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    const historyUser = { ...rawUser('server-user'), turn_id: 'turn-1' }
+    const historyAssistant = {
+      ...rawAssistant('server-assistant', [{ id: 0, type: 'text', content: 'old' }]),
+      turn_id: 'turn-1',
+    }
+    fetchMessages.mockResolvedValueOnce([historyUser, historyAssistant])
+    const phases: string[] = []
+
+    await transcript.loadInitialMessages('bot-1', 'session-1', () => {
+      phases.push('runtime')
+      transcript.applyRuntimeTranscript({
+        runId: 'run-1',
+        turnId: 'turn-1',
+        status: 'running',
+        operation: null,
+        streaming: true,
+        turns: [
+          { ...rawUser('runtime-user'), turn_id: 'turn-1' },
+          {
+            ...rawAssistant('runtime-assistant', [{ id: 0, type: 'text', content: 'streaming' }]),
+            turn_id: 'turn-1',
+          },
+        ],
+      })
+    })
+    phases.push('loaded')
+
+    expect(phases).toEqual(['runtime', 'loaded'])
+    expect(transcript.messages).toHaveLength(2)
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['server-user', 'server-assistant'])
+    expect(transcript.messages[1]).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+      messages: [{ type: 'text', content: 'streaming' }],
+    })
+  })
+
+  it('applies a replacement operation that arrives after the admitting projection', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([
+      rawUser('user-old'),
+      rawAssistant('assistant-old', [{ id: 0, type: 'text', content: 'old answer' }]),
+    ], 'session-1')
+
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-1',
+      status: 'admitting',
+      operation: null,
+      streaming: true,
+      turns: [rawAssistant('runtime-assistant')],
+    })
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-1',
+      status: 'running',
+      operation: {
+        kind: 'retry',
+        replace_from_message_id: 'assistant-old',
+      },
+      streaming: true,
+      turns: [rawAssistant('runtime-assistant', [
+        { id: 0, type: 'text', content: 'new answer' },
+      ])],
+    })
+
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['user-old', 'runtime-assistant'])
+    expect(transcript.messages[1]).toMatchObject({
+      role: 'assistant',
+      messages: [{ type: 'text', content: 'new answer' }],
+    })
+  })
+
+  it('requires a history resync when a replacement anchor is missing', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([rawUser('user-old')], 'session-1')
+
+    const applied = transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-1',
+      status: 'running',
+      operation: {
+        kind: 'edit',
+        replace_from_message_id: 'missing-user',
+      },
+      streaming: true,
+      turns: [
+        rawUser('runtime-user', 'edited'),
+        rawAssistant('runtime-assistant'),
+      ],
+    })
+
+    expect(applied).toBe(false)
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['user-old'])
+  })
+
   it('owns refresh state and reports the latest applied timestamp', async () => {
     const { transcript, fetchMessages } = makeTranscript()
     const onRefreshApplied = vi.fn()
@@ -325,7 +420,11 @@ describe('chat transcript controller', () => {
 
   it('drops a locate response that resolves after the active session changes', async () => {
     const { transcript, sessionId, locateMessage } = makeTranscript()
-    const pending = deferred<{ items: UITurn[]; target_id?: string }>()
+    const pending = deferred<{
+      items: UITurn[]
+      target_id: string
+      target_external_message_id: string
+    }>()
     locateMessage.mockReturnValueOnce(pending.promise)
 
     const locating = transcript.locateMessageByExternalId('external-1')
@@ -335,6 +434,7 @@ describe('chat transcript controller', () => {
     pending.resolve({
       items: [{ ...rawUser('session-1-target'), external_message_id: 'external-1' } as UITurn],
       target_id: 'session-1-target',
+      target_external_message_id: 'external-1',
     })
 
     expect(await locating).toBeNull()

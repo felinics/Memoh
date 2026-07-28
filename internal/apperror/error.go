@@ -38,6 +38,7 @@ const (
 	CodeACPConfigUpdateFailed            Code = "acp.config_update_failed"
 	CodeSessionBusy                      Code = "session_runtime.session_busy"
 	CodeSessionInvocationConflict        Code = "session_runtime.invocation_conflict"
+	CodeSessionHistoryInconsistent       Code = "session_runtime.history_inconsistent"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -167,6 +168,10 @@ var catalog = map[Code]Definition{
 	CodeSessionInvocationConflict: {
 		HTTPStatus: http.StatusConflict,
 		Detail:     "This request was already submitted with different content.",
+	},
+	CodeSessionHistoryInconsistent: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The conversation history could not be reconciled. Refresh and try again.",
 	},
 }
 

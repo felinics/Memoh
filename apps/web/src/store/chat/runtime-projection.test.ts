@@ -20,6 +20,7 @@ function runView(overrides: Partial<RuntimeCurrentRunView> = {}): RuntimeCurrent
     updated_at: '2026-07-27T08:00:00.000Z',
     messages: [],
     request_user_turn: {
+      turn_id: 'turn-1',
       role: 'user',
       text: 'hello',
       timestamp: '2026-07-27T08:00:00.000Z',
@@ -95,6 +96,7 @@ describe('runtime projection', () => {
         kind: 'edit',
         replace_from_message_id: 'user-old',
         replacement_user_turn: {
+          turn_id: 'turn-1',
           role: 'user',
           text: 'edited prompt',
           timestamp: '2026-07-27T08:00:01.000Z',

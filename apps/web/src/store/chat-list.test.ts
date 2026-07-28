@@ -494,6 +494,7 @@ beforeEach(() => {
               messages: [],
               request_user_turn: message.type === 'message'
                 ? {
+                    turn_id: `turn-${h.lastRunId}`,
                     role: 'user',
                     text: message.text ?? '',
                     timestamp: now,
@@ -509,6 +510,7 @@ beforeEach(() => {
                       kind: 'edit',
                       replace_from_message_id: message.message_id ?? '',
                       replacement_user_turn: {
+                        turn_id: `turn-${h.lastRunId}`,
                         role: 'user',
                         text: message.text ?? '',
                         timestamp: now,
@@ -694,7 +696,7 @@ describe('chat-list store', () => {
       await expect(sending).resolves.toMatchObject({ ok: true })
     })
 
-  it('returns startup stream errors to the composer when no assistant output exists', async () => {
+  it('projects startup failures identically while returning them to the composer', async () => {
       const store = useChatStore()
       const onBeforeTurnAppend = vi.fn()
       const onTurnAppendAborted = vi.fn()
@@ -712,7 +714,12 @@ describe('chat-list store', () => {
         error: 'model failed',
         restoreInput: 'hello',
       })
-      expect(store.messages).toHaveLength(0)
+      expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      expect(store.messages[1]).toMatchObject({
+        role: 'assistant',
+        streaming: false,
+        messages: [{ type: 'error', content: 'model failed' }],
+      })
       expect(store.startupSendFailure).toMatchObject({
         botId: 'bot-1',
         sessionId: 'session-1',
@@ -2919,6 +2926,7 @@ describe('chat-list store', () => {
               session_id: 'source-session',
               title: 'Source',
               message_id: 'source-assistant',
+              fork_message_id: 'fork-final-raw-message',
             },
           },
         }],
@@ -2939,7 +2947,7 @@ describe('chat-list store', () => {
       expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
         session_id: 'source-session',
         message_id: 'source-assistant',
-        fork_message_id: 'fork-assistant',
+        fork_message_id: 'fork-final-raw-message',
       })
     })
 
@@ -3455,6 +3463,7 @@ describe('chat-list store', () => {
 
       emitRuntime(runtime.userTurn({
           id: 'msg-skill',
+          turn_id: `turn-${runId}`,
           role: 'user',
           text: '',
           user_message_kind: 'skill_activation',

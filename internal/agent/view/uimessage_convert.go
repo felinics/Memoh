@@ -157,41 +157,6 @@ func ConvertModelMessagesToUIAssistantMessages(messages []turn.ModelMessage) []U
 	return pending.Turn.Messages
 }
 
-// IsUITurnBoundary reports whether a persisted message opens a new UI turn —
-// i.e. ConvertMessagesToUITurns would flush any pending assistant turn here and
-// start a fresh user/system turn. Only such a message is a safe page head:
-// pagination that begins on an assistant/tool row (or an invisible
-// screenshot-feedback user row) may be partway through an assistant turn whose
-// earlier rows landed on the previous page, which is what splits one reply into
-// several action bars. Handlers use this to extend a page back to the nearest
-// boundary so a turn is never cut across pages. The branch logic here MUST stay
-// in lockstep with the "user" case in ConvertMessagesToUITurns.
-func IsUITurnBoundary(raw messagepkg.Message) bool {
-	if !strings.EqualFold(strings.TrimSpace(raw.Role), "user") {
-		return false
-	}
-	ensurePersistedMetadata(&raw)
-
-	text := extractPersistedMessageText(raw, nil)
-
-	// Background-task completion opens its own system turn.
-	if _, ok := parseBackgroundTaskNotification(text); ok {
-		return true
-	}
-	// The placeholder ping is skipped, not a boundary.
-	if strings.EqualFold(strings.TrimSpace(text), "[background notification]") {
-		return false
-	}
-
-	// A visible user message opens a user turn; an invisible one (image-only
-	// screenshot feedback, empty body) is skipped and never starts a turn.
-	attachments := uiAttachmentsFromMessageAssets(raw)
-	reply := uiReplyFromMessage(raw)
-	forward := uiForwardFromMessage(raw)
-	activation := uiSkillActivationFromMessage(raw)
-	return text != "" || len(attachments) > 0 || reply != nil || forward != nil || activation != nil
-}
-
 // ConvertMessagesToUITurns converts persisted message rows into frontend-friendly turns.
 func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 	result := make([]UITurn, 0, len(messages))
@@ -259,6 +224,13 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 
 	for i := range messages {
 		raw := messages[i]
+		rawTurnID := strings.TrimSpace(raw.TurnID)
+		if rawTurnID == "" {
+			continue
+		}
+		if pending != nil && pending.Turn.TurnID != rawTurnID {
+			flushPending()
+		}
 		switch strings.ToLower(strings.TrimSpace(raw.Role)) {
 		case "user":
 			ensurePersistedMetadata(&raw)
@@ -279,6 +251,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				flushPending()
 				completeBackgroundTool(task)
 				result = append(result, UITurn{
+					TurnID:         strings.TrimSpace(raw.TurnID),
 					Role:           "system",
 					Kind:           "background_task",
 					BackgroundTask: &task,
@@ -289,15 +262,12 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				continue
 			}
 
-			// Invisible user-role messages must NOT end the assistant turn. The
+			// Invisible user-role messages must NOT end their assistant turn. The
 			// agent loop injects user messages that never render: Computer Use /
 			// Browser Use feed screenshots back as image-only user messages (empty
 			// display text, inline base64, no stored asset), plus
-			// "[background notification]" pings. Flushing on these is exactly what
-			// split one "talk while acting" reply into several turns (several
-			// action bars). Skip them WITHOUT flushing so the surrounding
-			// assistant/tool messages remain a single turn; only a real, visible
-			// user message below is a turn boundary.
+			// "[background notification]" pings. Their persisted turn_id already
+			// decided whether surrounding assistant/tool rows belong together.
 			if text == "" && len(attachments) == 0 && reply == nil && forward == nil && activation == nil {
 				continue
 			}
@@ -308,6 +278,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			flushPending()
 
 			turn := UITurn{
+				TurnID:            strings.TrimSpace(raw.TurnID),
 				Role:              "user",
 				Text:              text,
 				UserMessageKind:   userMessageKind,
@@ -337,15 +308,8 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			reasonings := extractPersistedReasoning(&modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 
-			// An assistant turn spans the whole reply to a user message: every
-			// assistant + tool message that follows, in order. A plain-text
-			// assistant message must NOT split the turn — the "talk while acting"
-			// pattern (a remark before or between tool calls) is common, so it
-			// extends the current turn instead of opening a new one. The turn is
-			// closed only by the next user message (flushed in the "user" case,
-			// which also derives background-notification system turns) or by the
-			// trailing flush at the end of the list. Empty messages carry nothing,
-			// so they neither open nor split a turn.
+			// A persisted turn_id is the only grouping key. Plain-text assistant
+			// messages and tool calls with that same id remain one reply.
 			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 {
 				continue
 			}
@@ -403,6 +367,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 func newPendingAssistantTurn(raw messagepkg.Message) *uiPendingAssistantTurn {
 	return &uiPendingAssistantTurn{
 		Turn: UITurn{
+			TurnID:            strings.TrimSpace(raw.TurnID),
 			Role:              "assistant",
 			Timestamp:         raw.CreatedAt,
 			Platform:          resolveUIPersistencePlatform(raw),

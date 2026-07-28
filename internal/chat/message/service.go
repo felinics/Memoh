@@ -1268,7 +1268,17 @@ func (s *DBService) replacePersistedRound(ctx context.Context, sessionID string,
 	if assistantMessageID == "" {
 		return errors.New("replacement assistant message was not persisted")
 	}
-	if _, err := replaceHistoryTurn(ctx, s.queries, sessionID, replacement.OldTurnID, requestMessageID, assistantMessageID, replacement.Reason); err != nil {
+	if _, err := replaceHistoryTurn(
+		ctx,
+		s.queries,
+		sessionID,
+		replacement.OldTurnID,
+		replacement.ReplacementTurnID,
+		replacement.ReplacementTurnPosition,
+		requestMessageID,
+		assistantMessageID,
+		replacement.Reason,
+	); err != nil {
 		return fmt.Errorf("replace persisted history turn: %w", err)
 	}
 	if replacement.SessionMetadata == nil {
@@ -1327,6 +1337,8 @@ func replaceHistoryTurn(
 	queries dbstore.Queries,
 	sessionID string,
 	oldTurnID string,
+	replacementTurnID string,
+	replacementTurnPosition *int64,
 	requestMessageID string,
 	assistantMessageID string,
 	reason string,
@@ -1338,6 +1350,13 @@ func replaceHistoryTurn(
 	pgOldTurnID, err := dbpkg.ParseUUID(oldTurnID)
 	if err != nil {
 		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid old turn id: %w", err)
+	}
+	pgReplacementTurnID, err := dbpkg.ParseUUID(replacementTurnID)
+	if err != nil {
+		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid replacement turn id: %w", err)
+	}
+	if replacementTurnPosition == nil || *replacementTurnPosition <= 0 {
+		return sqlc.ReplaceHistoryTurnRow{}, errors.New("replacement turn position must be positive")
 	}
 	pgRequestMessageID, err := parseOptionalUUID(requestMessageID)
 	if err != nil {
@@ -1352,25 +1371,27 @@ func replaceHistoryTurn(
 		reason = "replace"
 	}
 	return queries.ReplaceHistoryTurn(ctx, sqlc.ReplaceHistoryTurnParams{
-		OldTurnID:          pgOldTurnID,
-		SessionID:          pgSessionID,
-		RequestMessageID:   pgRequestMessageID,
-		AssistantMessageID: pgAssistantMessageID,
-		SupersededAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-		SupersededReason:   pgtype.Text{String: reason, Valid: true},
+		OldTurnID:           pgOldTurnID,
+		SessionID:           pgSessionID,
+		ReplacementTurnID:   pgReplacementTurnID,
+		ReplacementPosition: *replacementTurnPosition,
+		RequestMessageID:    pgRequestMessageID,
+		AssistantMessageID:  pgAssistantMessageID,
+		SupersededAt:        pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		SupersededReason:    pgtype.Text{String: reason, Valid: true},
 	})
 }
 
-func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error) {
+func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, replacementTurnID string, replacementTurnPosition *int64, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error) {
 	var row sqlc.ReplaceHistoryTurnRow
 	var err error
 	if _, fenced := runtimefence.FromContext(ctx); fenced {
 		err = runtimefence.InTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
-			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, replacementTurnID, replacementTurnPosition, requestMessageID, assistantMessageID, reason)
 			return err
 		})
 	} else {
-		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, replacementTurnID, replacementTurnPosition, requestMessageID, assistantMessageID, reason)
 	}
 	if err != nil {
 		return HistoryTurn{}, err
@@ -1760,7 +1781,7 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 }
 
 func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Message {
-	return toMessageFields(
+	message := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1781,10 +1802,12 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFromLatestUIBySessionRow(row sqlc.ListMessagesLatestUIBySessionRow) Message {
-	return toMessageFieldsWithMetadataMode(
+	message := toMessageFieldsWithMetadataMode(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1806,6 +1829,8 @@ func toMessageFromLatestUIBySessionRow(row sqlc.ListMessagesLatestUIBySessionRow
 		row.CreatedAt,
 		false,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
@@ -1833,7 +1858,7 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 }
 
 func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Message {
-	return toMessageFields(
+	message := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1854,10 +1879,12 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFromBeforeCursorBySessionRow(row sqlc.ListMessagesBeforeCursorBySessionRow) Message {
-	return toMessageFields(
+	message := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1878,6 +1905,8 @@ func toMessageFromBeforeCursorBySessionRow(row sqlc.ListMessagesBeforeCursorBySe
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
@@ -1905,7 +1934,7 @@ func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
 }
 
 func toMessageFromLocateWindowByExternalIDBySessionRow(row sqlc.LocateMessagesWindowByExternalIDBySessionRow) Message {
-	return toMessageFields(
+	message := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1926,6 +1955,8 @@ func toMessageFromLocateWindowByExternalIDBySessionRow(row sqlc.LocateMessagesWi
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFields(
@@ -2207,6 +2238,7 @@ func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySess
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	m.TurnID = uuidString(row.TurnID)
 	if row.CompactID.Valid {
 		m.CompactID = row.CompactID.String()
 	}

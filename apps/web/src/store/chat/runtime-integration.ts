@@ -78,7 +78,11 @@ export interface RuntimeIntegrationDeps {
   ) => void
   refreshCurrentSession: (botId: string, sessionId: string) => Promise<void>
   releaseHiddenSessionView: (botId: string, sessionId: string) => void
-  loadInitialMessages: (botId: string, sessionId: string) => Promise<void>
+  loadInitialMessages: (
+    botId: string,
+    sessionId: string,
+    afterApply?: () => void,
+  ) => Promise<void>
   reattachTurnToSession: (
     botId: string,
     sessionId: string,
@@ -167,9 +171,21 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       return
     }
     if (event.type === 'run_accepted') {
+      const turnId = event.turn_id.trim()
+      if (!turnId) {
+        const pending = deps.assistantStreams.getAssistantStream(event.invocation_id)
+        if (pending) {
+          deps.assistantStreams.rejectAssistantStream(
+            event.invocation_id,
+            new StreamFailureError(deps.sendFailedMessage(), 'startup', event),
+          )
+        }
+        return
+      }
       const accepted = deps.assistantStreams.bindRunId(
         event.invocation_id,
         event.run_id,
+        turnId,
       )
       const sessionId = event.session_id.trim()
       const botId = (
@@ -185,7 +201,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
           viewId: deps.focusedViewId.value,
         }).transcript.bindRuntimeTurn(
           event.invocation_id,
-          event.turn_id,
+          turnId,
           event.run_id,
         )
       }
@@ -275,10 +291,30 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
   ) {
     deps.bumpProjectionVersion()
     const view = deps.chatViews.getSession(botId, sessionId)
-    if (view) view.transcript.applyRuntimeTranscript(change.current.transcript)
-
     const previousRun = change.previous.currentRunView
     const currentRun = change.current.currentRunView
+    const currentInvocationId = currentRun
+      ? deps.assistantStreams.invocationIdForEvent({
+          run_id: currentRun.run_id,
+          session_id: sessionId,
+        })
+      : ''
+    const currentPending = currentInvocationId
+      ? deps.assistantStreams.getAssistantStream(currentInvocationId)
+      : undefined
+    const needsHistoryResync = Boolean(
+      view && !view.transcript.applyRuntimeTranscript(change.current.transcript),
+    )
+    const resyncTranscript = () => deps.refreshCurrentSession(botId, sessionId)
+      .then(() => {
+        deps.chatViews.getSession(botId, sessionId)
+          ?.transcript.applyRuntimeTranscript(change.current.transcript)
+      })
+
+    if (needsHistoryResync && currentRun && isRuntimeRunActive(currentRun.status)) {
+      void resyncTranscript()
+    }
+
     deps.decisions.observeRun(sessionId, currentRun)
     if (!currentRun) {
       if (previousRun) {
@@ -327,11 +363,8 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     const isActive = isRuntimeRunActive(currentRun.status)
     if (isActive || (previousRun?.run_id === currentRun.run_id && !wasActive)) return
 
-    const invocationId = deps.assistantStreams.invocationIdForEvent({
-      run_id: currentRun.run_id,
-      session_id: sessionId,
-    })
-    const pending = deps.assistantStreams.getAssistantStream(invocationId)
+    const invocationId = currentInvocationId
+    const pending = currentPending
     if (pending) {
       if (currentRun.status === 'completed') {
         deps.assistantStreams.resolveAssistantStream(invocationId)
@@ -342,9 +375,9 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
           aborted.name = 'AbortError'
           deps.assistantStreams.rejectAssistantStream(invocationId, aborted)
         } else {
-          const stage: SendMessageStage = deps.hasVisibleAssistantBlocks(
-            pending.assistantTurn,
-          ) ? 'stream' : 'startup'
+          const stage: SendMessageStage = currentRun.messages.length > 0
+            ? 'stream'
+            : 'startup'
           deps.assistantStreams.rejectAssistantStream(
             invocationId,
             new StreamFailureError(message, stage, currentRun),
@@ -354,20 +387,31 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       deps.releaseHiddenSessionView(botId, sessionId)
     }
 
-    if (view && !pending) {
-      void deps.refreshCurrentSession(botId, sessionId)
+    if (view && (needsHistoryResync || !pending)) {
+      const refresh = needsHistoryResync
+        ? resyncTranscript()
+        : deps.refreshCurrentSession(botId, sessionId)
+      void refresh
         .finally(() => deps.releaseHiddenSessionView(botId, sessionId))
     } else if (!view) {
       deps.touchSessionInList(sessionId, currentRun.updated_at)
     }
   }
 
-  async function prepareSessionRuntime(botId: string, sessionId: string) {
+  async function prepareSessionRuntime(
+    botId: string,
+    sessionId: string,
+    applyBufferedProjections: () => void,
+  ) {
     const normalizedBotId = botId.trim()
     const normalizedSessionId = sessionId.trim()
     if (!normalizedBotId || !normalizedSessionId) return
     try {
-      await deps.loadInitialMessages(normalizedBotId, normalizedSessionId)
+      await deps.loadInitialMessages(
+        normalizedBotId,
+        normalizedSessionId,
+        applyBufferedProjections,
+      )
     } finally {
       for (const stream of deps.assistantStreams.assistantStreamsForSession(
         normalizedBotId,

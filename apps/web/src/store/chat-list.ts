@@ -132,7 +132,6 @@ export const useChatStore = defineStore('chat', () => {
   const {
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,
     activeSession, knownSessions, activeChatReadOnly, activeChatCanFork,
-    withForkAnchorFromUITurns, syncForkAnchorFromUITurns,
     updateForkAnchorForReplacedMessage,
     replaceSessions, appendSessions, upsertSession, rememberSession,
     knownSessionSummary, hasListedSession, patchSessionInList,
@@ -338,9 +337,6 @@ export const useChatStore = defineStore('chat', () => {
     invalidateDraftCommand: invalidateDraftViewCommand,
     saveDraftACP: saveLiveDraftACPStage,
     activateDraftACP: activateDraftACPStage,
-    snapshotHook: (_view, targetSessionId, turns) => {
-      syncForkAnchorFromUITurns(targetSessionId, turns)
-    },
     refreshAppliedHook: (_view, targetSessionId, latestTimestamp) => {
       touchSessionInList(targetSessionId, latestTimestamp)
     },
@@ -483,7 +479,6 @@ export const useChatStore = defineStore('chat', () => {
     rememberSession,
     refreshSessionsList,
     fetchSessionWindow,
-    withForkAnchor: withForkAnchorFromUITurns,
     replaceSessionHistory: (botId, targetSessionId, turns) => {
       sessionTranscript(botId, targetSessionId)
         .replaceHistoryView(turns, targetSessionId)

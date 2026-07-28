@@ -35,6 +35,7 @@ type Message struct {
 	Content                 json.RawMessage `json:"content"`
 	Metadata                map[string]any  `json:"metadata,omitempty"`
 	RawMetadata             json.RawMessage `json:"-"`
+	TurnID                  string          `json:"turn_id,omitempty"`
 	Usage                   json.RawMessage `json:"usage,omitempty"`
 	SessionMode             string          `json:"session_mode,omitempty"`
 	RuntimeType             string          `json:"runtime_type,omitempty"`
@@ -124,10 +125,12 @@ type ToolTailRoundPersister interface {
 }
 
 type TurnReplacement struct {
-	OldTurnID        string
-	RequestMessageID string
-	Reason           string
-	SessionMetadata  map[string]any
+	OldTurnID               string
+	ReplacementTurnID       string
+	ReplacementTurnPosition *int64
+	RequestMessageID        string
+	Reason                  string
+	SessionMetadata         map[string]any
 }
 
 type RoundPersistenceOptions struct {
@@ -160,7 +163,7 @@ type Service interface {
 	ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string) ([]Message, error)
 	GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error)
 	GetLatestVisibleTurnBySession(ctx context.Context, sessionID string) (HistoryTurn, error)
-	ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error)
+	ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, replacementTurnID string, replacementTurnPosition *int64, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error)
 	DeleteByIDs(ctx context.Context, ids []string) error
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error

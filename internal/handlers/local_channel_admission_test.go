@@ -94,6 +94,7 @@ func startedWSAdmission() sessionruntime.Admission {
 			BotID:        wsAdmissionBotID,
 			SessionID:    wsAdmissionSessionID,
 			RunID:        "run-1",
+			TurnID:       "turn-1",
 			Generation:   "generation-1",
 			FencingToken: 3,
 		},
@@ -217,7 +218,7 @@ func TestAdmitWSTurnBuildsNormalMessageRequestUserTurn(t *testing.T) {
 		t.Fatalf("request user turn = %#v", view.RequestUserTurn)
 	}
 	requestTurn := view.RequestUserTurn
-	if requestTurn.Role != "user" || requestTurn.Text != "hello" || requestTurn.UserMessageKind != "text" ||
+	if requestTurn.TurnID != "turn-1" || requestTurn.Role != "user" || requestTurn.Text != "hello" || requestTurn.UserMessageKind != "text" ||
 		requestTurn.Timestamp != timestamp || requestTurn.Platform != "local" ||
 		requestTurn.SenderUserID != "user-1" || requestTurn.ExternalMessageID != "invocation-1" {
 		t.Fatalf("request user turn = %#v", requestTurn)
@@ -229,6 +230,83 @@ func TestAdmitWSTurnBuildsNormalMessageRequestUserTurn(t *testing.T) {
 	prepared := messageAdmission.preparedAttachments()
 	if len(prepared) != 1 || prepared[0].Base64 != "not-runtime-state" {
 		t.Fatalf("prepared execution attachments = %#v", prepared)
+	}
+}
+
+func TestAdmitWSTurnPublishesReplacementOperation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		admission       *wsReplacementAdmission
+		wantKind        string
+		wantReplaceFrom string
+		wantReplacement bool
+	}{
+		{
+			name: "retry",
+			admission: &wsReplacementAdmission{
+				kind: sessionruntime.RunOperationRetry,
+				prepareAnchor: func(context.Context) (string, error) {
+					return "assistant-first", nil
+				},
+			},
+			wantKind:        sessionruntime.RunOperationRetry,
+			wantReplaceFrom: "assistant-first",
+		},
+		{
+			name: "edit",
+			admission: &wsReplacementAdmission{
+				kind: sessionruntime.RunOperationEdit,
+				prepareAnchor: func(context.Context) (string, error) {
+					return "user-request", nil
+				},
+				replacementUserTurn: &chatview.UITurn{Role: "user", Text: "edited"},
+				attachmentsPrepared: true,
+			},
+			wantKind:        sessionruntime.RunOperationEdit,
+			wantReplaceFrom: "user-request",
+			wantReplacement: true,
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			runtime := newStubWSTurnAdmitter()
+			runtime.admission = startedWSAdmission()
+			handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
+
+			_, ok, _ := admitWSTestTurn(t, handler, wsAdmissionTestRef(), wsAdmissionTestSubmission(), test.admission.build)
+			if !ok {
+				t.Fatal("admission failed")
+			}
+			admitted := runtime.submissions()
+			if len(admitted) != 1 || admitted[0].Execution.Admission == nil {
+				t.Fatalf("admitted = %#v, want one replacement operation builder", admitted)
+			}
+			view, err := admitted[0].Execution.Admission(context.Background(), startedWSAdmission().Handle)
+			if err != nil {
+				t.Fatalf("build admission view: %v", err)
+			}
+			if view.Operation == nil {
+				t.Fatal("replacement operation is nil")
+			}
+			if view.Operation.Kind != test.wantKind || view.Operation.ReplaceFromMessageID != test.wantReplaceFrom {
+				t.Fatalf("replacement operation = %#v", view.Operation)
+			}
+			if test.wantReplacement {
+				if view.Operation.ReplacementUserTurn == nil ||
+					view.Operation.ReplacementUserTurn.TurnID != "turn-1" ||
+					view.Operation.ReplacementUserTurn.Text != "edited" {
+					t.Fatalf("replacement user turn = %#v", view.Operation.ReplacementUserTurn)
+				}
+			} else if view.Operation.ReplacementUserTurn != nil {
+				t.Fatalf("replacement user turn = %#v, want nil", view.Operation.ReplacementUserTurn)
+			}
+		})
 	}
 }
 

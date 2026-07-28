@@ -20,36 +20,6 @@ export interface SessionSummary {
   route_conversation_type?: string
 }
 
-export interface MessageAsset {
-  content_hash: string
-  role: string
-  ordinal: number
-  mime: string
-  size_bytes: number
-  storage_key: string
-  name?: string
-  metadata?: Record<string, unknown>
-}
-
-export interface Message {
-  id: string
-  bot_id: string
-  session_id?: string
-  sender_channel_identity_id?: string
-  sender_user_id?: string
-  sender_display_name?: string
-  sender_avatar_url?: string
-  platform?: string
-  external_message_id?: string
-  source_reply_to_message_id?: string
-  role: string
-  content?: unknown
-  metadata?: Record<string, unknown>
-  assets?: MessageAsset[]
-  display_content?: string
-  created_at?: string
-}
-
 // Bot-wide activity SSE: `/bots/{bot_id}/sessions/events`. Carries identifier
 // + minimal metadata for sidebar live-sort; never includes message bodies.
 export interface SessionTouchedEvent {
@@ -285,6 +255,7 @@ export interface UISkillActivation {
 }
 
 export interface UIUserTurn {
+  turn_id: string
   role: 'user'
   text: string
   user_message_kind?: string
@@ -302,6 +273,7 @@ export interface UIUserTurn {
 }
 
 export interface UIAssistantTurn {
+  turn_id: string
   role: 'assistant'
   messages: UIMessage[]
   timestamp: string
@@ -311,6 +283,7 @@ export interface UIAssistantTurn {
 }
 
 export interface UISystemTurn {
+  turn_id: string
   role: 'system'
   kind?: 'background_task' | string
   background_task?: UIBackgroundTask

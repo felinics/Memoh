@@ -108,7 +108,7 @@ export interface ChatUserTurn {
   streaming: boolean
   isSelf: boolean
   invocationId?: string
-  runtimeTurnId?: string
+  turnId?: string
   runtimeRunId?: string
   // Set by createOptimisticUserTurn / createOptimisticAssistantTurn and
   // cleared as soon as the server twin replaces the optimistic row in
@@ -128,7 +128,7 @@ export interface ChatAssistantTurn {
   externalMessageId?: string
   streaming: boolean
   invocationId?: string
-  runtimeTurnId?: string
+  turnId?: string
   runtimeRunId?: string
   // See ChatUserTurn.__optimistic.
   __optimistic?: boolean
@@ -143,6 +143,7 @@ export interface ChatSystemTurn {
   timestamp: string
   platform?: string
   streaming: boolean
+  turnId?: string
 }
 
 export type ChatMessage = ChatUserTurn | ChatAssistantTurn | ChatSystemTurn

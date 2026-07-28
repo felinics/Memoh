@@ -1,4 +1,3 @@
-import { client } from '@memohai/sdk/client'
 import {
   getBotsByBotIdMessages,
   getBotsByBotIdMessagesLocate,
@@ -6,34 +5,14 @@ import {
   getBotsByBotIdSkillsCatalog,
   postBotsByBotIdQuickActionsExecute,
 } from '@memohai/sdk'
+import type { ConversationUiTurn } from '@memohai/sdk'
 import type {
   BotSessionActivityEvent,
   CommandEventResponse,
   FetchMessagesOptions,
-  Message,
   RequestedSkillSelection,
   UITurn,
 } from './useChat.types'
-
-export async function fetchMessages(
-  botId: string,
-  sessionId: string,
-  options?: FetchMessagesOptions,
-): Promise<Message[]> {
-  const sid = sessionId.trim()
-  if (!sid) throw new Error('session id is required')
-  const { data } = await getBotsByBotIdMessages({
-    path: { bot_id: botId },
-    query: {
-      session_id: sid,
-      limit: options?.limit ?? 30,
-      ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
-    },
-    throwOnError: true,
-  })
-
-  return (data as unknown as { items?: Message[] })?.items ?? []
-}
 
 export async function fetchMessagesUI(
   botId: string,
@@ -42,26 +21,24 @@ export async function fetchMessagesUI(
 ): Promise<UITurn[]> {
   const sid = sessionId.trim()
   if (!sid) throw new Error('session id is required')
-  const response = await client.get({
-    url: '/bots/{bot_id}/messages',
+  const { data } = await getBotsByBotIdMessages({
     path: { bot_id: botId },
     query: {
       session_id: sid,
       limit: options?.limit ?? 30,
-      format: 'ui',
       ...(options?.beforeMessageId?.trim() ? { before_message_id: options.beforeMessageId.trim() } : {}),
       ...(options?.before?.trim() ? { before: options.before.trim() } : {}),
     },
     throwOnError: true,
   })
-
-  return (response.data as { items?: UITurn[] } | undefined)?.items ?? []
+  if (!data) throw new Error('messages response body is required')
+  return serializeUITurns(data.items)
 }
 
 export interface LocateMessageResult {
   items: UITurn[]
-  target_id?: string
-  target_external_message_id?: string
+  target_id: string
+  target_external_message_id: string
 }
 
 export async function locateMessageUI(
@@ -71,7 +48,7 @@ export async function locateMessageUI(
   before = 30,
   after = 30,
 ): Promise<LocateMessageResult> {
-  const response = await getBotsByBotIdMessagesLocate({
+  const { data } = await getBotsByBotIdMessagesLocate({
     path: { bot_id: botId },
     query: {
       session_id: sessionId,
@@ -81,13 +58,19 @@ export async function locateMessageUI(
     },
     throwOnError: true,
   })
-
-  const data = response.data as unknown as LocateMessageResult | undefined
+  if (!data) throw new Error('located message response body is required')
   return {
-    items: data?.items ?? [],
-    target_id: data?.target_id,
-    target_external_message_id: data?.target_external_message_id,
+    items: serializeUITurns(data.items),
+    target_id: data.target_id,
+    target_external_message_id: data.target_external_message_id,
   }
+}
+
+function serializeUITurns(items: ConversationUiTurn[]): UITurn[] {
+  return items.map(item => ({
+    ...item,
+    timestamp: item.timestamp.toISOString(),
+  })) as UITurn[]
 }
 
 function isCommandEvent(value: unknown): value is CommandEventResponse {

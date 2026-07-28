@@ -40,7 +40,6 @@ export function createSessionActions(deps: {
   rememberSession: (session: SessionSummary) => void
   refreshSessionsList: (botId: string) => Promise<void>
   fetchSessionWindow: (botId: string, sessionId: string) => Promise<UITurn[]>
-  withForkAnchor: (session: SessionSummary, turns: UITurn[]) => SessionSummary
   replaceSessionHistory: (botId: string, sessionId: string, turns: UITurn[]) => void
   rescopeCommandToComposer: (botId: string, sessionId: string) => string
   forkFailedMessage: () => string
@@ -195,18 +194,13 @@ export function createSessionActions(deps: {
         generation !== deps.userScopeGeneration()
         || (deps.currentBotId.value ?? '').trim() !== botId
       ) return true
-      const anchored = deps.withForkAnchor(forked, turns)
-      if (anchored !== forked) {
-        deps.upsertSession(anchored)
-        deps.rememberSession(anchored)
-      }
       deps.replaceSessionHistory(botId, forked.id, turns)
       forkedSessionRequested.value = {
         botId,
         viewId: target.viewId,
         expectedSessionId: sessionId,
         sessionId: forked.id,
-        title: (anchored.title ?? options.title ?? '').trim(),
+        title: (forked.title ?? options.title ?? '').trim(),
         explicitSelection: true,
         activate,
         seq: ++forkedSessionRequestSeq,

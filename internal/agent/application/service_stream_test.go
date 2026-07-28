@@ -16,9 +16,11 @@ import (
 )
 
 type recordingMessageService struct {
-	persisted []messagepkg.PersistInput
-	replaced  int
-	deleted   [][]string
+	persisted               []messagepkg.PersistInput
+	replaced                int
+	replacementTurnID       string
+	replacementTurnPosition *int64
+	deleted                 [][]string
 }
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
@@ -90,8 +92,10 @@ func (*recordingMessageService) GetLatestVisibleTurnBySession(context.Context, s
 	return messagepkg.HistoryTurn{}, nil
 }
 
-func (s *recordingMessageService) ReplaceTurn(context.Context, string, string, string, string, string) (messagepkg.HistoryTurn, error) {
+func (s *recordingMessageService) ReplaceTurn(_ context.Context, _, _, replacementTurnID string, replacementTurnPosition *int64, _, _, _ string) (messagepkg.HistoryTurn, error) {
 	s.replaced++
+	s.replacementTurnID = replacementTurnID
+	s.replacementTurnPosition = replacementTurnPosition
 	return messagepkg.HistoryTurn{}, nil
 }
 

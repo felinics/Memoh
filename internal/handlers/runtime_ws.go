@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -111,17 +112,60 @@ type wsMessageAdmission struct {
 	attachmentsPrepared bool
 }
 
-func (a *wsMessageAdmission) build(ctx context.Context, _ sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+func (a *wsMessageAdmission) build(ctx context.Context, handle sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
 	if !a.attachmentsPrepared {
 		a.attachments = a.handler.ingestWSInboundAttachments(ctx, a.botID, a.attachments)
 		a.attachmentsPrepared = true
 	}
 	request := a.request
+	request.TurnID = handle.TurnID
 	request.Attachments = wsRuntimeUIAttachments(a.botID, a.attachments)
 	return sessionruntime.RunAdmissionView{RequestUserTurn: &request}, nil
 }
 
 func (a *wsMessageAdmission) preparedAttachments() []turn.Attachment {
+	return a.attachments
+}
+
+// wsReplacementAdmission publishes a validated retry/edit boundary as part of
+// the run's first authoritative view. Other subscribers can therefore remove
+// the replaced history tail before any model output arrives.
+type wsReplacementAdmission struct {
+	handler             *LocalChannelHandler
+	botID               string
+	kind                string
+	prepareAnchor       func(context.Context) (string, error)
+	replacementUserTurn *chatview.UITurn
+	attachments         []turn.Attachment
+	attachmentsPrepared bool
+}
+
+func (a *wsReplacementAdmission) build(ctx context.Context, handle sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+	if a.prepareAnchor == nil {
+		return sessionruntime.RunAdmissionView{}, errors.New("replacement operation validator is not configured")
+	}
+	replaceFromMessageID, err := a.prepareAnchor(ctx)
+	if err != nil {
+		return sessionruntime.RunAdmissionView{}, err
+	}
+	operation := &sessionruntime.RunOperationView{
+		Kind:                 a.kind,
+		ReplaceFromMessageID: replaceFromMessageID,
+	}
+	if a.replacementUserTurn != nil {
+		if !a.attachmentsPrepared {
+			a.attachments = a.handler.ingestWSInboundAttachments(ctx, a.botID, a.attachments)
+			a.attachmentsPrepared = true
+		}
+		replacement := *a.replacementUserTurn
+		replacement.TurnID = handle.TurnID
+		replacement.Attachments = wsRuntimeUIAttachments(a.botID, a.attachments)
+		operation.ReplacementUserTurn = &replacement
+	}
+	return sessionruntime.RunAdmissionView{Operation: operation}, nil
+}
+
+func (a *wsReplacementAdmission) preparedAttachments() []turn.Attachment {
 	return a.attachments
 }
 

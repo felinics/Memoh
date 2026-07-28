@@ -1913,6 +1913,7 @@ func recordedMessages(inputs []messagepkg.PersistInput) []messagepkg.Message {
 			Content:        input.Content,
 			DisplayContent: input.DisplayText,
 			Metadata:       input.Metadata,
+			TurnID:         firstNonEmpty(input.TurnID, "test-turn"),
 		})
 	}
 	return messages

@@ -2044,21 +2044,31 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				SessionID: sessionID,
 				MessageID: messageID,
 			}.encode()
-			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws retry stream error", retrySubmission, nil, nil,
-				func(ctx context.Context, runRef wsTurnRef, _ wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
-					return h.agentService.RetryLatestMessageWS(ctx, application.RetryLatestMessageInput{
-						BotID:                  botID,
-						SessionID:              sessionID,
-						RunID:                  runRef.RunID,
-						MessageID:              messageID,
-						ActorChannelIdentityID: channelIdentityID,
-						ActorUserID:            channelIdentityID,
-						ChatToken:              bearerToken,
-						Model:                  strings.TrimSpace(msg.ModelID),
-						ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
-						WorkspaceTargetID:      workspaceTargetID,
-						ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
-					}, eventCh, abortCh)
+			retryInput := application.RetryLatestMessageInput{
+				BotID:                  botID,
+				SessionID:              sessionID,
+				MessageID:              messageID,
+				ActorChannelIdentityID: channelIdentityID,
+				ActorUserID:            channelIdentityID,
+				ChatToken:              bearerToken,
+				Model:                  strings.TrimSpace(msg.ModelID),
+				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
+				WorkspaceTargetID:      workspaceTargetID,
+				ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
+			}
+			retryAdmission := &wsReplacementAdmission{
+				kind: sessionruntime.RunOperationRetry,
+				prepareAnchor: func(ctx context.Context) (string, error) {
+					return h.agentService.PrepareRetryLatestMessageOperation(ctx, sessionID, messageID)
+				},
+			}
+			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws retry stream error", retrySubmission, retryAdmission.build, nil,
+				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
+					input := retryInput
+					input.RunID = runRef.RunID
+					input.TurnID = admittedTurn.TurnID
+					input.TurnPosition = admittedTurn.Position
+					return h.agentService.RetryLatestMessageWS(ctx, input, eventCh, abortCh)
 				},
 			)
 
@@ -2115,24 +2125,43 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				MessageID:   messageID,
 				Attachments: digestWSAttachments(msg.Attachments),
 			}.encode()
-			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws edit stream error", editSubmission, nil, nil,
-				func(ctx context.Context, runRef wsTurnRef, _ wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
-					ingestedAttachments := h.ingestWSInboundAttachments(ctx, botID, chatAttachments)
-					return h.agentService.EditLatestMessageWS(ctx, application.EditLatestMessageInput{
-						BotID:                  botID,
-						SessionID:              sessionID,
-						RunID:                  runRef.RunID,
-						MessageID:              messageID,
-						Text:                   text,
-						Attachments:            ingestedAttachments,
-						ActorChannelIdentityID: channelIdentityID,
-						ActorUserID:            channelIdentityID,
-						ChatToken:              bearerToken,
-						Model:                  strings.TrimSpace(msg.ModelID),
-						ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
-						WorkspaceTargetID:      workspaceTargetID,
-						ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
-					}, eventCh, abortCh)
+			editInput := application.EditLatestMessageInput{
+				BotID:                  botID,
+				SessionID:              sessionID,
+				MessageID:              messageID,
+				Text:                   text,
+				ActorChannelIdentityID: channelIdentityID,
+				ActorUserID:            channelIdentityID,
+				ChatToken:              bearerToken,
+				Model:                  strings.TrimSpace(msg.ModelID),
+				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
+				WorkspaceTargetID:      workspaceTargetID,
+				ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
+			}
+			editAdmission := &wsReplacementAdmission{
+				handler: h,
+				botID:   botID,
+				kind:    sessionruntime.RunOperationEdit,
+				prepareAnchor: func(ctx context.Context) (string, error) {
+					return h.agentService.PrepareEditLatestMessageOperation(ctx, sessionID, messageID)
+				},
+				replacementUserTurn: &chatview.UITurn{
+					Role:         "user",
+					Text:         text,
+					Timestamp:    time.Now().UTC(),
+					Platform:     h.channelType.String(),
+					SenderUserID: channelIdentityID,
+				},
+				attachments: chatAttachments,
+			}
+			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws edit stream error", editSubmission, editAdmission.build, nil,
+				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
+					input := editInput
+					input.RunID = runRef.RunID
+					input.TurnID = admittedTurn.TurnID
+					input.TurnPosition = admittedTurn.Position
+					input.Attachments = editAdmission.preparedAttachments()
+					return h.agentService.EditLatestMessageWS(ctx, input, eventCh, abortCh)
 				},
 			)
 

@@ -78,6 +78,16 @@ func sendChat(connection *websocket.Conn, sessionID, invocationID, text string) 
 	})
 }
 
+func sendEdit(connection *websocket.Conn, sessionID, invocationID, messageID, text string) error {
+	return connection.WriteJSON(map[string]any{
+		"type":          "edit_message",
+		"invocation_id": invocationID,
+		"session_id":    sessionID,
+		"message_id":    messageID,
+		"text":          text,
+	})
+}
+
 func subscribeRuntime(connection *websocket.Conn, sessionID string, cursor ...map[string]any) error {
 	message := map[string]any{
 		"type":       "runtime_subscribe",

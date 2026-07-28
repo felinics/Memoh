@@ -83,7 +83,7 @@ describe('assistant stream registry', () => {
     const entry = track(registry, 'invocation-1')
 
     expect(registry.requestAbort('invocation-1')).toBe('')
-    expect(registry.bindRunId('invocation-1', 'run-1')).toMatchObject({
+    expect(registry.bindRunId('invocation-1', 'run-1', 'turn-1')).toMatchObject({
       runId: 'run-1',
       abortRequested: true,
     })

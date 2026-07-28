@@ -167,6 +167,101 @@ func TestSROBS003ConcurrentSubscribersConvergeAfterInitiatorDisconnects(t *testi
 	assertOrderedRunEvents(t, append(observerEvents, continued...), admitted.RunID)
 }
 
+func TestSROBS003EditPublishesAuthoritativeReplacementToEverySubscriber(t *testing.T) {
+	fixture := requireFixture(t, true)
+	prepareFakeModel(t)
+
+	sessionID := mustCreateSession(t, fixture, "edit-subscribers")
+	initialMarker := uniqueMarker("edit-old")
+	initialInvocationID := "invocation-" + initialMarker
+	initialText := directive(initialMarker, 1, 0) + " old prompt"
+	env := loadEnvironment()
+
+	initiator := mustDial(t, env.primaryURL, fixture)
+	defer closeWebSocket(initiator)
+	observer := mustDial(t, env.secondaryURL, fixture)
+	defer closeWebSocket(observer)
+	mustSubscribeAndReadSnapshot(t, initiator, sessionID)
+	mustSubscribeAndReadSnapshot(t, observer, sessionID)
+
+	_, initialRun := mustSendAndAccept(t, fixture, initiator, sessionID, initialInvocationID, initialText)
+	mustReadRunTerminal(t, initiator, initialRun.RunID)
+	if !globalFakeModel.WaitIdle(10 * time.Second) {
+		t.Fatal("fake model did not complete the initial edit fixture")
+	}
+	initialHistory, err := fixture.api.history(fixture.botID, sessionID)
+	if err != nil {
+		t.Fatalf("load initial edit history: %v", err)
+	}
+	oldUserMessageID := historyMessageIDByRole(initialHistory, "user")
+	if oldUserMessageID == "" {
+		t.Fatalf("initial history has no user message id: %#v", initialHistory)
+	}
+	positionBeforeEdit, err := requireLedger(t).nextTurnPosition(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("read next turn position before edit: %v", err)
+	}
+
+	editMarker := uniqueMarker("edit-new")
+	editInvocationID := "invocation-" + editMarker
+	editedText := directive(editMarker, 3, 20) + " edited prompt"
+	if err := sendEdit(initiator, sessionID, editInvocationID, oldUserMessageID, editedText); err != nil {
+		t.Fatalf("send edit: %v", err)
+	}
+	_, accepted, err := readAccepted(initiator, editInvocationID, eventTimeout)
+	if err != nil {
+		t.Fatalf("read edit acceptance: %v", err)
+	}
+	observerEvents, err := readUntil(observer, eventTimeout, func(event wsEvent) bool {
+		return event.Type == "runtime_delta" &&
+			eventRunID(event) == accepted.RunID &&
+			nestedString(event.Delta, "replace_from_message_id") == oldUserMessageID
+	})
+	if err != nil {
+		t.Fatalf("SR-OBS-003: observer did not receive the edit boundary: %v; events=%#v", err, observerEvents)
+	}
+	operationEvent := observerEvents[len(observerEvents)-1]
+	if got := nestedString(operationEvent.Delta, "kind"); got != "edit" {
+		t.Errorf("SR-OBS-003: operation kind = %q, want edit", got)
+	}
+	if got := nestedString(operationEvent.Delta, "text"); got != editedText {
+		t.Errorf("SR-OBS-003: replacement user text = %q, want %q", got, editedText)
+	}
+	continued, err := readUntil(observer, eventTimeout, func(event wsEvent) bool {
+		return eventRunID(event) == accepted.RunID && isTerminal(event)
+	})
+	if err != nil {
+		t.Fatalf("SR-OBS-003: observer did not reach edited terminal state: %v; events=%#v", err, continued)
+	}
+	terminal := mustWaitRunState(t, sessionID, editInvocationID, func(run sessionRunRecord) bool {
+		return run.State == "completed"
+	})
+	if terminal.RunID != accepted.RunID || terminal.TurnID != eventTurnID(accepted) {
+		t.Errorf("SR-OBS-003: edit identity diverged: accepted=%#v terminal=%#v", accepted, terminal)
+	}
+	if terminal.TurnPosition != positionBeforeEdit {
+		t.Errorf("SR-TURN-001: edit turn_position = %d, want %d", terminal.TurnPosition, positionBeforeEdit)
+	}
+	positionAfterEdit, err := requireLedger(t).nextTurnPosition(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("read next turn position after edit: %v", err)
+	}
+	if positionAfterEdit != positionBeforeEdit+1 {
+		t.Errorf("SR-TURN-001: edit advanced next_turn_position from %d to %d, want %d", positionBeforeEdit, positionAfterEdit, positionBeforeEdit+1)
+	}
+	assertTerminalHistory(t, terminal)
+	finalHistory, err := fixture.api.history(fixture.botID, sessionID)
+	if err != nil {
+		t.Fatalf("load edited history: %v", err)
+	}
+	if !historyContainsRoleText(finalHistory, "user", editedText) {
+		t.Errorf("SR-OBS-003: edited user turn is missing from history: %#v", finalHistory)
+	}
+	if historyContainsRoleText(finalHistory, "user", initialText) {
+		t.Errorf("SR-OBS-003: superseded user turn remains visible: %#v", finalHistory)
+	}
+}
+
 func TestSRCTL001ReconnectAbortReachesOwnerAndIsAcknowledged(t *testing.T) {
 	fixture := requireFixture(t, true)
 	prepareFakeModel(t)
