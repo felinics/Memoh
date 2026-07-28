@@ -1275,37 +1275,22 @@
     "nameRequired": "请填写名称",
     "searchPlaceholder": "搜索提供方...",
     "emptyTitle": "暂无记忆提供方",
-    "emptyDescription": "添加记忆提供方以启用 Bot 的长期记忆功能",
     "saveSuccess": "记忆提供方已保存",
     "deleteSuccess": "记忆提供方已删除",
     "deleteFailed": "删除记忆提供方失败",
     "deleteConfirm": "确定要删除该记忆提供方吗？使用它的 Bot 将失去记忆访问。",
     "name": "名称",
     "namePlaceholder": "输入提供方名称",
-    "builtinMode": "内置记忆模式",
-    "builtinModeDescription": "选择内置记忆提供方为 Bot 存储和检索记忆的方式。",
-    "modeLabel": "记忆方式",
-    "modeHint": "决定智能体如何存取长期记忆。",
     "advanced": "高级",
     "advancedHint": "面向进阶场景的自定义记忆后端。",
     "graphTitle": "记忆图谱",
-    "graphDescription": "记忆以相互关联的节点形式存入数据库。召回时通过共享的人物、主题和时间找到相关记忆，而非仅靠关键词重叠。",
     "graphNodes": "记忆",
     "graphEdges": "关联",
-    "graphFiles": "文件",
-    "graphDegraded": "辅助索引降级，部分语义检索可能不可用。记忆仍正常存储并可通过关联检索。",
-    "semanticIndexEntries": "语义索引",
-    "semanticIndexTitle": "语义索引",
     "semanticIndexDescription": "Postgres 部署可用 Embedding 模型和 pgvector 为图谱召回提供语义起点。SQLite 和 Local 保持纯图谱。",
     "semanticEmbeddingModel": "Embedding 模型",
     "semanticEmbeddingModelPlaceholder": "选择 Embedding 模型",
-    "semanticIndexHealthy": "正常",
-    "semanticIndexUnavailable": "暂不可用",
     "modeNames": {
       "graph": "图谱"
-    },
-    "modeDescriptions": {
-      "graph": "将记忆存为相互关联的节点（人物、主题、事件），通过关系召回，而非仅靠关键词。"
     },
     "providerNames": {
       "builtin": "内置",
@@ -1313,8 +1298,7 @@
       "openviking": "OpenViking"
     },
     "graphViewHint": "浏览记忆之间的关联——枢纽、集群和孤立节点。",
-    "graphEmpty": "还没有记忆——添加一些以查看图谱。",
-    "notConfigured": "未配置"
+    "graphEmpty": "还没有记忆——添加一些以查看图谱。"
   },
   "network": {
     "title": "网络",

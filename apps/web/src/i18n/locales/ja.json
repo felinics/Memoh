@@ -1227,37 +1227,22 @@
     "nameRequired": "名前を入力してください",
     "searchPlaceholder": "プロバイダーを検索...",
     "emptyTitle": "メモリプロバイダーがありません",
-    "emptyDescription": "メモリプロバイダーを追加して、Bot の長期メモリを有効にします",
     "saveSuccess": "メモリプロバイダーを保存しました",
     "deleteSuccess": "メモリプロバイダーを削除しました",
     "deleteFailed": "メモリプロバイダーの削除に失敗しました",
     "deleteConfirm": "このメモリプロバイダーを削除してもよろしいですか？これを使用する Bot はメモリアクセスを失います。",
     "name": "名前",
     "namePlaceholder": "プロバイダー名を入力してください",
-    "builtinMode": "組み込みメモリモード",
-    "builtinModeDescription": "組み込みメモリプロバイダーが Bot のメモリを保存および取得する方法を選択します。",
-    "modeLabel": "メモリモード",
-    "modeHint": "Botが長期記憶を保存し、呼び出す方法。",
     "advanced": "詳細",
     "advancedHint": "高度な設定向けのカスタムメモリバックエンド。",
     "graphTitle": "メモリグラフ",
-    "graphDescription": "記憶はデータベース内の関連ノードとして保存されます。共有する人物、トピック、時間を通じて関連する記憶を見つけます。",
     "graphNodes": "記憶",
     "graphEdges": "リンク",
-    "graphFiles": "ファイル",
-    "graphDegraded": "補助インデックスが劣化しています。一部のセマンティック検索が利用できない可能性があります。記憶は引き続き保存され、関係性で検索できます。",
-    "semanticIndexEntries": "セマンティック",
-    "semanticIndexTitle": "セマンティックインデックス",
     "semanticIndexDescription": "Postgres では Embedding Model と pgvector でグラフ想起のセマンティック起点を作れます。SQLite と Local はグラフのみです。",
     "semanticEmbeddingModel": "Embedding Model",
     "semanticEmbeddingModelPlaceholder": "Embedding Modelを選択",
-    "semanticIndexHealthy": "正常",
-    "semanticIndexUnavailable": "利用不可",
     "modeNames": {
       "graph": "グラフ"
-    },
-    "modeDescriptions": {
-      "graph": "記憶を相互に関連するノード（人物、トピック、イベント）として保存し、キーワードだけでなく関係性を通じて想起します。"
     },
     "providerNames": {
       "builtin": "内蔵",
@@ -1265,8 +1250,7 @@
       "openviking": "オープンバイキング"
     },
     "graphViewHint": "記憶間のつながりを閲覧 — ハブ、クラスター、孤立ノード。",
-    "graphEmpty": "記憶がまだありません — 追加するとグラフが表示されます。",
-    "notConfigured": "未設定"
+    "graphEmpty": "記憶がまだありません — 追加するとグラフが表示されます。"
   },
   "network": {
     "title": "ネットワーク",

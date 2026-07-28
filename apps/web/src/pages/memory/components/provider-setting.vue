@@ -7,15 +7,15 @@
     <!-- Header card: identity + the single destructive action, mirroring the
          provider-detail header language (icon · name/type · confirm-gated
          delete) instead of a bare title above a hairline. -->
-    <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
+    <section class="flex items-center gap-3 rounded-menu-shell border border-border bg-card px-4 py-3">
       <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
         <Brain class="size-5 text-muted-foreground" />
       </span>
       <div class="min-w-0 flex-1">
-        <h3 class="truncate text-sm font-semibold text-foreground">
+        <h3 class="truncate text-control font-semibold text-foreground">
           {{ curProvider.name }}
         </h3>
-        <p class="mt-0.5 truncate text-xs text-muted-foreground">
+        <p class="mt-0.5 truncate text-body text-muted-foreground">
           {{ $t(`memory.providerNames.${curProvider.provider}`, curProvider.provider ?? '') }}
         </p>
       </div>

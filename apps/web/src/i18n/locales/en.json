@@ -1275,37 +1275,22 @@
     "nameRequired": "Name is required",
     "searchPlaceholder": "Search providers...",
     "emptyTitle": "No Memory Providers",
-    "emptyDescription": "Add a memory provider to enable long-term memory for your bots",
     "saveSuccess": "Memory provider saved",
     "deleteSuccess": "Memory provider deleted",
     "deleteFailed": "Failed to delete memory provider",
     "deleteConfirm": "Are you sure you want to delete this memory provider? Bots using it will lose memory access.",
     "name": "Name",
     "namePlaceholder": "Enter provider name",
-    "builtinMode": "Built-in Memory Mode",
-    "builtinModeDescription": "Choose how the built-in memory provider stores and retrieves memory for bots.",
-    "modeLabel": "Memory mode",
-    "modeHint": "How bots store and recall long-term memory.",
     "advanced": "Advanced",
     "advancedHint": "Custom memory backends for advanced setups.",
     "graphTitle": "Memory Graph",
-    "graphDescription": "Memories are stored as connected nodes in the database. Recall finds related memories through shared people, topics, and time — not just keyword overlap.",
     "graphNodes": "Memories",
     "graphEdges": "Links",
-    "graphFiles": "Files",
-    "graphDegraded": "Auxiliary index is degraded; some semantic recall may be unavailable. Memories are still stored and searchable by relationship.",
-    "semanticIndexEntries": "Semantic",
-    "semanticIndexTitle": "Semantic Index",
     "semanticIndexDescription": "Postgres deployments can use an embedding model with pgvector for semantic graph seeds. SQLite and Local stay graph-only.",
     "semanticEmbeddingModel": "Embedding Model",
     "semanticEmbeddingModelPlaceholder": "Select embedding model",
-    "semanticIndexHealthy": "Healthy",
-    "semanticIndexUnavailable": "Unavailable",
     "modeNames": {
       "graph": "Graph"
-    },
-    "modeDescriptions": {
-      "graph": "Store memories as a graph of connected nodes (people, topics, events) and recall through relationships, not just keywords."
     },
     "providerNames": {
       "builtin": "Built-in",
@@ -1313,8 +1298,7 @@
       "openviking": "OpenViking"
     },
     "graphViewHint": "Browse the connections between memories — hubs, clusters, and orphans.",
-    "graphEmpty": "No memories yet — add some to see the graph.",
-    "notConfigured": "Not configured"
+    "graphEmpty": "No memories yet — add some to see the graph."
   },
   "network": {
     "title": "Network",

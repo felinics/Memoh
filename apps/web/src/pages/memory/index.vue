@@ -1,16 +1,14 @@
 <script setup lang="ts">
-import { computed, provide, ref, watch } from 'vue'
+import { computed, provide, ref } from 'vue'
 import { useQuery } from '@pinia/colada'
-import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, Spinner } from '@felinic/ui'
+import { BackendCard, Button, PageShell, SectionGroup } from '@felinic/ui'
 import { getMemoryProviders, getMemoryProvidersMeta } from '@memohai/sdk'
 import type { AdaptersProviderGetResponse, AdaptersProviderMeta } from '@memohai/sdk'
-import { Brain, ChevronRight } from 'lucide-vue-next'
+import { Brain } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import BuiltinConfig from './components/builtin-config.vue'
 import ProviderSetting from './components/provider-setting.vue'
-import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
-import PageShell from '@/components/page-shell/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import { providerConfigDefaults } from '@/utils/provider-template'
@@ -57,18 +55,10 @@ const externalProviders = computed<AdaptersProviderGetResponse[]>(() => MEMORY_P
 const curProvider = ref<AdaptersProviderGetResponse | null>(null)
 provide('curMemoryProvider', curProvider)
 
-const advancedOpen = ref(false)
-
-// The built-in config owns the mode/model draft + save; the Save button lives in
+// The built-in config owns the model draft + save; the Save button lives in
 // this page's header (#actions), so read its state off the child instead of
 // hoisting all the memory logic up here.
 const builtinRef = ref<InstanceType<typeof BuiltinConfig> | null>(null)
-
-// Reveal Advanced on first load only when the user already configured an
-// external backend — a set-up backend should never sit hidden — while leaving
-// it collapsed for the common built-in-only case. `didAutoOpen` makes this a
-// one-shot so a later manual collapse isn't fought by refreshed data.
-let didAutoOpen = false
 
 // Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
 const {
@@ -87,13 +77,6 @@ const {
   isReady: () => providerData.value !== undefined,
 })
 
-watch(externalProviders, (items) => {
-  if (!didAutoOpen && items.length > 0) {
-    advancedOpen.value = true
-    didAutoOpen = true
-  }
-}, { immediate: true })
-
 function handleMaterialized(provider: AdaptersProviderGetResponse) {
   if (!provider.provider) return
   optimisticProviders.value = {
@@ -101,6 +84,14 @@ function handleMaterialized(provider: AdaptersProviderGetResponse) {
     [provider.provider]: provider,
   }
   curProvider.value = provider
+}
+
+// BackendCard subtitle: the provider TYPE name, only when it adds information —
+// an unconfigured draft's display name IS the type name, and showing it twice
+// reads as a stutter ("Mem0 / Mem0").
+function providerSubtitle(provider: AdaptersProviderGetResponse): string {
+  const typeName = t(`memory.providerNames.${provider.provider}`, provider.provider ?? '')
+  return provider.name && provider.name !== typeName ? typeName : ''
 }
 </script>
 
@@ -111,20 +102,17 @@ function handleMaterialized(provider: AdaptersProviderGetResponse) {
       v-if="view === 'list'"
       :title="t('sidebar.memory')"
     >
-      <!-- Root-page manual save: switching mode / picking a model provisions an
-           index backend, so it batches behind one deliberate Save rather than
-           auto-saving each toggle. It lives in the header (disabled while synced)
-           — the house pattern for a PageShell page — not a footer band inside
-           the card. -->
+      <!-- Root-page manual save: picking an embedding model provisions an index
+           backend, so it batches behind one deliberate Save rather than
+           auto-saving. It lives in the header (disabled while synced) — the
+           house pattern for a PageShell page — not a footer band inside the
+           card. -->
       <template #actions>
         <Button
           :disabled="!builtinRef?.hasChanges || builtinRef?.saveLoading"
+          :loading="builtinRef?.saveLoading"
           @click="builtinRef?.save()"
         >
-          <Spinner
-            v-if="builtinRef?.saveLoading"
-            class="size-3"
-          />
           {{ t('common.saveChanges') }}
         </Button>
       </template>
@@ -135,46 +123,30 @@ function handleMaterialized(provider: AdaptersProviderGetResponse) {
           :provider="builtinProvider"
         />
 
-        <!-- External backends are an advanced, rarely-touched concern, so they
-             stay behind a disclosure to keep the common built-in path clean
-             (99/1). The reveal is a plain, in-language group — no page-splitting
-             hairline; the section rhythm above already separates it. -->
-        <Collapsible v-model:open="advancedOpen">
-          <CollapsibleTrigger
-            class="flex items-center gap-1.5 rounded-[var(--radius-control)] px-2 py-1 text-label font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronRight
-              class="size-4 transition-transform"
-              :class="advancedOpen && 'rotate-90'"
-            />
-            {{ t('memory.advanced') }}
-          </CollapsibleTrigger>
-
-          <CollapsibleContent class="space-y-3 pt-3">
-            <p class="px-2 text-xs text-muted-foreground">
-              {{ t('memory.advancedHint') }}
-            </p>
-
-            <div
-              v-if="externalProviders.length > 0"
-              class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+        <!-- External backends: a rare concern, listed plainly below the built-in
+             group rather than hidden behind a disclosure — two quiet cards do
+             not need a collapse, and the hand-rolled one fought the section
+             rhythm. -->
+        <SectionGroup
+          :title="t('memory.advanced')"
+          :description="t('memory.advancedHint')"
+        >
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <BackendCard
+              v-for="provider in externalProviders"
+              :key="provider.provider"
+              :name="provider.name ?? ''"
+              :subtitle="providerSubtitle(provider)"
+              @click="openExternal(provider)"
             >
-              <BackendCard
-                v-for="provider in externalProviders"
-                :key="provider.provider"
-                :name="provider.name ?? ''"
-                :subtitle="t(`memory.providerNames.${provider.provider}`, provider.provider ?? '')"
-                @click="openExternal(provider)"
-              >
-                <template #leading>
-                  <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-                    <Brain class="size-5 text-muted-foreground" />
-                  </span>
-                </template>
-              </BackendCard>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+              <template #leading>
+                <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                  <Brain class="size-5 text-muted-foreground" />
+                </span>
+              </template>
+            </BackendCard>
+          </div>
+        </SectionGroup>
       </div>
     </PageShell>
 
