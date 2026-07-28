@@ -47,7 +47,7 @@
     "cronstrue": "^3.24.0",
     "dockview-vue": "^7.0.2",
     "echarts": "^6.1.0",
-    "katex": "^0.16.28",
+    "katex": "^0.18.1",
     "lucide-vue-next": "^0.562.0",
     "markstream-vue": "1.0.1-beta.5",
     "mermaid": "^11.16.0",

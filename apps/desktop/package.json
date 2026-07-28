@@ -55,7 +55,7 @@
     "electron": "^42.0.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
-    "katex": "^0.16.37",
+    "katex": "^0.18.1",
     "lucide-vue-next": "^0.562.0",
     "markstream-vue": "1.0.1-beta.5",
     "monaco-editor": "^0.52.2",
