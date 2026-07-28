@@ -351,6 +351,25 @@
   }
 }
 
+:root {
+  /* Code-font CJK coverage (#851). The stock mono stack (used by the
+   * `font-mono` utility: approval cards, inline code, diffs) has no CJK
+   * members, so code CJK fell to the OS per-lang pick — under lang="zh" the
+   * weight shave below then dropped it onto PingFang's Light face and 12px
+   * code Chinese read thin/blurry. Mirror --font-sans' CJK tail (felinic
+   * :root) so code Chinese renders the same MiSans as the rest of the UI,
+   * with system CJK behind it. Latin is always claimed by the mono families
+   * first; MiSans' unicode-range subsets claim no color emoji, so neither
+   * changes. Kept in sync with CODE_FONT_CJK_FALLBACK in
+   * store/settings/typography.ts (the runtime inline override, which wins
+   * over this when the user customizes the code font). */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", "MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", monospace;
+  /* Pre-boot default for var(--memoh-code-font-family, …) consumers
+   * (markstream code below); once settings apply, the inline variable
+   * carries the same tail from typography.ts. */
+  --memoh-code-font-family-default: ui-monospace, monospace, "MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC";
+}
+
 @layer components {
   [data-chat-content] .prose {
     /* Chat reading body: 16px. This is the container default; the actual glyph
@@ -490,8 +509,8 @@
 
   /* Typography scale */
   --ms-font-sans: var(--memoh-ui-font-family, inherit);
-  --ms-font-mono: var(--memoh-code-font-family, ui-monospace, monospace);
-  --markstream-code-font-family: var(--memoh-code-font-family, ui-monospace, monospace);
+  --ms-font-mono: var(--memoh-code-font-family, var(--memoh-code-font-family-default));
+  --markstream-code-font-family: var(--memoh-code-font-family, var(--memoh-code-font-family-default));
   --ms-text-body: inherit;
   --ms-leading-body: var(--chat-leading);
   /* Heading scale is em-relative (tracks the body) and restrained: headings sit
@@ -679,7 +698,7 @@
   padding: 0.125rem 0.375rem;
   font-size: 0.875em;
   font-weight: 480;
-  font-family: var(--memoh-code-font-family, ui-monospace, monospace);
+  font-family: var(--memoh-code-font-family, var(--memoh-code-font-family-default));
 }
 
 /* Code block container — soft rounded frame */
@@ -687,7 +706,7 @@
   margin: 1rem 0;
   overflow: hidden;
   font-size: var(--memoh-code-font-size, 13px);
-  font-family: var(--memoh-code-font-family, ui-monospace, monospace);
+  font-family: var(--memoh-code-font-family, var(--memoh-code-font-family-default));
 }
 
 /* markstream-vue 1.0.7 renamed .code-block-content to .code-block-shell-content
@@ -695,7 +714,7 @@
  * so the line-height override keeps applying. */
 .markstream-vue .code-block-container .code-block-shell-content {
   font-size: var(--memoh-code-font-size, 13px);
-  font-family: var(--memoh-code-font-family, ui-monospace, monospace);
+  font-family: var(--memoh-code-font-family, var(--memoh-code-font-family-default));
   line-height: 1.5;
 }
 

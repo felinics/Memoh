@@ -8,6 +8,7 @@ import { isColorSchemeId, type ColorSchemeId } from '@/constants/color-schemes'
 import {
   applyTypographyVariables,
   cssFontFamilyDeclaration,
+  cssCodeFontFamilyStyleValue,
   DEFAULT_CODE_FONT_FAMILY,
   DEFAULT_CODE_FONT_SIZE_PX,
   DEFAULT_UI_FONT_FAMILY,
@@ -55,7 +56,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const shikiThemeDark = useStorage<BundledTheme>('shiki-theme-dark', DEFAULT_SHIKI_THEME_DARK)
   const mermaidTheme = useStorage<MermaidTheme>('mermaid-theme', DEFAULT_MERMAID_THEME)
   const uiFontStack = computed(() => cssFontFamilyDeclaration(uiFontFamily.value, DEFAULT_UI_FONT_FAMILY))
-  const codeFontStack = computed(() => cssFontFamilyDeclaration(codeFontFamily.value, DEFAULT_CODE_FONT_FAMILY))
+  const codeFontStack = computed(() => cssCodeFontFamilyStyleValue(codeFontFamily.value))
   const shikiThemes = computed(() => ({ light: shikiThemeLight.value, dark: shikiThemeDark.value }))
 
   // Expose the resolved active color mode as the single source of truth.

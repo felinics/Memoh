@@ -4,6 +4,19 @@ export const DEFAULT_CODE_FONT_FAMILY = 'ui-monospace, monospace'
 export const DEFAULT_UI_FONT_SIZE_PX = 16
 export const DEFAULT_CODE_FONT_SIZE_PX = 13
 
+// CJK tail appended to EVERY code stack (default or user-custom). The Latin
+// mono families above carry no CJK members, so without this the glyphs fall to
+// whatever per-lang font the OS picks — under <html lang="zh"> the :lang(zh)
+// weight shave (style.css) drops the request to ~315, which lands on PingFang's
+// Light static face and renders visibly thin/blurry at 12–13px (#851). MiSans
+// leads so code CJK matches the rest of the UI; system CJK fonts follow for
+// glyphs outside MiSans' subset ranges. Latin is always claimed earlier by the
+// mono families, and MiSans' unicode-range subsets claim no color-emoji glyphs,
+// so neither Latin nor emoji rendering changes. The CSS fallback lists in
+// style.css (var(--memoh-code-font-family, …)) mirror this tail for the
+// pre-boot frame — keep them in sync.
+export const CODE_FONT_CJK_FALLBACK = 'MiSans, PingFang SC, Hiragino Sans GB, Microsoft YaHei UI, Noto Sans SC'
+
 const MIN_UI_FONT_SIZE_PX = 12
 const MAX_UI_FONT_SIZE_PX = 20
 const MIN_CODE_FONT_SIZE_PX = 11
@@ -115,6 +128,18 @@ export function cssFontFamilyDeclaration(value: unknown, fallback: string): stri
   return cssFontFamilyStyleValue(value, fallback)
 }
 
+// Code stacks only: the effective family list with the CJK tail appended. Goes
+// through cssFontStack first, so the tail lands AFTER the default fallback
+// (keeping it behind every Latin family the user asked for) and is present even
+// when the user stack ends in a generic family (where cssFontStack appends
+// nothing). Consumers: applyTypographyVariables, settings store codeFontStack
+// (monaco / markdown / html-preview), appearance preview.
+export function cssCodeFontFamilyStyleValue(value: unknown): string {
+  const base = cssFontFamilyStyleValue(value, DEFAULT_CODE_FONT_FAMILY)
+  const tail = cssFontFamilyStyleValue(CODE_FONT_CJK_FALLBACK, 'monospace')
+  return `${base}, ${tail}`
+}
+
 export function cssFontFamilyStyleValue(value: unknown, fallback: string): string {
   return splitFontFamilyList(cssFontStack(value, fallback))
     .map((family) => serializeFontFamily(family, fallback))
@@ -211,7 +236,7 @@ export function applyTypographyVariables(options: {
   const style = document.documentElement.style
 
   style.setProperty('--memoh-ui-font-family', cssFontFamilyDeclaration(options.uiFontFamily, DEFAULT_UI_FONT_FAMILY))
-  style.setProperty('--memoh-code-font-family', cssFontFamilyDeclaration(options.codeFontFamily, DEFAULT_CODE_FONT_FAMILY))
+  style.setProperty('--memoh-code-font-family', cssCodeFontFamilyStyleValue(options.codeFontFamily))
 
   // Tailwind's preflight resolves body/code fonts through --font-sans /
   // --font-mono at runtime. Override them only for explicit customizations so
@@ -222,7 +247,7 @@ export function applyTypographyVariables(options: {
     style.removeProperty('--font-sans')
   }
   if (codeFamily) {
-    style.setProperty('--font-mono', cssFontFamilyDeclaration(codeFamily, DEFAULT_CODE_FONT_FAMILY))
+    style.setProperty('--font-mono', cssCodeFontFamilyStyleValue(codeFamily))
   } else {
     style.removeProperty('--font-mono')
   }
