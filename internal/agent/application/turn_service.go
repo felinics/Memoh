@@ -151,17 +151,16 @@ func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	}
 }
 
-// closeInject closes the inject channel exactly once. Safe against a
-// concurrent Inject: the pump cancels the run context before closing, so
-// any in-flight Inject unblocks via ctx.Done and drops the mutex first.
-func (h *runHandle) closeInject() {
+// disableInject stops direct handle injection before the session runtime
+// finishes the run. The session runtime owns closing the shared channel so its
+// routed steer sender and the close are serialized by the same lock.
+func (h *runHandle) disableInject() {
 	h.injectMu.Lock()
 	defer h.injectMu.Unlock()
 	if h.injectClosed {
 		return
 	}
 	h.injectClosed = true
-	close(h.inject)
 }
 
 // finish records the run's terminal state and releases the thread's slot. Runs
@@ -222,7 +221,7 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, 
 	defer close(h.events)
 	defer close(h.errs)
 	defer h.finish()
-	defer h.closeInject()
+	defer h.disableInject()
 	defer func() {
 		// A canceled run may look like a clean completion here: the
 		// application reacts to ctx cancellation by closing both channels.

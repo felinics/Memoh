@@ -41,6 +41,7 @@ type scriptedAdmitter struct {
 
 	inputs   []sessionruntime.AdmitInput
 	finishes []recordedFinish
+	injects  map[string]chan<- turn.InjectMessage
 }
 
 type recordedFinish struct {
@@ -50,7 +51,10 @@ type recordedFinish struct {
 }
 
 func newScriptedAdmitter() *scriptedAdmitter {
-	return &scriptedAdmitter{started: true}
+	return &scriptedAdmitter{
+		started: true,
+		injects: make(map[string]chan<- turn.InjectMessage),
+	}
 }
 
 func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput) (sessionruntime.Admission, error) {
@@ -63,6 +67,9 @@ func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput
 	runID := "run-" + strconv.Itoa(len(a.inputs))
 	if !a.started {
 		return sessionruntime.Admission{RunID: runID, Replay: true}, nil
+	}
+	if in.Execution.InjectCh != nil {
+		a.injects[runID] = in.Execution.InjectCh
 	}
 	return sessionruntime.Admission{
 		RunID:   runID,
@@ -79,6 +86,10 @@ func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput
 func (a *scriptedAdmitter) FinishRun(_ context.Context, handle sessionruntime.RunHandle, status, message string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if injectCh := a.injects[handle.RunID]; injectCh != nil {
+		close(injectCh)
+		delete(a.injects, handle.RunID)
+	}
 	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: message})
 	return nil
 }
@@ -598,6 +609,45 @@ func TestRunEndClosesInjectChannel(t *testing.T) {
 	}
 	if err := h.Inject(context.Background(), turn.InjectMessage{Text: "late"}); err == nil {
 		t.Fatal("expected error injecting after run end")
+	}
+}
+
+func TestRunEndLeavesSharedInjectCloseToSessionRuntime(t *testing.T) {
+	injectCh := make(chan turn.InjectMessage, 1)
+	chunkCh := make(chan StreamChunk)
+	errCh := make(chan error)
+	close(chunkCh)
+	close(errCh)
+
+	finished := make(chan struct{})
+	h := &runHandle{
+		id:        "run-shared-inject-close",
+		events:    make(chan turn.Event, 1),
+		errs:      make(chan error, 1),
+		ctx:       context.Background(),
+		cancel:    func() {},
+		inject:    injectCh,
+		addAssets: func([]turn.OutboundAssetRef) {},
+		finishRun: func(string, error) {
+			close(injectCh)
+			close(finished)
+		},
+	}
+
+	go h.pump(turn.StartTurnCommand{}, chunkCh, errCh)
+	drainHandle(h)
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("session runtime finisher did not run")
+	}
+	select {
+	case _, ok := <-injectCh:
+		if ok {
+			t.Fatal("expected closed inject channel")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("inject channel was not closed by session runtime")
 	}
 }
 
