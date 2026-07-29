@@ -370,6 +370,86 @@ func TestDiscussNativeTrimsContextToModelBudget(t *testing.T) {
 	}
 }
 
+func TestDiscussNativeHonorsResolvedMessageTokenBudget(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{
+			ContextTokenBudget:        1000000,
+			DiscussMessageTokenBudget: 100,
+			ModelID:                   "model-1",
+		},
+	}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	cmd := discussCommand()
+	cmd.DiscussMessages = []turn.DiscussMessage{
+		{Role: "assistant", Content: strings.Repeat("o", 400)},
+		{Role: "user", Content: "recent question"},
+	}
+
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	if agent.lastConfig == nil {
+		t.Fatal("expected agent to be invoked")
+	}
+	if len(agent.lastConfig.Messages) != 1 {
+		t.Fatalf("trimmed messages = %d, want only recent question", len(agent.lastConfig.Messages))
+	}
+	if got := sdkMessageText(agent.lastConfig.Messages[0]); got != "recent question" {
+		t.Fatalf("retained message = %q, want recent question", got)
+	}
+}
+
+func TestEffectiveDiscussMessageTokenBudget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                string
+		contextTokenBudget  int
+		compactionEnabled   bool
+		compactionThreshold int
+		want                int
+	}{
+		{
+			name:                "enabled threshold caps large model window",
+			contextTokenBudget:  1000000,
+			compactionEnabled:   true,
+			compactionThreshold: 100000,
+			want:                100000,
+		},
+		{
+			name:                "disabled compaction uses reserved model budget",
+			contextTokenBudget:  128000,
+			compactionEnabled:   false,
+			compactionThreshold: 100000,
+			want:                89600,
+		},
+		{
+			name:                "higher threshold does not expand model budget",
+			contextTokenBudget:  100000,
+			compactionEnabled:   true,
+			compactionThreshold: 100000,
+			want:                70000,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := effectiveDiscussMessageTokenBudget(
+				tt.contextTokenBudget,
+				tt.compactionEnabled,
+				tt.compactionThreshold,
+			); got != tt.want {
+				t.Fatalf("effectiveDiscussMessageTokenBudget() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTrimDiscussMessagesUsesReservedBudgetAndLogs(t *testing.T) {
 	messages := []turn.DiscussMessage{
 		{Role: "assistant", Content: strings.Repeat("o", 80)},

@@ -152,7 +152,11 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 
 func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved ResolveRunConfigResult) {
 	runConfig := resolved.RunConfig
-	contextMessages := trimDiscussMessagesByTokens(s.logger, cmd.DiscussMessages, resolved.ContextTokenBudget)
+	messageTokenBudget := resolved.DiscussMessageTokenBudget
+	if messageTokenBudget <= 0 {
+		messageTokenBudget = discussMessageTokenBudget(resolved.ContextTokenBudget)
+	}
+	contextMessages := trimDiscussMessagesToTokenBudget(s.logger, cmd.DiscussMessages, messageTokenBudget)
 	runConfig.Messages = discussMessagesToSDK(contextMessages)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
@@ -253,7 +257,10 @@ func discussCompactableTokens(messages []turn.DiscussMessage) int {
 // system prompt, tools and model output. Active summaries remain pinned because
 // they are the only representation of their covered ranges.
 func trimDiscussMessagesByTokens(log *slog.Logger, messages []turn.DiscussMessage, contextTokenBudget int) []turn.DiscussMessage {
-	maxTokens := discussMessageTokenBudget(contextTokenBudget)
+	return trimDiscussMessagesToTokenBudget(log, messages, discussMessageTokenBudget(contextTokenBudget))
+}
+
+func trimDiscussMessagesToTokenBudget(log *slog.Logger, messages []turn.DiscussMessage, maxTokens int) []turn.DiscussMessage {
 	if maxTokens <= 0 || len(messages) == 0 {
 		return messages
 	}
@@ -329,6 +336,21 @@ func discussMessageTokenBudget(contextTokenBudget int) int {
 	budget := contextTokenBudget * compactionBudgetThresholdPercent / 100
 	if budget == 0 {
 		return 1
+	}
+	return budget
+}
+
+// effectiveDiscussMessageTokenBudget also honors the bot's enabled compaction
+// threshold as a pre-send ceiling. This keeps large group timelines within the
+// operating limit the user selected even when a provider advertises a much
+// larger theoretical model window than its compatibility endpoint accepts.
+func effectiveDiscussMessageTokenBudget(contextTokenBudget int, compactionEnabled bool, compactionThreshold int) int {
+	budget := discussMessageTokenBudget(contextTokenBudget)
+	if !compactionEnabled || compactionThreshold <= 0 {
+		return budget
+	}
+	if budget <= 0 || compactionThreshold < budget {
+		return compactionThreshold
 	}
 	return budget
 }

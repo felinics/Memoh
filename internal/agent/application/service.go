@@ -1212,11 +1212,26 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 	}
 
 	cfg = s.prepareRunConfig(ctx, cfg)
+	contextTokenBudget := modelContextTokenBudget(chatModel)
+	discussBudget := discussMessageTokenBudget(contextTokenBudget)
+	if botSettings, settingsErr := s.loadBotSettings(ctx, botID); settingsErr == nil {
+		discussBudget = effectiveDiscussMessageTokenBudget(
+			contextTokenBudget,
+			botSettings.CompactionEnabled,
+			botSettings.CompactionThreshold,
+		)
+	} else {
+		s.logger.Warn("resolve run config: failed to load discuss context limit",
+			slog.String("bot_id", botID),
+			slog.Any("error", settingsErr),
+		)
+	}
 	return ResolveRunConfigResult{
-		RunConfig:          cfg,
-		ModelID:            chatModel.ID,
-		ContextTokenBudget: modelContextTokenBudget(chatModel),
-		RuntimeType:        runtimeType,
+		RunConfig:                 cfg,
+		ModelID:                   chatModel.ID,
+		ContextTokenBudget:        contextTokenBudget,
+		DiscussMessageTokenBudget: discussBudget,
+		RuntimeType:               runtimeType,
 	}, nil
 }
 
