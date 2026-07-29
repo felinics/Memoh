@@ -21,12 +21,13 @@ const (
 
 // Config holds model resolution details for the memory LLM.
 type Config struct {
-	ModelID        string
-	BaseURL        string
-	APIKey         string `json:"-"`
-	ClientType     string
-	Timeout        time.Duration
-	PromptCacheTTL string
+	ModelID               string
+	BaseURL               string
+	APIKey                string `json:"-"`
+	ClientType            string
+	ChatCompletionsCompat string
+	Timeout               time.Duration
+	PromptCacheTTL        string
 }
 
 // Client implements adapters.LLM using the Twilight AI SDK.
@@ -44,10 +45,11 @@ func New(cfg Config) *Client {
 
 func (c *Client) model() *sdk.Model {
 	return models.NewSDKChatModel(models.SDKModelConfig{
-		ModelID:    c.cfg.ModelID,
-		ClientType: c.cfg.ClientType,
-		APIKey:     c.cfg.APIKey,
-		BaseURL:    c.cfg.BaseURL,
+		ModelID:               c.cfg.ModelID,
+		ClientType:            c.cfg.ClientType,
+		APIKey:                c.cfg.APIKey,
+		BaseURL:               c.cfg.BaseURL,
+		ChatCompletionsCompat: c.cfg.ChatCompletionsCompat,
 	})
 }
 

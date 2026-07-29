@@ -197,17 +197,18 @@ func (h *CompactionHandler) buildTriggerConfig(ctx context.Context, botID, sessi
 	}
 
 	cfg := compaction.TriggerConfig{
-		BotID:            botID,
-		SessionID:        sessionID,
-		ModelID:          compactModel.ModelID,
-		ClientType:       compactProvider.ClientType,
-		APIKey:           creds.APIKey,
-		CodexAccountID:   creds.CodexAccountID,
-		BaseURL:          providers.ProviderConfigString(compactProvider, "base_url"),
-		Ratio:            100,
-		TotalInputTokens: 1,
-		PromptCacheTTL:   providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
-		Manual:           true,
+		BotID:                 botID,
+		SessionID:             sessionID,
+		ModelID:               compactModel.ModelID,
+		ClientType:            compactProvider.ClientType,
+		APIKey:                creds.APIKey,
+		CodexAccountID:        creds.CodexAccountID,
+		BaseURL:               providers.ProviderConfigString(compactProvider, "base_url"),
+		ChatCompletionsCompat: providers.ProviderConfigString(compactProvider, models.ChatCompletionsCompatConfigKey),
+		Ratio:                 100,
+		TotalInputTokens:      1,
+		PromptCacheTTL:        providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
+		Manual:                true,
 	}
 	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
 		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100

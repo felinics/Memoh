@@ -14,9 +14,12 @@ func TestExplicitChatCompletionsCompatMigrationFiles(t *testing.T) {
 		"provider_template_id",
 		"'{template,key}'",
 		"'{registry,source}'",
-		"https://api.deepseek.com/v1",
-		"https://api.minimaxi.com/v1",
-		"https://api.moonshot.cn/v1",
+		"base_url = 'https://api.deepseek.com'",
+		"base_url LIKE 'https://api.deepseek.com/%'",
+		"base_url LIKE 'https://api.minimax.io/%'",
+		"base_url LIKE 'https://api.minimaxi.com/%'",
+		"base_url LIKE 'https://api.moonshot.cn/%'",
+		"base_url LIKE 'https://api.moonshot.ai/%'",
 		"THEN 'deepseek'",
 		"THEN 'minimax'",
 		"THEN 'kimi'",
@@ -28,6 +31,9 @@ func TestExplicitChatCompletionsCompatMigrationFiles(t *testing.T) {
 	}
 	if strings.Contains(up, "provider.name") {
 		t.Fatal("0123 must not infer compatibility from a user-editable provider name")
+	}
+	if strings.Contains(up, "LIKE '%") {
+		t.Fatal("0123 must match official endpoints by origin prefix, not substring")
 	}
 
 	down := readEmbeddedMigration(t, "postgres/migrations/0123_explicit_chat_completions_compat.down.sql")

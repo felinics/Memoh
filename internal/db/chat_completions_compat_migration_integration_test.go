@@ -62,6 +62,16 @@ func TestExplicitChatCompletionsCompatMigrationBackfillAndRollback(t *testing.T)
 			metadata: `{}`,
 		},
 		{
+			name:     "DeepSeek beta endpoint",
+			config:   `{"base_url":"https://api.deepseek.com/beta"}`,
+			metadata: `{}`,
+		},
+		{
+			name:     "Lookalike domain",
+			config:   `{"base_url":"https://api.deepseek.com.evil.example/v1"}`,
+			metadata: `{}`,
+		},
+		{
 			name:     "Existing explicit value",
 			config:   `{"base_url":"https://api.moonshot.cn/v1","chat_completions_compat":"deepseek"}`,
 			metadata: `{}`,
@@ -107,6 +117,8 @@ func TestExplicitChatCompletionsCompatMigrationBackfillAndRollback(t *testing.T)
 	assertProviderCompat("Kimi linked template", "kimi", "kimi")
 	assertProviderCompat("DeepSeek registry source", "deepseek", "deepseek")
 	assertProviderCompat("MiniMax canonical endpoint", "minimax", "minimax")
+	assertProviderCompat("DeepSeek beta endpoint", "deepseek", "deepseek")
+	assertProviderCompat("Lookalike domain", "", "")
 	assertProviderCompat("Existing explicit value", "deepseek", "")
 	assertProviderCompat("Unknown provider", "", "")
 
@@ -123,6 +135,8 @@ func TestExplicitChatCompletionsCompatMigrationBackfillAndRollback(t *testing.T)
 	assertProviderCompat("Kimi linked template", "", "")
 	assertProviderCompat("DeepSeek registry source", "custom", "")
 	assertProviderCompat("MiniMax canonical endpoint", "", "")
+	assertProviderCompat("DeepSeek beta endpoint", "", "")
+	assertProviderCompat("Lookalike domain", "", "")
 	assertProviderCompat("Existing explicit value", "deepseek", "")
 	assertProviderCompat("Unknown provider", "", "")
 

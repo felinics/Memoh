@@ -176,12 +176,13 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	userPrompt := buildUserPrompt(priorSummaries, entries)
 
 	model := models.NewSDKChatModel(models.SDKModelConfig{
-		ClientType:     cfg.ClientType,
-		BaseURL:        cfg.BaseURL,
-		APIKey:         cfg.APIKey,
-		CodexAccountID: cfg.CodexAccountID,
-		ModelID:        cfg.ModelID,
-		HTTPClient:     cfg.HTTPClient,
+		ClientType:            cfg.ClientType,
+		BaseURL:               cfg.BaseURL,
+		APIKey:                cfg.APIKey,
+		CodexAccountID:        cfg.CodexAccountID,
+		ModelID:               cfg.ModelID,
+		ChatCompletionsCompat: cfg.ChatCompletionsCompat,
+		HTTPClient:            cfg.HTTPClient,
 	})
 
 	systemPromptDecorated, sdkMessages, _ := models.ApplyPromptCache(

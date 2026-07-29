@@ -1,6 +1,9 @@
 -- 0123_explicit_chat_completions_compat
 -- Backfill explicit Chat Completions compatibility modes for existing built-in
--- DeepSeek, MiniMax, and Moonshot/Kimi provider instances.
+-- DeepSeek, MiniMax, and Moonshot/Kimi provider instances. Official endpoint
+-- URLs match by exact origin or path prefix (covering /v1, /beta, ...), never
+-- by substring, so lookalike domains and proxies that merely embed an official
+-- hostname are not classified.
 
 ALTER POLICY teams_self_select ON public.teams USING (true);
 
@@ -44,10 +47,8 @@ BEGIN
             OR metadata_template_source IN ('deepseek.yaml', 'deepseek.yml')
             OR metadata_preset_source IN ('deepseek.yaml', 'deepseek.yml')
             OR metadata_registry_source IN ('deepseek.yaml', 'deepseek.yml')
-            OR base_url IN (
-              'https://api.deepseek.com',
-              'https://api.deepseek.com/v1'
-            )
+            OR base_url = 'https://api.deepseek.com'
+            OR base_url LIKE 'https://api.deepseek.com/%'
             THEN 'deepseek'
           WHEN template_key = 'minimax'
             OR template_preset_id = 'minimax'
@@ -57,12 +58,10 @@ BEGIN
             OR metadata_template_source IN ('minimax.yaml', 'minimax.yml')
             OR metadata_preset_source IN ('minimax.yaml', 'minimax.yml')
             OR metadata_registry_source IN ('minimax.yaml', 'minimax.yml')
-            OR base_url IN (
-              'https://api.minimax.io',
-              'https://api.minimax.io/v1',
-              'https://api.minimaxi.com',
-              'https://api.minimaxi.com/v1'
-            )
+            OR base_url = 'https://api.minimax.io'
+            OR base_url LIKE 'https://api.minimax.io/%'
+            OR base_url = 'https://api.minimaxi.com'
+            OR base_url LIKE 'https://api.minimaxi.com/%'
             THEN 'minimax'
           WHEN template_key = 'moonshot'
             OR template_preset_id = 'moonshot'
@@ -72,12 +71,10 @@ BEGIN
             OR metadata_template_source IN ('moonshot.yaml', 'moonshot.yml')
             OR metadata_preset_source IN ('moonshot.yaml', 'moonshot.yml')
             OR metadata_registry_source IN ('moonshot.yaml', 'moonshot.yml')
-            OR base_url IN (
-              'https://api.moonshot.cn',
-              'https://api.moonshot.cn/v1',
-              'https://api.moonshot.ai',
-              'https://api.moonshot.ai/v1'
-            )
+            OR base_url = 'https://api.moonshot.cn'
+            OR base_url LIKE 'https://api.moonshot.cn/%'
+            OR base_url = 'https://api.moonshot.ai'
+            OR base_url LIKE 'https://api.moonshot.ai/%'
             THEN 'kimi'
           ELSE NULL
         END AS compat

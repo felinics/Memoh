@@ -184,17 +184,18 @@ func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, bo
 	}
 
 	cfg := compaction.TriggerConfig{
-		BotID:            req.BotID,
-		SessionID:        req.ThreadID,
-		ModelID:          compactModel.ModelID,
-		ClientType:       compactProvider.ClientType,
-		APIKey:           creds.APIKey,
-		CodexAccountID:   creds.CodexAccountID,
-		BaseURL:          providers.ProviderConfigString(compactProvider, "base_url"),
-		Ratio:            ratio,
-		TotalInputTokens: inputTokens,
-		HTTPClient:       s.streamHTTPClient,
-		PromptCacheTTL:   providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
+		BotID:                 req.BotID,
+		SessionID:             req.ThreadID,
+		ModelID:               compactModel.ModelID,
+		ClientType:            compactProvider.ClientType,
+		APIKey:                creds.APIKey,
+		CodexAccountID:        creds.CodexAccountID,
+		BaseURL:               providers.ProviderConfigString(compactProvider, "base_url"),
+		ChatCompletionsCompat: providers.ProviderConfigString(compactProvider, models.ChatCompletionsCompatConfigKey),
+		Ratio:                 ratio,
+		TotalInputTokens:      inputTokens,
+		HTTPClient:            s.streamHTTPClient,
+		PromptCacheTTL:        providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
 	}
 
 	// Cap compaction input to 90% of the compaction model's context window.

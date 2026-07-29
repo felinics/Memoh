@@ -383,10 +383,11 @@ func generateChatImage(ctx context.Context, provider sqlc.Provider, apiKey, mode
 		size = "1024x1024"
 	}
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
-		ModelID:    modelID,
-		ClientType: provider.ClientType,
-		APIKey:     apiKey,
-		BaseURL:    providers.ProviderConfigString(provider, "base_url"),
+		ModelID:               modelID,
+		ClientType:            provider.ClientType,
+		APIKey:                apiKey,
+		BaseURL:               providers.ProviderConfigString(provider, "base_url"),
+		ChatCompletionsCompat: providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	})
 
 	userMsg := fmt.Sprintf("Generate an image with the following description. Size: %s\n\n%s", size, prompt)

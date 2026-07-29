@@ -1536,7 +1536,7 @@ func (p *SpawnProvider) resolveModel(
 	}
 	baseURL := providers.ProviderConfigString(provider, "base_url")
 	chatCompletionsCompat := models.ResolveChatCompletionsCompat(
-		providers.ProviderConfigString(provider, "chat_completions_compat"),
+		providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	)
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               modelInfo.ModelID,

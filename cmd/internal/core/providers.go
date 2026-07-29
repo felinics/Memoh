@@ -891,12 +891,13 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 		return nil, err
 	}
 	return memllm.New(memllm.Config{
-		ModelID:        memoryModel.ModelID,
-		BaseURL:        strings.TrimRight(providers.ProviderConfigString(memoryProvider, "base_url"), "/"),
-		APIKey:         providers.ProviderConfigString(memoryProvider, "api_key"),
-		ClientType:     memoryProvider.ClientType,
-		Timeout:        c.timeout,
-		PromptCacheTTL: providers.ProviderConfigString(memoryProvider, "prompt_cache_ttl"),
+		ModelID:               memoryModel.ModelID,
+		BaseURL:               strings.TrimRight(providers.ProviderConfigString(memoryProvider, "base_url"), "/"),
+		APIKey:                providers.ProviderConfigString(memoryProvider, "api_key"),
+		ClientType:            memoryProvider.ClientType,
+		ChatCompletionsCompat: providers.ProviderConfigString(memoryProvider, models.ChatCompletionsCompatConfigKey),
+		Timeout:               c.timeout,
+		PromptCacheTTL:        providers.ProviderConfigString(memoryProvider, "prompt_cache_ttl"),
 	}), nil
 }
 
