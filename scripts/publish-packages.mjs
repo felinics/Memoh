@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { detectPublishAuthMode } from './publish-auth.mjs'
+
 const ROOT_DIR = dirname(dirname(fileURLToPath(import.meta.url)))
 
 // packages/ui is a git submodule, but it intentionally stays in this publish
@@ -33,7 +35,7 @@ const publishScope = process.env.NPM_PUBLISH_SCOPE?.trim() || null
 
 // Auth model: two modes.
 // - Token mode (local/manual): NODE_AUTH_TOKEN is set and used directly.
-// - OIDC mode (CI trusted publishing): no token; pnpm exchanges the GitHub
+// - OIDC mode (CI trusted publishing): pnpm exchanges the GitHub
 //   Actions OIDC token (ACTIONS_ID_TOKEN_REQUEST_TOKEN, available when the job
 //   has id-token: write) for a short-lived npm credential at publish time.
 //   Every published package must have memohai/Memoh + release.yml registered
@@ -41,8 +43,8 @@ const publishScope = process.env.NPM_PUBLISH_SCOPE?.trim() || null
 // OIDC mode changes two behaviors below: the token preflight is impossible
 // (npm whoami needs a token), so it is skipped; and --provenance is added,
 // which both requires OIDC and records the build provenance on npm.
-const hasToken = Boolean(process.env.NODE_AUTH_TOKEN?.trim())
-const oidcMode = !hasToken && Boolean(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN)
+const authMode = detectPublishAuthMode()
+const oidcMode = authMode === 'oidc'
 
 function prereleaseTag(version) {
   const override = process.env.NPM_PUBLISH_TAG?.trim()
@@ -218,7 +220,7 @@ for (const dir of CANDIDATE_DIRS) {
 // dry runs keep working.
 if (!dryRun && plan.length > 0) {
   if (oidcMode) {
-    log.info('OIDC trusted publishing (no NODE_AUTH_TOKEN): skipping token preflight; auth happens per-package at publish time')
+    log.info('OIDC trusted publishing: skipping token preflight; auth happens per-package at publish time')
   } else if (!preflightScopes(plan)) {
     console.log(`\nSummary: 0 published, ${skipped} skipped, ${plan.length} blocked by preflight`)
     process.exit(1)
@@ -227,9 +229,6 @@ if (!dryRun && plan.length > 0) {
 
 for (const { dir, name, version } of plan) {
   log.info(`${name}@${version}`)
-  if (name === '@felinic/ui') {
-    log.info('@felinic/ui requires FELINIC_NPM_TOKEN publish rights for the @felinic scope')
-  }
   if (publish(dir, version)) {
     log.ok(`${name}@${version}`)
     published++

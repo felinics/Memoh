@@ -15,6 +15,7 @@ on:
       - "packages/**/*.ts"
       - "packages/**/*.tsx"
       - "packages/**/*.vue"
+      - "scripts/**/*.mjs"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -36,6 +37,7 @@ on:
       - "packages/**/*.ts"
       - "packages/**/*.tsx"
       - "packages/**/*.vue"
+      - "scripts/**/*.mjs"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -90,6 +92,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Test release scripts
+        run: node --test scripts/publish-auth.test.mjs
       - name: Run Vitest
         run: pnpm test --run --testTimeout=15000 apps/web/src/composables/api/useChat.ws.test.ts apps/web/src/store/chat-list.test.ts
       # Report-only until the pre-existing error backlog (~476 at introduction)
