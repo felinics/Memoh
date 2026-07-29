@@ -51,6 +51,10 @@ type ACPRuntimeCloser interface {
 	CloseBotAgentRuntimes(botID, agentID string) error
 }
 
+type WorkspaceContextRefresher interface {
+	RequestRefresh(ctx context.Context, botID, reason string)
+}
+
 type Service struct {
 	logger          *slog.Logger
 	db              *pgxpool.Pool
@@ -68,6 +72,7 @@ type Service struct {
 	fetchProviders  *fetchpkg.Service
 	memoryProviders *memprovider.Service
 	workspace       WorkspaceData
+	contextCache    WorkspaceContextRefresher
 	acpRuntimes     ACPRuntimeCloser
 }
 
@@ -90,6 +95,7 @@ type Params struct {
 	FetchProviders  *fetchpkg.Service
 	MemoryProviders *memprovider.Service
 	Workspace       WorkspaceData
+	ContextCache    WorkspaceContextRefresher
 	ACPRuntimes     ACPRuntimeCloser
 }
 
@@ -115,6 +121,7 @@ func New(params Params) *Service {
 		fetchProviders:  params.FetchProviders,
 		memoryProviders: params.MemoryProviders,
 		workspace:       params.Workspace,
+		contextCache:    params.ContextCache,
 		acpRuntimes:     params.ACPRuntimes,
 	}
 }

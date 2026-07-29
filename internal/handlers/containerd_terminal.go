@@ -13,8 +13,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/memohai/memoh/internal/workspacecontext"
 )
 
 // terminalIdleTimeout closes inactive terminal WebSocket sessions to
@@ -182,6 +184,10 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	}()
 
 	<-done
+	if h.workspaceContext != nil {
+		refreshCtx := workspace.WithWorkspaceTarget(context.WithoutCancel(ctx), workspace.WorkspaceTargetNative)
+		h.workspaceContext.RequestRefresh(refreshCtx, botID, workspacecontext.ReasonWorkspaceCommand)
+	}
 	return nil
 }
 

@@ -204,11 +204,24 @@ func List(ctx context.Context, client fileClient, rawCompatRoots []string) ([]En
 }
 
 func ListWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, error) {
-	idx := readIndex(ctx, client)
-	items := scan(ctx, client, DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots))
-	resolved := resolve(items, idx.Overrides)
+	resolved, idx := scanWithPluginRoots(ctx, client, rawCompatRoots, rawPluginRoots)
 	writeIndex(ctx, client, idx.withItems(resolved))
 	return resolved, nil
+}
+
+// ScanWithPluginRoots discovers and resolves Skills without writing the
+// compatibility index back to the workspace. It is used by the durable
+// workspace-context materializer so a read-only refresh has no write side
+// effects.
+func ScanWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) []Entry {
+	resolved, _ := scanWithPluginRoots(ctx, client, rawCompatRoots, rawPluginRoots)
+	return resolved
+}
+
+func scanWithPluginRoots(ctx context.Context, client fileClient, rawCompatRoots []string, rawPluginRoots []string) ([]Entry, indexState) {
+	idx := readIndex(ctx, client)
+	items := scan(ctx, client, DiscoveryRootsWithPluginRoots(rawCompatRoots, rawPluginRoots))
+	return resolve(items, idx.Overrides), idx
 }
 
 func LoadEffective(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {

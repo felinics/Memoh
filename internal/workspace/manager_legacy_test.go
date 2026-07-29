@@ -44,10 +44,12 @@ type legacyRouteTestService struct {
 
 type workspaceInfoProviderTestService struct {
 	legacyRouteTestService
-	info bridge.WorkspaceInfo
+	info               bridge.WorkspaceInfo
+	workspaceInfoCalls int
 }
 
 func (s *workspaceInfoProviderTestService) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+	s.workspaceInfoCalls++
 	return s.info, nil
 }
 
@@ -377,6 +379,30 @@ func TestWorkspaceInfoAddsACPToolsEndpointForProviderContainer(t *testing.T) {
 	}
 	if info.ACPToolsHTTPURL != ACPToolsProxyHTTPURL {
 		t.Fatalf("ACPToolsHTTPURL = %q", info.ACPToolsHTTPURL)
+	}
+	if svc.workspaceInfoCalls != 1 {
+		t.Fatalf("runtime WorkspaceInfo calls = %d, want 1", svc.workspaceInfoCalls)
+	}
+}
+
+func TestWorkspaceDescriptorInfoDoesNotOpenProviderRuntime(t *testing.T) {
+	svc := &workspaceInfoProviderTestService{
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: "/data",
+		},
+	}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{DataRoot: t.TempDir()})
+
+	info, err := m.WorkspaceDescriptorInfo(context.Background(), "bot-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ACPToolsHTTPURL != ACPToolsProxyHTTPURL {
+		t.Fatalf("ACPToolsHTTPURL = %q", info.ACPToolsHTTPURL)
+	}
+	if svc.workspaceInfoCalls != 0 {
+		t.Fatalf("runtime WorkspaceInfo calls = %d, want 0", svc.workspaceInfoCalls)
 	}
 }
 

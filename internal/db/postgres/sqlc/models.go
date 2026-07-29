@@ -345,6 +345,22 @@ type BotVisibleHistoryMessage struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
+type BotWorkspaceContextSnapshot struct {
+	ID                  pgtype.UUID        `json:"id"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	BotID               pgtype.UUID        `json:"bot_id"`
+	TargetID            string             `json:"target_id"`
+	RequestedGeneration int64              `json:"requested_generation"`
+	AppliedGeneration   int64              `json:"applied_generation"`
+	Status              string             `json:"status"`
+	Payload             []byte             `json:"payload"`
+	ContentHash         pgtype.Text        `json:"content_hash"`
+	LastRefreshError    pgtype.Text        `json:"last_refresh_error"`
+	RefreshedAt         pgtype.Timestamptz `json:"refreshed_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotWorkspaceResourceLimit struct {
 	BotID         pgtype.UUID        `json:"bot_id"`
 	CpuMillicores int64              `json:"cpu_millicores"`

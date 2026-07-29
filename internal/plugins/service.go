@@ -34,7 +34,12 @@ type Service struct {
 	oauthService *mcp.OAuthService
 	oauthClients *OAuthClientRegistry
 	bridges      bridge.Provider
+	contextCache WorkspaceContextRefresher
 	logger       *slog.Logger
+}
+
+type WorkspaceContextRefresher interface {
+	RefreshNow(ctx context.Context, botID, reason string) error
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries, mcpService *mcp.ConnectionService, oauthService *mcp.OAuthService, oauthClients *OAuthClientRegistry, bridges BridgeProvider) *Service {
@@ -48,6 +53,37 @@ func NewService(log *slog.Logger, queries dbstore.Queries, mcpService *mcp.Conne
 		oauthClients: oauthClients,
 		bridges:      bridges.Provider,
 		logger:       log.With(slog.String("service", "plugins")),
+	}
+}
+
+func (s *Service) SetWorkspaceContextRefresher(refresher WorkspaceContextRefresher) {
+	if s == nil {
+		return
+	}
+	s.contextCache = refresher
+}
+
+func (s *Service) normalizeAndRefresh(ctx context.Context, botID string, row sqlc.BotPluginInstallation) (Installation, error) {
+	installation, err := s.normalizeInstallation(ctx, row)
+	if err != nil {
+		return Installation{}, err
+	}
+	s.refreshWorkspaceContext(ctx, botID)
+	return installation, nil
+}
+
+func (s *Service) refreshWorkspaceContext(ctx context.Context, botID string) {
+	if s == nil || s.contextCache == nil {
+		return
+	}
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	if err := s.contextCache.RefreshNow(refreshCtx, botID, "plugins_changed"); err != nil && s.logger != nil {
+		s.logger.Warn("workspace context refresh failed",
+			slog.String("bot_id", botID),
+			slog.String("reason", "plugins_changed"),
+			slog.Any("error", err),
+		)
 	}
 }
 
@@ -197,7 +233,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest)
 		return Installation{}, err
 	}
 
-	return s.normalizeInstallation(ctx, row)
+	return s.normalizeAndRefresh(ctx, botID, row)
 }
 
 func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, enabled bool) (Installation, error) {
@@ -213,7 +249,7 @@ func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, 
 		if err != nil {
 			return Installation{}, err
 		}
-		return s.normalizeInstallation(ctx, updated)
+		return s.normalizeAndRefresh(ctx, botID, updated)
 	}
 
 	manifest, err := decodeManifest(row.Manifest)
@@ -244,7 +280,7 @@ func (s *Service) SetEnabled(ctx context.Context, botID, installationID string, 
 	if err != nil {
 		return Installation{}, err
 	}
-	return s.normalizeInstallation(ctx, updated)
+	return s.normalizeAndRefresh(ctx, botID, updated)
 }
 
 func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (Installation, error) {
@@ -265,7 +301,7 @@ func (s *Service) Uninstall(ctx context.Context, botID, installationID string) (
 	if err != nil {
 		return Installation{}, err
 	}
-	return s.normalizeInstallation(ctx, updated)
+	return s.normalizeAndRefresh(ctx, botID, updated)
 }
 
 func (s *Service) Purge(ctx context.Context, botID, installationID string) error {
@@ -290,10 +326,14 @@ func (s *Service) Purge(ctx context.Context, botID, installationID string) error
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteBotPluginInstallation(ctx, sqlc.DeleteBotPluginInstallationParams{
+	if err := s.queries.DeleteBotPluginInstallation(ctx, sqlc.DeleteBotPluginInstallationParams{
 		BotID: botUUID,
 		ID:    installationUUID,
-	})
+	}); err != nil {
+		return err
+	}
+	s.refreshWorkspaceContext(ctx, botID)
+	return nil
 }
 
 func (s *Service) StartOAuth(ctx context.Context, botID, installationID, callbackURL string) (*mcp.AuthorizeResult, error) {
@@ -381,7 +421,7 @@ func (s *Service) RefreshOAuthStatus(ctx context.Context, botID, installationID 
 	if err != nil {
 		return Installation{}, err
 	}
-	return s.normalizeInstallation(ctx, updated)
+	return s.normalizeAndRefresh(ctx, botID, updated)
 }
 
 func (s *Service) getRow(ctx context.Context, botID, installationID string) (sqlc.BotPluginInstallation, error) {

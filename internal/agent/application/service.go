@@ -45,6 +45,7 @@ import (
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/internal/workspacecontext"
 )
 
 const (
@@ -94,6 +95,10 @@ type workspaceTargetResolver interface {
 	ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (workspace.ResolvedWorkspaceTarget, error)
 }
 
+type workspaceTargetDescriptorResolver interface {
+	ResolveWorkspaceTargetDescriptor(ctx context.Context, botID, targetID string) (workspace.WorkspaceTargetDescriptor, error)
+}
+
 // Service orchestrates chat with the internal agent.
 type Service struct {
 	agent              *native.Agent
@@ -112,6 +117,7 @@ type Service struct {
 	platformIdentities PlatformIdentitySource
 	botPermissions     botPermissionChecker
 	workspaceTargets   workspaceTargetResolver
+	workspaceContext   *workspacecontext.Service
 	pipeline           *timeline.Pipeline
 	streamHTTPClient   *http.Client
 	bgManager          *background.Manager
@@ -212,6 +218,12 @@ func (s *Service) SetBotPermissionChecker(checker botPermissionChecker) {
 // SetWorkspaceTargetResolver configures request-scoped Computer resolution.
 func (s *Service) SetWorkspaceTargetResolver(resolver workspaceTargetResolver) {
 	s.workspaceTargets = resolver
+}
+
+// SetWorkspaceContext configures the materialized workspace context used by
+// native Agent turns for hooks, skills, and system files.
+func (s *Service) SetWorkspaceContext(service *workspacecontext.Service) {
+	s.workspaceContext = service
 }
 
 // SetPlatformIdentitySource configures the neutral source used to load
@@ -751,7 +763,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		cfg.ToolApprovalHandler = s.buildToolApprovalHandler(p)
 	}
 	if s.workspaceTargets != nil {
-		if target, targetErr := s.workspaceTargets.ResolveWorkspaceTarget(ctx, p.BotID, ""); targetErr == nil {
+		if target, targetErr := s.resolveWorkspaceTargetDescriptor(ctx, p.BotID, ""); targetErr == nil {
 			cfg.Identity.WorkspaceTargetID = strings.TrimSpace(target.TargetID)
 			cfg.Identity.WorkspaceTargetKind = strings.TrimSpace(target.Kind)
 			cfg.Identity.WorkspaceTargetName = strings.TrimSpace(target.Name)
@@ -1222,12 +1234,27 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 	limits := native.DefaultLimits()
 	if s.agent != nil {
 		limits = s.agent.Limits()
-		nowFn := time.Now
-		if cfg.Identity.TimezoneLocation != nil {
-			nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }
+		if s.workspaceContext != nil {
+			snapshotFiles, err := s.workspaceContext.SystemFiles(ctx, cfg.Identity.BotID)
+			if err != nil {
+				s.logger.Warn("load cached workspace system files failed",
+					slog.String("bot_id", cfg.Identity.BotID),
+					slog.Any("error", err),
+				)
+			} else {
+				files = make([]native.SystemFile, 0, len(snapshotFiles))
+				for _, file := range snapshotFiles {
+					files = append(files, native.SystemFile{Filename: file.Filename, Content: file.Content})
+				}
+			}
+		} else {
+			nowFn := time.Now
+			if cfg.Identity.TimezoneLocation != nil {
+				nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }
+			}
+			fs := native.NewFSClient(s.agent.BridgeProvider(), cfg.Identity.BotID, nowFn)
+			files = fs.LoadSystemFiles(ctx)
 		}
-		fs := native.NewFSClient(s.agent.BridgeProvider(), cfg.Identity.BotID, nowFn)
-		files = fs.LoadSystemFiles(ctx)
 	}
 
 	platformIdentitiesSection := ""

@@ -24,6 +24,7 @@ import (
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/memohai/memoh/internal/workspacecontext"
 )
 
 type SupermarketHandler struct {
@@ -33,6 +34,7 @@ type SupermarketHandler struct {
 	containers     bridge.Provider
 	botService     *bots.Service
 	accountService *accounts.Service
+	contextCache   *workspacecontext.Service
 	logger         *slog.Logger
 }
 
@@ -89,6 +91,7 @@ func NewSupermarketHandler(
 	containers bridge.Provider,
 	botService *bots.Service,
 	accountService *accounts.Service,
+	contextCache *workspacecontext.Service,
 ) *SupermarketHandler {
 	return &SupermarketHandler{
 		baseURL:        cfg.Supermarket.GetBaseURL(),
@@ -97,6 +100,7 @@ func NewSupermarketHandler(
 		containers:     containers,
 		botService:     botService,
 		accountService: accountService,
+		contextCache:   contextCache,
 		logger:         log.With(slog.String("handler", "supermarket")),
 	}
 }
@@ -386,6 +390,11 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 
 	if filesWritten == 0 {
 		return echo.NewHTTPError(http.StatusBadGateway, "skill archive was empty")
+	}
+	if h.contextCache != nil {
+		if _, err := h.contextCache.Refresh(ctx, botID, workspacecontext.ReasonSkillsChanged); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{"ok": true, "files_written": filesWritten})

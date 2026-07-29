@@ -20,6 +20,7 @@ import (
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/memohai/memoh/internal/workspacecontext"
 )
 
 const mediaContainerRoot = "/data/media"
@@ -703,6 +704,9 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 	if err := client.WriteFile(ctx, containerPath, contentBytes); err != nil {
 		return fsHTTPError(err)
 	}
+	if err := h.refreshWorkspaceContextIfRelevant(ctx, botID, workspacecontext.ReasonRelevantFile, containerPath); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true, Revision: fsContentRevision(contentBytes)})
 }
@@ -755,6 +759,9 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	written, err := client.WriteRaw(ctx, containerPath, src)
 	if err != nil {
 		return fsHTTPError(err)
+	}
+	if err := h.refreshWorkspaceContextIfRelevant(ctx, botID, workspacecontext.ReasonRelevantFile, containerPath); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	return c.JSON(http.StatusOK, FSUploadResponse{
@@ -850,6 +857,9 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	if err := client.DeleteFile(ctx, containerPath, req.Recursive); err != nil {
 		return fsHTTPError(err)
 	}
+	if err := h.refreshWorkspaceContextIfRelevant(ctx, botID, workspacecontext.ReasonRelevantFile, containerPath); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
 }
@@ -897,6 +907,9 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 
 	if err := client.Rename(ctx, oldPath, newPath); err != nil {
 		return fsHTTPError(err)
+	}
+	if err := h.refreshWorkspaceContextIfRelevant(ctx, botID, workspacecontext.ReasonRelevantFile, oldPath, newPath); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
@@ -977,6 +990,9 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 	if err != nil {
 		_ = client.DeleteFile(ctx, destination, true)
 		return err
+	}
+	if err := h.refreshWorkspaceContext(ctx, botID, workspacecontext.ReasonRelevantFile); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
 }

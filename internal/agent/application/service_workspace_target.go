@@ -13,6 +13,8 @@ import (
 
 var ErrWorkspaceTargetACPUnsupported = errors.New("workspace_target_id is not supported for ACP sessions")
 
+type workspaceTargetDescriptorContextKey struct{}
+
 // ValidateWorkspaceTarget validates a user-selected Computer without changing
 // the Bot's Primary target. It is used by handlers before creating a session.
 func (s *Service) ValidateWorkspaceTarget(ctx context.Context, botID, targetID string) error {
@@ -23,7 +25,7 @@ func (s *Service) ValidateWorkspaceTarget(ctx context.Context, botID, targetID s
 	if s == nil || s.workspaceTargets == nil {
 		return errors.New("workspace target resolver not configured")
 	}
-	_, err := s.workspaceTargets.ResolveWorkspaceTarget(ctx, strings.TrimSpace(botID), targetID)
+	_, err := s.resolveWorkspaceTargetDescriptor(ctx, strings.TrimSpace(botID), targetID)
 	return err
 }
 
@@ -48,9 +50,9 @@ func (s *Service) prepareWorkspaceRequest(ctx context.Context, req ChatRequest) 
 		if requestedTargetID != "" {
 			return ctx, req, errors.New("workspace target resolver not configured")
 		}
-		return ctx, req, nil
+		return s.attachWorkspaceContext(ctx, req)
 	}
-	resolved, err := s.workspaceTargets.ResolveWorkspaceTarget(ctx, req.BotID, requestedTargetID)
+	resolved, err := s.resolveWorkspaceTargetDescriptor(ctx, req.BotID, requestedTargetID)
 	if err != nil {
 		return ctx, req, err
 	}
@@ -61,7 +63,8 @@ func (s *Service) prepareWorkspaceRequest(ctx context.Context, req ChatRequest) 
 		Name:     strings.TrimSpace(resolved.Name),
 	}
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
-	return ctx, req, nil
+	ctx = context.WithValue(ctx, workspaceTargetDescriptorContextKey{}, resolved)
+	return s.attachWorkspaceContext(ctx, req)
 }
 
 func (s *Service) resolveWorkspaceTargetSnapshot(ctx context.Context, botID, targetID string) (*WorkspaceTarget, error) {
@@ -71,7 +74,7 @@ func (s *Service) resolveWorkspaceTargetSnapshot(ctx context.Context, botID, tar
 		}
 		return nil, errors.New("workspace target resolver not configured")
 	}
-	resolved, err := s.workspaceTargets.ResolveWorkspaceTarget(ctx, botID, targetID)
+	resolved, err := s.resolveWorkspaceTargetDescriptor(ctx, botID, targetID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +83,46 @@ func (s *Service) resolveWorkspaceTargetSnapshot(ctx context.Context, botID, tar
 		Kind:     strings.TrimSpace(resolved.Kind),
 		Name:     strings.TrimSpace(resolved.Name),
 	}, nil
+}
+
+func (s *Service) resolveWorkspaceTargetDescriptor(ctx context.Context, botID, targetID string) (workspace.WorkspaceTargetDescriptor, error) {
+	if ctx != nil {
+		if cached, ok := ctx.Value(workspaceTargetDescriptorContextKey{}).(workspace.WorkspaceTargetDescriptor); ok {
+			requested := strings.TrimSpace(targetID)
+			if requested == "" {
+				requested = workspace.WorkspaceTargetFromContext(ctx)
+			}
+			if requested == "" || strings.EqualFold(strings.TrimSpace(cached.TargetID), requested) {
+				return cached, nil
+			}
+		}
+	}
+	if resolver, ok := s.workspaceTargets.(workspaceTargetDescriptorResolver); ok {
+		return resolver.ResolveWorkspaceTargetDescriptor(ctx, botID, targetID)
+	}
+	resolved, err := s.workspaceTargets.ResolveWorkspaceTarget(ctx, botID, targetID)
+	if err != nil {
+		return workspace.WorkspaceTargetDescriptor{}, err
+	}
+	return workspace.WorkspaceTargetDescriptor{
+		TargetID: resolved.TargetID,
+		Kind:     resolved.Kind,
+		Name:     resolved.Name,
+		Primary:  resolved.Primary,
+		Info:     resolved.Info,
+		Approval: resolved.Approval,
+	}, nil
+}
+
+func (s *Service) attachWorkspaceContext(ctx context.Context, req ChatRequest) (context.Context, ChatRequest, error) {
+	if s == nil || s.workspaceContext == nil {
+		return ctx, req, nil
+	}
+	next, _, err := s.workspaceContext.Attach(ctx, req.BotID)
+	if err != nil {
+		return ctx, req, fmt.Errorf("load workspace context: %w", err)
+	}
+	return next, req, nil
 }
 
 func workspaceTargetFromRunConfig(cfg native.RunConfig) *WorkspaceTarget {

@@ -37,6 +37,8 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	searchpkg "github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/internal/workspacecontext"
 )
 
 type importState struct {
@@ -517,6 +519,10 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 
 	if err := s.applyRestore(ctx, actorUserID, targetBotID, cfg, deps, opts, state); err != nil {
 		return ImportResult{}, err
+	}
+	if s.contextCache != nil && state.counts[SectionWorkspace] > 0 {
+		refreshCtx := workspace.WithWorkspaceTarget(ctx, workspace.WorkspaceTargetNative)
+		s.contextCache.RequestRefresh(refreshCtx, targetBotID, workspacecontext.ReasonWorkspaceImport)
 	}
 
 	committed = true

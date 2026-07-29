@@ -255,11 +255,21 @@ func TestOwnerMismatchIsRedactedButTargetCanBeDeleted(t *testing.T) {
 func TestRemotePrimaryOfflineNeverFallsBackToNative(t *testing.T) {
 	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{{
 		ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
+		RuntimeName:   "Offline Mac",
 		IsPrimary:     true,
 		RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
 	}}}
 	manager := NewManager(slog.Default(), nil, nil, config.WorkspaceConfig{}, "", nil)
 	manager.SetRemoteWorkspaceService(&RemoteWorkspaceService{store: store, runtimes: fakeRuntimeConnections{}})
+	descriptor, err := manager.ResolveWorkspaceTargetDescriptor(context.Background(), remoteTestBotID, "")
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceTargetDescriptor: %v", err)
+	}
+	if descriptor.TargetID != remoteTestTargetID ||
+		descriptor.Name != "Offline Mac" ||
+		descriptor.Info.Backend != bridge.WorkspaceBackendRemote {
+		t.Fatalf("offline descriptor = %#v", descriptor)
+	}
 	if _, err := manager.MCPClient(context.Background(), remoteTestBotID); !errors.Is(err, ErrRemoteRuntimeOffline) {
 		t.Fatalf("MCPClient error = %v, want offline", err)
 	}

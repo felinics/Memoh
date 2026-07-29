@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/config"
@@ -278,12 +279,44 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, 
 }
 
 func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (ResolvedWorkspaceTarget, error) {
+	descriptor, err := m.ResolveWorkspaceTargetDescriptor(ctx, botID, targetID)
+	if err != nil {
+		return ResolvedWorkspaceTarget{}, err
+	}
+	var client *bridge.Client
+	if descriptor.Kind == WorkspaceTargetRemote {
+		resolved, resolveErr := m.remote.ResolveMount(ctx, botID, descriptor.TargetID)
+		if resolveErr != nil {
+			return ResolvedWorkspaceTarget{}, resolveErr
+		}
+		client = resolved.Client
+	} else {
+		client, err = m.nativeMCPClient(ctx, botID)
+		if err != nil {
+			return ResolvedWorkspaceTarget{}, err
+		}
+	}
+	return ResolvedWorkspaceTarget{
+		TargetID: descriptor.TargetID,
+		Kind:     descriptor.Kind,
+		Name:     descriptor.Name,
+		Primary:  descriptor.Primary,
+		Client:   client,
+		Info:     descriptor.Info,
+		Approval: descriptor.Approval,
+	}, nil
+}
+
+// ResolveWorkspaceTargetDescriptor resolves target metadata without opening a
+// filesystem client. This keeps ordinary Agent turns independent from the
+// workspace runtime until a workspace-backed tool is selected.
+func (m *Manager) ResolveWorkspaceTargetDescriptor(ctx context.Context, botID, targetID string) (WorkspaceTargetDescriptor, error) {
 	targetID = strings.TrimSpace(targetID)
 	if targetID == "" {
 		targetID = WorkspaceTargetFromContext(ctx)
 	}
 	if targetID == "" && m.remote != nil {
-		if target, primary, err := m.remote.ResolvePrimary(ctx, botID); err != nil || primary {
+		if target, primary, err := m.remote.ResolvePrimaryDescriptor(ctx, botID); err != nil || primary {
 			return target, err
 		}
 	}
@@ -293,37 +326,32 @@ func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID st
 			if _, err := m.remote.GetPrimaryMount(ctx, botID); err == nil {
 				primary = false
 			} else if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
-				return ResolvedWorkspaceTarget{}, err
+				return WorkspaceTargetDescriptor{}, err
 			} else {
 				primary = true
 			}
 		}
-		client, err := m.nativeMCPClient(ctx, botID)
+		info, err := m.nativeWorkspaceDescriptorInfo(ctx, botID)
 		if err != nil {
-			return ResolvedWorkspaceTarget{}, err
-		}
-		info, err := m.nativeWorkspaceInfo(ctx, botID)
-		if err != nil {
-			return ResolvedWorkspaceTarget{}, err
+			return WorkspaceTargetDescriptor{}, err
 		}
 		approval, err := m.nativeToolApprovalConfig(ctx, botID)
 		if err != nil {
-			return ResolvedWorkspaceTarget{}, err
+			return WorkspaceTargetDescriptor{}, err
 		}
-		return ResolvedWorkspaceTarget{
+		return WorkspaceTargetDescriptor{
 			TargetID: WorkspaceTargetNative,
 			Kind:     WorkspaceTargetNative,
 			Name:     "Server Workspace",
 			Primary:  primary,
-			Client:   client,
 			Info:     info,
 			Approval: approval,
 		}, nil
 	}
 	if _, ok := canonicalWorkspaceUUID(targetID); !ok || m.remote == nil {
-		return ResolvedWorkspaceTarget{}, ErrWorkspaceTargetNotFound
+		return WorkspaceTargetDescriptor{}, ErrWorkspaceTargetNotFound
 	}
-	return m.remote.ResolveMount(ctx, botID, targetID)
+	return m.remote.ResolveMountDescriptor(ctx, botID, targetID)
 }
 
 func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error {
@@ -389,6 +417,11 @@ func (m *Manager) WorkspaceInfo(ctx context.Context, botID string) (bridge.Works
 	return m.nativeWorkspaceInfo(ctx, botID)
 }
 
+func (m *Manager) WorkspaceDescriptorInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
+	target, err := m.ResolveWorkspaceTargetDescriptor(ctx, botID, "")
+	return target.Info, err
+}
+
 func (m *Manager) nativeWorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
 	if provider, ok := m.service.(bridge.WorkspaceInfoProvider); ok {
 		info, err := provider.WorkspaceInfo(ctx, botID)
@@ -402,6 +435,31 @@ func (m *Manager) nativeWorkspaceInfo(ctx context.Context, botID string) (bridge
 	info := bridge.WorkspaceInfo{
 		Backend:        bridge.WorkspaceBackendContainer,
 		DefaultWorkDir: config.DefaultDataMount,
+	}
+	return withACPToolsEndpoint(info), nil
+}
+
+func (m *Manager) nativeWorkspaceDescriptorInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
+	info := bridge.WorkspaceInfo{
+		Backend:        bridge.WorkspaceBackendContainer,
+		DefaultWorkDir: config.DefaultDataMount,
+	}
+	if m.queries == nil {
+		return withACPToolsEndpoint(info), nil
+	}
+	id, err := db.ParseUUID(botID)
+	if err != nil {
+		return bridge.WorkspaceInfo{}, err
+	}
+	row, err := m.queries.GetContainerByBotID(ctx, id)
+	if err == nil {
+		if backend := strings.TrimSpace(row.WorkspaceBackend); backend != "" {
+			info.Backend = backend
+		}
+		return withACPToolsEndpoint(info), nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, db.ErrNotFound) {
+		return bridge.WorkspaceInfo{}, err
 	}
 	return withACPToolsEndpoint(info), nil
 }

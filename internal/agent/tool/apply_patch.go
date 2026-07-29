@@ -92,6 +92,14 @@ func (p applyPatchPlan) files() []map[string]any {
 	return files
 }
 
+func (p applyPatchPlan) paths() []string {
+	paths := make([]string, 0, len(p.added)+len(p.modified)+len(p.deleted))
+	paths = append(paths, p.added...)
+	paths = append(paths, p.modified...)
+	paths = append(paths, p.deleted...)
+	return paths
+}
+
 func (p applyPatchPlan) summary() string {
 	var b strings.Builder
 	b.WriteString("Success. Updated the following files:")
@@ -226,6 +234,7 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 	}); err != nil {
 		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
+	p.refreshWorkspaceContextIfRelevantForTarget(ctx, session.BotID, target.id, "relevant_file", plan.paths()...)
 
 	return map[string]any{
 		"ok":       true,

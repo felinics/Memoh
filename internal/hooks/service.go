@@ -25,10 +25,17 @@ type PluginInstallationLister interface {
 	List(ctx context.Context, botID string) ([]pluginspkg.Installation, error)
 }
 
+// EffectiveConfigProvider supplies a materialized Hook configuration without
+// requiring the Hook service to read workspace files for every event.
+type EffectiveConfigProvider interface {
+	LoadEffectiveHooks(ctx context.Context, botID string) (Config, bool, error)
+}
+
 type Service struct {
-	logger        *slog.Logger
-	provider      bridge.Provider
-	pluginService PluginInstallationLister
+	logger          *slog.Logger
+	provider        bridge.Provider
+	pluginService   PluginInstallationLister
+	effectiveConfig EffectiveConfigProvider
 }
 
 var emptyConfigFile = []byte("{\n  \"version\": 1,\n  \"enabled\": true,\n  \"hooks\": []\n}\n")
@@ -53,6 +60,13 @@ func (s *Service) SetPluginService(service PluginInstallationLister) {
 		return
 	}
 	s.pluginService = service
+}
+
+func (s *Service) SetEffectiveConfigProvider(provider EffectiveConfigProvider) {
+	if s == nil {
+		return
+	}
+	s.effectiveConfig = provider
 }
 
 func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) {
@@ -90,12 +104,24 @@ func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) 
 }
 
 func (s *Service) LoadEffective(ctx context.Context, botID string) (Config, bool, error) {
+	if s != nil && s.effectiveConfig != nil {
+		return s.effectiveConfig.LoadEffectiveHooks(ctx, botID)
+	}
 	userCfg, exists, err := s.Load(ctx, botID)
 	if err != nil {
 		return Config{}, exists, err
 	}
-	userCfg.applyDefaults()
+	pluginHooks, err := s.loadPluginHooks(ctx, botID)
+	if err != nil {
+		return Config{}, exists, err
+	}
+	return BuildEffectiveConfig(userCfg, pluginHooks), exists, nil
+}
 
+// BuildEffectiveConfig applies user defaults and source metadata to a
+// materialized set of user and Plugin Hooks.
+func BuildEffectiveConfig(userCfg Config, pluginHooks []Hook) Config {
+	userCfg.applyDefaults()
 	effective := Config{
 		Version:  1,
 		Enabled:  boolPtr(true),
@@ -108,12 +134,30 @@ func (s *Service) LoadEffective(ctx context.Context, botID string) (Config, bool
 			effective.Hooks = append(effective.Hooks, hook)
 		}
 	}
-	pluginHooks, err := s.loadPluginHooks(ctx, botID)
-	if err != nil {
-		return Config{}, exists, err
-	}
 	effective.Hooks = append(effective.Hooks, pluginHooks...)
-	return effective, exists, nil
+	return effective
+}
+
+// BuildPluginHooks converts a parsed Plugin Hook config into the effective
+// Hooks while preserving Plugin working-directory and environment semantics.
+func BuildPluginHooks(pluginID, pluginDir string, cfg Config) []Hook {
+	if !cfg.enabled() {
+		return nil
+	}
+	env := cloneStringMap(cfg.Env)
+	out := make([]Hook, 0, len(cfg.Hooks))
+	for idx, hook := range cfg.Hooks {
+		hook.Name = pluginHookName(pluginID, hook.Name, idx)
+		hook.source = hookSource{
+			Kind:           sourceKindPlugin,
+			PluginID:       pluginID,
+			PluginDir:      pluginDir,
+			Env:            env,
+			MaxOutputBytes: cfg.Defaults.MaxOutputBytes,
+		}
+		out = append(out, hook)
+	}
+	return out
 }
 
 func (s *Service) loadPluginHooks(ctx context.Context, botID string) ([]Hook, error) {
@@ -183,21 +227,7 @@ func (s *Service) loadPluginHooks(ctx context.Context, botID string) ([]Hook, er
 			}
 			continue
 		}
-		if !cfg.enabled() {
-			continue
-		}
-		env := cloneStringMap(cfg.Env)
-		for idx, hook := range cfg.Hooks {
-			hook.Name = pluginHookName(pluginID, hook.Name, idx)
-			hook.source = hookSource{
-				Kind:           sourceKindPlugin,
-				PluginID:       pluginID,
-				PluginDir:      pluginDir,
-				Env:            env,
-				MaxOutputBytes: cfg.Defaults.MaxOutputBytes,
-			}
-			hooks = append(hooks, hook)
-		}
+		hooks = append(hooks, BuildPluginHooks(pluginID, pluginDir, cfg)...)
 	}
 	return hooks, nil
 }

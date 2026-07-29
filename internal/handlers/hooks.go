@@ -186,11 +186,15 @@ func (h *HooksHandler) workspaceInfo(ctx context.Context, botID string) hooks.Wo
 		CWD:     hooks.DefaultWorkDir,
 		Runtime: bridge.WorkspaceBackendContainer,
 	}
-	provider, ok := h.bridgeProvider.(bridge.WorkspaceInfoProvider)
-	if !ok {
+	var workspaceInfo bridge.WorkspaceInfo
+	var err error
+	if provider, ok := h.bridgeProvider.(bridge.WorkspaceDescriptorInfoProvider); ok {
+		workspaceInfo, err = provider.WorkspaceDescriptorInfo(ctx, botID)
+	} else if provider, ok := h.bridgeProvider.(bridge.WorkspaceInfoProvider); ok {
+		workspaceInfo, err = provider.WorkspaceInfo(ctx, botID)
+	} else {
 		return info
 	}
-	workspaceInfo, err := provider.WorkspaceInfo(ctx, botID)
 	if err != nil {
 		return info
 	}

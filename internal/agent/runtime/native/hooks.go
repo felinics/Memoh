@@ -277,11 +277,15 @@ func (a *Agent) hookWorkspace(ctx context.Context, botID string) hooks.Workspace
 	if a == nil || a.bridgeProvider == nil {
 		return info
 	}
-	provider, ok := a.bridgeProvider.(bridge.WorkspaceInfoProvider)
-	if !ok {
+	var workspaceInfo bridge.WorkspaceInfo
+	var err error
+	if provider, ok := a.bridgeProvider.(bridge.WorkspaceDescriptorInfoProvider); ok {
+		workspaceInfo, err = provider.WorkspaceDescriptorInfo(ctx, botID)
+	} else if provider, ok := a.bridgeProvider.(bridge.WorkspaceInfoProvider); ok {
+		workspaceInfo, err = provider.WorkspaceInfo(ctx, botID)
+	} else {
 		return info
 	}
-	workspaceInfo, err := provider.WorkspaceInfo(ctx, botID)
 	if err != nil {
 		return info
 	}

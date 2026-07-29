@@ -13,6 +13,7 @@ import (
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/internal/workspacecontext"
 )
 
 type SkillItem struct {
@@ -155,6 +156,9 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 			return fsHTTPError(fmt.Errorf("write skill file: %w", err))
 		}
 	}
+	if err := h.refreshWorkspaceContext(ctx, botID, workspacecontext.ReasonSkillsChanged); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
 }
@@ -203,6 +207,9 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 			return fsHTTPError(err)
 		}
 	}
+	if err := h.refreshWorkspaceContext(ctx, botID, workspacecontext.ReasonSkillsChanged); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
 }
@@ -245,12 +252,22 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 	}); err != nil {
 		return fsHTTPError(err)
 	}
+	if err := h.refreshWorkspaceContext(ctx, botID, workspacecontext.ReasonSkillsChanged); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
 
 	return c.JSON(http.StatusOK, skillsOpResponse{OK: true})
 }
 
 // LoadSkills loads the effective skills from the container for the given bot.
 func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]SkillItem, error) {
+	if h.workspaceContext != nil {
+		items, err := h.workspaceContext.Skills(ctx, botID, true)
+		if err != nil {
+			return nil, err
+		}
+		return skillItemsFromEntries(items), nil
+	}
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return nil, err
@@ -295,6 +312,9 @@ func (h *ContainerdHandler) listSkillsFromContainer(ctx context.Context, botID s
 }
 
 func (h *ContainerdHandler) listSkillEntriesFromContainer(ctx context.Context, botID string) ([]skillset.Entry, error) {
+	if h.workspaceContext != nil {
+		return h.workspaceContext.Skills(ctx, botID, false)
+	}
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return nil, err

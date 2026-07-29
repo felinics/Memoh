@@ -25,6 +25,7 @@ import (
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/internal/workspacecontext"
 )
 
 type ContainerdHandler struct {
@@ -41,8 +42,33 @@ type ContainerdHandler struct {
 	accountService   *accounts.Service
 	policyService    *policy.Service
 	pluginService    PluginInstallationLister
+	workspaceContext *workspacecontext.Service
 	displayService   *displaypkg.Service
 	browserSessions  *browserSessionStore
+}
+
+func (h *ContainerdHandler) SetWorkspaceContext(service *workspacecontext.Service) {
+	h.workspaceContext = service
+}
+
+func (h *ContainerdHandler) refreshWorkspaceContext(ctx context.Context, botID, reason string) error {
+	if h == nil || h.workspaceContext == nil {
+		return nil
+	}
+	_, err := h.workspaceContext.Refresh(ctx, botID, reason)
+	return err
+}
+
+func (h *ContainerdHandler) refreshWorkspaceContextIfRelevant(ctx context.Context, botID, reason string, paths ...string) error {
+	if h == nil || h.workspaceContext == nil {
+		return nil
+	}
+	for _, filePath := range paths {
+		if workspacecontext.IsRelevantPath(filePath) {
+			return h.refreshWorkspaceContext(ctx, botID, reason)
+		}
+	}
+	return nil
 }
 
 type ContainerGPURequest struct {
@@ -521,6 +547,15 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		}
 		dataRestored = true
 	}
+	nativeContext := workspace.WithWorkspaceTarget(ctx, workspace.WorkspaceTargetNative)
+	if err := h.refreshWorkspaceContext(nativeContext, botID, workspacecontext.ReasonWorkspaceInit); err != nil {
+		h.logger.Error("workspace context initialization failed",
+			slog.String("bot_id", botID),
+			slog.Any("error", err),
+		)
+		sendError("workspace_context_failed", "bots.container.createFailed", "workspace context initialization failed")
+		return nil
+	}
 
 	h.manager.RecordContainerRunning(ctx, botID, containerID, image)
 	h.clearContainerSetupFailure(ctx, botID)
@@ -904,6 +939,10 @@ func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 	if err := h.manager.RollbackVersion(c.Request().Context(), botID, req.Version); err != nil {
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_snapshot_rollback_failed", "bots.container.rollbackFailed", err.Error())
 	}
+	refreshCtx := workspace.WithWorkspaceTarget(c.Request().Context(), workspace.WorkspaceTargetNative)
+	if err := h.refreshWorkspaceContext(refreshCtx, botID, workspacecontext.ReasonWorkspaceImport); err != nil {
+		return newI18nHTTPError(http.StatusInternalServerError, "workspace_context_refresh_failed", "bots.container.rollbackFailed", err.Error())
+	}
 	return c.JSON(http.StatusOK, map[string]any{"rolled_back_to": req.Version})
 }
 
@@ -928,8 +967,13 @@ func (h *ContainerdHandler) RestorePreservedData(c echo.Context) error {
 		return newI18nHTTPError(http.StatusNotFound, "workspace_preserved_data_not_found", "bots.container.restoreFailed", "no preserved data found")
 	}
 
-	if err := h.manager.RestorePreservedData(c.Request().Context(), botID); err != nil {
+	ctx := c.Request().Context()
+	if err := h.manager.RestorePreservedData(ctx, botID); err != nil {
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_restore_failed", "bots.container.restoreFailed", err.Error())
+	}
+	refreshCtx := workspace.WithWorkspaceTarget(ctx, workspace.WorkspaceTargetNative)
+	if err := h.refreshWorkspaceContext(refreshCtx, botID, workspacecontext.ReasonWorkspaceImport); err != nil {
+		return newI18nHTTPError(http.StatusInternalServerError, "workspace_context_refresh_failed", "bots.container.restoreFailed", err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"restored": true})
 }

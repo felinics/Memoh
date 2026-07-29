@@ -21,6 +21,25 @@ func (workspaceRequestTargetService) ResolveWorkspaceTarget(_ context.Context, _
 	}, nil
 }
 
+type descriptorFirstWorkspaceTargetService struct {
+	descriptorCalls int
+	clientCalls     int
+}
+
+func (s *descriptorFirstWorkspaceTargetService) ResolveWorkspaceTarget(context.Context, string, string) (workspace.ResolvedWorkspaceTarget, error) {
+	s.clientCalls++
+	return workspace.ResolvedWorkspaceTarget{}, nil
+}
+
+func (s *descriptorFirstWorkspaceTargetService) ResolveWorkspaceTargetDescriptor(_ context.Context, _ string, targetID string) (workspace.WorkspaceTargetDescriptor, error) {
+	s.descriptorCalls++
+	return workspace.WorkspaceTargetDescriptor{
+		TargetID: strings.TrimSpace(targetID),
+		Kind:     workspace.WorkspaceTargetRemote,
+		Name:     "Computer B",
+	}, nil
+}
+
 type workspaceRequestPermission bool
 
 func (allowed workspaceRequestPermission) HasBotPermission(_ context.Context, _, _, permission string) (bool, error) {
@@ -55,6 +74,31 @@ func TestPrepareWorkspaceRequestRequiresWorkspaceRead(t *testing.T) {
 	}
 	if targetID := workspace.WorkspaceTargetFromContext(ctx); targetID != "computer-b" {
 		t.Fatalf("context target = %q, want computer-b", targetID)
+	}
+}
+
+func TestPrepareWorkspaceRequestDoesNotOpenWorkspaceClient(t *testing.T) {
+	targets := &descriptorFirstWorkspaceTargetService{}
+	service := &Service{
+		workspaceTargets: targets,
+		botPermissions:   workspaceRequestPermission(true),
+	}
+	_, got, err := service.prepareWorkspaceRequest(t.Context(), ChatRequest{
+		BotID:             "bot-1",
+		UserID:            "user-1",
+		WorkspaceTargetID: "computer-b",
+	})
+	if err != nil {
+		t.Fatalf("prepareWorkspaceRequest() error = %v", err)
+	}
+	if got.WorkspaceTarget == nil || got.WorkspaceTarget.TargetID != "computer-b" {
+		t.Fatalf("workspace target = %#v", got.WorkspaceTarget)
+	}
+	if targets.descriptorCalls != 1 {
+		t.Fatalf("descriptor calls = %d, want 1", targets.descriptorCalls)
+	}
+	if targets.clientCalls != 0 {
+		t.Fatalf("workspace client calls = %d, want 0", targets.clientCalls)
 	}
 }
 

@@ -77,6 +77,7 @@ func ServerModule() fx.Option {
 			provideWorkspaceManager,
 			provideBridgeProvider,
 			providePluginBridgeProvider,
+			provideWorkspaceContextService,
 			provideMemoryLLM,
 			memprovider.NewService,
 			provideMemoryProviderRegistry,

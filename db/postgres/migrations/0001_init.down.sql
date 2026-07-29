@@ -49,6 +49,7 @@ DROP TABLE IF EXISTS mcp_oauth_tokens CASCADE;
 DROP TABLE IF EXISTS bot_plugin_resources CASCADE;
 DROP TABLE IF EXISTS mcp_connections CASCADE;
 DROP TABLE IF EXISTS bot_plugin_installations CASCADE;
+DROP TABLE IF EXISTS bot_workspace_context_snapshots CASCADE;
 DROP TABLE IF EXISTS channel_link_codes CASCADE;
 DROP TABLE IF EXISTS user_channel_identity_bindings CASCADE;
 DROP TABLE IF EXISTS bot_channel_admins CASCADE;

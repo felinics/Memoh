@@ -41,6 +41,12 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	}
 	defer func() { finish(err) }()
 	ctx = runCtx
+	if s.workspaceContext != nil {
+		ctx, _, err = s.workspaceContext.Attach(ctx, botID)
+		if err != nil {
+			return schedule.TriggerResult{}, err
+		}
+	}
 
 	req := ChatRequest{
 		BotID:       botID,
@@ -113,6 +119,12 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 	}
 	defer func() { finish(err) }()
 	ctx = runCtx
+	if s.workspaceContext != nil {
+		ctx, _, err = s.workspaceContext.Attach(ctx, botID)
+		if err != nil {
+			return heartbeat.TriggerResult{}, err
+		}
+	}
 
 	var heartbeatModel string
 	if botSettings, err := s.loadBotSettings(ctx, botID); err == nil {
@@ -141,7 +153,12 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 	cfg.ContextScope.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
 	var checklist string
-	if s.agent != nil {
+	if s.workspaceContext != nil {
+		checklist, err = s.workspaceContext.HeartbeatChecklist(ctx, botID)
+		if err != nil {
+			return heartbeat.TriggerResult{}, err
+		}
+	} else if s.agent != nil {
 		nowFn := time.Now
 		if cfg.Identity.TimezoneLocation != nil {
 			nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }

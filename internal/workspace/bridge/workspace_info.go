@@ -19,3 +19,9 @@ type WorkspaceInfo struct {
 type WorkspaceInfoProvider interface {
 	WorkspaceInfo(ctx context.Context, botID string) (WorkspaceInfo, error)
 }
+
+// WorkspaceDescriptorInfoProvider supplies routing metadata without requiring
+// the underlying workspace runtime to be online.
+type WorkspaceDescriptorInfoProvider interface {
+	WorkspaceDescriptorInfo(ctx context.Context, botID string) (WorkspaceInfo, error)
+}

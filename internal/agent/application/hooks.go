@@ -100,6 +100,18 @@ func (s *Service) hookWorkspace(ctx context.Context, botID string) hooks.Workspa
 		CWD:     hooks.DefaultWorkDir,
 		Runtime: bridge.WorkspaceBackendContainer,
 	}
+	if s != nil && s.workspaceTargets != nil {
+		descriptor, err := s.resolveWorkspaceTargetDescriptor(ctx, botID, "")
+		if err == nil {
+			if strings.TrimSpace(descriptor.Info.DefaultWorkDir) != "" {
+				info.CWD = descriptor.Info.DefaultWorkDir
+			}
+			if strings.TrimSpace(descriptor.Info.Backend) != "" {
+				info.Runtime = descriptor.Info.Backend
+			}
+		}
+		return info
+	}
 	if s == nil || s.agent == nil {
 		return info
 	}

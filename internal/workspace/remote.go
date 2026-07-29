@@ -86,6 +86,18 @@ type ResolvedWorkspaceTarget struct {
 	Approval settings.ToolApprovalConfig
 }
 
+// WorkspaceTargetDescriptor contains request-routing metadata without opening
+// the target's filesystem client. Agent turns use this shape until a workspace
+// tool actually needs the runtime.
+type WorkspaceTargetDescriptor struct {
+	TargetID string
+	Kind     string
+	Name     string
+	Primary  bool
+	Info     bridge.WorkspaceInfo
+	Approval settings.ToolApprovalConfig
+}
+
 // RemoteWorkspaceService owns persistent remote mounts. Live runtime
 // connections remain owned by userruntime.Service.
 type RemoteWorkspaceService struct {
@@ -234,6 +246,14 @@ func (s *RemoteWorkspaceService) ResolveMount(ctx context.Context, botID, target
 	return s.resolveRecord(record)
 }
 
+func (s *RemoteWorkspaceService) ResolveMountDescriptor(ctx context.Context, botID, targetID string) (WorkspaceTargetDescriptor, error) {
+	record, err := s.getRecord(ctx, botID, targetID)
+	if err != nil {
+		return WorkspaceTargetDescriptor{}, err
+	}
+	return s.describeRecord(record)
+}
+
 func (s *RemoteWorkspaceService) resolveRecord(record dbstore.BotRemoteRuntimeBindingRecord) (ResolvedWorkspaceTarget, error) {
 	client, connection, err := s.clientForRecord(record)
 	if err != nil {
@@ -254,6 +274,30 @@ func (s *RemoteWorkspaceService) resolveRecord(record dbstore.BotRemoteRuntimeBi
 	}, nil
 }
 
+func (s *RemoteWorkspaceService) describeRecord(record dbstore.BotRemoteRuntimeBindingRecord) (WorkspaceTargetDescriptor, error) {
+	if record.RuntimeUserID != record.BotOwnerUserID {
+		return WorkspaceTargetDescriptor{}, ErrRemoteRuntimeOwnerMismatch
+	}
+	if record.RuntimeRevoked {
+		return WorkspaceTargetDescriptor{}, ErrRemoteRuntimeRevoked
+	}
+	info := bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendRemote}
+	if s.runtimes != nil {
+		if connection, ok := s.runtimes.Connection(record.RuntimeID); ok && connection != nil {
+			info.OS = connection.Info.OS
+			info.DefaultWorkDir = connection.Info.WorkspaceBase
+		}
+	}
+	return WorkspaceTargetDescriptor{
+		TargetID: record.ID,
+		Kind:     WorkspaceTargetRemote,
+		Name:     record.RuntimeName,
+		Primary:  record.IsPrimary,
+		Info:     info,
+		Approval: toolApprovalConfig(record.ToolApproval),
+	}, nil
+}
+
 func (s *RemoteWorkspaceService) ResolvePrimary(ctx context.Context, botID string) (ResolvedWorkspaceTarget, bool, error) {
 	record, err := s.getPrimaryRecord(ctx, botID)
 	if errors.Is(err, ErrRemoteWorkspaceNotBound) {
@@ -263,6 +307,18 @@ func (s *RemoteWorkspaceService) ResolvePrimary(ctx context.Context, botID strin
 		return ResolvedWorkspaceTarget{}, false, err
 	}
 	target, err := s.resolveRecord(record)
+	return target, true, err
+}
+
+func (s *RemoteWorkspaceService) ResolvePrimaryDescriptor(ctx context.Context, botID string) (WorkspaceTargetDescriptor, bool, error) {
+	record, err := s.getPrimaryRecord(ctx, botID)
+	if errors.Is(err, ErrRemoteWorkspaceNotBound) {
+		return WorkspaceTargetDescriptor{}, false, nil
+	}
+	if err != nil {
+		return WorkspaceTargetDescriptor{}, false, err
+	}
+	target, err := s.describeRecord(record)
 	return target, true, err
 }
 
@@ -324,27 +380,31 @@ func (s *RemoteWorkspaceService) getPrimaryRecord(ctx context.Context, botID str
 }
 
 func (s *RemoteWorkspaceService) clientForRecord(record dbstore.BotRemoteRuntimeBindingRecord) (*bridge.Client, *userruntime.Connection, error) {
+	connection, err := s.connectionForRecord(record)
+	if err != nil {
+		return nil, nil, err
+	}
+	return connection.Client, connection, nil
+}
+
+func (s *RemoteWorkspaceService) connectionForRecord(record dbstore.BotRemoteRuntimeBindingRecord) (*userruntime.Connection, error) {
 	if record.RuntimeUserID != record.BotOwnerUserID {
-		return nil, nil, ErrRemoteRuntimeOwnerMismatch
+		return nil, ErrRemoteRuntimeOwnerMismatch
 	}
 	if record.RuntimeRevoked {
-		return nil, nil, ErrRemoteRuntimeRevoked
+		return nil, ErrRemoteRuntimeRevoked
 	}
 	if s.runtimes == nil {
-		return nil, nil, ErrRemoteRuntimeOffline
+		return nil, ErrRemoteRuntimeOffline
 	}
 	connection, ok := s.runtimes.Connection(record.RuntimeID)
 	if !ok || connection == nil || connection.Client == nil {
-		return nil, nil, ErrRemoteRuntimeOffline
+		return nil, ErrRemoteRuntimeOffline
 	}
 	if !supportsRemoteWorkspace(connection.Info.Capabilities) {
-		return nil, nil, ErrRemoteRuntimeClientUpdateNeeded
+		return nil, ErrRemoteRuntimeClientUpdateNeeded
 	}
-	client := connection.Client
-	if client == nil {
-		return nil, nil, ErrRemoteRuntimeOffline
-	}
-	return client, connection, nil
+	return connection, nil
 }
 
 func (s *RemoteWorkspaceService) target(record dbstore.BotRemoteRuntimeBindingRecord) WorkspaceTarget {

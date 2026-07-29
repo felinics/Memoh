@@ -92,6 +92,7 @@ import (
 	videopkg "github.com/memohai/memoh/internal/video"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/memohai/memoh/internal/workspacecontext"
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
@@ -311,9 +312,16 @@ func providePluginBridgeProvider(provider bridge.Provider) pluginspkg.BridgeProv
 	return pluginspkg.BridgeProvider{Provider: provider}
 }
 
-func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginService *pluginspkg.Service) *hookspkg.Service {
+func provideWorkspaceContextService(log *slog.Logger, queries dbstore.Queries, manager *workspace.Manager, pluginService *pluginspkg.Service) *workspacecontext.Service {
+	service := workspacecontext.NewService(log, queries, manager, pluginService)
+	pluginService.SetWorkspaceContextRefresher(service)
+	return service
+}
+
+func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginService *pluginspkg.Service, workspaceContext *workspacecontext.Service) *hookspkg.Service {
 	service := hookspkg.NewService(log, provider)
 	service.SetPluginService(pluginService)
+	service.SetEffectiveConfigProvider(workspaceContext)
 	return service
 }
 
@@ -479,13 +487,14 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager) *application.Service {
+func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, workspaceManager *workspace.Manager, workspaceContext *workspacecontext.Service, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager) *application.Service {
 	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
 	// Every turn entry point goes through admission, so a service without it can
 	// start nothing: this is the thread's single-run guarantee, not an add-on.
 	service.SetSessionRuntime(sessionRuntime)
 	service.SetWorkspaceTargetResolver(workspaceManager)
+	service.SetWorkspaceContext(workspaceContext)
 	service.SetHookService(hookService)
 	if sessionService != nil {
 		sessionService.SetHookService(hookService)
@@ -497,7 +506,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 		workspaceManager.SetHookService(hookService)
 	}
 	service.SetMemoryRegistry(memoryRegistry)
-	service.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
+	service.SetSkillLoader(&skillLoaderAdapter{workspaceContext: workspaceContext})
 	service.SetGatewayAssetLoader(&gatewayAssetLoaderAdapter{media: mediaService})
 	service.SetPlatformIdentitySource(channelidentityadapter.NewSource(channelStore))
 	service.SetSessionService(sessionService)
@@ -534,14 +543,15 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service, workspaceContext *workspacecontext.Service) *handlers.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
 	h.SetPluginService(pluginService)
+	h.SetWorkspaceContext(workspaceContext)
 	return h
 }
 
-func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool) *botbackup.Service {
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, workspaceContext *workspacecontext.Service, acpPool *acpagent.SessionPool) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
 		DB:              conn,
@@ -559,6 +569,7 @@ func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbsto
 		FetchProviders:  fetchProviderService,
 		MemoryProviders: memoryProviderService,
 		Workspace:       manager,
+		ContextCache:    workspaceContext,
 		ACPRuntimes:     acpPool,
 	})
 }
@@ -625,13 +636,15 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, workspaceContext *workspacecontext.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
 	channelMessaging := channelmessagingadapter.New(channelRuntime, registry, assetResolver)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
+	containerProvider := agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService)
+	containerProvider.SetWorkspaceContextRefresher(workspaceContext)
 	return []agenttools.ToolProvider{
 		agenttools.NewAskUserProvider(log),
 		agenttools.NewMessageProvider(log, channelMessaging, channelMessaging, channelMessaging, assetResolver),
@@ -639,7 +652,7 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewScheduleProvider(log, scheduleService),
 		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
-		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
+		containerProvider,
 		agenttools.NewBackgroundProvider(log, bgManager),
 		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, manager, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailRuntime),
@@ -901,11 +914,11 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 }
 
 type skillLoaderAdapter struct {
-	handler *handlers.ContainerdHandler
+	workspaceContext *workspacecontext.Service
 }
 
 func (a *skillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]application.SkillEntry, error) {
-	items, err := a.handler.LoadSkills(ctx, botID)
+	items, err := a.workspaceContext.Skills(ctx, botID, true)
 	if err != nil {
 		return nil, err
 	}

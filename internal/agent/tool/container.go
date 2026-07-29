@@ -42,15 +42,21 @@ const containerOpTimeout = 30 * time.Second
 const largeFileThreshold = 512 * 1024 // 512 KB
 
 type ContainerProvider struct {
-	clients     bridge.Provider
-	bgManager   *background.Manager
-	hookService workspaceHookService
-	execWorkDir string
-	logger      *slog.Logger
+	clients                   bridge.Provider
+	bgManager                 *background.Manager
+	hookService               workspaceHookService
+	workspaceContextRefresher workspaceContextRefresher
+	execWorkDir               string
+	logger                    *slog.Logger
 }
 
 type workspaceHookService interface {
 	Run(ctx context.Context, req hooks.Request, runner hooks.ToolRunner) (hooks.Result, error)
+}
+
+type workspaceContextRefresher interface {
+	RefreshNow(ctx context.Context, botID, reason string) error
+	RefreshIfRelevant(ctx context.Context, botID, reason string, paths ...string) error
 }
 
 func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *background.Manager, execWorkDir string, hookServices ...*hooks.Service) *ContainerProvider {
@@ -70,6 +76,48 @@ func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *
 
 func (p *ContainerProvider) SetHookService(h *hooks.Service) {
 	p.hookService = h
+}
+
+func (p *ContainerProvider) SetWorkspaceContextRefresher(refresher workspaceContextRefresher) {
+	p.workspaceContextRefresher = refresher
+}
+
+func (p *ContainerProvider) refreshWorkspaceContextForTarget(ctx context.Context, botID, targetID, reason string) {
+	if p == nil || p.workspaceContextRefresher == nil {
+		return
+	}
+	if targetID = strings.TrimSpace(targetID); targetID != "" {
+		ctx = workspacepkg.WithWorkspaceTarget(ctx, targetID)
+	}
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	if err := p.workspaceContextRefresher.RefreshNow(refreshCtx, botID, reason); err != nil && p.logger != nil {
+		p.logger.Warn("workspace context refresh failed",
+			slog.String("bot_id", botID),
+			slog.String("target_id", targetID),
+			slog.String("reason", reason),
+			slog.Any("error", err),
+		)
+	}
+}
+
+func (p *ContainerProvider) refreshWorkspaceContextIfRelevantForTarget(ctx context.Context, botID, targetID, reason string, paths ...string) {
+	if p == nil || p.workspaceContextRefresher == nil {
+		return
+	}
+	if targetID = strings.TrimSpace(targetID); targetID != "" {
+		ctx = workspacepkg.WithWorkspaceTarget(ctx, targetID)
+	}
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	if err := p.workspaceContextRefresher.RefreshIfRelevant(refreshCtx, botID, reason, paths...); err != nil && p.logger != nil {
+		p.logger.Warn("workspace context refresh failed",
+			slog.String("bot_id", botID),
+			slog.String("target_id", targetID),
+			slog.String("reason", reason),
+			slog.Any("error", err),
+		)
+	}
 }
 
 func (*ContainerProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
@@ -759,6 +807,7 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	}); err != nil {
 		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
+	p.refreshWorkspaceContextIfRelevantForTarget(ctx, session.BotID, target.id, "relevant_file", filePath)
 	return map[string]any{"ok": true}, nil
 }
 
@@ -895,6 +944,7 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	}); err != nil {
 		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
+	p.refreshWorkspaceContextIfRelevantForTarget(ctx, session.BotID, target.id, "relevant_file", filePath)
 	return map[string]any{"ok": true}, nil
 }
 
@@ -938,24 +988,34 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 			return nil, fmt.Errorf("blocked: %s. Run blocking commands in the background with run_in_background: true, then use wait_until(task_id) and get_background_status(task_id). If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds", reason)
 		}
 	}
+	executionSession := session
+	executionSession.WorkspaceTargetID = target.id
 
 	// Background execution path.
 	if runInBg && p.bgManager != nil {
-		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, true, func() (any, error) {
-			return p.execExecBackground(ctx, session, client, command, workDir, description, backgroundOutputDir)
+		return p.execWithWorkspaceHooks(ctx, executionSession, hookWorkspace, command, workDir, timeout, true, func() (any, error) {
+			return p.execExecBackground(ctx, executionSession, client, command, workDir, description, backgroundOutputDir)
 		})
 	}
 
 	// If we have a background manager, use streaming exec so we can flip
 	// to background on timeout without killing the process.
 	if p.bgManager != nil {
-		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
-			return p.execExecWithFlip(ctx, session, client, command, workDir, description, backgroundOutputDir, timeout)
+		commandStarted := false
+		result, runErr := p.execWithWorkspaceHooks(ctx, executionSession, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
+			commandStarted = true
+			return p.execExecWithFlip(ctx, executionSession, client, command, workDir, description, backgroundOutputDir, timeout)
 		})
+		if commandStarted && !isBackgroundExecResult(result) {
+			p.refreshWorkspaceContextForTarget(ctx, session.BotID, target.id, "workspace_command")
+		}
+		return result, runErr
 	}
 
 	// Fallback: no background manager, plain synchronous exec.
-	wrapped, err := p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
+	commandStarted := false
+	wrapped, err := p.execWithWorkspaceHooks(ctx, executionSession, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
+		commandStarted = true
 		result, err := client.Exec(ctx, command, workDir, timeout)
 		if err != nil {
 			return nil, err
@@ -964,10 +1024,26 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 		stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
 		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
 	})
+	if commandStarted {
+		p.refreshWorkspaceContextForTarget(ctx, session.BotID, target.id, "workspace_command")
+	}
 	if err != nil {
 		return nil, err
 	}
 	return wrapped, nil
+}
+
+func isBackgroundExecResult(result any) bool {
+	payload, ok := result.(map[string]any)
+	if !ok {
+		return false
+	}
+	switch strings.TrimSpace(StringArg(payload, "status")) {
+	case "background_started", "auto_backgrounded":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session SessionContext, workspace hooks.WorkspaceInfo, command, workDir string, timeout int32, background bool, run func() (any, error)) (any, error) {
@@ -1183,7 +1259,7 @@ func (p *ContainerProvider) flipToBackground(
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
 		session.BotID, session.SessionID, command, workDir, description, outputDir,
-		reader.Result(), writeFn,
+		p.refreshWorkspaceContextOnResult(ctx, session.BotID, targetIDFromSession(session), reader.Result()), writeFn,
 	)
 	// SetChunkHandler replays output collected during the foreground phase
 	// into the task buffer, so the tail below already contains it.
@@ -1252,7 +1328,7 @@ func (p *ContainerProvider) execExecBackground(
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
 		session.BotID, session.SessionID, command, workDir, description, outputDir,
-		reader.Result(), writeFn,
+		p.refreshWorkspaceContextOnResult(ctx, session.BotID, targetIDFromSession(session), reader.Result()), writeFn,
 	)
 	reader.SetChunkHandler(func(stream, chunk string) {
 		p.bgManager.RecordOutput(taskID, stream, chunk)
@@ -1269,6 +1345,32 @@ func (p *ContainerProvider) execExecBackground(
 			taskID, outputFile,
 		),
 	}, nil
+}
+
+func (p *ContainerProvider) refreshWorkspaceContextOnResult(
+	ctx context.Context,
+	botID string,
+	targetID string,
+	resultCh <-chan background.AdoptResult,
+) <-chan background.AdoptResult {
+	if p == nil || p.workspaceContextRefresher == nil {
+		return resultCh
+	}
+	forwarded := make(chan background.AdoptResult, 1)
+	go func() {
+		defer close(forwarded)
+		result, ok := <-resultCh
+		if !ok {
+			return
+		}
+		p.refreshWorkspaceContextForTarget(ctx, botID, targetID, "workspace_command")
+		forwarded <- result
+	}()
+	return forwarded
+}
+
+func targetIDFromSession(session SessionContext) string {
+	return strings.TrimSpace(session.WorkspaceTargetID)
 }
 
 func truncateStr(s string, n int) string {
