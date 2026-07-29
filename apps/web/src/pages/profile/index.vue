@@ -147,10 +147,12 @@ import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePassw
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { useClipboard } from '@/composables/useClipboard'
 
 type UserAccount = AccountsAccount
 
 const { t } = useI18n()
+const { copyText } = useClipboard()
 const router = useRouter()
 const userStore = useUserStore()
 const { userInfo, exitLogin, patchUserInfo } = userStore
@@ -200,13 +202,13 @@ const passwordDialogOpen = ref(false)
 const copiedId = ref(false)
 
 async function copyToClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    copiedId.value = true
-    setTimeout(() => copiedId.value = false, 2000)
-  } catch {
+  const ok = await copyText(text)
+  if (!ok) {
     toast.error(t('common.copyFailed'))
+    return
   }
+  copiedId.value = true
+  setTimeout(() => copiedId.value = false, 2000)
 }
 
 const displayUserID = computed(() => account.value?.id || userInfo.id || '')
