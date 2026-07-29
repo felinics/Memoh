@@ -21,6 +21,7 @@ type Page struct {
 
 type UserRuntimeRecord struct {
 	ID        string
+	TeamID    string
 	UserID    string
 	Name      string
 	APIToken  string //nolint:gosec // owner-readable Remote Runtime credential by product design

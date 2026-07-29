@@ -6,6 +6,7 @@ import "time"
 // reverse-RPC connection is online; they are not persisted.
 type Runtime struct {
 	ID            string    `json:"id"`
+	TeamID        string    `json:"team_id"`
 	Name          string    `json:"name"`
 	Key           string    `json:"key"`
 	CreatedAt     time.Time `json:"created_at"`

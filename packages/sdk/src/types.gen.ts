@@ -2904,6 +2904,7 @@ export type UserruntimeRuntime = {
     name?: string;
     online?: boolean;
     os?: string;
+    team_id?: string;
     workspace_base?: string;
 };
 

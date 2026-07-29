@@ -201,7 +201,7 @@ func canonicalRuntimeUUID(value string) (string, bool) {
 
 func runtimeFromRecord(row dbstore.UserRuntimeRecord, connection *Connection) Runtime {
 	runtime := Runtime{
-		ID: row.ID, Name: row.Name, Key: row.APIToken, CreatedAt: row.CreatedAt,
+		ID: row.ID, TeamID: row.TeamID, Name: row.Name, Key: row.APIToken, CreatedAt: row.CreatedAt,
 	}
 	if connection == nil {
 		return runtime

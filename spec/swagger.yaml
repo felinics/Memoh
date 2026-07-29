@@ -4933,6 +4933,8 @@ definitions:
         type: boolean
       os:
         type: string
+      team_id:
+        type: string
       workspace_base:
         type: string
     type: object

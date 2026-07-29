@@ -257,7 +257,7 @@ declare module '@memohai/web/lib/desktop-shell' {
   }
   export interface DesktopRuntimeBridge {
     runtimeState(): Promise<DesktopRuntimeState>
-    configureRuntime(config: { runtimeId: string, name: string, key: string } | null): Promise<DesktopRuntimeState>
+    configureRuntime(config: { runtimeId: string, name: string, key: string, teamId?: string } | null): Promise<DesktopRuntimeState>
     onRuntimeStateChanged(listener: (state: DesktopRuntimeState) => void): () => void
   }
   export const DesktopRuntimeKey: InjectionKey<DesktopRuntimeBridge | undefined>

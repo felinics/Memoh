@@ -61,7 +61,7 @@ func (s *Store) RevokeUserRuntime(ctx context.Context, runtimeID, userID string)
 
 func userRuntimeRecord(row dbsqlc.UserRuntime) dbstore.UserRuntimeRecord {
 	return dbstore.UserRuntimeRecord{
-		ID: row.ID.String(), UserID: row.UserID.String(), Name: row.Name,
+		ID: row.ID.String(), TeamID: row.TeamID.String(), UserID: row.UserID.String(), Name: row.Name,
 		APIToken: row.ApiToken, CreatedAt: db.TimeFromPg(row.CreatedAt),
 	}
 }

@@ -778,7 +778,15 @@ function normalizeDesktopRuntimeConfig(value: unknown): DesktopRuntimeConfig | n
   if (typeof record.runtimeId !== 'string' || typeof record.name !== 'string' || typeof record.key !== 'string') {
     throw new Error('runtime configuration must contain runtimeId, name, and key')
   }
+  if (record.teamId !== undefined && typeof record.teamId !== 'string') {
+    throw new Error('runtime configuration teamId must be a string')
+  }
   const name = record.name.trim()
   if (!name) throw new Error('runtime configuration name is required')
-  return { runtimeId: record.runtimeId, name, key: record.key }
+  return {
+    runtimeId: record.runtimeId,
+    name,
+    key: record.key,
+    teamId: record.teamId,
+  }
 }

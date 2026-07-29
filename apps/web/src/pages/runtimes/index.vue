@@ -345,6 +345,7 @@ import {
 } from '@/lib/desktop-shell'
 import { useClipboard } from '@/composables/useClipboard'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { buildRuntimeConnectCommand } from './command'
 
 const { t } = useI18n()
 const { copyText } = useClipboard()
@@ -501,6 +502,7 @@ const enableDesktopRuntime = connectForm.handleSubmit(async (values) => {
       runtimeId: created.id,
       name,
       key: created.key,
+      teamId: created.team_id?.trim() || undefined,
     })
     created = undefined
     desktopRuntimeDialogOpen.value = false
@@ -521,18 +523,16 @@ const enableDesktopRuntime = connectForm.handleSubmit(async (values) => {
   }
 })
 
-function commandForKey(value: string | undefined): string {
-  const key = value?.trim()
-  if (!key) return ''
-  const server = sdkApiBaseUrl()
-  const localFlag = isInsecureLocalhost(server) ? ' --insecure-localhost' : ''
-  return `npx --yes @memohai/runtime --server ${server} --key ${key}${localFlag}`
+function commandForCredential(
+  credential: Pick<UserruntimeRuntime, 'key' | 'team_id'> | null | undefined,
+): string {
+  return buildRuntimeConnectCommand(sdkApiBaseUrl(), credential)
 }
 
-const connectCommand = computed(() => commandForKey(createdCredential.value?.key))
+const connectCommand = computed(() => commandForCredential(createdCredential.value))
 
 function runtimeCommand(runtime: UserruntimeRuntime): string {
-  return commandForKey(runtime.key)
+  return commandForCredential(runtime)
 }
 
 const createRuntimeCredential = connectForm.handleSubmit(async (values) => {
@@ -568,12 +568,6 @@ function runtimeSummary(runtime: UserruntimeRuntime): string {
   if (!runtime.online) return t('runtimes.waitingForConnection')
   const machine = [runtime.hostname, runtime.os, runtime.arch].filter(Boolean).join(' · ')
   return machine || t('runtimes.connected')
-}
-
-function isInsecureLocalhost(server: string): boolean {
-  const url = new URL(server)
-  const hostname = url.hostname.replace(/^\[|\]$/g, '')
-  return url.protocol === 'http:' && ['localhost', '127.0.0.1', '::1'].includes(hostname)
 }
 
 watch(connectDialogOpen, (open) => {
