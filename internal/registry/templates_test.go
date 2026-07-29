@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -36,7 +35,7 @@ func TestProviderTemplateDefinitionsKeepLastDuplicateModel(t *testing.T) {
 func TestMoonshotTemplateUsesExplicitKimiChatCompletionsCompat(t *testing.T) {
 	t.Parallel()
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	definitions, err := Load(logger, filepath.Join("..", "..", "conf", "providers"))
 	if err != nil {
 		t.Fatalf("load provider templates: %v", err)
