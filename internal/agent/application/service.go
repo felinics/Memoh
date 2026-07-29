@@ -632,9 +632,15 @@ type baseRunConfigParams struct {
 	ReasoningEffort   string // caller-provided override (empty = use bot default)
 }
 
+// defaultModelContextTokenBudget bounds requests for custom or legacy models
+// whose metadata does not declare a context window. Built-in model templates
+// should always provide the real limit; this fallback prevents an unknown
+// value from being treated as unlimited.
+const defaultModelContextTokenBudget = 128000
+
 func modelContextTokenBudget(model models.GetResponse) int {
 	if model.Config.ContextWindow == nil || *model.Config.ContextWindow <= 0 {
-		return 0
+		return defaultModelContextTokenBudget
 	}
 	return *model.Config.ContextWindow
 }

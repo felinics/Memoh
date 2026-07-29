@@ -292,7 +292,7 @@ func TestDiscussACPTriggersCompaction(t *testing.T) {
 	if gotBotID != "bot-1" || gotThreadID != "sess-1" || gotUserID != "user-1" {
 		t.Fatalf("compaction scope = %q/%q/%q", gotBotID, gotThreadID, gotUserID)
 	}
-	if gotTokens != 100 || gotBudget != 0 {
+	if gotTokens != 200 || gotBudget != 0 {
 		t.Fatalf("compaction pressure = %d tokens, budget %d", gotTokens, gotBudget)
 	}
 }
@@ -387,7 +387,7 @@ func TestTrimDiscussMessagesUsesReservedBudgetAndLogs(t *testing.T) {
 	for _, want := range []string{
 		"level=WARN",
 		"dropped_messages=1",
-		"estimated_tokens=80",
+		"estimated_tokens=160",
 		"message_token_budget=70",
 	} {
 		if !strings.Contains(output, want) {

@@ -243,7 +243,7 @@ func discussCompactableTokens(messages []turn.DiscussMessage) int {
 		if message.CompactionArtifactID != "" {
 			continue
 		}
-		total += discussMessageContentBytes(message) / 4
+		total += estimateDiscussMessageTokens(message)
 	}
 	return total
 }
@@ -348,7 +348,11 @@ func latestSafeDiscussCutoff(messages []turn.DiscussMessage) int {
 }
 
 func estimateDiscussMessageTokens(message turn.DiscussMessage) int {
-	return (discussMessageContentBytes(message) + 3) / 4
+	// Keep this estimate aligned with chat/timeline context composition. Group
+	// histories contain a large share of CJK text, where the old bytes/4
+	// estimate could undercount by roughly half and bypass the pre-send trim.
+	const charsPerToken = 2
+	return (discussMessageContentBytes(message) + charsPerToken - 1) / charsPerToken
 }
 
 func discussMessageContentBytes(message turn.DiscussMessage) int {

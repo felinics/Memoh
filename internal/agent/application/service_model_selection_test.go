@@ -141,6 +141,28 @@ func TestSupportsImageInputForModel(t *testing.T) {
 	}
 }
 
+func TestModelContextTokenBudgetUsesFallbackWhenUnknown(t *testing.T) {
+	t.Parallel()
+
+	if got := modelContextTokenBudget(models.GetResponse{}); got != defaultModelContextTokenBudget {
+		t.Fatalf("modelContextTokenBudget() = %d, want fallback %d", got, defaultModelContextTokenBudget)
+	}
+
+	invalid := 0
+	if got := modelContextTokenBudget(models.GetResponse{
+		Model: models.Model{Config: models.ModelConfig{ContextWindow: &invalid}},
+	}); got != defaultModelContextTokenBudget {
+		t.Fatalf("modelContextTokenBudget(invalid) = %d, want fallback %d", got, defaultModelContextTokenBudget)
+	}
+
+	configured := 1000000
+	if got := modelContextTokenBudget(models.GetResponse{
+		Model: models.Model{Config: models.ModelConfig{ContextWindow: &configured}},
+	}); got != configured {
+		t.Fatalf("modelContextTokenBudget(configured) = %d, want %d", got, configured)
+	}
+}
+
 func TestResolveReasoningConfig(t *testing.T) {
 	t.Parallel()
 

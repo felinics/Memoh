@@ -4,6 +4,13 @@ icon: ollama
 base_url: http://127.0.0.1:11434/v1
 
 models:
+  - model_id: "deepseek-v4-flash:cloud"
+    name: DeepSeek V4 Flash
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1000000
+
   - model_id: "deepseek-v3.1:671b"
     name: DeepSeek V3.1
     type: chat

@@ -19,7 +19,7 @@ func TestDiscussCompactableTokensExcludesSummaries(t *testing.T) {
 	}
 
 	got := discussCompactableTokens(messages)
-	want := 400/4 + 800/4 + 400/4
+	want := 400/2 + 800/2 + 400/2
 	if got != want {
 		t.Fatalf("discussCompactableTokens = %d, want %d", got, want)
 	}
