@@ -9,6 +9,7 @@ import (
 const (
 	ChatCompletionsCompatDeepSeek = "deepseek"
 	ChatCompletionsCompatMiniMax  = "minimax"
+	ChatCompletionsCompatKimi     = "kimi"
 )
 
 func normalizeChatCompletionsCompat(compat string) string {
@@ -23,19 +24,14 @@ func isMiniMaxChatCompletionsCompat(compat string) bool {
 	return normalizeChatCompletionsCompat(compat) == ChatCompletionsCompatMiniMax
 }
 
-// ResolveChatCompletionsCompat returns a normalized compatibility mode from
-// explicit config, with fallbacks for built-in provider endpoints.
-func ResolveChatCompletionsCompat(baseURL, compat string) string {
-	compat = normalizeChatCompletionsCompat(compat)
-	if compat != "" {
-		return compat
-	}
-	base := strings.ToLower(strings.TrimSpace(baseURL))
-	if strings.Contains(base, "api.deepseek.com") {
-		return ChatCompletionsCompatDeepSeek
-	}
-	if strings.Contains(base, "api.minimax.io") || strings.Contains(base, "api.minimaxi.com") {
-		return ChatCompletionsCompatMiniMax
-	}
-	return ""
+func isKimiChatCompletionsCompat(compat string) bool {
+	return normalizeChatCompletionsCompat(compat) == ChatCompletionsCompatKimi
+}
+
+// ResolveChatCompletionsCompat returns the normalized explicit compatibility
+// mode. Endpoint URLs are deliberately not used for provider detection: a
+// proxy may serve any OpenAI-compatible backend, while a built-in provider may
+// itself be reached through a custom endpoint.
+func ResolveChatCompletionsCompat(compat string) string {
+	return normalizeChatCompletionsCompat(compat)
 }

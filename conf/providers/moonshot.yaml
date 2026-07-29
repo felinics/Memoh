@@ -2,6 +2,8 @@ name: Moonshot
 client_type: openai-completions
 icon: moonshot
 base_url: https://api.moonshot.cn/v1
+config:
+  chat_completions_compat: kimi
 
 models:
   - model_id: kimi-k2.5

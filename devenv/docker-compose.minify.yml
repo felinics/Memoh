@@ -70,6 +70,7 @@ services:
       GOFLAGS: -buildvcs=false
     volumes:
       - ..:/workspace
+      - ../../twilight-ai:/twilight-ai:ro
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
     depends_on:
@@ -104,6 +105,7 @@ services:
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:
       - ..:/workspace
+      - ../../twilight-ai:/twilight-ai:ro
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
       - containerd_data:/var/lib/containerd
@@ -140,6 +142,7 @@ services:
       TZ: "${MEMOH_DEV_TZ:-UTC}"
     volumes:
       - ..:/workspace
+      - ../../twilight-ai:/twilight-ai:ro
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
       - memoh_data:/opt/memoh/data

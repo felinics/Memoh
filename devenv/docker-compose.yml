@@ -82,6 +82,7 @@ services:
       no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-pgvector,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
     volumes:
       - ..:/workspace
+      - ../../twilight-ai:/twilight-ai:ro
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
     depends_on:
@@ -116,6 +117,7 @@ services:
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:
       - ..:/workspace
+      - ../../twilight-ai:/twilight-ai:ro
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
       - containerd_data:/var/lib/containerd
@@ -166,6 +168,7 @@ services:
       no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,channel,web,migrate,deps,webhook-tunnel,memoh-dev-postgres,memoh-dev-pgvector,memoh-dev-server,memoh-dev-channel,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-webhook-tunnel"
     volumes:
       - ..:/workspace
+      - ../../twilight-ai:/twilight-ai:ro
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
       - memoh_data:/opt/memoh/data

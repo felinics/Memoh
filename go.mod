@@ -202,3 +202,7 @@ require (
 )
 
 tool github.com/swaggo/swag/cmd/swag
+
+// Local development: use the sibling Twilight AI checkout until the SDK fix
+// is published and this module can be bumped to that revision.
+replace github.com/memohai/twilight-ai => ../twilight-ai
