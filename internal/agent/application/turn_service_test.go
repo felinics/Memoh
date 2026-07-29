@@ -39,8 +39,10 @@ type scriptedAdmitter struct {
 	// replay of a run owned elsewhere or already finished.
 	started bool
 
-	inputs   []sessionruntime.AdmitInput
-	finishes []recordedFinish
+	inputs         []sessionruntime.AdmitInput
+	finishes       []recordedFinish
+	injectChannels map[string]chan<- turn.InjectMessage
+	closedInject   map[string]bool
 }
 
 type recordedFinish struct {
@@ -50,7 +52,11 @@ type recordedFinish struct {
 }
 
 func newScriptedAdmitter() *scriptedAdmitter {
-	return &scriptedAdmitter{started: true}
+	return &scriptedAdmitter{
+		started:        true,
+		injectChannels: make(map[string]chan<- turn.InjectMessage),
+		closedInject:   make(map[string]bool),
+	}
 }
 
 func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput) (sessionruntime.Admission, error) {
@@ -64,6 +70,7 @@ func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput
 	if !a.started {
 		return sessionruntime.Admission{RunID: runID, Replay: true}, nil
 	}
+	a.injectChannels[runID] = in.Execution.InjectCh
 	return sessionruntime.Admission{
 		RunID:   runID,
 		Started: true,
@@ -79,6 +86,10 @@ func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput
 func (a *scriptedAdmitter) FinishRun(_ context.Context, handle sessionruntime.RunHandle, status, message string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if injectCh := a.injectChannels[handle.RunID]; injectCh != nil && !a.closedInject[handle.RunID] {
+		close(injectCh)
+		a.closedInject[handle.RunID] = true
+	}
 	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: message})
 	return nil
 }
@@ -577,9 +588,9 @@ func drainHandle(h turn.RunHandle) {
 	}
 }
 
-// TestRunEndClosesInjectChannel pins the fix for the per-turn goroutine
-// leak: the application's inject-forwarding goroutine exits by ranging over
-// InjectCh, so the service must close it when the run ends.
+// TestRunEndClosesInjectChannel pins both sides of the ownership contract: the
+// session runtime closes InjectCh during FinishRun, while the application only
+// stops local sends. A second close here would panic instead of passing.
 func TestRunEndClosesInjectChannel(t *testing.T) {
 	r := &fakeRunner{chunks: []string{`{"type":"done"}`}}
 	a := newTurnTestService(r)

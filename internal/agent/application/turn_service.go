@@ -111,9 +111,9 @@ type runHandle struct {
 	inject    chan turn.InjectMessage
 	addAssets func([]turn.OutboundAssetRef)
 
-	// injectMu guards inject against send-after-close: the pump closes the
-	// channel when the run ends so the application's forwarding goroutine
-	// (which ranges over it) can exit instead of leaking per turn.
+	// injectMu prevents a local Inject from racing the end of the pump. The
+	// session runtime owns and closes the shared channel when FinishRun stops
+	// the command executor.
 	injectMu     sync.Mutex
 	injectClosed bool
 
@@ -151,17 +151,13 @@ func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	}
 }
 
-// closeInject closes the inject channel exactly once. Safe against a
-// concurrent Inject: the pump cancels the run context before closing, so
-// any in-flight Inject unblocks via ctx.Done and drops the mutex first.
-func (h *runHandle) closeInject() {
+// stopInject prevents new application-side sends before FinishRun asks the
+// session runtime to stop its command executor and close the shared channel.
+// Keeping the close in the runtime gives the channel one synchronization owner.
+func (h *runHandle) stopInject() {
 	h.injectMu.Lock()
 	defer h.injectMu.Unlock()
-	if h.injectClosed {
-		return
-	}
 	h.injectClosed = true
-	close(h.inject)
 }
 
 // finish records the run's terminal state and releases the thread's slot. Runs
@@ -216,13 +212,13 @@ func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {
 // wrapping each chunk as a turn.Event with a monotonically increasing Seq.
 func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, errCh <-chan error) {
 	// Deferred order (LIFO): detect external cancellation, cancel, close
-	// inject, release a failed claim, then close the channel pair — so by
+	// injection, release a failed claim, then close the channel pair — so by
 	// the time a consumer observes the closed channels, the idempotency
 	// claim of a failed/canceled run has already been released.
 	defer close(h.events)
 	defer close(h.errs)
 	defer h.finish()
-	defer h.closeInject()
+	defer h.stopInject()
 	defer func() {
 		// A canceled run may look like a clean completion here: the
 		// application reacts to ctx cancellation by closing both channels.
