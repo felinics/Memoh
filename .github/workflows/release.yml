@@ -51,6 +51,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          # workflow_dispatch runs the repaired workflow from main, but release
+          # archives must remain reproducible from the requested release tag.
+          ref: ${{ env.RELEASE_TAG }}
       - name: Package repository with submodules
         shell: bash
         run: |

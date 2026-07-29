@@ -23,6 +23,7 @@ on:
       - "tsconfig.json"
       - "vitest.config.ts"
       - ".github/workflows/eslint.yml"
+      - ".github/workflows/release.yml"
   pull_request:
     branches: ["main"]
     paths:
@@ -45,6 +46,7 @@ on:
       - "tsconfig.json"
       - "vitest.config.ts"
       - ".github/workflows/eslint.yml"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:
