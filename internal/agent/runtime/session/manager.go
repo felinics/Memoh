@@ -97,7 +97,7 @@ type runControl struct {
 	lifecycleCancel   context.CancelFunc
 	injectCh          chan<- turn.InjectMessage
 	injectMu          sync.Mutex
-	injectClosed      bool
+	injectStopped     bool
 	converter         *chatview.UIMessageStreamConverter
 	leaseStop         func()
 	leaseDone         chan struct{}

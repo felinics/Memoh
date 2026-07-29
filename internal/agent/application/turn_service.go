@@ -111,11 +111,11 @@ type runHandle struct {
 	inject    chan turn.InjectMessage
 	addAssets func([]turn.OutboundAssetRef)
 
-	// injectMu guards inject against send-after-close: the pump closes the
-	// channel when the run ends so the application's forwarding goroutine
-	// (which ranges over it) can exit instead of leaking per turn.
-	injectMu     sync.Mutex
-	injectClosed bool
+	// injectMu lets teardown stop direct injections before the durable finisher
+	// stops the session sender and the channel can be closed safely.
+	injectMu      sync.Mutex
+	injectStopped bool
+	injectClosed  bool
 
 	// failed records that the run ended in an error or cancellation, and
 	// streamErr keeps the error itself when there was one. Both are needed
@@ -135,10 +135,10 @@ func (h *runHandle) Cancel()                   { h.cancel() }
 func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	h.injectMu.Lock()
 	defer h.injectMu.Unlock()
-	if h.injectClosed {
-		if err := h.ctx.Err(); err != nil {
-			return err
-		}
+	if err := h.ctx.Err(); err != nil {
+		return err
+	}
+	if h.injectStopped {
 		return errors.New("turn: run already finished")
 	}
 	select {
@@ -151,22 +151,27 @@ func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	}
 }
 
-// closeInject closes the inject channel exactly once. Safe against a
-// concurrent Inject: the pump cancels the run context before closing, so
-// any in-flight Inject unblocks via ctx.Done and drops the mutex first.
+func (h *runHandle) stopInject() {
+	h.injectMu.Lock()
+	defer h.injectMu.Unlock()
+	h.injectStopped = true
+}
+
+// closeInject closes the inject channel exactly once after direct and session
+// senders have stopped.
 func (h *runHandle) closeInject() {
 	h.injectMu.Lock()
 	defer h.injectMu.Unlock()
 	if h.injectClosed {
 		return
 	}
+	h.injectStopped = true
 	h.injectClosed = true
 	close(h.inject)
 }
 
-// finish records the run's terminal state and releases the thread's slot. Runs
-// the last thing in the pump's defer stack, so nothing else in the run can still
-// be writing when the record is closed.
+// finish records the run's terminal state and releases the thread's slot after
+// direct injects stop but before the application closes the shared channel.
 //
 // Every outcome is terminal, including failure. A failed run is this invocation's
 // recorded answer, so a platform redelivery of the same external message is a
@@ -215,14 +220,13 @@ func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {
 // pump forwards the application's chunk/error pair into the handle's channels,
 // wrapping each chunk as a turn.Event with a monotonically increasing Seq.
 func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, errCh <-chan error) {
-	// Deferred order (LIFO): detect external cancellation, cancel, close
-	// inject, release a failed claim, then close the channel pair — so by
-	// the time a consumer observes the closed channels, the idempotency
-	// claim of a failed/canceled run has already been released.
+	// Deferred order (LIFO): detect external cancellation, cancel, stop direct
+	// injects, finish the durable run, close inject, then close the channel pair.
 	defer close(h.events)
 	defer close(h.errs)
-	defer h.finish()
 	defer h.closeInject()
+	defer h.finish()
+	defer h.stopInject()
 	defer func() {
 		// A canceled run may look like a clean completion here: the
 		// application reacts to ctx cancellation by closing both channels.

@@ -642,47 +642,6 @@ func TestActiveCommandContextAccountsForBackendTimeLatency(t *testing.T) {
 	}
 }
 
-func TestFinishRunSerializesInjectSendAndClose(t *testing.T) {
-	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-inject-close")
-
-	for i := range 100 {
-		sessionID := fmt.Sprintf("session-inject-close-%d", i)
-		runID := fmt.Sprintf("stream-inject-close-%d", i)
-		injectCh := make(chan turn.InjectMessage, 1)
-		if err := manager.StartRun(context.Background(), testBotID, sessionID, runID, make(chan struct{}, 1), func() {}, injectCh); err != nil {
-			t.Fatalf("start run %d: %v", i, err)
-		}
-		start := make(chan struct{})
-		steerDone := make(chan struct{})
-		go func() {
-			<-start
-			_, _ = manager.Steer(context.Background(), testBotID, sessionID, runID, "race teardown")
-			close(steerDone)
-		}()
-		close(start)
-		if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, sessionID, runID), RunStatusCompleted, ""); err != nil {
-			t.Fatalf("finish run %d: %v", i, err)
-		}
-		receiveTestResult(t, "concurrent steer", steerDone)
-		waitInjectChannelClosed(t, injectCh)
-	}
-}
-
-func waitInjectChannelClosed(t *testing.T, injectCh <-chan turn.InjectMessage) {
-	t.Helper()
-	deadline := time.After(time.Second)
-	for {
-		select {
-		case _, ok := <-injectCh:
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("runtime inject channel was not closed")
-		}
-	}
-}
-
 func waitRuntimeEvent(t *testing.T, events <-chan Event, pred func(Event) bool) Event {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
@@ -2318,7 +2277,7 @@ func runRuntimeManagerCancelsExecutionAfterOwnershipLossContract(t *testing.T, s
 	case <-time.After(time.Second):
 		t.Fatal("ownership loss did not revoke terminal hook authority")
 	}
-	waitInjectChannelClosed(t, injectCh)
+	closeExecutionInjectChannel(t, injectCh)
 }
 
 func runRuntimeManagerKeepsHookAuthorityForUserAbort(t *testing.T, suite distributedRuntimeBackendContractSuite) {
@@ -3375,7 +3334,7 @@ func runRuntimeManagerCancelsActiveResponseOnClose(t *testing.T, suite distribut
 	if !result.handled || !errors.Is(result.err, context.Canceled) {
 		t.Fatalf("dispatch after close = handled:%v err:%v, want handler cancellation", result.handled, result.err)
 	}
-	waitInjectChannelClosed(t, injectCh)
+	closeExecutionInjectChannel(t, injectCh)
 }
 
 func runRuntimeManagerAbortCommandDoesNotRepublishStaleSelfReference(t *testing.T, suite distributedRuntimeBackendContractSuite) {

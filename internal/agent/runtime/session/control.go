@@ -193,7 +193,7 @@ func (c *runControl) stopCommands() {
 	if c.lifecycleCancel != nil {
 		c.lifecycleCancel()
 	}
-	c.closeInject()
+	c.stopInject()
 }
 
 func (c *runControl) sendInject(ctx context.Context, message turn.InjectMessage) (bool, string) {
@@ -202,7 +202,7 @@ func (c *runControl) sendInject(ctx context.Context, message turn.InjectMessage)
 	}
 	c.injectMu.Lock()
 	defer c.injectMu.Unlock()
-	if c.injectClosed || c.injectCh == nil {
+	if c.injectStopped || c.injectCh == nil {
 		return false, "active runtime is not available"
 	}
 	select {
@@ -215,17 +215,16 @@ func (c *runControl) sendInject(ctx context.Context, message turn.InjectMessage)
 	}
 }
 
-func (c *runControl) closeInject() {
+func (c *runControl) stopInject() {
 	if c == nil {
 		return
 	}
 	c.injectMu.Lock()
 	defer c.injectMu.Unlock()
-	if c.injectClosed || c.injectCh == nil {
+	if c.injectStopped || c.injectCh == nil {
 		return
 	}
-	close(c.injectCh)
-	c.injectClosed = true
+	c.injectStopped = true
 }
 
 func (c *runControl) markReady() {
