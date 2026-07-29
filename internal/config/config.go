@@ -826,6 +826,12 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	if value := strings.TrimSpace(os.Getenv("MEMOH_INTERNAL_RPC_CHANNEL_TARGET")); value != "" {
 		cfg.InternalRPC.ChannelTarget = value
 	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_SERVER_RPC_LISTEN_ADDR")); value != "" {
+		cfg.Server.RPCListenAddr = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_CHANNEL_RPC_LISTEN_ADDR")); value != "" {
+		cfg.Channel.RPCListenAddr = value
+	}
 }
 
 func (cfg *Config) resolvePaths() {

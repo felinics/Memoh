@@ -232,6 +232,22 @@ func TestRuntimeValidationRequiresInternalRPCSecret(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesInternalRPCListenEnvOverrides(t *testing.T) {
+	t.Setenv("MEMOH_SERVER_RPC_LISTEN_ADDR", ":19090")
+	t.Setenv("MEMOH_CHANNEL_RPC_LISTEN_ADDR", ":19091")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Server.RPCListenAddr != ":19090" {
+		t.Fatalf("server rpc listen addr = %q", cfg.Server.RPCListenAddr)
+	}
+	if cfg.Channel.RPCListenAddr != ":19091" {
+		t.Fatalf("channel rpc listen addr = %q", cfg.Channel.RPCListenAddr)
+	}
+}
+
 func TestLoadRejectsInvalidWebhookTunnelMode(t *testing.T) {
 	t.Parallel()
 
