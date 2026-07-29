@@ -773,6 +773,10 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 	if err := m.ensureBotWithImage(ctx, botID, image, gpu); err != nil {
 		return err
 	}
+	info, err := m.service.GetContainer(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf("get workspace runtime after create: %w", err)
+	}
 
 	// Restore preserved data (from orphaned snapshot recovery or a previous
 	// CleanupBotContainer with preserveData) into the fresh snapshot before
@@ -780,7 +784,7 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 	// without mount support restore through the bridge after the task starts.
 	restoreAfterStart := false
 	if m.HasPreservedData(botID) {
-		if err := m.restorePreservedIntoSnapshot(ctx, botID); err != nil {
+		if err := m.restorePreservedIntoSnapshot(ctx, botID, info); err != nil {
 			if errors.Is(err, errMountNotSupported) {
 				restoreAfterStart = true
 			} else {
@@ -798,7 +802,7 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 		return err
 	}
 	if restoreAfterStart {
-		if err := m.RestorePreservedData(ctx, botID); err != nil {
+		if err := m.restorePreservedDataViaGRPC(ctx, botID); err != nil {
 			return fmt.Errorf("restore preserved data through bridge: %w", err)
 		}
 	}

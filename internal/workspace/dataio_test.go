@@ -10,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/memohai/memoh/internal/config"
+	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 	"github.com/memohai/memoh/internal/workspace/bridgesvc"
@@ -94,6 +96,59 @@ func TestUntarGzDirSkipsHermesSecrets(t *testing.T) {
 	assertPathMissing(t, root, ".memoh-hermes/mcp-tokens/stale-target.json")
 	assertPathMissing(t, root, ".hermes/auth/stale-target.json")
 	assertWorkspaceUserDataOnDisk(t, root)
+}
+
+func TestStartWithResolvedConfigRestoresPreservedDataWithoutRelocking(t *testing.T) {
+	const botID = "00000000-0000-0000-0000-000000000001"
+
+	workspaceRoot := t.TempDir()
+	service := &dataIOBridgeProvider{
+		legacyRouteTestService: legacyRouteTestService{
+			getContainerBeforeCreateErr: ctr.ErrNotFound,
+		},
+		client: newDataIOTestBridgeClient(t, workspaceRoot),
+	}
+	manager := newLegacyRouteTestManager(t, service, config.WorkspaceConfig{
+		DataRoot:    t.TempDir(),
+		BridgePath:  filepath.Join(t.TempDir(), "bridge"),
+		Snapshotter: "overlayfs",
+	})
+
+	backupPath := manager.backupPath(botID)
+	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	raw := buildWorkspaceArchive(t, map[string]string{"notes/restored.txt": "restored\n"})
+	if err := os.WriteFile(backupPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- manager.StartWithResolvedConfig(
+			context.Background(),
+			botID,
+			"docker.io/memohai/workspace:debian",
+			WorkspaceGPUConfig{},
+		)
+	}()
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("StartWithResolvedConfig error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartWithResolvedConfig deadlocked while restoring preserved data")
+	}
+
+	if service.startCalls != 1 {
+		t.Fatalf("StartContainer calls = %d, want 1", service.startCalls)
+	}
+	assertPathContent(t, workspaceRoot, "notes/restored.txt", "restored\n")
+	if _, err := os.Stat(backupPath); !os.IsNotExist(err) {
+		t.Fatalf("preserved backup still exists after restore: %v", err)
+	}
 }
 
 func workspaceArchiveFixture() map[string]string {

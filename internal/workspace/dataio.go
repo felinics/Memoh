@@ -219,9 +219,15 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 }
 
 // restorePreservedIntoSnapshot restores a preserved backup directly into
-// the container's snapshot before the task is started. This avoids the
-// stop/start cycle that RestorePreservedData (via ImportData) requires.
-func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string) error {
+// the container's snapshot before the task is started. The caller must hold
+// the container lock. This avoids reacquiring the same non-reentrant lock from
+// startWithResolvedConfig and the stop/start cycle that RestorePreservedData
+// (via ImportData) requires.
+func (m *Manager) restorePreservedIntoSnapshot(
+	ctx context.Context,
+	botID string,
+	info ctr.ContainerInfo,
+) error {
 	bp := m.backupPath(botID)
 	f, err := os.Open(bp) //nolint:gosec // G304: operator-controlled path
 	if err != nil {
@@ -229,13 +235,7 @@ func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string
 	}
 	defer func() { _ = f.Close() }()
 
-	ref, err := m.loadLockedContainer(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("get workspace runtime: %w", err)
-	}
-	defer ref.Close()
-
-	mounts, err := m.snapshotMounts(ctx, ref.info)
+	mounts, err := m.snapshotMounts(ctx, info)
 	if err != nil {
 		return err
 	}
@@ -252,6 +252,23 @@ func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string
 
 	_ = os.Remove(bp)
 	return nil
+}
+
+// restorePreservedDataViaGRPC restores a preserved backup after the task has
+// started on backends that cannot mount snapshots. The caller must hold the
+// container lock.
+func (m *Manager) restorePreservedDataViaGRPC(ctx context.Context, botID string) error {
+	bp := m.backupPath(botID)
+	f, err := os.Open(bp) //nolint:gosec // G304: operator-controlled path
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	if err := m.importDataViaGRPC(ctx, botID, f); err != nil {
+		return err
+	}
+	return os.Remove(bp)
 }
 
 // errMountNotSupported indicates the backend doesn't support snapshot mounts
