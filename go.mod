@@ -34,7 +34,7 @@ require (
 	github.com/mailgun/mailgun-go/v5 v5.14.0
 	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
 	github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978
-	github.com/memohai/twilight-ai v0.4.1-0.20260713114708-c19f5170bfe6
+	github.com/memohai/twilight-ai v0.4.1-0.20260729090613-198e82782622
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0
@@ -202,7 +202,3 @@ require (
 )
 
 tool github.com/swaggo/swag/cmd/swag
-
-// Local development: use the sibling Twilight AI checkout until the SDK fix
-// is published and this module can be bumped to that revision.
-replace github.com/memohai/twilight-ai => ../twilight-ai
