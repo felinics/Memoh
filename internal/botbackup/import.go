@@ -1786,22 +1786,11 @@ func (s *Service) ensureProvider(ctx context.Context, item providerpkg.GetRespon
 	if existing, err := s.providers.GetByName(ctx, item.Name); err == nil {
 		return existing.ID, nil
 	}
-	config := item.Config
-	// Archives exported before migration 0123 predate explicit
-	// chat_completions_compat; stamp the same classification so restored
-	// built-in providers keep their protocol adaptations.
-	if compat := modelpkg.LegacyChatCompletionsCompat(item.ClientType, item.Config, item.Metadata); compat != "" {
-		config = make(map[string]any, len(item.Config)+1)
-		for key, value := range item.Config {
-			config[key] = value
-		}
-		config[modelpkg.ChatCompletionsCompatConfigKey] = compat
-	}
 	created, err := s.providers.Create(ctx, providerpkg.CreateRequest{
 		Name:       item.Name,
 		ClientType: item.ClientType,
 		Icon:       item.Icon,
-		Config:     config,
+		Config:     item.Config,
 		Metadata:   item.Metadata,
 	})
 	if err != nil {
