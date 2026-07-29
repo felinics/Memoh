@@ -234,7 +234,7 @@ func TestNewSDKChatModelMiniMaxChatCompletionsCompatDisablesThinking(t *testing.
 	}))
 	defer srv.Close()
 
-	compat := ResolveChatCompletionsCompat(ChatCompletionsCompatMiniMax)
+	compat := ResolveChatCompletionsCompat(srv.URL, ChatCompletionsCompatMiniMax)
 	model := NewSDKChatModel(SDKModelConfig{
 		ModelID:               "MiniMax-M3",
 		ClientType:            string(ClientTypeOpenAICompletions),
@@ -299,7 +299,7 @@ func TestNewSDKChatModelMiniMaxChatCompletionsCompatEnablesThinking(t *testing.T
 	}))
 	defer srv.Close()
 
-	compat := ResolveChatCompletionsCompat(ChatCompletionsCompatMiniMax)
+	compat := ResolveChatCompletionsCompat(srv.URL, ChatCompletionsCompatMiniMax)
 	model := NewSDKChatModel(SDKModelConfig{
 		ModelID:               "MiniMax-M3",
 		ClientType:            string(ClientTypeOpenAICompletions),
@@ -516,25 +516,84 @@ func TestLegacyAnthropicBudgetFor(t *testing.T) {
 	}
 }
 
-func TestResolveChatCompletionsCompatUsesOnlyExplicitConfig(t *testing.T) {
+func TestResolveChatCompletionsCompat(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		compat string
-		want   string
+		name    string
+		baseURL string
+		compat  string
+		want    string
 	}{
-		{name: "blank", compat: "", want: ""},
+		{name: "blank everything", want: ""},
 		{name: "deepseek normalized", compat: " DeepSeek ", want: ChatCompletionsCompatDeepSeek},
 		{name: "minimax normalized", compat: " MINIMAX ", want: ChatCompletionsCompatMiniMax},
 		{name: "kimi normalized", compat: " KiMi ", want: ChatCompletionsCompatKimi},
 		{name: "unknown remains explicit", compat: " Vendor-Specific ", want: "vendor-specific"},
+		{
+			name:    "explicit wins over official origin",
+			baseURL: "https://api.deepseek.com/v1",
+			compat:  ChatCompletionsCompatKimi,
+			want:    ChatCompletionsCompatKimi,
+		},
+		{
+			name:    "explicit none disables inference",
+			baseURL: "https://api.deepseek.com/v1",
+			compat:  "none",
+			want:    "none",
+		},
+		{
+			name:    "deepseek origin",
+			baseURL: "https://api.deepseek.com",
+			want:    ChatCompletionsCompatDeepSeek,
+		},
+		{
+			name:    "deepseek beta path",
+			baseURL: "https://api.deepseek.com/beta",
+			want:    ChatCompletionsCompatDeepSeek,
+		},
+		{
+			name:    "minimax v1 trailing slash",
+			baseURL: "https://api.minimaxi.com/v1/",
+			want:    ChatCompletionsCompatMiniMax,
+		},
+		{
+			name:    "minimax io origin",
+			baseURL: "https://api.minimax.io/v1",
+			want:    ChatCompletionsCompatMiniMax,
+		},
+		{
+			name:    "moonshot cn infers kimi",
+			baseURL: "https://api.moonshot.cn/v1",
+			want:    ChatCompletionsCompatKimi,
+		},
+		{
+			name:    "moonshot ai infers kimi",
+			baseURL: "HTTPS://API.MOONSHOT.AI/v1",
+			want:    ChatCompletionsCompatKimi,
+		},
+		{
+			name:    "lookalike domain rejected",
+			baseURL: "https://api.deepseek.com.evil.example/v1",
+			want:    "",
+		},
+		{
+			name:    "official hostname embedded in proxy path rejected",
+			baseURL: "https://gateway.example/https://api.moonshot.cn/v1",
+			want:    "",
+		},
+		{
+			name:    "unrelated proxy stays generic",
+			baseURL: "https://proxy.example/v1",
+			want:    "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := ResolveChatCompletionsCompat(tt.compat); got != tt.want {
-				t.Fatalf("ResolveChatCompletionsCompat(%q) = %q, want %q", tt.compat, got, tt.want)
+			if got := ResolveChatCompletionsCompat(tt.baseURL, tt.compat); got != tt.want {
+				t.Fatalf("ResolveChatCompletionsCompat(%q, %q) = %q, want %q",
+					tt.baseURL, tt.compat, got, tt.want)
 			}
 		})
 	}

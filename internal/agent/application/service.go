@@ -667,6 +667,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 
 	baseURL := providers.ProviderConfigString(provider, "base_url")
 	chatCompletionsCompat := models.ResolveChatCompletionsCompat(
+		baseURL,
 		providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	)
 
