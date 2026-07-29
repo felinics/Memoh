@@ -130,6 +130,11 @@ export default defineConfig(({ command }) => {
       allowedHosts: true,
     },
     resolve: {
+      // @felinic/ui is a linked workspace package and pnpm can resolve its
+      // peer dependencies through a different Vue version than the host app.
+      // Keep singleton/injection-based runtimes shared so useForm() and the
+      // UI package's FormField see the same vee-validate context in builds.
+      dedupe: ['vue', 'vee-validate'],
       alias: {
         '#': fileURLToPath(new URL('../../packages/ui/src', import.meta.url)),
         '@': fileURLToPath(new URL('./src', import.meta.url))

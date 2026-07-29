@@ -103,6 +103,10 @@ export default defineConfig(async ({ command }) => {
         tailwindcss(),
       ],
       resolve: {
+        // The renderer consumes both @memohai/web and the linked @felinic/ui
+        // workspace package. Keep their injection-based runtimes shared just
+        // like the standalone Web build does.
+        dedupe: ['vue', 'vee-validate'],
         alias: {
           '@renderer': fileURLToPath(new URL('./src/renderer/src', import.meta.url)),
           // match apps/web/vite.config.ts aliases so imported web modules resolve correctly.
