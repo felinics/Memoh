@@ -218,12 +218,42 @@ function toggleAll(expand: boolean) {
 }
 
 async function copyToClipboard(text: string) {
-  const ok = await copyText(text)
+  // The dialog focus trap prevents useClipboard's body-mounted fallback from
+  // retaining selection, so plain HTTP copying must run inside the active dialog.
+  const ok = typeof window !== 'undefined' && !window.isSecureContext
+    ? copyTextWithinDialog(text)
+    : await copyText(text)
   if (!ok) {
     toast.error(t('common.copyFailed'))
     return
   }
   toast.success(t('common.copied'))
+}
+
+function copyTextWithinDialog(text: string): boolean {
+  const dialog = document.activeElement?.closest('[role="dialog"]')
+  if (!(dialog instanceof HTMLElement) || typeof document.execCommand !== 'function') return false
+
+  const previousFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null
+  const textArea = document.createElement('textarea')
+  textArea.value = text
+  textArea.style.position = 'fixed'
+  textArea.style.left = '-9999px'
+  textArea.style.top = '0'
+  dialog.appendChild(textArea)
+
+  try {
+    textArea.focus()
+    textArea.select()
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    textArea.remove()
+    previousFocus?.focus()
+  }
 }
 
 function getStatusIcon(status: BotCheck['status']) {
