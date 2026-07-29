@@ -158,6 +158,7 @@ import {
   Copy,
   HelpCircle,
 } from 'lucide-vue-next'
+import { useClipboard } from '@/composables/useClipboard'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 type BotCheck = BotsBotCheck
@@ -172,6 +173,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { copyText } = useClipboard()
 
 const checks = ref<BotCheck[]>([])
 const checksLoading = ref(false)
@@ -215,8 +217,12 @@ function toggleAll(expand: boolean) {
     : new Set()
 }
 
-function copyToClipboard(text: string) {
-  navigator.clipboard.writeText(text)
+async function copyToClipboard(text: string) {
+  const ok = await copyText(text)
+  if (!ok) {
+    toast.error(t('common.copyFailed'))
+    return
+  }
   toast.success(t('common.copied'))
 }
 
