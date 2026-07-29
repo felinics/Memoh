@@ -345,6 +345,9 @@ function parseStoredConfig(raw: string): StoredRuntimeConfig {
   if (typeof parsed.encryptedKey !== 'string') {
     throw new Error('desktop runtime credential is missing')
   }
+  if (parsed.teamId !== undefined && typeof parsed.teamId !== 'string') {
+    throw new Error('desktop runtime team ID is invalid')
+  }
   const teamId = parsed.teamId === undefined
     ? undefined
     : normalizeRuntimeTeamId(parsed.teamId)

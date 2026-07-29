@@ -76,6 +76,30 @@ describe('DesktopRemoteRuntimeManager', () => {
     })
   })
 
+  it('fails closed when a saved team ID is not a string', async () => {
+    const fixture = await createFixture()
+    const encryptedKey = fixture.encryption.encrypt(runtimeKey).toString('base64')
+    await writeFile(fixture.configPath, JSON.stringify({
+      version: 1,
+      runtimeId: runtimeID,
+      serverUrl: 'http://localhost:18080/',
+      teamId: 42,
+      encryptedKey,
+    }))
+    const decrypt = vi.spyOn(fixture.encryption, 'decrypt')
+    const factory = vi.fn<RuntimeSessionFactory>(() => resolvedSession())
+
+    const state = await fixture.manager({ createSession: factory }).restore()
+
+    expect(state).toMatchObject({
+      enabled: true,
+      status: 'error',
+      error: 'This computer\'s saved connection could not be read',
+    })
+    expect(decrypt).not.toHaveBeenCalled()
+    expect(factory).not.toHaveBeenCalled()
+  })
+
   it('fails closed without decrypting when the saved server does not match the current server', async () => {
     const fixture = await createFixture()
     await fixture.manager({ createSession: resolvedSessionFactory() })
