@@ -877,6 +877,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			BotID:             identity.BotID,
 			ThreadID:          sessionID,
 			RouteID:           resolved.RouteID,
+			UserID:            strings.TrimSpace(identity.UserID),
 			ChannelIdentityID: identity.ChannelIdentityID,
 			ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
 			CurrentPlatform:   msg.Channel.String(),

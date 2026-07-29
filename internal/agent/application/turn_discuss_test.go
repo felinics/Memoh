@@ -1,8 +1,10 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -197,6 +199,7 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	cmd.CurrentChannel = "telegram"
 	cmd.ReplyTarget = "chat-1"
 	cmd.ConversationType = "group"
+	cmd.UserID = "user-1"
 	cmd.SessionToken = "Bearer owner-token"
 	cmd.ChatToken = "chat-token"
 	cmd.ToolHTTPURL = "http://example.test/bots/bot-1/tools"
@@ -217,6 +220,9 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	}
 	if req.RouteID != "route-1" || req.ChatToken != "chat-token" || req.Token != "Bearer owner-token" {
 		t.Fatalf("runtime context = route %q chat token %q token %q", req.RouteID, req.ChatToken, req.Token)
+	}
+	if req.UserID != "user-1" {
+		t.Fatalf("runtime user id = %q, want user-1", req.UserID)
 	}
 	if req.ToolHTTPURL != "http://example.test/bots/bot-1/tools" {
 		t.Fatalf("ToolHTTPURL = %q", req.ToolHTTPURL)
@@ -247,6 +253,50 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	}
 }
 
+func TestDiscussACPTriggersCompaction(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	runner := &fakeRunner{chunks: []string{`{"type":"agent_end"}`}}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{RuntimeType: sessionpkg.RuntimeACPAgent},
+	}
+	a := newDiscussTestService(runner, agent, resolver)
+	var (
+		called      int
+		gotBotID    string
+		gotThreadID string
+		gotUserID   string
+		gotTokens   int
+		gotBudget   int
+	)
+	a.turnHooks.compactDiscuss = func(_ context.Context, botID, threadID, userID string, compactable, budget int) {
+		called++
+		gotBotID = botID
+		gotThreadID = threadID
+		gotUserID = userID
+		gotTokens = compactable
+		gotBudget = budget
+	}
+	cmd := discussCommand()
+	cmd.UserID = "user-1"
+	cmd.DiscussMessages = []turn.DiscussMessage{{Role: "user", Content: strings.Repeat("x", 400)}}
+
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	if called != 1 {
+		t.Fatalf("compaction triggers = %d, want 1", called)
+	}
+	if gotBotID != "bot-1" || gotThreadID != "sess-1" || gotUserID != "user-1" {
+		t.Fatalf("compaction scope = %q/%q/%q", gotBotID, gotThreadID, gotUserID)
+	}
+	if gotTokens != 100 || gotBudget != 0 {
+		t.Fatalf("compaction pressure = %d tokens, budget %d", gotTokens, gotBudget)
+	}
+}
+
 func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 	agent := &fakeAgentStreamer{}
 	runner := &fakeRunner{chunks: []string{`{"type":"agent_end"}`}}
@@ -254,6 +304,10 @@ func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 		resolveResult: ResolveRunConfigResult{RuntimeType: sessionpkg.RuntimeACPAgent},
 	}
 	a := newDiscussTestService(runner, agent, resolver)
+	compactionTriggered := false
+	a.turnHooks.compactDiscuss = func(context.Context, string, string, string, int, int) {
+		compactionTriggered = true
+	}
 	cmd := discussCommand()
 	cmd.DiscussAddressed = false
 
@@ -274,6 +328,92 @@ func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 	}
 	if !sawSkip {
 		t.Fatal("expected skip marker event")
+	}
+	if compactionTriggered {
+		t.Fatal("passive ACP discuss turn must not trigger compaction")
+	}
+}
+
+func TestDiscussNativeTrimsContextToModelBudget(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{
+			ContextTokenBudget: 40,
+			ModelID:            "model-1",
+		},
+	}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	cmd := discussCommand()
+	cmd.DiscussMessages = []turn.DiscussMessage{
+		{Role: "user", Content: "<summary>\ncompacted window\n</summary>", CompactionArtifactID: "artifact-1"},
+		{Role: "assistant", Content: strings.Repeat("o", 400)},
+		{Role: "user", Content: "recent question"},
+	}
+
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	if agent.lastConfig == nil {
+		t.Fatal("expected agent to be invoked")
+	}
+	if len(agent.lastConfig.Messages) != 2 {
+		t.Fatalf("trimmed messages = %d, want summary + recent question", len(agent.lastConfig.Messages))
+	}
+	if got := sdkMessageText(agent.lastConfig.Messages[0]); !strings.Contains(got, "compacted window") {
+		t.Fatalf("first message = %q, want pinned summary", got)
+	}
+	if got := sdkMessageText(agent.lastConfig.Messages[1]); got != "recent question" {
+		t.Fatalf("last message = %q, want recent question", got)
+	}
+}
+
+func TestTrimDiscussMessagesUsesReservedBudgetAndLogs(t *testing.T) {
+	messages := []turn.DiscussMessage{
+		{Role: "assistant", Content: strings.Repeat("o", 80)},
+		{Role: "user", Content: strings.Repeat("r", 240)},
+	}
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+
+	trimmed := trimDiscussMessagesByTokens(log, messages, 100)
+
+	if len(trimmed) != 1 || trimmed[0].Role != "user" {
+		t.Fatalf("trimmed messages = %#v, want only recent user message", trimmed)
+	}
+	output := logs.String()
+	for _, want := range []string{
+		"level=WARN",
+		"dropped_messages=1",
+		"estimated_tokens=80",
+		"message_token_budget=70",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("log output = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestTrimDiscussMessagesPreservesLatestTurnBeforeToolOnlySuffix(t *testing.T) {
+	messages := []turn.DiscussMessage{
+		{Role: "assistant", Content: strings.Repeat("o", 400)},
+		{Role: "user", Content: "latest question"},
+		{Role: "assistant", Content: strings.Repeat("c", 120)},
+		{Role: "tool", Content: "done"},
+	}
+
+	trimmed := trimDiscussMessagesByTokens(nil, messages, 40)
+
+	if len(trimmed) != 3 {
+		t.Fatalf("trimmed messages = %d, want latest user/assistant/tool turn", len(trimmed))
+	}
+	if trimmed[0].Role != "user" || trimmed[0].Content != "latest question" {
+		t.Fatalf("first retained message = %#v, want latest user message", trimmed[0])
+	}
+	if trimmed[2].Role != "tool" {
+		t.Fatalf("last retained message = %#v, want tool result", trimmed[2])
 	}
 }
 
@@ -367,6 +507,16 @@ func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) boo
 		return false
 	}
 	return false
+}
+
+func sdkMessageText(message sdk.Message) string {
+	var text strings.Builder
+	for _, part := range message.Content {
+		if value, ok := part.(sdk.TextPart); ok {
+			text.WriteString(value.Text)
+		}
+	}
+	return text.String()
 }
 
 // TestDiscussCancelUnblocksFullEventBuffer mirrors the chat-mode burst

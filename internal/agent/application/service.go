@@ -364,10 +364,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		}
 	}
 
-	contextTokenBudget := 0
-	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
-		contextTokenBudget = *chatModel.Config.ContextWindow
-	}
+	contextTokenBudget := modelContextTokenBudget(chatModel)
 
 	var messages []ModelMessage
 	var historyRecords []historyfrag.HistoryRecord
@@ -633,6 +630,13 @@ type baseRunConfigParams struct {
 	Model             string
 	Provider          string
 	ReasoningEffort   string // caller-provided override (empty = use bot default)
+}
+
+func modelContextTokenBudget(model models.GetResponse) int {
+	if model.Config.ContextWindow == nil || *model.Config.ContextWindow <= 0 {
+		return 0
+	}
+	return *model.Config.ContextWindow
 }
 
 // buildBaseRunConfig creates a RunConfig with model, credentials, skills,
@@ -1203,9 +1207,10 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 
 	cfg = s.prepareRunConfig(ctx, cfg)
 	return ResolveRunConfigResult{
-		RunConfig:   cfg,
-		ModelID:     chatModel.ID,
-		RuntimeType: runtimeType,
+		RunConfig:          cfg,
+		ModelID:            chatModel.ID,
+		ContextTokenBudget: modelContextTokenBudget(chatModel),
+		RuntimeType:        runtimeType,
 	}, nil
 }
 

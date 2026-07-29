@@ -61,7 +61,7 @@ func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 	svc := &fakeTurnService{}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
-		config: DiscussSessionConfig{TeamID: "team-1", BotID: "bot-1", ThreadID: "sess-1"},
+		config: DiscussSessionConfig{TeamID: "team-1", BotID: "bot-1", ThreadID: "sess-1", UserID: "user-1"},
 	}
 
 	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
@@ -70,7 +70,7 @@ func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 		t.Fatalf("StartTurn calls = %d, want 1", svc.calls)
 	}
 	cmd := svc.lastCmd
-	if cmd.Mode != turn.ModeDiscuss || cmd.TeamID != "team-1" || cmd.BotID != "bot-1" {
+	if cmd.Mode != turn.ModeDiscuss || cmd.TeamID != "team-1" || cmd.BotID != "bot-1" || cmd.UserID != "user-1" {
 		t.Fatalf("cmd = %+v", cmd)
 	}
 	if len(cmd.DiscussImageRefs) != 1 || cmd.DiscussImageRefs[0].ContentHash != "img-hash" || cmd.DiscussImageRefs[0].Mime != "image/jpeg" {

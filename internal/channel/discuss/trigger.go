@@ -51,6 +51,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			BotID:                   cfg.BotID,
 			ThreadID:                cfg.ThreadID,
 			RouteID:                 cfg.RouteID,
+			UserID:                  cfg.UserID,
 			SourceChannelIdentityID: cfg.ChannelIdentityID,
 			CurrentChannel:          cfg.CurrentPlatform,
 			ReplyTarget:             cfg.ReplyTarget,

@@ -44,6 +44,7 @@ type DiscussSessionConfig struct {
 	BotID             string
 	ThreadID          string
 	RouteID           string
+	UserID            string
 	ChannelIdentityID string
 	ReplyTarget       string
 	CurrentPlatform   string

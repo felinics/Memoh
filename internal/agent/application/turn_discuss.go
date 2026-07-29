@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -24,6 +25,7 @@ type turnRuntimeHooks struct {
 	resolveRunConfig func(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
 	inlineImages     func(context.Context, string, []timeline.ImageAttachmentRef) []sdk.ImagePart
 	storeRound       func(context.Context, string, string, string, string, []sdk.Message, string) error
+	compactDiscuss   func(context.Context, string, string, string, int, int)
 }
 
 // startDiscussTurn orchestrates one discuss turn: resolve the run config,
@@ -150,7 +152,8 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 
 func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved ResolveRunConfigResult) {
 	runConfig := resolved.RunConfig
-	runConfig.Messages = discussMessagesToSDK(cmd.DiscussMessages)
+	contextMessages := trimDiscussMessagesByTokens(s.logger, cmd.DiscussMessages, resolved.ContextTokenBudget)
+	runConfig.Messages = discussMessagesToSDK(contextMessages)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
 
@@ -194,27 +197,41 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 	}
 
-	// Compute pressure on this goroutine so the detached trigger holds a few
-	// scalars instead of pinning the whole composed context until it runs.
-	if compactable := discussCompactableTokens(cmd.DiscussMessages); compactable > 0 && s.compactionService != nil && s.settingsService != nil {
-		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
-	}
+	s.triggerDiscussCompaction(ctx, cmd, resolved.ContextTokenBudget)
 }
 
-// maybeCompactDiscuss re-evaluates compaction pressure after a native discuss
-// turn with the same trigger policy as the chat path. ACP discuss turns run
-// through streamTurnChat and inherit its trigger directly.
-func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, modelID string, compactable int) {
-	budget := 0
-	if s.modelsService != nil && strings.TrimSpace(modelID) != "" {
-		if model, err := s.modelsService.GetByID(ctx, modelID); err == nil && model.Config.ContextWindow != nil {
-			budget = *model.Config.ContextWindow
-		}
+// triggerDiscussCompaction computes pressure before detaching so the
+// background job retains only scalar request data, not the full context.
+func (s *Service) triggerDiscussCompaction(ctx context.Context, cmd turn.StartTurnCommand, contextTokenBudget int) {
+	compactable := discussCompactableTokens(cmd.DiscussMessages)
+	if compactable <= 0 {
+		return
 	}
-	s.maybeCompact(ctx, ChatRequest{BotID: botID, ThreadID: threadID}, resolvedContext{
+	if s.turnHooks != nil && s.turnHooks.compactDiscuss != nil {
+		s.turnHooks.compactDiscuss(ctx, cmd.BotID, cmd.ThreadID, cmd.UserID, compactable, contextTokenBudget)
+		return
+	}
+	if s.compactionService == nil || s.settingsService == nil {
+		return
+	}
+
+	go s.maybeCompactDiscuss(
+		context.WithoutCancel(ctx),
+		cmd.BotID,
+		cmd.ThreadID,
+		cmd.UserID,
+		compactable,
+		contextTokenBudget,
+	)
+}
+
+// maybeCompactDiscuss re-evaluates compaction pressure after either native or
+// ACP discuss turns with the same trigger policy as the chat path.
+func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, userID string, compactable, contextTokenBudget int) {
+	s.maybeCompact(ctx, ChatRequest{BotID: botID, ThreadID: threadID, UserID: userID}, resolvedContext{
 		compactableTokens:      compactable,
 		compactableTokensKnown: true,
-		contextTokenBudget:     budget,
+		contextTokenBudget:     contextTokenBudget,
 	}, compactable)
 }
 
@@ -226,13 +243,119 @@ func discussCompactableTokens(messages []turn.DiscussMessage) int {
 		if message.CompactionArtifactID != "" {
 			continue
 		}
-		size := len(message.RawContent)
-		if size == 0 {
-			size = len(message.Content)
-		}
-		total += size / 4
+		total += discussMessageContentBytes(message) / 4
 	}
 	return total
+}
+
+// trimDiscussMessagesByTokens keeps the newest context within the same 70%
+// budget used by the synchronous compaction backstop, leaving room for the
+// system prompt, tools and model output. Active summaries remain pinned because
+// they are the only representation of their covered ranges.
+func trimDiscussMessagesByTokens(log *slog.Logger, messages []turn.DiscussMessage, contextTokenBudget int) []turn.DiscussMessage {
+	maxTokens := discussMessageTokenBudget(contextTokenBudget)
+	if maxTokens <= 0 || len(messages) == 0 {
+		return messages
+	}
+
+	estimatedTokens := 0
+	for _, message := range messages {
+		estimatedTokens += estimateDiscussMessageTokens(message)
+	}
+	if estimatedTokens <= maxTokens {
+		return messages
+	}
+
+	scannedTokens := 0
+	cutoff := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		scannedTokens += estimateDiscussMessageTokens(messages[i])
+		if scannedTokens > maxTokens {
+			cutoff = i + 1
+			break
+		}
+	}
+	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Role), "tool") {
+		cutoff++
+	}
+	preservedLatestTurn := false
+	if cutoff >= len(messages) {
+		// The entire nominally retained suffix consists of tool results.
+		// Preserve the latest user turn (or at least the latest non-tool
+		// message) with that suffix instead of sending summaries alone.
+		cutoff = latestSafeDiscussCutoff(messages)
+		preservedLatestTurn = true
+	}
+	if cutoff == 0 {
+		if log != nil {
+			log.Warn("trimDiscussMessagesByTokens: context exceeds reserved budget; preserving latest turn",
+				slog.Int("total_messages", len(messages)),
+				slog.Int("estimated_tokens", estimatedTokens),
+				slog.Int("message_token_budget", maxTokens),
+			)
+		}
+		return messages
+	}
+
+	kept := make([]turn.DiscussMessage, 0, len(messages)-cutoff)
+	for i := 0; i < cutoff; i++ {
+		if strings.TrimSpace(messages[i].CompactionArtifactID) != "" {
+			kept = append(kept, messages[i])
+		}
+	}
+	kept = append(kept, messages[cutoff:]...)
+
+	if log != nil {
+		retainedTokens := 0
+		for _, message := range kept {
+			retainedTokens += estimateDiscussMessageTokens(message)
+		}
+		log.Warn("trimDiscussMessagesByTokens: context trimmed",
+			slog.Int("total_messages", len(messages)),
+			slog.Int("dropped_messages", len(messages)-len(kept)),
+			slog.Int("estimated_tokens", estimatedTokens),
+			slog.Int("retained_estimated_tokens", retainedTokens),
+			slog.Int("message_token_budget", maxTokens),
+			slog.Bool("preserved_latest_turn", preservedLatestTurn),
+		)
+	}
+	return kept
+}
+
+func discussMessageTokenBudget(contextTokenBudget int) int {
+	if contextTokenBudget <= 0 {
+		return 0
+	}
+	budget := contextTokenBudget * compactionBudgetThresholdPercent / 100
+	if budget == 0 {
+		return 1
+	}
+	return budget
+}
+
+func latestSafeDiscussCutoff(messages []turn.DiscussMessage) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "user") {
+			return i
+		}
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if !strings.EqualFold(strings.TrimSpace(messages[i].Role), "tool") {
+			return i
+		}
+	}
+	return 0
+}
+
+func estimateDiscussMessageTokens(message turn.DiscussMessage) int {
+	return (discussMessageContentBytes(message) + 3) / 4
+}
+
+func discussMessageContentBytes(message turn.DiscussMessage) int {
+	if len(message.RawContent) > 0 {
+		return len(message.RawContent)
+	}
+	return len(message.Content)
 }
 
 func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
@@ -247,6 +370,7 @@ func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 		ChatID:                  cmd.BotID,
 		ThreadID:                cmd.ThreadID,
 		RouteID:                 cmd.RouteID,
+		UserID:                  cmd.UserID,
 		SourceChannelIdentityID: cmd.SourceChannelIdentityID,
 		CurrentChannel:          cmd.CurrentChannel,
 		ReplyTarget:             cmd.ReplyTarget,
@@ -285,6 +409,7 @@ func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 			return
 		}
 	}
+	s.triggerDiscussCompaction(ctx, cmd, 0)
 }
 
 func (s *Service) discussRuntimeConfigured() bool {
