@@ -139,6 +139,15 @@ const chatStoreMock = vi.hoisted(() => ({
     chatStoreMock.sessionId = null
     chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
   }),
+  resetToEmptyComposer: vi.fn((options?: {
+    clearPendingACP?: boolean
+    explicitSelection?: boolean
+    draftIntent?: boolean
+  }) => {
+    useChatSelectionStore().setSession(null, { explicitSelection: options?.explicitSelection === true })
+    chatStoreMock.sessionId = null
+    chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
+  }),
   knownSessionSummary: vi.fn((sessionId: string) =>
     chatStoreMock.knownSessions.find(session => session.id === sessionId)
     ?? chatStoreMock.sessions.find(session => session.id === sessionId)
@@ -194,6 +203,7 @@ vi.mock('@/store/chat-list', () => ({
     focusChatView: chatStoreMock.focusChatView,
     selectSession: chatStoreMock.selectSession,
     selectDraft: chatStoreMock.selectDraft,
+    resetToEmptyComposer: chatStoreMock.resetToEmptyComposer,
     applyDraftViewRequest: chatStoreMock.applyDraftViewRequest,
   }),
 }))
@@ -562,6 +572,7 @@ describe('workspace layout store', () => {
     chatStoreMock.focusChatView.mockClear()
     chatStoreMock.selectSession.mockClear()
     chatStoreMock.selectDraft.mockClear()
+    chatStoreMock.resetToEmptyComposer.mockClear()
     chatStoreMock.applyDraftViewRequest.mockClear()
     chatStoreMock.sessionId = null
     chatStoreMock.hasExplicitSessionSelection = false
@@ -588,6 +599,15 @@ describe('workspace layout store', () => {
     })
     chatStoreMock.selectDraft.mockImplementation((options?: { explicitSelection?: boolean }) => {
       useChatSelectionStore().setSession(null, options)
+      chatStoreMock.sessionId = null
+      chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
+    })
+    chatStoreMock.resetToEmptyComposer.mockImplementation((options?: {
+      clearPendingACP?: boolean
+      explicitSelection?: boolean
+      draftIntent?: boolean
+    }) => {
+      useChatSelectionStore().setSession(null, { explicitSelection: options?.explicitSelection === true })
       chatStoreMock.sessionId = null
       chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
     })
@@ -1005,7 +1025,8 @@ describe('workspace layout store', () => {
   it('does not open a chat tab when initialize auto-picks a session over a restored file/preview workspace', async () => {
     // Cold-start seed: File + Preview only (the user's Tab A layout). A new
     // browser tab must restore that dock as-is — initialize()'s non-explicit
-    // auto-pick of the latest Untitled Session must NOT punch chat tabs in.
+    // auto-pick of the latest Untitled Session must NOT punch chat tabs in,
+    // and must not leave Recents highlighting a session that is not on screen.
     localStorage.setItem('workspace-layout', JSON.stringify({
       'bot-1': {
         layout: {
@@ -1048,6 +1069,14 @@ describe('workspace layout store', () => {
 
     expect(dock.panels.map(panel => panel.component).sort()).toEqual(['file', 'preview'])
     expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
+    expect(chatStoreMock.resetToEmptyComposer).toHaveBeenCalledWith({
+      clearPendingACP: false,
+      explicitSelection: false,
+      draftIntent: false,
+    })
+    expect(chatStoreMock.sessionId).toBeNull()
+    expect(useChatSelectionStore().sessionId).toBeNull()
+    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
   })
 
   it('still opens a chat tab on explicit session selection after a file/preview restore', async () => {

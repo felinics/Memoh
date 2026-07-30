@@ -1175,8 +1175,21 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openDraftChat({ groupId, explicitSelection })
   }
 
+  // Align global selection to the chat on screen (or to none). Called after a
+  // non-empty restore blocks inventing tabs: if the active panel is a chat,
+  // Recents must highlight that session; if there is no chat to adopt,
+  // drop initialize()'s non-explicit auto-pick so Recents stays unselected.
   function adoptActiveRestoredChatSelection(sessionId: string | null, panelId?: string) {
-    if (!sessionId || isDeletedSessionForCurrentBot(sessionId)) return
+    if (!sessionId || isDeletedSessionForCurrentBot(sessionId)) {
+      if (!chatStore.hasExplicitSessionSelection && (chatStore.sessionId ?? '').trim()) {
+        chatStore.resetToEmptyComposer({
+          clearPendingACP: false,
+          explicitSelection: false,
+          draftIntent: false,
+        })
+      }
+      return
+    }
     if (panelId) chatStore.focusChatView(panelId)
     // Already pointing at the preserved panel — leave explicitness alone.
     if ((chatStore.sessionId ?? '').trim() === sessionId) return
