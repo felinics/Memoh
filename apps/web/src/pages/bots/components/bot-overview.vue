@@ -135,15 +135,21 @@
         v-if="isContainerBot"
         class="space-y-2.5"
       >
-        <!-- Title row: section label + status Badge (sharing a baseline, so the
-             status has an edge to align to), with the sampled-at freshness note
-             pushed to the far right as a quiet footnote. -->
+        <!-- Title row: section label + status or inline note when metrics are
+             unavailable. Freshness timestamp stays on the far right. -->
         <div class="flex items-center gap-2 px-2">
           <h2 class="text-[13px] font-medium text-muted-foreground">
             {{ $t('bots.overview.runtimeTitle') }}
           </h2>
+          <span
+            v-if="runtimeMetricsNote"
+            class="text-[11px] text-muted-foreground"
+          >
+            {{ runtimeMetricsNote }}
+          </span>
           <Badge
-            :variant="runtimeStatusVariant"
+            v-else
+            variant="secondary"
             size="sm"
           >
             {{ runtimeStatusLabel }}
@@ -158,8 +164,7 @@
 
         <!-- Metric tiles: always render the three-slot grid so the block keeps
              the same shape whether or not the backend has sampled yet. Missing
-             values read as '—'; the footnote below explains unsupported or
-             stopped states instead of collapsing into a lone text line. -->
+             values read as '—'. -->
         <div class="grid grid-cols-3 gap-3">
           <MetricReadout
             v-for="m in runtimeMetricCards"
@@ -169,13 +174,6 @@
             :sub="m.sub"
           />
         </div>
-
-        <p
-          v-if="runtimeMetricsNote"
-          class="px-2 text-xs text-muted-foreground"
-        >
-          {{ runtimeMetricsNote }}
-        </p>
       </section>
 
       <!-- Usage: token stat row + daily bar chart — the dashboard's "numbers",
@@ -549,18 +547,8 @@ const runtimeStatusKey = computed(() => {
   return containerRunning.value ? 'running' : 'unknown'
 })
 
-// Status as a Badge variant (not a loose dot+text): a badge gives the status a
-// real box to align against the section title, instead of floating with no edge
-// to line up with — which is what made the old dot+label read as misaligned.
-const runtimeStatusVariant = computed<'success' | 'secondary' | 'default'>(() => {
-  switch (runtimeStatusKey.value) {
-    case 'running': return 'success'
-    case 'created': return 'default'
-    case 'stopped': return 'secondary'
-    default: return 'secondary'
-  }
-})
-
+// Status label reuses the Container tab vocabulary. Badge is always secondary
+// (neutral gray) — green "Running" was too loud for a quiet telemetry row.
 const runtimeStatusLabel = computed(() => {
   switch (runtimeStatusKey.value) {
     case 'running': return t('bots.container.statusRunning')
