@@ -4,7 +4,7 @@
        the stream hairline-separated and kills the card-in-card nesting — the
        section card is the only frame. -->
   <SettingsRow
-    align="start"
+    align="center"
     class="group"
   >
     <template #content>
