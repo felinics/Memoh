@@ -158,14 +158,11 @@
           </span>
         </div>
 
-        <!-- Metric tiles: CPU / memory / storage. '--' shows for any metric the
-             backend hasn't sampled, so a value is never faked as 0. Caller owns
-             the grid; each cell is a framed MetricReadout (same shape as the
-             Container tab's identical runtime tile row). -->
-        <div
-          v-if="runtimeHasMetrics"
-          class="grid grid-cols-3 gap-3"
-        >
+        <!-- Metric tiles: always render the three-slot grid so the block keeps
+             the same shape whether or not the backend has sampled yet. Missing
+             values read as '—'; the footnote below explains unsupported or
+             stopped states instead of collapsing into a lone text line. -->
+        <div class="grid grid-cols-3 gap-3">
           <MetricReadout
             v-for="m in runtimeMetricCards"
             :key="m.key"
@@ -175,19 +172,16 @@
           />
         </div>
 
-        <!-- Why there's no metric grid: backend can't sample, or the container
-             is stopped. Honest one-liner instead of empty tiles. -->
         <p
-          v-else
+          v-if="runtimeMetricsNote"
           class="px-2 text-xs text-muted-foreground"
         >
           {{ runtimeMetricsNote }}
         </p>
       </section>
 
-      <!-- Memory: same lightweight telemetry scale as Runtime — a title row,
-           status badge, and three metric tiles. Full sync / path details live
-           on the Memory tab; Overview only surfaces what helps at a glance. -->
+      <!-- Memory: same lightweight telemetry scale as Runtime — title row plus
+           three metric tiles. Full sync / path details live on the Memory tab. -->
       <section
         v-if="showMemorySection"
         class="space-y-2.5"
@@ -196,12 +190,6 @@
           <h2 class="text-[13px] font-medium text-muted-foreground">
             {{ $t('bots.overview.memoryTitle') }}
           </h2>
-          <Badge
-            :variant="memoryStatusVariant"
-            size="sm"
-          >
-            {{ memoryStatusLabel }}
-          </Badge>
         </div>
 
         <div
@@ -215,24 +203,23 @@
           />
         </div>
 
-        <div
-          v-else-if="memoryHasStats"
-          class="grid grid-cols-3 gap-3"
-        >
-          <MetricReadout
-            v-for="m in memoryMetricCards"
-            :key="m.key"
-            :label="m.label"
-            :value="m.value"
-          />
-        </div>
+        <template v-else>
+          <div class="grid grid-cols-3 gap-3">
+            <MetricReadout
+              v-for="m in memoryMetricCards"
+              :key="m.key"
+              :label="m.label"
+              :value="m.value"
+            />
+          </div>
 
-        <p
-          v-else
-          class="px-2 text-xs text-muted-foreground"
-        >
-          {{ memoryStatsNote }}
-        </p>
+          <p
+            v-if="memoryStatsNote"
+            class="px-2 text-xs text-muted-foreground"
+          >
+            {{ memoryStatsNote }}
+          </p>
+        </template>
       </section>
 
       <!-- Core setup: the model this bot thinks with. Memory telemetry sits in
@@ -479,24 +466,6 @@ const memoryIsBuiltin = computed(() =>
   (memoryStatus.value?.provider_type ?? 'builtin') === 'builtin',
 )
 
-const memoryStatusVariant = computed<'success' | 'default' | 'secondary'>(() => {
-  if (!settings.value?.memory_provider_id) return 'secondary'
-  if (memoryStatus.value?.degraded) return 'default'
-  return 'success'
-})
-
-const memoryStatusLabel = computed(() => {
-  if (!settings.value?.memory_provider_id) return t('bots.overview.memoryOff')
-  if (memoryStatus.value?.degraded) return t('bots.overview.memoryDegraded')
-  return t('bots.overview.memoryHealthy')
-})
-
-const memoryHasStats = computed(() =>
-  memoryStatus.value?.indexed_count != null
-  || memoryStatus.value?.edge_count != null
-  || memoryStatus.value?.source_count != null,
-)
-
 const memoryMetricCards = computed(() => {
   const status = memoryStatus.value
   const formatCount = (n: number | undefined) => (n == null ? '—' : formatNumber(n))
@@ -522,7 +491,9 @@ const memoryMetricCards = computed(() => {
 })
 
 const memoryStatsNote = computed(() => {
-  if (!settings.value?.memory_provider_id) return t('bots.overview.memoryNone')
+  if (memoryLoading.value) return ''
+  if (!settings.value?.memory_provider_id) return ''
+  if (memoryStatus.value) return ''
   return t('bots.overview.memoryNoStats')
 })
 
@@ -679,8 +650,9 @@ const runtimeMetricCards = computed(() => {
   ]
 })
 
-// When there's no metric grid, say why instead of showing empty cards.
+// Footnote only when the tile grid is present but nothing has been sampled yet.
 const runtimeMetricsNote = computed(() => {
+  if (runtimeHasMetrics.value) return ''
   if (containerMetrics.value?.supported === false) {
     return t('bots.container.metricsUnsupported')
   }
