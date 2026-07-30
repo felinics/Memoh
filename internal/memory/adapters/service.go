@@ -32,6 +32,16 @@ func NewService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *S
 // can instantiate/evict provider instances automatically.
 func (s *Service) SetRegistry(registry *Registry) {
 	s.registry = registry
+	if registry == nil {
+		return
+	}
+	registry.SetConfigLoader(func(ctx context.Context, id string) (string, map[string]any, error) {
+		provider, err := s.Get(ctx, id)
+		if err != nil {
+			return "", nil, err
+		}
+		return provider.Provider, provider.Config, nil
+	})
 }
 
 func (*Service) ListMeta(_ context.Context) []ProviderMeta {

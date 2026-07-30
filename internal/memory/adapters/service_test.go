@@ -26,6 +26,15 @@ func (q *providerBootstrapQueries) ListMemoryProviders(context.Context) ([]sqlc.
 	return q.providers, nil
 }
 
+func (q *providerBootstrapQueries) GetMemoryProviderByID(_ context.Context, id pgtype.UUID) (sqlc.MemoryProvider, error) {
+	for _, provider := range q.providers {
+		if provider.ID == id {
+			return provider, nil
+		}
+	}
+	return sqlc.MemoryProvider{}, errors.New("memory provider not found")
+}
+
 type bootstrapProvider struct {
 	providerType string
 	closeCalls   *atomic.Int32
@@ -117,6 +126,41 @@ func TestInstantiateAllLoadsConfiguredProvidersIntoRegistry(t *testing.T) {
 	}
 	if _, err := registry.Get(context.Background(), providerID.String()); err != nil {
 		t.Fatalf("registry missing configured provider after InstantiateAll(): %v", err)
+	}
+}
+
+func TestSetRegistryLoadsPersistedProviderOnCacheMiss(t *testing.T) {
+	t.Parallel()
+
+	providerID := pgtype.UUID{Bytes: [16]byte{4, 5, 6}, Valid: true}
+	registry := NewRegistry(slog.Default())
+	var factoryCalls atomic.Int32
+	registry.RegisterFactory(string(ProviderBuiltin), func(_ context.Context, _, _ string, config map[string]any) (Provider, error) {
+		factoryCalls.Add(1)
+		if got := StringFromConfig(config, "memory_mode"); got != "graph" {
+			return nil, errors.New("unexpected provider config")
+		}
+		return &bootstrapProvider{providerType: string(ProviderBuiltin)}, nil
+	})
+	service := NewService(slog.Default(), &providerBootstrapQueries{
+		providers: []sqlc.MemoryProvider{{
+			ID:       providerID,
+			Name:     "Built-in Memory",
+			Provider: string(ProviderBuiltin),
+			Config:   []byte(`{"memory_mode":"graph"}`),
+		}},
+	}, config.Config{})
+	service.SetRegistry(registry)
+
+	provider, err := registry.Get(context.Background(), providerID.String())
+	if err != nil {
+		t.Fatalf("Get() after SetRegistry() error = %v", err)
+	}
+	if provider.Type() != string(ProviderBuiltin) {
+		t.Fatalf("provider type = %q, want %q", provider.Type(), ProviderBuiltin)
+	}
+	if got := factoryCalls.Load(); got != 1 {
+		t.Fatalf("factory calls = %d, want 1", got)
 	}
 }
 
