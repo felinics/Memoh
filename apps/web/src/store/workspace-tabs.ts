@@ -1144,8 +1144,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         return
       }
       // Auto-picked / cold-start selection must not add a chat tab on top of a
-      // restored File/Preview (or any non-empty) workspace.
-      if (blockNonExplicitOpen) return
+      // restored File/Preview (or any non-empty) workspace. If the restored
+      // active panel is already a different chat, pull selection onto it so
+      // Recents highlights the conversation on screen — not the auto-pick.
+      if (blockNonExplicitOpen) {
+        adoptActiveRestoredChatSelection(activeSession, active?.id)
+        return
+      }
       openSessionChat({ sessionId: sid, groupId, explicitSelection })
       return
     }
@@ -1162,12 +1167,21 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       // A fresh top-level tab has no separately-seeded chat selection, but its
       // restored workspace can already contain the chat the user was viewing.
       // Keep that panel instead of interpreting the empty selection as a request
-      // for a second draft. Later explicit draft/ACP transitions still use the
-      // normal path below and may replace it deliberately.
-      chatStore.focusChatView(active.id)
+      // for a second draft. Align the global selection to the preserved panel
+      // (non-explicit) so the Recents highlight matches the open conversation.
+      adoptActiveRestoredChatSelection(activeSession, active.id)
       return
     }
     openDraftChat({ groupId, explicitSelection })
+  }
+
+  function adoptActiveRestoredChatSelection(sessionId: string | null, panelId?: string) {
+    if (!sessionId || isDeletedSessionForCurrentBot(sessionId)) return
+    if (panelId) chatStore.focusChatView(panelId)
+    // Already pointing at the preserved panel — leave explicitness alone.
+    if ((chatStore.sessionId ?? '').trim() === sessionId) return
+    // Non-explicit: layout ownership, not a user click.
+    selectChatSession(sessionId, false)
   }
 
   function syncDraftTargetFromState() {

@@ -48,8 +48,12 @@ export function useTabScopedStorage<T>(
   // Must run BEFORE useStorage: its constructor writes `defaults` into
   // sessionStorage, which would erase the "this tab is cold" signal.
   if (opts.seed && ss && ls && ss.getItem(key) === null) {
-    const seed = ls.getItem(key)
-    if (seed !== null) ss.setItem(key, seed) // useStorage reads it as if native
+    try {
+      const seed = ls.getItem(key)
+      // Quota / disabled sessionStorage must not abort store construction —
+      // fall through to `defaults` the same way the mirror write is best-effort.
+      if (seed !== null) ss.setItem(key, seed)
+    } catch { /* seed unavailable — use defaults */ }
   }
 
   const state = useStorage<T>(key, defaults, ss, { listenToStorageChanges: false })

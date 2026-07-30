@@ -957,6 +957,49 @@ describe('workspace layout store', () => {
     expect(dock.activePanel?.params.sessionId).toBe('session-1')
     expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId == null)).toBe(false)
     expect(chatStoreMock.focusChatView).toHaveBeenCalledWith('chat:bot-1:1')
+    // Recents follows chat-session-id — pull it onto the restored panel.
+    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('session-1', { explicitSelection: false })
+    expect(useChatSelectionStore().sessionId).toBe('session-1')
+  })
+
+  it('reconciles an auto-picked session to the restored chat panel without opening another tab', async () => {
+    const restoredLayout = persistedLayoutWithPanel(
+      'chat:bot-1:1',
+      'chat',
+      { sessionId: 'restored-session', explicitSelection: true },
+      'Restored',
+    )
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: restoredLayout,
+        ephemeralIds: [],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+    chatStoreMock.selectSession.mockClear()
+
+    // initialize() auto-picks a newer Untitled while the dock still shows the
+    // restored conversation — selection must snap back to the open panel.
+    chatStoreMock.sessionId = 'untitled-latest'
+    chatStoreMock.hasExplicitSessionSelection = false
+    chatStoreMock.loadingChats = false
+    chatStoreMock.sessions.push(
+      { id: 'untitled-latest', title: '' },
+      { id: 'restored-session', title: 'Restored' },
+    )
+    useChatSelectionStore().setSession('untitled-latest', { explicitSelection: false })
+    await nextTick()
+    await flushDraftChatFallback()
+
+    expect(dock.panels).toHaveLength(1)
+    expect(dock.activePanel?.params.sessionId).toBe('restored-session')
+    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('restored-session', { explicitSelection: false })
+    expect(useChatSelectionStore().sessionId).toBe('restored-session')
+    expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
   })
 
   it('does not open a chat tab when initialize auto-picks a session over a restored file/preview workspace', async () => {

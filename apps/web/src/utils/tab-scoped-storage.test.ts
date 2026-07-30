@@ -58,4 +58,16 @@ describe('useTabScopedStorage', () => {
     const r = useTabScopedStorage<string>('k', 'def')
     expect(r.value).toBe('def')
   })
+
+  it('falls back to defaults when seeding into sessionStorage throws', () => {
+    ls.set('k', 'seed')
+    vi.stubGlobal('sessionStorage', {
+      ...mock(ss),
+      setItem: () => {
+        throw new DOMException('QuotaExceededError')
+      },
+    })
+    const r = useTabScopedStorage<string>('k', 'def', { seed: true })
+    expect(r.value).toBe('def')
+  })
 })
