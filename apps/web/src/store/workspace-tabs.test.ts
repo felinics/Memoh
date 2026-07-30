@@ -35,14 +35,24 @@ vi.hoisted(() => {
 
   const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
   const storage = new MemoryStorage()
+  // Layout/selection now live in sessionStorage (per-Tab), so the store's
+  // restore path reads it, not localStorage. A separate instance mirrors the
+  // real browser split (two distinct areas under the same key names).
+  const session = new MemoryStorage()
   Object.defineProperty(globalThis, 'localStorage', {
     value: storage,
+    configurable: true,
+    writable: true,
+  })
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    value: session,
     configurable: true,
     writable: true,
   })
   Object.defineProperty(globalThis, 'window', {
     value: {
       localStorage: storage,
+      sessionStorage: session,
       addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
         const set = listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>()
         set.add(listener)
@@ -546,6 +556,8 @@ describe('workspace layout store', () => {
   beforeEach(() => {
     localStorage.clear()
     window.localStorage.clear()
+    sessionStorage.clear()
+    window.sessionStorage.clear()
     chatStoreMock.createNewSession.mockClear()
     chatStoreMock.focusChatView.mockClear()
     chatStoreMock.selectSession.mockClear()
@@ -920,6 +932,110 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
     expect(chatStoreMock.selectSession).toHaveBeenCalledWith('history-session-1')
     expect(dock.activePanel?.params.sessionId).toBe('history-session-1')
+  })
+
+  it('keeps a restored session chat without adding a draft when selection is empty', async () => {
+    const restoredLayout = persistedLayoutWithPanel(
+      'chat:bot-1:1',
+      'chat',
+      { sessionId: 'session-1', explicitSelection: true },
+      'Session 1',
+    )
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: restoredLayout,
+        ephemeralIds: [],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(dock.panels).toHaveLength(1)
+    expect(dock.activePanel?.params.sessionId).toBe('session-1')
+    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId == null)).toBe(false)
+    expect(chatStoreMock.focusChatView).toHaveBeenCalledWith('chat:bot-1:1')
+  })
+
+  it('does not open a chat tab when initialize auto-picks a session over a restored file/preview workspace', async () => {
+    // Cold-start seed: File + Preview only (the user's Tab A layout). A new
+    // browser tab must restore that dock as-is — initialize()'s non-explicit
+    // auto-pick of the latest Untitled Session must NOT punch chat tabs in.
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          panels: {
+            'file:/data/AGENTS.md': {
+              id: 'file:/data/AGENTS.md',
+              contentComponent: 'file',
+              title: 'AGENTS.md',
+              params: { filePath: '/data/AGENTS.md' },
+            },
+            'preview:/data/AGENTS.md': {
+              id: 'preview:/data/AGENTS.md',
+              contentComponent: 'preview',
+              title: 'Preview: AGENTS.md',
+              params: { filePath: '/data/AGENTS.md' },
+            },
+          },
+        },
+        ephemeralIds: ['file:/data/AGENTS.md', 'preview:/data/AGENTS.md'],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(dock.panels.map(panel => panel.component).sort()).toEqual(['file', 'preview'])
+    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
+
+    // Simulate initialize() finishing: it writes the latest history item into
+    // selection with explicitSelection=false (see bootstrap.ts).
+    chatStoreMock.sessionId = 'untitled-1'
+    chatStoreMock.hasExplicitSessionSelection = false
+    chatStoreMock.loadingChats = false
+    chatStoreMock.sessions.push({ id: 'untitled-1', title: '' })
+    useChatSelectionStore().setSession('untitled-1', { explicitSelection: false })
+    await nextTick()
+    await flushDraftChatFallback()
+
+    expect(dock.panels.map(panel => panel.component).sort()).toEqual(['file', 'preview'])
+    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
+  })
+
+  it('still opens a chat tab on explicit session selection after a file/preview restore', async () => {
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          panels: {
+            'file:/data/AGENTS.md': {
+              id: 'file:/data/AGENTS.md',
+              contentComponent: 'file',
+              title: 'AGENTS.md',
+              params: { filePath: '/data/AGENTS.md' },
+            },
+          },
+        },
+        ephemeralIds: [],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    chatStoreMock.sessionId = 'picked-1'
+    chatStoreMock.hasExplicitSessionSelection = true
+    chatStoreMock.sessions.push({ id: 'picked-1', title: 'Picked' })
+    useChatSelectionStore().setSession('picked-1', { explicitSelection: true })
+    await nextTick()
+
+    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 'picked-1')).toBe(true)
   })
 
   it('does not promote a restored auto-selected native session into explicit selection while chats load', async () => {
@@ -1298,6 +1414,93 @@ describe('workspace layout store', () => {
     const chat = dock.panels[0]!
     expect(chat.component).toBe('chat')
     expect(chat.params.sessionId ?? null).toBeNull()
+  })
+
+  it('opens a draft — not an auto-picked Untitled session — after closing a restored file/preview workspace', async () => {
+    // Cold-start tab: layout seeded from localStorage, initialize() wrote a
+    // non-explicit sessionId we refused to open. Closing the last file must
+    // refill New Session, not that stale Untitled pick.
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          panels: {
+            'file:/data/AGENTS.md': {
+              id: 'file:/data/AGENTS.md',
+              contentComponent: 'file',
+              title: 'AGENTS.md',
+              params: { filePath: '/data/AGENTS.md' },
+            },
+            'preview:/data/AGENTS.md': {
+              id: 'preview:/data/AGENTS.md',
+              contentComponent: 'preview',
+              title: 'Preview: AGENTS.md',
+              params: { filePath: '/data/AGENTS.md' },
+            },
+          },
+        },
+        ephemeralIds: ['file:/data/AGENTS.md', 'preview:/data/AGENTS.md'],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    chatStoreMock.sessionId = 'untitled-stale'
+    chatStoreMock.hasExplicitSessionSelection = false
+    chatStoreMock.sessions.push({ id: 'untitled-stale', title: '' })
+    useChatSelectionStore().setSession('untitled-stale', { explicitSelection: false })
+    await nextTick()
+
+    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
+
+    store.closeTab('preview:/data/AGENTS.md')
+    store.closeTab('file:/data/AGENTS.md')
+    await flushDraftChatFallback()
+
+    expect(dock.panels).toHaveLength(1)
+    const chat = dock.panels[0]!
+    expect(chat.component).toBe('chat')
+    expect(chat.params.sessionId ?? null).toBeNull()
+    expect(chat.title).toBe('New Session')
+  })
+
+  it('refills an explicitly selected session when the last non-chat tab closes', async () => {
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          panels: {
+            'file:/data/AGENTS.md': {
+              id: 'file:/data/AGENTS.md',
+              contentComponent: 'file',
+              title: 'AGENTS.md',
+              params: { filePath: '/data/AGENTS.md' },
+            },
+          },
+        },
+        ephemeralIds: [],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    // Drive chatStore directly: an already-explicit selection whose chat tab is
+    // not open (e.g. replaced by a file). Closing the file should restore it.
+    chatStoreMock.sessionId = 'explicit-1'
+    chatStoreMock.hasExplicitSessionSelection = true
+    chatStoreMock.sessions.push({ id: 'explicit-1', title: 'Kept Session' })
+    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
+
+    store.closeTab('file:/data/AGENTS.md')
+    await flushDraftChatFallback()
+
+    const chat = dock.panels.find(panel => panel.component === 'chat')
+    expect(chat?.params.sessionId).toBe('explicit-1')
+    expect(chat?.title).toBe('Kept Session')
   })
 
   it('opens a draft chat when switching to a bot without a saved layout', async () => {

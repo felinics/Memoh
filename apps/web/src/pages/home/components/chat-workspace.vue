@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-import { inject, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { inject, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
@@ -40,7 +40,6 @@ import {
 import 'dockview-vue/dist/styles/dockview.css'
 import '@/styles/dockview-theme.css'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFileManagerProvider'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import PanelChat from './dockview/panel-chat.vue'
@@ -62,8 +61,6 @@ import TabCloseConfirm from './dockview/tab-close-confirm.vue'
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
 const { api } = storeToRefs(store)
-const chatStore = useChatStore()
-const { currentBotId } = storeToRefs(chatStore)
 
 // dockview's own auto-resize is disabled at construction (:disable-auto-resizing);
 // we drive layout from this ResizeObserver instead. The dock is a flex-1 sibling
@@ -177,36 +174,12 @@ function getTabContextMenuItems({ panel, group }: GetTabContextMenuItemsParams):
 }
 
 function onReady(event: DockviewReadyEvent) {
+  // registerApi owns restoration and the only empty-dock fallback. Keeping a
+  // second "no chat panel" fallback here rewrites a valid file/preview-only
+  // workspace by opening New Session into its ephemeral slot.
   store.registerApi(event.api)
   applyLayout()
-  ensureChatPanel()
 }
-
-// Bot ready/switch: the store restores the persisted layout; make sure at least a
-// draft chat tab exists afterwards (all chat tabs may have been closed in a past
-// session). Per-tab titles are kept in sync by the store (syncChatTitles).
-function ensureChatPanel() {
-  const dock = api.value
-  if (!currentBotId.value || !dock) return
-  const hasChat = dock.panels.some(
-    p => p.id === 'chat' || p.id.startsWith('chat:') || p.id.startsWith('chat~'),
-  )
-  if (hasChat) return
-  // Open the active session's tab if one is already selected (e.g. initialize or an
-  // ACP start set it before the dock mounted); otherwise a fresh draft.
-  const sid = (chatStore.sessionId ?? '').trim()
-  if (sid) {
-    store.openSessionChat({
-      sessionId: sid,
-      explicitSelection: chatStore.hasExplicitSessionSelection === true,
-    })
-  }
-  else store.openDraftChat({ title: t('chat.newSession'), explicitSelection: false })
-}
-
-watch(currentBotId, (bid) => {
-  if (bid && api.value) ensureChatPanel()
-})
 
 const FILE_MANAGER_ROOT = '/data'
 
