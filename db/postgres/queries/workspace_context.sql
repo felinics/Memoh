@@ -6,6 +6,13 @@ WHERE team_id = public.memoh_current_team_id()
   AND target_id = $2
 LIMIT 1;
 
+-- name: InvalidateBotWorkspaceContextSnapshots :execrows
+UPDATE public.bot_workspace_context_snapshots
+SET requested_generation = requested_generation + 1,
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1;
+
 -- name: BeginBotWorkspaceContextRefresh :one
 INSERT INTO public.bot_workspace_context_snapshots (
     bot_id,

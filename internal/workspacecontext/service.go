@@ -45,6 +45,8 @@ const (
 	ReasonWorkspaceImport  = "workspace_import"
 )
 
+const defaultSnapshotMaxAge = time.Minute
+
 var emptyHooksConfig = []byte("{\n  \"version\": 1,\n  \"enabled\": true,\n  \"hooks\": []\n}\n")
 
 type HookDocument struct {
@@ -89,6 +91,7 @@ type Snapshot struct {
 
 type Store interface {
 	GetBotWorkspaceContextSnapshot(ctx context.Context, arg sqlc.GetBotWorkspaceContextSnapshotParams) (sqlc.BotWorkspaceContextSnapshot, error)
+	InvalidateBotWorkspaceContextSnapshots(ctx context.Context, botID pgtype.UUID) (int64, error)
 	BeginBotWorkspaceContextRefresh(ctx context.Context, arg sqlc.BeginBotWorkspaceContextRefreshParams) (int64, error)
 	CompleteBotWorkspaceContextRefresh(ctx context.Context, arg sqlc.CompleteBotWorkspaceContextRefreshParams) (sqlc.BotWorkspaceContextSnapshot, error)
 	MarkBotWorkspaceContextSourceInvalid(ctx context.Context, arg sqlc.MarkBotWorkspaceContextSourceInvalidParams) (int64, error)
@@ -115,6 +118,9 @@ type Service struct {
 
 	requestMu sync.Mutex
 	requests  map[string]*refreshRequest
+
+	now            func() time.Time
+	snapshotMaxAge time.Duration
 }
 
 type refreshRequest struct {
@@ -134,11 +140,13 @@ func NewService(log *slog.Logger, store Store, workspace WorkspaceSource, plugin
 		log = slog.Default()
 	}
 	return &Service{
-		logger:    log.With(slog.String("service", "workspace_context")),
-		store:     store,
-		workspace: workspace,
-		plugins:   plugins,
-		requests:  make(map[string]*refreshRequest),
+		logger:         log.With(slog.String("service", "workspace_context")),
+		store:          store,
+		workspace:      workspace,
+		plugins:        plugins,
+		requests:       make(map[string]*refreshRequest),
+		now:            time.Now,
+		snapshotMaxAge: defaultSnapshotMaxAge,
 	}
 }
 
@@ -178,10 +186,11 @@ func (s *Service) GetOrHydrate(ctx context.Context, botID string) (Snapshot, err
 		return Snapshot{}, err
 	}
 	if snapshot, ok := FromContext(ctx, botID, targetID); ok {
-		if err := snapshotSourceError(snapshot); err != nil {
-			return Snapshot{}, err
+		usable, cachedErr := s.cachedSnapshotUsable(snapshot, true)
+		if cachedErr != nil {
+			return Snapshot{}, cachedErr
 		}
-		if snapshot.Status == StatusReady && snapshot.RequestedGeneration == snapshot.AppliedGeneration {
+		if usable {
 			return snapshot, nil
 		}
 	}
@@ -201,12 +210,11 @@ func (s *Service) GetOrHydrate(ctx context.Context, botID string) (Snapshot, err
 		if decodeErr != nil {
 			return Snapshot{}, decodeErr
 		}
-		if err := snapshotSourceError(snapshot); err != nil {
-			return Snapshot{}, err
+		usable, cachedErr := s.cachedSnapshotUsable(snapshot, row.Payload != nil)
+		if cachedErr != nil {
+			return Snapshot{}, cachedErr
 		}
-		if row.Payload != nil &&
-			snapshot.Status == StatusReady &&
-			snapshot.RequestedGeneration == snapshot.AppliedGeneration {
+		if usable {
 			updateContextSnapshot(ctx, snapshot)
 			return snapshot, nil
 		}
@@ -214,6 +222,31 @@ func (s *Service) GetOrHydrate(ctx context.Context, botID string) (Snapshot, err
 		return Snapshot{}, err
 	}
 	return s.refreshTarget(ctx, botID, targetID, ReasonHydrate)
+}
+
+func (s *Service) cachedSnapshotUsable(snapshot Snapshot, hasPayload bool) (bool, error) {
+	if snapshot.RequestedGeneration != snapshot.AppliedGeneration {
+		return false, nil
+	}
+	if snapshot.Status == StatusReady || snapshot.Status == StatusSourceInvalid {
+		now := time.Now()
+		maxAge := defaultSnapshotMaxAge
+		if s != nil {
+			if s.now != nil {
+				now = s.now()
+			}
+			if s.snapshotMaxAge > 0 {
+				maxAge = s.snapshotMaxAge
+			}
+		}
+		if snapshot.RefreshedAt.IsZero() || !snapshot.RefreshedAt.Add(maxAge).After(now) {
+			return false, nil
+		}
+	}
+	if err := snapshotSourceError(snapshot); err != nil {
+		return false, err
+	}
+	return hasPayload && snapshot.Status == StatusReady, nil
 }
 
 func (s *Service) Refresh(ctx context.Context, botID, reason string) (Snapshot, error) {
@@ -231,6 +264,20 @@ func (s *Service) Refresh(ctx context.Context, botID, reason string) (Snapshot, 
 func (s *Service) RefreshNow(ctx context.Context, botID, reason string) error {
 	_, err := s.Refresh(ctx, botID, reason)
 	return err
+}
+
+func (s *Service) RefreshAllTargetsNow(ctx context.Context, botID, reason string) error {
+	if s == nil || s.store == nil {
+		return errors.New("workspace context service is not configured")
+	}
+	botUUID, err := db.ParseUUID(strings.TrimSpace(botID))
+	if err != nil {
+		return err
+	}
+	if _, err := s.store.InvalidateBotWorkspaceContextSnapshots(ctx, botUUID); err != nil {
+		return err
+	}
+	return s.RefreshNow(ctx, botID, reason)
 }
 
 func (s *Service) RefreshIfRelevant(ctx context.Context, botID, reason string, paths ...string) error {
@@ -295,7 +342,7 @@ func (s *Service) refreshTarget(ctx context.Context, botID, targetID, reason str
 			updateContextSnapshot(ctx, snapshot)
 			return Snapshot{}, scanErr
 		}
-		_, failErr := s.store.FailBotWorkspaceContextRefresh(ctx, sqlc.FailBotWorkspaceContextRefreshParams{
+		updated, failErr := s.store.FailBotWorkspaceContextRefresh(ctx, sqlc.FailBotWorkspaceContextRefreshParams{
 			BotID:               botUUID,
 			TargetID:            targetID,
 			RequestedGeneration: generation,
@@ -303,6 +350,9 @@ func (s *Service) refreshTarget(ctx context.Context, botID, targetID, reason str
 		})
 		if failErr != nil {
 			return Snapshot{}, errors.Join(scanErr, failErr)
+		}
+		if updated == 0 {
+			return s.awaitFreshSnapshot(ctx, botUUID, botID, targetID)
 		}
 		return Snapshot{}, scanErr
 	}
@@ -559,7 +609,14 @@ func (s *Service) HeartbeatChecklist(ctx context.Context, botID string) (string,
 }
 
 func IsRelevantPath(filePath string) bool {
-	filePath = path.Clean("/" + strings.TrimSpace(strings.ReplaceAll(filePath, "\\", "/")))
+	filePath = strings.TrimSpace(strings.ReplaceAll(filePath, "\\", "/"))
+	if filePath == "" {
+		return false
+	}
+	if !path.IsAbs(filePath) {
+		filePath = path.Join(config.DefaultDataMount, filePath)
+	}
+	filePath = path.Clean(filePath)
 	for _, exactPath := range []string{
 		hooks.DefaultConfigPath,
 		path.Join(config.DefaultDataMount, "AGENTS.md"),

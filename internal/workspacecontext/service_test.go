@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -13,14 +14,16 @@ import (
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/skills"
 	workspacepkg "github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const workspaceContextTestBotID = "6e33a6ad-f888-4051-9b1a-e709bdc048b2"
 
 type cachedSnapshotStore struct {
-	row      sqlc.BotWorkspaceContextSnapshot
-	rows     map[string]sqlc.BotWorkspaceContextSnapshot
-	getCalls int
+	row             sqlc.BotWorkspaceContextSnapshot
+	rows            map[string]sqlc.BotWorkspaceContextSnapshot
+	getCalls        int
+	invalidateCalls int
 }
 
 type sequenceSnapshotStore struct {
@@ -49,6 +52,11 @@ func (s *cachedSnapshotStore) GetBotWorkspaceContextSnapshot(_ context.Context, 
 	return s.row, nil
 }
 
+func (s *cachedSnapshotStore) InvalidateBotWorkspaceContextSnapshots(context.Context, pgtype.UUID) (int64, error) {
+	s.invalidateCalls++
+	return 0, nil
+}
+
 func (*cachedSnapshotStore) BeginBotWorkspaceContextRefresh(context.Context, sqlc.BeginBotWorkspaceContextRefreshParams) (int64, error) {
 	return 0, errors.New("unexpected refresh")
 }
@@ -63,6 +71,34 @@ func (*cachedSnapshotStore) MarkBotWorkspaceContextSourceInvalid(context.Context
 
 func (*cachedSnapshotStore) FailBotWorkspaceContextRefresh(context.Context, sqlc.FailBotWorkspaceContextRefreshParams) (int64, error) {
 	return 0, errors.New("unexpected refresh")
+}
+
+type supersededFailureStore struct {
+	cachedSnapshotStore
+	failCalls int
+}
+
+func (*supersededFailureStore) BeginBotWorkspaceContextRefresh(context.Context, sqlc.BeginBotWorkspaceContextRefreshParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *supersededFailureStore) FailBotWorkspaceContextRefresh(context.Context, sqlc.FailBotWorkspaceContextRefreshParams) (int64, error) {
+	s.failCalls++
+	return 0, nil
+}
+
+type failingWorkspaceSource struct{}
+
+func (failingWorkspaceSource) MCPClient(context.Context, string) (*bridge.Client, error) {
+	return nil, errors.New("workspace scan failed")
+}
+
+func (failingWorkspaceSource) ResolveWorkspaceSkillDiscoveryRoots(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
+func (failingWorkspaceSource) ResolveWorkspaceTargetDescriptor(context.Context, string, string) (workspacepkg.WorkspaceTargetDescriptor, error) {
+	return workspacepkg.WorkspaceTargetDescriptor{TargetID: workspacepkg.WorkspaceTargetNative}, nil
 }
 
 func TestCachedSnapshotServesHooksSkillsAndFilesWithoutWorkspace(t *testing.T) {
@@ -107,6 +143,7 @@ func TestCachedSnapshotServesHooksSkillsAndFilesWithoutWorkspace(t *testing.T) {
 		Status:              StatusReady,
 		Payload:             rawPayload,
 		ContentHash:         pgtype.Text{String: "hash", Valid: true},
+		RefreshedAt:         pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	}}
 	service := NewService(nil, store, nil, nil)
 
@@ -154,14 +191,24 @@ func TestCachedSnapshotServesHooksSkillsAndFilesWithoutWorkspace(t *testing.T) {
 func TestIsRelevantPath(t *testing.T) {
 	for _, filePath := range []string{
 		"/data/.memoh/hooks.json",
+		".memoh/hooks.json",
 		"/data/AGENTS.md",
+		"AGENTS.md",
 		"/data/HEARTBEAT.md",
+		"HEARTBEAT.md",
 		"/data/MEMORY.md",
+		"MEMORY.md",
 		"/data/PROFILES.md",
+		"PROFILES.md",
 		"/data/skills/example/SKILL.md",
+		"skills/example/SKILL.md",
 		"/data/.memoh/plugins/example/hooks.json",
+		".memoh/plugins/example/hooks.json",
+		".memoh/skills/example",
 		"/data/.memoh",
+		".memoh",
 		"/data",
+		".",
 	} {
 		if !IsRelevantPath(filePath) {
 			t.Errorf("IsRelevantPath(%q) = false", filePath)
@@ -191,6 +238,7 @@ func TestCachedSnapshotsAreScopedByWorkspaceTarget(t *testing.T) {
 			Status:              StatusReady,
 			Payload:             raw,
 			ContentHash:         pgtype.Text{String: "hash", Valid: true},
+			RefreshedAt:         pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		}
 	}
 	store := &cachedSnapshotStore{rows: map[string]sqlc.BotWorkspaceContextSnapshot{
@@ -243,6 +291,59 @@ func TestStaleCachedGenerationTriggersRefresh(t *testing.T) {
 	}
 }
 
+func TestExpiredCachedSnapshotTriggersRevalidation(t *testing.T) {
+	rawPayload, err := json.Marshal(Payload{Version: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
+	botUUID := uuid.MustParse(workspaceContextTestBotID)
+	store := &cachedSnapshotStore{row: sqlc.BotWorkspaceContextSnapshot{
+		BotID:               pgtype.UUID{Bytes: botUUID, Valid: true},
+		TargetID:            workspacepkg.WorkspaceTargetNative,
+		RequestedGeneration: 1,
+		AppliedGeneration:   1,
+		Status:              StatusReady,
+		Payload:             rawPayload,
+		ContentHash:         pgtype.Text{String: "stale", Valid: true},
+		RefreshedAt:         pgtype.Timestamptz{Time: now.Add(-time.Minute), Valid: true},
+	}}
+	service := NewService(nil, store, nil, nil)
+	service.now = func() time.Time { return now }
+	service.snapshotMaxAge = time.Minute
+
+	if _, err := service.GetOrHydrate(t.Context(), workspaceContextTestBotID); err == nil ||
+		err.Error() != "unexpected refresh" {
+		t.Fatalf("GetOrHydrate() error = %v, want revalidation attempt", err)
+	}
+}
+
+func TestFreshCachedSnapshotDoesNotRevalidate(t *testing.T) {
+	rawPayload, err := json.Marshal(Payload{Version: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
+	botUUID := uuid.MustParse(workspaceContextTestBotID)
+	store := &cachedSnapshotStore{row: sqlc.BotWorkspaceContextSnapshot{
+		BotID:               pgtype.UUID{Bytes: botUUID, Valid: true},
+		TargetID:            workspacepkg.WorkspaceTargetNative,
+		RequestedGeneration: 1,
+		AppliedGeneration:   1,
+		Status:              StatusReady,
+		Payload:             rawPayload,
+		ContentHash:         pgtype.Text{String: "fresh", Valid: true},
+		RefreshedAt:         pgtype.Timestamptz{Time: now.Add(-time.Minute + time.Nanosecond), Valid: true},
+	}}
+	service := NewService(nil, store, nil, nil)
+	service.now = func() time.Time { return now }
+	service.snapshotMaxAge = time.Minute
+
+	if _, err := service.GetOrHydrate(t.Context(), workspaceContextTestBotID); err != nil {
+		t.Fatalf("GetOrHydrate() error = %v", err)
+	}
+}
+
 func TestAttachedSnapshotCanAdvanceWithinRequest(t *testing.T) {
 	ctx := WithSnapshot(t.Context(), Snapshot{
 		BotID:               workspaceContextTestBotID,
@@ -280,6 +381,7 @@ func TestAttachedSourceInvalidSnapshotFailsClosed(t *testing.T) {
 		TargetID:         workspacepkg.WorkspaceTargetNative,
 		Status:           StatusSourceInvalid,
 		LastRefreshError: "invalid hooks",
+		RefreshedAt:      time.Now(),
 	})
 
 	if _, err := service.GetOrHydrate(ctx, workspaceContextTestBotID); err == nil {
@@ -287,6 +389,56 @@ func TestAttachedSourceInvalidSnapshotFailsClosed(t *testing.T) {
 	}
 	if store.getCalls != 0 {
 		t.Fatalf("database reads = %d, want 0", store.getCalls)
+	}
+}
+
+func TestRefreshAllTargetsInvalidatesEveryCachedTargetBeforeRefreshingPrimary(t *testing.T) {
+	store := &cachedSnapshotStore{}
+	service := NewService(nil, store, failingWorkspaceSource{}, nil)
+
+	if err := service.RefreshAllTargetsNow(t.Context(), workspaceContextTestBotID, ReasonPluginsChanged); err == nil ||
+		err.Error() != "unexpected refresh" {
+		t.Fatalf("RefreshAllTargetsNow() error = %v, want primary refresh attempt", err)
+	}
+	if store.invalidateCalls != 1 {
+		t.Fatalf("all-target invalidations = %d, want 1", store.invalidateCalls)
+	}
+}
+
+func TestSupersededFailedScanAwaitsNewerRefresh(t *testing.T) {
+	rawPayload, err := json.Marshal(Payload{Version: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	botUUID := uuid.MustParse(workspaceContextTestBotID)
+	store := &supersededFailureStore{cachedSnapshotStore: cachedSnapshotStore{
+		row: sqlc.BotWorkspaceContextSnapshot{
+			BotID:               pgtype.UUID{Bytes: botUUID, Valid: true},
+			TargetID:            workspacepkg.WorkspaceTargetNative,
+			RequestedGeneration: 2,
+			AppliedGeneration:   2,
+			Status:              StatusReady,
+			Payload:             rawPayload,
+			ContentHash:         pgtype.Text{String: "newer", Valid: true},
+			RefreshedAt:         pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		},
+	}}
+	service := NewService(nil, store, failingWorkspaceSource{}, nil)
+
+	got, err := service.refreshTarget(
+		t.Context(),
+		workspaceContextTestBotID,
+		workspacepkg.WorkspaceTargetNative,
+		ReasonHydrate,
+	)
+	if err != nil {
+		t.Fatalf("refreshTarget() error = %v", err)
+	}
+	if got.AppliedGeneration != 2 || got.ContentHash != "newer" {
+		t.Fatalf("refreshTarget() = %#v, want superseding generation", got)
+	}
+	if store.failCalls != 1 {
+		t.Fatalf("failed refresh updates = %d, want 1", store.failCalls)
 	}
 }
 

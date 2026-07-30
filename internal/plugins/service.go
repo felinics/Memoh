@@ -39,7 +39,7 @@ type Service struct {
 }
 
 type WorkspaceContextRefresher interface {
-	RefreshNow(ctx context.Context, botID, reason string) error
+	RefreshAllTargetsNow(ctx context.Context, botID, reason string) error
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries, mcpService *mcp.ConnectionService, oauthService *mcp.OAuthService, oauthClients *OAuthClientRegistry, bridges BridgeProvider) *Service {
@@ -78,7 +78,7 @@ func (s *Service) refreshWorkspaceContext(ctx context.Context, botID string) {
 	}
 	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()
-	if err := s.contextCache.RefreshNow(refreshCtx, botID, "plugins_changed"); err != nil && s.logger != nil {
+	if err := s.contextCache.RefreshAllTargetsNow(refreshCtx, botID, "plugins_changed"); err != nil && s.logger != nil {
 		s.logger.Warn("workspace context refresh failed",
 			slog.String("bot_id", botID),
 			slog.String("reason", "plugins_changed"),

@@ -158,6 +158,22 @@ func (q *Queries) GetBotWorkspaceContextSnapshot(ctx context.Context, arg GetBot
 	return i, err
 }
 
+const invalidateBotWorkspaceContextSnapshots = `-- name: InvalidateBotWorkspaceContextSnapshots :execrows
+UPDATE public.bot_workspace_context_snapshots
+SET requested_generation = requested_generation + 1,
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
+`
+
+func (q *Queries) InvalidateBotWorkspaceContextSnapshots(ctx context.Context, botID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, invalidateBotWorkspaceContextSnapshots, botID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markBotWorkspaceContextSourceInvalid = `-- name: MarkBotWorkspaceContextSourceInvalid :execrows
 UPDATE public.bot_workspace_context_snapshots
 SET applied_generation = $3,

@@ -161,6 +161,7 @@ type Queries interface {
 	GetBotOverlayConfig(ctx context.Context, id pgtype.UUID) (dbsqlc.GetBotOverlayConfigRow, error)
 	GetBotPluginInstallationByID(ctx context.Context, arg dbsqlc.GetBotPluginInstallationByIDParams) (dbsqlc.BotPluginInstallation, error)
 	GetBotWorkspaceContextSnapshot(ctx context.Context, arg dbsqlc.GetBotWorkspaceContextSnapshotParams) (dbsqlc.BotWorkspaceContextSnapshot, error)
+	InvalidateBotWorkspaceContextSnapshots(ctx context.Context, botID pgtype.UUID) (int64, error)
 	GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotStorageBinding, error)
 	GetHistoryTurnByID(ctx context.Context, arg dbsqlc.GetHistoryTurnByIDParams) (HistoryTurn, error)
 	GetVisibleHistoryTurnByMessage(ctx context.Context, arg dbsqlc.GetVisibleHistoryTurnByMessageParams) (HistoryTurn, error)
