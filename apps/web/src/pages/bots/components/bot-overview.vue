@@ -185,9 +185,58 @@
         </p>
       </section>
 
-      <!-- Core setup: only the two settings worth surfacing here — the model it
-           thinks with, and whether memory is on. Everything else lives in its
-           own tab, so this never becomes a mirror of the left nav. -->
+      <!-- Memory: same lightweight telemetry scale as Runtime — a title row,
+           status badge, and three metric tiles. Full sync / path details live
+           on the Memory tab; Overview only surfaces what helps at a glance. -->
+      <section
+        v-if="showMemorySection"
+        class="space-y-2.5"
+      >
+        <div class="flex items-center gap-2 px-2">
+          <h2 class="text-[13px] font-medium text-muted-foreground">
+            {{ $t('bots.overview.memoryTitle') }}
+          </h2>
+          <Badge
+            :variant="memoryStatusVariant"
+            size="sm"
+          >
+            {{ memoryStatusLabel }}
+          </Badge>
+        </div>
+
+        <div
+          v-if="memoryLoading"
+          class="grid grid-cols-3 gap-3"
+        >
+          <Skeleton
+            v-for="i in 3"
+            :key="i"
+            class="h-[4.5rem] rounded-[var(--radius-menu-shell)]"
+          />
+        </div>
+
+        <div
+          v-else-if="memoryHasStats"
+          class="grid grid-cols-3 gap-3"
+        >
+          <MetricReadout
+            v-for="m in memoryMetricCards"
+            :key="m.key"
+            :label="m.label"
+            :value="m.value"
+          />
+        </div>
+
+        <p
+          v-else
+          class="px-2 text-xs text-muted-foreground"
+        >
+          {{ memoryStatsNote }}
+        </p>
+      </section>
+
+      <!-- Core setup: the model this bot thinks with. Memory telemetry sits in
+           its own block above; everything else lives in its own tab. -->
       <SettingsSection :title="$t('bots.overview.configTitle')">
         <SettingsRow
           :label="$t('bots.overview.modelLabel')"
@@ -198,11 +247,6 @@
             class="rounded bg-accent px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
           >{{ reasoningLabel }}</span>
         </SettingsRow>
-
-        <SettingsRow
-          :label="$t('bots.overview.memoryLabel')"
-          :description="memoryDesc"
-        />
       </SettingsSection>
 
       <!-- Usage: a real data visualization (stat row + daily token bar chart)
@@ -340,7 +384,7 @@ const { data: models } = useQuery({
   },
 })
 
-const { data: memoryStatus } = useQuery({
+const { data: memoryStatus, isLoading: memoryLoading } = useQuery({
   key: () => ['bot-memory-status', botId.value],
   query: async () => {
     const { data } = await getBotsByBotIdMemoryStatus({ path: { bot_id: botId.value }, throwOnError: true })
@@ -429,10 +473,57 @@ const reasoningLabel = computed(() => {
     : t('bots.overview.reasoningBadge')
 })
 
-const memoryDesc = computed(() => {
-  const n = memoryStatus.value?.indexed_count
-  if (n == null) return t('bots.overview.memoryNone')
-  return t('bots.overview.memoryCount', { count: n })
+const showMemorySection = computed(() => !!settings.value?.memory_provider_id)
+
+const memoryIsBuiltin = computed(() =>
+  (memoryStatus.value?.provider_type ?? 'builtin') === 'builtin',
+)
+
+const memoryStatusVariant = computed<'success' | 'default' | 'secondary'>(() => {
+  if (!settings.value?.memory_provider_id) return 'secondary'
+  if (memoryStatus.value?.degraded) return 'default'
+  return 'success'
+})
+
+const memoryStatusLabel = computed(() => {
+  if (!settings.value?.memory_provider_id) return t('bots.overview.memoryOff')
+  if (memoryStatus.value?.degraded) return t('bots.overview.memoryDegraded')
+  return t('bots.overview.memoryHealthy')
+})
+
+const memoryHasStats = computed(() =>
+  memoryStatus.value?.indexed_count != null
+  || memoryStatus.value?.edge_count != null
+  || memoryStatus.value?.source_count != null,
+)
+
+const memoryMetricCards = computed(() => {
+  const status = memoryStatus.value
+  const formatCount = (n: number | undefined) => (n == null ? '—' : formatNumber(n))
+  return [
+    {
+      key: 'indexed',
+      label: t('bots.settings.memoryIndexedEntries'),
+      value: formatCount(status?.indexed_count),
+    },
+    {
+      key: 'edges',
+      label: memoryIsBuiltin.value
+        ? t('bots.settings.memoryGraphEdges')
+        : t('bots.settings.memorySourceEntries'),
+      value: formatCount(memoryIsBuiltin.value ? status?.edge_count : status?.source_count),
+    },
+    {
+      key: 'sources',
+      label: t('bots.settings.memoryMarkdownFiles'),
+      value: formatCount(status?.markdown_file_count),
+    },
+  ]
+})
+
+const memoryStatsNote = computed(() => {
+  if (!settings.value?.memory_provider_id) return t('bots.overview.memoryNone')
+  return t('bots.overview.memoryNoStats')
 })
 
 // --- Runtime: live container state + resource metrics. This is only meaningful

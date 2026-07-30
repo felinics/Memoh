@@ -81,11 +81,6 @@
         :search-providers="searchProviders"
         :fetch-providers="fetchProviders"
         :memory-providers="memoryProviders"
-        :persisted-memory-provider-i-d="persistedMemoryProviderID"
-        :memory-status="memoryStatus"
-        :is-memory-status-loading="isMemoryStatusLoading"
-        :is-rebuilding="isRebuilding"
-        @sync-memory="handleMemorySync"
       />
 
       <SettingsMultimediaCard
@@ -143,7 +138,7 @@ import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getAcpProfiles, getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
+import { getAcpProfiles, getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
@@ -455,35 +450,6 @@ const form = reactive<SettingsForm>({
   show_tool_calls_in_im: false,
 })
 
-const persistedMemoryProviderID = computed(() => settings.value?.memory_provider_id ?? '')
-
-const { data: memoryStatusData, isLoading: isMemoryStatusLoading } = useQuery({
-  key: () => ['bot-memory-status', botIdRef.value, persistedMemoryProviderID.value],
-  query: async () => {
-    const { data } = await getBotsByBotIdMemoryStatus({
-      path: { bot_id: botIdRef.value },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => !!botIdRef.value,
-})
-
-const { mutateAsync: rebuildMemory, isLoading: isRebuilding } = useMutation({
-  mutation: async () => {
-    const { data } = await postBotsByBotIdMemoryRebuild({
-      path: { bot_id: botIdRef.value },
-      throwOnError: true,
-    })
-    return data
-  },
-  onSettled: () => {
-    queryCache.invalidateQueries({ key: ['bot-memory-status', botIdRef.value, persistedMemoryProviderID.value] })
-  },
-})
-
-const memoryStatus = computed(() => memoryStatusData.value ?? null)
-
 watch(settings, (val) => {
   if (val) {
     form.chat_model_id = val.chat_model_id ?? ''
@@ -570,19 +536,6 @@ async function handleSave() {
       return
     }
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
-  }
-}
-
-async function handleMemorySync() {
-  try {
-    const result = await rebuildMemory()
-    toast.success(t('bots.settings.memorySyncSuccess', {
-      fsCount: result?.fs_count ?? 0,
-      restoredCount: result?.restored_count ?? 0,
-      storageCount: result?.storage_count ?? 0,
-    }))
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.settings.memorySyncFailed')))
   }
 }
 
