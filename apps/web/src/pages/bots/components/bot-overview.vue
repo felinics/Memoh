@@ -135,24 +135,16 @@
         v-if="isContainerBot"
         class="space-y-2.5"
       >
-        <!-- Title row: section label + status or inline note when metrics are
-             unavailable. Freshness timestamp stays on the far right. -->
+        <!-- Title row: section label + status badge (Running or unavailable note). -->
         <div class="flex items-center gap-2 px-2">
           <h2 class="text-[13px] font-medium text-muted-foreground">
             {{ $t('bots.overview.runtimeTitle') }}
           </h2>
-          <span
-            v-if="runtimeMetricsNote"
-            class="text-[11px] text-muted-foreground"
-          >
-            {{ runtimeMetricsNote }}
-          </span>
           <Badge
-            v-else
             variant="secondary"
             size="sm"
           >
-            {{ runtimeStatusLabel }}
+            {{ runtimeStatusBadgeLabel }}
           </Badge>
           <span
             v-if="runtimeSampledAt"
@@ -549,6 +541,11 @@ const runtimeStatusKey = computed(() => {
 
 // Status label reuses the Container tab vocabulary. Badge is always secondary
 // (neutral gray) — green "Running" was too loud for a quiet telemetry row.
+// Badge label: unavailable-metrics note takes the badge slot; otherwise Running/Stopped.
+const runtimeStatusBadgeLabel = computed(() =>
+  runtimeMetricsNote.value || runtimeStatusLabel.value,
+)
+
 const runtimeStatusLabel = computed(() => {
   switch (runtimeStatusKey.value) {
     case 'running': return t('bots.container.statusRunning')
