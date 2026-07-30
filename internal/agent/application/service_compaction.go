@@ -18,6 +18,85 @@ import (
 // threshold to it so they fire before the blocking backstop does.
 const compactionBudgetThresholdPercent = 70
 
+// Model-relative policy: when the configured absolute threshold is zero, the
+// controller derives every level from the chat model's context window. The
+// async maintenance pass fires at the soft share, the blocking pre-send
+// backstop waits for the hard share, and both compact the raw tail down to
+// the target share — three separate roles so background maintenance normally
+// keeps the backstop from ever blocking a turn. The shares are bench-tuned
+// against strict 8k/16k provider windows: soft above 50 leaves too thin a
+// margin on small windows, a hard below 75 adds blocking latency without
+// preventing single-turn jumps, and a target above 40 can re-trigger into
+// the summarizer's output cap.
+const (
+	compactionSoftThresholdPercent = 50
+	compactionHardThresholdPercent = 75
+	compactionTargetPercent        = 40
+	// maxAsyncCompactionPasses bounds how many consecutive summarizer calls
+	// one background trigger may spend draining a backlog.
+	maxAsyncCompactionPasses = 3
+)
+
+// modelRelativeCompaction reports whether the bot runs the model-relative
+// default policy instead of a legacy absolute threshold.
+func modelRelativeCompaction(userThreshold int) bool {
+	return userThreshold <= 0
+}
+
+// autoCompactionThreshold is the async trigger level: the soft window share
+// under the model-relative policy, or the clamped absolute threshold in
+// legacy mode. A zero return (no usable window in model-relative mode)
+// leaves the async trigger off.
+func autoCompactionThreshold(userThreshold, contextTokenBudget int) int {
+	if modelRelativeCompaction(userThreshold) {
+		if contextTokenBudget <= 0 {
+			return 0
+		}
+		return contextTokenBudget * compactionSoftThresholdPercent / 100
+	}
+	return effectiveCompactionThreshold(userThreshold, contextTokenBudget)
+}
+
+// compactionTargetTokensFor is the post-compaction raw-tail goal shared by the
+// async and synchronous paths under the model-relative policy, so both modes
+// converge on the same pressure. Legacy mode keeps its historical split:
+// async compacts a ratio of the corpus (no target), sync keeps the
+// (100-ratio)% share of the window.
+func compactionTargetTokensFor(userThreshold, ratio, contextTokenBudget int) int {
+	if modelRelativeCompaction(userThreshold) {
+		if contextTokenBudget <= 0 {
+			return 0
+		}
+		return contextTokenBudget * compactionTargetPercent / 100
+	}
+	return syncCompactionTargetTokens(contextTokenBudget, ratio)
+}
+
+// asyncCompactionTargetTokens is the background trigger's goal: only the
+// model-relative policy drives the engine's target-based selection; a legacy
+// absolute threshold keeps ratio-based selection (target zero), matching the
+// pre-policy behavior where a 2M-window bot with a 100k threshold compacted
+// on trigger instead of waiting for a 900k backlog.
+func asyncCompactionTargetTokens(userThreshold, contextTokenBudget int) int {
+	if !modelRelativeCompaction(userThreshold) {
+		return 0
+	}
+	return compactionTargetTokensFor(userThreshold, 0, contextTokenBudget)
+}
+
+// syncCompactionShouldRun gates the blocking backstop: model-relative bots
+// wait for the hard share so the soft async pass gets a chance first; legacy
+// bots keep the caller's shared-budget gate.
+func syncCompactionShouldRun(userThreshold, pressure, contextTokenBudget int) bool {
+	if !modelRelativeCompaction(userThreshold) {
+		return true
+	}
+	if contextTokenBudget <= 0 {
+		return false
+	}
+	return pressure >= contextTokenBudget*compactionHardThresholdPercent/100
+}
+
 // effectiveCompactionThreshold clamps the user-configured absolute threshold
 // to the budget share, so an absolute default (e.g. 100000) still fires on
 // models whose context window never reaches it. A non-positive threshold
@@ -41,8 +120,6 @@ func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int
 }
 
 func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolvedContext, inputTokens int) {
-	done := s.enterSessionCompaction(req.BotID, req.ThreadID)
-	defer done()
 	inputTokens = asyncCompactionInputTokens(rc, inputTokens)
 	if s.compactionService == nil || s.settingsService == nil {
 		s.logger.Info("compaction: skipped, service or settings nil")
@@ -53,14 +130,18 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		s.logger.Warn("compaction: failed to load settings", slog.Any("error", err))
 		return
 	}
-	if !botSettings.CompactionEnabled || botSettings.CompactionThreshold <= 0 {
-		s.logger.Info("compaction: skipped, disabled or no threshold",
-			slog.Bool("enabled", botSettings.CompactionEnabled),
-			slog.Int("threshold", botSettings.CompactionThreshold),
+	if !botSettings.CompactionEnabled {
+		s.logger.Info("compaction: skipped, disabled")
+		return
+	}
+	threshold := autoCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
+	if threshold <= 0 {
+		s.logger.Info("compaction: skipped, no usable threshold",
+			slog.Int("configured_threshold", botSettings.CompactionThreshold),
+			slog.Int("context_token_budget", rc.contextTokenBudget),
 		)
 		return
 	}
-	threshold := effectiveCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
 	if !compaction.ShouldCompact(inputTokens, threshold) {
 		s.logger.Info("compaction: skipped, below threshold",
 			slog.Int("input_tokens", inputTokens),
@@ -77,7 +158,7 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		slog.Int("ratio", botSettings.CompactionRatio),
 	)
 
-	cfg, err := s.buildCompactionConfig(ctx, req, botSettings, inputTokens)
+	cfg, err := s.buildCompactionConfig(ctx, req, botSettings, inputTokens, rc.model.ID)
 	if err != nil {
 		s.logger.Warn("compaction: failed to build config", slog.Any("error", err))
 		return
@@ -88,17 +169,61 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		// so the compaction service doesn't run hooks + fail on empty UUIDs.
 		return
 	}
-	if err := s.compactionService.RunCompaction(ctx, cfg); err != nil {
+	cfg.TargetTokens = asyncCompactionTargetTokens(botSettings.CompactionThreshold, rc.contextTokenBudget)
+	if err := s.drainCompactionBacklog(ctx, cfg, asyncCompactionPasses(botSettings.CompactionThreshold)); err != nil {
 		s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
 	}
 }
 
-// runCompactionSync runs compaction synchronously when context reaches
-// 70% of the model's context window and reports the session-scoped result.
+// asyncCompactionPasses bounds the background drain per mode: the
+// model-relative policy may need several passes because a small summarizer
+// window caps each pass's input, while a legacy absolute threshold keeps the
+// historical one-shot semantics — its ratio selection re-reads the original
+// TotalInputTokens, so repeating it would keep compacting an already-reduced
+// tail.
+func asyncCompactionPasses(userThreshold int) int {
+	if modelRelativeCompaction(userThreshold) {
+		return maxAsyncCompactionPasses
+	}
+	return 1
+}
+
+// drainCompactionBacklog runs bounded consecutive passes until the backlog is
+// drained (noop), a pass fails, or the pass cap is reached, so a small
+// summarizer window cannot strand a large backlog for future turns. The
+// session barrier is re-acquired per pass: a turn that arrives between
+// passes runs before the next summarizer call instead of waiting out the
+// whole drain.
+func (s *Service) drainCompactionBacklog(ctx context.Context, cfg compaction.TriggerConfig, maxPasses int) error {
+	for pass := 0; pass < maxPasses; pass++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		res, err := s.runCompactionPass(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		if res.Status != compaction.StatusOK {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *Service) runCompactionPass(ctx context.Context, cfg compaction.TriggerConfig) (compaction.Result, error) {
+	done := s.enterSessionCompaction(cfg.BotID, cfg.SessionID)
+	defer done()
+	return s.compactionService.RunCompactionSync(ctx, cfg)
+}
+
+// runCompactionSync runs compaction synchronously when context reaches the
+// blocking share of the model's context window (the hard threshold under the
+// model-relative policy, the shared budget gate in legacy mode) and reports
+// the session-scoped result.
 // A noop (failure cooldown, another compaction in flight, or nothing to
 // compact) leaves this turn's context untouched: the request proceeds as-is,
 // possibly still above the threshold, and the next turn re-evaluates.
-func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int) compaction.Result {
+func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string) compaction.Result {
 	if s.compactionService == nil || s.settingsService == nil {
 		s.logger.Warn("compaction sync: skipped, service or settings nil")
 		return compaction.Result{}
@@ -112,8 +237,15 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		s.logger.Warn("compaction sync: compaction disabled, skipping")
 		return compaction.Result{}
 	}
+	if !syncCompactionShouldRun(botSettings.CompactionThreshold, inputTokens, contextTokenBudget) {
+		s.logger.Info("compaction sync: below the hard threshold, leaving maintenance to the async pass",
+			slog.Int("input_tokens", inputTokens),
+			slog.Int("context_token_budget", contextTokenBudget),
+		)
+		return compaction.Result{}
+	}
 
-	cfg, err := s.buildCompactionConfig(ctx, req, botSettings, inputTokens)
+	cfg, err := s.buildCompactionConfig(ctx, req, botSettings, inputTokens, turnModelID)
 	if err != nil {
 		s.logger.Warn("compaction sync: failed to build config", slog.Any("error", err))
 		return compaction.Result{}
@@ -123,7 +255,7 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
 	}
-	cfg.TargetTokens = syncCompactionTargetTokens(contextTokenBudget, cfg.Ratio)
+	cfg.TargetTokens = compactionTargetTokensFor(botSettings.CompactionThreshold, cfg.Ratio, contextTokenBudget)
 
 	s.logger.Info("compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),
@@ -132,7 +264,7 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		slog.String("model_id", cfg.ModelID),
 	)
 
-	done := s.enterSessionCompactionForStream(req.BotID, req.ThreadID, strings.TrimSpace(req.StreamID))
+	done := s.enterSessionCompactionForRun(req.BotID, req.ThreadID, strings.TrimSpace(req.RunID))
 	defer done()
 	res, err := s.compactionService.RunCompactionSync(ctx, cfg)
 	if err != nil {
@@ -147,61 +279,62 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 	return res
 }
 
-// buildCompactionConfig resolves the compaction model, provider credentials,
-// and sets MaxCompactTokens to 90% of the compaction model's context window.
-func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, botSettings settings.Settings, inputTokens int) (compaction.TriggerConfig, error) {
-	modelID := botSettings.CompactionModelID
-	if modelID == "" {
-		return compaction.TriggerConfig{}, nil
-	}
-
+// buildCompactionConfig resolves the summarizer through the shared model
+// policy — explicit override first, then the turn's actually-resolved model,
+// then the bot chat default, then the session's latest model — and attaches
+// credentials. Unavailable-model conditions stand the automatic trigger down
+// silently; infrastructure errors propagate.
+func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, botSettings settings.Settings, inputTokens int, turnModelID string) (compaction.TriggerConfig, error) {
 	ratio := botSettings.CompactionRatio
 	if ratio <= 0 || ratio > 100 {
 		ratio = 80
 	}
-
-	compactModel, err := s.modelsService.GetByID(ctx, modelID)
-	if err != nil {
-		return compaction.TriggerConfig{}, err
+	sessionModelID := ""
+	if strings.TrimSpace(botSettings.CompactionModelID) == "" && strings.TrimSpace(turnModelID) == "" && strings.TrimSpace(botSettings.ChatModelID) == "" {
+		sessionModelID = models.LatestSessionModelID(ctx, s.queries, req.ThreadID)
 	}
-	if !compactModel.Enable {
-		// Silently skip auto-compaction when the configured model is
-		// disabled — matches the existing "no model configured" path so the
-		// bot keeps running without spending tokens on a model the user
-		// explicitly turned off.
+	resolution, err := models.ResolveCompactionModel(
+		ctx,
+		s.modelsService,
+		s.queries,
+		botSettings.CompactionModelID,
+		turnModelID,
+		botSettings.ChatModelID,
+		sessionModelID,
+	)
+	if models.IsCompactionModelUnavailable(err) {
+		s.logger.Info("compaction: skipped",
+			slog.String("bot_id", req.BotID),
+			slog.String("session_id", req.ThreadID),
+			slog.Any("reason", err),
+		)
 		return compaction.TriggerConfig{}, nil
 	}
-
-	compactProvider, err := models.FetchProviderByID(ctx, s.queries, compactModel.ProviderID)
 	if err != nil {
 		return compaction.TriggerConfig{}, err
 	}
 	authService := providers.NewService(nil, s.queries, "")
 	authCtx := oauthctx.WithUserID(ctx, req.UserID)
-	creds, err := authService.ResolveModelCredentials(authCtx, compactProvider)
+	creds, err := authService.ResolveModelCredentials(authCtx, resolution.Provider)
 	if err != nil {
 		return compaction.TriggerConfig{}, err
 	}
-
-	cfg := compaction.TriggerConfig{
-		BotID:            req.BotID,
-		SessionID:        req.ThreadID,
-		ModelID:          compactModel.ModelID,
-		ClientType:       compactProvider.ClientType,
-		APIKey:           creds.APIKey,
-		CodexAccountID:   creds.CodexAccountID,
-		BaseURL:          providers.ProviderConfigString(compactProvider, "base_url"),
-		Ratio:            ratio,
-		TotalInputTokens: inputTokens,
-		HTTPClient:       s.streamHTTPClient,
-		PromptCacheTTL:   providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
-	}
-
-	// Cap compaction input to 90% of the compaction model's context window.
-	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
-		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
-	}
-
+	cfg := compaction.NewTriggerConfig(compaction.TriggerModel{
+		Slug:                  resolution.Model.ModelID,
+		RecordID:              resolution.Model.ID,
+		ClientType:            resolution.Provider.ClientType,
+		APIKey:                creds.APIKey,
+		CodexAccountID:        creds.CodexAccountID,
+		BaseURL:               providers.ProviderConfigString(resolution.Provider, "base_url"),
+		ChatCompletionsCompat: providers.ProviderConfigString(resolution.Provider, models.ChatCompletionsCompatConfigKey),
+		PromptCacheTTL:        providers.ProviderConfigString(resolution.Provider, "prompt_cache_ttl"),
+		WindowTokens:          resolution.WindowTokens,
+	})
+	cfg.BotID = req.BotID
+	cfg.SessionID = req.ThreadID
+	cfg.Ratio = ratio
+	cfg.TotalInputTokens = inputTokens
+	cfg.HTTPClient = s.streamHTTPClient
 	return cfg, nil
 }
 

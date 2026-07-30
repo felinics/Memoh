@@ -11,10 +11,24 @@ next_short_id AS (
   FROM locked_session
   LEFT JOIN user_input_requests ON user_input_requests.session_id = locked_session.id
     AND user_input_requests.team_id = public.memoh_current_team_id()
+),
+runtime_scope AS (
+  SELECT session_runs.run_id, session_runs.turn_id
+  FROM session_runs
+  WHERE session_runs.team_id = public.memoh_current_team_id()
+    AND session_runs.bot_id = sqlc.arg(bot_id)
+    AND session_runs.session_id = sqlc.arg(session_id)
+    AND session_runs.fencing_token = sqlc.narg(runtime_fencing_token)::bigint
+    AND session_runs.state IN ('running', 'waiting_decision')
+  UNION ALL
+  SELECT NULL::uuid, NULL::uuid
+  WHERE sqlc.narg(runtime_fencing_token)::bigint IS NULL
 )
 INSERT INTO user_input_requests (
   bot_id,
   session_id,
+  run_id,
+  turn_id,
   route_id,
   channel_identity_id,
   workspace_target_id,
@@ -33,6 +47,8 @@ INSERT INTO user_input_requests (
 ) SELECT
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
+  runtime_scope.run_id,
+  runtime_scope.turn_id,
   sqlc.narg(route_id),
   sqlc.narg(channel_identity_id),
   sqlc.arg(workspace_target_id),
@@ -50,6 +66,7 @@ INSERT INTO user_input_requests (
   sqlc.narg(expires_at)
 FROM locked_session
 CROSS JOIN next_short_id
+CROSS JOIN runtime_scope
 ON CONFLICT (team_id, session_id, tool_call_id) DO UPDATE
 SET requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id,
     source_platform = EXCLUDED.source_platform,
@@ -59,6 +76,8 @@ SET requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id
     updated_at = now()
 WHERE user_input_requests.status = 'pending'
   AND user_input_requests.runtime_fencing_token IS NOT DISTINCT FROM EXCLUDED.runtime_fencing_token
+  AND user_input_requests.run_id IS NOT DISTINCT FROM EXCLUDED.run_id
+  AND user_input_requests.turn_id IS NOT DISTINCT FROM EXCLUDED.turn_id
   AND user_input_requests.input_json = EXCLUDED.input_json
   AND user_input_requests.ui_payload_json = EXCLUDED.ui_payload_json
   AND user_input_requests.provider_metadata = EXCLUDED.provider_metadata
@@ -70,6 +89,16 @@ RETURNING *;
 SELECT *
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id() AND id = $1;
+
+-- name: GetPendingUserInputByRun :one
+SELECT *
+FROM user_input_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
+ORDER BY created_at DESC, short_id DESC
+LIMIT 1;
 
 -- name: GetRespondableUserInputRequest :one
 SELECT *
@@ -185,6 +214,8 @@ UPDATE user_input_requests
 SET status = 'submitted',
     result_json = sqlc.arg(result_json),
     responded_by_channel_identity_id = sqlc.narg(responded_by_channel_identity_id),
+    response_control_id = sqlc.narg(response_control_id)::text,
+    response_payload_hash = sqlc.narg(response_payload_hash)::text,
     responded_at = now(),
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
@@ -201,6 +232,8 @@ UPDATE user_input_requests
 SET status = 'canceled',
     result_json = sqlc.arg(result_json),
     responded_by_channel_identity_id = sqlc.narg(responded_by_channel_identity_id),
+    response_control_id = sqlc.narg(response_control_id)::text,
+    response_payload_hash = sqlc.narg(response_payload_hash)::text,
     responded_at = now(),
     canceled_at = now(),
     updated_at = now()

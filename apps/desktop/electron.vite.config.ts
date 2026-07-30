@@ -50,6 +50,9 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
 export default defineConfig(async ({ command }) => {
   const { port, host, baseUrl } = resolveProxyTarget(command)
   const bundledElectronToolkit = ['@electron-toolkit/preload', '@electron-toolkit/utils']
+  const desktopBaseUrl = process.env.MEMOH_DESKTOP_BASE_URL?.trim() ?? ''
+  const desktopAppId = process.env.MEMOH_DESKTOP_APP_ID?.trim() ?? ''
+  const updateBaseUrl = process.env.MEMOH_DESKTOP_UPDATE_BASE_URL?.trim() ?? ''
 
   const devtoolsPlugins: PluginOption[] = []
   if (command !== 'build' && process.env.MEMOH_VUE_DEVTOOLS !== '0') {
@@ -63,6 +66,11 @@ export default defineConfig(async ({ command }) => {
 
   return {
     main: {
+      define: {
+        'process.env.MEMOH_DESKTOP_BASE_URL': JSON.stringify(desktopBaseUrl),
+        'process.env.MEMOH_DESKTOP_APP_ID': JSON.stringify(desktopAppId),
+        'process.env.MEMOH_DESKTOP_UPDATE_BASE_URL': JSON.stringify(updateBaseUrl),
+      },
       plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
     },
     preload: {
@@ -95,6 +103,10 @@ export default defineConfig(async ({ command }) => {
         tailwindcss(),
       ],
       resolve: {
+        // The renderer consumes both @memohai/web and the linked @felinic/ui
+        // workspace package. Keep their injection-based runtimes shared just
+        // like the standalone Web build does.
+        dedupe: ['vue', 'vee-validate'],
         alias: {
           '@renderer': fileURLToPath(new URL('./src/renderer/src', import.meta.url)),
           // match apps/web/vite.config.ts aliases so imported web modules resolve correctly.

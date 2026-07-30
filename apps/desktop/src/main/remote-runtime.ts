@@ -3,6 +3,7 @@ import { dirname } from 'node:path'
 
 import {
   RuntimeSession,
+  normalizeRuntimeTeamId,
   normalizeRuntimeServerUrl,
   validateRuntimeKey,
   type RuntimeClientConfig,
@@ -23,6 +24,7 @@ interface StoredRuntimeConfig {
   runtimeId: string
   runtimeName?: string
   serverUrl: string
+  teamId?: string
   encryptedKey: string
 }
 
@@ -149,7 +151,7 @@ export class DesktopRemoteRuntimeManager {
       }
 
       try {
-        this.startSession(stored.runtimeId, currentServerUrl, key)
+        this.startSession(stored.runtimeId, currentServerUrl, key, stored.teamId)
       } catch (error) {
         return this.updateState({
           enabled: true,
@@ -177,16 +179,20 @@ export class DesktopRemoteRuntimeManager {
       const runtimeName = normalizedRuntimeName(input.name)
       const key = input.key.trim()
       validateRuntimeKey(key)
+      const teamId = input.teamId === undefined
+        ? undefined
+        : normalizeRuntimeTeamId(input.teamId)
       if (!this.options.encryption.isAvailable()) {
         throw new Error('secure credential storage is unavailable')
       }
       const serverUrl = normalizeDesktopServerUrl(this.options.currentServerUrl())
-      const prepared = this.prepareSession(runtimeId, serverUrl, key)
+      const prepared = this.prepareSession(runtimeId, serverUrl, key, teamId)
       const stored: StoredRuntimeConfig = {
         version: configVersion,
         runtimeId,
         runtimeName,
         serverUrl,
+        teamId,
         encryptedKey: this.options.encryption.encrypt(key).toString('base64'),
       }
       await writeStoredConfig(this.options.configPath, stored)
@@ -214,7 +220,7 @@ export class DesktopRemoteRuntimeManager {
     })
   }
 
-  private prepareSession(runtimeId: string, serverUrl: string, key: string): {
+  private prepareSession(runtimeId: string, serverUrl: string, key: string, teamId?: string): {
     session: ManagedRuntimeSession
     token: object
   } {
@@ -223,6 +229,7 @@ export class DesktopRemoteRuntimeManager {
       {
         serverUrl,
         key,
+        teamId,
         workspaceBase: this.options.workspaceBase,
         insecureLocalhost: isInsecureLocalhost(serverUrl),
       },
@@ -234,8 +241,8 @@ export class DesktopRemoteRuntimeManager {
     return { session, token }
   }
 
-  private startSession(runtimeId: string, serverUrl: string, key: string): void {
-    this.activateSession(this.prepareSession(runtimeId, serverUrl, key), runtimeId, key)
+  private startSession(runtimeId: string, serverUrl: string, key: string, teamId?: string): void {
+    this.activateSession(this.prepareSession(runtimeId, serverUrl, key, teamId), runtimeId, key)
   }
 
   private activateSession(
@@ -338,6 +345,12 @@ function parseStoredConfig(raw: string): StoredRuntimeConfig {
   if (typeof parsed.encryptedKey !== 'string') {
     throw new Error('desktop runtime credential is missing')
   }
+  if (parsed.teamId !== undefined && typeof parsed.teamId !== 'string') {
+    throw new Error('desktop runtime team ID is invalid')
+  }
+  const teamId = parsed.teamId === undefined
+    ? undefined
+    : normalizeRuntimeTeamId(parsed.teamId)
   decodeEncryptedKey(parsed.encryptedKey)
   return {
     version: configVersion,
@@ -346,6 +359,7 @@ function parseStoredConfig(raw: string): StoredRuntimeConfig {
       ? normalizedRuntimeName(parsed.runtimeName)
       : undefined,
     serverUrl,
+    teamId,
     encryptedKey: parsed.encryptedKey,
   }
 }

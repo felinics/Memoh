@@ -35,6 +35,7 @@ type Message struct {
 	Content                 json.RawMessage `json:"content"`
 	Metadata                map[string]any  `json:"metadata,omitempty"`
 	RawMetadata             json.RawMessage `json:"-"`
+	TurnID                  string          `json:"turn_id,omitempty"`
 	Usage                   json.RawMessage `json:"usage,omitempty"`
 	SessionMode             string          `json:"session_mode,omitempty"`
 	RuntimeType             string          `json:"runtime_type,omitempty"`
@@ -92,6 +93,19 @@ type PersistInput struct {
 	DisplayText             string
 	TurnRequestMessageID    string
 	SkipHistoryTurn         bool
+	// RunID links this row to the admitted run that produced it. It is
+	// traceability only: history is read by turn, never by run.
+	RunID string
+	// TurnID and TurnPosition carry a turn this message must be filed under
+	// because admission already allocated it (SR-TURN-001). Both empty means no
+	// admission decided the turn and the history layer allocates one, which is
+	// still the case for channel inbound, schedules and heartbeats.
+	//
+	// They travel together: a turn id without its position would file the row
+	// under the right turn at the wrong place in the session's order, and a
+	// position without its id would take a slot the client cannot name.
+	TurnID       string
+	TurnPosition *int64
 }
 
 type LocateResult struct {
@@ -111,10 +125,12 @@ type ToolTailRoundPersister interface {
 }
 
 type TurnReplacement struct {
-	OldTurnID        string
-	RequestMessageID string
-	Reason           string
-	SessionMetadata  map[string]any
+	OldTurnID               string
+	ReplacementTurnID       string
+	ReplacementTurnPosition *int64
+	RequestMessageID        string
+	Reason                  string
+	SessionMetadata         map[string]any
 }
 
 type RoundPersistenceOptions struct {
@@ -147,7 +163,7 @@ type Service interface {
 	ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string) ([]Message, error)
 	GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error)
 	GetLatestVisibleTurnBySession(ctx context.Context, sessionID string) (HistoryTurn, error)
-	ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error)
+	ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, replacementTurnID string, replacementTurnPosition *int64, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error)
 	DeleteByIDs(ctx context.Context, ids []string) error
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error

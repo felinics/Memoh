@@ -1,6 +1,6 @@
 import { computed, ref, type Ref } from 'vue'
 import type { CommandEventResponse } from '@/composables/api/useChat'
-import { createStreamId } from '../chat-list.normalize'
+import { createInvocationId } from '../chat-list.normalize'
 
 // Slash-command event registry — remembers the latest command_result /
 // command_error per scope so the composer that issued the command (and only
@@ -79,7 +79,7 @@ export function createCommandEventRegistry({ currentBotId, sessionId }: CommandE
   function showCommandError(code: string, message: string, scope: CommandEventScope = currentCommandScope()) {
     rememberCommandEvent({
       type: 'command_error',
-      invocation_id: createStreamId(),
+      invocation_id: createInvocationId(),
       composer_scope: scope.composerScope || 'chat',
       terminal: true,
       error: { code, message },

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	turnpkg "github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/apperror"
 	messageevent "github.com/memohai/memoh/internal/chat/event"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
@@ -17,7 +17,9 @@ import (
 type RetryLatestMessageInput struct {
 	BotID                  string
 	SessionID              string
-	StreamID               string
+	RunID                  string
+	TurnID                 string
+	TurnPosition           *int64
 	MessageID              string
 	ActorChannelIdentityID string
 	ActorUserID            string
@@ -31,7 +33,9 @@ type RetryLatestMessageInput struct {
 type EditLatestMessageInput struct {
 	BotID                  string
 	SessionID              string
-	StreamID               string
+	RunID                  string
+	TurnID                 string
+	TurnPosition           *int64
 	MessageID              string
 	Text                   string
 	Attachments            []ChatAttachment
@@ -45,32 +49,13 @@ type EditLatestMessageInput struct {
 }
 
 func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
-	if s == nil || s.messageService == nil {
-		return errors.New("message service not configured")
-	}
 	sessionID := strings.TrimSpace(input.SessionID)
 	messageID := strings.TrimSpace(input.MessageID)
-	if sessionID == "" {
-		return errors.New("session id is required")
-	}
-	if messageID == "" {
-		return errors.New("message id is required")
-	}
-
-	turn, target, err := s.latestVisibleTurnAndMessage(ctx, sessionID, messageID)
+	turn, _, cutoffMessageID, err := s.prepareRetryLatestMessageOperation(ctx, sessionID, messageID)
 	if err != nil {
 		return err
 	}
-	if !strings.EqualFold(target.Role, "assistant") {
-		return errors.New("only latest assistant messages can be retried")
-	}
-	if err := s.ensureLatestVisibleTurn(ctx, sessionID, turn.ID); err != nil {
-		return errors.New("only the latest assistant message can be retried")
-	}
 	requestMessageID := strings.TrimSpace(turn.RequestMessageID)
-	if requestMessageID == "" {
-		return errors.New("retry target has no request message")
-	}
 	requestMessage, err := s.messageService.GetByIDBySession(ctx, sessionID, requestMessageID)
 	if err != nil {
 		return err
@@ -78,16 +63,14 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 	if !strings.EqualFold(requestMessage.Role, "user") {
 		return errors.New("retry target request is not a user message")
 	}
-	cutoffMessageID := strings.TrimSpace(turn.AssistantMessageID)
-	if cutoffMessageID == "" {
-		cutoffMessageID = target.ID
-	}
 
 	req := ChatRequest{
 		BotID:                        strings.TrimSpace(input.BotID),
 		ChatID:                       strings.TrimSpace(input.BotID),
 		ThreadID:                     sessionID,
-		StreamID:                     strings.TrimSpace(input.StreamID),
+		RunID:                        strings.TrimSpace(input.RunID),
+		TurnID:                       strings.TrimSpace(input.TurnID),
+		TurnPosition:                 input.TurnPosition,
 		UserID:                       strings.TrimSpace(input.ActorUserID),
 		SourceChannelIdentityID:      strings.TrimSpace(input.ActorChannelIdentityID),
 		ConversationType:             turnpkg.ConversationTypePrivate,
@@ -112,41 +95,25 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 }
 
 func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
-	if s == nil || s.messageService == nil {
-		return errors.New("message service not configured")
-	}
 	sessionID := strings.TrimSpace(input.SessionID)
 	messageID := strings.TrimSpace(input.MessageID)
 	text := strings.TrimSpace(input.Text)
-	if sessionID == "" {
-		return errors.New("session id is required")
-	}
-	if messageID == "" {
-		return errors.New("message id is required")
-	}
 	if text == "" && len(input.Attachments) == 0 {
 		return errors.New("message text or attachments required")
 	}
 
-	turn, target, err := s.latestVisibleTurnAndMessage(ctx, sessionID, messageID)
+	turn, target, err := s.prepareEditLatestMessageOperation(ctx, sessionID, messageID)
 	if err != nil {
 		return err
-	}
-	if !strings.EqualFold(target.Role, "user") {
-		return errors.New("only latest user messages can be edited")
-	}
-	if strings.TrimSpace(turn.RequestMessageID) != target.ID {
-		return errors.New("edit target is not the request for its turn")
-	}
-	if err := s.ensureLatestVisibleTurn(ctx, sessionID, turn.ID); err != nil {
-		return errors.New("only the latest user message can be edited")
 	}
 
 	req := ChatRequest{
 		BotID:                        strings.TrimSpace(input.BotID),
 		ChatID:                       strings.TrimSpace(input.BotID),
 		ThreadID:                     sessionID,
-		StreamID:                     strings.TrimSpace(input.StreamID),
+		RunID:                        strings.TrimSpace(input.RunID),
+		TurnID:                       strings.TrimSpace(input.TurnID),
+		TurnPosition:                 input.TurnPosition,
 		UserID:                       strings.TrimSpace(input.ActorUserID),
 		SourceChannelIdentityID:      strings.TrimSpace(input.ActorChannelIdentityID),
 		ConversationType:             turnpkg.ConversationTypePrivate,
@@ -166,6 +133,85 @@ func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessa
 		HistoryCutoffBeforeMessageID: target.ID,
 	}
 	return s.streamReplacementWS(ctx, req, turn.ID, "", "edit", eventCh, abortCh)
+}
+
+// PrepareRetryLatestMessageOperation validates the replacement target before
+// Session Runtime publishes it to subscribers and returns the exact persisted
+// message where the old assistant tail begins.
+func (s *Service) PrepareRetryLatestMessageOperation(ctx context.Context, sessionID, messageID string) (string, error) {
+	_, _, replaceFromMessageID, err := s.prepareRetryLatestMessageOperation(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(messageID))
+	return replaceFromMessageID, err
+}
+
+func (s *Service) prepareRetryLatestMessageOperation(ctx context.Context, sessionID, messageID string) (messagepkg.HistoryTurn, messagepkg.Message, string, error) {
+	if s == nil || s.messageService == nil {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, "", errors.New("message service not configured")
+	}
+	if sessionID == "" {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, "", errors.New("session id is required")
+	}
+	if messageID == "" {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, "", errors.New("message id is required")
+	}
+	turn, target, err := s.latestVisibleTurnAndMessage(ctx, sessionID, messageID)
+	if err != nil {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, "", err
+	}
+	if !strings.EqualFold(target.Role, "assistant") {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, "", errors.New("only latest assistant messages can be retried")
+	}
+	if err := s.ensureLatestVisibleTurn(ctx, sessionID, turn.ID); err != nil {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, "", errors.New("only the latest assistant message can be retried")
+	}
+	requestMessageID := strings.TrimSpace(turn.RequestMessageID)
+	if requestMessageID == "" {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, "", errors.New("retry target has no request message")
+	}
+	replaceFromMessageID := strings.TrimSpace(turn.AssistantMessageID)
+	if replaceFromMessageID == "" {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, "", apperror.New(
+			apperror.CodeSessionHistoryInconsistent,
+			nil,
+		)
+	}
+	return turn, target, replaceFromMessageID, nil
+}
+
+// PrepareEditLatestMessageOperation validates the replacement target before
+// Session Runtime publishes it to subscribers and returns the exact persisted
+// user message where the old turn begins.
+func (s *Service) PrepareEditLatestMessageOperation(ctx context.Context, sessionID, messageID string) (string, error) {
+	_, target, err := s.prepareEditLatestMessageOperation(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(messageID))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(target.ID), nil
+}
+
+func (s *Service) prepareEditLatestMessageOperation(ctx context.Context, sessionID, messageID string) (messagepkg.HistoryTurn, messagepkg.Message, error) {
+	if s == nil || s.messageService == nil {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, errors.New("message service not configured")
+	}
+	if sessionID == "" {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, errors.New("session id is required")
+	}
+	if messageID == "" {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, errors.New("message id is required")
+	}
+	turn, target, err := s.latestVisibleTurnAndMessage(ctx, sessionID, messageID)
+	if err != nil {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, err
+	}
+	if !strings.EqualFold(target.Role, "user") {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, errors.New("only latest user messages can be edited")
+	}
+	if strings.TrimSpace(turn.RequestMessageID) != target.ID {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, errors.New("edit target is not the request for its turn")
+	}
+	if err := s.ensureLatestVisibleTurn(ctx, sessionID, turn.ID); err != nil {
+		return messagepkg.HistoryTurn{}, messagepkg.Message{}, errors.New("only the latest user message can be edited")
+	}
+	return turn, target, nil
 }
 
 func (s *Service) latestVisibleTurnAndMessage(ctx context.Context, sessionID, messageID string) (messagepkg.HistoryTurn, messagepkg.Message, error) {
@@ -234,7 +280,16 @@ func (s *Service) replacePersistedTurn(
 		requestMessageID = firstUserID(persisted)
 	}
 	forkAnchorUpdate := s.prepareForkAnchorUpdate(ctx, req.ThreadID, req.HistoryCutoffBeforeMessageID)
-	if _, err := s.messageService.ReplaceTurn(context.WithoutCancel(ctx), req.ThreadID, oldTurnID, requestMessageID, replacementID, reason); err != nil {
+	if _, err := s.messageService.ReplaceTurn(
+		context.WithoutCancel(ctx),
+		req.ThreadID,
+		oldTurnID,
+		req.TurnID,
+		req.TurnPosition,
+		requestMessageID,
+		replacementID,
+		reason,
+	); err != nil {
 		s.logger.Error("replace history turn failed", slog.String("reason", reason), slog.Any("error", err))
 		s.cleanupReplacementMessages(ctx, persisted)
 		return fmt.Errorf("replace history turn: %w", err)
@@ -311,7 +366,7 @@ func (s *Service) prepareForkAnchorUpdate(ctx context.Context, sessionID string,
 		return nil
 	}
 
-	nextAnchor := s.latestInheritedAssistantBefore(ctx, sessionID, replacedTailStartMessageID, sess.CreatedAt)
+	nextAnchor := s.latestInheritedAssistantBefore(ctx, sessionID, replacedTailStartMessageID)
 	if nextAnchor == currentAnchor {
 		return nil
 	}
@@ -338,19 +393,15 @@ func (s *Service) applyForkAnchorUpdate(ctx context.Context, sessionID string, u
 	}
 }
 
-func (s *Service) latestInheritedAssistantBefore(ctx context.Context, sessionID string, beforeMessageID string, sessionCreatedAt time.Time) string {
+func (s *Service) latestInheritedAssistantBefore(ctx context.Context, sessionID string, beforeMessageID string) string {
 	messages, err := s.messageService.ListBeforeMessageBySession(ctx, sessionID, beforeMessageID, 10000)
 	if err != nil {
 		s.logForkAnchorUpdateWarning("load previous messages for fork anchor update failed", sessionID, err)
 		return ""
 	}
-	hasCutoff := !sessionCreatedAt.IsZero()
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
 		if !strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
-			continue
-		}
-		if hasCutoff && (msg.CreatedAt.IsZero() || msg.CreatedAt.After(sessionCreatedAt)) {
 			continue
 		}
 		return strings.TrimSpace(msg.ID)

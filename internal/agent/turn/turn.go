@@ -17,6 +17,20 @@ import (
 // delivery and drop the duplicate silently.
 var ErrDuplicateTurn = errors.New("turn: duplicate idempotency key")
 
+// ErrSessionBusy reports that the thread already has a run in flight, so this
+// command was not started and nothing was persisted for it.
+//
+// It is retryable by construction, and that is the whole point: a thread runs
+// one turn at a time, and the runtime holds nothing on a caller's behalf. The
+// caller redelivers through the retry mechanism it already owns — a platform
+// webhook retry, the next cron fire — and because a redelivery repeats the same
+// IdempotencyKey, the retry is the same invocation rather than a second turn.
+//
+// It is declared here rather than reused from the runtime because this package
+// is the only agent surface Channel may import, and it must not depend on the
+// runtime that produces the condition.
+var ErrSessionBusy = errors.New("turn: thread already has a run in flight")
+
 // ErrTeamNotServed reports that the service instance does not serve the
 // command's team. The in-process runtime binds its database pool to the
 // single self-hosted team, so commands for any other team must fail
@@ -139,6 +153,7 @@ type DiscussRunResolvedPayload struct {
 // ToolApprovalResponse resumes a thread's turn deferred on tool approval
 // (RFC ResumeApprovalCommand).
 type ToolApprovalResponse struct {
+	ControlID                  string
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string
@@ -155,6 +170,7 @@ type ToolApprovalResponse struct {
 // UserInputResponse resumes a thread's turn deferred on ask_user
 // (RFC ResumeUserInputCommand).
 type UserInputResponse struct {
+	ControlID                  string
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string

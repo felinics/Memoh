@@ -33,6 +33,10 @@ type RedisBackend struct {
 	closeErr        error
 }
 
+// renewRedisLeaseScript also carries the lease index forward. The index score is
+// the deadline the reaper condemns a run by, so it must move in the same atomic
+// step as the deadline inside the snapshot; a renewal that updated one and not
+// the other would either lose the run or condemn a live owner.
 var renewRedisLeaseScript = redis.NewScript(`
 local current_state = redis.call('GET', KEYS[1])
 local current_ref = redis.call('GET', KEYS[2])
@@ -50,15 +54,35 @@ if not expires_at_ms or expires_at_ms <= now_ms then
 end
 redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[6])
 redis.call('SET', KEYS[2], ARGV[4], 'PXAT', ARGV[5])
+if ARGV[7] ~= '' then
+  redis.call('ZADD', KEYS[3], expires_at_ms, ARGV[7])
+end
 return 1
 `)
 
-var deleteRedisStreamRefScript = redis.NewScript(`
+// deleteRedisRunRefScript compares the identity fields rather than the whole
+// stored blob: release paths reconstruct a ref from live state, which does not
+// carry the fencing token. The token is read back from the stored ref so the
+// lease index member can be removed exactly, without the caller having to still
+// hold a token it may have already lost.
+var deleteRedisRunRefScript = redis.NewScript(`
 local current_ref = redis.call('GET', KEYS[1])
-if not current_ref or current_ref ~= ARGV[1] then
+if not current_ref then
+  return 0
+end
+local ok_ref, ref = pcall(cjson.decode, current_ref)
+if not ok_ref then
+  return 0
+end
+if ref.bot_id ~= ARGV[1] or ref.session_id ~= ARGV[2] or
+   ref.run_id ~= ARGV[3] or ref.owner_id ~= ARGV[4] or ref.generation ~= ARGV[5] then
   return 0
 end
 redis.call('DEL', KEYS[1])
+local token = tonumber(ref.fencing_token)
+if token and token > 0 then
+  redis.call('ZREM', KEYS[2], ARGV[1] .. '|' .. ARGV[2] .. '|' .. ARGV[3] .. '|' .. string.format('%d', math.floor(token)))
+end
 return 1
 `)
 
@@ -77,13 +101,14 @@ end
 
 local run = state.current_run_view
 if ref.bot_id ~= ARGV[1] or ref.session_id ~= ARGV[2] or
-   ref.stream_id ~= ARGV[3] or ref.owner_id ~= ARGV[4] or ref.generation ~= ARGV[5] or
+   ref.run_id ~= ARGV[3] or ref.owner_id ~= ARGV[4] or ref.generation ~= ARGV[5] or
    state.bot_id ~= ARGV[1] or state.session_id ~= ARGV[2] or
-   run.stream_id ~= ARGV[3] or run.owner_id ~= ARGV[4] or run.generation ~= ARGV[5] then
+   run.run_id ~= ARGV[3] or run.owner_id ~= ARGV[4] or run.generation ~= ARGV[5] then
   return 0
 end
 
-if run.status ~= 'admitting' and run.status ~= 'running' and run.status ~= 'aborting' then
+if run.status ~= 'admitting' and run.status ~= 'running' and
+   run.status ~= 'waiting_decision' and run.status ~= 'aborting' then
   return 0
 end
 
@@ -176,7 +201,6 @@ func (b *RedisBackend) Load(ctx context.Context, key Key) (Snapshot, bool, error
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return Snapshot{}, false, err
 	}
-	snapshot.Queue = nonNilQueue(snapshot.Queue)
 	return snapshot, true, nil
 }
 
@@ -204,7 +228,6 @@ func (b *RedisBackend) Update(ctx context.Context, key Key, update SnapshotUpdat
 				changed = false
 				return nil
 			}
-			next.Queue = nonNilQueue(next.Queue)
 			data, err := json.Marshal(next)
 			if err != nil {
 				return err
@@ -226,17 +249,17 @@ func (b *RedisBackend) Update(ctx context.Context, key Key, update SnapshotUpdat
 	}
 }
 
-func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, generation string, update ActiveRunUpdate) (Snapshot, bool, error) {
+func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, runID, generation string, update ActiveRunUpdate) (Snapshot, bool, error) {
 	if update == nil {
 		return Snapshot{}, false, errors.New("active run update is required")
 	}
-	streamID = strings.TrimSpace(streamID)
+	runID = strings.TrimSpace(runID)
 	generation = strings.TrimSpace(generation)
-	if streamID == "" || generation == "" {
-		return Snapshot{}, false, errors.New("stream_id and generation are required")
+	if runID == "" || generation == "" {
+		return Snapshot{}, false, errors.New("run_id and generation are required")
 	}
 	stateKey := b.stateKey(key)
-	streamKey := b.streamKey(key, streamID)
+	runKey := b.runKey(key, runID)
 	for {
 		var updated Snapshot
 		var changed bool
@@ -245,7 +268,7 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, g
 			if err != nil {
 				return err
 			}
-			ref, ok, err := loadRedisStreamRef(ctx, tx, streamKey)
+			ref, ok, err := loadRedisRunRef(ctx, tx, runKey)
 			if err != nil {
 				return err
 			}
@@ -257,7 +280,7 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, g
 				return ErrRunOwnershipLost
 			}
 			run := current.CurrentRunView
-			if run.StreamID != streamID || run.Generation != generation || ref.StreamID != streamID || ref.Generation != generation || ref.OwnerID != run.OwnerID || ref.BotID != key.BotID || ref.SessionID != key.SessionID || !isActiveRunStatus(run.Status) || run.OwnerLeaseExpiresAt == nil || !now.Before(*run.OwnerLeaseExpiresAt) {
+			if run.RunID != runID || run.Generation != generation || ref.RunID != runID || ref.Generation != generation || ref.OwnerID != run.OwnerID || ref.BotID != key.BotID || ref.SessionID != key.SessionID || !isActiveRunStatus(run.Status) || run.OwnerLeaseExpiresAt == nil || !now.Before(*run.OwnerLeaseExpiresAt) {
 				return ErrRunOwnershipLost
 			}
 			next, apply, err := update(current, now)
@@ -269,7 +292,6 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, g
 				changed = false
 				return nil
 			}
-			next.Queue = nonNilQueue(next.Queue)
 			data, err := json.Marshal(next)
 			if err != nil {
 				return err
@@ -283,7 +305,7 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, g
 			updated = next
 			changed = true
 			return nil
-		}, stateKey, streamKey)
+		}, stateKey, runKey)
 		if errors.Is(err, redis.TxFailedErr) {
 			continue
 		}
@@ -291,20 +313,20 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, g
 	}
 }
 
-func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error) {
+func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref RunRef, update ActiveRunUpdate) (Snapshot, bool, error) {
 	if update == nil {
 		return Snapshot{}, false, errors.New("active run update is required")
 	}
 	ref.BotID = strings.TrimSpace(ref.BotID)
 	ref.SessionID = strings.TrimSpace(ref.SessionID)
-	ref.StreamID = strings.TrimSpace(ref.StreamID)
+	ref.RunID = strings.TrimSpace(ref.RunID)
 	ref.OwnerID = strings.TrimSpace(ref.OwnerID)
 	ref.Generation = strings.TrimSpace(ref.Generation)
-	if ref.BotID != strings.TrimSpace(key.BotID) || ref.SessionID != strings.TrimSpace(key.SessionID) || ref.StreamID == "" || ref.OwnerID == "" || ref.Generation == "" {
+	if ref.BotID != strings.TrimSpace(key.BotID) || ref.SessionID != strings.TrimSpace(key.SessionID) || ref.RunID == "" || ref.OwnerID == "" || ref.Generation == "" {
 		return Snapshot{}, false, ErrRunOwnershipLost
 	}
 	stateKey := b.stateKey(key)
-	streamKey := b.streamKey(key, ref.StreamID)
+	runKey := b.runKey(key, ref.RunID)
 	for {
 		var updated Snapshot
 		var changed bool
@@ -313,7 +335,7 @@ func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, u
 			if err != nil {
 				return err
 			}
-			storedRef, ok, err := loadRedisStreamRef(ctx, tx, streamKey)
+			storedRef, ok, err := loadRedisRunRef(ctx, tx, runKey)
 			if err != nil {
 				return err
 			}
@@ -325,7 +347,7 @@ func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, u
 				return ErrRunOwnershipLost
 			}
 			run := current.CurrentRunView
-			if storedRef != ref || run.StreamID != ref.StreamID || run.Generation != ref.Generation || run.OwnerID != ref.OwnerID || !isActiveRunStatus(run.Status) || run.OwnerLeaseExpiresAt == nil || !now.Before(*run.OwnerLeaseExpiresAt) {
+			if !storedRef.identityMatches(ref) || run.RunID != ref.RunID || run.Generation != ref.Generation || run.OwnerID != ref.OwnerID || !isActiveRunStatus(run.Status) || run.OwnerLeaseExpiresAt == nil || !now.Before(*run.OwnerLeaseExpiresAt) {
 				return ErrRunOwnershipLost
 			}
 			next, apply, err := update(current, now)
@@ -337,14 +359,18 @@ func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, u
 				changed = false
 				return nil
 			}
-			next.Queue = nonNilQueue(next.Queue)
 			data, err := json.Marshal(next)
 			if err != nil {
 				return err
 			}
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 				pipe.Set(ctx, stateKey, data, b.stateTTL)
-				pipe.Del(ctx, streamKey)
+				pipe.Del(ctx, runKey)
+				// The stored ref, not the caller's, carries the token this
+				// reservation was indexed under.
+				if storedRef.FencingToken > 0 {
+					pipe.ZRem(ctx, b.leaseIndexKey(), encodeLeaseIndexMember(key, storedRef.RunID, storedRef.FencingToken))
+				}
 				return nil
 			}); err != nil {
 				return err
@@ -352,7 +378,7 @@ func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, u
 			updated = next
 			changed = true
 			return nil
-		}, stateKey, streamKey)
+		}, stateKey, runKey)
 		if errors.Is(err, redis.TxFailedErr) {
 			continue
 		}
@@ -360,30 +386,30 @@ func (b *RedisBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, u
 	}
 }
 
-func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref StreamRef, update SnapshotUpdate) (Snapshot, bool, error) {
+func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref RunRef, update SnapshotUpdate) (Snapshot, bool, error) {
 	if update == nil {
 		return Snapshot{}, false, errors.New("snapshot update is required")
 	}
-	streamID := strings.TrimSpace(ref.StreamID)
+	runID := strings.TrimSpace(ref.RunID)
 	ref.Generation = strings.TrimSpace(ref.Generation)
-	if streamID == "" || ref.Generation == "" {
-		return Snapshot{}, false, errors.New("stream_id and generation are required")
+	if runID == "" || ref.Generation == "" {
+		return Snapshot{}, false, errors.New("run_id and generation are required")
 	}
-	ref.StreamID = streamID
+	ref.RunID = runID
 	refData, err := json.Marshal(ref)
 	if err != nil {
 		return Snapshot{}, false, err
 	}
 	stateKey := b.stateKey(key)
-	streamKey := b.streamKey(key, streamID)
+	runKey := b.runKey(key, runID)
 	for {
 		var updated Snapshot
 		var changed bool
 		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
-			if existing, ok, err := loadRedisStreamRef(ctx, tx, streamKey); err != nil {
+			if existing, ok, err := loadRedisRunRef(ctx, tx, runKey); err != nil {
 				return err
 			} else if ok {
-				return fmt.Errorf("stream_id %q is already registered for session %q", streamID, existing.SessionID)
+				return fmt.Errorf("run_id %q is already registered for session %q", runID, existing.SessionID)
 			}
 			current, ok, err := loadRedisSnapshot(ctx, tx, stateKey)
 			if err != nil {
@@ -398,15 +424,25 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref StreamRef, upd
 				changed = false
 				return nil
 			}
-			next.Queue = nonNilQueue(next.Queue)
 			stateData, err := json.Marshal(next)
 			if err != nil {
 				return err
 			}
+			leaseExpiry := streamLeaseExpiry(next, runID, time.Now().Add(b.stateTTL))
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 				pipe.Set(ctx, stateKey, stateData, b.stateTTL)
-				pipe.Set(ctx, streamKey, refData, 0)
-				pipe.PExpireAt(ctx, streamKey, streamLeaseExpiry(next, streamID, time.Now().Add(b.stateTTL)))
+				pipe.Set(ctx, runKey, refData, 0)
+				pipe.PExpireAt(ctx, runKey, leaseExpiry)
+				// The index entry is what makes this reservation reapable. It is
+				// written in the same transaction as the reservation itself, so
+				// there is no window in which an owner holds a run that no
+				// reaper can find.
+				if ref.FencingToken > 0 {
+					pipe.ZAdd(ctx, b.leaseIndexKey(), redis.Z{
+						Score:  float64(leaseExpiry.UnixMilli()),
+						Member: encodeLeaseIndexMember(key, runID, ref.FencingToken),
+					})
+				}
 				return nil
 			}); err != nil {
 				return err
@@ -414,7 +450,7 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref StreamRef, upd
 			updated = next
 			changed = true
 			return nil
-		}, stateKey, streamKey)
+		}, stateKey, runKey)
 		if errors.Is(err, redis.TxFailedErr) {
 			continue
 		}
@@ -422,18 +458,18 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref StreamRef, upd
 	}
 }
 
-func (b *RedisBackend) RenewLease(ctx context.Context, key Key, streamID, ownerID, generation string, renewedAt, expiresAt time.Time) error {
-	streamID = strings.TrimSpace(streamID)
+func (b *RedisBackend) RenewLease(ctx context.Context, key Key, runID, ownerID, generation string, renewedAt, expiresAt time.Time) error {
+	runID = strings.TrimSpace(runID)
 	ownerID = strings.TrimSpace(ownerID)
 	generation = strings.TrimSpace(generation)
-	if streamID == "" || ownerID == "" || generation == "" {
+	if runID == "" || ownerID == "" || generation == "" {
 		return nil
 	}
 	if renewedAt.IsZero() || !renewedAt.Before(expiresAt) {
 		return ErrRunOwnershipLost
 	}
 	stateKey := b.stateKey(key)
-	streamKey := b.streamKey(key, streamID)
+	runKey := b.runKey(key, runID)
 	for {
 		stateData, err := b.client.Get(ctx, stateKey).Bytes()
 		if errors.Is(err, redis.Nil) {
@@ -442,18 +478,18 @@ func (b *RedisBackend) RenewLease(ctx context.Context, key Key, streamID, ownerI
 		if err != nil {
 			return err
 		}
-		refData, err := b.client.Get(ctx, streamKey).Bytes()
+		refData, err := b.client.Get(ctx, runKey).Bytes()
 		if errors.Is(err, redis.Nil) {
 			return ErrRunOwnershipLost
 		}
 		if err != nil {
 			return err
 		}
-		var ref StreamRef
+		var ref RunRef
 		if err := json.Unmarshal(refData, &ref); err != nil {
 			return err
 		}
-		if ref.OwnerID != ownerID || ref.BotID != key.BotID || ref.SessionID != key.SessionID || ref.StreamID != streamID || ref.Generation != generation {
+		if ref.OwnerID != ownerID || ref.BotID != key.BotID || ref.SessionID != key.SessionID || ref.RunID != runID || ref.Generation != generation {
 			return ErrRunOwnershipLost
 		}
 		var snapshot Snapshot
@@ -464,20 +500,23 @@ func (b *RedisBackend) RenewLease(ctx context.Context, key Key, streamID, ownerI
 			return ErrRunOwnershipLost
 		}
 		run := snapshot.CurrentRunView
-		if run.StreamID != streamID || run.OwnerID != ownerID || run.Generation != generation || run.OwnerLeaseExpiresAt == nil {
+		if run.RunID != runID || run.OwnerID != ownerID || run.Generation != generation || run.OwnerLeaseExpiresAt == nil {
 			return ErrRunOwnershipLost
 		}
 		if !isActiveRunStatus(run.Status) {
 			return nil
 		}
 		run.OwnerLeaseExpiresAt = &expiresAt
-		snapshot.Queue = nonNilQueue(snapshot.Queue)
 		nextStateData, err := json.Marshal(snapshot)
 		if err != nil {
 			return err
 		}
-		result, err := renewRedisLeaseScript.Run(ctx, b.client, []string{stateKey, streamKey},
-			stateData, refData, nextStateData, refData, expiresAt.UnixMilli(), b.stateTTL.Milliseconds(),
+		leaseMember := ""
+		if ref.FencingToken > 0 {
+			leaseMember = encodeLeaseIndexMember(key, runID, ref.FencingToken)
+		}
+		result, err := renewRedisLeaseScript.Run(ctx, b.client, []string{stateKey, runKey, b.leaseIndexKey()},
+			stateData, refData, nextStateData, refData, expiresAt.UnixMilli(), b.stateTTL.Milliseconds(), leaseMember,
 		).Int64()
 		if err != nil {
 			return err
@@ -493,17 +532,17 @@ func (b *RedisBackend) RenewLease(ctx context.Context, key Key, streamID, ownerI
 	}
 }
 
-func (b *RedisBackend) ValidateRunOwnership(ctx context.Context, key Key, ref StreamRef) error {
+func (b *RedisBackend) ValidateRunOwnership(ctx context.Context, key Key, ref RunRef) error {
 	ref.BotID = strings.TrimSpace(ref.BotID)
 	ref.SessionID = strings.TrimSpace(ref.SessionID)
-	ref.StreamID = strings.TrimSpace(ref.StreamID)
+	ref.RunID = strings.TrimSpace(ref.RunID)
 	ref.OwnerID = strings.TrimSpace(ref.OwnerID)
 	ref.Generation = strings.TrimSpace(ref.Generation)
-	if ref.BotID != strings.TrimSpace(key.BotID) || ref.SessionID != strings.TrimSpace(key.SessionID) || ref.StreamID == "" || ref.OwnerID == "" || ref.Generation == "" {
+	if ref.BotID != strings.TrimSpace(key.BotID) || ref.SessionID != strings.TrimSpace(key.SessionID) || ref.RunID == "" || ref.OwnerID == "" || ref.Generation == "" {
 		return ErrRunOwnershipLost
 	}
-	valid, err := validateRedisRunOwnershipScript.Run(ctx, b.client, []string{b.stateKey(key), b.streamKey(key, ref.StreamID)},
-		ref.BotID, ref.SessionID, ref.StreamID, ref.OwnerID, ref.Generation,
+	valid, err := validateRedisRunOwnershipScript.Run(ctx, b.client, []string{b.stateKey(key), b.runKey(key, ref.RunID)},
+		ref.BotID, ref.SessionID, ref.RunID, ref.OwnerID, ref.Generation,
 	).Int64()
 	if err != nil {
 		return err
@@ -589,32 +628,35 @@ func (b *RedisBackend) Subscribe(ctx context.Context, key Key) (Subscription, er
 	}, nil
 }
 
-func (b *RedisBackend) LoadStreamRef(ctx context.Context, key Key, streamID string) (StreamRef, bool, error) {
-	data, err := b.client.Get(ctx, b.streamKey(key, streamID)).Bytes()
+func (b *RedisBackend) LoadRunRef(ctx context.Context, key Key, runID string) (RunRef, bool, error) {
+	data, err := b.client.Get(ctx, b.runKey(key, runID)).Bytes()
 	if errors.Is(err, redis.Nil) {
-		return StreamRef{}, false, nil
+		return RunRef{}, false, nil
 	}
 	if err != nil {
-		return StreamRef{}, false, err
+		return RunRef{}, false, err
 	}
-	var ref StreamRef
+	var ref RunRef
 	if err := json.Unmarshal(data, &ref); err != nil {
-		return StreamRef{}, false, err
+		return RunRef{}, false, err
 	}
 	return ref, true, nil
 }
 
-func (b *RedisBackend) DeleteStreamRef(ctx context.Context, ref StreamRef) (bool, error) {
-	ref.StreamID = strings.TrimSpace(ref.StreamID)
+func (b *RedisBackend) DeleteRunRef(ctx context.Context, ref RunRef) (bool, error) {
+	ref.BotID = strings.TrimSpace(ref.BotID)
+	ref.SessionID = strings.TrimSpace(ref.SessionID)
+	ref.RunID = strings.TrimSpace(ref.RunID)
+	ref.OwnerID = strings.TrimSpace(ref.OwnerID)
 	ref.Generation = strings.TrimSpace(ref.Generation)
-	if ref.StreamID == "" || ref.Generation == "" {
+	if ref.RunID == "" || ref.Generation == "" {
 		return false, nil
 	}
-	data, err := json.Marshal(ref)
-	if err != nil {
-		return false, err
-	}
-	deleted, err := deleteRedisStreamRefScript.Run(ctx, b.client, []string{b.streamKey(Key{BotID: ref.BotID, SessionID: ref.SessionID}, ref.StreamID)}, data).Int64()
+	key := Key{BotID: ref.BotID, SessionID: ref.SessionID}
+	deleted, err := deleteRedisRunRefScript.Run(ctx, b.client,
+		[]string{b.runKey(key, ref.RunID), b.leaseIndexKey()},
+		ref.BotID, ref.SessionID, ref.RunID, ref.OwnerID, ref.Generation,
+	).Int64()
 	return deleted == 1, err
 }
 
@@ -759,7 +801,6 @@ func loadRedisSnapshot(ctx context.Context, tx *redis.Tx, key string) (Snapshot,
 	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return Snapshot{}, false, err
 	}
-	snapshot.Queue = nonNilQueue(snapshot.Queue)
 	return snapshot, true, nil
 }
 
@@ -774,17 +815,17 @@ func waitRedisSubscriptionRetry(ctx context.Context) bool {
 	}
 }
 
-func loadRedisStreamRef(ctx context.Context, tx *redis.Tx, key string) (StreamRef, bool, error) {
+func loadRedisRunRef(ctx context.Context, tx *redis.Tx, key string) (RunRef, bool, error) {
 	data, err := tx.Get(ctx, key).Bytes()
 	if errors.Is(err, redis.Nil) {
-		return StreamRef{}, false, nil
+		return RunRef{}, false, nil
 	}
 	if err != nil {
-		return StreamRef{}, false, err
+		return RunRef{}, false, err
 	}
-	var ref StreamRef
+	var ref RunRef
 	if err := json.Unmarshal(data, &ref); err != nil {
-		return StreamRef{}, false, err
+		return RunRef{}, false, err
 	}
 	return ref, true, nil
 }
@@ -793,8 +834,8 @@ func (b *RedisBackend) stateKey(key Key) string {
 	return b.keyPrefix + "state:" + key.String()
 }
 
-func (b *RedisBackend) streamKey(key Key, streamID string) string {
-	return b.keyPrefix + "stream:" + key.String() + ":" + strings.TrimSpace(streamID)
+func (b *RedisBackend) runKey(key Key, runID string) string {
+	return b.keyPrefix + "run:" + key.String() + ":" + strings.TrimSpace(runID)
 }
 
 func (b *RedisBackend) sessionChannel(key Key) string {

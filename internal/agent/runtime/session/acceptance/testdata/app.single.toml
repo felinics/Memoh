@@ -1,0 +1,95 @@
+# Session Runtime single-Server acceptance configuration.
+# This is intentionally self-contained: production and developer configs must
+# not be changed just to run an isolated black-box suite.
+
+[log]
+level = "debug"
+format = "text"
+
+[server]
+addr = ":8080"
+rpc_listen_addr = ":9090"
+
+[channel]
+addr = ":8081"
+rpc_listen_addr = ":9091"
+
+[internal_rpc]
+server_target = "server:9090"
+channel_target = "channel:9091"
+shared_secret = "memoh-dev-internal-rpc-secret"
+
+[admin]
+username = "admin"
+password = "admin123"
+email = "dev@memoh.local"
+
+[auth]
+jwt_secret = "memoh-dev-secret-do-not-use-in-production"
+jwt_expires_in = "168h"
+
+timezone = "UTC"
+
+[database]
+driver = "postgres"
+
+[container]
+backend = "containerd"
+default_image = "memohai/workspace:debian"
+image_pull_policy = "if_not_present"
+snapshotter = "overlayfs"
+data_root = "/opt/memoh/data"
+bridge_path = "/opt/memoh/runtime/bridge"
+cni_bin_dir = "/opt/cni/bin"
+cni_conf_dir = "/etc/cni/net.d"
+
+[containerd]
+socket_path = "/run/containerd/containerd.sock"
+namespace = "default"
+runtime_type = "io.containerd.runc.v2"
+
+[docker]
+host = ""
+
+[postgres]
+host = "postgres"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh"
+sslmode = "disable"
+
+[pgvector]
+enabled = true
+host = "127.0.0.1"
+port = 5433
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
+
+[registry]
+providers_dir = "conf/providers"
+
+[supermarket]
+base_url = "https://supermarket.memoh.ai"
+
+[oauth_clients]
+config_path = "conf/oauth-clients.toml"
+
+[web]
+host = "0.0.0.0"
+port = 8082
+
+[session_runtime]
+# The memory backend is the point of this topology: one process, no shared live
+# state, so a restart is a backend replacement and the reaper's generation sweep
+# is the only thing that can converge the runs the dead process left behind.
+backend = "memory"
+cluster = false
+state_ttl = "1h"
+# Matched to the cluster suite rather than to the defaults. Production derives a
+# 90s grace from a 30s lease, which is right for an operator and far too slow to
+# assert against; the mechanism under test is identical at either scale.
+owner_lease_ttl = "2s"
+backend_loss_grace = "6s"

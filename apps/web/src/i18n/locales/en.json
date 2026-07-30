@@ -99,6 +99,9 @@
     "channel": {
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly."
     },
+    "compaction": {
+      "model_unavailable": "The compaction model is unavailable. Pick an enabled chat model with a declared context window."
+    },
     "profile": {
       "request_invalid": "The profile update request is invalid.",
       "title_model_invalid": "The selected title model is unavailable or is not a chat model.",
@@ -133,6 +136,11 @@
       "reasoning_effort_required": "Choose a reasoning effort and try again.",
       "reasoning_effort_unavailable": "The selected reasoning effort is no longer available for this external agent.",
       "config_update_failed": "The external agent could not apply the selected settings. Please retry."
+    },
+    "session_runtime": {
+      "session_busy": "This conversation is still working on your previous message. Please try again in a moment.",
+      "invocation_conflict": "This message was already sent with different content. Reload the conversation to see what was saved.",
+      "history_inconsistent": "The conversation history could not be reconciled. Refresh and try again."
     }
   },
   "auth": {
@@ -480,6 +488,7 @@
     "updatesSection": "Updates",
     "currentVersion": "Version v{version}",
     "checkHint": "Check GitHub for the latest release.",
+    "desktopCheckHint": "Check for a newer Desktop app version.",
     "checkForUpdates": "Check for Updates",
     "checking": "Checking…",
     "upToDate": "You're on the latest version",
@@ -490,6 +499,15 @@
     "releaseNotes": "Release Notes",
     "viewOnGitHub": "View on GitHub",
     "checkFailed": "Check Failed",
+    "desktopUpdatesUnavailable": "Automatic updates are unavailable",
+    "desktopUpdatesUnavailableDesc": "This build does not have an update feed configured.",
+    "desktopUpdateAvailableDesc": "Download this version, then restart Memoh to install it.",
+    "downloadUpdate": "Download Update",
+    "downloadingUpdate": "Downloading… {progress}%",
+    "desktopUpdateDownloadedDesc": "The update is ready. Restart Memoh to install it.",
+    "restartToUpdate": "Restart to Update",
+    "retryUpdate": "Try Again",
+    "desktopUpdateFailed": "Desktop update failed",
     "github": "GitHub",
     "docs": "Documentation",
     "feedback": "Feedback",
@@ -1451,9 +1469,7 @@
     "emptyTitle": "No MCP Servers",
     "emptyDescription": "Add an MCP server to extend your bot's capabilities",
     "command": "Command",
-    "commandPlaceholder": "Enter start command",
-    "arguments": "Arguments",
-    "argumentsPlaceholder": "Type and press Enter to add",
+    "commandPlaceholder": "npx -y @modelcontextprotocol/server-everything",
     "cwd": "Working Directory",
     "cwdPlaceholder": "Enter working directory path",
     "env": "Environment",
@@ -1486,10 +1502,8 @@
     "importErrorJson": "Invalid JSON",
     "exportFailed": "Failed to export MCP servers",
     "probe": "Test Connection",
-    "probing": "Testing...",
     "probeSuccess": "Connection verified",
     "probeFailed": "Connection test failed",
-    "probeAborted": "Connection test aborted",
     "probeFailedNetwork": "Network error during connection test",
     "probeRefresh": "Refresh",
     "tools": "Tools",
@@ -1499,8 +1513,6 @@
     "statusConnected": "Connected",
     "statusError": "Error",
     "statusUnknown": "Not tested",
-    "lastProbed": "Last tested",
-    "testedAt": "Tested {time}",
     "commandRequired": "Enter a command before saving.",
     "urlRequired": "Enter an endpoint URL before saving.",
     "authRequired": "Authorization required",
@@ -1530,9 +1542,13 @@
       "clientSecret": "Client Secret",
       "clientSecretPlaceholder": "OAuth App Client Secret (if required)",
       "clientIdHint": "The authorization server does not support automatic registration. Please create an OAuth App and enter its Client ID.",
+      "signInRequired": "Sign in required to use this server.",
+      "signInLabel": "Server sign-in",
+      "optionalHint": "Only needed if this server asks you to sign in.",
       "callbackUrl": "Callback URL",
       "callbackUrlHint": "Set this as the callback/redirect URL in your OAuth App settings.",
-      "callbackMissingParams": "Missing authorization code or state parameter"
+      "callbackMissingParams": "Missing authorization code or state parameter",
+      "popupBlocked": "The authorization window was blocked — allow popups for this page and try again."
     },
     "servers": "Servers",
     "addNew": "New Server",
@@ -1570,7 +1586,7 @@
     },
     "advancedSettings": "Advanced Settings",
     "advancedHintStdio": "Environment variables for the process.",
-    "advancedHintRemote": "Request headers and authorization.",
+    "advancedHintRemote": "Request headers.",
     "expand": "Expand",
     "collapse": "Collapse",
     "envVars": "Environment Variables",
@@ -2391,7 +2407,7 @@
       "heartbeatModelPlaceholder": "Use chat model (default)",
       "compactionEnabled": "Enable Context Compaction",
       "compactionDescription": "Automatically summarize older messages when context gets too large",
-      "compactionThreshold": "Compaction Threshold (input tokens)",
+      "compactionThreshold": "Compaction Threshold (input tokens, 0 = automatic)",
       "compactionRatio": "Compaction Ratio (%)",
       "compactionRatioDescription": "The percentage of older messages to summarize. Recent messages are kept intact.",
       "compactionModel": "Compaction Model",

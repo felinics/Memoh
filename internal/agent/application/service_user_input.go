@@ -36,6 +36,7 @@ func (s *Service) AdvancePlainTextUserInput(ctx context.Context, input userinput
 }
 
 type UserInputResponseInput struct {
+	ControlID                  string
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string
@@ -52,8 +53,27 @@ type UserInputResponseInput struct {
 }
 
 func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
+	committed, err := s.CommitUserInputResponse(ctx, input)
+	if err != nil {
+		return err
+	}
+	return s.ContinueCommittedUserInputResponse(ctx, committed, eventCh)
+}
+
+// CommittedUserInputResponse is the durable half of an ask_user response.
+// Keeping it separate from the continuation lets the runtime acknowledge the
+// user's click as soon as the decision commits, without imposing the command
+// acknowledgement deadline on the following model call.
+type CommittedUserInputResponse struct {
+	request      userinput.Request
+	input        UserInputResponseInput
+	activePrompt *acpActivePromptSubscription
+	ackOnly      bool
+}
+
+func (s *Service) CommitUserInputResponse(ctx context.Context, input UserInputResponseInput) (CommittedUserInputResponse, error) {
 	if s.userInput == nil {
-		return errors.New("user input service not configured")
+		return CommittedUserInputResponse{}, errors.New("user input service not configured")
 	}
 	target, err := s.userInput.ResolveTarget(ctx, userinput.ResolveInput{
 		BotID:                  input.BotID,
@@ -62,13 +82,13 @@ func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseI
 		ReplyExternalMessageID: input.ReplyExternalMessageID,
 	})
 	if err != nil {
-		return err
+		return CommittedUserInputResponse{}, err
 	}
 
 	isACPMCP := userinput.IsACPMCPRequest(target)
 	if isACPMCP {
 		if err := s.authorizeACPUserInputResponse(ctx, target, input); err != nil {
-			return err
+			return CommittedUserInputResponse{}, err
 		}
 	}
 	if !isACPMCP {
@@ -80,12 +100,12 @@ func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseI
 			ActorChannelIdentityID: input.ActorChannelIdentityID,
 			Reason:                 "user input expired: the requesting tool call is no longer waiting",
 		}); err != nil && !errors.Is(err, userinput.ErrAlreadyDecided) {
-			return err
+			return CommittedUserInputResponse{}, err
 		}
-		return emitApprovalAck(ctx, eventCh)
+		return CommittedUserInputResponse{request: target, input: input, ackOnly: true}, nil
 	}
 	var activePrompt *acpActivePromptSubscription
-	if isACPMCP && eventCh != nil && !input.SuppressActivePromptAttach {
+	if isACPMCP && !input.SuppressActivePromptAttach {
 		activePrompt, _ = s.subscribeACPActivePrompt(
 			firstNonEmpty(target.BotID, input.BotID),
 			firstNonEmpty(target.SessionID, input.ThreadID),
@@ -107,7 +127,7 @@ func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseI
 				if activePrompt != nil {
 					activePrompt.release()
 				}
-				return err
+				return CommittedUserInputResponse{}, err
 			}
 		}
 		resolved, err = s.userInput.Submit(ctx, userinput.SubmitInput{
@@ -121,19 +141,34 @@ func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseI
 			activePrompt.release()
 		}
 		if isACPMCP && errors.Is(err, userinput.ErrAlreadyDecided) {
-			return emitApprovalAck(ctx, eventCh)
+			return CommittedUserInputResponse{request: target, input: input, ackOnly: true}, nil
 		}
-		return err
+		return CommittedUserInputResponse{}, err
+	}
+	return CommittedUserInputResponse{
+		request:      resolved,
+		input:        input,
+		activePrompt: activePrompt,
+	}, nil
+}
+
+func (s *Service) ContinueCommittedUserInputResponse(ctx context.Context, committed CommittedUserInputResponse, eventCh chan<- WSStreamEvent) error {
+	resolved := committed.request
+	if strings.TrimSpace(resolved.ID) == "" {
+		return errors.New("committed user input response is missing its request")
+	}
+	if committed.ackOnly {
+		return emitApprovalAck(ctx, eventCh)
 	}
 	if userinput.IsACPMCPRequest(resolved) {
 		// An ACP/MCP waiter is blocked on this request and resumes the run
 		// itself. When this response stream has reattached to the active ACP
 		// prompt, forward that live continuation so refreshes observe the same
 		// loading/progress shape as native deferred requests.
-		if activePrompt != nil {
-			return forwardACPActivePrompt(ctx, activePrompt, eventCh, acpActivePromptForwardOptions{
-				SkipToolCallID:  target.ToolCallID,
-				SkipUserInputID: target.ID,
+		if committed.activePrompt != nil {
+			return forwardACPActivePrompt(ctx, committed.activePrompt, eventCh, acpActivePromptForwardOptions{
+				SkipToolCallID:  resolved.ToolCallID,
+				SkipUserInputID: resolved.ID,
 			})
 		}
 		return emitApprovalAck(ctx, eventCh)
@@ -149,7 +184,7 @@ func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseI
 	if continueFn == nil {
 		continueFn = s.storeUserInputResultAndContinue
 	}
-	return continueFn(ctx, resolved, input, toolResult, eventCh)
+	return continueFn(ctx, resolved, committed.input, toolResult, eventCh)
 }
 
 func (s *Service) authorizeACPUserInputResponse(ctx context.Context, target userinput.Request, input UserInputResponseInput) error {

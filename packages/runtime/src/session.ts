@@ -1,9 +1,10 @@
 import { arch, hostname, platform } from 'node:os'
 import { realpath } from 'node:fs/promises'
+import type { IncomingMessage } from 'node:http'
 
 import WebSocket from 'ws'
 
-import { validateConfig, type RuntimeClientConfig } from './config.js'
+import { normalizeRuntimeTeamId, validateConfig, type RuntimeClientConfig } from './config.js'
 import { bridgeWebSocketToGrpc } from './pipe/grpc-websocket'
 import { grpcMessageLimit, startRuntimeGrpcServer } from './service'
 import { runtimeCapabilities } from './core/guards'
@@ -11,7 +12,12 @@ import { runtimeClientVersion } from './version'
 
 export const runtimeProtocolGrpc = 'memoh.runtime.v1.grpc'
 export const runtimeMetadataHeader = 'X-Memoh-Runtime-Metadata'
+// Hosted gateways consume this tenant-routing header before proxying the
+// WebSocket. The upstream single-team server intentionally does not require it.
+export const runtimeTeamIDHeader = 'X-Team-ID'
 export const runtimeMetadataMaxBytes = 8 * 1024
+const runtimeHandshakeErrorMaxBytes = 8 * 1024
+const runtimeHandshakeErrorReadTimeoutMs = 2_000
 
 export interface RuntimeHandshakeMetadataV1 {
   version: 1
@@ -27,6 +33,7 @@ export interface RuntimeHandshakeHeaders {
   Authorization: string
   'Sec-WebSocket-Protocol': typeof runtimeProtocolGrpc
   'X-Memoh-Runtime-Metadata': string
+  'X-Team-ID'?: string
 }
 
 export interface RuntimeSessionOptions {
@@ -111,11 +118,15 @@ export function handshakeHeaders(
   version = runtimeClientVersion,
   metadata = createHandshakeMetadata(config.workspaceBase, version),
 ): RuntimeHandshakeHeaders {
-  return {
+  const headers: RuntimeHandshakeHeaders = {
     Authorization: `Bearer ${config.key.trim()}`,
     'Sec-WebSocket-Protocol': runtimeProtocolGrpc,
     'X-Memoh-Runtime-Metadata': encodeHandshakeMetadata(metadata),
   }
+  if (config.teamId !== undefined) {
+    headers[runtimeTeamIDHeader] = normalizeRuntimeTeamId(config.teamId)
+  }
+  return headers
 }
 
 export class RuntimeSession {
@@ -198,11 +209,15 @@ export class RuntimeSession {
       })
       const metadata = createHandshakeMetadata(workspaceBase, this.version)
       const headers = handshakeHeaders(this.config, this.version, metadata)
+      const websocketHeaders: Record<string, string> = {
+        Authorization: headers.Authorization,
+        [runtimeMetadataHeader]: headers[runtimeMetadataHeader],
+      }
+      if (headers[runtimeTeamIDHeader]) {
+        websocketHeaders[runtimeTeamIDHeader] = headers[runtimeTeamIDHeader]
+      }
       websocket = new WebSocket(url, runtimeProtocolGrpc, {
-        headers: {
-          Authorization: headers.Authorization,
-          [runtimeMetadataHeader]: headers[runtimeMetadataHeader],
-        },
+        headers: websocketHeaders,
         handshakeTimeout: 15_000,
         maxPayload: grpcMessageLimit,
         perMessageDeflate: false,
@@ -258,15 +273,65 @@ function waitForOpen(websocket: WebSocket): Promise<void> {
       cleanup()
       reject(new Error('runtime WebSocket closed during handshake'))
     }
-    const onUnexpectedResponse = (_request: unknown, response: { statusCode?: number, resume?: () => void }) => {
+    const onUnexpectedResponse = (_request: unknown, response: IncomingMessage) => {
       cleanup()
-      response.resume?.()
-      reject(new Error(`runtime handshake rejected with HTTP ${response.statusCode ?? 'unknown'}`))
+      void readHandshakeError(response).then((detail) => {
+        const suffix = detail ? `: ${detail}` : ''
+        reject(new Error(`runtime handshake rejected with HTTP ${response.statusCode ?? 'unknown'}${suffix}`))
+      })
     }
     websocket.once('open', onOpen)
     websocket.once('error', onError)
     websocket.once('close', onClose)
     websocket.once('unexpected-response', onUnexpectedResponse)
+  })
+}
+
+function readHandshakeError(response: IncomingMessage): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    let settled = false
+
+    const cleanup = () => {
+      clearTimeout(timer)
+      response.off('data', onData)
+      response.off('end', finish)
+      response.off('error', finish)
+      response.off('aborted', finish)
+      response.off('close', finish)
+    }
+    const finish = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      response.resume()
+      resolve(
+        Buffer.concat(chunks)
+          .toString('utf8')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      )
+    }
+    const onData = (chunk: Buffer | Uint8Array | string) => {
+      if (size >= runtimeHandshakeErrorMaxBytes) return
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      const remaining = runtimeHandshakeErrorMaxBytes - size
+      const accepted = buffer.subarray(0, remaining)
+      chunks.push(accepted)
+      size += accepted.length
+      if (size >= runtimeHandshakeErrorMaxBytes) {
+        finish()
+      }
+    }
+
+    const timer = setTimeout(finish, runtimeHandshakeErrorReadTimeoutMs)
+    timer.unref()
+    response.on('data', onData)
+    response.once('end', finish)
+    response.once('error', finish)
+    response.once('aborted', finish)
+    response.once('close', finish)
   })
 }
 

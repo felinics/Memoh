@@ -31,7 +31,17 @@ type PreservedDecision struct {
 }
 
 type ActivationOptions struct {
-	PreserveDecision *PreservedDecision
+	PreserveDecision       *PreservedDecision
+	ReclaimWaitingDecision *WaitingDecisionReclaim
+}
+
+// WaitingDecisionReclaim is committed atomically with the persistence-fence
+// and preserved-decision token update.
+type WaitingDecisionReclaim struct {
+	RunID          string
+	OwnerID        string
+	PreviousToken  int64
+	LiveGeneration string
 }
 
 func (f Fence) Valid() bool {

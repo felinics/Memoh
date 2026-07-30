@@ -775,7 +775,8 @@ INSERT INTO bot_history_messages (
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  run_id
 )
 VALUES (
   $1,
@@ -792,7 +793,8 @@ VALUES (
   $12,
   $13::uuid,
   $14::uuid,
-  $15::text
+  $15::text,
+  $16::uuid
 )
 RETURNING
   id,
@@ -829,6 +831,7 @@ type CreateMessageParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	RunID                   pgtype.UUID `json:"run_id"`
 }
 
 type CreateMessageRow struct {
@@ -867,6 +870,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.RunID,
 	)
 	var i CreateMessageRow
 	err := row.Scan(
@@ -948,6 +952,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    run_id,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -969,6 +974,7 @@ inserted AS (
     $14::uuid,
     $15::uuid,
     $16::text,
+    $17::uuid,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -1029,6 +1035,7 @@ type CreateMessageInHistoryTurnByRequestParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	RunID                   pgtype.UUID `json:"run_id"`
 }
 
 type CreateMessageInHistoryTurnByRequestRow struct {
@@ -1068,6 +1075,7 @@ func (q *Queries) CreateMessageInHistoryTurnByRequest(ctx context.Context, arg C
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.RunID,
 	)
 	var i CreateMessageInHistoryTurnByRequestRow
 	err := row.Scan(
@@ -1149,6 +1157,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    run_id,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -1170,6 +1179,7 @@ inserted AS (
     $14::uuid,
     $15::uuid,
     $16::text,
+    $17::uuid,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -1204,6 +1214,7 @@ type CreateMessageInHistoryTurnByRequestAndBindParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	RunID                   pgtype.UUID `json:"run_id"`
 }
 
 type CreateMessageInHistoryTurnByRequestAndBindRow struct {
@@ -1229,6 +1240,7 @@ func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.RunID,
 	)
 	var i CreateMessageInHistoryTurnByRequestAndBindRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
@@ -1239,8 +1251,16 @@ const createMessageWithHistoryTurn = `-- name: CreateMessageWithHistoryTurn :one
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.team_id = public.memoh_current_team_id() AND bot_sessions.id = $1
+  WHERE bot_sessions.team_id = public.memoh_current_team_id()
+    AND bot_sessions.id = $1
+    AND $2::bigint IS NULL
   RETURNING (next_turn_position - 1)::bigint AS position
+),
+turn_slot AS (
+  SELECT $2::bigint AS position
+  WHERE $2::bigint IS NOT NULL
+  UNION ALL
+  SELECT next_position.position FROM next_position
 ),
 inserted_message AS (
   INSERT INTO bot_history_messages (
@@ -1260,33 +1280,35 @@ inserted_message AS (
     model_id,
     event_id,
     display_text,
+    run_id,
     turn_id,
     turn_position,
     turn_message_seq,
     turn_visible
   )
   SELECT
-    $2,
     $3,
+    $4,
     $1,
-    $4::uuid,
     $5::uuid,
-    $6::text,
+    $6::uuid,
     $7::text,
-    $8,
+    $8::text,
     $9,
     $10,
     $11,
     $12,
     $13,
-    $14::uuid,
+    $14,
     $15::uuid,
-    $16::text,
-    $17,
-    next_position.position,
-    $18,
+    $16::uuid,
+    $17::text,
+    $18::uuid,
+    $19,
+    turn_slot.position,
+    $20,
     true
-  FROM next_position
+  FROM turn_slot
   RETURNING
     id,
     created_at
@@ -1299,6 +1321,7 @@ FROM inserted_message
 
 type CreateMessageWithHistoryTurnParams struct {
 	SessionID               pgtype.UUID `json:"session_id"`
+	TurnPosition            pgtype.Int8 `json:"turn_position"`
 	MessageID               pgtype.UUID `json:"message_id"`
 	BotID                   pgtype.UUID `json:"bot_id"`
 	SenderChannelIdentityID pgtype.UUID `json:"sender_channel_identity_id"`
@@ -1314,6 +1337,7 @@ type CreateMessageWithHistoryTurnParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	RunID                   pgtype.UUID `json:"run_id"`
 	TurnID                  pgtype.UUID `json:"turn_id"`
 	TurnMessageSeq          pgtype.Int8 `json:"turn_message_seq"`
 }
@@ -1323,9 +1347,18 @@ type CreateMessageWithHistoryTurnRow struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+// Writes the request message of a turn.
+//
+// The turn position is allocated here only when the caller did not bring one.
+// A run admitted through session_runs already drew turn_id and turn_position
+// from this same counter (SR-TURN-001, SR-DUR-002), so bumping again would
+// spend a second position and file the message under a turn the client was
+// never told about. Entry points with no admission — channel inbound,
+// schedules, heartbeats — pass NULL and keep allocating here.
 func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg CreateMessageWithHistoryTurnParams) (CreateMessageWithHistoryTurnRow, error) {
 	row := q.db.QueryRow(ctx, createMessageWithHistoryTurn,
 		arg.SessionID,
+		arg.TurnPosition,
 		arg.MessageID,
 		arg.BotID,
 		arg.SenderChannelIdentityID,
@@ -1341,6 +1374,7 @@ func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg CreateMe
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.RunID,
 		arg.TurnID,
 		arg.TurnMessageSeq,
 	)
@@ -1601,8 +1635,16 @@ WITH input_rows(
 next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.team_id = public.memoh_current_team_id() AND bot_sessions.id = $53
+  WHERE bot_sessions.team_id = public.memoh_current_team_id()
+    AND bot_sessions.id = $53
+    AND $54::bigint IS NULL
   RETURNING (next_turn_position - 1)::bigint AS position
+),
+turn_slot AS (
+  SELECT $54::bigint AS position
+  WHERE $54::bigint IS NOT NULL
+  UNION ALL
+  SELECT next_position.position FROM next_position
 ),
 inserted_messages AS (
   INSERT INTO bot_history_messages (
@@ -1622,6 +1664,7 @@ inserted_messages AS (
     model_id,
     event_id,
     display_text,
+    run_id,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -1629,7 +1672,7 @@ inserted_messages AS (
   )
   SELECT
     input.message_id,
-    $54,
+    $55,
     $53,
     input.sender_channel_identity_id,
     input.sender_user_id,
@@ -1644,11 +1687,12 @@ inserted_messages AS (
     input.model_id,
     input.event_id,
     input.display_text,
-    $55,
-    next_position.position,
+    $56::uuid,
+    $57,
+    turn_slot.position,
     input.turn_message_seq,
     true
-  FROM input_rows input, next_position
+  FROM input_rows input, turn_slot
   RETURNING id, created_at, turn_message_seq
 )
 SELECT inserted_messages.id, inserted_messages.created_at
@@ -1710,7 +1754,9 @@ type CreateToolTailRoundParams struct {
 	FinalAssistantEventID                    pgtype.UUID `json:"final_assistant_event_id"`
 	FinalAssistantDisplayText                pgtype.Text `json:"final_assistant_display_text"`
 	SessionID                                pgtype.UUID `json:"session_id"`
+	TurnPosition                             pgtype.Int8 `json:"turn_position"`
 	BotID                                    pgtype.UUID `json:"bot_id"`
+	RunID                                    pgtype.UUID `json:"run_id"`
 	TurnID                                   pgtype.UUID `json:"turn_id"`
 }
 
@@ -1719,6 +1765,9 @@ type CreateToolTailRoundRow struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+// As in CreateMessageWithHistoryTurn: a run admitted through session_runs
+// already drew this turn's position, so bumping again would spend a second one
+// and file the round under a turn the client was never told about.
 func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRoundParams) ([]CreateToolTailRoundRow, error) {
 	rows, err := q.db.Query(ctx, createToolTailRound,
 		arg.UserMessageID,
@@ -1774,7 +1823,9 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 		arg.FinalAssistantEventID,
 		arg.FinalAssistantDisplayText,
 		arg.SessionID,
+		arg.TurnPosition,
 		arg.BotID,
+		arg.RunID,
 		arg.TurnID,
 	)
 	if err != nil {
@@ -3490,6 +3541,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -3529,6 +3581,7 @@ type ListMessagesBeforeBySessionRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
 	Usage                   []byte             `json:"usage"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
@@ -3560,6 +3613,7 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.TurnID,
 			&i.Usage,
 			&i.SessionMode,
 			&i.RuntimeType,
@@ -3592,6 +3646,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -3640,6 +3695,7 @@ type ListMessagesBeforeCursorBySessionRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
 	Usage                   []byte             `json:"usage"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
@@ -3678,6 +3734,7 @@ func (q *Queries) ListMessagesBeforeCursorBySession(ctx context.Context, arg Lis
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.TurnID,
 			&i.Usage,
 			&i.SessionMode,
 			&i.RuntimeType,
@@ -4012,6 +4069,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -4049,6 +4107,7 @@ type ListMessagesLatestBySessionRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
 	Usage                   []byte             `json:"usage"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
@@ -4080,6 +4139,7 @@ func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg ListMessa
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.TurnID,
 			&i.Usage,
 			&i.SessionMode,
 			&i.RuntimeType,
@@ -4112,6 +4172,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -4145,6 +4206,7 @@ type ListMessagesLatestUIBySessionRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
@@ -4172,6 +4234,7 @@ func (q *Queries) ListMessagesLatestUIBySession(ctx context.Context, arg ListMes
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.TurnID,
 			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
@@ -4709,6 +4772,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -4748,6 +4812,7 @@ type ListVisibleMessagesFromBySessionRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
 	Usage                   []byte             `json:"usage"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
@@ -4780,6 +4845,7 @@ func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg List
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.TurnID,
 			&i.Usage,
 			&i.SessionMode,
 			&i.RuntimeType,
@@ -4866,6 +4932,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -4905,6 +4972,7 @@ type LocateMessagesWindowByExternalIDBySessionRow struct {
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
 	Usage                   []byte             `json:"usage"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
@@ -4943,6 +5011,7 @@ func (q *Queries) LocateMessagesWindowByExternalIDBySession(ctx context.Context,
 			&i.Role,
 			&i.Content,
 			&i.Metadata,
+			&i.TurnID,
 			&i.Usage,
 			&i.SessionMode,
 			&i.RuntimeType,
@@ -5250,6 +5319,7 @@ replacement_input AS (
           AND (
             request_message.turn_id IS NULL
             OR request_message.turn_id = old_turn.id
+            OR request_message.turn_id = $5::uuid
           )
         FOR UPDATE
       )
@@ -5283,10 +5353,9 @@ affected_compaction_sessions AS MATERIALIZED (
     AND compact.session_id = locked.session_id
     AND compact.compaction_epoch = session.compaction_epoch
 ),
-next_position AS (
+session_update AS (
   UPDATE bot_sessions s
-  SET next_turn_position = next_turn_position + 1,
-      compaction_epoch = compaction_epoch + CASE
+  SET compaction_epoch = compaction_epoch + CASE
         WHEN EXISTS (
           SELECT 1
           FROM affected_compaction_sessions affected
@@ -5296,14 +5365,14 @@ next_position AS (
       END
   FROM replacement_input
   WHERE s.team_id = public.memoh_current_team_id() AND s.id = replacement_input.session_id
-  RETURNING s.next_turn_position - 1 AS position
+  RETURNING s.id
 ),
 replacement AS (
   SELECT
-    gen_random_uuid() AS id,
+    $5::uuid AS id,
     replacement_input.bot_id,
     replacement_input.session_id,
-    next_position.position::bigint AS position,
+    $6::bigint AS position,
     replacement_input.replacement_request_message_id AS request_message_id,
     replacement_input.replacement_assistant_message_id AS assistant_message_id,
     NULL::uuid AS superseded_by_turn_id,
@@ -5312,13 +5381,14 @@ replacement AS (
     now()::timestamptz AS created_at,
     now()::timestamptz AS updated_at
   FROM replacement_input
-  CROSS JOIN next_position
+  CROSS JOIN session_update
+  WHERE $6::bigint > 0
 ),
 updated AS (
   UPDATE bot_history_messages old
   SET turn_superseded_by_turn_id = replacement.id,
-      turn_superseded_at = $5,
-      turn_superseded_reason = $6,
+      turn_superseded_at = $7,
+      turn_superseded_reason = $8,
       turn_visible = false
   FROM replacement
   WHERE old.team_id = public.memoh_current_team_id() AND old.turn_id = $2
@@ -5421,12 +5491,14 @@ CROSS JOIN linked_tail_done
 `
 
 type ReplaceHistoryTurnParams struct {
-	SessionID          pgtype.UUID        `json:"session_id"`
-	OldTurnID          pgtype.UUID        `json:"old_turn_id"`
-	RequestMessageID   pgtype.UUID        `json:"request_message_id"`
-	AssistantMessageID pgtype.UUID        `json:"assistant_message_id"`
-	SupersededAt       pgtype.Timestamptz `json:"superseded_at"`
-	SupersededReason   pgtype.Text        `json:"superseded_reason"`
+	SessionID           pgtype.UUID        `json:"session_id"`
+	OldTurnID           pgtype.UUID        `json:"old_turn_id"`
+	RequestMessageID    pgtype.UUID        `json:"request_message_id"`
+	AssistantMessageID  pgtype.UUID        `json:"assistant_message_id"`
+	ReplacementTurnID   pgtype.UUID        `json:"replacement_turn_id"`
+	ReplacementPosition int64              `json:"replacement_position"`
+	SupersededAt        pgtype.Timestamptz `json:"superseded_at"`
+	SupersededReason    pgtype.Text        `json:"superseded_reason"`
 }
 
 type ReplaceHistoryTurnRow struct {
@@ -5449,6 +5521,8 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg ReplaceHistoryTurn
 		arg.OldTurnID,
 		arg.RequestMessageID,
 		arg.AssistantMessageID,
+		arg.ReplacementTurnID,
+		arg.ReplacementPosition,
 		arg.SupersededAt,
 		arg.SupersededReason,
 	)

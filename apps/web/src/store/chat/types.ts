@@ -107,6 +107,9 @@ export interface ChatUserTurn {
   externalMessageId?: string
   streaming: boolean
   isSelf: boolean
+  invocationId?: string
+  turnId?: string
+  runtimeRunId?: string
   // Set by createOptimisticUserTurn / createOptimisticAssistantTurn and
   // cleared as soon as the server twin replaces the optimistic row in
   // mergeMessages. mergeMessages keys off this flag to decide which side of
@@ -124,6 +127,9 @@ export interface ChatAssistantTurn {
   platform?: string
   externalMessageId?: string
   streaming: boolean
+  invocationId?: string
+  turnId?: string
+  runtimeRunId?: string
   // See ChatUserTurn.__optimistic.
   __optimistic?: boolean
 }
@@ -137,6 +143,7 @@ export interface ChatSystemTurn {
   timestamp: string
   platform?: string
   streaming: boolean
+  turnId?: string
 }
 
 export type ChatMessage = ChatUserTurn | ChatAssistantTurn | ChatSystemTurn

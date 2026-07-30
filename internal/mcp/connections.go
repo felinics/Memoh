@@ -290,6 +290,33 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	}
 	authType := strings.TrimSpace(req.AuthType)
 	if authType == "" {
+		// Upsert payloads never carry auth_type — that field is owned by the
+		// OAuth flow. Defaulting an omitted value to "none" would silently
+		// strip OAuth on every save/toggle, so preserve the stored value —
+		// but ONLY within the credential's scope. The scope is the RFC 8707
+		// resource the token was minted for — origin AND path, compared
+		// through canonicalResourceURI — because the path is baked into the
+		// token's audience: a token minted for /mcp fails audience checks on
+		// /v2/mcp, so a same-origin path edit is still out of scope.
+		// Editing out of scope (other origin, other path, or stdio) falls
+		// back to "none" AND clears the stored credential: keeping it would
+		// leave GetStatus reporting has_token=true while requests go out
+		// anonymous. Clearing mirrors RevokeToken — the client registration
+		// survives, only the grant is dropped — so the UI and the wire agree
+		// that re-authorization is needed. Clear BEFORE the row update: if
+		// the update then fails, the safe side is a dropped grant, never a
+		// credential attached to a target it was not minted for.
+		if existing, getErr := s.Get(ctx, botID, id); getErr == nil {
+			if sameOAuthResource(existing, config) {
+				authType = strings.TrimSpace(existing.AuthType)
+			} else if existing.AuthType == "oauth" {
+				if err := s.queries.ClearMCPOAuthTokens(ctx, connUUID); err != nil {
+					return Connection{}, fmt.Errorf("clear oauth tokens on scope change: %w", err)
+				}
+			}
+		}
+	}
+	if authType == "" {
 		authType = "none"
 	}
 	configPayload, err := json.Marshal(config)
@@ -545,6 +572,23 @@ func normalizeMap(value map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return value
+}
+
+// sameOAuthResource reports whether an existing connection and a new config
+// are both remote and address the same OAuth resource — compared through
+// canonicalResourceURI (origin AND path), the same form the token's RFC 8707
+// resource is stored in. Any parse failure, missing URL, or type mismatch
+// counts as "different" — the safe side.
+func sameOAuthResource(existing Connection, newConfig map[string]any) bool {
+	if existing.Type == "stdio" {
+		return false
+	}
+	oldURL, _ := existing.Config["url"].(string)
+	newURL, _ := newConfig["url"].(string)
+	if strings.TrimSpace(oldURL) == "" || strings.TrimSpace(newURL) == "" {
+		return false
+	}
+	return canonicalResourceURI(oldURL) == canonicalResourceURI(newURL)
 }
 
 // inferTypeAndConfig builds internal type + config from a standard mcpServers item.

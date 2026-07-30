@@ -26,12 +26,12 @@
                   Memoh
                 </h2>
                 <Badge
-                  v-if="normalizedServerVersion"
+                  v-if="displayVersion"
                   variant="secondary"
                   size="sm"
                   class="font-medium"
                 >
-                  {{ $t('settings.versionTag', { version: normalizedServerVersion }) }}
+                  {{ $t('settings.versionTag', { version: displayVersion }) }}
                 </Badge>
               </div>
               <p class="mt-0.5 text-[13px] leading-[18px] tracking-[-0.08px] font-[360] text-muted-foreground">
@@ -67,15 +67,31 @@
       </SettingsSection>
 
       <!-- Updates: status as the row label, actions on the right — the standard
-           Settings row pattern. Detection runs at launch; here we only read the
-           cached result and offer a manual re-check (no toast on success). -->
+           Settings row pattern. Browser checks the OSS server release; Desktop
+           delegates app checks/download/install to Electron main over preload. -->
       <SettingsSection :title="$t('about.updatesSection')">
         <SettingsRow
           :label="updateLabel"
           :description="updateDesc"
         >
           <div class="flex items-center gap-1.5">
-            <template v-if="update.hasUpdate">
+            <template v-if="desktopUpdates">
+              <Button
+                v-if="desktopUpdate?.status !== 'unavailable'"
+                variant="secondary"
+                size="sm"
+                :disabled="desktopUpdateActionDisabled"
+                :loading="desktopUpdateActionLoading"
+                loading-mode="icon"
+                @click="runDesktopUpdateAction"
+              >
+                <Download v-if="desktopUpdate?.status === 'available'" />
+                <RotateCcw v-else-if="desktopUpdate?.status === 'downloaded'" />
+                <RefreshCw v-else />
+                {{ desktopUpdateActionLabel }}
+              </Button>
+            </template>
+            <template v-else-if="update.hasUpdate">
               <Button
                 v-if="update.releaseBody"
                 variant="ghost"
@@ -143,7 +159,10 @@
 
     <!-- Release notes live behind a button and scroll internally so the dialog
          never grows past the viewport. -->
-    <Dialog v-model:open="notesOpen">
+    <Dialog
+      v-if="!desktopUpdates"
+      v-model:open="notesOpen"
+    >
       <DialogContent class="flex max-h-[80vh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader class="border-b border-border px-6 py-4 text-left">
           <DialogTitle>{{ $t('about.releaseNotes') }}</DialogTitle>
@@ -210,10 +229,10 @@
 
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDark } from '@vueuse/core'
-import { BookOpen, Github, MessageSquare, RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
+import { BookOpen, Download, Github, MessageSquare, RefreshCw, RotateCcw, SlidersHorizontal } from 'lucide-vue-next'
 import {
   ActionCard,
   Badge,
@@ -233,7 +252,12 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import {
+  DesktopShellKey,
+  DesktopUpdatesKey,
+  type DesktopUpdateInfo,
+  type DesktopUpdateState,
+} from '@/lib/desktop-shell'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useSettingsStore } from '@/store/settings'
 import { useUpdateStore } from '@/store/update'
@@ -249,10 +273,18 @@ interface ResourceLink {
 const { t } = useI18n()
 const router = useRouter()
 const desktopShell = inject(DesktopShellKey, false)
+const desktopUpdates = inject(DesktopUpdatesKey, undefined)
+const desktopUpdateInfo = ref<DesktopUpdateInfo | null>(null)
+const desktopUpdate = ref<DesktopUpdateState | null>(null)
+let stopDesktopUpdateListener: (() => void) | undefined
 
 const capabilitiesStore = useCapabilitiesStore()
 const { serverVersion, commitHash } = storeToRefs(capabilitiesStore)
 const normalizedServerVersion = computed(() => (serverVersion.value ?? '').replace(/^v/i, ''))
+const displayVersion = computed(() => (
+  desktopUpdateInfo.value?.version.replace(/^v/i, '')
+  || normalizedServerVersion.value
+))
 
 const update = useUpdateStore()
 const settingsStore = useSettingsStore()
@@ -271,11 +303,37 @@ const links: ResourceLink[] = [
 // Update row copy: the label states the headline status, the description carries
 // the running version or a hint, depending on whether a check has run yet.
 const updateLabel = computed(() => {
+  if (desktopUpdates) {
+    const state = desktopUpdate.value
+    if (!state) return t('about.currentVersion', { version: displayVersion.value || '—' })
+    if (state.status === 'up-to-date') return t('about.upToDate')
+    if (['available', 'downloading', 'downloaded'].includes(state.status) && state.latestVersion) {
+      return t('about.newVersionTitle', { version: state.latestVersion })
+    }
+    if (state.status === 'error') return t('about.desktopUpdateFailed')
+    if (state.status === 'unavailable') return t('about.desktopUpdatesUnavailable')
+    return t('about.currentVersion', { version: state.currentVersion })
+  }
   if (update.hasUpdate) return t('about.newVersionTitle', { version: update.latestVersion })
   if (update.checked) return t('about.upToDate')
   return t('about.currentVersion', { version: normalizedServerVersion.value || '—' })
 })
 const updateDesc = computed(() => {
+  if (desktopUpdates) {
+    const state = desktopUpdate.value
+    if (!state || state.status === 'idle') return t('about.desktopCheckHint')
+    if (state.status === 'checking') return t('about.checking')
+    if (state.status === 'up-to-date') {
+      return t('about.currentVersion', { version: state.currentVersion })
+    }
+    if (state.status === 'available') return t('about.desktopUpdateAvailableDesc')
+    if (state.status === 'downloading') {
+      return t('about.downloadingUpdate', { progress: state.progress ?? 0 })
+    }
+    if (state.status === 'downloaded') return t('about.desktopUpdateDownloadedDesc')
+    if (state.status === 'error') return state.error || t('about.desktopUpdateFailed')
+    return t('about.desktopUpdatesUnavailableDesc')
+  }
   if (update.hasUpdate) return t('about.newVersionDesc')
   if (update.checked) {
     return normalizedServerVersion.value
@@ -283,6 +341,26 @@ const updateDesc = computed(() => {
       : ''
   }
   return t('about.checkHint')
+})
+const desktopUpdateActionLoading = computed(() => (
+  ['checking', 'downloading'].includes(desktopUpdate.value?.status ?? '')
+))
+const desktopUpdateActionDisabled = computed(() => desktopUpdateActionLoading.value)
+const desktopUpdateActionLabel = computed(() => {
+  switch (desktopUpdate.value?.status) {
+    case 'checking':
+      return t('about.checking')
+    case 'available':
+      return t('about.downloadUpdate')
+    case 'downloading':
+      return t('about.downloadingUpdate', { progress: desktopUpdate.value.progress ?? 0 })
+    case 'downloaded':
+      return t('about.restartToUpdate')
+    case 'error':
+      return t('about.retryUpdate')
+    default:
+      return t('about.checkForUpdates')
+  }
 })
 
 const notesOpen = ref(false)
@@ -314,16 +392,52 @@ function cleanMarkdownBody(body: string): string {
     })
 }
 
-onMounted(() => {
+onMounted(async () => {
   // Only resolve the current version/commit for display. Update checks are NOT
-  // run here — detection happens at app launch (see store/update.ts), so opening
-  // About never triggers a fresh check + toast.
+  // run here: browser checks stay manual and Electron main owns the native app
+  // startup check.
   void capabilitiesStore.load()
+
+  if (!desktopUpdates) return
+  stopDesktopUpdateListener = desktopUpdates.onStateChanged((state) => {
+    desktopUpdate.value = state
+  })
+  try {
+    const [info, state] = await Promise.all([
+      desktopUpdates.getInfo(),
+      desktopUpdates.getState(),
+    ])
+    desktopUpdateInfo.value = info
+    desktopUpdate.value = state
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    toast.error(`${t('about.checkFailed')}: ${reason}`)
+  }
 })
+onBeforeUnmount(() => stopDesktopUpdateListener?.())
 
 async function recheck() {
   try {
     await update.check()
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    toast.error(`${t('about.checkFailed')}: ${reason}`)
+  }
+}
+
+async function runDesktopUpdateAction() {
+  if (!desktopUpdates || desktopUpdateActionDisabled.value) return
+  try {
+    const status = desktopUpdate.value?.status
+    const state = status === 'available'
+      ? await desktopUpdates.download()
+      : status === 'downloaded'
+        ? await desktopUpdates.install()
+        : await desktopUpdates.check()
+    desktopUpdate.value = state
+    if (state.status === 'error') {
+      toast.error(`${t('about.checkFailed')}: ${state.error || t('about.desktopUpdateFailed')}`)
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     toast.error(`${t('about.checkFailed')}: ${reason}`)

@@ -1,5 +1,4 @@
-import { ref } from 'vue'
-import type { UITurn } from '@/composables/api/useChat.types'
+import { ref, type Ref } from 'vue'
 import { createTranscriptController, type TranscriptDeps } from './transcript'
 import type {
   ChatMessage,
@@ -34,7 +33,6 @@ export interface ChatViewEntry {
 interface ChatViewRegistryDeps extends Omit<TranscriptDeps, 'currentBotId' | 'sessionId'> {
   cacheLimit?: number
   isSessionStreaming?: (botId: string, sessionId: string) => boolean
-  onSnapshot?: (view: ChatViewEntry, targetSessionId: string | undefined, turns: UITurn[]) => void
   onRefreshApplied?: (view: ChatViewEntry, targetSessionId: string, latestTimestamp?: string) => void
   onEvict?: (view: ChatViewEntry) => void
 }
@@ -130,9 +128,6 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       workspaceTargetSelectionSource: ref('unset'),
       lastAccess: 0,
     }
-    transcript.setSnapshotHook((targetSessionId, turns) => {
-      deps.onSnapshot?.(view, targetSessionId, turns)
-    })
     transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp) => {
       view.initialized = true
       deps.onRefreshApplied?.(view, targetSessionId, latestTimestamp)

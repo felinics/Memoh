@@ -116,19 +116,9 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	if err := s.requireACPRuntimeOwnerWorkspaceExec(ctx, req.BotID, runtimeOwnerAccountID); err != nil {
 		return err
 	}
-	doneTurn, entered := s.tryEnterIdleSessionTurn(ctx, req.BotID, req.ThreadID)
-	if !entered {
-		return acpfeedback.New(
-			acpfeedback.CodeRuntimeBusy,
-			"runtime_busy",
-			409,
-			"chat.acp.runtimeBusy",
-			"External agent runtime is already processing a turn for this session.",
-			nil,
-		)
-	}
-	defer doneTurn()
-
+	// A concurrent turn never reaches here: admission holds the session's single
+	// active slot, so a second submission is refused with a retryable
+	// session_busy before any runtime is asked to prompt.
 	preparedAttachments, err := s.prepareACPAttachments(ctx, req)
 	if err != nil {
 		return err
@@ -232,7 +222,7 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		BotID:                    req.BotID,
 		ChatID:                   req.ChatID,
 		SessionID:                req.ThreadID,
-		StreamID:                 req.StreamID,
+		RunID:                    req.RunID,
 		RouteID:                  req.RouteID,
 		AgentID:                  agentID,
 		ProjectPath:              projectPath,

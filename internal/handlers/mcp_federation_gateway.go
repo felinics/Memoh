@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -238,17 +237,13 @@ func (g *MCPFederationGateway) ListStdioConnectionTools(ctx context.Context, bot
 	if err != nil {
 		return nil, err
 	}
-	defer sess.closeWithError(io.EOF)
+	defer sess.Close()
 
-	payload, err := sess.call(ctx, mcpgw.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcpgw.RawStringID("federated-stdio-tools-list"),
-		Method:  "tools/list",
-	})
+	result, err := sess.session.ListTools(ctx, &sdkmcp.ListToolsParams{})
 	if err != nil {
-		return nil, err
+		return nil, sess.enrichError(err)
 	}
-	return parseGatewayToolsListPayload(payload)
+	return convertSDKTools(result.Tools), nil
 }
 
 func (g *MCPFederationGateway) CallStdioConnectionTool(ctx context.Context, botID string, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error) {
@@ -256,24 +251,19 @@ func (g *MCPFederationGateway) CallStdioConnectionTool(ctx context.Context, botI
 	if err != nil {
 		return nil, err
 	}
-	defer sess.closeWithError(io.EOF)
+	defer sess.Close()
 
-	params, err := json.Marshal(map[string]any{
-		"name":      toolName,
-		"arguments": args,
+	result, err := sess.session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      strings.TrimSpace(toolName),
+		Arguments: args,
 	})
 	if err != nil {
-		return nil, err
+		return nil, sess.enrichError(err)
 	}
-	return sess.call(ctx, mcpgw.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcpgw.RawStringID("federated-stdio-tools-call"),
-		Method:  "tools/call",
-		Params:  params,
-	})
+	return wrapSDKToolResult(result)
 }
 
-func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, botID string, connection mcpgw.Connection) (*mcpSession, error) {
+func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, botID string, connection mcpgw.Connection) (*mcpStdioClient, error) {
 	if g.handler == nil {
 		return nil, errors.New("containerd handler not configured")
 	}
@@ -296,46 +286,9 @@ func (g *MCPFederationGateway) startStdioConnectionSession(ctx context.Context, 
 		Env:     normalizeStringMap(connection.Config["env"]),
 		Cwd:     strings.TrimSpace(anyToString(connection.Config["cwd"])),
 	}
-	return g.handler.startContainerdMCPCommandSession(ctx, botID, containerID, request)
-}
-
-func parseGatewayToolsListPayload(payload map[string]any) ([]mcpgw.ToolDescriptor, error) {
-	if err := mcpgw.PayloadError(payload); err != nil {
-		return nil, err
-	}
-	result, ok := payload["result"].(map[string]any)
-	if !ok {
-		return nil, errors.New("invalid tools/list result")
-	}
-	rawTools, ok := result["tools"].([]any)
-	if !ok {
-		return nil, errors.New("invalid tools/list tools field")
-	}
-	tools := make([]mcpgw.ToolDescriptor, 0, len(rawTools))
-	for _, rawTool := range rawTools {
-		item, ok := rawTool.(map[string]any)
-		if !ok {
-			continue
-		}
-		name := strings.TrimSpace(anyToString(item["name"]))
-		if name == "" {
-			continue
-		}
-		description := strings.TrimSpace(anyToString(item["description"]))
-		inputSchema, _ := item["inputSchema"].(map[string]any)
-		if inputSchema == nil {
-			inputSchema = map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			}
-		}
-		tools = append(tools, mcpgw.ToolDescriptor{
-			Name:        name,
-			Description: description,
-			InputSchema: inputSchema,
-		})
-	}
-	return tools, nil
+	// Federation sessions are short-lived and unregistered — no onClose. Memoh
+	// is the real client here, so the handshake uses the default identity.
+	return g.handler.startContainerdMCPCommandSession(ctx, botID, containerID, request, nil, defaultStdioSDKClient())
 }
 
 func convertSDKTools(items []*sdkmcp.Tool) []mcpgw.ToolDescriptor {

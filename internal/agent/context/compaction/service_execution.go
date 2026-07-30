@@ -49,13 +49,30 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 
 	// Cap the compaction input to avoid exceeding the compaction model's
-	// context window. MaxCompactTokens is typically set to 90% of the model's
-	// window. If not set, use a conservative default of 30K tokens. Prior
+	// context window. NewTriggerConfig sets MaxCompactTokens to 85% of the
+	// model's window. If not set, use a conservative default of 30K tokens. Prior
 	// summaries and message entries share this one budget — an additive prior
 	// allowance would let the combined prompt exceed the window headroom.
 	maxCompactTokens := cfg.MaxCompactTokens
 	if maxCompactTokens <= 0 {
 		maxCompactTokens = 30000
+	}
+
+	// Bound the summary output and derive the hard input budget: window minus
+	// output reserve minus the fixed system prompt and wrapper framing. A
+	// window that cannot hold even that fails closed before claiming rows.
+	maxOutputTokens := maxCompactionSummaryTokens
+	if cfg.SummaryWindowTokens > 0 {
+		maxOutputTokens = min(maxCompactionSummaryTokens, max(1, cfg.SummaryWindowTokens/10))
+		fixedPromptTokens := estimateBytesAsTokens(systemPrompt) + compactionPromptFramingTokens
+		inputBudget := cfg.SummaryWindowTokens - maxOutputTokens - fixedPromptTokens
+		if inputBudget <= 0 {
+			return Result{}, fmt.Errorf("%w: window=%d output_reserve=%d fixed_prompt=%d",
+				ErrSummaryWindowTooSmall, cfg.SummaryWindowTokens, maxOutputTokens, fixedPromptTokens)
+		}
+		if inputBudget < maxCompactTokens {
+			maxCompactTokens = inputBudget
+		}
 	}
 
 	frontier, err := NewArtifactProjection(s.queries).LoadActiveSession(ctx, ArtifactOwner{BotID: cfg.BotID, SessionID: cfg.SessionID, SessionIDKnown: true})
@@ -109,6 +126,16 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		// mark rows we cannot faithfully summarize. Leave them in raw history.
 		return Result{Status: StatusNoop}, nil
 	}
+	// Cap the rendered entries and verify the final prompt cost before any
+	// row is claimed: a selection that cannot fit (an unsplittable tool
+	// exchange larger than the budget) must fail closed with zero claims and
+	// zero provider calls instead of overflowing the summarizer window.
+	entries = capEntriesToBudget(entries, maxCompactTokens-priorTokens)
+	if cost := entriesPromptCost(entries); cost+priorTokens > maxCompactTokens {
+		return Result{}, fmt.Errorf("%w: entries=%d entry_tokens=%d max_compact_tokens=%d",
+			errCompactionInputOverflow, len(entries), cost, maxCompactTokens)
+	}
+
 	expectedCompactIDs, err := expectedCompactionClaims(rows, compactedMessageIDs)
 	if err != nil {
 		return Result{}, err
@@ -158,30 +185,16 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{}, err
 	}
 
-	// A single markable group larger than the whole budget survives trim by
-	// design (progress guarantee); truncate its rendered entries rather than
-	// send a prompt the model rejects on every pass. Entry floors can still
-	// exceed the budget when that group holds enough rows, so recheck and
-	// surface the overshoot instead of claiming an unconditional cap.
-	entries = capEntriesToBudget(entries, maxCompactTokens-priorTokens)
-	if cost := entriesPromptCost(entries); cost+priorTokens > maxCompactTokens {
-		s.logger.Warn("compaction: entry floors exceed the budget, prompt may overflow the compaction window",
-			slog.Int("entries", len(entries)),
-			slog.Int("entry_tokens", cost),
-			slog.Int("max_compact_tokens", maxCompactTokens),
-			slog.String("session_id", cfg.SessionID),
-		)
-	}
-
 	userPrompt := buildUserPrompt(priorSummaries, entries)
 
 	model := models.NewSDKChatModel(models.SDKModelConfig{
-		ClientType:     cfg.ClientType,
-		BaseURL:        cfg.BaseURL,
-		APIKey:         cfg.APIKey,
-		CodexAccountID: cfg.CodexAccountID,
-		ModelID:        cfg.ModelID,
-		HTTPClient:     cfg.HTTPClient,
+		ClientType:            cfg.ClientType,
+		BaseURL:               cfg.BaseURL,
+		APIKey:                cfg.APIKey,
+		CodexAccountID:        cfg.CodexAccountID,
+		ModelID:               cfg.ModelID,
+		ChatCompletionsCompat: cfg.ChatCompletionsCompat,
+		HTTPClient:            cfg.HTTPClient,
 	})
 
 	systemPromptDecorated, sdkMessages, _ := models.ApplyPromptCache(
@@ -193,28 +206,40 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		sdk.WithModel(model),
 		sdk.WithSystem(systemPromptDecorated),
 		sdk.WithMessages(sdkMessages),
+		sdk.WithMaxTokens(maxOutputTokens),
 	)
 	if err != nil {
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
 
-	if strings.TrimSpace(result.Text) == "" {
+	summary := strings.TrimSpace(result.Text)
+	if summary == "" {
 		_ = s.completeLog(persistCtx, logID, "error", "", errEmptySummary.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, errEmptySummary
+	}
+	if result.FinishReason != sdk.FinishReasonStop {
+		err = fmt.Errorf("%w: finish_reason=%s", errIncompleteSummary, result.FinishReason)
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, err
+	}
+	if summaryTokens := estimateSummaryReplayTokens(summary); summaryTokens >= entriesPromptCost(entries) {
+		err = fmt.Errorf("%w: summary_tokens=%d raw_tokens=%d", errIneffectiveSummary, summaryTokens, entriesPromptCost(entries))
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, err
 	}
 
 	usageJSON, _ := json.Marshal(result.Usage)
 
-	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
-	if err := s.completeLog(persistCtx, logID, "ok", result.Text, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact); err != nil {
+	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelRecordID)
+	if err := s.completeLog(persistCtx, logID, "ok", summary, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact); err != nil {
 		// The rows are already marked, but the log never reached status=ok, so
 		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
 		// here would claim a summary that was never persisted.
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
-	return Result{Status: StatusOK, Summary: result.Text, MessageCount: len(compactedMessageIDs)}, nil
+	return Result{Status: StatusOK, Summary: summary, MessageCount: len(compactedMessageIDs)}, nil
 }
 
 func expectedCompactionClaims(rows []sqlc.ListUncompactedMessagesBySessionRow, messageIDs []pgtype.UUID) ([]pgtype.UUID, error) {
@@ -259,3 +284,15 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 	}
 	return nil
 }
+
+// estimateSummaryReplayTokens meters the summary with the same byte-based
+// estimator the selection path uses, so the ineffective-summary check
+// compares like units.
+func estimateSummaryReplayTokens(summary string) int {
+	return estimateBytesAsTokens("<summary>\n" + strings.TrimSpace(summary) + "\n</summary>")
+}
+
+// compactionPromptFramingTokens is a fixed safety allowance for the user
+// prompt wrapper, entry headers, and provider framing that the byte estimator
+// does not attribute to any single entry.
+const compactionPromptFramingTokens = 512

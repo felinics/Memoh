@@ -80,6 +80,9 @@ func (s *Service) persistUserTurn(ctx context.Context, req ChatRequest) (message
 		DisplayText:             displayText,
 		SessionMode:             sessionMode,
 		RuntimeType:             runtimeType,
+		RunID:                   req.RunID,
+		TurnID:                  req.TurnID,
+		TurnPosition:            req.TurnPosition,
 	})
 }
 

@@ -190,3 +190,119 @@ func workspaceHistoryRecord(role, text, targetID, kind, name, path string) histo
 		},
 	}
 }
+
+func TestTrimDerivesGoverningMarkersForEveryKeptRun(t *testing.T) {
+	t.Parallel()
+
+	raw := []historyfrag.HistoryRecord{
+		workspaceHistoryRecord("user", strings.Repeat("work on a ", 30), "computer-a", "remote", "Computer A", "/a"),
+		workspaceHistoryRecord("user", strings.Repeat("first b step ", 30), "computer-b", "remote", "Computer B", "/b"),
+		workspaceHistoryRecord("assistant", strings.Repeat("second b step ", 30), "computer-b", "remote", "Computer B", "/b"),
+		workspaceHistoryRecord("user", "current question", "computer-b", "remote", "Computer B", "/b"),
+	}
+
+	// Budget that cuts inside Computer B's run: whichever B messages survive,
+	// the derived marker must govern them, the notice must be charged, and
+	// the declared budget must stay a hard bound.
+	budget := estimateMessageTokens(raw[3].ModelMessage) +
+		estimateMessageTokens(raw[2].ModelMessage) +
+		estimateMessageTokens(raw[2].ModelMessage)/2
+
+	messages, retained, estimated := trimMessagesAndRecordsByTokens(nil, raw, budget)
+	if estimated > budget {
+		t.Fatalf("estimated = %d, want a hard bound at budget %d including markers and notice", estimated, budget)
+	}
+	if len(messages) == 0 || !strings.Contains(messages[0].TextContent(), "trimmed") {
+		t.Fatalf("trim notice missing after a real cut: %#v", messages)
+	}
+	assertGovernedWorkspaceRuns(t, retained)
+
+	// The kept B tail must be governed by a Computer B marker even though the
+	// cut removed earlier B messages.
+	foundB := false
+	for index, record := range retained {
+		if record.Synthetic || !strings.Contains(record.ModelMessage.TextContent(), "b step") &&
+			!strings.Contains(record.ModelMessage.TextContent(), "current question") {
+			continue
+		}
+		foundB = true
+		governed := false
+		for _, earlier := range retained[:index] {
+			if earlier.Synthetic && strings.Contains(earlier.ModelMessage.TextContent(), "Computer B") {
+				governed = true
+			}
+		}
+		if !governed {
+			t.Fatalf("kept Computer B message %q without a governing marker: %#v", record.ModelMessage.TextContent(), recordTexts(retained))
+		}
+	}
+	if !foundB {
+		t.Fatalf("budget unexpectedly dropped the whole B run: %#v", recordTexts(retained))
+	}
+}
+
+func TestTrimDerivesMarkersForRequiredPullbacks(t *testing.T) {
+	t.Parallel()
+
+	required := workspaceHistoryRecord("user", strings.Repeat("required a question ", 20), "computer-a", "remote", "Computer A", "/a")
+	required.Required = true
+	raw := []historyfrag.HistoryRecord{
+		required,
+		workspaceHistoryRecord("assistant", strings.Repeat("filler between runs ", 40), "computer-a", "remote", "Computer A", "/a"),
+		workspaceHistoryRecord("user", "current on b", "computer-b", "remote", "Computer B", "/b"),
+	}
+	budget := estimateMessageTokens(raw[0].ModelMessage) + estimateMessageTokens(raw[2].ModelMessage) + estimateMessageTokens(raw[2].ModelMessage)/2
+
+	_, retained, _ := trimMessagesAndRecordsByTokens(nil, raw, budget)
+	keptRequired := false
+	for _, record := range retained {
+		if record.Required {
+			keptRequired = true
+		}
+	}
+	if !keptRequired {
+		t.Fatalf("required record dropped: %#v", recordTexts(retained))
+	}
+	assertGovernedWorkspaceRuns(t, retained)
+}
+
+func TestTrimWithoutBudgetDerivesMarkers(t *testing.T) {
+	t.Parallel()
+
+	raw := []historyfrag.HistoryRecord{
+		workspaceHistoryRecord("user", "on a", "computer-a", "remote", "Computer A", "/a"),
+		workspaceHistoryRecord("user", "to b", "computer-b", "remote", "Computer B", "/b"),
+	}
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, raw, 0)
+	if len(retained) != 4 || len(messages) != 4 {
+		t.Fatalf("retained/messages = %d/%d, want two markers and two messages", len(retained), len(messages))
+	}
+	assertGovernedWorkspaceRuns(t, retained)
+}
+
+// assertGovernedWorkspaceRuns fails when any kept message carrying an
+// execution location is not preceded by a marker for that location.
+func assertGovernedWorkspaceRuns(t *testing.T, retained []historyfrag.HistoryRecord) {
+	t.Helper()
+	current := ""
+	for index, record := range retained {
+		if record.Synthetic {
+			continue
+		}
+		target := workspaceTargetFromMetadata(record.Metadata)
+		if target == nil {
+			continue
+		}
+		governed := false
+		for _, earlier := range retained[:index] {
+			if earlier.Synthetic && strings.Contains(earlier.ModelMessage.TextContent(), "target_id=\""+target.TargetID+"\"") {
+				governed = true
+			}
+		}
+		if !governed {
+			t.Fatalf("record %d (%s) is not governed by a marker for %s: %#v", index, record.ModelMessage.TextContent(), target.TargetID, recordTexts(retained))
+		}
+		current = target.TargetID
+	}
+	_ = current
+}

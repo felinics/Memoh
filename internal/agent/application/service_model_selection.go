@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -69,18 +68,7 @@ func (s *Service) selectChatModel(ctx context.Context, req ChatRequest, botSetti
 // message in the session that recorded one, or "" when the session has no
 // model-bearing history yet.
 func (s *Service) latestSessionModelID(ctx context.Context, sessionID string) string {
-	if s.queries == nil {
-		return ""
-	}
-	pgSessionID, err := parseServiceUUID(sessionID)
-	if err != nil {
-		return ""
-	}
-	modelID, err := s.queries.GetLatestSessionModelID(ctx, pgSessionID)
-	if err != nil || !modelID.Valid {
-		return ""
-	}
-	return modelID.String()
+	return models.LatestSessionModelID(ctx, s.queries, sessionID)
 }
 
 func (s *Service) fetchChatModel(ctx context.Context, modelID string) (models.GetResponse, sqlc.Provider, error) {
@@ -135,69 +123,7 @@ func validateSelectedChatModel(model models.GetResponse, provider sqlc.Provider)
 }
 
 func isImageOnlyChatModel(model models.GetResponse, provider sqlc.Provider) bool {
-	// A model that advertises tool calling is usable as a chat model regardless
-	// of its name — this is the escape hatch for the name heuristic below, so a
-	// tool-capable model that merely looks like an image model (or a genuine
-	// multimodal chat model) is never blocked.
-	if model.HasCompatibility(models.CompatToolCall) {
-		return false
-	}
-	lowerModel := strings.ToLower(strings.TrimSpace(model.ModelID))
-	if lowerModel == "" {
-		return false
-	}
-	if isKnownStandaloneImageModelID(lowerModel) {
-		return true
-	}
-	lowerBase := strings.ToLower(providerConfigString(provider, "base_url"))
-	if strings.Contains(lowerBase, "dashscope") && strings.Contains(lowerModel, "image") {
-		return true
-	}
-	if !model.HasCompatibility(models.CompatImageOutput) {
-		return false
-	}
-	ct := models.ClientType(provider.ClientType)
-	if ct != models.ClientTypeOpenAICompletions && ct != models.ClientTypeOpenAIResponses {
-		return false
-	}
-	return strings.Contains(lowerBase, "maas.aliyuncs.com") ||
-		strings.Contains(lowerBase, "api.openai.com") ||
-		strings.Contains(lowerBase, "volces.com") ||
-		strings.Contains(lowerBase, "bytepluses.com") ||
-		strings.Contains(lowerBase, "siliconflow")
-}
-
-// isKnownStandaloneImageModelID matches the naming conventions of dedicated
-// text-to-image model families. Prefixes are kept specific enough not to catch
-// ordinary chat models that merely share a leading token — e.g. "wan2"/"wanx"
-// (Alibaba Wan image/video) rather than a bare "wan" that would also match a
-// chat model like "wanjuan-chat", and "flux-"/"flux."/"flux1" rather than a
-// bare "flux". A tool-calling model bypasses this check entirely (see
-// isImageOnlyChatModel), which is the override when a name collision is wrong.
-func isKnownStandaloneImageModelID(lowerModel string) bool {
-	return strings.HasPrefix(lowerModel, "qwen-image") ||
-		strings.HasPrefix(lowerModel, "wan2") ||
-		strings.HasPrefix(lowerModel, "wanx") ||
-		strings.HasPrefix(lowerModel, "z-image") ||
-		strings.HasPrefix(lowerModel, "flux-") ||
-		strings.HasPrefix(lowerModel, "flux.") ||
-		strings.HasPrefix(lowerModel, "flux1") ||
-		strings.HasPrefix(lowerModel, "stable-diffusion") ||
-		strings.HasPrefix(lowerModel, "gpt-image") ||
-		strings.HasPrefix(lowerModel, "dall-e") ||
-		strings.Contains(lowerModel, "seedream")
-}
-
-func providerConfigString(provider sqlc.Provider, key string) string {
-	var cfg map[string]any
-	if len(provider.Config) == 0 {
-		return ""
-	}
-	if err := json.Unmarshal(provider.Config, &cfg); err != nil {
-		return ""
-	}
-	value, _ := cfg[key].(string)
-	return strings.TrimSpace(value)
+	return models.IsImageOnlyChatModel(model, provider)
 }
 
 func matchesModelReference(model models.GetResponse, modelRef string) bool {

@@ -19,7 +19,7 @@ type ToolSessionContext struct {
 	RuntimeID           string
 	RuntimeToken        string `json:"-"`
 	SessionID           string
-	StreamID            string
+	RunID               string
 	ToolCallID          string
 	SessionType         string
 	RouteID             string

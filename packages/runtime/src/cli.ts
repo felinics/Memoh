@@ -13,6 +13,7 @@ async function main(args: string[]): Promise<void> {
   }
   const serverUrl = valueAfter(args, '--server') ?? process.env.MEMOH_RUNTIME_SERVER
   const key = valueAfter(args, '--key') ?? process.env.MEMOH_RUNTIME_KEY
+  const teamId = (valueAfter(args, '--team-id') ?? process.env.MEMOH_RUNTIME_TEAM_ID)?.trim() || undefined
   if (!serverUrl || !key) {
     throw new Error('--server and --key are required (or set MEMOH_RUNTIME_SERVER and MEMOH_RUNTIME_KEY)')
   }
@@ -25,6 +26,7 @@ async function main(args: string[]): Promise<void> {
     const session = new RuntimeSession({
       serverUrl,
       key,
+      teamId,
       workspaceBase,
       insecureLocalhost: args.includes('--insecure-localhost'),
     }, {
@@ -51,7 +53,7 @@ function valueAfter(args: string[], name: string): string | undefined {
 }
 
 function usage(exitCode: number): never {
-  console.error('Usage: memoh-runtime --server <url> --key <key> [--insecure-localhost]')
+  console.error('Usage: memoh-runtime --server <url> --key <key> [--team-id <uuid>] [--insecure-localhost]')
   process.exit(exitCode)
 }
 

@@ -8,8 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/google/uuid"
-
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
 )
 
@@ -25,11 +24,8 @@ func (s *Service) SetAllowedTeam(teamID string) {
 	s.allowedTeam = teamID
 }
 
-// newRunID mints a run identifier.
-func newRunID() string { return uuid.NewString() }
-
-// StartTurn validates the command, starts the underlying stream, and
-// returns a handle whose Events/Errs mirror the application stream.
+// StartTurn validates the command, admits it durably, starts the underlying
+// stream, and returns a handle whose Events/Errs mirror the application stream.
 func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
 	if cmd.TeamID == "" {
 		return nil, errors.New("turn: TeamID is required")
@@ -40,31 +36,36 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 	if cmd.Mode == turn.ModeDiscuss && !s.discussRuntimeConfigured() {
 		return nil, errors.New("turn: discuss runtime not configured")
 	}
-	s.turnIdempotencyOnce.Do(func() {
-		if s.turnIdempotency == nil {
-			s.turnIdempotency = newIdempotencyRegistry(idempotencyCapacity)
-		}
-	})
-	var releaseClaim func()
-	if cmd.IdempotencyKey != "" {
-		if !s.turnIdempotency.claim(cmd.TeamID, cmd.IdempotencyKey) {
-			return nil, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, cmd.IdempotencyKey)
-		}
-		teamID, key := cmd.TeamID, cmd.IdempotencyKey
-		releaseClaim = func() { s.turnIdempotency.release(teamID, key) }
-	}
+
+	// The run context is cancellable by cause so a lost owner lease can stop
+	// execution with a reason, instead of a superseded owner racing the fence it
+	// can no longer pass.
+	runCtx, cancelCause := context.WithCancelCause(ctx)
+	cancel := func() { cancelCause(context.Canceled) }
+
 	if cmd.Mode == turn.ModeDiscuss {
-		return s.startDiscussTurn(ctx, cmd, releaseClaim)
+		admission, err := s.admitTurnRun(runCtx, cmd, cancel, cancelCause, nil)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		return s.startDiscussTurn(runCtx, cmd, cancel, admission)
 	}
-	runCtx, cancel := context.WithCancel(ctx)
 
 	injectCh := make(chan turn.InjectMessage, 16)
+	admission, err := s.admitTurnRun(runCtx, cmd, cancel, cancelCause, injectCh)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
 	var (
 		assetMu sync.Mutex
 		assets  []turn.OutboundAssetRef
 	)
 
 	req := chatRequestFromCommand(cmd)
+	req.RunID = admission.RunID
 	req.InjectCh = injectCh
 	req.OutboundAssetCollector = func() []turn.OutboundAssetRef {
 		assetMu.Lock()
@@ -77,7 +78,7 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 	chunkCh, errCh := s.streamTurnChat(runCtx, req)
 
 	h := &runHandle{
-		id:     newRunID(),
+		id:     admission.RunID,
 		events: make(chan turn.Event, 16),
 		errs:   make(chan error, 1),
 		ctx:    runCtx,
@@ -88,7 +89,7 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 			defer assetMu.Unlock()
 			assets = append(assets, refs...)
 		},
-		releaseClaim: releaseClaim,
+		finishRun: s.turnRunFinisher(runCtx, admission),
 	}
 	go h.pump(cmd, chunkCh, errCh)
 	return h, nil
@@ -116,10 +117,14 @@ type runHandle struct {
 	injectMu     sync.Mutex
 	injectClosed bool
 
-	// failed records that the run ended in an error or cancellation; finish
-	// then releases the idempotency claim so a redelivery can retry.
-	failed       atomic.Bool
-	releaseClaim func()
+	// failed records that the run ended in an error or cancellation, and
+	// streamErr keeps the error itself when there was one. Both are needed
+	// because the terminal record distinguishes a run someone stopped from a run
+	// that broke, and cancellation alone cannot tell them apart. Only the pump
+	// goroutine writes either, and it reads them in its own defer.
+	failed    atomic.Bool
+	streamErr error
+	finishRun func(status string, cause error)
 }
 
 func (h *runHandle) RunID() string             { return h.id }
@@ -159,22 +164,48 @@ func (h *runHandle) closeInject() {
 	close(h.inject)
 }
 
-// finish releases the idempotency claim for runs that did not complete
-// cleanly. Runs the last thing in the pump's defer stack.
+// finish records the run's terminal state and releases the thread's slot. Runs
+// the last thing in the pump's defer stack, so nothing else in the run can still
+// be writing when the record is closed.
+//
+// Every outcome is terminal, including failure. A failed run is this invocation's
+// recorded answer, so a platform redelivery of the same external message is a
+// replay to drop rather than a turn to run again: nothing here can tell a run
+// that failed before saying anything from one that failed halfway through a
+// reply, and re-running the latter would say it twice.
 func (h *runHandle) finish() {
-	if h.failed.Load() && h.releaseClaim != nil {
-		h.releaseClaim()
+	if h.finishRun == nil {
+		return
 	}
+	if h.streamErr != nil {
+		h.finishRun(sessionruntime.RunStatusErrored, h.streamErr)
+		return
+	}
+	// Canceled with nothing on the error channel means someone stopped this run
+	// — /stop, a routed abort, or a lost owner lease — rather than it breaking.
+	if h.failed.Load() {
+		h.finishRun(sessionruntime.RunStatusAborted, nil)
+		return
+	}
+	h.finishRun(sessionruntime.RunStatusCompleted, nil)
 }
 
 // RespondToolApproval resumes a turn deferred on tool approval.
 func (s *Service) RespondToolApproval(ctx context.Context, input turn.ToolApprovalResponse, eventCh chan<- json.RawMessage) error {
-	return s.respondToolApproval(ctx, toolApprovalInputFromResponse(input), eventCh)
+	converted := toolApprovalInputFromResponse(input)
+	if handled, err := s.routeToolApprovalResponse(ctx, converted); handled || err != nil {
+		return err
+	}
+	return s.respondToolApproval(ctx, converted, eventCh)
 }
 
 // RespondUserInput resumes a turn deferred on ask_user.
 func (s *Service) RespondUserInput(ctx context.Context, input turn.UserInputResponse, eventCh chan<- json.RawMessage) error {
-	return s.respondUserInput(ctx, userInputInputFromResponse(input), eventCh)
+	converted := userInputInputFromResponse(input)
+	if handled, err := s.routeUserInputResponse(ctx, converted); handled || err != nil {
+		return err
+	}
+	return s.respondUserInput(ctx, converted, eventCh)
 }
 
 func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {
@@ -231,6 +262,9 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, 
 			}
 			if err != nil {
 				h.failed.Store(true)
+				if h.streamErr == nil {
+					h.streamErr = err
+				}
 				select {
 				case h.errs <- err:
 				case <-h.ctx.Done():

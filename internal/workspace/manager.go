@@ -645,6 +645,12 @@ func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string, g
 	if err := validateBotID(botID); err != nil {
 		return err
 	}
+	containerID := m.resolveContainerID(ctx, botID)
+	if _, err := m.service.GetContainer(ctx, containerID); err == nil {
+		return nil
+	} else if !ctr.IsNotFound(err) {
+		return err
+	}
 	spec, err := m.buildWorkspaceContainerSpec(ctx, botID, gpu)
 	if err != nil {
 		return err
@@ -666,7 +672,7 @@ func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string, g
 	}
 
 	_, err = m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
-		ID:              ContainerPrefix + botID,
+		ID:              containerID,
 		ImageRef:        image,
 		ImagePullPolicy: m.cfg.EffectiveImagePullPolicy(),
 		StorageRef:      ctr.StorageRef{Driver: m.cfg.Snapshotter, Kind: "active"},
@@ -752,6 +758,8 @@ func (m *Manager) StartWithResolvedConfig(ctx context.Context, botID, image stri
 
 func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig) error {
 	containerID := m.resolveContainerID(ctx, botID)
+	unlock := m.lockContainer(containerID)
+	defer unlock()
 
 	// Before creating a new container, check for an orphaned snapshot
 	// (container deleted but snapshot with /data survived). Export /data

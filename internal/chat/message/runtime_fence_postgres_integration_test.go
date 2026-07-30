@@ -57,9 +57,7 @@ func TestPostgresRuntimeFenceUnfencedReplacementIsAtomic(t *testing.T) {
 	_, handled, err := service.PersistRound(ctx, []PersistInput{{
 		BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
 		Content: []byte(`{"role":"assistant","content":"must roll back"}`), SkipHistoryTurn: true,
-	}}, RoundPersistenceOptions{Replacement: &TurnReplacement{
-		OldTurnID: uuid.NewString(), RequestMessageID: user.ID, Reason: "retry",
-	}})
+	}}, RoundPersistenceOptions{Replacement: runtimeFenceReplacement(oldTurn, uuid.NewString(), user.ID, "retry")})
 	if err == nil || !handled {
 		t.Fatalf("invalid local replacement = handled %v, error %v", handled, err)
 	}
@@ -71,13 +69,12 @@ func TestPostgresRuntimeFenceUnfencedReplacementIsAtomic(t *testing.T) {
 		t.Fatalf("failed local replacement left orphan messages: before=%d after=%d", beforeFailedReplacement, afterFailedReplacement)
 	}
 
+	successfulReplacement := runtimeFenceReplacement(oldTurn, oldTurn.ID, user.ID, "retry")
+	successfulReplacement.SessionMetadata = map[string]any{"forked_from": map[string]any{"fork_message_id": "assistant-parent"}}
 	replacement, handled, err := service.PersistRound(ctx, []PersistInput{{
 		BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
 		Content: []byte(`{"role":"assistant","content":"replacement"}`), SkipHistoryTurn: true,
-	}}, RoundPersistenceOptions{Replacement: &TurnReplacement{
-		OldTurnID: oldTurn.ID, RequestMessageID: user.ID, Reason: "retry",
-		SessionMetadata: map[string]any{"forked_from": map[string]any{"fork_message_id": "assistant-parent"}},
-	}})
+	}}, RoundPersistenceOptions{Replacement: successfulReplacement})
 	if err != nil || !handled || len(replacement) != 1 {
 		t.Fatalf("persist local replacement = (%d, %v, %v), want (1, true, nil)", len(replacement), handled, err)
 	}
@@ -130,11 +127,7 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 		Role:            "assistant",
 		Content:         []byte(`{"role":"assistant","content":"must roll back"}`),
 		SkipHistoryTurn: true,
-	}}, RoundPersistenceOptions{Replacement: &TurnReplacement{
-		OldTurnID:        uuid.NewString(),
-		RequestMessageID: persisted[0].ID,
-		Reason:           "retry",
-	}})
+	}}, RoundPersistenceOptions{Replacement: runtimeFenceReplacement(oldTurn, uuid.NewString(), persisted[0].ID, "retry")})
 	if err == nil || !handled {
 		t.Fatalf("invalid atomic replacement = handled %v, error %v", handled, err)
 	}
@@ -145,17 +138,14 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	if afterFailedReplacement != beforeFailedReplacement {
 		t.Fatalf("failed replacement left orphan messages: before=%d after=%d", beforeFailedReplacement, afterFailedReplacement)
 	}
+	successfulReplacement := runtimeFenceReplacement(oldTurn, oldTurn.ID, persisted[0].ID, "retry")
 	replacement, handled, err := service.PersistRound(owner2, []PersistInput{{
 		BotID:           botID.String(),
 		SessionID:       sessionID.String(),
 		Role:            "assistant",
 		Content:         []byte(`{"role":"assistant","content":"owner two"}`),
 		SkipHistoryTurn: true,
-	}}, RoundPersistenceOptions{Replacement: &TurnReplacement{
-		OldTurnID:        oldTurn.ID,
-		RequestMessageID: persisted[0].ID,
-		Reason:           "retry",
-	}})
+	}}, RoundPersistenceOptions{Replacement: successfulReplacement})
 	if err != nil || !handled || len(replacement) != 1 {
 		t.Fatalf("persist owner-two replacement = (%d, %v, %v), want (1, true, nil)", len(replacement), handled, err)
 	}
@@ -167,7 +157,16 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	if !errors.Is(err, runtimefence.ErrStale) {
 		t.Fatalf("stale PersistRound error = %v, want ErrStale", err)
 	}
-	if _, err := service.ReplaceTurn(owner1, sessionID.String(), oldTurn.ID, persisted[0].ID, replacement[0].ID, "retry"); !errors.Is(err, runtimefence.ErrStale) {
+	if _, err := service.ReplaceTurn(
+		owner1,
+		sessionID.String(),
+		oldTurn.ID,
+		successfulReplacement.ReplacementTurnID,
+		successfulReplacement.ReplacementTurnPosition,
+		persisted[0].ID,
+		replacement[0].ID,
+		"retry",
+	); !errors.Is(err, runtimefence.ErrStale) {
 		t.Fatalf("stale ReplaceTurn error = %v, want ErrStale", err)
 	}
 
@@ -177,6 +176,17 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	}
 	if len(visible) != 2 || visible[0].ID != persisted[0].ID || visible[1].ID != replacement[0].ID {
 		t.Fatalf("visible messages changed after stale writes: %#v", visible)
+	}
+}
+
+func runtimeFenceReplacement(oldTurn HistoryTurn, oldTurnID, requestMessageID, reason string) *TurnReplacement {
+	position := oldTurn.Position + 1
+	return &TurnReplacement{
+		OldTurnID:               oldTurnID,
+		ReplacementTurnID:       uuid.NewString(),
+		ReplacementTurnPosition: &position,
+		RequestMessageID:        requestMessageID,
+		Reason:                  reason,
 	}
 }
 

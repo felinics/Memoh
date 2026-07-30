@@ -9,8 +9,8 @@ func TestSessionCompactionWaitsForEveryOutboundAssetLinker(t *testing.T) {
 	t.Parallel()
 
 	resolver := &Service{}
-	releaseFirst := resolver.DeferSessionCompaction("bot-1", "session-1", "stream-1")
-	releaseSecond := resolver.DeferSessionCompaction("bot-1", "session-1", "stream-2")
+	releaseFirst := resolver.DeferSessionCompaction("bot-1", "session-1", "run-1")
+	releaseSecond := resolver.DeferSessionCompaction("bot-1", "session-1", "run-2")
 	compactionEntered := make(chan struct{})
 	releaseCompaction := make(chan struct{})
 	go func() {
@@ -31,7 +31,7 @@ func TestWaitingSessionCompactionBlocksLaterAssetLinkers(t *testing.T) {
 	t.Parallel()
 
 	resolver := &Service{}
-	releaseFirst := resolver.DeferSessionCompaction("bot-1", "session-1", "stream-1")
+	releaseFirst := resolver.DeferSessionCompaction("bot-1", "session-1", "run-1")
 	compactionEntered := make(chan struct{})
 	releaseCompaction := make(chan struct{})
 	go func() {
@@ -44,7 +44,7 @@ func TestWaitingSessionCompactionBlocksLaterAssetLinkers(t *testing.T) {
 
 	secondEntered := make(chan func(), 1)
 	go func() {
-		secondEntered <- resolver.DeferSessionCompaction("bot-1", "session-1", "stream-2")
+		secondEntered <- resolver.DeferSessionCompaction("bot-1", "session-1", "run-2")
 	}()
 	releaseFirst()
 	assertChannelReady(t, compactionEntered, "waiting compaction did not acquire the session gate")
@@ -64,14 +64,14 @@ func TestSynchronousSessionCompactionSuspendsOnlyItsOwnAssetLinker(t *testing.T)
 	t.Parallel()
 
 	resolver := &Service{}
-	releaseCurrent := resolver.DeferSessionCompaction("bot-1", "session-1", "stream-current")
-	releaseOther := resolver.DeferSessionCompaction("bot-1", "session-1", "stream-other")
+	releaseCurrent := resolver.DeferSessionCompaction("bot-1", "session-1", "run-current")
+	releaseOther := resolver.DeferSessionCompaction("bot-1", "session-1", "run-other")
 	compactionEntered := make(chan func(), 1)
 	go func() {
-		compactionEntered <- resolver.enterSessionCompactionForStream("bot-1", "session-1", "stream-current")
+		compactionEntered <- resolver.enterSessionCompactionForRun("bot-1", "session-1", "run-current")
 	}()
 
-	assertChannelBlocked(t, compactionEntered, "sync compaction ignored another stream's asset linker")
+	assertChannelBlocked(t, compactionEntered, "sync compaction ignored another run.s asset linker")
 	releaseOther()
 	var finishCompaction func()
 	select {
@@ -87,7 +87,7 @@ func TestSynchronousSessionCompactionSuspendsOnlyItsOwnAssetLinker(t *testing.T)
 		close(asyncEntered)
 		done()
 	}()
-	assertChannelBlocked(t, asyncEntered, "sync compaction did not restore its stream's asset linker")
+	assertChannelBlocked(t, asyncEntered, "sync compaction did not restore its run.s asset linker")
 	releaseCurrent()
 	assertChannelReady(t, asyncEntered, "restored asset linker did not release async compaction")
 }
@@ -96,21 +96,21 @@ func TestConcurrentSynchronousSessionCompactionsDoNotDeadlockUpgradingReaders(t 
 	t.Parallel()
 
 	resolver := &Service{}
-	releaseFirst := resolver.DeferSessionCompaction("bot-1", "session-1", "stream-1")
-	releaseSecond := resolver.DeferSessionCompaction("bot-1", "session-1", "stream-2")
+	releaseFirst := resolver.DeferSessionCompaction("bot-1", "session-1", "run-1")
+	releaseSecond := resolver.DeferSessionCompaction("bot-1", "session-1", "run-2")
 	type enteredCompaction struct {
 		release       chan struct{}
 		done          chan struct{}
 		releaseReader func()
 	}
 	entered := make(chan enteredCompaction, 2)
-	releaseReaders := map[string]func(){"stream-1": releaseFirst, "stream-2": releaseSecond}
-	for _, streamID := range []string{"stream-1", "stream-2"} {
+	releaseReaders := map[string]func(){"run-1": releaseFirst, "run-2": releaseSecond}
+	for _, runID := range []string{"run-1", "run-2"} {
 		go func() {
-			finish := resolver.enterSessionCompactionForStream("bot-1", "session-1", streamID)
+			finish := resolver.enterSessionCompactionForRun("bot-1", "session-1", runID)
 			release := make(chan struct{})
 			done := make(chan struct{})
-			entered <- enteredCompaction{release: release, done: done, releaseReader: releaseReaders[streamID]}
+			entered <- enteredCompaction{release: release, done: done, releaseReader: releaseReaders[runID]}
 			<-release
 			finish()
 			close(done)

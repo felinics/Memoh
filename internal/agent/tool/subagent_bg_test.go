@@ -290,7 +290,7 @@ func (*fakeAgentMessageService) GetLatestVisibleTurnBySession(context.Context, s
 	return messagepkg.HistoryTurn{}, nil
 }
 
-func (*fakeAgentMessageService) ReplaceTurn(context.Context, string, string, string, string, string) (messagepkg.HistoryTurn, error) {
+func (*fakeAgentMessageService) ReplaceTurn(context.Context, string, string, string, *int64, string, string, string) (messagepkg.HistoryTurn, error) {
 	return messagepkg.HistoryTurn{}, nil
 }
 
@@ -312,6 +312,11 @@ func (*fakeAgentMessageService) LinkAssets(context.Context, string, []messagepkg
 
 func newAgentControlProvider(t *testing.T, agent *fakeSpawnAgent) (*SpawnProvider, *background.Manager, *fakeAgentSessionService, *fakeAgentMessageService) {
 	t.Helper()
+	return newAgentControlProviderWithAdmitter(t, agent, &fakeSubagentAdmitter{})
+}
+
+func newAgentControlProviderWithAdmitter(t *testing.T, agent *fakeSpawnAgent, admitter *fakeSubagentAdmitter) (*SpawnProvider, *background.Manager, *fakeAgentSessionService, *fakeAgentMessageService) {
+	t.Helper()
 	mgr := background.New(nil)
 	sessionSvc := &fakeAgentSessionService{}
 	messageSvc := newFakeAgentMessageService()
@@ -319,6 +324,7 @@ func newAgentControlProvider(t *testing.T, agent *fakeSpawnAgent) (*SpawnProvide
 	p.sessionService = sessionSvc
 	p.SetAgent(agent)
 	p.SetMessageService(messageSvc)
+	p.SetSubagentAdmitter(admitter)
 	p.modelResolver = func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
 		return resolvedSubagentModel{
 			Model:            &sdk.Model{},

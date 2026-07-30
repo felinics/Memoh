@@ -12,11 +12,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	sdkjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcptools "github.com/memohai/memoh/internal/mcp"
@@ -39,24 +40,244 @@ type MCPStdioResponse struct {
 	Tools        []string `json:"tools,omitempty"`
 }
 
-// mcpSession represents an MCP session over stdio.
-type mcpSession struct {
-	stdin      io.WriteCloser
-	stdout     io.ReadCloser
-	stderr     io.ReadCloser
+// mcpStdioClient owns an SDK client session connected to an MCP process running
+// inside the bot's workspace container. The go-sdk speaks the protocol (handshake,
+// request correlation); this wrapper owns what the SDK cannot see: the process's
+// stderr tail and exit code for error attribution, and teardown of the bridge
+// exec stream.
+//
+// The process runs container-side, so the SDK's CommandTransport (local os/exec)
+// is unusable here — the session rides on IOTransport over the bridge pipes.
+type mcpStdioClient struct {
+	session    *sdkmcp.ClientSession
 	stderrTail *mcpStderrTail
-	readCtx    context.Context
-	cancelRead context.CancelFunc
-	initMu     sync.Mutex
-	initState  mcpSessionInitState
-	initWait   chan struct{}
-	pendingMu  sync.Mutex
-	pending    map[string]chan *sdkjsonrpc.Response
-	conn       sdkmcp.Connection
-	closed     chan struct{}
-	closeOnce  sync.Once
-	closeErr   error
-	onClose    func()
+	// exitCode is -1 until the bridge reports the process's EXIT frame.
+	exitCode    atomic.Int32
+	streamClose func()
+
+	done      chan struct{}
+	closeOnce sync.Once
+	onClose   func()
+
+	// inflight maps the EXTERNAL request ID of each in-flight dispatched call
+	// to its cancel func, so notifications/cancelled from the proxy client can
+	// reach it. Cancelling the call's ctx makes the SDK send the server a
+	// spec-compliant cancelled notification carrying the INTERNAL call ID (the
+	// SDK transport's call() does this on ctx cancel) — the raw-forward path
+	// the pre-migration client used is gone because the SDK owns the transport.
+	inflight sync.Map // string(external request ID) → context.CancelFunc
+}
+
+// Close shuts the SDK session (which closes the stdio pipes), the bridge exec
+// stream, and fires onClose. Idempotent; also invoked by the Wait goroutine when
+// the server side dies on its own.
+func (c *mcpStdioClient) Close() {
+	c.closeOnce.Do(func() {
+		close(c.done)
+		if c.session != nil {
+			_ = c.session.Close()
+		}
+		if c.streamClose != nil {
+			c.streamClose()
+		}
+		if c.onClose != nil {
+			c.onClose()
+		}
+	})
+}
+
+// enrichError turns a bare transport failure (usually io.EOF from a dead
+// process) into an actionable message: the exit code when the bridge reported
+// one, plus the captured stderr tail. Without this, a container-side
+// "command not found" surfaced to users as the single word "EOF".
+func (c *mcpStdioClient) enrichError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var b strings.Builder
+	code := c.exitCode.Load()
+	if code >= 0 {
+		// Keep the original failure alongside the exit diagnostics: a real
+		// protocol error that races the process death (server answers "tool not
+		// found", then crashes) must not be swallowed by the exit code. io.EOF
+		// itself adds nothing beyond "the process died", so it stays out.
+		fmt.Fprintf(&b, "process exited with code %d", code) //nolint:gosec // G705: goes out as a JSON-RPC result via c.JSON — JSON-encoded, never HTML
+		if !errors.Is(err, io.EOF) {
+			b.WriteString(": ")
+			b.WriteString(err.Error())
+		}
+	} else {
+		b.WriteString(err.Error())
+	}
+	if tail := strings.TrimSpace(c.stderrTail.String()); tail != "" {
+		b.WriteString(": ")
+		b.WriteString(tail)
+	}
+	// No diagnostics captured → hand the original error back untouched so
+	// errors.Is/As chains keep working.
+	if b.String() == err.Error() {
+		return err
+	}
+	return errors.New(b.String())
+}
+
+// errMCPMethodNotFound marks an unsupported method on the stdio proxy endpoint
+// so the handler can answer -32601 (method not found) instead of -32603.
+var errMCPMethodNotFound = errors.New("method not found")
+
+// dispatch answers a raw JSON-RPC request from the external proxy endpoint using
+// the typed SDK session. The go-sdk client offers no raw passthrough (its read
+// loop owns the transport, so interleaving hand-correlated frames is unsafe),
+// so the surface is a method table instead of arbitrary forwarding. It covers
+// the FULL standard MCP client surface the SDK speaks — anything the replayed
+// initialize can advertise (tools, prompts, resources, completion, logging,
+// subscriptions) is callable here; -32601 is reserved for genuinely unknown
+// (experimental/custom) methods.
+func (c *mcpStdioClient) dispatch(ctx context.Context, req mcptools.JSONRPCRequest) (map[string]any, error) {
+	switch strings.TrimSpace(req.Method) {
+	case "ping":
+		return c.sdkCall(ctx, req, nil, func(ctx context.Context) (any, error) {
+			return map[string]any{}, c.session.Ping(ctx, &sdkmcp.PingParams{})
+		})
+	case "initialize":
+		// The session already handshook at connect; replay the stored result.
+		result := c.session.InitializeResult()
+		if result == nil {
+			return jsonrpcResultPayload(req.ID, map[string]any{}), nil
+		}
+		return jsonrpcResultPayload(req.ID, result), nil
+	case "tools/list":
+		params := &sdkmcp.ListToolsParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ListTools(ctx, params)
+		})
+	case "tools/call":
+		params := &sdkmcp.CallToolParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			params.Name = strings.TrimSpace(params.Name)
+			return c.session.CallTool(ctx, params)
+		})
+	case "prompts/list":
+		params := &sdkmcp.ListPromptsParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ListPrompts(ctx, params)
+		})
+	case "prompts/get":
+		params := &sdkmcp.GetPromptParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.GetPrompt(ctx, params)
+		})
+	case "resources/list":
+		params := &sdkmcp.ListResourcesParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ListResources(ctx, params)
+		})
+	case "resources/templates/list":
+		params := &sdkmcp.ListResourceTemplatesParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ListResourceTemplates(ctx, params)
+		})
+	case "resources/read":
+		params := &sdkmcp.ReadResourceParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.ReadResource(ctx, params)
+		})
+	case "resources/subscribe":
+		params := &sdkmcp.SubscribeParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return map[string]any{}, c.session.Subscribe(ctx, params)
+		})
+	case "resources/unsubscribe":
+		params := &sdkmcp.UnsubscribeParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return map[string]any{}, c.session.Unsubscribe(ctx, params)
+		})
+	case "completion/complete":
+		params := &sdkmcp.CompleteParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return c.session.Complete(ctx, params)
+		})
+	case "logging/setLevel":
+		params := &sdkmcp.SetLoggingLevelParams{}
+		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
+			return map[string]any{}, c.session.SetLoggingLevel(ctx, params)
+		})
+	default:
+		return nil, errMCPMethodNotFound
+	}
+}
+
+// sdkCall runs one dispatch case: decode the raw JSON-RPC params into the typed
+// SDK params (nil for parameterless methods), invoke, then wrap the result —
+// or enrich the failure with process diagnostics (exit code + stderr tail).
+func (c *mcpStdioClient) sdkCall(ctx context.Context, req mcptools.JSONRPCRequest, params any, invoke func(context.Context) (any, error)) (map[string]any, error) {
+	if params != nil && len(req.Params) > 0 {
+		if err := json.Unmarshal(req.Params, params); err != nil {
+			return nil, fmt.Errorf("invalid %s params: %w", req.Method, err)
+		}
+	}
+	// Register under the external ID BEFORE invoking: notifications/cancelled
+	// arrives on a separate HTTP request while this call is still in flight.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if len(req.ID) > 0 {
+		key := string(req.ID)
+		c.inflight.Store(key, cancel)
+		defer c.inflight.Delete(key)
+	}
+	result, err := invoke(ctx)
+	if err != nil {
+		// A JSON-RPC error from the downstream server must keep its code — the
+		// proxy's callers distinguish invalid params (-32602), missing tools,
+		// and server-defined -320xx failures by it. It also needs no exit
+		// diagnostics: the server answered, so it is alive by definition.
+		var wireErr *jsonrpc.Error
+		if errors.As(err, &wireErr) {
+			return nil, wireErr
+		}
+		return nil, c.enrichError(err)
+	}
+	if result == nil {
+		result = map[string]any{}
+	}
+	return jsonrpcResultPayload(req.ID, result), nil
+}
+
+// cancelInFlight handles notifications/cancelled from the proxy client: the
+// referenced external request ID resolves to an in-flight dispatched call and
+// its ctx is cancelled (the SDK then notifies the server itself, with the
+// internal call ID). Unknown or already-finished IDs are no-ops, matching the
+// spec's allowance to ignore cancellations for requests that no longer exist.
+func (c *mcpStdioClient) cancelInFlight(req mcptools.JSONRPCRequest) {
+	var params struct {
+		RequestID json.RawMessage `json:"requestId"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil || len(params.RequestID) == 0 {
+		return
+	}
+	if cancel, ok := c.inflight.Load(string(params.RequestID)); ok {
+		cancel.(context.CancelFunc)()
+	}
+}
+
+// jsonrpcResultPayload wraps a typed SDK result into a standard JSON-RPC
+// envelope via a JSON round-trip.
+func jsonrpcResultPayload(id json.RawMessage, result any) map[string]any {
+	var idValue any
+	if len(id) > 0 {
+		_ = json.Unmarshal(id, &idValue)
+	}
+	var resultValue any
+	if result != nil {
+		if raw, err := json.Marshal(result); err == nil {
+			_ = json.Unmarshal(raw, &resultValue)
+		}
+	}
+	return map[string]any{
+		"jsonrpc": "2.0",
+		"id":      idValue,
+		"result":  resultValue,
+	}
 }
 
 type mcpStderrTail struct {
@@ -86,409 +307,6 @@ func (t *mcpStderrTail) String() string {
 	return strings.Join(t.lines, "\n")
 }
 
-func (s *mcpSession) errorWithStderr(err error) error {
-	if err == nil {
-		err = io.EOF
-	}
-	stderr := strings.TrimSpace(s.stderrTail.String())
-	if stderr == "" {
-		return err
-	}
-	return fmt.Errorf("%w: %s", err, stderr)
-}
-
-type mcpSessionInitState uint8
-
-const (
-	mcpSessionInitStateNone mcpSessionInitState = iota
-	mcpSessionInitStateInitializing
-	mcpSessionInitStateInitialized
-	mcpSessionInitStateReady
-)
-
-func (s *mcpSession) closeWithError(err error) {
-	s.closeOnce.Do(func() {
-		s.closeErr = err
-		close(s.closed)
-		if s.cancelRead != nil {
-			s.cancelRead()
-		}
-		s.pendingMu.Lock()
-		for _, ch := range s.pending {
-			close(ch)
-		}
-		s.pending = map[string]chan *sdkjsonrpc.Response{}
-		s.pendingMu.Unlock()
-		if s.conn != nil {
-			_ = s.conn.Close()
-		}
-		if s.stdin != nil {
-			_ = s.stdin.Close()
-		}
-		if s.stdout != nil {
-			_ = s.stdout.Close()
-		}
-		if s.stderr != nil {
-			_ = s.stderr.Close()
-		}
-		if s.onClose != nil {
-			s.onClose()
-		}
-	})
-}
-
-func (s *mcpSession) readLoop() {
-	if s.conn == nil {
-		s.closeWithError(io.EOF)
-		return
-	}
-	for {
-		msg, err := s.conn.Read(s.readCtx)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				s.closeWithError(io.EOF)
-				return
-			}
-			s.closeWithError(err)
-			return
-		}
-		resp, ok := msg.(*sdkjsonrpc.Response)
-		if !ok || !resp.ID.IsValid() {
-			continue
-		}
-		id := sdkIDKey(resp.ID)
-		if id == "" {
-			continue
-		}
-		s.pendingMu.Lock()
-		ch, ok := s.pending[id]
-		if ok {
-			delete(s.pending, id)
-		}
-		s.pendingMu.Unlock()
-		if ok {
-			ch <- resp
-			close(ch)
-		}
-	}
-}
-
-func (s *mcpSession) call(ctx context.Context, req mcptools.JSONRPCRequest) (map[string]any, error) {
-	method := strings.TrimSpace(req.Method)
-	if method == "initialize" {
-		payload, err := s.callRaw(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		// If the server accepted our initialize, advance state so
-		// ensureInitialized will only send notifications/initialized next time.
-		if _, hasError := payload["error"]; !hasError {
-			s.initMu.Lock()
-			if s.initState < mcpSessionInitStateInitialized {
-				s.initState = mcpSessionInitStateInitialized
-			}
-			s.initMu.Unlock()
-		}
-		return payload, nil
-	}
-	if method != "notifications/initialized" {
-		if err := s.ensureInitialized(ctx); err != nil {
-			return nil, err
-		}
-	}
-	return s.callRaw(ctx, req)
-}
-
-func (s *mcpSession) callRaw(ctx context.Context, req mcptools.JSONRPCRequest) (map[string]any, error) {
-	targetID, err := parseRawJSONRPCID(req.ID)
-	if err != nil {
-		return nil, err
-	}
-	target := sdkIDKey(targetID)
-	if target == "" {
-		return nil, errors.New("missing request id")
-	}
-
-	respCh := make(chan *sdkjsonrpc.Response, 1)
-	s.pendingMu.Lock()
-	s.pending[target] = respCh
-	s.pendingMu.Unlock()
-
-	callReq := &sdkjsonrpc.Request{
-		ID:     targetID,
-		Method: req.Method,
-		Params: req.Params,
-	}
-	if err := s.conn.Write(ctx, callReq); err != nil {
-		s.pendingMu.Lock()
-		delete(s.pending, target)
-		s.pendingMu.Unlock()
-		return nil, s.errorWithStderr(err)
-	}
-
-	select {
-	case resp, ok := <-respCh:
-		if !ok {
-			if s.closeErr != nil {
-				return nil, s.errorWithStderr(s.closeErr)
-			}
-			return nil, io.EOF
-		}
-		return sdkResponsePayload(resp)
-	case <-s.closed:
-		if s.closeErr != nil {
-			return nil, s.errorWithStderr(s.closeErr)
-		}
-		return nil, io.EOF
-	case <-ctx.Done():
-		s.pendingMu.Lock()
-		delete(s.pending, target)
-		s.pendingMu.Unlock()
-		return nil, ctx.Err()
-	}
-}
-
-// sdkResponsePayload wraps an SDK JSON-RPC response into a standard JSON-RPC
-// envelope ({"jsonrpc":"2.0","id":...,"result":...} or "error":...).
-func sdkResponsePayload(resp *sdkjsonrpc.Response) (map[string]any, error) {
-	if resp == nil {
-		return nil, io.EOF
-	}
-	if resp.Error != nil {
-		code := int64(-32603)
-		message := strings.TrimSpace(resp.Error.Error())
-		wireErr := &sdkjsonrpc.Error{}
-		if errors.As(resp.Error, &wireErr) {
-			code = wireErr.Code
-			message = strings.TrimSpace(wireErr.Message)
-		}
-		if message == "" {
-			message = "internal error"
-		}
-		return map[string]any{
-			"jsonrpc": "2.0",
-			"id":      sdkIDRaw(resp.ID),
-			"error": map[string]any{
-				"code":    code,
-				"message": message,
-			},
-		}, nil
-	}
-	var result any
-	if len(resp.Result) > 0 {
-		if err := json.Unmarshal(resp.Result, &result); err != nil {
-			return nil, err
-		}
-	}
-	return map[string]any{
-		"jsonrpc": "2.0",
-		"id":      sdkIDRaw(resp.ID),
-		"result":  result,
-	}, nil
-}
-
-func sdkIDRaw(id sdkjsonrpc.ID) any {
-	if !id.IsValid() {
-		return nil
-	}
-	return id.Raw()
-}
-
-func (s *mcpSession) notify(ctx context.Context, req mcptools.JSONRPCRequest) error {
-	if s.conn == nil {
-		return io.EOF
-	}
-	return s.conn.Write(ctx, &sdkjsonrpc.Request{
-		Method: req.Method,
-		Params: req.Params,
-	})
-}
-
-func (s *mcpSession) ensureInitialized(ctx context.Context) error {
-	for {
-		s.initMu.Lock()
-		state := s.initState
-
-		switch state {
-		case mcpSessionInitStateReady:
-			s.initMu.Unlock()
-			return nil
-		case mcpSessionInitStateInitializing:
-			waitCh := s.initWait
-			s.initMu.Unlock()
-			if waitCh == nil {
-				continue
-			}
-			select {
-			case <-waitCh:
-				continue
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-s.closed:
-				if s.closeErr != nil {
-					return s.closeErr
-				}
-				return io.EOF
-			}
-		case mcpSessionInitStateInitialized:
-			waitCh := make(chan struct{})
-			s.initState = mcpSessionInitStateInitializing
-			s.initWait = waitCh
-			s.initMu.Unlock()
-
-			err := s.sendInitializedNotification(ctx)
-
-			s.initMu.Lock()
-			if err == nil {
-				s.initState = mcpSessionInitStateReady
-			} else {
-				s.initState = mcpSessionInitStateInitialized
-			}
-			s.initWait = nil
-			close(waitCh)
-			s.initMu.Unlock()
-
-			if err != nil {
-				return err
-			}
-			return nil
-		default:
-			waitCh := make(chan struct{})
-			s.initState = mcpSessionInitStateInitializing
-			s.initWait = waitCh
-			s.initMu.Unlock()
-
-			nextState, err := s.initializeHandshake(ctx)
-
-			s.initMu.Lock()
-			s.initState = nextState
-			s.initWait = nil
-			close(waitCh)
-			s.initMu.Unlock()
-
-			if err != nil {
-				return err
-			}
-			if nextState == mcpSessionInitStateReady {
-				return nil
-			}
-		}
-	}
-}
-
-func (s *mcpSession) initializeHandshake(ctx context.Context) (mcpSessionInitState, error) {
-	initID, _ := sdkjsonrpc.MakeID("init")
-	params, _ := json.Marshal(map[string]any{
-		"protocolVersion": "2025-06-18",
-		"capabilities":    map[string]any{},
-		"clientInfo": map[string]any{
-			"name":    "memoh",
-			"version": "1.0.0",
-		},
-	})
-	initResp, err := s.invokeCall(ctx, &sdkjsonrpc.Request{
-		ID:     initID,
-		Method: "initialize",
-		Params: params,
-	})
-	if err != nil {
-		return mcpSessionInitStateNone, err
-	}
-	if initResp.Error != nil {
-		return mcpSessionInitStateNone, initResp.Error
-	}
-	if err := s.sendInitializedNotification(ctx); err != nil {
-		return mcpSessionInitStateInitialized, err
-	}
-	return mcpSessionInitStateReady, nil
-}
-
-func (s *mcpSession) sendInitializedNotification(ctx context.Context) error {
-	if s.conn == nil {
-		return io.EOF
-	}
-	return s.conn.Write(ctx, &sdkjsonrpc.Request{
-		Method: "notifications/initialized",
-	})
-}
-
-func (s *mcpSession) invokeCall(ctx context.Context, req *sdkjsonrpc.Request) (*sdkjsonrpc.Response, error) {
-	if s.conn == nil {
-		return nil, io.EOF
-	}
-	if req == nil || !req.ID.IsValid() {
-		return nil, errors.New("missing request id")
-	}
-	key := sdkIDKey(req.ID)
-	if key == "" {
-		return nil, errors.New("invalid request id")
-	}
-
-	respCh := make(chan *sdkjsonrpc.Response, 1)
-	s.pendingMu.Lock()
-	s.pending[key] = respCh
-	s.pendingMu.Unlock()
-
-	if err := s.conn.Write(ctx, req); err != nil {
-		s.removePending(key)
-		return nil, err
-	}
-
-	select {
-	case resp, ok := <-respCh:
-		if !ok {
-			if s.closeErr != nil {
-				return nil, s.closeErr
-			}
-			return nil, io.EOF
-		}
-		return resp, nil
-	case <-s.closed:
-		if s.closeErr != nil {
-			return nil, s.closeErr
-		}
-		return nil, io.EOF
-	case <-ctx.Done():
-		s.removePending(key)
-		return nil, ctx.Err()
-	}
-}
-
-func (s *mcpSession) removePending(key string) {
-	if strings.TrimSpace(key) == "" {
-		return
-	}
-	s.pendingMu.Lock()
-	delete(s.pending, key)
-	s.pendingMu.Unlock()
-}
-
-func parseRawJSONRPCID(raw json.RawMessage) (sdkjsonrpc.ID, error) {
-	if len(raw) == 0 {
-		return sdkjsonrpc.ID{}, errors.New("missing request id")
-	}
-	var idValue any
-	if err := json.Unmarshal(raw, &idValue); err != nil {
-		return sdkjsonrpc.ID{}, err
-	}
-	id, err := sdkjsonrpc.MakeID(idValue)
-	if err != nil {
-		return sdkjsonrpc.ID{}, err
-	}
-	if !id.IsValid() {
-		return sdkjsonrpc.ID{}, errors.New("missing request id")
-	}
-	return id, nil
-}
-
-func sdkIDKey(id sdkjsonrpc.ID) string {
-	if !id.IsValid() {
-		return ""
-	}
-	raw, _ := json.Marshal(id.Raw())
-	return string(raw)
-}
-
 func startMCPStderrLogger(stderr io.ReadCloser, containerID string, logger *slog.Logger, tail *mcpStderrTail) {
 	if stderr == nil {
 		return
@@ -513,32 +331,10 @@ func startMCPStderrLogger(stderr io.ReadCloser, containerID string, logger *slog
 	}()
 }
 
-func extractToolNames(payload map[string]any) []string {
-	result, ok := payload["result"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	rawTools, ok := result["tools"].([]any)
-	if !ok {
-		return nil
-	}
-	names := make([]string, 0, len(rawTools))
-	for _, raw := range rawTools {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		name, _ := item["name"].(string)
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
+// buildShellCommand renders the stdio launch line executed via `sh -c` inside the
+// workspace container. Command is a single executable token — callers must not
+// smuggle arguments into it (they would be escaped into one bogus binary name);
+// flags and operands belong in Args.
 func buildShellCommand(req MCPStdioRequest) string {
 	cmd := strings.TrimSpace(req.Command)
 	if cmd == "" {
@@ -553,7 +349,11 @@ func buildShellCommand(req MCPStdioRequest) string {
 
 	assignments := []string{}
 	for _, pair := range buildEnvPairs(req.Env) {
-		assignments = append(assignments, escapeShellArg(pair))
+		// Quote KEY and VALUE separately: quoting the whole "KEY=value" pair
+		// makes sh see a quoted word, not an assignment prefix, and the launch
+		// dies with "KEY=value: command not found" (exit 127).
+		key, value, _ := strings.Cut(pair, "=")
+		assignments = append(assignments, key+"="+escapeShellArg(value))
 	}
 	if len(assignments) > 0 {
 		command = strings.Join(assignments, " ") + " " + command
@@ -568,7 +368,9 @@ func escapeShellArg(value string) string {
 	if value == "" {
 		return "''"
 	}
-	if !strings.ContainsAny(value, " \t\n'\"\\$&;|<>*?()[]{}!`") {
+	// '#' must force quoting too: as the first char of a bare word it starts a
+	// shell comment and silently eats the rest of the line.
+	if !strings.ContainsAny(value, " \t\n'\"\\$&;|<>*?()[]{}!`#") {
 		return value
 	}
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
@@ -600,8 +402,14 @@ type mcpStdioSession struct {
 	containerID string
 	name        string
 	createdAt   time.Time
-	lastUsedAt  time.Time
-	session     *mcpSession
+	// request is retained for the lazy start: the session process spawns on
+	// the FIRST proxied message, so an initialize can drive the handshake with
+	// the external client's own capabilities (see ensureStdioSession). An
+	// eager session would burn the single handshake on memoh's empty one.
+	request MCPStdioRequest
+	// startMu serializes the lazy start across concurrent first messages.
+	startMu sync.Mutex
+	session *mcpStdioClient
 }
 
 // CreateMCPStdio godoc
@@ -636,11 +444,6 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "workspace runtime not found for bot")
 	}
 
-	sess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	tools := h.probeMCPTools(ctx, sess, botID, strings.TrimSpace(req.Name))
 	connectionID := uuid.NewString()
 	record := &mcpStdioSession{
 		id:          connectionID,
@@ -648,16 +451,19 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 		containerID: containerID,
 		name:        strings.TrimSpace(req.Name),
 		createdAt:   time.Now().UTC(),
-		lastUsedAt:  time.Now().UTC(),
-		session:     sess,
+		request:     req,
 	}
-	sess.onClose = func() {
-		h.mcpStdioMu.Lock()
-		if current, ok := h.mcpStdioSess[connectionID]; ok && current == record {
-			delete(h.mcpStdioSess, connectionID)
-		}
-		h.mcpStdioMu.Unlock()
+	// Eager probe on a THROWAWAY process: it validates the command and fills
+	// the response's tool list, then dies. The session process starts lazily
+	// on the first proxied message (see mcpStdioSession.request), so create
+	// keeps its old contract — fail fast on a bad command, return the tool
+	// list — without burning the session's handshake on memoh's capabilities.
+	probeSess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req, nil, defaultStdioSDKClient())
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	tools := h.probeMCPTools(ctx, probeSess, botID, strings.TrimSpace(req.Name))
+	probeSess.Close()
 	h.mcpStdioMu.Lock()
 	h.mcpStdioSess[connectionID] = record
 	h.mcpStdioMu.Unlock()
@@ -681,6 +487,35 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post].
+// ensureStdioSession lazily starts the session process on the first proxied
+// message. An initialize starts it with a client built from the message's own
+// capabilities/clientInfo (the server then negotiates against the REAL client);
+// anything else starts it with memoh's default identity. Concurrent first
+// messages serialize on the record's startMu.
+func (h *ContainerdHandler) ensureStdioSession(ctx context.Context, record *mcpStdioSession, req *mcptools.JSONRPCRequest) (*mcpStdioClient, error) {
+	record.startMu.Lock()
+	defer record.startMu.Unlock()
+	if record.session != nil {
+		return record.session, nil
+	}
+	client := defaultStdioSDKClient()
+	if req != nil && strings.TrimSpace(req.Method) == "initialize" {
+		client = sdkClientForInitialize(req.Params)
+	}
+	sess, err := h.startContainerdMCPCommandSession(ctx, record.botID, record.containerID, record.request, func() {
+		h.mcpStdioMu.Lock()
+		if current, ok := h.mcpStdioSess[record.id]; ok && current == record {
+			delete(h.mcpStdioSess, record.id)
+		}
+		h.mcpStdioMu.Unlock()
+	}, client)
+	if err != nil {
+		return nil, err
+	}
+	record.session = sess
+	return sess, nil
+}
+
 func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -691,15 +526,10 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "connection_id is required")
 	}
 	h.mcpStdioMu.Lock()
-	session := h.mcpStdioSess[connectionID]
+	record := h.mcpStdioSess[connectionID]
 	h.mcpStdioMu.Unlock()
-	if session == nil || session.session == nil || session.botID != botID {
+	if record == nil || record.botID != botID {
 		return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
-	}
-	select {
-	case <-session.session.closed:
-		return echo.NewHTTPError(http.StatusNotFound, "mcp connection closed")
-	default:
 	}
 
 	var req mcptools.JSONRPCRequest
@@ -712,21 +542,113 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	if strings.TrimSpace(req.Method) == "" {
 		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, -32601, "method not found"))
 	}
-	session.lastUsedAt = time.Now().UTC()
+
+	sess, err := h.ensureStdioSession(c.Request().Context(), record, &req)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	select {
+	case <-sess.done:
+		return echo.NewHTTPError(http.StatusNotFound, "mcp connection closed")
+	default:
+	}
+
 	if mcptools.IsNotification(req) {
-		if err := session.session.notify(c.Request().Context(), req); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		// The SDK client owns the protocol and offers no generic notify to
+		// forward. cancelled is the one notification with load-bearing
+		// semantics, so it gets a real path: resolving the in-flight call and
+		// cancelling it makes the SDK notify the server itself. Everything
+		// else (progress, custom notifications) is still acknowledged and
+		// dropped — a known fidelity gap, now narrowed to messages no standard
+		// server depends on.
+		if strings.TrimSpace(req.Method) == "notifications/cancelled" {
+			sess.cancelInFlight(req)
+		} else {
+			h.logger.Debug("mcp stdio notification dropped",
+				slog.String("connection_id", connectionID),
+				slog.String("method", req.Method),
+			)
 		}
 		return c.NoContent(http.StatusAccepted)
 	}
-	payload, err := session.session.call(c.Request().Context(), req)
+	payload, err := sess.dispatch(c.Request().Context(), req)
 	if err != nil {
-		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, -32603, err.Error()))
+		code := int64(-32603)
+		var wireErr *jsonrpc.Error
+		switch {
+		case errors.Is(err, errMCPMethodNotFound):
+			code = -32601
+		case errors.As(err, &wireErr):
+			// Forward the downstream server's code verbatim.
+			code = wireErr.Code
+		}
+		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, int(code), err.Error()))
 	}
 	return c.JSON(http.StatusOK, payload)
 }
 
-func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, botID, containerID string, req MCPStdioRequest) (*mcpSession, error) {
+// defaultStdioSDKClient is the fixed client identity memoh presents when it is
+// the real client itself (create-time probes, federation gateway sessions).
+func defaultStdioSDKClient() *sdkmcp.Client {
+	return sdkmcp.NewClient(&sdkmcp.Implementation{Name: "memoh", Version: "1.0.0"}, nil)
+}
+
+// sdkClientForInitialize builds the SDK client for a lazily-started proxy
+// session from the EXTERNAL client's own initialize params, so the container
+// server sees the real client's capabilities and clientInfo instead of memoh's
+// fixed empty handshake. The pre-migration client raw-forwarded the external
+// initialize as a spec-invalid SECOND initialize on an already-handshaken
+// session; advertising at the single handshake is the spec-valid form of the
+// same intent. Capabilities the proxy cannot fulfill (sampling, elicitation —
+// server→client requests have no channel back to the HTTP client) stay
+// advertised: the SDK answers them with method-not-found, an explicit error
+// instead of the old silent hang.
+func sdkClientForInitialize(rawParams json.RawMessage) *sdkmcp.Client {
+	var params sdkmcp.InitializeParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return defaultStdioSDKClient()
+	}
+	impl := params.ClientInfo
+	if impl == nil || strings.TrimSpace(impl.Name) == "" {
+		impl = &sdkmcp.Implementation{Name: "memoh", Version: "1.0.0"}
+	}
+	opts := &sdkmcp.ClientOptions{}
+	if caps := params.Capabilities; caps != nil {
+		// #607: the SDK's deprecated Roots field is ignored at handshake —
+		// only RootsV2 actually advertises roots. Decode the wire "roots"
+		// member straight into RootCapabilities rather than reading the
+		// deprecated field.
+		var wire struct {
+			Capabilities map[string]json.RawMessage `json:"capabilities"`
+		}
+		if err := json.Unmarshal(rawParams, &wire); err == nil {
+			if rawRoots, hasRoots := wire.Capabilities["roots"]; hasRoots && caps.RootsV2 == nil {
+				roots := &sdkmcp.RootCapabilities{}
+				if err := json.Unmarshal(rawRoots, roots); err == nil {
+					caps.RootsV2 = roots
+				}
+			}
+		}
+		opts.Capabilities = caps
+	}
+	return sdkmcp.NewClient(impl, opts)
+}
+
+// connectStdioClient performs the MCP initialize handshake over the given process
+// pipes and returns the ready session. Split from
+// startContainerdMCPCommandSession so tests can exercise the protocol path over
+// plain in-memory pipes instead of a container.
+func connectStdioClient(ctx context.Context, stdin io.WriteCloser, stdout io.ReadCloser, sdkClient *sdkmcp.Client) (*sdkmcp.ClientSession, error) {
+	return sdkClient.Connect(ctx, &sdkmcp.IOTransport{Reader: stdout, Writer: stdin}, nil)
+}
+
+// onClose is registered on the client BEFORE connect/Wait can fire Close: a
+// process that dies during the handshake must still run the registry cleanup,
+// otherwise closeOnce is consumed with a nil callback and the entry leaks.
+// The client argument chooses the identity presented at the handshake:
+// defaultStdioSDKClient() when memoh is the real client, or
+// sdkClientForInitialize(...) for lazily-started proxy sessions.
+func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context, botID, containerID string, req MCPStdioRequest, onClose func(), sdkClient *sdkmcp.Client) (*mcpStdioClient, error) {
 	// Get gRPC client for the bot container via manager
 	client, err := h.manager.MCPClient(ctx, botID)
 	if err != nil {
@@ -735,8 +657,10 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 
 	command := buildShellCommand(req)
 
-	// Create bidirectional exec stream
-	execStream, err := client.ExecStream(ctx, command, strings.TrimSpace(req.Cwd), 0)
+	// timeout -1 disables the bridge-side timer: 0 falls back to its 30s default
+	// and SIGKILLs the process, which murdered every long-lived MCP server. These
+	// processes are session-scoped daemons; their lifetime is owned by Close().
+	execStream, err := client.ExecStream(ctx, command, strings.TrimSpace(req.Cwd), -1)
 	if err != nil {
 		return nil, err
 	}
@@ -746,19 +670,15 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
 
-	readCtx, cancelRead := context.WithCancel(context.Background()) //nolint:gosec // G118: cancelRead is stored in sess.cancelRead
-	sess := &mcpSession{
-		stdin:      stdinW,
-		stdout:     stdoutR,
-		stderr:     stderrR,
-		stderrTail: &mcpStderrTail{},
-		readCtx:    readCtx,
-		cancelRead: cancelRead,
-		pending:    make(map[string]chan *sdkjsonrpc.Response),
-		closed:     make(chan struct{}),
+	sess := &mcpStdioClient{
+		stderrTail:  &mcpStderrTail{},
+		done:        make(chan struct{}),
+		streamClose: func() { _ = execStream.Close() },
+		onClose:     onClose,
 	}
+	sess.exitCode.Store(-1)
 
-	// Forward stdin to gRPC stream
+	// Forward stdin to the bridge stream
 	go func() {
 		buf := make([]byte, 32*1024)
 		for {
@@ -773,7 +693,9 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 		_ = stdinR.Close()
 	}()
 
-	// Forward gRPC stdout/stderr to pipes
+	// Demux bridge stdout/stderr into the pipes. The EXIT frame carries the
+	// process exit code — capture it before dropping the pipes so later failures
+	// can say WHY the server died instead of surfacing a bare EOF.
 	go func() {
 		for {
 			output, err := execStream.Recv()
@@ -783,7 +705,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 				}
 				_ = stdoutW.Close()
 				_ = stderrW.Close()
-				break
+				return
 			}
 			switch output.GetStream() {
 			case pb.ExecOutput_STDOUT:
@@ -791,6 +713,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 			case pb.ExecOutput_STDERR:
 				_, _ = stderrW.Write(output.GetData())
 			case pb.ExecOutput_EXIT:
+				sess.exitCode.Store(output.GetExitCode())
 				_ = stdoutW.Close()
 				_ = stderrW.Close()
 				return
@@ -798,45 +721,50 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 		}
 	}()
 
-	transport := &sdkmcp.IOTransport{
-		Reader: sess.stdout,
-		Writer: sess.stdin,
-	}
-	conn, err := transport.Connect(ctx)
+	startMCPStderrLogger(stderrR, containerID, h.logger, sess.stderrTail)
+
+	session, err := connectStdioClient(ctx, stdinW, stdoutR, sdkClient)
 	if err != nil {
-		sess.closeWithError(err)
+		// Handshake failed — most commonly the process is not an MCP server and
+		// already exited (e.g. command not found). Report that, not a bare EOF.
+		err = sess.enrichError(err)
+		sess.Close()
 		return nil, err
 	}
-	sess.conn = conn
-	startMCPStderrLogger(sess.stderr, containerID, h.logger, sess.stderrTail)
-	go sess.readLoop()
+	sess.session = session
 	go func() {
-		<-sess.closed
-		_ = execStream.Close()
+		_ = session.Wait()
+		// Server side ended on its own — run the same teardown as an explicit Close.
+		sess.Close()
 	}()
 	return sess, nil
 }
 
-func (h *ContainerdHandler) probeMCPTools(ctx context.Context, sess *mcpSession, botID, name string) []string {
-	if sess == nil {
+func (h *ContainerdHandler) probeMCPTools(ctx context.Context, sess *mcpStdioClient, botID, name string) []string {
+	if sess == nil || sess.session == nil {
 		return nil
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	payload, err := sess.call(probeCtx, mcptools.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      mcptools.RawStringID("probe-tools"),
-		Method:  "tools/list",
-	})
+	result, err := sess.session.ListTools(probeCtx, &sdkmcp.ListToolsParams{})
 	if err != nil {
 		h.logger.Warn("mcp stdio tools probe failed",
 			slog.String("bot_id", botID),
 			slog.String("name", name),
-			slog.Any("error", err),
+			slog.Any("error", sess.enrichError(err)),
 		)
 		return nil
 	}
-	tools := extractToolNames(payload)
+	tools := make([]string, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		if tool == nil {
+			continue
+		}
+		if n := strings.TrimSpace(tool.Name); n != "" {
+			tools = append(tools, n)
+		}
+	}
+	sort.Strings(tools)
 	if len(tools) == 0 {
 		h.logger.Warn("mcp stdio tools empty",
 			slog.String("bot_id", botID),

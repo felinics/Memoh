@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  SAME_TURN_TIMESTAMP_TOLERANCE_MS,
   asRecord,
   cloneRequestedSkills,
   cloneUserInputState,
-  createStreamId,
+  createInvocationId,
   isOptimisticTurn,
-  isSameLogicalTurn,
   mergeApprovalState,
   normalizeForwardRef,
   normalizeReplyRef,
@@ -109,32 +107,12 @@ describe('sortChatMessages', () => {
   })
 })
 
-describe('isOptimisticTurn / isSameLogicalTurn', () => {
+describe('isOptimisticTurn', () => {
   it('only flags explicitly optimistic turns', () => {
     expect(isOptimisticTurn(userTurn())).toBe(false)
     expect(isOptimisticTurn(userTurn({ __optimistic: true } as Partial<ChatUserTurn>))).toBe(true)
   })
 
-  it('matches by externalMessageId when both sides carry one', () => {
-    const a = userTurn({ externalMessageId: 'x' } as Partial<ChatUserTurn>)
-    const b = userTurn({ id: 'u2', text: 'different', externalMessageId: 'x' } as Partial<ChatUserTurn>)
-    expect(isSameLogicalTurn(a, b)).toBe(true)
-  })
-
-  it('matches user turns by text + timestamp within tolerance', () => {
-    const a = userTurn()
-    const near = userTurn({ id: 'u2', timestamp: new Date(Date.parse(a.timestamp) + SAME_TURN_TIMESTAMP_TOLERANCE_MS).toISOString() })
-    const far = userTurn({ id: 'u3', timestamp: new Date(Date.parse(a.timestamp) + SAME_TURN_TIMESTAMP_TOLERANCE_MS + 1).toISOString() })
-    expect(isSameLogicalTurn(a, near)).toBe(true)
-    expect(isSameLogicalTurn(a, far)).toBe(false)
-    expect(isSameLogicalTurn(a, userTurn({ id: 'u4', text: 'other' }))).toBe(false)
-  })
-
-  it('refuses to guess on assistant content', () => {
-    const asst = { id: 'a1', role: 'assistant', timestamp: userTurn().timestamp, messages: [], streaming: false } as unknown as ChatMessage
-    const twin = { ...asst, id: 'a2' } as ChatMessage
-    expect(isSameLogicalTurn(asst, twin)).toBe(false)
-  })
 })
 
 describe('mergeApprovalState', () => {
@@ -190,9 +168,9 @@ describe('ids', () => {
     expect(serverMessageId(userTurn())).toBe('u1')
   })
 
-  it('createStreamId yields distinct non-empty ids', () => {
-    const a = createStreamId()
-    const b = createStreamId()
+  it('createInvocationId yields distinct non-empty ids', () => {
+    const a = createInvocationId()
+    const b = createInvocationId()
     expect(a).toBeTruthy()
     expect(a).not.toBe(b)
   })

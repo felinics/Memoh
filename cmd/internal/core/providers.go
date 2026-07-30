@@ -36,6 +36,7 @@ import (
 	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	agenttools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/agent/turn"
 	audiopkg "github.com/memohai/memoh/internal/audio"
@@ -436,7 +437,7 @@ func agentLimitsFromConfig(cfg config.AgentConfig) native.Limits {
 	)
 }
 
-func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, providers []agenttools.ToolProvider) {
+func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, providers []agenttools.ToolProvider) {
 	a.SetToolProviders(providers)
 	for _, p := range providers {
 		if cp, ok := p.(*agenttools.ContainerProvider); ok {
@@ -447,6 +448,9 @@ func injectToolProviders(a *native.Agent, msgService *message.DBService, hookSer
 			sp.SetMessageService(msgService)
 			sp.SetSystemPromptFunc(native.SpawnSystemPrompt)
 			sp.SetHookService(hookService)
+			// A spawned turn takes its thread's single run slot like any other,
+			// so without admission this provider starts nothing.
+			sp.SetSubagentAdmitter(agentService)
 		}
 	}
 }
@@ -475,9 +479,12 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service) *application.Service {
+func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager) *application.Service {
 	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
+	// Every turn entry point goes through admission, so a service without it can
+	// start nothing: this is the thread's single-run guarantee, not an add-on.
+	service.SetSessionRuntime(sessionRuntime)
 	service.SetWorkspaceTargetResolver(workspaceManager)
 	service.SetHookService(hookService)
 	if sessionService != nil {
@@ -512,8 +519,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 			}
 			// The wire shape lives in internal/agent/event/payload — see its
 			// BackgroundTask helper and the tests there that pin the
-			// top-level `session_id` placement the per-session SSE handler
-			// routes on.
+			// top-level `session_id` placement consumers route on.
 			data, err := json.Marshal(agentpayload.BackgroundTask(evt))
 			if err != nil {
 				return
@@ -885,12 +891,13 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 		return nil, err
 	}
 	return memllm.New(memllm.Config{
-		ModelID:        memoryModel.ModelID,
-		BaseURL:        strings.TrimRight(providers.ProviderConfigString(memoryProvider, "base_url"), "/"),
-		APIKey:         providers.ProviderConfigString(memoryProvider, "api_key"),
-		ClientType:     memoryProvider.ClientType,
-		Timeout:        c.timeout,
-		PromptCacheTTL: providers.ProviderConfigString(memoryProvider, "prompt_cache_ttl"),
+		ModelID:               memoryModel.ModelID,
+		BaseURL:               strings.TrimRight(providers.ProviderConfigString(memoryProvider, "base_url"), "/"),
+		APIKey:                providers.ProviderConfigString(memoryProvider, "api_key"),
+		ClientType:            memoryProvider.ClientType,
+		ChatCompletionsCompat: providers.ProviderConfigString(memoryProvider, models.ChatCompletionsCompatConfigKey),
+		Timeout:               c.timeout,
+		PromptCacheTTL:        providers.ProviderConfigString(memoryProvider, "prompt_cache_ttl"),
 	}), nil
 }
 

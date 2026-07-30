@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
@@ -478,5 +479,36 @@ func TestRenderEntryContentTopLevelToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(got, `"q":"x"`) {
 		t.Fatalf("top-level tool call arguments lost from summarizer input: %q", got)
+	}
+}
+
+func TestRenderEntryHeaderCarriesExecutionLocation(t *testing.T) {
+	t.Parallel()
+
+	got := renderEntryHeader(historyfrag.HistoryRecord{
+		Metadata: map[string]any{
+			"execution_location": map[string]any{
+				"target_id": "computer-b",
+				"kind":      "remote",
+				"name":      "Computer B",
+			},
+		},
+	})
+	if !strings.Contains(got, "[workspace: Computer B (computer-b)]") {
+		t.Fatalf("header missing workspace provenance:\n%s", got)
+	}
+
+	if got := renderEntryHeader(historyfrag.HistoryRecord{
+		Metadata: map[string]any{
+			"execution_location": map[string]any{"target_id": "computer-b"},
+		},
+	}); !strings.Contains(got, "[workspace: computer-b]") {
+		t.Fatalf("target-only header = %q, want bare target id", got)
+	}
+
+	if got := renderEntryHeader(historyfrag.HistoryRecord{
+		Metadata: map[string]any{"execution_location": map[string]any{"name": "No Target"}},
+	}); strings.Contains(got, "workspace") {
+		t.Fatalf("header rendered a workspace without a target id:\n%s", got)
 	}
 }

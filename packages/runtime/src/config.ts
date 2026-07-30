@@ -2,11 +2,23 @@ import { isAbsolute } from 'node:path'
 
 import { validateRuntimeKey } from './key'
 
+const runtimeTeamIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export interface RuntimeClientConfig {
   serverUrl: string
   key: string
+  // Optional for direct connections to the upstream single-team server.
+  teamId?: string
   workspaceBase: string
   insecureLocalhost?: boolean
+}
+
+export function normalizeRuntimeTeamId(teamId: string): string {
+  const normalized = teamId.trim().toLowerCase()
+  if (!runtimeTeamIdPattern.test(normalized)) {
+    throw new Error('runtime team ID must be a UUID')
+  }
+  return normalized
 }
 
 export function validateConfig(config: RuntimeClientConfig): void {
@@ -35,4 +47,7 @@ export function validateConfig(config: RuntimeClientConfig): void {
     throw new Error('insecureLocalhost must be a boolean')
   }
   validateRuntimeKey(config.key)
+  if (config.teamId !== undefined) {
+    normalizeRuntimeTeamId(config.teamId)
+  }
 }

@@ -20,75 +20,6 @@ export interface SessionSummary {
   route_conversation_type?: string
 }
 
-export interface MessageAsset {
-  content_hash: string
-  role: string
-  ordinal: number
-  mime: string
-  size_bytes: number
-  storage_key: string
-  name?: string
-  metadata?: Record<string, unknown>
-}
-
-export interface Message {
-  id: string
-  bot_id: string
-  session_id?: string
-  sender_channel_identity_id?: string
-  sender_user_id?: string
-  sender_display_name?: string
-  sender_avatar_url?: string
-  platform?: string
-  external_message_id?: string
-  source_reply_to_message_id?: string
-  role: string
-  content?: unknown
-  metadata?: Record<string, unknown>
-  assets?: MessageAsset[]
-  display_content?: string
-  created_at?: string
-}
-
-// Per-session SSE: `/bots/{bot_id}/sessions/{session_id}/messages/events`.
-// Server pushes a small backlog of `message_created` events followed by live
-// `message_created` / `session_title_updated` events scoped to this session
-// only. `ping` is a server heartbeat; `dropped` asks the client to refresh
-// because the server-side subscriber buffer overflowed.
-export interface SessionMessageCreatedEvent {
-  type: 'message_created'
-  bot_id?: string
-  message: Message
-}
-
-export interface SessionTitleUpdatedEvent {
-  type: 'session_title_updated'
-  bot_id?: string
-  session_id: string
-  title: string
-}
-
-export interface SessionPingEvent {
-  type: 'ping'
-}
-
-export interface SessionDroppedEvent {
-  type: 'dropped'
-  count?: number
-}
-
-export interface SessionBackgroundTaskEvent extends UIBackgroundTask {
-  type: 'background_task'
-  task?: UIBackgroundTask
-}
-
-export type SessionMessageStreamEvent =
-  | SessionMessageCreatedEvent
-  | SessionTitleUpdatedEvent
-  | SessionBackgroundTaskEvent
-  | SessionDroppedEvent
-  | SessionPingEvent
-
 // Bot-wide activity SSE: `/bots/{bot_id}/sessions/events`. Carries identifier
 // + minimal metadata for sidebar live-sort; never includes message bodies.
 export interface SessionTouchedEvent {
@@ -112,12 +43,21 @@ export interface SessionCreatedEvent {
   title?: string
 }
 
+export interface BotSessionActivityDroppedEvent {
+  type: 'dropped'
+  count?: number
+}
+
+export interface BotSessionActivityPingEvent {
+  type: 'ping'
+}
+
 export type BotSessionActivityEvent =
   | SessionTouchedEvent
   | SessionTitleChangedEvent
   | SessionCreatedEvent
-  | SessionDroppedEvent
-  | SessionPingEvent
+  | BotSessionActivityDroppedEvent
+  | BotSessionActivityPingEvent
 
 export interface FetchMessagesOptions {
   limit?: number
@@ -315,6 +255,7 @@ export interface UISkillActivation {
 }
 
 export interface UIUserTurn {
+  turn_id: string
   role: 'user'
   text: string
   user_message_kind?: string
@@ -332,6 +273,7 @@ export interface UIUserTurn {
 }
 
 export interface UIAssistantTurn {
+  turn_id: string
   role: 'assistant'
   messages: UIMessage[]
   timestamp: string
@@ -341,6 +283,7 @@ export interface UIAssistantTurn {
 }
 
 export interface UISystemTurn {
+  turn_id: string
   role: 'system'
   kind?: 'background_task' | string
   background_task?: UIBackgroundTask
@@ -351,28 +294,36 @@ export interface UISystemTurn {
 
 export type UITurn = UIUserTurn | UIAssistantTurn | UISystemTurn
 
-export interface UIStreamStartEvent {
-  type: 'start'
-  stream_id?: string
-  session_id?: string
+// Turn events are named by the server's run_id. Events that precede the run —
+// acceptance, rejection, session creation, and validation errors — are named by
+// the invocation_id the client sent, since that is the only name shared yet.
+export interface UIStreamRunAcceptedEvent {
+  type: 'run_accepted'
+  run_id: string
+  invocation_id: string
+  session_id: string
+  turn_id: string
+  // A replay reserved no new observable position; its subscription snapshot is
+  // authoritative, so duplicate acceptances may omit the cursor.
+  epoch?: string
+  seq?: number
+  // Set when this acceptance names a run the invocation had already started,
+  // which is how a redelivered send avoids producing a second turn.
+  duplicate?: boolean
 }
 
-export interface UIStreamMessageEvent {
-  type: 'message'
-  stream_id?: string
-  session_id?: string
-  data: UIMessage
-}
-
-export interface UIStreamEndEvent {
-  type: 'end'
-  stream_id?: string
-  session_id?: string
+export interface UIStreamRunRejectedEvent {
+  type: 'run_rejected'
+  invocation_id: string
+  session_id: string
+  code: string
+  message: string
 }
 
 export interface UIStreamErrorEvent {
   type: 'error'
-  stream_id?: string
+  run_id?: string
+  invocation_id?: string
   session_id?: string
   message: string
   feedback?: unknown
@@ -380,24 +331,141 @@ export interface UIStreamErrorEvent {
 
 export interface UIStreamSessionCreatedEvent {
   type: 'session_created'
-  stream_id?: string
+  invocation_id: string
   session_id: string
 }
 
-export interface UIStreamUserMessageEvent {
-  type: 'user_message'
-  stream_id?: string
-  session_id?: string
-  data: UIUserTurn
+export type RuntimeRunStatus =
+  | 'admitting'
+  | 'running'
+  | 'waiting_decision'
+  | 'aborting'
+  | 'completed'
+  | 'aborted'
+  | 'errored'
+  | 'lost'
+
+export interface RuntimeCursor {
+  epoch: string
+  seq: number
 }
 
+export interface RuntimeSteerState {
+  id: string
+  status: string
+  text?: string
+  error?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RuntimeRunOperation {
+  kind: 'retry' | 'edit'
+  replace_from_message_id: string
+  replacement_user_turn?: UIUserTurn
+}
+
+export interface RuntimeCurrentRunView {
+  run_id: string
+  turn_id: string
+  generation: string
+  status: RuntimeRunStatus
+  owner_id?: string
+  owner_lease_expires_at?: string
+  started_at: string
+  updated_at: string
+  messages: UIMessage[]
+  request_user_turn?: UIUserTurn
+  error?: string
+  steer?: RuntimeSteerState
+  operation?: RuntimeRunOperation
+}
+
+export interface RuntimeSnapshot {
+  bot_id: string
+  session_id: string
+  epoch: string
+  seq: number
+  current_run_view?: RuntimeCurrentRunView
+  updated_at: string
+}
+
+export interface RuntimeCurrentRunPatch {
+  run_id: string
+  status?: RuntimeRunStatus
+  error?: string
+  steer?: RuntimeSteerState
+  updated_at?: string
+  owner_lease_expires_at?: string
+}
+
+export interface RuntimeMessageAppend {
+  id: number
+  type: 'text' | 'reasoning'
+  content: string
+}
+
+export interface RuntimeProgressAppend {
+  id: number
+  progress: unknown
+  input?: unknown
+}
+
+export interface RuntimeDelta {
+  current_run_view?: RuntimeCurrentRunView
+  run?: RuntimeCurrentRunPatch
+  message_appends?: RuntimeMessageAppend[]
+  progress_appends?: RuntimeProgressAppend[]
+  message_upserts?: UIMessage[]
+  reset_messages?: boolean
+}
+
+export interface UIRuntimeSnapshotEvent {
+  type: 'runtime_snapshot'
+  session_id: string
+  epoch: string
+  seq: number
+  snapshot: RuntimeSnapshot
+}
+
+export interface UIRuntimeDeltaEvent {
+  type: 'runtime_delta'
+  session_id: string
+  epoch: string
+  seq: number
+  delta: RuntimeDelta
+}
+
+export interface UIRuntimeDroppedEvent {
+  type: 'runtime_dropped'
+  session_id: string
+  epoch: string
+  seq: number
+  message?: string
+}
+
+export interface UIControlAckEvent {
+  type: 'control_ack'
+  session_id: string
+  run_id: string
+  control: 'abort' | 'tool_approval_response' | 'user_input_response'
+  control_id: string
+  applied: boolean
+  code?: string
+}
+
+export type UIRuntimeEvent =
+  | UIRuntimeSnapshotEvent
+  | UIRuntimeDeltaEvent
+  | UIRuntimeDroppedEvent
+
 export type UIStreamEvent =
-  | UIStreamStartEvent
-  | UIStreamMessageEvent
-  | UIStreamEndEvent
+  | UIStreamRunAcceptedEvent
+  | UIStreamRunRejectedEvent
   | UIStreamErrorEvent
   | UIStreamSessionCreatedEvent
-  | UIStreamUserMessageEvent
+  | UIRuntimeEvent
+  | UIControlAckEvent
   | CommandEventResponse
 
 export type UIStreamEventHandler = (event: UIStreamEvent) => void

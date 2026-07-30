@@ -1,5 +1,3 @@
-import type { SessionMessageCreatedEvent } from '@/composables/api/useChat'
-
 export function assignInPlace<T extends object>(target: T, source: T): void {
   for (const key of Object.keys(target)) {
     if (!(key in source)) delete (target as Record<string, unknown>)[key]
@@ -389,26 +387,4 @@ export function provisionalSessionTitle(userQuery: string): string {
   const runes = Array.from(firstLine)
   if (runes.length <= provisionalTitleMaxRunes) return firstLine
   return `${runes.slice(0, provisionalTitleMaxRunes).join('')}…`
-}
-export function shouldRefreshFromMessageCreated(
-  targetBotId: string,
-  currentSessionId: string | null,
-  streamingSessionId: string | null,
-  event: SessionMessageCreatedEvent,
-): boolean {
-  const raw = event.message
-  if (!raw) return false
-
-  const eventBotId = String(event.bot_id ?? '').trim()
-  if (eventBotId && eventBotId !== targetBotId) return false
-
-  const messageBotId = String(raw.bot_id ?? '').trim()
-  if (messageBotId && messageBotId !== targetBotId) return false
-
-  const messageSessionId = String(raw.session_id ?? '').trim()
-  if (!currentSessionId) return false
-  if (messageSessionId && messageSessionId !== currentSessionId) return false
-  if (streamingSessionId && streamingSessionId === currentSessionId) return false
-
-  return true
 }

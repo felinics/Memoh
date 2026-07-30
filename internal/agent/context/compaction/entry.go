@@ -79,7 +79,29 @@ func renderEntryHeader(record historyfrag.HistoryRecord) string {
 	add("conversation_type", record.Scope.ConversationType)
 	add("conversation_name", record.Scope.ConversationName)
 	add("reply_target", record.Scope.ReplyTarget)
+	add("workspace", entryExecutionLocation(record.Metadata))
 	return strings.Join(lines, "\n")
+}
+
+// entryExecutionLocation renders the workspace a message ran in, so summaries
+// keep the execution-location provenance that raw replay carries via
+// transition markers.
+func entryExecutionLocation(metadata map[string]any) string {
+	raw, ok := metadata["execution_location"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	targetID, _ := raw["target_id"].(string)
+	targetID = strings.TrimSpace(targetID)
+	if targetID == "" {
+		return ""
+	}
+	name, _ := raw["name"].(string)
+	name = strings.TrimSpace(name)
+	if name == "" || name == targetID {
+		return targetID
+	}
+	return name + " (" + targetID + ")"
 }
 
 func cleanEntryMetadataValue(value string) string {

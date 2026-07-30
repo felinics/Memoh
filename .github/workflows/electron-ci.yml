@@ -39,9 +39,6 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 30
-    env:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -63,32 +60,8 @@ jobs:
       - name: Typecheck desktop
         run: pnpm --filter @memohai/desktop typecheck
 
-      - name: Prepare macOS code signing
-        id: mac-signing
-        if: ${{ startsWith(matrix.platform, 'macos-') && github.event_name != 'pull_request' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          CSC_PATH="$RUNNER_TEMP/certificate.p12"
-          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$CSC_PATH"
-          echo "CSC_LINK=$CSC_PATH" >> "$GITHUB_ENV"
-          echo "CSC_KEY_PASSWORD=$APPLE_CERTIFICATE_PASSWORD" >> "$GITHUB_ENV"
-          echo "has_cert=true" >> "$GITHUB_OUTPUT"
+      - name: Test desktop release tooling
+        run: pnpm --filter @memohai/desktop test:release
 
       - name: Build desktop (unpacked smoke)
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.mac-signing.outputs.has_cert == 'true' && 'true' || 'false' }}
         run: pnpm --filter @memohai/desktop build:dir
-
-      - name: Verify macOS signature
-        if: ${{ startsWith(matrix.platform, 'macos-') && steps.mac-signing.outputs.has_cert == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          app_path="$(find apps/desktop/dist -name 'Memoh.app' -type d | head -n 1)"
-          if [[ -z "$app_path" ]]; then
-            echo "Memoh.app not found in apps/desktop/dist" >&2
-            exit 1
-          fi
-          codesign --verify --deep --strict --verbose=2 "$app_path"
-          codesign -dv --verbose=4 "$app_path" 2>&1 | grep -F "Developer ID Application"

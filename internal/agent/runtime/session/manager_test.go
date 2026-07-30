@@ -19,19 +19,19 @@ import (
 const (
 	testBotID     = "bot-runtime"
 	testSessionID = "session-runtime"
-	testStreamID  = "stream-runtime"
+	testRunID     = "stream-runtime"
 )
 
-func requireRunHandle(t *testing.T, manager *Manager, botID, sessionID, streamID string) RunHandle {
+func requireRunHandle(t *testing.T, manager *Manager, botID, sessionID, runID string) RunHandle {
 	t.Helper()
-	ref, ok, err := manager.StreamRef(context.Background(), botID, sessionID, streamID)
+	ref, ok, err := manager.RunRef(context.Background(), botID, sessionID, runID)
 	if err != nil || !ok {
-		t.Fatalf("load run handle for %q = ok:%v err:%v", streamID, ok, err)
+		t.Fatalf("load run handle for %q = ok:%v err:%v", runID, ok, err)
 	}
 	if ref.BotID != botID || ref.SessionID != sessionID {
 		t.Fatalf("run handle scope = %s/%s, want %s/%s", ref.BotID, ref.SessionID, botID, sessionID)
 	}
-	return RunHandle{BotID: ref.BotID, SessionID: ref.SessionID, StreamID: ref.StreamID, Generation: ref.Generation}
+	return RunHandle{BotID: ref.BotID, SessionID: ref.SessionID, RunID: ref.RunID, Generation: ref.Generation}
 }
 
 type runtimeBackendContractSuite struct {
@@ -201,6 +201,42 @@ func memoryRuntimeBackendSuite() runtimeBackendContractSuite {
 	}
 }
 
+// The convenience overloads below used to be exported Manager methods. Only
+// tests ever called them — production admits through Admit — so they live here
+// now, next to the tests that need the shorthand, instead of widening the
+// package's public surface with eight ways to say one thing.
+
+func (m *Manager) startRunWithAdmission(ctx context.Context, botID, sessionID, runID string, admission RunAdmissionView, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- turn.InjectMessage) error {
+	_, err := m.StartRunWithAdmissionBuilderHandle(ctx, botID, sessionID, runID, func(context.Context, RunHandle) (RunAdmissionView, error) {
+		return admission, nil
+	}, abortCh, cancel, injectCh)
+	return err
+}
+
+func (m *Manager) startRunWithOperation(ctx context.Context, botID, sessionID, runID string, operation *RunOperationView, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- turn.InjectMessage) error {
+	return m.startRunWithAdmission(ctx, botID, sessionID, runID, RunAdmissionView{Operation: operation}, abortCh, cancel, injectCh)
+}
+
+func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessionID, runID string, builder func(context.Context) (RunAdmissionView, error), abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- turn.InjectMessage) error {
+	_, err := m.StartRunWithAdmissionBuilderHandle(ctx, botID, sessionID, runID, func(ctx context.Context, _ RunHandle) (RunAdmissionView, error) {
+		return builder(ctx)
+	}, abortCh, cancel, injectCh)
+	return err
+}
+
+func (m *Manager) startRunWithOperationBuilder(ctx context.Context, botID, sessionID, runID string, builder func(context.Context) (*RunOperationView, error), abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- turn.InjectMessage) error {
+	_, err := m.StartRunWithAdmissionBuilderHandle(ctx, botID, sessionID, runID, func(ctx context.Context, _ RunHandle) (RunAdmissionView, error) {
+		operation, err := builder(ctx)
+		return RunAdmissionView{Operation: operation}, err
+	}, abortCh, cancel, injectCh)
+	return err
+}
+
+func (m *Manager) startRunWithAdmissionBuilderAndOwnership(ctx context.Context, botID, sessionID, runID string, builder func(context.Context, RunHandle) (RunAdmissionView, error), ownershipCancel context.CancelCauseFunc, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- turn.InjectMessage) error {
+	_, err := m.StartRunWithAdmissionBuilderAndOwnershipHandle(ctx, botID, sessionID, runID, builder, ownershipCancel, abortCh, cancel, injectCh)
+	return err
+}
+
 func testRuntimeManager(t *testing.T, backend Backend, ownerID string) *Manager {
 	t.Helper()
 	manager := NewManager(backend, Options{
@@ -322,7 +358,7 @@ type gatedReleaseCloseBackend struct {
 	closeCalls     atomic.Int32
 }
 
-func (b *gatedReleaseCloseBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error) {
+func (b *gatedReleaseCloseBackend) ReleaseRun(ctx context.Context, key Key, ref RunRef, update ActiveRunUpdate) (Snapshot, bool, error) {
 	b.releaseOnce.Do(func() { close(b.releaseStarted) })
 	select {
 	case <-b.allowRelease:
@@ -359,7 +395,7 @@ type delayedOwnershipValidationBackend struct {
 	release   chan struct{}
 }
 
-type delayedStreamRefCleanupBackend struct {
+type delayedRunRefCleanupBackend struct {
 	DistributedBackend
 	targetGeneration string
 	deleted          chan struct{}
@@ -367,8 +403,8 @@ type delayedStreamRefCleanupBackend struct {
 	once             sync.Once
 }
 
-func (b *delayedStreamRefCleanupBackend) DeleteStreamRef(ctx context.Context, ref StreamRef) (bool, error) {
-	deleted, err := b.DistributedBackend.DeleteStreamRef(ctx, ref)
+func (b *delayedRunRefCleanupBackend) DeleteRunRef(ctx context.Context, ref RunRef) (bool, error) {
+	deleted, err := b.DistributedBackend.DeleteRunRef(ctx, ref)
 	if ref.Generation != b.targetGeneration {
 		return deleted, err
 	}
@@ -397,29 +433,29 @@ type uninterruptibleLeaseRenewalBackend struct {
 	once    sync.Once
 }
 
-func (b *blockedLeaseRenewalBackend) RenewLease(ctx context.Context, key Key, streamID, ownerID, generation string, now, expiresAt time.Time) error {
+func (b *blockedLeaseRenewalBackend) RenewLease(ctx context.Context, key Key, runID, ownerID, generation string, now, expiresAt time.Time) error {
 	if b.calls.Add(1) == 1 {
-		return b.DistributedBackend.RenewLease(ctx, key, streamID, ownerID, generation, now, expiresAt)
+		return b.DistributedBackend.RenewLease(ctx, key, runID, ownerID, generation, now, expiresAt)
 	}
 	b.once.Do(func() { close(b.started) })
 	select {
 	case <-b.release:
-		return b.DistributedBackend.RenewLease(ctx, key, streamID, ownerID, generation, now, expiresAt)
+		return b.DistributedBackend.RenewLease(ctx, key, runID, ownerID, generation, now, expiresAt)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (b *uninterruptibleLeaseRenewalBackend) RenewLease(ctx context.Context, key Key, streamID, ownerID, generation string, now, expiresAt time.Time) error {
+func (b *uninterruptibleLeaseRenewalBackend) RenewLease(ctx context.Context, key Key, runID, ownerID, generation string, now, expiresAt time.Time) error {
 	if b.calls.Add(1) == 1 {
-		return b.DistributedBackend.RenewLease(ctx, key, streamID, ownerID, generation, now, expiresAt)
+		return b.DistributedBackend.RenewLease(ctx, key, runID, ownerID, generation, now, expiresAt)
 	}
 	b.once.Do(func() { close(b.started) })
 	<-b.release
 	return ctx.Err()
 }
 
-func (b *delayedOwnershipValidationBackend) ValidateRunOwnership(ctx context.Context, key Key, ref StreamRef) error {
+func (b *delayedOwnershipValidationBackend) ValidateRunOwnership(ctx context.Context, key Key, ref RunRef) error {
 	if err := b.DistributedBackend.ValidateRunOwnership(ctx, key, ref); err != nil {
 		return err
 	}
@@ -486,21 +522,21 @@ func (b *toggledUpdateFailureBackend) Update(ctx context.Context, key Key, updat
 	return b.DistributedBackend.Update(ctx, key, update)
 }
 
-func (b *toggledUpdateFailureBackend) UpdateActiveRun(ctx context.Context, key Key, streamID, generation string, update ActiveRunUpdate) (Snapshot, bool, error) {
+func (b *toggledUpdateFailureBackend) UpdateActiveRun(ctx context.Context, key Key, runID, generation string, update ActiveRunUpdate) (Snapshot, bool, error) {
 	if b.failing.Load() {
 		return Snapshot{}, false, errors.New("injected persistent update failure")
 	}
-	return b.DistributedBackend.UpdateActiveRun(ctx, key, streamID, generation, update)
+	return b.DistributedBackend.UpdateActiveRun(ctx, key, runID, generation, update)
 }
 
-func (b *toggledUpdateFailureBackend) ReleaseRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error) {
+func (b *toggledUpdateFailureBackend) ReleaseRun(ctx context.Context, key Key, ref RunRef, update ActiveRunUpdate) (Snapshot, bool, error) {
 	if b.failing.Load() {
 		return Snapshot{}, false, errors.New("injected persistent update failure")
 	}
 	return b.DistributedBackend.ReleaseRun(ctx, key, ref, update)
 }
 
-func (b *startRunGateBackend) StartRun(ctx context.Context, key Key, ref StreamRef, update SnapshotUpdate) (Snapshot, bool, error) {
+func (b *startRunGateBackend) StartRun(ctx context.Context, key Key, ref RunRef, update SnapshotUpdate) (Snapshot, bool, error) {
 	snapshot, changed, err := b.DistributedBackend.StartRun(ctx, key, ref, update)
 	b.once.Do(func() { close(b.claimed) })
 	select {
@@ -511,7 +547,7 @@ func (b *startRunGateBackend) StartRun(ctx context.Context, key Key, ref StreamR
 	}
 }
 
-func (b *preClaimGateBackend) StartRun(ctx context.Context, key Key, ref StreamRef, update SnapshotUpdate) (Snapshot, bool, error) {
+func (b *preClaimGateBackend) StartRun(ctx context.Context, key Key, ref RunRef, update SnapshotUpdate) (Snapshot, bool, error) {
 	b.once.Do(func() { close(b.entered) })
 	select {
 	case <-b.release:
@@ -611,20 +647,20 @@ func TestFinishRunSerializesInjectSendAndClose(t *testing.T) {
 
 	for i := range 100 {
 		sessionID := fmt.Sprintf("session-inject-close-%d", i)
-		streamID := fmt.Sprintf("stream-inject-close-%d", i)
+		runID := fmt.Sprintf("stream-inject-close-%d", i)
 		injectCh := make(chan turn.InjectMessage, 1)
-		if err := manager.StartRun(context.Background(), testBotID, sessionID, streamID, make(chan struct{}, 1), func() {}, injectCh); err != nil {
+		if err := manager.StartRun(context.Background(), testBotID, sessionID, runID, make(chan struct{}, 1), func() {}, injectCh); err != nil {
 			t.Fatalf("start run %d: %v", i, err)
 		}
 		start := make(chan struct{})
 		steerDone := make(chan struct{})
 		go func() {
 			<-start
-			_, _ = manager.Steer(context.Background(), testBotID, sessionID, streamID, "race teardown")
+			_, _ = manager.Steer(context.Background(), testBotID, sessionID, runID, "race teardown")
 			close(steerDone)
 		}()
 		close(start)
-		if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, sessionID, streamID), RunStatusCompleted, ""); err != nil {
+		if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, sessionID, runID), RunStatusCompleted, ""); err != nil {
 			t.Fatalf("finish run %d: %v", i, err)
 		}
 		receiveTestResult(t, "concurrent steer", steerDone)
@@ -919,14 +955,14 @@ func runManagerAbortAcknowledgesReservedRunBeforeTerminalCompletion(t *testing.T
 			runCtx,
 			testBotID,
 			testSessionID,
-			testStreamID,
+			testRunID,
 			make(chan struct{}, 1),
 			func() {},
 			make(chan turn.InjectMessage, 1),
 		)
 	}()
 	receiveTestResult(t, "reserved run claim", backend.claimed)
-	handle := manager.localControl(testStreamID).handle()
+	handle := manager.localControl(testRunID).handle()
 
 	type abortResult struct {
 		ok  bool
@@ -934,7 +970,7 @@ func runManagerAbortAcknowledgesReservedRunBeforeTerminalCompletion(t *testing.T
 	}
 	aborted := make(chan abortResult, 1)
 	go func() {
-		ok, err := manager.Abort(runCtx, testBotID, testSessionID, testStreamID)
+		ok, err := manager.Abort(runCtx, testBotID, testSessionID, testRunID)
 		aborted <- abortResult{ok: ok, err: err}
 	}()
 	result := receiveTestResult(t, "reserved run abort", aborted)
@@ -981,7 +1017,7 @@ func runManagerDoesNotActivateAdmissionAfterClaimLeaseExpires(t *testing.T, suit
 	builderCalled := make(chan struct{}, 1)
 	startErr := make(chan error, 1)
 	go func() {
-		startErr <- manager.StartRunWithAdmissionBuilder(
+		startErr <- manager.startRunWithAdmissionBuilder(
 			runCtx,
 			testBotID,
 			testSessionID,
@@ -1076,7 +1112,7 @@ func runManagerCloseWaitsForStartRunAndCancelsControl(t *testing.T, suite distri
 			runCtx,
 			testBotID,
 			testSessionID,
-			testStreamID,
+			testRunID,
 			make(chan struct{}, 1),
 			func() { canceled <- struct{}{} },
 			make(chan turn.InjectMessage, 1),
@@ -1154,7 +1190,6 @@ func TestMemoryBackendExpiresSnapshots(t *testing.T) {
 		snapshot.BotID = key.BotID
 		snapshot.SessionID = key.SessionID
 		snapshot.Seq = 1
-		snapshot.Queue = []QueuedRunView{}
 		return snapshot, true, nil
 	}); err != nil {
 		t.Fatalf("start memory run: %v", err)
@@ -1253,7 +1288,7 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 	})
 	t.Run("scopes identical stream ids by bot and session", func(t *testing.T) {
 		t.Parallel()
-		runRuntimeManagerScopesIdenticalStreamIDsContract(t, suite)
+		runRuntimeManagerScopesIdenticalRunIDsContract(t, suite)
 	})
 	t.Run("detects a gap in the first delta after subscription hydration", func(t *testing.T) {
 		t.Parallel()
@@ -1261,24 +1296,24 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 	})
 }
 
-func runRuntimeManagerScopesIdenticalStreamIDsContract(t *testing.T, suite runtimeBackendContractSuite) {
+func runRuntimeManagerScopesIdenticalRunIDsContract(t *testing.T, suite runtimeBackendContractSuite) {
 	t.Helper()
 	manager := testRuntimeManager(t, suite.newBackend(t), "owner-scoped-streams")
-	const streamID = "shared-caller-stream-id"
+	const runID = "shared-caller-run-id"
 	abortChannels := make(map[string]chan struct{})
 	for _, sessionID := range []string{"session-scope-a", "session-scope-b"} {
 		abortCh := make(chan struct{}, 1)
 		abortChannels[sessionID] = abortCh
-		if err := manager.StartRun(context.Background(), testBotID, sessionID, streamID, abortCh, func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+		if err := manager.StartRun(context.Background(), testBotID, sessionID, runID, abortCh, func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 			t.Fatalf("start %s: %v", sessionID, err)
 		}
 		snapshot, err := manager.Snapshot(context.Background(), testBotID, sessionID)
-		if err != nil || snapshot.CurrentRunView == nil || snapshot.CurrentRunView.StreamID != streamID {
+		if err != nil || snapshot.CurrentRunView == nil || snapshot.CurrentRunView.RunID != runID {
 			t.Fatalf("snapshot %s = %#v, err %v", sessionID, snapshot.CurrentRunView, err)
 		}
 	}
 	for _, sessionID := range []string{"session-scope-a", "session-scope-b"} {
-		aborted, err := manager.Abort(context.Background(), testBotID, sessionID, streamID)
+		aborted, err := manager.Abort(context.Background(), testBotID, sessionID, runID)
 		if err != nil || !aborted {
 			t.Fatalf("abort %s = %v, err %v", sessionID, aborted, err)
 		}
@@ -1289,7 +1324,7 @@ func runRuntimeManagerScopesIdenticalStreamIDsContract(t *testing.T, suite runti
 		}
 	}
 	for _, sessionID := range []string{"session-scope-a", "session-scope-b"} {
-		handle := requireRunHandle(t, manager, testBotID, sessionID, streamID)
+		handle := requireRunHandle(t, manager, testBotID, sessionID, runID)
 		if err := manager.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
 			t.Fatalf("finish %s: %v", sessionID, err)
 		}
@@ -1377,11 +1412,11 @@ func runRuntimeManagerFencesDelayedOwnerMutationsContract(t *testing.T, suite ru
 	})
 
 	oldInject := make(chan turn.InjectMessage, 1)
-	oldHandle, err := manager.StartRunHandle(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, oldInject)
+	oldHandle, err := manager.StartRunHandle(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, oldInject)
 	if err != nil {
 		t.Fatalf("start first generation: %v", err)
 	}
-	if _, err := manager.Steer(context.Background(), testBotID, testSessionID, testStreamID, "old generation steer"); err != nil {
+	if _, err := manager.Steer(context.Background(), testBotID, testSessionID, testRunID, "old generation steer"); err != nil {
 		t.Fatalf("steer first generation: %v", err)
 	}
 	var delayedApplied func()
@@ -1399,7 +1434,7 @@ func runRuntimeManagerFencesDelayedOwnerMutationsContract(t *testing.T, suite ru
 	}
 	newAbort := make(chan struct{}, 1)
 	newInject := make(chan turn.InjectMessage, 1)
-	newHandle, err := manager.StartRunHandle(context.Background(), testBotID, testSessionID, testStreamID, newAbort, func() {}, newInject)
+	newHandle, err := manager.StartRunHandle(context.Background(), testBotID, testSessionID, testRunID, newAbort, func() {}, newInject)
 	if err != nil {
 		t.Fatalf("start second generation: %v", err)
 	}
@@ -1575,7 +1610,7 @@ func runDistributedRuntimeManagerContract(t *testing.T, suite distributedRuntime
 		runRuntimeManagerAbortCommandDoesNotRepublishStaleSelfReference(t, suite)
 	})
 	t.Run("scopes stream reference cleanup to one run generation", func(t *testing.T) {
-		runRuntimeManagerScopesStreamRefCleanupToGeneration(t, suite)
+		runRuntimeManagerScopesRunRefCleanupToGeneration(t, suite)
 	})
 	t.Run("rejects delayed commands from an older run generation", func(t *testing.T) {
 		runRuntimeManagerRejectsDelayedOldGenerationCommand(t, suite)
@@ -1695,8 +1730,8 @@ func runRuntimeManagerRoutesAbortPastStaleLocalGeneration(t *testing.T, suite di
 	ready := make(chan struct{})
 	close(ready)
 	caller.mu.Lock()
-	caller.controls[scopedRunControlKey(testBotID, testSessionID, handle.StreamID)] = &runControl{
-		botID: testBotID, sessionID: testSessionID, streamID: handle.StreamID,
+	caller.controls[scopedRunControlKey(testBotID, testSessionID, handle.RunID)] = &runControl{
+		botID: testBotID, sessionID: testSessionID, runID: handle.RunID,
 		generation: "stale-generation", ready: ready,
 	}
 	caller.mu.Unlock()
@@ -1908,7 +1943,7 @@ func runRuntimeManagerLeaseWatchdogRevokesBlockedRenewal(t *testing.T, suite dis
 func runRuntimeManagerExpiredCleanupScopesLocalControlToGeneration(t *testing.T, suite distributedRuntimeBackendContractSuite) {
 	t.Helper()
 	const leaseTTL = 80 * time.Millisecond
-	backend := &delayedStreamRefCleanupBackend{
+	backend := &delayedRunRefCleanupBackend{
 		DistributedBackend: suite.newBackend(t),
 		deleted:            make(chan struct{}),
 		release:            make(chan struct{}),
@@ -2005,7 +2040,7 @@ func runRuntimeManagerRejectsValidationAfterLocalLeaseDeadline(t *testing.T, sui
 	}
 }
 
-func runRuntimeManagerScopesStreamRefCleanupToGeneration(t *testing.T, suite distributedRuntimeBackendContractSuite) {
+func runRuntimeManagerScopesRunRefCleanupToGeneration(t *testing.T, suite distributedRuntimeBackendContractSuite) {
 	t.Helper()
 
 	backend := suite.newBackend(t)
@@ -2018,36 +2053,36 @@ func runRuntimeManagerScopesStreamRefCleanupToGeneration(t *testing.T, suite dis
 			return fmt.Sprintf("generation-%d", generation.Add(1))
 		},
 	})
-	const streamID = "stream-generation-cleanup"
+	const runID = "stream-generation-cleanup"
 	key := Key{BotID: testBotID, SessionID: testSessionID}
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, streamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start first generation: %v", err)
 	}
-	oldRef, ok, err := backend.LoadStreamRef(context.Background(), key, streamID)
+	oldRef, ok, err := backend.LoadRunRef(context.Background(), key, runID)
 	if err != nil || !ok {
 		t.Fatalf("load first generation ref = ok:%v err:%v", ok, err)
 	}
-	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, streamID), RunStatusCompleted, ""); err != nil {
+	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted, ""); err != nil {
 		t.Fatalf("finish first generation: %v", err)
 	}
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, streamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start second generation: %v", err)
 	}
-	newRef, ok, err := backend.LoadStreamRef(context.Background(), key, streamID)
+	newRef, ok, err := backend.LoadRunRef(context.Background(), key, runID)
 	if err != nil || !ok {
 		t.Fatalf("load second generation ref = ok:%v err:%v", ok, err)
 	}
 	if oldRef.Generation == newRef.Generation {
 		t.Fatalf("run generation was reused: %q", oldRef.Generation)
 	}
-	deleted, err := backend.DeleteStreamRef(context.Background(), oldRef)
+	deleted, err := backend.DeleteRunRef(context.Background(), oldRef)
 	if err != nil {
 		t.Fatalf("delete stale generation ref: %v", err)
 	}
 	if deleted {
 		t.Fatal("stale generation cleanup deleted the current stream reference")
 	}
-	currentRef, ok, err := backend.LoadStreamRef(context.Background(), key, streamID)
+	currentRef, ok, err := backend.LoadRunRef(context.Background(), key, runID)
 	if err != nil || !ok || currentRef != newRef {
 		t.Fatalf("current stream ref after stale cleanup = (%#v, %v, %v), want %#v", currentRef, ok, err, newRef)
 	}
@@ -2067,20 +2102,20 @@ func runRuntimeManagerRejectsDelayedOldGenerationCommand(t *testing.T, suite dis
 			return fmt.Sprintf("generation-%d", generation.Add(1))
 		},
 	})
-	const streamID = "stream-generation-command"
+	const runID = "stream-generation-command"
 	key := Key{BotID: testBotID, SessionID: testSessionID}
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, streamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start first generation: %v", err)
 	}
-	oldRef, ok, err := backend.LoadStreamRef(context.Background(), key, streamID)
+	oldRef, ok, err := backend.LoadRunRef(context.Background(), key, runID)
 	if err != nil || !ok {
 		t.Fatalf("load first generation ref = ok:%v err:%v", ok, err)
 	}
-	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, streamID), RunStatusCompleted, ""); err != nil {
+	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted, ""); err != nil {
 		t.Fatalf("finish first generation: %v", err)
 	}
 	newAbort := make(chan struct{}, 1)
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, streamID, newAbort, func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, runID, newAbort, func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start second generation: %v", err)
 	}
 	now, err := backend.Now(context.Background())
@@ -2091,7 +2126,7 @@ func runRuntimeManagerRejectsDelayedOldGenerationCommand(t *testing.T, suite dis
 		Type:       CommandAbort,
 		BotID:      oldRef.BotID,
 		SessionID:  oldRef.SessionID,
-		StreamID:   oldRef.StreamID,
+		RunID:      oldRef.RunID,
 		Generation: oldRef.Generation,
 		CreatedAt:  now,
 		ExpiresAt:  now.Add(time.Second),
@@ -2159,10 +2194,10 @@ func runRuntimeManagerRejectsExpiredLeaseRevivalContract(t *testing.T, suite dis
 	); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("renew expired lease error = %v, want ErrRunOwnershipLost", err)
 	}
-	if _, ok, err := backend.LoadStreamRef(context.Background(), Key{BotID: testBotID, SessionID: testSessionID}, "stream-expired-revival"); err != nil || ok {
+	if _, ok, err := backend.LoadRunRef(context.Background(), Key{BotID: testBotID, SessionID: testSessionID}, "stream-expired-revival"); err != nil || ok {
 		t.Fatalf("expired stream ref = ok:%v err:%v, want absent", ok, err)
 	}
-	if err := manager.ValidateRunOwnership(context.Background(), RunHandle{BotID: testBotID, SessionID: testSessionID, StreamID: "stream-expired-revival", Generation: initial.CurrentRunView.Generation}); !errors.Is(err, ErrRunOwnershipLost) {
+	if err := manager.ValidateRunOwnership(context.Background(), RunHandle{BotID: testBotID, SessionID: testSessionID, RunID: "stream-expired-revival", Generation: initial.CurrentRunView.Generation}); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("validate expired ownership error = %v, want ErrRunOwnershipLost", err)
 	}
 
@@ -2186,10 +2221,10 @@ func runRuntimeManagerKeepsQueuedSteerPastAckTimeoutContract(t *testing.T, suite
 		CommandAckTTL: commandAckTTL,
 	})
 	injectCh := make(chan turn.InjectMessage, 1)
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, injectCh); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, injectCh); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	steer, err := manager.Steer(context.Background(), testBotID, testSessionID, testStreamID, "wait for the next model step")
+	steer, err := manager.Steer(context.Background(), testBotID, testSessionID, testRunID, "wait for the next model step")
 	if err != nil {
 		t.Fatalf("steer: %v", err)
 	}
@@ -2240,7 +2275,7 @@ func runRuntimeManagerCancelsExecutionAfterOwnershipLossContract(t *testing.T, s
 	canceled := make(chan struct{}, 1)
 	injectCh := make(chan turn.InjectMessage, 1)
 	authorityCtx, revokeAuthority := context.WithCancelCause(context.Background())
-	handle, err := manager.StartRunWithAdmissionBuilderAndOwnershipHandle(context.Background(), testBotID, testSessionID, testStreamID, func(context.Context, RunHandle) (RunAdmissionView, error) {
+	handle, err := manager.StartRunWithAdmissionBuilderAndOwnershipHandle(context.Background(), testBotID, testSessionID, testRunID, func(context.Context, RunHandle) (RunAdmissionView, error) {
 		return RunAdmissionView{}, nil
 	}, revokeAuthority, abortCh, func() {
 		select {
@@ -2293,12 +2328,12 @@ func runRuntimeManagerKeepsHookAuthorityForUserAbort(t *testing.T, suite distrib
 	owner := testRuntimeManager(t, backends[0], "owner-user-abort-authority")
 	remote := testRuntimeManager(t, backends[1], "remote-user-abort-authority")
 	authorityCtx, revokeAuthority := context.WithCancelCause(context.Background())
-	if err := owner.StartRunWithAdmissionBuilderAndOwnership(context.Background(), testBotID, testSessionID, testStreamID, func(context.Context) (RunAdmissionView, error) {
+	if err := owner.startRunWithAdmissionBuilderAndOwnership(context.Background(), testBotID, testSessionID, testRunID, func(context.Context, RunHandle) (RunAdmissionView, error) {
 		return RunAdmissionView{}, nil
 	}, revokeAuthority, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if ok, err := remote.Abort(context.Background(), testBotID, testSessionID, testStreamID); err != nil || !ok {
+	if ok, err := remote.Abort(context.Background(), testBotID, testSessionID, testRunID); err != nil || !ok {
 		t.Fatalf("remote abort = ok:%v err:%v", ok, err)
 	}
 	select {
@@ -2306,7 +2341,7 @@ func runRuntimeManagerKeepsHookAuthorityForUserAbort(t *testing.T, suite distrib
 		t.Fatalf("user abort revoked terminal hook authority: %v", context.Cause(authorityCtx))
 	default:
 	}
-	if err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testStreamID), RunStatusAborted, ""); err != nil {
+	if err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted, ""); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	select {
@@ -2327,7 +2362,7 @@ func runRuntimeManagerAbortsBlockedAdmissionContract(t *testing.T, suite distrib
 	builderStarted := make(chan struct{})
 	startDone := make(chan error, 1)
 	go func() {
-		startDone <- owner.StartRunWithOperationBuilder(
+		startDone <- owner.startRunWithOperationBuilder(
 			streamCtx,
 			testBotID,
 			testSessionID,
@@ -2384,7 +2419,7 @@ func runRuntimeManagerRetriesTerminalUpdateBeforeDroppingOwnerRoute(t *testing.T
 	if manager.localControlForHandle(firstHandle) == nil {
 		t.Fatal("terminal update failure dropped local owner control")
 	}
-	if _, ok, err := manager.StreamRef(context.Background(), testBotID, testSessionID, "stream-finish-retry"); err != nil || !ok {
+	if _, ok, err := manager.RunRef(context.Background(), testBotID, testSessionID, "stream-finish-retry"); err != nil || !ok {
 		t.Fatalf("terminal update failure stream ref = ok:%v err:%v", ok, err)
 	}
 
@@ -2397,7 +2432,7 @@ func runRuntimeManagerRetriesTerminalUpdateBeforeDroppingOwnerRoute(t *testing.T
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		_, ok, err := manager.StreamRef(context.Background(), testBotID, testSessionID, "stream-finish-retry")
+		_, ok, err := manager.RunRef(context.Background(), testBotID, testSessionID, "stream-finish-retry")
 		if err == nil && !ok && manager.localControlForHandle(firstHandle) == nil {
 			secondHandle := requireRunHandle(t, manager, testBotID, secondSessionID, "stream-finish-retry")
 			if err := manager.FinishRun(context.Background(), secondHandle, RunStatusCompleted, ""); err != nil {
@@ -2421,7 +2456,7 @@ func runRuntimeManagerDoesNotBuildRejectedOperationContract(t *testing.T, suite 
 	}
 
 	var built atomic.Bool
-	err := contender.StartRunWithOperationBuilder(
+	err := contender.startRunWithOperationBuilder(
 		context.Background(),
 		testBotID,
 		testSessionID,
@@ -2455,7 +2490,7 @@ func TestRuntimeManagerPublishesAdmittingCheckpoint(t *testing.T) {
 	releaseBuilder := make(chan struct{})
 	startDone := make(chan error, 1)
 	go func() {
-		startDone <- manager.StartRunWithOperationBuilder(
+		startDone <- manager.startRunWithOperationBuilder(
 			context.Background(),
 			testBotID,
 			testSessionID,
@@ -2506,7 +2541,7 @@ func TestRuntimeManagerBuilderFailureReleasesReservation(t *testing.T) {
 		t.Fatalf("subscribe: %v", err)
 	}
 	defer sub.Close()
-	err = manager.StartRunWithOperationBuilder(
+	err = manager.startRunWithOperationBuilder(
 		context.Background(),
 		testBotID,
 		testSessionID,
@@ -2519,7 +2554,7 @@ func TestRuntimeManagerBuilderFailureReleasesReservation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "prepare operation failed") {
 		t.Fatalf("builder error = %v", err)
 	}
-	if _, ok, err := manager.StreamRef(context.Background(), testBotID, testSessionID, "stream-builder-failure"); err != nil || ok {
+	if _, ok, err := manager.RunRef(context.Background(), testBotID, testSessionID, "stream-builder-failure"); err != nil || ok {
 		t.Fatalf("reservation stream ref = ok:%v err:%v", ok, err)
 	}
 	snapshot, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
@@ -2540,10 +2575,10 @@ func runRuntimeManagerRejectsQueuedSteerOnFinishContract(t *testing.T, suite run
 
 	manager := testRuntimeManager(t, suite.newBackend(t), "owner-finished-steer")
 	injectCh := make(chan turn.InjectMessage, 1)
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, injectCh); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, injectCh); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	steer, err := manager.Steer(context.Background(), testBotID, testSessionID, testStreamID, "adjust before finish")
+	steer, err := manager.Steer(context.Background(), testBotID, testSessionID, testRunID, "adjust before finish")
 	if err != nil {
 		t.Fatalf("steer: %v", err)
 	}
@@ -2551,7 +2586,7 @@ func runRuntimeManagerRejectsQueuedSteerOnFinishContract(t *testing.T, suite run
 		return snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Steer != nil &&
 			snapshot.CurrentRunView.Steer.ID == steer.ID && snapshot.CurrentRunView.Steer.Status == SteerStatusQueued
 	})
-	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, testStreamID), RunStatusCompleted, ""); err != nil {
+	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, testRunID), RunStatusCompleted, ""); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	snapshot, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
@@ -2600,7 +2635,7 @@ func runRuntimeManagerRejectsQueuedSteerOnAgentTerminalContract(t *testing.T, su
 			}
 			defer sub.Close()
 			injectCh := make(chan turn.InjectMessage, 1)
-			handle, err := manager.StartRunHandle(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, injectCh)
+			handle, err := manager.StartRunHandle(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, injectCh)
 			if err != nil {
 				t.Fatalf("start run: %v", err)
 			}
@@ -2657,11 +2692,11 @@ func runRuntimeManagerSharesReplacementOperationContract(t *testing.T, suite run
 		ReplaceFromMessageID: "user-old",
 		ReplacementUserTurn:  replacement,
 	}
-	if err := owner.StartRunWithOperation(
+	if err := owner.startRunWithOperation(
 		context.Background(),
 		testBotID,
 		testSessionID,
-		testStreamID,
+		testRunID,
 		operation,
 		make(chan struct{}, 1),
 		func() {},
@@ -2699,13 +2734,13 @@ func runRuntimeManagerSharesRequestUserTurnContract(t *testing.T, suite runtimeB
 		Timestamp:         time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC),
 		Platform:          "local",
 		SenderUserID:      "user-request-turn",
-		ExternalMessageID: testStreamID,
+		ExternalMessageID: testRunID,
 	}
-	if err := owner.StartRunWithAdmission(
+	if err := owner.startRunWithAdmission(
 		context.Background(),
 		testBotID,
 		testSessionID,
-		testStreamID,
+		testRunID,
 		RunAdmissionView{RequestUserTurn: requestTurn},
 		make(chan struct{}, 1),
 		func() {},
@@ -2722,7 +2757,7 @@ func runRuntimeManagerSharesRequestUserTurnContract(t *testing.T, suite runtimeB
 	if got == nil || got.RequestUserTurn == nil {
 		t.Fatalf("current run request user turn = %#v", got)
 	}
-	if got.RequestUserTurn.Text != requestTurn.Text || got.RequestUserTurn.ExternalMessageID != testStreamID {
+	if got.RequestUserTurn.Text != requestTurn.Text || got.RequestUserTurn.ExternalMessageID != testRunID {
 		t.Fatalf("request user turn = %#v", got.RequestUserTurn)
 	}
 	if len(got.RequestUserTurn.Attachments) != 1 || got.RequestUserTurn.Attachments[0].ContentHash != "sha256:notes" {
@@ -2740,7 +2775,7 @@ func TestRuntimeManagerRejectsNonUserRequestTurn(t *testing.T) {
 	t.Parallel()
 
 	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-invalid-request-turn")
-	err := manager.StartRunWithAdmission(
+	err := manager.startRunWithAdmission(
 		context.Background(),
 		testBotID,
 		testSessionID,
@@ -2774,11 +2809,11 @@ func runRuntimeManagerSnapshotsRichActiveRunContract(t *testing.T, suite runtime
 
 	abortCh := make(chan struct{}, 1)
 	injectCh := make(chan turn.InjectMessage, 1)
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testStreamID, abortCh, func() {}, injectCh); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, abortCh, func() {}, injectCh); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
 	for _, event := range richRuntimeAgentScript() {
-		if _, err := manager.HandleAgentEvent(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, testStreamID), event); err != nil {
+		if _, err := manager.HandleAgentEvent(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, testRunID), event); err != nil {
 			t.Fatalf("handle event %s: %v", event.Type, err)
 		}
 	}
@@ -2787,7 +2822,7 @@ func runRuntimeManagerSnapshotsRichActiveRunContract(t *testing.T, suite runtime
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.StreamID != testStreamID || snapshot.CurrentRunView.Status != RunStatusRunning {
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.RunID != testRunID || snapshot.CurrentRunView.Status != RunStatusWaitingDecision {
 		t.Fatalf("current run = %#v", snapshot.CurrentRunView)
 	}
 	if snapshot.Epoch == "" || snapshot.CurrentRunView.Generation == "" {
@@ -2798,9 +2833,6 @@ func runRuntimeManagerSnapshotsRichActiveRunContract(t *testing.T, suite runtime
 	assertRuntimeBlock(t, snapshot.CurrentRunView.Messages, chatview.UIMessageTool, "call-exec", "")
 	assertRuntimeBlock(t, snapshot.CurrentRunView.Messages, chatview.UIMessageTool, "call-approval", "")
 	assertRuntimeBlock(t, snapshot.CurrentRunView.Messages, chatview.UIMessageTool, "call-ask", "")
-	if snapshot.Queue == nil {
-		t.Fatal("queue must be an empty array, not nil")
-	}
 
 	var sawDelta bool
 	deadline := time.After(2 * time.Second)
@@ -2876,7 +2908,7 @@ func TestRuntimeManagerRehydratesSnapshotWhenSequenceEpochResets(t *testing.T) {
 	key := Key{BotID: testBotID, SessionID: "session-sequence-reset"}
 	firstUpdatedAt := time.Now().UTC()
 	if _, _, err := backend.Update(context.Background(), key, func(Snapshot, bool) (Snapshot, bool, error) {
-		return Snapshot{BotID: key.BotID, SessionID: key.SessionID, Epoch: "epoch-1", Seq: 100, Queue: []QueuedRunView{}, UpdatedAt: firstUpdatedAt}, true, nil
+		return Snapshot{BotID: key.BotID, SessionID: key.SessionID, Epoch: "epoch-1", Seq: 100, UpdatedAt: firstUpdatedAt}, true, nil
 	}); err != nil {
 		t.Fatalf("seed first epoch: %v", err)
 	}
@@ -2891,7 +2923,7 @@ func TestRuntimeManagerRehydratesSnapshotWhenSequenceEpochResets(t *testing.T) {
 
 	secondUpdatedAt := firstUpdatedAt.Add(time.Second)
 	if _, _, err := backend.Update(context.Background(), key, func(Snapshot, bool) (Snapshot, bool, error) {
-		return Snapshot{BotID: key.BotID, SessionID: key.SessionID, Epoch: "epoch-2", Seq: 2, Queue: []QueuedRunView{}, UpdatedAt: secondUpdatedAt}, true, nil
+		return Snapshot{BotID: key.BotID, SessionID: key.SessionID, Epoch: "epoch-2", Seq: 2, UpdatedAt: secondUpdatedAt}, true, nil
 	}); err != nil {
 		t.Fatalf("seed second epoch: %v", err)
 	}
@@ -2920,7 +2952,7 @@ func TestRuntimeManagerDropsEpochlessEventsAfterEpochIsEstablished(t *testing.T)
 	key := Key{BotID: testBotID, SessionID: "session-missing-epoch"}
 	now := time.Now().UTC()
 	if _, _, err := backend.Update(context.Background(), key, func(Snapshot, bool) (Snapshot, bool, error) {
-		return Snapshot{BotID: key.BotID, SessionID: key.SessionID, Epoch: "epoch-1", Seq: 1, Queue: []QueuedRunView{}, UpdatedAt: now}, true, nil
+		return Snapshot{BotID: key.BotID, SessionID: key.SessionID, Epoch: "epoch-1", Seq: 1, UpdatedAt: now}, true, nil
 	}); err != nil {
 		t.Fatalf("seed snapshot: %v", err)
 	}
@@ -2957,11 +2989,11 @@ func runRuntimeManagerRoutesAbortAndSteerAcrossManagersContract(t *testing.T, su
 	abortCh := make(chan struct{}, 1)
 	injectCh := make(chan turn.InjectMessage, 1)
 	canceled := make(chan struct{}, 1)
-	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, abortCh, func() { canceled <- struct{}{} }, injectCh); err != nil {
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, abortCh, func() { canceled <- struct{}{} }, injectCh); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
 
-	if ok, err := remote.Abort(context.Background(), testBotID, testSessionID, testStreamID); err != nil || !ok {
+	if ok, err := remote.Abort(context.Background(), testBotID, testSessionID, testRunID); err != nil || !ok {
 		if err != nil {
 			t.Fatalf("remote abort: %v", err)
 		}
@@ -2983,7 +3015,7 @@ func runRuntimeManagerRoutesAbortAndSteerAcrossManagersContract(t *testing.T, su
 	if snapshot.CurrentRunView.Error != "" {
 		t.Fatalf("abort error = %q, want empty", snapshot.CurrentRunView.Error)
 	}
-	if err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testStreamID), RunStatusAborted, ""); err != nil {
+	if err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted, ""); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	snapshot, err := owner.Snapshot(context.Background(), testBotID, testSessionID)
@@ -3047,14 +3079,14 @@ func runRuntimeManagerRoutesActiveResponsesAcrossManagersContract(t *testing.T, 
 		commands <- command
 		return nil
 	})
-	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start response run: %v", err)
 	}
 	for _, event := range []native.StreamEvent{
 		{Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-approval", ApprovalID: "approval-1", Status: "pending"},
 		{Type: native.EventUserInputRequest, ToolName: "ask_user", ToolCallID: "call-input", UserInputID: "input-1", Status: "pending"},
 	} {
-		if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testStreamID), event); err != nil {
+		if _, err := owner.HandleAgentEvent(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), event); err != nil {
 			t.Fatalf("record response target: %v", err)
 		}
 	}
@@ -3072,7 +3104,7 @@ func runRuntimeManagerRoutesActiveResponsesAcrossManagersContract(t *testing.T, 
 		}
 		select {
 		case command := <-commands:
-			if command.Type != request.commandType || command.TargetID != request.targetID || command.StreamID != testStreamID {
+			if command.Type != request.commandType || command.TargetID != request.targetID || command.RunID != testRunID {
 				t.Fatalf("routed command = %#v", command)
 			}
 		case <-time.After(2 * time.Second):
@@ -3147,10 +3179,10 @@ func runRuntimeManagerAcknowledgesAppliedResponseAfterFinish(t *testing.T, suite
 	backends := suite.newSharedBackends(t, 2)
 	owner := testRuntimeManager(t, backends[0], "response-applied-owner")
 	remote := testRuntimeManager(t, backends[1], "response-applied-remote")
-	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start response run: %v", err)
 	}
-	handle := requireRunHandle(t, owner, testBotID, testSessionID, testStreamID)
+	handle := requireRunHandle(t, owner, testBotID, testSessionID, testRunID)
 	owner.SetCommandHandler(func(ctx context.Context, _ Command) error {
 		return owner.FinishRun(context.WithoutCancel(ctx), handle, RunStatusCompleted, "")
 	})
@@ -3190,11 +3222,11 @@ func runRuntimeManagerCommandRoutingOutlivesStartContext(t *testing.T, suite dis
 	t.Cleanup(func() { _ = owner.Close() })
 	remote := testRuntimeManager(t, backends[1], "startup-context-remote")
 	abortCh := make(chan struct{}, 1)
-	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, abortCh, func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, abortCh, func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run after startup context cancellation: %v", err)
 	}
 
-	if ok, err := remote.Abort(context.Background(), testBotID, testSessionID, testStreamID); err != nil || !ok {
+	if ok, err := remote.Abort(context.Background(), testBotID, testSessionID, testRunID); err != nil || !ok {
 		t.Fatalf("remote abort after startup context cancellation = ok:%v err:%v", ok, err)
 	}
 	receiveTestResult(t, "abort routed after startup context cancellation", abortCh)
@@ -3214,10 +3246,10 @@ func runRuntimeManagerCancelsActiveResponseOnFinish(t *testing.T, suite distribu
 		handlerCanceled <- ctx.Err()
 		return ctx.Err()
 	})
-	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start response run: %v", err)
 	}
-	handle := requireRunHandle(t, owner, testBotID, testSessionID, testStreamID)
+	handle := requireRunHandle(t, owner, testBotID, testSessionID, testRunID)
 	if _, err := owner.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 		Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-finish",
 		ApprovalID: "approval-finish", Status: "pending",
@@ -3350,17 +3382,17 @@ func runRuntimeManagerAbortCommandDoesNotRepublishStaleSelfReference(t *testing.
 	t.Helper()
 	backend := &countCommandPublishBackend{DistributedBackend: suite.newBackend(t)}
 	manager := testRuntimeManager(t, backend, "stale-self-owner")
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start stale self run: %v", err)
 	}
-	ctrl := manager.localControl(testStreamID)
-	manager.removeLocalControl(testStreamID, ctrl)
+	ctrl := manager.localControl(testRunID)
+	manager.removeLocalControl(testRunID, ctrl)
 	createdAt := time.Now().UTC()
 	manager.applyCommand(context.Background(), Command{
 		Type:      CommandAbort,
 		BotID:     testBotID,
 		SessionID: testSessionID,
-		StreamID:  testStreamID,
+		RunID:     testRunID,
 		CreatedAt: createdAt,
 		ExpiresAt: createdAt.Add(time.Second),
 	})
@@ -3379,9 +3411,8 @@ func runRuntimeManagerMarksExpiredOwnerLeaseLostContract(t *testing.T, suite dis
 		BotID:     testBotID,
 		SessionID: testSessionID,
 		Seq:       3,
-		Queue:     []QueuedRunView{},
 		CurrentRunView: &CurrentRunView{
-			StreamID:            testStreamID,
+			RunID:               testRunID,
 			Status:              RunStatusRunning,
 			OwnerID:             "dead-owner",
 			OwnerLeaseExpiresAt: &expired,
@@ -3452,7 +3483,7 @@ func runRuntimeManagerFencesStaleOwnerEventsContract(t *testing.T, suite distrib
 	if err != nil {
 		t.Fatalf("snapshot replacement run: %v", err)
 	}
-	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.StreamID != "stream-current" || snapshot.CurrentRunView.OwnerID != "owner-current" {
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.RunID != "stream-current" || snapshot.CurrentRunView.OwnerID != "owner-current" {
 		t.Fatalf("stale owner replaced current run: %#v", snapshot.CurrentRunView)
 	}
 }
@@ -3473,7 +3504,7 @@ func runRuntimeManagerRenewsIdleOwnerLeaseContract(t *testing.T, suite distribut
 		OwnerLeaseTTL: 200 * time.Millisecond,
 		CommandAckTTL: 50 * time.Millisecond,
 	})
-	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
 	first, err := remote.Snapshot(context.Background(), testBotID, testSessionID)
@@ -3497,7 +3528,7 @@ func runRuntimeManagerRenewsIdleOwnerLeaseContract(t *testing.T, suite distribut
 		t.Fatalf("owner lease was not renewed: first=%s current=%s", firstLease, snapshot.CurrentRunView.OwnerLeaseExpiresAt)
 	}
 
-	owner.forgetLocalControl(context.Background(), testStreamID)
+	owner.forgetLocalControl(context.Background(), testRunID)
 	time.Sleep(2 * 200 * time.Millisecond)
 	snapshot, err = remote.Snapshot(context.Background(), testBotID, testSessionID)
 	if err != nil {
@@ -3506,7 +3537,7 @@ func runRuntimeManagerRenewsIdleOwnerLeaseContract(t *testing.T, suite distribut
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusLost {
 		t.Fatalf("stopped owner current run = %#v, want lost", snapshot.CurrentRunView)
 	}
-	if _, ok, err := remote.StreamRef(context.Background(), testBotID, testSessionID, testStreamID); err != nil || ok {
+	if _, ok, err := remote.RunRef(context.Background(), testBotID, testSessionID, testRunID); err != nil || ok {
 		if err != nil {
 			t.Fatalf("stream ref after lost: %v", err)
 		}
@@ -3536,10 +3567,10 @@ func runRuntimeManagerNotifiesLeaseLostContract(t *testing.T, suite distributedR
 		t.Fatalf("subscribe observer: %v", err)
 	}
 	defer sub.Close()
-	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	owner.stopLeaseRenewal(owner.localControl(testStreamID))
+	owner.stopLeaseRenewal(owner.localControl(testRunID))
 
 	deadline := time.After(5 * time.Second)
 	for {
@@ -3574,10 +3605,9 @@ func runRuntimeManagerReconcilesMissedPublishContract(t *testing.T, suite distri
 		BotID:     testBotID,
 		SessionID: testSessionID,
 		Seq:       7,
-		Queue:     []QueuedRunView{},
 		UpdatedAt: now,
 		CurrentRunView: &CurrentRunView{
-			StreamID:  "stream-missed-publish",
+			RunID:     "stream-missed-publish",
 			Status:    RunStatusCompleted,
 			OwnerID:   "owner-missed-publish",
 			StartedAt: now,
@@ -3705,11 +3735,11 @@ func runRuntimeManagerDroppedCommandAckContract(t *testing.T, suite distributedR
 		CommandAckTTL: 50 * time.Millisecond,
 	})
 	injectCh := make(chan turn.InjectMessage, 1)
-	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, injectCh); err != nil {
+	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, injectCh); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
 
-	if ok, err := remote.Abort(context.Background(), testBotID, testSessionID, testStreamID); err == nil || ok {
+	if ok, err := remote.Abort(context.Background(), testBotID, testSessionID, testRunID); err == nil || ok {
 		t.Fatalf("dropped abort = ok:%v err:%v, want acknowledgement error", ok, err)
 	}
 	snapshot, err := remote.Snapshot(context.Background(), testBotID, testSessionID)
@@ -3720,7 +3750,7 @@ func runRuntimeManagerDroppedCommandAckContract(t *testing.T, suite distributedR
 		t.Fatalf("dropped abort status = %#v, want still running", snapshot.CurrentRunView)
 	}
 
-	steer, err := remote.Steer(context.Background(), testBotID, testSessionID, testStreamID, "adjust course")
+	steer, err := remote.Steer(context.Background(), testBotID, testSessionID, testRunID, "adjust course")
 	if err != nil {
 		t.Fatalf("dropped steer initial publish: %v", err)
 	}
@@ -3741,7 +3771,7 @@ func runRuntimeManagerDroppedCommandAckContract(t *testing.T, suite distributedR
 		Type:      CommandSteer,
 		BotID:     testBotID,
 		SessionID: testSessionID,
-		StreamID:  testStreamID,
+		RunID:     testRunID,
 		SteerID:   steer.ID,
 		Text:      "late adjust course",
 		CreatedAt: time.Now().UTC().Add(-time.Second),
@@ -3807,7 +3837,7 @@ func runRuntimeManagerReleasesPendingCommandOnClose(t *testing.T, suite distribu
 		OwnerLeaseTTL: time.Second,
 		CommandAckTTL: time.Hour,
 	})
-	handle, err := owner.StartRunHandle(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1))
+	handle, err := owner.StartRunHandle(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1))
 	if err != nil {
 		t.Fatalf("start run: %v", err)
 	}
@@ -3872,7 +3902,7 @@ func runRuntimeManagerReleasesOwnedRunOnClose(t *testing.T, suite distributedRun
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusLost || snapshot.CurrentRunView.Error != runtimeOwnerShutdownError || snapshot.CurrentRunView.OwnerLeaseExpiresAt != nil {
 		t.Fatalf("released snapshot = %#v", snapshot.CurrentRunView)
 	}
-	if _, ok, err := backends[1].LoadStreamRef(context.Background(), Key{BotID: testBotID, SessionID: "session-graceful-release"}, "stream-graceful-release"); err != nil || ok {
+	if _, ok, err := backends[1].LoadRunRef(context.Background(), Key{BotID: testBotID, SessionID: "session-graceful-release"}, "stream-graceful-release"); err != nil || ok {
 		t.Fatalf("released stream ref = ok:%v err:%v", ok, err)
 	}
 	if err := remote.StartRun(context.Background(), testBotID, "session-graceful-release", "stream-after-graceful-release", make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
@@ -3908,12 +3938,12 @@ func runRuntimeManagerDoesNotBlockCommandResultsBehindSlowHandlers(t *testing.T,
 	})
 	ownerB.SetCommandHandler(func(context.Context, Command) error { return nil })
 
-	startApprovalRun := func(manager *Manager, sessionID, streamID, approvalID string) {
+	startApprovalRun := func(manager *Manager, sessionID, runID, approvalID string) {
 		t.Helper()
-		if err := manager.StartRun(context.Background(), testBotID, sessionID, streamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
-			t.Fatalf("start %s: %v", streamID, err)
+		if err := manager.StartRun(context.Background(), testBotID, sessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+			t.Fatalf("start %s: %v", runID, err)
 		}
-		handle := requireRunHandle(t, manager, testBotID, sessionID, streamID)
+		handle := requireRunHandle(t, manager, testBotID, sessionID, runID)
 		if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 			Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-" + approvalID, ApprovalID: approvalID, Status: "pending",
 		}); err != nil {
@@ -3944,10 +3974,10 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterAbortContract(t *testing.T, 
 	t.Helper()
 
 	manager := testRuntimeManager(t, suite.newBackend(t), "owner-error")
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	handle := requireRunHandle(t, manager, testBotID, testSessionID, testStreamID)
+	handle := requireRunHandle(t, manager, testBotID, testSessionID, testRunID)
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 		Type:  native.EventError,
 		Error: "runtime interrupted",
@@ -3979,10 +4009,10 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterEndContract(t *testing.T, su
 	t.Helper()
 
 	manager := testRuntimeManager(t, suite.newBackend(t), "owner-error-end")
-	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testStreamID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	handle := requireRunHandle(t, manager, testBotID, testSessionID, testStreamID)
+	handle := requireRunHandle(t, manager, testBotID, testSessionID, testRunID)
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 		Type:  native.EventError,
 		Error: "provider failed",
@@ -4024,11 +4054,21 @@ func runRuntimeBackendSerializesConcurrentSnapshotUpdatesContract(t *testing.T, 
 			defer wg.Done()
 			_, _, err := backend.Update(context.Background(), key, func(snapshot Snapshot, ok bool) (Snapshot, bool, error) {
 				if !ok {
-					snapshot = Snapshot{BotID: key.BotID, SessionID: key.SessionID, Queue: []QueuedRunView{}}
+					snapshot = Snapshot{BotID: key.BotID, SessionID: key.SessionID}
 				}
 				snapshot.Seq++
 				snapshot.UpdatedAt = time.Now().UTC()
-				snapshot.Queue = append(nonNilQueue(snapshot.Queue), QueuedRunView{StreamID: fmt.Sprintf("queued-%02d", i)})
+				// Appending to the cumulative message list, not just bumping
+				// Seq, is what makes a lost update visible: a scalar increment
+				// can be re-derived, a dropped append cannot.
+				if snapshot.CurrentRunView == nil {
+					snapshot.CurrentRunView = &CurrentRunView{RunID: testRunID}
+				}
+				snapshot.CurrentRunView.Messages = append(snapshot.CurrentRunView.Messages, chatview.UIMessage{
+					ID:      i,
+					Type:    chatview.UIMessageText,
+					Content: fmt.Sprintf("update-%02d", i),
+				})
 				return snapshot, true, nil
 			})
 			if err != nil {
@@ -4053,8 +4093,11 @@ func runRuntimeBackendSerializesConcurrentSnapshotUpdatesContract(t *testing.T, 
 	if snapshot.Seq != updates {
 		t.Fatalf("seq = %d, want %d", snapshot.Seq, updates)
 	}
-	if len(snapshot.Queue) != updates {
-		t.Fatalf("queue len = %d, want %d", len(snapshot.Queue), updates)
+	if snapshot.CurrentRunView == nil {
+		t.Fatal("current run view is missing after concurrent updates")
+	}
+	if got := len(snapshot.CurrentRunView.Messages); got != updates {
+		t.Fatalf("messages len = %d, want %d", got, updates)
 	}
 }
 

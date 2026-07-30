@@ -1122,13 +1122,14 @@ export type ConversationUiTurn = {
     messages?: Array<ConversationUiMessage>;
     platform?: string;
     reply?: ConversationUiReplyRef;
-    role?: string;
+    role: 'user' | 'assistant' | 'system';
     sender_avatar_url?: string;
     sender_display_name?: string;
     sender_user_id?: string;
     skill_activation?: ConversationSkillActivation;
     text?: string;
-    timestamp?: string;
+    timestamp: Date;
+    turn_id: string;
     user_message_kind?: string;
 };
 
@@ -1921,6 +1922,7 @@ export type HandlersTokenUsageResponse = {
 };
 
 export type HandlersToolApprovalDecisionRequest = {
+    control_id?: string;
     reason?: string;
 };
 
@@ -1928,6 +1930,16 @@ export type HandlersTriggerCompactResponse = {
     message_count?: number;
     status?: string;
     summary?: string;
+};
+
+export type HandlersUiLocateMessageResponse = {
+    items: Array<ConversationUiTurn>;
+    target_external_message_id: string;
+    target_id: string;
+};
+
+export type HandlersUiMessageListResponse = {
+    items: Array<ConversationUiTurn>;
 };
 
 export type HandlersUpdateContainerMetricsRequest = {
@@ -2291,45 +2303,6 @@ export type McpUpsertRequest = {
     name?: string;
     transport?: string;
     url?: string;
-};
-
-export type MessageMessage = {
-    assets?: Array<MessageMessageAsset>;
-    bot_id?: string;
-    compact_id?: string;
-    content?: Array<number>;
-    created_at?: string;
-    display_content?: string;
-    event_id?: string;
-    external_message_id?: string;
-    id?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    platform?: string;
-    role?: string;
-    runtime_type?: string;
-    sender_avatar_url?: string;
-    sender_channel_identity_id?: string;
-    sender_display_name?: string;
-    sender_user_id?: string;
-    session_id?: string;
-    session_mode?: string;
-    source_reply_to_message_id?: string;
-    usage?: Array<number>;
-};
-
-export type MessageMessageAsset = {
-    content_hash?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    mime?: string;
-    name?: string;
-    ordinal?: number;
-    role?: string;
-    size_bytes?: number;
-    storage_key?: string;
 };
 
 export type ModelsAddRequest = {
@@ -2931,6 +2904,7 @@ export type UserruntimeRuntime = {
     name?: string;
     online?: boolean;
     os?: string;
+    team_id?: string;
     workspace_base?: string;
 };
 
@@ -7558,10 +7532,6 @@ export type GetBotsByBotIdMessagesData = {
          * Message ID cursor before which to page
          */
         before_message_id?: string;
-        /**
-         * Response format: ui returns normalized chat UI turns
-         */
-        format?: string;
     };
     url: '/bots/{bot_id}/messages';
 };
@@ -7589,11 +7559,9 @@ export type GetBotsByBotIdMessagesError = GetBotsByBotIdMessagesErrors[keyof Get
 
 export type GetBotsByBotIdMessagesResponses = {
     /**
-     * when format=ui
+     * OK
      */
-    200: {
-        [key: string]: Array<ConversationUiTurn>;
-    };
+    200: HandlersUiMessageListResponse;
 };
 
 export type GetBotsByBotIdMessagesResponse = GetBotsByBotIdMessagesResponses[keyof GetBotsByBotIdMessagesResponses];
@@ -7652,9 +7620,7 @@ export type GetBotsByBotIdMessagesLocateResponses = {
     /**
      * OK
      */
-    200: {
-        [key: string]: unknown;
-    };
+    200: HandlersUiLocateMessageResponse;
 };
 
 export type GetBotsByBotIdMessagesLocateResponse = GetBotsByBotIdMessagesLocateResponses[keyof GetBotsByBotIdMessagesLocateResponses];
@@ -8778,7 +8744,7 @@ export type PostBotsByBotIdSessionsBySessionIdCompactErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
@@ -8844,52 +8810,6 @@ export type PostBotsByBotIdSessionsBySessionIdForkResponses = {
 };
 
 export type PostBotsByBotIdSessionsBySessionIdForkResponse = PostBotsByBotIdSessionsBySessionIdForkResponses[keyof PostBotsByBotIdSessionsBySessionIdForkResponses];
-
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Session ID
-         */
-        session_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/sessions/{session_id}/messages/events';
-};
-
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsError = GetBotsByBotIdSessionsBySessionIdMessagesEventsErrors[keyof GetBotsByBotIdSessionsBySessionIdMessagesEventsErrors];
-
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses = {
-    /**
-     * SSE stream
-     */
-    200: string;
-};
-
-export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponse = GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses[keyof GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdStatusData = {
     body?: never;

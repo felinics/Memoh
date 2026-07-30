@@ -19,4 +19,5 @@ export interface DesktopRuntimeConfig {
   runtimeId: string
   name: string
   key: string
+  teamId?: string
 }

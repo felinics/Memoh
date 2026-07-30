@@ -30,6 +30,8 @@ type Agent struct {
 	limits         Limits
 }
 
+const streamCancelDrainGrace = 250 * time.Millisecond
+
 // New creates a new Agent with the given dependencies.
 func New(deps Deps) *Agent {
 	logger := deps.Logger
@@ -334,10 +336,19 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	var allText strings.Builder
 	stepNumber := 0
 
-	for part := range streamResult.Stream {
-		if streamCtx.Err() != nil {
+	streamClosed := false
+	for !aborted && !streamClosed {
+		var part sdk.StreamPart
+		select {
+		case <-streamCtx.Done():
 			aborted = true
-			break
+			continue
+		case next, ok := <-streamResult.Stream:
+			if !ok {
+				streamClosed = true
+				continue
+			}
+			part = next
 		}
 
 		switch p := part.(type) {
@@ -552,35 +563,42 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		}
 	}
 
-	if aborted {
-		for range streamResult.Stream {
-		}
+	if aborted && !streamClosed {
+		// A provider is expected to close its stream when the context is
+		// cancelled, but run termination must not depend on that cooperation.
+		// Preserve the final snapshot when it arrives promptly, then stop
+		// waiting so the caller can fence and finalize the run as aborted.
+		cancel(context.Canceled)
+		streamClosed = drainStreamUntilClosed(streamResult.Stream, streamCancelDrainGrace)
 	}
 
 	if textLoopProbeBuffer != nil {
 		textLoopProbeBuffer.Flush()
 	}
 
-	finalMessages := streamResult.Messages
-	if readMediaState != nil {
-		finalMessages = readMediaState.mergeMessages(streamResult.Steps, finalMessages)
-	}
-	if streamResult.DeferredToolApproval != nil {
-		finalMessages = annotateDeferredApproval(finalMessages, *streamResult.DeferredToolApproval)
-	}
-	finalMessages = toolExecutionMetadata.annotate(finalMessages)
+	var finalMessages []sdk.Message
 	var totalUsage sdk.Usage
-	for _, step := range streamResult.Steps {
-		totalUsage.InputTokens += step.Usage.InputTokens
-		totalUsage.OutputTokens += step.Usage.OutputTokens
-		totalUsage.TotalTokens += step.Usage.TotalTokens
-		totalUsage.ReasoningTokens += step.Usage.ReasoningTokens
-		totalUsage.CachedInputTokens += step.Usage.CachedInputTokens
-		totalUsage.InputTokenDetails.NoCacheTokens += step.Usage.InputTokenDetails.NoCacheTokens
-		totalUsage.InputTokenDetails.CacheReadTokens += step.Usage.InputTokenDetails.CacheReadTokens
-		totalUsage.InputTokenDetails.CacheWriteTokens += step.Usage.InputTokenDetails.CacheWriteTokens
-		totalUsage.OutputTokenDetails.TextTokens += step.Usage.OutputTokenDetails.TextTokens
-		totalUsage.OutputTokenDetails.ReasoningTokens += step.Usage.OutputTokenDetails.ReasoningTokens
+	if streamClosed {
+		finalMessages = streamResult.Messages
+		if readMediaState != nil {
+			finalMessages = readMediaState.mergeMessages(streamResult.Steps, finalMessages)
+		}
+		if streamResult.DeferredToolApproval != nil {
+			finalMessages = annotateDeferredApproval(finalMessages, *streamResult.DeferredToolApproval)
+		}
+		finalMessages = toolExecutionMetadata.annotate(finalMessages)
+		for _, step := range streamResult.Steps {
+			totalUsage.InputTokens += step.Usage.InputTokens
+			totalUsage.OutputTokens += step.Usage.OutputTokens
+			totalUsage.TotalTokens += step.Usage.TotalTokens
+			totalUsage.ReasoningTokens += step.Usage.ReasoningTokens
+			totalUsage.CachedInputTokens += step.Usage.CachedInputTokens
+			totalUsage.InputTokenDetails.NoCacheTokens += step.Usage.InputTokenDetails.NoCacheTokens
+			totalUsage.InputTokenDetails.CacheReadTokens += step.Usage.InputTokenDetails.CacheReadTokens
+			totalUsage.InputTokenDetails.CacheWriteTokens += step.Usage.InputTokenDetails.CacheWriteTokens
+			totalUsage.OutputTokenDetails.TextTokens += step.Usage.OutputTokenDetails.TextTokens
+			totalUsage.OutputTokenDetails.ReasoningTokens += step.Usage.OutputTokenDetails.ReasoningTokens
+		}
 	}
 	usageJSON, _ := json.Marshal(totalUsage)
 
@@ -588,7 +606,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		Messages: mustMarshal(finalMessages),
 		Usage:    usageJSON,
 	}
-	if streamResult.DeferredToolApproval != nil {
+	if streamClosed && streamResult.DeferredToolApproval != nil {
 		termEvent.ApprovalID = streamResult.DeferredToolApproval.ApprovalID
 		if isUserInputMetadata(streamResult.DeferredToolApproval.Metadata) {
 			termEvent.UserInputID = streamResult.DeferredToolApproval.ApprovalID
@@ -625,6 +643,24 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	deliveryCtx, deliveryCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer deliveryCancel()
 	sendEvent(deliveryCtx, ch, termEvent)
+}
+
+func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration) bool {
+	if stream == nil {
+		return true
+	}
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	for {
+		select {
+		case _, ok := <-stream:
+			if !ok {
+				return true
+			}
+		case <-timer.C:
+			return false
+		}
+	}
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *GenerateResult, retErr error) {

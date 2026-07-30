@@ -171,6 +171,11 @@ func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages [
 		displayText := ""
 		assets := []messagepkg.AssetRef(nil)
 		persistMeta := meta
+		// The admitted turn belongs to exactly one row: the turn-leading user
+		// query. Everything else in the round either binds to it or is a
+		// synthetic mid-turn message that must not claim the turn's identity.
+		turnID := ""
+		var turnPosition *int64
 		if msg.Role == "user" {
 			messageSenderChannelIdentityID = senderChannelIdentityID
 			messageSenderUserID = senderUserID
@@ -200,6 +205,8 @@ func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages [
 				externalMessageID = req.ExternalMessageID
 				sourceReplyToMessageID = req.SourceReplyToMessageID
 				messageEventID = req.EventID
+				turnID = req.TurnID
+				turnPosition = req.TurnPosition
 				switch {
 				case strings.TrimSpace(req.UserVisibleText) != "" || req.UserMessageKind == UserMessageKindSkillActivation:
 					displayText = strings.TrimSpace(req.UserVisibleText)
@@ -245,6 +252,11 @@ func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages [
 			RuntimeType:             runtimeType,
 			TurnRequestMessageID:    turnRequestMessageID,
 			SkipHistoryTurn:         req.SkipHistoryTurn,
+			// Assistant and tool rows bind to the request message's turn, so they
+			// carry the run for traceability but never a turn of their own.
+			RunID:        req.RunID,
+			TurnID:       turnID,
+			TurnPosition: turnPosition,
 		})
 	}
 	if batcher, ok := s.messageService.(messagepkg.ToolTailRoundPersister); ok {

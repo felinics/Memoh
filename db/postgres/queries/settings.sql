@@ -65,7 +65,10 @@ WITH updated AS (
       chat_acp_project_path = sqlc.arg(chat_acp_project_path),
       chat_acp_project_mode = sqlc.arg(chat_acp_project_mode),
       heartbeat_model_id = COALESCE(sqlc.narg(heartbeat_model_id)::uuid, bots.heartbeat_model_id),
-      compaction_model_id = COALESCE(sqlc.narg(compaction_model_id)::uuid, bots.compaction_model_id),
+      compaction_model_id = CASE
+        WHEN sqlc.arg(compaction_model_id_set)::boolean THEN sqlc.narg(compaction_model_id)::uuid
+        ELSE bots.compaction_model_id
+      END,
       search_provider_id = COALESCE(sqlc.narg(search_provider_id)::uuid, bots.search_provider_id),
       fetch_provider_id = CASE
         WHEN sqlc.arg(fetch_provider_id_set)::boolean THEN sqlc.narg(fetch_provider_id)::uuid
@@ -143,8 +146,8 @@ SET language = 'auto',
     heartbeat_enabled = false,
     heartbeat_interval = 1440,
     heartbeat_prompt = '',
-    compaction_enabled = false,
-    compaction_threshold = 100000,
+    compaction_enabled = true,
+    compaction_threshold = 0,
     compaction_ratio = 80,
     chat_model_id = NULL,
     chat_runtime = 'model',

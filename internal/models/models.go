@@ -530,6 +530,14 @@ func IsLLMClientType(clientType ClientType) bool {
 		!strings.HasSuffix(string(clientType), "-video")
 }
 
+// EnforcesMaxOutputTokens reports whether the client honors the configured
+// maximum output token limit. Compaction relies on the cap to keep summaries
+// inside their output reserve, so clients that ignore it are not eligible
+// summarizers.
+func EnforcesMaxOutputTokens(clientType ClientType) bool {
+	return clientType != ClientTypeOpenAICodex
+}
+
 // SelectMemoryModel selects a chat model for memory operations.
 // It only considers models from enabled providers.
 func SelectMemoryModel(ctx context.Context, modelsService *Service, queries dbstore.Queries) (GetResponse, sqlc.Provider, error) {

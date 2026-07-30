@@ -157,3 +157,10 @@ func TestModelTypes(t *testing.T) {
 		assert.Equal(t, models.ClientTypeGoogleGenerativeAI, models.ClientType("google-generative-ai"))
 	})
 }
+
+func TestEnforcesMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, models.EnforcesMaxOutputTokens(models.ClientTypeOpenAICodex))
+	assert.True(t, models.EnforcesMaxOutputTokens(models.ClientTypeOpenAIResponses))
+}

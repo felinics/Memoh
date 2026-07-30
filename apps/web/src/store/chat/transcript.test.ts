@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref, toRaw } from 'vue'
 import type { UIMessage, UITurn } from '@/composables/api/useChat.types'
-import { isOptimisticTurn } from '@/store/chat-list.normalize'
 import { createBackgroundTaskTracker } from './background-tasks'
 import { createTranscriptController } from './transcript'
 import type { ChatAssistantTurn, ChatUserTurn, ToolCallBlock } from './types'
@@ -11,11 +10,11 @@ vi.mock('@/store/user', () => ({
 }))
 
 function rawUser(id: string, text = 'hello', timestamp = '2026-01-01T00:00:00.000Z'): UITurn {
-  return { id, role: 'user', text, timestamp, platform: 'local' }
+  return { id, turn_id: `turn-${id}`, role: 'user', text, timestamp, platform: 'local' }
 }
 
 function rawAssistant(id: string, messages: UIMessage[] = [], timestamp = '2026-01-01T00:00:01.000Z'): UITurn {
-  return { id, role: 'assistant', messages, timestamp }
+  return { id, turn_id: `turn-${id}`, role: 'assistant', messages, timestamp }
 }
 
 function assistant(id: string, messages: ChatAssistantTurn['messages'] = []): ChatAssistantTurn {
@@ -35,7 +34,11 @@ function makeTranscript() {
   const backgroundTasks = createBackgroundTaskTracker()
   const bumpFsChangedAtIfFsMutation = vi.fn()
   const fetchMessages = vi.fn().mockResolvedValue([])
-  const locateMessage = vi.fn().mockResolvedValue({ items: [] })
+  const locateMessage = vi.fn().mockResolvedValue({
+    items: [],
+    target_id: '',
+    target_external_message_id: '',
+  })
   const transcript = createTranscriptController({
     currentBotId,
     sessionId,
@@ -108,10 +111,8 @@ describe('chat transcript controller', () => {
     expect(transcript.isLatestVisibleUserTurn(transcript.findTurnByServerId('user-1')!)).toBe(false)
   })
 
-  it('preserves optimistic render identity when a server snapshot replaces the view', () => {
+  it('does not guess optimistic identity from matching text and timestamps', () => {
     const { transcript } = makeTranscript()
-    const snapshotHook = vi.fn()
-    transcript.setSnapshotHook(snapshotHook)
     const optimistic: ChatUserTurn = {
       id: 'local-user',
       role: 'user',
@@ -126,8 +127,7 @@ describe('chat transcript controller', () => {
 
     transcript.replaceMessages([rawUser('server-user')], 'session-1')
 
-    expect(snapshotHook).toHaveBeenCalledWith('session-1', expect.any(Array))
-    expect(transcript.messages[0]).toMatchObject({ id: 'local-user', serverId: 'server-user' })
+    expect(transcript.messages[0]).toMatchObject({ id: 'server-user' })
   })
 
   it('rolls an optimistic tail back only while its original context is active', () => {
@@ -192,19 +192,14 @@ describe('chat transcript controller', () => {
     expect(block.userInput).toMatchObject({ status: 'pending', can_respond: true })
   })
 
-  it('replays ephemeral stream errors after refresh until user-scope reset', () => {
+  it('does not inject browser-memory stream errors into authoritative history', () => {
     const { transcript } = makeTranscript()
     transcript.replaceMessages([rawUser('user-1')], 'session-1')
     const failed = assistant('assistant-local', [{ id: 1, type: 'text', content: 'partial' }])
+    failed.turnId = 'turn-user-1'
     transcript.appendToView(failed)
     transcript.finalizeStreamFailure(failed, 'bot-1', 'session-1', new Error('stream failed'))
 
-    transcript.replaceMessages([rawUser('user-1')], 'session-1')
-    expect(transcript.messages.some(turn =>
-      turn.role === 'assistant' && turn.messages.some(block => block.type === 'error' && block.content === 'stream failed'),
-    )).toBe(true)
-
-    transcript.resetUserScope()
     transcript.replaceMessages([rawUser('user-1')], 'session-1')
     expect(transcript.messages).toHaveLength(1)
   })
@@ -233,6 +228,7 @@ describe('chat transcript controller', () => {
       }]),
       {
         id: 'system-1',
+        turn_id: 'turn-system-1',
         role: 'system',
         kind: 'background_task',
         timestamp: '2026-01-01T00:00:02.000Z',
@@ -245,47 +241,41 @@ describe('chat transcript controller', () => {
     expect(tool.done).toBe(true)
   })
 
-  it('keeps optimistic turns the initial-history snapshot does not contain yet', async () => {
-    // First send from a draft: promoteDraftChatView starts the per-session
-    // SSE, whose prepare step refreshes history. That fetch can resolve
-    // AFTER the optimistic user+assistant turns were appended but BEFORE the
-    // server persisted the send — the snapshot comes back empty. The refresh
-    // replace must carry the unmatched optimistic turns over instead of
-    // blanking the user's own message until the stream-end refresh.
+  it('rekeys an optimistic invocation from run acceptance before terminal refresh', async () => {
     const { transcript, fetchMessages } = makeTranscript()
-    const pending = deferred<UITurn[]>()
-    fetchMessages.mockReturnValueOnce(pending.promise)
-
-    const loading = transcript.loadInitialMessages('bot-1', 'session-1')
-    const assistantTurn = transcript.createOptimisticAssistantTurn()
-    const userTurn = transcript.createOptimisticUserTurn('hello first')
+    const assistantTurn = transcript.createOptimisticAssistantTurn('invocation-1')
+    const userTurn = transcript.createOptimisticUserTurn('hello first', undefined, 'invocation-1')
     transcript.appendToView(userTurn, assistantTurn)
 
-    pending.resolve([])
-    await loading
-    // The user turn is carried over by the replace itself; the streaming
-    // assistant is restored by the caller's reattach step (chat-list's
-    // prepareSessionMessages finally block), mirrored here.
-    transcript.reattachTurnToSession('bot-1', 'session-1', assistantTurn)
+    transcript.bindRuntimeTurn('invocation-1', 'turn-1', 'run-1')
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-1',
+      status: 'running',
+      operation: null,
+      streaming: true,
+      turns: [
+        rawAssistant('runtime-assistant', []),
+      ],
+    })
 
     expect(transcript.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
-    expect(transcript.messages[0]).toMatchObject({ role: 'user', text: 'hello first' })
-  })
+    expect(transcript.messages[0]).toMatchObject({ text: 'hello first' })
 
-  it('adopts carried-over optimistic turns once the snapshot contains their server twins', async () => {
-    const { transcript, fetchMessages } = makeTranscript()
-    // Round 1: optimistic turns survive an empty snapshot (as above).
-    fetchMessages.mockResolvedValueOnce([])
-    const loading = transcript.loadInitialMessages('bot-1', 'session-1')
-    const assistantTurn = transcript.createOptimisticAssistantTurn()
-    const userTurn = transcript.createOptimisticUserTurn('hello first')
-    transcript.appendToView(userTurn, assistantTurn)
-    await loading
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-1',
+      status: 'completed',
+      operation: null,
+      streaming: false,
+      turns: [
+        rawUser('runtime-user', 'hello first'),
+        rawAssistant('runtime-assistant', []),
+      ],
+    })
 
-    // Round 2 (stream-end refresh): the server now returns persisted twins —
-    // no duplicates, the optimistic pair collapses into the server rows.
-    // Server timestamps sit next to the optimistic client clock (the twin
-    // match tolerates 5s of skew), unlike the fixed dates used elsewhere.
+    // The terminal REST snapshot is authoritative and replaces the runtime
+    // projection without content or timestamp matching.
     const now = new Date().toISOString()
     fetchMessages.mockResolvedValueOnce([
       rawUser('server-user', 'hello first', now),
@@ -297,34 +287,102 @@ describe('chat transcript controller', () => {
     expect(transcript.messages.filter(turn => turn.role === 'user')).toHaveLength(1)
   })
 
-  it('does not let an older persisted twin swallow a re-sent optimistic prompt', async () => {
-    // The user sends the SAME text again in a session whose history already
-    // contains that prompt. The racing snapshot returns only the OLD row —
-    // the new send is not persisted yet. A text-set match would treat the
-    // new optimistic turn as "already present" and drop it; the count-based
-    // match reserves the old row for the old (non-optimistic) local turn.
+  it('merges initial history and buffered runtime by authoritative turn id', async () => {
     const { transcript, fetchMessages } = makeTranscript()
-    transcript.replaceHistoryView([
-      rawUser('server-user-old', 'same prompt', '2026-01-01T00:00:00.000Z'),
-      rawAssistant('server-assistant-old', [], '2026-01-01T00:00:01.000Z'),
+    const historyUser = { ...rawUser('server-user'), turn_id: 'turn-1' }
+    const historyAssistant = {
+      ...rawAssistant('server-assistant', [{ id: 0, type: 'text', content: 'old' }]),
+      turn_id: 'turn-1',
+    }
+    fetchMessages.mockResolvedValueOnce([historyUser, historyAssistant])
+    const phases: string[] = []
+
+    await transcript.loadInitialMessages('bot-1', 'session-1', () => {
+      phases.push('runtime')
+      transcript.applyRuntimeTranscript({
+        runId: 'run-1',
+        turnId: 'turn-1',
+        status: 'running',
+        operation: null,
+        streaming: true,
+        turns: [
+          { ...rawUser('runtime-user'), turn_id: 'turn-1' },
+          {
+            ...rawAssistant('runtime-assistant', [{ id: 0, type: 'text', content: 'streaming' }]),
+            turn_id: 'turn-1',
+          },
+        ],
+      })
+    })
+    phases.push('loaded')
+
+    expect(phases).toEqual(['runtime', 'loaded'])
+    expect(transcript.messages).toHaveLength(2)
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['server-user', 'server-assistant'])
+    expect(transcript.messages[1]).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+      messages: [{ type: 'text', content: 'streaming' }],
+    })
+  })
+
+  it('applies a replacement operation that arrives after the admitting projection', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([
+      rawUser('user-old'),
+      rawAssistant('assistant-old', [{ id: 0, type: 'text', content: 'old answer' }]),
     ], 'session-1')
 
-    const pending = deferred<UITurn[]>()
-    fetchMessages.mockReturnValueOnce(pending.promise)
-    const loading = transcript.loadInitialMessages('bot-1', 'session-1')
-    const assistantTurn = transcript.createOptimisticAssistantTurn()
-    const userTurn = transcript.createOptimisticUserTurn('same prompt')
-    transcript.appendToView(userTurn, assistantTurn)
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-1',
+      status: 'admitting',
+      operation: null,
+      streaming: true,
+      turns: [rawAssistant('runtime-assistant')],
+    })
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-1',
+      status: 'running',
+      operation: {
+        kind: 'retry',
+        replace_from_message_id: 'assistant-old',
+      },
+      streaming: true,
+      turns: [rawAssistant('runtime-assistant', [
+        { id: 0, type: 'text', content: 'new answer' },
+      ])],
+    })
 
-    pending.resolve([
-      rawUser('server-user-old', 'same prompt', '2026-01-01T00:00:00.000Z'),
-      rawAssistant('server-assistant-old', [], '2026-01-01T00:00:01.000Z'),
-    ])
-    await loading
-    transcript.reattachTurnToSession('bot-1', 'session-1', assistantTurn)
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['user-old', 'runtime-assistant'])
+    expect(transcript.messages[1]).toMatchObject({
+      role: 'assistant',
+      messages: [{ type: 'text', content: 'new answer' }],
+    })
+  })
 
-    expect(transcript.messages.map(turn => `${turn.role}${isOptimisticTurn(turn) ? '*' : ''}`))
-      .toEqual(['user', 'assistant', 'user*', 'assistant*'])
+  it('requires a history resync when a replacement anchor is missing', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([rawUser('user-old')], 'session-1')
+
+    const applied = transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-1',
+      status: 'running',
+      operation: {
+        kind: 'edit',
+        replace_from_message_id: 'missing-user',
+      },
+      streaming: true,
+      turns: [
+        rawUser('runtime-user', 'edited'),
+        rawAssistant('runtime-assistant'),
+      ],
+    })
+
+    expect(applied).toBe(false)
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['user-old'])
   })
 
   it('owns refresh state and reports the latest applied timestamp', async () => {
@@ -362,7 +420,11 @@ describe('chat transcript controller', () => {
 
   it('drops a locate response that resolves after the active session changes', async () => {
     const { transcript, sessionId, locateMessage } = makeTranscript()
-    const pending = deferred<{ items: UITurn[]; target_id?: string }>()
+    const pending = deferred<{
+      items: UITurn[]
+      target_id: string
+      target_external_message_id: string
+    }>()
     locateMessage.mockReturnValueOnce(pending.promise)
 
     const locating = transcript.locateMessageByExternalId('external-1')
@@ -372,6 +434,7 @@ describe('chat transcript controller', () => {
     pending.resolve({
       items: [{ ...rawUser('session-1-target'), external_message_id: 'external-1' } as UITurn],
       target_id: 'session-1-target',
+      target_external_message_id: 'external-1',
     })
 
     expect(await locating).toBeNull()

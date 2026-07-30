@@ -27,6 +27,20 @@ export default [
     },
   },
   {
+    files: ['apps/web/src/store/**/*.ts'],
+    ignores: [
+      'apps/web/src/store/workspace-tabs.ts',
+      'apps/web/src/store/**/*.test.ts',
+    ],
+    rules: {
+      'max-lines': ['error', {
+        max: 600,
+        skipBlankLines: true,
+        skipComments: true,
+      }],
+    },
+  },
+  {
     files: ['packages/**/*.vue', 'apps/**/*.vue'],
     languageOptions: {
       parser: vueParser,

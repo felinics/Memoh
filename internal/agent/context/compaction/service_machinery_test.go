@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,9 +21,11 @@ import (
 // --- stub summarizer model (intercepts the SDK HTTP call) ---------------------
 
 type stubModel struct {
-	summary string
-	calls   int
-	prompt  string // decoded text of the captured request messages
+	summary      string
+	finishReason string // defaults to "stop"
+	calls        int
+	prompt       string // decoded text of the captured request messages
+	maxTokens    int    // captured max_tokens of the last request
 }
 
 func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -30,9 +33,19 @@ func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Body != nil {
 		body, _ := io.ReadAll(req.Body)
 		s.prompt = decodePromptMessages(body)
+		var limits struct {
+			MaxTokens           int `json:"max_tokens"`
+			MaxCompletionTokens int `json:"max_completion_tokens"`
+		}
+		_ = json.Unmarshal(body, &limits)
+		s.maxTokens = max(limits.MaxTokens, limits.MaxCompletionTokens)
+	}
+	finishReason := s.finishReason
+	if finishReason == "" {
+		finishReason = "stop"
 	}
 	resp := `{"id":"stub","object":"chat.completion","created":0,"model":"stub",` +
-		`"choices":[{"index":0,"message":{"role":"assistant","content":` + jsonStr(s.summary) + `},"finish_reason":"stop"}],` +
+		`"choices":[{"index":0,"message":{"role":"assistant","content":` + jsonStr(s.summary) + `},"finish_reason":` + jsonStr(finishReason) + `}],` +
 		`"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}`
 	return &http.Response{
 		StatusCode: http.StatusOK,
@@ -286,12 +299,11 @@ func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
 	}
 }
 
-// TestDoCompactionWarnsWhenEntryFloorsExceedBudget drives one unsplittable
-// tool exchange with more minimal entries than MaxCompactTokens can hold:
-// the progress guarantee still compacts it, but the overshoot must be
-// surfaced instead of silently trusted as capped.
-
-func TestDoCompactionWarnsWhenEntryFloorsExceedBudget(t *testing.T) {
+// TestDoCompactionFailsClosedWhenEntryFloorsExceedBudget drives one
+// unsplittable tool exchange with more minimal entries than MaxCompactTokens
+// can hold: sending it anyway would overflow the summarizer window, so the
+// attempt must fail closed with zero claims and zero provider calls.
+func TestDoCompactionFailsClosedWhenEntryFloorsExceedBudget(t *testing.T) {
 	const fanout = 40
 	callParts := make([]string, 0, fanout)
 	for i := 0; i < fanout; i++ {
@@ -307,21 +319,23 @@ func TestDoCompactionWarnsWhenEntryFloorsExceedBudget(t *testing.T) {
 
 	q := &fakeQueries{uncompacted: rows}
 	stub := &stubModel{summary: "SUMMARY-OK"}
-	var logBuf strings.Builder
-	svc := NewService(slog.New(slog.NewTextHandler(&logBuf, nil)), q)
+	svc := newMachineryService(q)
 
 	cfg := machineryConfig(stub, 100)
 	cfg.MaxCompactTokens = 40
 
-	res, err := svc.RunCompactionSync(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
+	_, err := svc.RunCompactionSync(context.Background(), cfg)
+	if !errors.Is(err, errCompactionInputOverflow) {
+		t.Fatalf("RunCompactionSync error = %v, want errCompactionInputOverflow", err)
 	}
-	if res.Status != StatusOK {
-		t.Fatalf("the oversized exchange must still compact (progress guarantee), got %q", res.Status)
+	if stub.calls != 0 {
+		t.Fatalf("summarizer calls = %d, want 0: an oversized selection must not reach the provider", stub.calls)
 	}
-	if !strings.Contains(logBuf.String(), "entry floors exceed the budget") {
-		t.Fatalf("budget overshoot not surfaced in logs:\n%s", logBuf.String())
+	if q.created {
+		t.Fatal("attempt row was created: fail closed before claiming sources")
+	}
+	if len(q.markedIDs) != 0 {
+		t.Fatalf("marked rows = %v, want none", q.markedIDs)
 	}
 }
 
@@ -380,11 +394,11 @@ func TestDoCompactionMarksOnlyContiguousRunAcrossEmptyMiddleRow(t *testing.T) {
 	// order. doCompaction must mark only the first contiguous run (row 0) and
 	// leave row 2 for a later pass.
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `[{"type":"text","text":"old question"}]`, 100),       // 0
-		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 100), // 1 renders empty
-		mkRow(t, "assistant", `[{"type":"text","text":"old answer"}]`, 100),    // 2
-		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),    // 3 kept
-		mkRow(t, "assistant", `[{"type":"text","text":"recent answer"}]`, 100), // 4 kept
+		mkRow(t, "user", `[{"type":"text","text":"old question about a long-running project with plenty of detail to summarize"}]`, 100), // 0
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 100),                                                           // 1 renders empty
+		mkRow(t, "assistant", `[{"type":"text","text":"old answer covering the whole project state in enough words to compress"}]`, 100), // 2
+		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),                                                              // 3 kept
+		mkRow(t, "assistant", `[{"type":"text","text":"recent answer"}]`, 100),                                                           // 4 kept
 	}
 	q := &fakeQueries{uncompacted: rows}
 	stub := &stubModel{summary: "SUMMARY"}

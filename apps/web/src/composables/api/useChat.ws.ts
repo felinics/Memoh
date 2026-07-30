@@ -1,5 +1,11 @@
 import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
-import type { ChatAttachment, RequestedSkillRequest, UIStreamEvent, UIStreamEventHandler } from './useChat.types'
+import type {
+  ChatAttachment,
+  RequestedSkillRequest,
+  RuntimeCursor,
+  UIStreamEvent,
+  UIStreamEventHandler,
+} from './useChat.types'
 
 export interface WSUserInputAnswer {
   question_id: string
@@ -8,32 +14,107 @@ export interface WSUserInputAnswer {
   text?: string
 }
 
-export interface WSClientMessage {
-  type: 'message' | 'abort' | 'tool_approval_response' | 'user_input_response' | 'retry_message' | 'edit_message'
-  stream_id?: string
-  invocation_id?: string
-  composer_scope?: string
-  text?: string
-  session_id?: string
-  message_id?: string
-  attachments?: ChatAttachment[]
-  requested_skills?: RequestedSkillRequest[]
+interface WSTurnOptions {
   model_id?: string
   reasoning_effort?: string
   workspace_target_id?: string
-  approval_id?: string
-  user_input_id?: string
-  short_id?: number
-  tool_call_id?: string
-  decision?: 'approve' | 'reject'
-  reason?: string
-  answers?: WSUserInputAnswer[]
-  canceled?: boolean
+}
+
+export type WSClientMessage =
+  | ({
+      type: 'message'
+      invocation_id: string
+      session_id?: string
+      composer_scope?: string
+      text?: string
+      attachments?: ChatAttachment[]
+      requested_skills?: RequestedSkillRequest[]
+    } & WSTurnOptions)
+  | ({
+      type: 'retry_message'
+      invocation_id: string
+      session_id: string
+      message_id: string
+    } & WSTurnOptions)
+  | ({
+      type: 'edit_message'
+      invocation_id: string
+      session_id: string
+      message_id: string
+      text?: string
+      attachments?: ChatAttachment[]
+    } & WSTurnOptions)
+  | {
+      type: 'abort'
+      run_id: string
+      session_id: string
+      control_id: string
+    }
+  | {
+      type: 'tool_approval_response'
+      run_id: string
+      session_id: string
+      decision_id: string
+      control_id: string
+      decision: 'approve' | 'reject'
+      reason?: string
+    }
+  | {
+      type: 'user_input_response'
+      run_id: string
+      session_id: string
+      decision_id: string
+      control_id: string
+      answers?: WSUserInputAnswer[]
+      canceled?: boolean
+      reason?: string
+    }
+  | {
+      type: 'runtime_subscribe'
+      session_id: string
+      cursor?: RuntimeCursor
+    }
+  | {
+      type: 'runtime_unsubscribe'
+      session_id: string
+    }
+
+function reliableRequestKey(message: WSClientMessage): string {
+  switch (message.type) {
+    case 'message':
+    case 'retry_message':
+    case 'edit_message':
+      return `invocation:${message.invocation_id.trim()}`
+    case 'abort':
+    case 'tool_approval_response':
+    case 'user_input_response':
+      return `control:${message.control_id.trim()}`
+    default:
+      return ''
+  }
+}
+
+function acknowledgedRequestKey(event: UIStreamEvent): string {
+  if (
+    event.type === 'run_accepted'
+    || event.type === 'run_rejected'
+    || event.type === 'command_result'
+    || event.type === 'command_error'
+    || event.type === 'error'
+  ) {
+    const invocationId = event.invocation_id?.trim()
+    return invocationId ? `invocation:${invocationId}` : ''
+  }
+  if (event.type === 'control_ack') {
+    const controlId = event.control_id.trim()
+    return controlId ? `control:${controlId}` : ''
+  }
+  return ''
 }
 
 export interface ChatWebSocket {
   send: (msg: WSClientMessage) => void
-  abort: (streamId: string) => void
+  abort: (runId: string, sessionId: string, controlId: string) => void
   close: () => void
   readonly connected: boolean
   onOpen: (() => void) | null
@@ -55,8 +136,7 @@ export function connectWebSocket(
   const id = botId.trim()
   if (!id) throw new Error('bot id is required')
 
-  const wsUrl = resolveWebSocketUrl(id)
-  const url = wsUrl
+  const url = resolveWebSocketUrl(id)
 
   let ws: WebSocket | null = null
   let isConnected = false
@@ -64,22 +144,34 @@ export function connectWebSocket(
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let reconnectDelay = 1000
   const sendQueue: string[] = []
+  const pendingReliableRequests = new Map<string, string>()
 
   const handle: ChatWebSocket = {
     send(msg: WSClientMessage) {
       const payload = JSON.stringify(msg)
+      const reliableKey = reliableRequestKey(msg)
+      if (reliableKey) {
+        pendingReliableRequests.set(reliableKey, payload)
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(payload)
+        return
+      }
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(payload)
         return
       }
       sendQueue.push(payload)
     },
-    abort(streamId: string) {
-      const id = streamId.trim()
-      if (!id) return
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'abort', stream_id: id }))
-      }
+    abort(runId: string, sessionId: string, controlId: string) {
+      const id = runId.trim()
+      const sid = sessionId.trim()
+      const cid = controlId.trim()
+      if (!id || !sid || !cid) return
+      handle.send({
+        type: 'abort',
+        run_id: id,
+        session_id: sid,
+        control_id: cid,
+      })
     },
     close() {
       closed = true
@@ -92,6 +184,8 @@ export function connectWebSocket(
         ws = null
       }
       isConnected = false
+      sendQueue.length = 0
+      pendingReliableRequests.clear()
     },
     get connected() {
       return isConnected
@@ -102,46 +196,53 @@ export function connectWebSocket(
 
   function connect() {
     if (closed) return
-    ws = new WebSocket(url)
+    const socket = new WebSocket(url)
+    ws = socket
 
-    ws.onopen = () => {
+    socket.onopen = () => {
       isConnected = true
       reconnectDelay = 1000
-      while (sendQueue.length > 0 && ws?.readyState === WebSocket.OPEN) {
-        ws.send(sendQueue.shift()!)
+      for (const payload of pendingReliableRequests.values()) socket.send(payload)
+      while (sendQueue.length > 0 && socket.readyState === WebSocket.OPEN) {
+        socket.send(sendQueue.shift()!)
       }
       handle.onOpen?.()
     }
 
-    ws.onclose = () => {
+    socket.onclose = () => {
       isConnected = false
       handle.onClose?.()
       scheduleReconnect()
     }
 
-    ws.onerror = () => {
+    socket.onerror = () => {
       // onerror is always followed by onclose; reconnect handled there.
     }
 
-    ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
       if (typeof event.data !== 'string') return
       try {
         const parsed = JSON.parse(event.data)
         if (!parsed || typeof parsed !== 'object') return
         const eventType = String(parsed.type ?? '').trim()
         if (
-          eventType !== 'start'
-          && eventType !== 'message'
-          && eventType !== 'end'
+          eventType !== 'run_accepted'
+          && eventType !== 'run_rejected'
           && eventType !== 'error'
           && eventType !== 'session_created'
-          && eventType !== 'user_message'
           && eventType !== 'command_result'
           && eventType !== 'command_error'
+          && eventType !== 'runtime_snapshot'
+          && eventType !== 'runtime_delta'
+          && eventType !== 'runtime_dropped'
+          && eventType !== 'control_ack'
         ) {
           return
         }
-        onStreamEvent(parsed as UIStreamEvent)
+        const streamEvent = parsed as UIStreamEvent
+        const acknowledged = acknowledgedRequestKey(streamEvent)
+        if (acknowledged) pendingReliableRequests.delete(acknowledged)
+        onStreamEvent(streamEvent)
       } catch {
         // Ignore unparsable messages.
       }

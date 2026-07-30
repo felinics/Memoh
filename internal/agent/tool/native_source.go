@@ -254,7 +254,7 @@ func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSess
 			ProviderMetadata: map[string]any{
 				"source":     userinput.ProviderSourceACPMCP,
 				"runtime_id": session.RuntimeID,
-				"stream_id":  session.StreamID,
+				"run_id":     session.RunID,
 			},
 			SourcePlatform:   session.CurrentPlatform,
 			ReplyTarget:      session.ReplyTarget,
@@ -314,7 +314,7 @@ func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.Tool
 			ConversationType:             session.ConversationType,
 			WorkspaceTargeted:            isWorkspaceTargetToolName(toolName),
 		},
-		Interactive:       strings.TrimSpace(session.StreamID) != "",
+		Interactive:       strings.TrimSpace(session.RunID) != "",
 		UndeliveredReason: "tool approval request was not delivered to the interactive stream",
 		RegisterWaiter:    s.approval.RegisterWaiter,
 		Emit: func(req toolapproval.Request) bool {
@@ -354,7 +354,7 @@ func (s *NativeToolSource) emitToolApprovalRequest(session mcp.ToolSessionContex
 	if !delivered && s.logger != nil {
 		s.logger.Warn("tool approval request not delivered to prompt stream",
 			slog.String("approval_id", req.ID),
-			slog.String("stream_id", session.StreamID))
+			slog.String("run_id", session.RunID))
 	}
 	return delivered
 }
@@ -383,7 +383,7 @@ func (s *NativeToolSource) emitUserInputRequest(session mcp.ToolSessionContext, 
 	if !delivered && s.logger != nil {
 		s.logger.Warn("user input request not delivered to prompt stream",
 			slog.String("request_id", req.ID),
-			slog.String("stream_id", session.StreamID))
+			slog.String("run_id", session.RunID))
 	}
 	return delivered
 }

@@ -9,8 +9,14 @@
  * lived in recents' scoped style, which silently did nothing for
  * panel-schedule (scoped selectors only match the defining component's DOM).
  * Import this file from every component that puts `sidebar-scroll` on a
- * scroll container. */
+ * scroll container.
+ *
+ * overflow-anchor is OFF here on purpose. Chat panes keep the browser default
+ * so history prepend stays visually pinned; sidebar lists grow downward from
+ * an empty/short first paint (virtualizer spacer + load-more), and anchoring
+ * would walk scrollTop down with that growth — Recents opening mid-list. */
 .sidebar-scroll {
+  overflow-anchor: none;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
 }

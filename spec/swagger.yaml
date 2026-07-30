@@ -1939,6 +1939,10 @@ definitions:
       reply:
         $ref: '#/definitions/conversation.UIReplyRef'
       role:
+        enum:
+        - user
+        - assistant
+        - system
         type: string
       sender_avatar_url:
         type: string
@@ -1951,9 +1955,17 @@ definitions:
       text:
         type: string
       timestamp:
+        format: date-time
+        type: string
+      turn_id:
+        format: uuid
         type: string
       user_message_kind:
         type: string
+    required:
+    - role
+    - timestamp
+    - turn_id
     type: object
   conversation.UIUserInput:
     properties:
@@ -3247,6 +3259,8 @@ definitions:
     type: object
   handlers.ToolApprovalDecisionRequest:
     properties:
+      control_id:
+        type: string
       reason:
         type: string
     type: object
@@ -3258,6 +3272,31 @@ definitions:
         type: string
       summary:
         type: string
+    type: object
+  handlers.UILocateMessageResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/conversation.UITurn'
+        type: array
+      target_external_message_id:
+        type: string
+      target_id:
+        format: uuid
+        type: string
+    required:
+    - items
+    - target_external_message_id
+    - target_id
+    type: object
+  handlers.UIMessageListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/conversation.UITurn'
+        type: array
+    required:
+    - items
     type: object
   handlers.UpdateContainerMetricsRequest:
     properties:
@@ -3819,78 +3858,6 @@ definitions:
       transport:
         type: string
       url:
-        type: string
-    type: object
-  message.Message:
-    properties:
-      assets:
-        items:
-          $ref: '#/definitions/message.MessageAsset'
-        type: array
-      bot_id:
-        type: string
-      compact_id:
-        type: string
-      content:
-        items:
-          type: integer
-        type: array
-      created_at:
-        type: string
-      display_content:
-        type: string
-      event_id:
-        type: string
-      external_message_id:
-        type: string
-      id:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      platform:
-        type: string
-      role:
-        type: string
-      runtime_type:
-        type: string
-      sender_avatar_url:
-        type: string
-      sender_channel_identity_id:
-        type: string
-      sender_display_name:
-        type: string
-      sender_user_id:
-        type: string
-      session_id:
-        type: string
-      session_mode:
-        type: string
-      source_reply_to_message_id:
-        type: string
-      usage:
-        items:
-          type: integer
-        type: array
-    type: object
-  message.MessageAsset:
-    properties:
-      content_hash:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      mime:
-        type: string
-      name:
-        type: string
-      ordinal:
-        type: integer
-      role:
-        type: string
-      size_bytes:
-        type: integer
-      storage_key:
         type: string
     type: object
   models.AddRequest:
@@ -4965,6 +4932,8 @@ definitions:
       online:
         type: boolean
       os:
+        type: string
+      team_id:
         type: string
       workspace_base:
         type: string
@@ -8717,17 +8686,22 @@ paths:
       description: List messages for one session with optional pagination
       parameters:
       - description: Bot ID
+        format: uuid
         in: path
         name: bot_id
         required: true
         type: string
       - description: Session ID
+        format: uuid
         in: query
         name: session_id
         required: true
         type: string
-      - description: Limit
+      - default: 30
+        description: Limit
         in: query
+        maximum: 100
+        minimum: 1
         name: limit
         type: integer
       - description: Before
@@ -8735,24 +8709,17 @@ paths:
         name: before
         type: string
       - description: Message ID cursor before which to page
+        format: uuid
         in: query
         name: before_message_id
-        type: string
-      - description: 'Response format: ui returns normalized chat UI turns'
-        in: query
-        name: format
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: when format=ui
+          description: OK
           schema:
-            additionalProperties:
-              items:
-                $ref: '#/definitions/conversation.UITurn'
-              type: array
-            type: object
+            $ref: '#/definitions/handlers.UIMessageListResponse'
         "400":
           description: Bad Request
           schema:
@@ -8778,11 +8745,13 @@ paths:
         UI turns
       parameters:
       - description: Bot ID
+        format: uuid
         in: path
         name: bot_id
         required: true
         type: string
       - description: Session ID
+        format: uuid
         in: query
         name: session_id
         required: true
@@ -8792,12 +8761,18 @@ paths:
         name: external_message_id
         required: true
         type: string
-      - description: Messages before target
+      - default: 30
+        description: Messages before target
         in: query
+        maximum: 100
+        minimum: 0
         name: before
         type: integer
-      - description: Messages after target
+      - default: 30
+        description: Messages after target
         in: query
+        maximum: 100
+        minimum: 0
         name: after
         type: integer
       produces:
@@ -8806,8 +8781,7 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/handlers.UILocateMessageResponse'
         "400":
           description: Bad Request
           schema:
@@ -9694,7 +9668,7 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -9745,49 +9719,6 @@ paths:
       summary: Fork a chat session from an assistant reply
       tags:
       - sessions
-  /bots/{bot_id}/sessions/{session_id}/messages/events:
-    get:
-      description: |-
-        SSE stream that pushes a server-fixed backlog of the last 50
-        messages, then streams future message_created and
-        session_title_updated events scoped to this session only.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Session ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: SSE stream
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Stream message events for one session
-      tags:
-      - messages
   /bots/{bot_id}/sessions/{session_id}/status:
     get:
       description: Get aggregated info for a chat session including message count,

@@ -33,8 +33,8 @@ apps/desktop/
 ├── electron-builder.yml           # single Desktop package config
 ├── package.json
 ├── scripts/
-│   ├── build.mjs                  # electron-vite build + electron-builder
-│   └── install-icon-tools.mjs      # isolated icon generator dependencies
+│   ├── build.mjs                  # env + signing + electron-vite + electron-builder
+│   └── build-icons.mjs            # checked-in app/tray icon generator
 ├── src/
 │   ├── main/index.ts              # Electron main process and IPC handlers
 │   ├── main/remote-runtime.ts     # safeStorage-backed Remote Runtime lifecycle
@@ -106,6 +106,12 @@ Current Desktop IPC includes:
 - `desktop:api-base-url`
 - `desktop:runtime-state`
 - `desktop:configure-runtime`
+- `desktop:updates:get-info`
+- `desktop:updates:get-state`
+- `desktop:updates:check`
+- `desktop:updates:download`
+- `desktop:updates:install`
+- `desktop:updates:state-changed`
 - `desktop:set-menu-accelerators`
 - `desktop:open-external-url`
 - `desktop:broadcast-invalidate`
@@ -126,8 +132,8 @@ sync. Authentication belongs to the hosted server flow; the renderer should not
 inject local auto-login tokens.
 
 `chat/App.vue` provides `DesktopShellKey` and the narrow `DesktopRuntimeKey`
-bridge so reused web components can adapt to Electron without importing
-Electron or receiving Node privileges.
+and `DesktopUpdatesKey` bridges so reused web components can adapt to Electron
+without importing Electron or receiving Node privileges.
 
 ## Commands
 
@@ -150,6 +156,13 @@ by Main. Build the Runtime package before Desktop and keep `bridge.proto`
 unpacked for the gRPC loader. Do not add server binaries, installed CLI
 binaries, database files, provider templates, container runtimes, Qdrant, or
 media runtimes to Desktop packaging.
+
+`scripts/build.mjs` owns build-time environment loading and signing setup.
+Process/CI values override `apps/desktop/.env`; it always passes
+`--publish never`, so release workflows upload completed artifacts rather than
+delegating network publication to electron-builder. A configured
+`MEMOH_DESKTOP_UPDATE_BASE_URL` enables generic update metadata and the native
+updater. Without it, updater checks stay disabled.
 
 ## Icons
 

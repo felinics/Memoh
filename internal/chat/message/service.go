@@ -190,7 +190,14 @@ func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistIn
 	}
 
 	messageIDs := [4]pgtype.UUID{newPGUUID(), newPGUUID(), newPGUUID(), newPGUUID()}
-	turnID := newPGUUID()
+	// The round's turn is the request message's turn, so it comes from the same
+	// admission the user row was prepared with. Minting one here would file the
+	// whole round under a turn the client cannot address (SR-TURN-001).
+	roundTurn := prepared[0].turn()
+	turnID := roundTurn.id
+	if !turnID.Valid {
+		turnID = newPGUUID()
+	}
 	rows, err := writer.CreateToolTailRound(ctx, sqlc.CreateToolTailRoundParams{
 		UserMessageID:                            messageIDs[0],
 		UserSenderChannelIdentityID:              prepared[0].createArg.SenderChannelIdentityID,
@@ -247,6 +254,8 @@ func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistIn
 		BotID:                                    prepared[0].botID,
 		SessionID:                                prepared[0].sessionID,
 		TurnID:                                   turnID,
+		TurnPosition:                             roundTurn.position,
+		RunID:                                    prepared[0].createArg.RunID,
 	})
 	if err != nil {
 		return nil, true, err
@@ -375,6 +384,14 @@ type preparedPersistMessage struct {
 	botID                pgtype.UUID
 	sessionID            pgtype.UUID
 	turnRequestMessageID pgtype.UUID
+	// turnID and turnPosition are set only when admission already decided this
+	// message's turn. Both invalid means the history layer allocates one.
+	turnID       pgtype.UUID
+	turnPosition pgtype.Int8
+}
+
+func (p preparedPersistMessage) turn() turnIdentity {
+	return turnIdentity{id: p.turnID, position: p.turnPosition}
 }
 
 func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInput) (preparedPersistMessage, error) {
@@ -402,6 +419,20 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 	pgEventID, err := parseOptionalUUID(input.EventID)
 	if err != nil {
 		return preparedPersistMessage{}, fmt.Errorf("invalid event id: %w", err)
+	}
+	pgRunID, err := parseOptionalUUID(input.RunID)
+	if err != nil {
+		return preparedPersistMessage{}, fmt.Errorf("invalid run id: %w", err)
+	}
+	pgTurnID, err := parseOptionalUUID(input.TurnID)
+	if err != nil {
+		return preparedPersistMessage{}, fmt.Errorf("invalid turn id: %w", err)
+	}
+	// A caller-decided turn is only usable whole: admission allocates the id and
+	// the position together, and honouring one without the other would either
+	// misorder the turn or take a slot under a name the client never saw.
+	if pgTurnID.Valid != (input.TurnPosition != nil) {
+		return preparedPersistMessage{}, errors.New("turn id and turn position must be supplied together")
 	}
 
 	metadata := nonNilMap(input.Metadata)
@@ -433,10 +464,13 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 			ModelID:                 pgModelID,
 			EventID:                 pgEventID,
 			DisplayText:             toPgText(input.DisplayText),
+			RunID:                   pgRunID,
 		},
-		metadata:  metadata,
-		botID:     pgBotID,
-		sessionID: pgSessionID,
+		metadata:     metadata,
+		botID:        pgBotID,
+		sessionID:    pgSessionID,
+		turnID:       pgTurnID,
+		turnPosition: toPgInt8(input.TurnPosition),
 	}
 
 	if !input.SkipHistoryTurn {
@@ -469,7 +503,7 @@ func (s *DBService) persistDirectWithoutTx(ctx context.Context, input PersistInp
 	if !prepared.sessionID.Valid {
 		return Message{}, false, nil
 	}
-	result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, prepared.createArg, prepared.metadata, input.Role, prepared.turnRequestMessageID)
+	result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, prepared.createArg, prepared.metadata, input.Role, prepared.turnRequestMessageID, prepared.turn())
 	if err != nil {
 		return Message{}, true, err
 	}
@@ -494,7 +528,7 @@ func (s *DBService) persist(ctx context.Context, input PersistInput) (Message, e
 	if !input.SkipHistoryTurn {
 		pgTurnRequestMessageID = prepared.turnRequestMessageID
 		if direct, ok := s.queries.(directHistoryTurnWriter); ok && prepared.sessionID.Valid {
-			result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, createArg, prepared.metadata, input.Role, pgTurnRequestMessageID)
+			result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, createArg, prepared.metadata, input.Role, pgTurnRequestMessageID, prepared.turn())
 			if err != nil {
 				return Message{}, err
 			}
@@ -520,6 +554,13 @@ func (s *DBService) persist(ctx context.Context, input PersistInput) (Message, e
 	return s.finishPersistedMessage(ctx, result, row.ID, input.Assets)
 }
 
+// turnIdentity is a turn decided before persistence, by admission. Both fields
+// are set or neither is; the pair is validated at preparePersistMessage.
+type turnIdentity struct {
+	id       pgtype.UUID
+	position pgtype.Int8
+}
+
 func persistDirectHistoryMessage(
 	ctx context.Context,
 	writer directHistoryTurnWriter,
@@ -527,12 +568,21 @@ func persistDirectHistoryMessage(
 	metadata map[string]any,
 	role string,
 	requestMessageID pgtype.UUID,
+	turn turnIdentity,
 ) (Message, pgtype.UUID, bool, error) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "user":
 		messageID := newPGUUID()
-		turnID := newPGUUID()
+		// A run admitted through session_runs already drew this turn's id and
+		// position from bot_sessions.next_turn_position, and the client has been
+		// told that id. Minting a second one here would file the message under a
+		// turn nobody can address and spend a second position (SR-TURN-001).
+		turnID := turn.id
+		if !turnID.Valid {
+			turnID = newPGUUID()
+		}
 		row, err := writer.CreateMessageWithHistoryTurn(ctx, sqlc.CreateMessageWithHistoryTurnParams{
+			TurnPosition:            turn.position,
 			MessageID:               messageID,
 			BotID:                   createArg.BotID,
 			SessionID:               createArg.SessionID,
@@ -549,6 +599,7 @@ func persistDirectHistoryMessage(
 			ModelID:                 createArg.ModelID,
 			EventID:                 createArg.EventID,
 			DisplayText:             createArg.DisplayText,
+			RunID:                   createArg.RunID,
 			TurnID:                  turnID,
 			TurnMessageSeq:          pgtype.Int8{Int64: 1, Valid: true},
 		})
@@ -577,6 +628,7 @@ func persistDirectHistoryMessage(
 			ModelID:                 createArg.ModelID,
 			EventID:                 createArg.EventID,
 			DisplayText:             createArg.DisplayText,
+			RunID:                   createArg.RunID,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Message{}, pgtype.UUID{}, false, nil
@@ -1216,7 +1268,17 @@ func (s *DBService) replacePersistedRound(ctx context.Context, sessionID string,
 	if assistantMessageID == "" {
 		return errors.New("replacement assistant message was not persisted")
 	}
-	if _, err := replaceHistoryTurn(ctx, s.queries, sessionID, replacement.OldTurnID, requestMessageID, assistantMessageID, replacement.Reason); err != nil {
+	if _, err := replaceHistoryTurn(
+		ctx,
+		s.queries,
+		sessionID,
+		replacement.OldTurnID,
+		replacement.ReplacementTurnID,
+		replacement.ReplacementTurnPosition,
+		requestMessageID,
+		assistantMessageID,
+		replacement.Reason,
+	); err != nil {
 		return fmt.Errorf("replace persisted history turn: %w", err)
 	}
 	if replacement.SessionMetadata == nil {
@@ -1275,6 +1337,8 @@ func replaceHistoryTurn(
 	queries dbstore.Queries,
 	sessionID string,
 	oldTurnID string,
+	replacementTurnID string,
+	replacementTurnPosition *int64,
 	requestMessageID string,
 	assistantMessageID string,
 	reason string,
@@ -1286,6 +1350,13 @@ func replaceHistoryTurn(
 	pgOldTurnID, err := dbpkg.ParseUUID(oldTurnID)
 	if err != nil {
 		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid old turn id: %w", err)
+	}
+	pgReplacementTurnID, err := dbpkg.ParseUUID(replacementTurnID)
+	if err != nil {
+		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid replacement turn id: %w", err)
+	}
+	if replacementTurnPosition == nil || *replacementTurnPosition <= 0 {
+		return sqlc.ReplaceHistoryTurnRow{}, errors.New("replacement turn position must be positive")
 	}
 	pgRequestMessageID, err := parseOptionalUUID(requestMessageID)
 	if err != nil {
@@ -1300,25 +1371,27 @@ func replaceHistoryTurn(
 		reason = "replace"
 	}
 	return queries.ReplaceHistoryTurn(ctx, sqlc.ReplaceHistoryTurnParams{
-		OldTurnID:          pgOldTurnID,
-		SessionID:          pgSessionID,
-		RequestMessageID:   pgRequestMessageID,
-		AssistantMessageID: pgAssistantMessageID,
-		SupersededAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-		SupersededReason:   pgtype.Text{String: reason, Valid: true},
+		OldTurnID:           pgOldTurnID,
+		SessionID:           pgSessionID,
+		ReplacementTurnID:   pgReplacementTurnID,
+		ReplacementPosition: *replacementTurnPosition,
+		RequestMessageID:    pgRequestMessageID,
+		AssistantMessageID:  pgAssistantMessageID,
+		SupersededAt:        pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		SupersededReason:    pgtype.Text{String: reason, Valid: true},
 	})
 }
 
-func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error) {
+func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, replacementTurnID string, replacementTurnPosition *int64, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error) {
 	var row sqlc.ReplaceHistoryTurnRow
 	var err error
 	if _, fenced := runtimefence.FromContext(ctx); fenced {
 		err = runtimefence.InTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
-			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, replacementTurnID, replacementTurnPosition, requestMessageID, assistantMessageID, reason)
 			return err
 		})
 	} else {
-		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, requestMessageID, assistantMessageID, reason)
+		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, replacementTurnID, replacementTurnPosition, requestMessageID, assistantMessageID, reason)
 	}
 	if err != nil {
 		return HistoryTurn{}, err
@@ -1708,7 +1781,7 @@ func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
 }
 
 func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Message {
-	return toMessageFields(
+	message := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1729,10 +1802,12 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFromLatestUIBySessionRow(row sqlc.ListMessagesLatestUIBySessionRow) Message {
-	return toMessageFieldsWithMetadataMode(
+	message := toMessageFieldsWithMetadataMode(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1754,6 +1829,8 @@ func toMessageFromLatestUIBySessionRow(row sqlc.ListMessagesLatestUIBySessionRow
 		row.CreatedAt,
 		false,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
@@ -1781,7 +1858,7 @@ func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 }
 
 func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Message {
-	return toMessageFields(
+	message := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1802,10 +1879,12 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFromBeforeCursorBySessionRow(row sqlc.ListMessagesBeforeCursorBySessionRow) Message {
-	return toMessageFields(
+	message := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1826,6 +1905,8 @@ func toMessageFromBeforeCursorBySessionRow(row sqlc.ListMessagesBeforeCursorBySe
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
@@ -1853,7 +1934,7 @@ func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
 }
 
 func toMessageFromLocateWindowByExternalIDBySessionRow(row sqlc.LocateMessagesWindowByExternalIDBySessionRow) Message {
-	return toMessageFields(
+	message := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1874,6 +1955,8 @@ func toMessageFromLocateWindowByExternalIDBySessionRow(row sqlc.LocateMessagesWi
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFields(
@@ -2155,6 +2238,7 @@ func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySess
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	m.TurnID = uuidString(row.TurnID)
 	if row.CompactID.Valid {
 		m.CompactID = row.CompactID.String()
 	}
@@ -2227,6 +2311,15 @@ func toPgText(value string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: value, Valid: true}
+}
+
+// toPgInt8 keeps nil distinct from zero: position 0 is the first turn of a
+// session, so a plain int64 could not say "no position was supplied".
+func toPgInt8(value *int64) pgtype.Int8 {
+	if value == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *value, Valid: true}
 }
 
 func nonNilMap(m map[string]any) map[string]any {

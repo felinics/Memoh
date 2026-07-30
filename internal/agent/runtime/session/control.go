@@ -12,16 +12,16 @@ import (
 	"github.com/memohai/memoh/internal/runtimefence"
 )
 
-func (m *Manager) localControl(streamID string) *runControl {
+func (m *Manager) localControl(runID string) *runControl {
 	if m == nil {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	streamID = strings.TrimSpace(streamID)
+	runID = strings.TrimSpace(runID)
 	var match *runControl
 	for key, ctrl := range m.controls {
-		if key.streamID != streamID {
+		if key.runID != runID {
 			continue
 		}
 		if match != nil {
@@ -32,18 +32,18 @@ func (m *Manager) localControl(streamID string) *runControl {
 	return match
 }
 
-func (m *Manager) localControlForScope(botID, sessionID, streamID string) *runControl {
+func (m *Manager) localControlForScope(botID, sessionID, runID string) *runControl {
 	if m == nil {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.controls[scopedRunControlKey(botID, sessionID, streamID)]
+	return m.controls[scopedRunControlKey(botID, sessionID, runID)]
 }
 
 func (m *Manager) localControlForHandle(handle RunHandle) *runControl {
 	handle = handle.normalized()
-	ctrl := m.localControlForScope(handle.BotID, handle.SessionID, handle.StreamID)
+	ctrl := m.localControlForScope(handle.BotID, handle.SessionID, handle.RunID)
 	if ctrl == nil || ctrl.botID != handle.BotID || ctrl.sessionID != handle.SessionID || ctrl.generation != handle.Generation {
 		return nil
 	}
@@ -53,7 +53,7 @@ func (m *Manager) localControlForHandle(handle RunHandle) *runControl {
 func (m *Manager) forgetLocalControlForHandle(ctx context.Context, handle RunHandle) {
 	handle = handle.normalized()
 	m.mu.Lock()
-	ctrl := m.controls[scopedRunControlKey(handle.BotID, handle.SessionID, handle.StreamID)]
+	ctrl := m.controls[scopedRunControlKey(handle.BotID, handle.SessionID, handle.RunID)]
 	if ctrl == nil || ctrl.botID != handle.BotID || ctrl.sessionID != handle.SessionID || ctrl.generation != handle.Generation {
 		m.mu.Unlock()
 		return
@@ -66,11 +66,11 @@ func (m *Manager) forgetLocalControlForHandle(ctx context.Context, handle RunHan
 	ctrl.revokeOwnership(context.Canceled)
 }
 
-func (m *Manager) forgetLocalControl(ctx context.Context, streamID string) {
+func (m *Manager) forgetLocalControl(ctx context.Context, runID string) {
 	m.mu.Lock()
 	var ctrl *runControl
 	for key, candidate := range m.controls {
-		if key.streamID == strings.TrimSpace(streamID) {
+		if key.runID == strings.TrimSpace(runID) {
 			if ctrl != nil {
 				m.mu.Unlock()
 				return
@@ -91,11 +91,11 @@ func (m *Manager) forgetLocalControl(ctx context.Context, streamID string) {
 	ctrl.revokeOwnership(context.Canceled)
 }
 
-func (m *Manager) removeLocalControl(streamID string, expected *runControl) {
+func (m *Manager) removeLocalControl(runID string, expected *runControl) {
 	m.mu.Lock()
 	key := expected.key()
 	removed := false
-	if key.streamID == strings.TrimSpace(streamID) && m.controls[key] == expected {
+	if key.runID == strings.TrimSpace(runID) && m.controls[key] == expected {
 		delete(m.controls, key)
 		removed = true
 	}
@@ -109,9 +109,9 @@ func (m *Manager) removeLocalControl(streamID string, expected *runControl) {
 func (m *Manager) stopAllLocalControls(ctx context.Context) error {
 	m.mu.Lock()
 	controls := make([]*runControl, 0, len(m.controls))
-	for streamID, ctrl := range m.controls {
+	for runID, ctrl := range m.controls {
 		controls = append(controls, ctrl)
-		delete(m.controls, streamID)
+		delete(m.controls, runID)
 	}
 	m.mu.Unlock()
 	var stopErr error
@@ -157,7 +157,7 @@ func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 		if releaseErr == nil {
 			releaseErr = err
 		}
-		m.logger.Warn("release runtime run during shutdown failed", slog.Any("error", err), slog.String("stream_id", ctrl.streamID))
+		m.logger.Warn("release runtime run during shutdown failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
 	}
 	return releaseErr
 }
@@ -282,7 +282,7 @@ func (m *Manager) startLeaseRenewal(ctx context.Context, ctrl *runControl) {
 				renewCtx, renewCancel := context.WithDeadline(ctx, leaseDeadline)
 				now, err := m.backend.Now(renewCtx)
 				if err == nil {
-					err = m.distributed.RenewLease(renewCtx, Key{BotID: ctrl.botID, SessionID: ctrl.sessionID}, ctrl.streamID, m.ownerID, ctrl.generation, now, now.Add(m.ownerLeaseTTL))
+					err = m.distributed.RenewLease(renewCtx, Key{BotID: ctrl.botID, SessionID: ctrl.sessionID}, ctrl.runID, m.ownerID, ctrl.generation, now, now.Add(m.ownerLeaseTTL))
 				}
 				renewCancel()
 				if err == nil {
@@ -298,7 +298,7 @@ func (m *Manager) startLeaseRenewal(ctx context.Context, ctrl *runControl) {
 				if ctx.Err() != nil {
 					return
 				}
-				m.logger.Warn("renew runtime owner lease failed", slog.Any("error", err), slog.String("stream_id", ctrl.streamID))
+				m.logger.Warn("renew runtime owner lease failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
 				if errors.Is(err, ErrRunOwnershipLost) || !ctrl.leaseIsValidAt(time.Now()) {
 					m.cancelRunControl(ctrl)
 					return
@@ -408,10 +408,25 @@ func (*Manager) cancelRunControl(ctrl *runControl) {
 }
 
 func (c *runControl) revokeOwnership(cause error) {
-	if c == nil || c.ownershipCancel == nil {
+	if c == nil {
+		return
+	}
+	// Recorded before the nil check on the cancel func, so the flag means the
+	// same thing for a control that never carried one.
+	if errors.Is(cause, ErrRunOwnershipLost) {
+		c.ownershipLost.Store(true)
+	}
+	if c.ownershipCancel == nil {
 		return
 	}
 	c.ownershipOnce.Do(func() { c.ownershipCancel(cause) })
+}
+
+// ownershipWasLost reports that this process was told it no longer owns the run.
+// Ordinary teardown revokes with context.Canceled and does not set it, so the
+// answer distinguishes "the run ended" from "the run was taken away".
+func (c *runControl) ownershipWasLost() bool {
+	return c != nil && c.ownershipLost.Load()
 }
 
 func (m *Manager) stopLeaseRenewal(ctrl *runControl) {

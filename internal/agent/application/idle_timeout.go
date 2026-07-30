@@ -45,13 +45,6 @@ func (ic *idleCancel) DidFire() bool {
 	return ic.fired
 }
 
-// ToolCalls returns the number of tool calls recorded.
-func (ic *idleCancel) ToolCalls() int {
-	ic.mu.Lock()
-	defer ic.mu.Unlock()
-	return ic.toolCalls
-}
-
 // currentTimeout returns the adaptive timeout: base + 60s per tool call, capped at 600s.
 // Tool calls (especially spawn/subagent) can take minutes to complete, so the
 // extension per tool call is generous to avoid interrupting active work.

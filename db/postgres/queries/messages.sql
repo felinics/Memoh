@@ -14,7 +14,8 @@ INSERT INTO bot_history_messages (
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  run_id
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -31,7 +32,8 @@ VALUES (
   sqlc.arg(runtime_type),
   sqlc.narg(model_id)::uuid,
   sqlc.narg(event_id)::uuid,
-  sqlc.narg(display_text)::text
+  sqlc.narg(display_text)::text,
+  sqlc.narg(run_id)::uuid
 )
 RETURNING
   id,
@@ -135,11 +137,27 @@ WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(session_id)
 RETURNING (next_turn_position - 1)::bigint AS position;
 
 -- name: CreateMessageWithHistoryTurn :one
+-- Writes the request message of a turn.
+--
+-- The turn position is allocated here only when the caller did not bring one.
+-- A run admitted through session_runs already drew turn_id and turn_position
+-- from this same counter (SR-TURN-001, SR-DUR-002), so bumping again would
+-- spend a second position and file the message under a turn the client was
+-- never told about. Entry points with no admission — channel inbound,
+-- schedules, heartbeats — pass NULL and keep allocating here.
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.team_id = public.memoh_current_team_id() AND bot_sessions.id = sqlc.arg(session_id)
+  WHERE bot_sessions.team_id = public.memoh_current_team_id()
+    AND bot_sessions.id = sqlc.arg(session_id)
+    AND sqlc.narg(turn_position)::bigint IS NULL
   RETURNING (next_turn_position - 1)::bigint AS position
+),
+turn_slot AS (
+  SELECT sqlc.narg(turn_position)::bigint AS position
+  WHERE sqlc.narg(turn_position)::bigint IS NOT NULL
+  UNION ALL
+  SELECT next_position.position FROM next_position
 ),
 inserted_message AS (
   INSERT INTO bot_history_messages (
@@ -159,6 +177,7 @@ inserted_message AS (
     model_id,
     event_id,
     display_text,
+    run_id,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -181,11 +200,12 @@ inserted_message AS (
     sqlc.narg(model_id)::uuid,
     sqlc.narg(event_id)::uuid,
     sqlc.narg(display_text)::text,
+    sqlc.narg(run_id)::uuid,
     sqlc.arg(turn_id),
-    next_position.position,
+    turn_slot.position,
     sqlc.arg(turn_message_seq),
     true
-  FROM next_position
+  FROM turn_slot
   RETURNING
     id,
     created_at
@@ -253,6 +273,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    run_id,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -274,6 +295,7 @@ inserted AS (
     sqlc.narg(model_id)::uuid,
     sqlc.narg(event_id)::uuid,
     sqlc.narg(display_text)::text,
+    sqlc.narg(run_id)::uuid,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -374,6 +396,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    run_id,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -395,6 +418,7 @@ inserted AS (
     sqlc.narg(model_id)::uuid,
     sqlc.narg(event_id)::uuid,
     sqlc.narg(display_text)::text,
+    sqlc.narg(run_id)::uuid,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -499,11 +523,22 @@ WITH input_rows(
         sqlc.narg(final_assistant_display_text)::text
       )
 ),
+-- As in CreateMessageWithHistoryTurn: a run admitted through session_runs
+-- already drew this turn's position, so bumping again would spend a second one
+-- and file the round under a turn the client was never told about.
 next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.team_id = public.memoh_current_team_id() AND bot_sessions.id = sqlc.arg(session_id)
+  WHERE bot_sessions.team_id = public.memoh_current_team_id()
+    AND bot_sessions.id = sqlc.arg(session_id)
+    AND sqlc.narg(turn_position)::bigint IS NULL
   RETURNING (next_turn_position - 1)::bigint AS position
+),
+turn_slot AS (
+  SELECT sqlc.narg(turn_position)::bigint AS position
+  WHERE sqlc.narg(turn_position)::bigint IS NOT NULL
+  UNION ALL
+  SELECT next_position.position FROM next_position
 ),
 inserted_messages AS (
   INSERT INTO bot_history_messages (
@@ -523,6 +558,7 @@ inserted_messages AS (
     model_id,
     event_id,
     display_text,
+    run_id,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -545,11 +581,12 @@ inserted_messages AS (
     input.model_id,
     input.event_id,
     input.display_text,
+    sqlc.narg(run_id)::uuid,
     sqlc.arg(turn_id),
-    next_position.position,
+    turn_slot.position,
     input.turn_message_seq,
     true
-  FROM input_rows input, next_position
+  FROM input_rows input, turn_slot
   RETURNING id, created_at, turn_message_seq
 )
 SELECT inserted_messages.id, inserted_messages.created_at
@@ -1157,6 +1194,7 @@ replacement_input AS (
           AND (
             request_message.turn_id IS NULL
             OR request_message.turn_id = old_turn.id
+            OR request_message.turn_id = sqlc.arg(replacement_turn_id)::uuid
           )
         FOR UPDATE
       )
@@ -1190,10 +1228,9 @@ affected_compaction_sessions AS MATERIALIZED (
     AND compact.session_id = locked.session_id
     AND compact.compaction_epoch = session.compaction_epoch
 ),
-next_position AS (
+session_update AS (
   UPDATE bot_sessions s
-  SET next_turn_position = next_turn_position + 1,
-      compaction_epoch = compaction_epoch + CASE
+  SET compaction_epoch = compaction_epoch + CASE
         WHEN EXISTS (
           SELECT 1
           FROM affected_compaction_sessions affected
@@ -1203,14 +1240,14 @@ next_position AS (
       END
   FROM replacement_input
   WHERE s.team_id = public.memoh_current_team_id() AND s.id = replacement_input.session_id
-  RETURNING s.next_turn_position - 1 AS position
+  RETURNING s.id
 ),
 replacement AS (
   SELECT
-    gen_random_uuid() AS id,
+    sqlc.arg(replacement_turn_id)::uuid AS id,
     replacement_input.bot_id,
     replacement_input.session_id,
-    next_position.position::bigint AS position,
+    sqlc.arg(replacement_position)::bigint AS position,
     replacement_input.replacement_request_message_id AS request_message_id,
     replacement_input.replacement_assistant_message_id AS assistant_message_id,
     NULL::uuid AS superseded_by_turn_id,
@@ -1219,7 +1256,8 @@ replacement AS (
     now()::timestamptz AS created_at,
     now()::timestamptz AS updated_at
   FROM replacement_input
-  CROSS JOIN next_position
+  CROSS JOIN session_update
+  WHERE sqlc.arg(replacement_position)::bigint > 0
 ),
 updated AS (
   UPDATE bot_history_messages old
@@ -1715,6 +1753,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -1821,6 +1860,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -1853,6 +1893,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -2062,6 +2103,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -2169,6 +2211,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -2257,6 +2300,7 @@ SELECT
   m.role,
   m.content,
   m.metadata,
+  m.turn_id,
   m.usage,
   m.session_mode,
   m.runtime_type,

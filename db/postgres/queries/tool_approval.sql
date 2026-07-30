@@ -11,10 +11,24 @@ next_short_id AS (
   FROM locked_session
   LEFT JOIN tool_approval_requests ON tool_approval_requests.session_id = locked_session.id
     AND tool_approval_requests.team_id = public.memoh_current_team_id()
+),
+runtime_scope AS (
+  SELECT session_runs.run_id, session_runs.turn_id
+  FROM session_runs
+  WHERE session_runs.team_id = public.memoh_current_team_id()
+    AND session_runs.bot_id = sqlc.arg(bot_id)
+    AND session_runs.session_id = sqlc.arg(session_id)
+    AND session_runs.fencing_token = sqlc.narg(runtime_fencing_token)::bigint
+    AND session_runs.state IN ('running', 'waiting_decision')
+  UNION ALL
+  SELECT NULL::uuid, NULL::uuid
+  WHERE sqlc.narg(runtime_fencing_token)::bigint IS NULL
 )
 INSERT INTO tool_approval_requests (
   bot_id,
   session_id,
+  run_id,
+  turn_id,
   route_id,
   channel_identity_id,
   workspace_target_id,
@@ -32,6 +46,8 @@ INSERT INTO tool_approval_requests (
 ) SELECT
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
+  runtime_scope.run_id,
+  runtime_scope.turn_id,
   sqlc.narg(route_id),
   sqlc.narg(channel_identity_id),
   sqlc.arg(workspace_target_id),
@@ -48,10 +64,13 @@ INSERT INTO tool_approval_requests (
   sqlc.arg(conversation_type)
 FROM locked_session
 CROSS JOIN next_short_id
+CROSS JOIN runtime_scope
 ON CONFLICT (team_id, session_id, tool_call_id) DO UPDATE
 SET tool_input = tool_approval_requests.tool_input
 WHERE tool_approval_requests.status = 'pending'
   AND tool_approval_requests.runtime_fencing_token IS NOT DISTINCT FROM EXCLUDED.runtime_fencing_token
+  AND tool_approval_requests.run_id IS NOT DISTINCT FROM EXCLUDED.run_id
+  AND tool_approval_requests.turn_id IS NOT DISTINCT FROM EXCLUDED.turn_id
   AND tool_approval_requests.tool_name = EXCLUDED.tool_name
   AND tool_approval_requests.operation = EXCLUDED.operation
   AND tool_approval_requests.tool_input = EXCLUDED.tool_input
@@ -62,6 +81,15 @@ RETURNING *;
 SELECT *
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id() AND id = $1;
+
+-- name: GetPendingToolApprovalByRun :one
+SELECT *
+FROM tool_approval_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND status = 'pending'
+ORDER BY created_at DESC, short_id DESC
+LIMIT 1;
 
 -- name: ClaimToolApprovalRequestForRuntime :one
 UPDATE tool_approval_requests
@@ -116,6 +144,8 @@ UPDATE tool_approval_requests
 SET status = 'approved',
     decision_reason = sqlc.arg(reason),
     decided_by_channel_identity_id = sqlc.narg(decided_by_channel_identity_id),
+    response_control_id = sqlc.narg(response_control_id)::text,
+    response_payload_hash = sqlc.narg(response_payload_hash)::text,
     decided_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(id)
@@ -128,6 +158,8 @@ UPDATE tool_approval_requests
 SET status = 'rejected',
     decision_reason = sqlc.arg(reason),
     decided_by_channel_identity_id = sqlc.narg(decided_by_channel_identity_id),
+    response_control_id = sqlc.narg(response_control_id)::text,
+    response_payload_hash = sqlc.narg(response_payload_hash)::text,
     decided_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(id)

@@ -173,7 +173,7 @@ type PromptInput struct {
 	BotID                    string
 	ChatID                   string
 	SessionID                string
-	StreamID                 string
+	RunID                    string
 	SessionType              string
 	RouteID                  string
 	AgentID                  string
@@ -1622,7 +1622,7 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 	}
 	overlay(&ctx.ChatID, h.active.ChatID)
 	overlay(&ctx.SessionID, h.active.SessionID)
-	overlay(&ctx.StreamID, h.active.StreamID)
+	overlay(&ctx.RunID, h.active.RunID)
 	overlay(&ctx.SessionType, h.active.SessionType)
 	overlay(&ctx.RouteID, h.active.RouteID)
 	overlay(&ctx.ChannelIdentityID, h.active.ChannelIdentityID)
@@ -1670,7 +1670,7 @@ func toolSessionContext(ctx context.Context, input PromptInput, h *runtimeHandle
 		ChatID:              firstNonEmpty(input.ChatID, h.botID),
 		RuntimeID:           h.id,
 		SessionID:           strings.TrimSpace(input.SessionID),
-		StreamID:            strings.TrimSpace(input.StreamID),
+		RunID:               strings.TrimSpace(input.RunID),
 		SessionType:         firstNonEmpty(input.SessionType, sessionmode.ACPAgent),
 		RouteID:             input.RouteID,
 		ChannelIdentityID:   input.ChannelIdentityID,
@@ -1710,7 +1710,7 @@ func (p *SessionPool) registerToolEventSink(input PromptInput, sink *promptToolE
 	return p.contexts.RegisterToolEventSink(client.ToolSessionContext{
 		BotID:     input.BotID,
 		SessionID: input.SessionID,
-		StreamID:  input.StreamID,
+		RunID:     input.RunID,
 	}, sink.EmitToolStreamEvent)
 }
 

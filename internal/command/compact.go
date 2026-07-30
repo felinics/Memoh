@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -17,7 +18,12 @@ import (
 // a compaction model nor a chat model is configured. The Handler catches it
 // via errors.Is and surfaces a localized user message; other (internal) errors
 // flow through friendlyCommandError's looksLikeInternalError path.
-var errCompactNoModel = errors.New("compact: no compaction or chat model configured")
+var (
+	errCompactNoModel = errors.New("compact: no compaction or chat model configured")
+	// errCompactModelUnavailable covers every other resolution failure (model
+	// or provider disabled, no output cap, unknown window).
+	errCompactModelUnavailable = errors.New("compact: compaction model unavailable")
+)
 
 func (h *Handler) buildCompactGroup() *CommandGroup {
 	g := newCommandGroup("compact", "Compact conversation context")
@@ -56,12 +62,15 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 				if errors.Is(err, errCompactNoModel) {
 					return cc.T("cmd.compact.noModel"), nil
 				}
+				if errors.Is(err, errCompactModelUnavailable) {
+					return cc.T("cmd.compact.modelUnavailable"), nil
+				}
 				return "", err
 			}
 
 			res, err := h.compactionService.RunCompactionSync(cc.Ctx, cfg)
 			if err != nil {
-				return "", fmt.Errorf("compaction failed: %w", err)
+				return h.compactRunError(cc, err), nil
 			}
 			if res.Status != compaction.StatusOK {
 				return cc.T("cmd.compact.noop"), nil
@@ -72,50 +81,65 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 	return g
 }
 
+// compactRunError maps a summarizer run failure to a localized chat message:
+// a too-small summarizer window is actionable by the user, every other cause
+// stays in the server log — run errors carry window/budget/provider
+// diagnostics that must not reach chat verbatim.
+func (h *Handler) compactRunError(cc CommandContext, err error) string {
+	if errors.Is(err, compaction.ErrSummaryWindowTooSmall) {
+		return cc.T("cmd.compact.windowTooSmall")
+	}
+	if h.logger != nil {
+		h.logger.Error("compact: run failed", slog.String("bot_id", cc.BotID), slog.Any("error", err))
+	}
+	return cc.T("cmd.error.generic", map[string]any{"command": CmdRef("compact")})
+}
+
 func (h *Handler) buildCompactConfig(cc CommandContext, sessionID string) (compaction.TriggerConfig, error) {
 	botSettings, err := h.settingsService.GetBot(cc.Ctx, cc.BotID)
 	if err != nil {
 		return compaction.TriggerConfig{}, fmt.Errorf("failed to load settings: %w", err)
 	}
-	modelID := botSettings.CompactionModelID
-	if modelID == "" {
-		modelID = botSettings.ChatModelID
+	sessionModelID := ""
+	if strings.TrimSpace(botSettings.CompactionModelID) == "" {
+		sessionModelID = models.LatestSessionModelID(cc.Ctx, h.sqlcQueries, sessionID)
 	}
-	if modelID == "" {
+	resolution, err := models.ResolveCompactionModel(
+		cc.Ctx,
+		h.modelsService,
+		h.sqlcQueries,
+		botSettings.CompactionModelID,
+		sessionModelID,
+		botSettings.ChatModelID,
+	)
+	if errors.Is(err, models.ErrCompactionModelNotConfigured) {
 		return compaction.TriggerConfig{}, errCompactNoModel
 	}
-
-	compactModel, err := h.modelsService.GetByID(cc.Ctx, modelID)
+	if models.IsCompactionModelUnavailable(err) {
+		return compaction.TriggerConfig{}, errCompactModelUnavailable
+	}
 	if err != nil {
-		return compaction.TriggerConfig{}, fmt.Errorf("failed to load compaction model: %w", err)
+		return compaction.TriggerConfig{}, err
 	}
-	if !compactModel.Enable {
-		return compaction.TriggerConfig{}, fmt.Errorf("compaction model %s is disabled", compactModel.ModelID)
-	}
-	compactProvider, err := models.FetchProviderByID(cc.Ctx, h.sqlcQueries, compactModel.ProviderID)
-	if err != nil {
-		return compaction.TriggerConfig{}, fmt.Errorf("failed to load provider: %w", err)
-	}
-	creds, err := h.providersService.ResolveModelCredentials(cc.Ctx, compactProvider)
+	creds, err := h.providersService.ResolveModelCredentials(cc.Ctx, resolution.Provider)
 	if err != nil {
 		return compaction.TriggerConfig{}, fmt.Errorf("failed to resolve credentials: %w", err)
 	}
-
-	cfg := compaction.TriggerConfig{
-		BotID:            cc.BotID,
-		SessionID:        sessionID,
-		ModelID:          compactModel.ModelID,
-		ClientType:       compactProvider.ClientType,
-		APIKey:           creds.APIKey,
-		CodexAccountID:   creds.CodexAccountID,
-		BaseURL:          providers.ProviderConfigString(compactProvider, "base_url"),
-		Ratio:            100,
-		TotalInputTokens: 1,
-		PromptCacheTTL:   providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
-		Manual:           true,
-	}
-	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
-		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
-	}
+	cfg := compaction.NewTriggerConfig(compaction.TriggerModel{
+		Slug:                  resolution.Model.ModelID,
+		RecordID:              resolution.Model.ID,
+		ClientType:            resolution.Provider.ClientType,
+		APIKey:                creds.APIKey,
+		CodexAccountID:        creds.CodexAccountID,
+		BaseURL:               providers.ProviderConfigString(resolution.Provider, "base_url"),
+		ChatCompletionsCompat: providers.ProviderConfigString(resolution.Provider, models.ChatCompletionsCompatConfigKey),
+		PromptCacheTTL:        providers.ProviderConfigString(resolution.Provider, "prompt_cache_ttl"),
+		WindowTokens:          resolution.WindowTokens,
+	})
+	cfg.BotID = cc.BotID
+	cfg.SessionID = sessionID
+	cfg.Ratio = 100
+	cfg.TotalInputTokens = 1
+	cfg.Manual = true
 	return cfg, nil
 }

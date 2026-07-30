@@ -83,7 +83,7 @@ func TestSessionPoolPromptColdStartsBindsAndReuses(t *testing.T) {
 	input := PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		StreamID:              "stream-1",
+		RunID:                 "run-1",
 		AgentID:               acpprofile.AgentCodexID,
 		ProjectPath:           "/data/project",
 		Prompt:                "first prompt",
@@ -2373,7 +2373,7 @@ func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 		BotID:                 "bot-1",
 		ChatID:                "chat-1",
 		SessionID:             "session-1",
-		StreamID:              "stream-1",
+		RunID:                 "run-1",
 		RouteID:               "route-1",
 		AgentID:               "codex",
 		ProjectPath:           "/data/project",
@@ -2398,12 +2398,12 @@ func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 	if baked.BotID != "bot-1" || !strings.HasPrefix(baked.RuntimeID, runtimeIDPrefix) || baked.RuntimeToken == "" || baked.SessionType != sessionmode.ACPAgent {
 		t.Fatalf("baked identity = %#v, want stable runtime identity", baked)
 	}
-	if baked.SessionID != "" || baked.StreamID != "" || baked.SessionToken != "" || baked.ReplyTarget != "" || baked.RouteID != "" || baked.ChannelIdentityID != "" {
+	if baked.SessionID != "" || baked.RunID != "" || baked.SessionToken != "" || baked.ReplyTarget != "" || baked.RouteID != "" || baked.ChannelIdentityID != "" {
 		t.Fatalf("baked identity leaks per-prompt fields: %#v", baked)
 	}
 	// The pool no longer publishes ACP contexts into the shared store.
 	merged := contexts.Merge(mcp.ToolSessionContext{BotID: "bot-1", SessionID: "session-1"})
-	if merged.StreamID != "" || merged.ConversationType != "" {
+	if merged.RunID != "" || merged.ConversationType != "" {
 		t.Fatalf("ACP context leaked into the shared store: %#v", merged)
 	}
 }
@@ -2436,7 +2436,7 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	if ctx.BotID != "bot-1" || ctx.RuntimeID != "rt_test" || ctx.SessionID != "session-1" || ctx.SessionType != sessionmode.ACPAgent {
 		t.Fatalf("idle tool context = %#v", ctx)
 	}
-	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.IsSubagent {
+	if ctx.RunID != "" || ctx.SessionToken != "" || ctx.IsSubagent {
 		t.Fatalf("idle tool context leaks per-prompt fields: %#v", ctx)
 	}
 	if ctx.RuntimeActive {
@@ -2454,7 +2454,7 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	active := client.ToolSessionContext{
 		ChatID:             "chat-1",
 		SessionID:          "session-1",
-		StreamID:           "stream-7",
+		RunID:              "stream-7",
 		SessionToken:       "token-7",
 		CurrentPlatform:    "web",
 		ReplyTarget:        "reply-7",
@@ -2471,7 +2471,7 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	h.active = &active
 	h.state.Unlock()
 	ctx = h.toolContext()
-	if ctx.StreamID != "stream-7" || ctx.SessionToken != "token-7" || ctx.ChatID != "chat-1" || ctx.ReplyTarget != "reply-7" || !ctx.RuntimeActive {
+	if ctx.RunID != "stream-7" || ctx.SessionToken != "token-7" || ctx.ChatID != "chat-1" || ctx.ReplyTarget != "reply-7" || !ctx.RuntimeActive {
 		t.Fatalf("active tool context = %#v", ctx)
 	}
 	if !ctx.CanListUserInput {
@@ -2496,7 +2496,7 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	// clearActive removes every per-prompt field again.
 	h.clearActive()
 	ctx = h.toolContext()
-	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || !ctx.CanListUserInput || ctx.RunContext != nil || ctx.RuntimeGuard != nil {
+	if ctx.RunID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || !ctx.CanListUserInput || ctx.RunContext != nil || ctx.RuntimeGuard != nil {
 		t.Fatalf("cleared tool context = %#v", ctx)
 	}
 }
@@ -2505,7 +2505,7 @@ func TestToolSessionContextCarriesPromptRuntimeFence(t *testing.T) {
 	want := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 31}
 	ctx := runtimefence.WithContext(context.Background(), want)
 	guard := func(context.Context) error { return nil }
-	got := toolSessionContext(ctx, PromptInput{SessionID: want.SessionID, StreamID: "stream-1", RuntimeGuard: guard}, &runtimeHandle{id: "rt-1", botID: want.BotID})
+	got := toolSessionContext(ctx, PromptInput{SessionID: want.SessionID, RunID: "run-1", RuntimeGuard: guard}, &runtimeHandle{id: "rt-1", botID: want.BotID})
 	if got.RuntimeFence != want {
 		t.Fatalf("tool session fence = %#v, want %#v", got.RuntimeFence, want)
 	}

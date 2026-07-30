@@ -72,12 +72,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		if cfg.BaseURL != "" {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
-		if isDeepSeekChatCompletionsCompat(chatCompletionsCompat) {
-			opts = append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
-		}
-		if isMiniMaxChatCompletionsCompat(chatCompletionsCompat) {
-			opts = append(opts, openaicompletions.WithMiniMaxChatCompletionsCompat())
-		}
+		opts = appendChatCompletionsCompat(opts, chatCompletionsCompat)
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 
@@ -157,14 +152,25 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		if cfg.BaseURL != "" {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
-		if isDeepSeekChatCompletionsCompat(chatCompletionsCompat) {
-			opts = append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
-		}
-		if isMiniMaxChatCompletionsCompat(chatCompletionsCompat) {
-			opts = append(opts, openaicompletions.WithMiniMaxChatCompletionsCompat())
-		}
+		opts = appendChatCompletionsCompat(opts, chatCompletionsCompat)
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
+	}
+}
+
+func appendChatCompletionsCompat(
+	opts []openaicompletions.Option,
+	compat string,
+) []openaicompletions.Option {
+	switch {
+	case isDeepSeekChatCompletionsCompat(compat):
+		return append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
+	case isMiniMaxChatCompletionsCompat(compat):
+		return append(opts, openaicompletions.WithMiniMaxChatCompletionsCompat())
+	case isKimiChatCompletionsCompat(compat):
+		return append(opts, openaicompletions.WithKimiChatCompletionsCompat())
+	default:
+		return opts
 	}
 }
 

@@ -4,7 +4,7 @@ import { fetchSessions } from '@/composables/api/useChat'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import type { SessionSummary } from '@/composables/api/useChat'
-import type { ToolCallBlock } from '@/store/chat-list'
+import type { ContentBlock, ToolCallBlock } from '@/store/chat-list'
 import { useChatViewTarget } from './useChatViewContext'
 
 export interface SubagentSession {
@@ -98,7 +98,8 @@ function toSubagentSession(session: SessionSummary): SubagentSession {
   }
 }
 
-function isActiveSubagentTool(block: ToolCallBlock): boolean {
+function isActiveSubagentTool(block: ContentBlock): block is ToolCallBlock {
+  if (block.type !== 'tool') return false
   if (!SUBAGENT_TOOL_NAMES.has(block.toolName)) return false
   if (block.done === true) return false
   const status = block.backgroundTask?.status?.trim().toLowerCase()

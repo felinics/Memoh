@@ -11,11 +11,24 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
 
+func convertTestMessagesToUITurns(messages []messagepkg.Message) []UITurn {
+	turnID := "test-turn"
+	for i := range messages {
+		if explicit := strings.TrimSpace(messages[i].TurnID); explicit != "" {
+			turnID = explicit
+		} else {
+			messages[i].TurnID = turnID
+		}
+	}
+	return ConvertMessagesToUITurns(messages)
+}
+
 func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationDelivery(t *testing.T) {
 	baseTime := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	messages := []messagepkg.Message{
 		{
 			ID:             "user-1",
+			TurnID:         "turn-1",
 			BotID:          "bot-1",
 			SessionID:      "session-1",
 			Role:           "user",
@@ -28,6 +41,7 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 		},
 		{
 			ID:        "assistant-1",
+			TurnID:    "turn-1",
 			BotID:     "bot-1",
 			SessionID: "session-1",
 			Role:      "assistant",
@@ -86,7 +100,7 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 		},
 	}
 
-	turns := ConvertMessagesToUITurns(messages)
+	turns := convertTestMessagesToUITurns(messages)
 	if len(turns) != 2 {
 		t.Fatalf("expected 2 turns, got %d", len(turns))
 	}
@@ -95,10 +109,16 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 	if userTurn.Role != "user" || userTurn.Text != "hello" {
 		t.Fatalf("unexpected user turn: %#v", userTurn)
 	}
+	if userTurn.TurnID != "turn-1" {
+		t.Fatalf("user turn id = %q, want turn-1", userTurn.TurnID)
+	}
 
 	assistantTurn := turns[1]
 	if assistantTurn.Role != "assistant" {
 		t.Fatalf("expected assistant turn, got %#v", assistantTurn)
+	}
+	if assistantTurn.TurnID != "turn-1" {
+		t.Fatalf("assistant turn id = %q, want turn-1", assistantTurn.TurnID)
 	}
 	if len(assistantTurn.Messages) != 5 {
 		t.Fatalf("expected 5 assistant messages, got %d", len(assistantTurn.Messages))
@@ -236,7 +256,7 @@ func TestConvertMessagesToUITurnsMergesTalkWhileActingIntoOneTurn(t *testing.T) 
 		},
 	}
 
-	turns := ConvertMessagesToUITurns(messages)
+	turns := convertTestMessagesToUITurns(messages)
 	if len(turns) != 2 {
 		t.Fatalf("talk-while-acting reply must collapse into one user + one assistant turn, got %d", len(turns))
 	}
@@ -383,7 +403,7 @@ func TestConvertMessagesToUITurnsKeepsScreenshotFeedbackInOneTurn(t *testing.T) 
 		},
 	}
 
-	turns := ConvertMessagesToUITurns(messages)
+	turns := convertTestMessagesToUITurns(messages)
 	if len(turns) != 2 {
 		t.Fatalf("screenshot feedback must not split the reply: want user + assistant (2 turns), got %d", len(turns))
 	}
@@ -419,63 +439,46 @@ func TestConvertMessagesToUITurnsKeepsScreenshotFeedbackInOneTurn(t *testing.T) 
 	}
 }
 
-// IsUITurnBoundary backs the handler's page-head backfill: only a visible user
-// message (or background-task notification) is a safe page head. Screenshot
-// feedback, empty user rows, and assistant/tool rows are not — they may be
-// continuing an assistant turn whose start is on the previous page.
-func TestIsUITurnBoundary(t *testing.T) {
-	visibleUser := messagepkg.Message{
-		Role:           "user",
-		DisplayContent: "hello there",
-		Content: mustUIMessageJSON(t, turn.ModelMessage{
-			Role:    "user",
-			Content: mustUIRawJSON(t, "hello there"),
-		}),
-	}
-	screenshotUser := messagepkg.Message{
-		Role: "user",
-		Content: mustUIMessageJSON(t, turn.ModelMessage{
-			Role:    "user",
-			Content: mustUIRawJSON(t, []map[string]any{{"type": "image", "image": "data:image/png;base64,AAAA"}}),
-		}),
-	}
-	emptyUser := messagepkg.Message{
-		Role: "user",
-		Content: mustUIMessageJSON(t, turn.ModelMessage{
-			Role:    "user",
-			Content: mustUIRawJSON(t, ""),
-		}),
-	}
-	assistantToolCall := messagepkg.Message{
-		Role: "assistant",
-		Content: mustUIMessageJSON(t, turn.ModelMessage{
-			Role:    "assistant",
-			Content: mustUIRawJSON(t, []map[string]any{{"type": "tool-call", "toolCallId": "c1", "toolName": "browser_action"}}),
-		}),
-	}
-	toolResult := messagepkg.Message{
-		Role: "tool",
-		Content: mustUIMessageJSON(t, turn.ModelMessage{
-			Role:    "tool",
-			Content: mustUIRawJSON(t, []map[string]any{{"type": "tool-result", "toolCallId": "c1"}}),
-		}),
+func TestConvertMessagesToUITurnsGroupsOnlyByTurnID(t *testing.T) {
+	messages := []messagepkg.Message{
+		{
+			ID:        "assistant-1",
+			TurnID:    "turn-1",
+			Role:      "assistant",
+			Content:   mustUIMessageJSON(t, turn.ModelMessage{Role: "assistant", Content: mustUIRawJSON(t, "first")}),
+			CreatedAt: time.Date(2026, 7, 28, 9, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:        "internal-user",
+			TurnID:    "turn-2",
+			Role:      "user",
+			Content:   mustUIMessageJSON(t, turn.ModelMessage{Role: "user", Content: mustUIRawJSON(t, "")}),
+			CreatedAt: time.Date(2026, 7, 28, 9, 0, 1, 0, time.UTC),
+		},
+		{
+			ID:        "assistant-2",
+			TurnID:    "turn-2",
+			Role:      "assistant",
+			Content:   mustUIMessageJSON(t, turn.ModelMessage{Role: "assistant", Content: mustUIRawJSON(t, "second")}),
+			CreatedAt: time.Date(2026, 7, 28, 9, 0, 2, 0, time.UTC),
+		},
+		{
+			ID:        "missing-turn",
+			Role:      "assistant",
+			Content:   mustUIMessageJSON(t, turn.ModelMessage{Role: "assistant", Content: mustUIRawJSON(t, "must not render")}),
+			CreatedAt: time.Date(2026, 7, 28, 9, 0, 3, 0, time.UTC),
+		},
 	}
 
-	cases := []struct {
-		name string
-		msg  messagepkg.Message
-		want bool
-	}{
-		{"visible user message is a boundary", visibleUser, true},
-		{"screenshot-feedback user is not a boundary", screenshotUser, false},
-		{"empty user is not a boundary", emptyUser, false},
-		{"assistant tool-call is not a boundary", assistantToolCall, false},
-		{"tool result is not a boundary", toolResult, false},
+	turns := ConvertMessagesToUITurns(messages)
+	if len(turns) != 2 {
+		t.Fatalf("turn count = %d, want 2: %#v", len(turns), turns)
 	}
-	for _, tc := range cases {
-		if got := IsUITurnBoundary(tc.msg); got != tc.want {
-			t.Errorf("%s: IsUITurnBoundary = %v, want %v", tc.name, got, tc.want)
-		}
+	if turns[0].TurnID != "turn-1" || turns[1].TurnID != "turn-2" {
+		t.Fatalf("turn ids = %q, %q; want turn-1, turn-2", turns[0].TurnID, turns[1].TurnID)
+	}
+	if turns[0].Messages[0].Content != "first" || turns[1].Messages[0].Content != "second" {
+		t.Fatalf("assistant content crossed turn boundary: %#v", turns)
 	}
 }
 
@@ -518,7 +521,7 @@ func TestConvertMessagesToUITurnsKeepsUserInputMetadata(t *testing.T) {
 		CreatedAt: time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC),
 	}}
 
-	turns := ConvertMessagesToUITurns(messages)
+	turns := convertTestMessagesToUITurns(messages)
 	if len(turns) != 1 || len(turns[0].Messages) != 1 {
 		t.Fatalf("unexpected turns: %#v", turns)
 	}
@@ -533,7 +536,7 @@ func TestConvertMessagesToUITurnsKeepsUserInputMetadata(t *testing.T) {
 
 func TestConvertMessagesToUITurnsStripsUserYAMLHeaderFallback(t *testing.T) {
 	now := time.Now().UTC()
-	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
 		ID:        "user-1",
 		BotID:     "bot-1",
 		SessionID: "session-1",
@@ -555,7 +558,7 @@ func TestConvertMessagesToUITurnsStripsUserYAMLHeaderFallback(t *testing.T) {
 
 func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFallback(t *testing.T) {
 	now := time.Now().UTC()
-	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
 		ID:        "user-1",
 		BotID:     "bot-1",
 		SessionID: "session-1",
@@ -737,7 +740,7 @@ func TestConvertModelMessagesToUIAssistantMessagesIncludesExecutionLocation(t *t
 
 func TestConvertMessagesToUITurnsIncludesReplyAndForwardMetadata(t *testing.T) {
 	now := time.Now().UTC()
-	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
 		ID:                     "user-1",
 		BotID:                  "bot-1",
 		SessionID:              "session-1",
@@ -790,7 +793,7 @@ func TestConvertMessagesToUITurnsIncludesReplyAndForwardMetadata(t *testing.T) {
 
 func TestConvertMessagesToUITurnsParsesRawReplyMetadata(t *testing.T) {
 	now := time.Now().UTC()
-	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
 		ID:        "user-raw-reply",
 		BotID:     "bot-1",
 		SessionID: "session-1",
@@ -814,7 +817,7 @@ func TestConvertMessagesToUITurnsParsesRawReplyMetadata(t *testing.T) {
 func TestConvertMessagesToUITurnsTruncatesReplyPreview(t *testing.T) {
 	now := time.Now().UTC()
 	longPreview := strings.Repeat("预览", 80)
-	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
 		ID:        "user-1",
 		BotID:     "bot-1",
 		SessionID: "session-1",
@@ -847,7 +850,7 @@ func TestConvertMessagesToUITurnsTruncatesReplyPreview(t *testing.T) {
 
 func TestConvertMessagesToUITurnsKeepsForwardOnlyUserMessage(t *testing.T) {
 	now := time.Now().UTC()
-	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
 		ID:        "user-1",
 		BotID:     "bot-1",
 		Role:      "user",
@@ -865,7 +868,7 @@ func TestConvertMessagesToUITurnsKeepsForwardOnlyUserMessage(t *testing.T) {
 
 func TestConvertMessagesToUITurnsKeepsSkillActivationWithoutPrompt(t *testing.T) {
 	now := time.Now().UTC()
-	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
 		ID:             "user-activation",
 		BotID:          "bot-1",
 		Role:           "user",
@@ -904,7 +907,7 @@ func TestConvertMessagesToUITurnsKeepsSkillActivationWithoutPrompt(t *testing.T)
 
 func TestConvertMessagesToUITurnsInfersLegacyRequestedSkillActivation(t *testing.T) {
 	now := time.Now().UTC()
-	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
 		ID:             "user-activation",
 		BotID:          "bot-1",
 		Role:           "user",
@@ -938,7 +941,7 @@ func TestConvertMessagesToUITurnsInfersLegacyRequestedSkillActivation(t *testing
 
 func TestConvertMessagesToUITurnsStripsLegacyRawSlashActivationText(t *testing.T) {
 	now := time.Now().UTC()
-	turns := ConvertMessagesToUITurns([]messagepkg.Message{
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{
 		{
 			ID:      "user-activation-empty",
 			BotID:   "bot-1",
@@ -1400,7 +1403,7 @@ func TestApplyBackgroundTaskSnapshotsClosesPersistedStartedExec(t *testing.T) {
 		},
 	}
 
-	turns := ConvertMessagesToUITurns(messages)
+	turns := convertTestMessagesToUITurns(messages)
 	if len(turns) != 1 || len(turns[0].Messages) != 1 {
 		t.Fatalf("unexpected initial turns: %#v", turns)
 	}
@@ -1458,7 +1461,7 @@ func TestApplyBackgroundTaskSnapshotsClosesMissingPersistedStartedExec(t *testin
 		},
 	}
 
-	turns := ConvertMessagesToUITurns(messages)
+	turns := convertTestMessagesToUITurns(messages)
 	if len(turns) != 1 || len(turns[0].Messages) != 1 {
 		t.Fatalf("unexpected initial turns: %#v", turns)
 	}

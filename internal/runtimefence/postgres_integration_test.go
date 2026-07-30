@@ -47,6 +47,7 @@ func TestPostgresRuntimeFenceActivationLeavesUnfencedDecisionsAlone(t *testing.T
 	}
 	input := createRuntimeFenceUserInput(t, ctx, inputs, botID, sessionID, "unfenced-input", nil)
 	fence := nextRuntimeFence(t, ctx, dbsqlc.New(pool), botID, sessionID)
+	createRuntimeFenceRun(t, ctx, pool, fence)
 	if err := runtimefence.Activate(ctx, store, fence); err != nil {
 		t.Fatalf("activate runtime fence: %v", err)
 	}
@@ -70,6 +71,8 @@ func TestPostgresRuntimeFenceActivationLeavesUnfencedDecisionsAlone(t *testing.T
 	}
 	runtimeInput := createRuntimeFenceUserInput(t, ownerCtx, inputs, botID, sessionID, "fenced-input", nil)
 	nextFence := nextRuntimeFence(t, ctx, dbsqlc.New(pool), botID, sessionID)
+	finishRuntimeFenceRun(t, ctx, pool, fence)
+	createRuntimeFenceRun(t, ctx, pool, nextFence)
 	if err := runtimefence.Activate(ctx, store, nextFence); err != nil {
 		t.Fatalf("activate successor runtime fence: %v", err)
 	}
@@ -147,6 +150,7 @@ func TestPostgresRuntimeFenceLocksBotBeforeSessionWrites(t *testing.T) {
 	queries := dbsqlc.New(pool)
 	store := postgresstore.NewQueriesWithPool(pool, queries)
 	fence := nextRuntimeFence(t, ctx, queries, botID, sessionID)
+	createRuntimeFenceRun(t, ctx, pool, fence)
 	if err := runtimefence.Activate(ctx, store, fence); err != nil {
 		t.Fatalf("activate runtime fence: %v", err)
 	}
@@ -343,6 +347,35 @@ func nextRuntimeFence(t *testing.T, ctx context.Context, queries *dbsqlc.Queries
 		t.Fatalf("allocate runtime fence token: %v", err)
 	}
 	return runtimefence.Fence{BotID: botID, SessionID: sessionID, Token: token}
+}
+
+func createRuntimeFenceRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fence runtimefence.Fence) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_runs (
+			run_id, bot_id, session_id, invocation_id, turn_id, turn_position,
+			state, input_json, input_fingerprint, owner_id, fencing_token,
+			owner_since, live_generation
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, 'running', '{}'::jsonb, $7, $8, $9, now(), $10)
+	`,
+		uuid.New(), fence.BotID, fence.SessionID, uuid.NewString(), uuid.New(), fence.Token,
+		"runtime-fence-test", fmt.Sprintf("owner-%d", fence.Token), fence.Token,
+		fmt.Sprintf("generation-%d", fence.Token),
+	); err != nil {
+		t.Fatalf("create runtime fence run: %v", err)
+	}
+}
+
+func finishRuntimeFenceRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fence runtimefence.Fence) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		UPDATE session_runs
+		SET state = 'lost', updated_at = now()
+		WHERE session_id = $1 AND fencing_token = $2
+	`, fence.SessionID, fence.Token); err != nil {
+		t.Fatalf("finish runtime fence run: %v", err)
+	}
 }
 
 func createRuntimeFenceUserInput(t *testing.T, ctx context.Context, inputs *userinput.Service, botID, sessionID, callID string, expiresAt *time.Time) userinput.Request {

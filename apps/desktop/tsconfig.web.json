@@ -8,12 +8,16 @@
   ],
   "compilerOptions": {
     "composite": true,
+    // @vue/tsconfig 0.9.1 dropped this from its base (0.8.1 had it);
+    // pinned here to keep the TS 6 upgrade strictness-neutral.
+    "noUncheckedIndexedAccess": true,
     "types": ["vite/client"],
-    "baseUrl": ".",
+    // baseUrl removed: deprecated in TS 6 (TS5101); without it, paths
+    // values must carry an explicit './' prefix (TS5090).
     "paths": {
-      "@renderer/*": ["src/renderer/src/*"],
-      "@memohai/web/*": ["src/renderer/types/web-stubs.d.ts"],
-      "@felinic/ui": ["src/renderer/types/ui-stubs.d.ts"]
+      "@renderer/*": ["./src/renderer/src/*"],
+      "@memohai/web/*": ["./src/renderer/types/web-stubs.d.ts"],
+      "@felinic/ui": ["./src/renderer/types/ui-stubs.d.ts"]
     }
   }
 }

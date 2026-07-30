@@ -516,28 +516,185 @@ func TestLegacyAnthropicBudgetFor(t *testing.T) {
 	}
 }
 
-func TestResolveChatCompletionsCompatInfersDeepSeekBaseURL(t *testing.T) {
+func TestResolveChatCompletionsCompat(t *testing.T) {
 	t.Parallel()
 
-	got := ResolveChatCompletionsCompat("https://api.deepseek.com/v1", "")
-	if got != ChatCompletionsCompatDeepSeek {
-		t.Fatalf("expected deepseek compat, got %q", got)
+	tests := []struct {
+		name    string
+		baseURL string
+		compat  string
+		want    string
+	}{
+		{name: "blank everything", want: ""},
+		{name: "deepseek normalized", compat: " DeepSeek ", want: ChatCompletionsCompatDeepSeek},
+		{name: "minimax normalized", compat: " MINIMAX ", want: ChatCompletionsCompatMiniMax},
+		{name: "kimi normalized", compat: " KiMi ", want: ChatCompletionsCompatKimi},
+		{name: "unknown remains explicit", compat: " Vendor-Specific ", want: "vendor-specific"},
+		{
+			name:    "explicit wins over official origin",
+			baseURL: "https://api.deepseek.com/v1",
+			compat:  ChatCompletionsCompatKimi,
+			want:    ChatCompletionsCompatKimi,
+		},
+		{
+			name:    "explicit none disables inference",
+			baseURL: "https://api.deepseek.com/v1",
+			compat:  "none",
+			want:    "none",
+		},
+		{
+			name:    "deepseek origin",
+			baseURL: "https://api.deepseek.com",
+			want:    ChatCompletionsCompatDeepSeek,
+		},
+		{
+			name:    "deepseek beta path",
+			baseURL: "https://api.deepseek.com/beta",
+			want:    ChatCompletionsCompatDeepSeek,
+		},
+		{
+			name:    "minimax v1 trailing slash",
+			baseURL: "https://api.minimaxi.com/v1/",
+			want:    ChatCompletionsCompatMiniMax,
+		},
+		{
+			name:    "minimax io origin",
+			baseURL: "https://api.minimax.io/v1",
+			want:    ChatCompletionsCompatMiniMax,
+		},
+		{
+			name:    "moonshot cn infers kimi",
+			baseURL: "https://api.moonshot.cn/v1",
+			want:    ChatCompletionsCompatKimi,
+		},
+		{
+			name:    "moonshot ai infers kimi",
+			baseURL: "HTTPS://API.MOONSHOT.AI/v1",
+			want:    ChatCompletionsCompatKimi,
+		},
+		{
+			name:    "lookalike domain rejected",
+			baseURL: "https://api.deepseek.com.evil.example/v1",
+			want:    "",
+		},
+		{
+			name:    "official hostname embedded in proxy path rejected",
+			baseURL: "https://gateway.example/https://api.moonshot.cn/v1",
+			want:    "",
+		},
+		{
+			name:    "unrelated proxy stays generic",
+			baseURL: "https://proxy.example/v1",
+			want:    "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ResolveChatCompletionsCompat(tt.baseURL, tt.compat); got != tt.want {
+				t.Fatalf("ResolveChatCompletionsCompat(%q, %q) = %q, want %q",
+					tt.baseURL, tt.compat, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestResolveChatCompletionsCompatInfersMiniMaxBaseURL(t *testing.T) {
+func TestNewSDKChatModelKimiCompatIsExplicitForEveryCompletionsBranch(t *testing.T) {
 	t.Parallel()
 
-	tests := []string{
-		"https://api.minimax.io/v1",
-		"https://api.minimaxi.com/v1",
+	clientTypes := []string{
+		string(ClientTypeOpenAICompletions),
+		"unknown-openai-compatible-client",
 	}
-	for _, baseURL := range tests {
-		t.Run(baseURL, func(t *testing.T) {
+	for _, clientType := range clientTypes {
+		t.Run(clientType, func(t *testing.T) {
 			t.Parallel()
-			got := ResolveChatCompletionsCompat(baseURL, "")
-			if got != ChatCompletionsCompatMiniMax {
-				t.Fatalf("expected minimax compat, got %q", got)
+
+			var parameters map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Tools []struct {
+						Function struct {
+							Parameters map[string]any `json:"parameters"`
+						} `json:"function"`
+					} `json:"tools"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode request body: %v", err)
+				}
+				if len(body.Tools) != 1 {
+					t.Fatalf("tools length = %d, want 1", len(body.Tools))
+				}
+				parameters = body.Tools[0].Function.Parameters
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id":    "chatcmpl-kimi",
+					"model": "kimi-k2.5",
+					"choices": []map[string]any{{
+						"index":         0,
+						"finish_reason": "stop",
+						"message":       map[string]any{"role": "assistant", "content": "ok"},
+					}},
+					"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+				})
+			}))
+			defer srv.Close()
+
+			model := NewSDKChatModel(SDKModelConfig{
+				ModelID:               "kimi-k2.5",
+				ClientType:            clientType,
+				BaseURL:               srv.URL,
+				ChatCompletionsCompat: ChatCompletionsCompatKimi,
+				APIKey:                "test-key",
+			})
+			_, err := sdk.GenerateTextResult(
+				context.Background(),
+				sdk.WithModel(model),
+				sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
+				sdk.WithTools([]sdk.Tool{{
+					Name: "attach_file",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"attachment": map[string]any{
+								"type": "object",
+								"anyOf": []any{
+									map[string]any{
+										"properties": map[string]any{"path": map[string]any{"type": "string"}},
+									},
+									map[string]any{
+										"properties": map[string]any{"url": map[string]any{"type": "string"}},
+									},
+								},
+							},
+						},
+					},
+				}}),
+			)
+			if err != nil {
+				t.Fatalf("generate text: %v", err)
+			}
+
+			properties, ok := parameters["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("parameters.properties = %T, want object", parameters["properties"])
+			}
+			attachment, ok := properties["attachment"].(map[string]any)
+			if !ok {
+				t.Fatalf("attachment schema = %T, want object", properties["attachment"])
+			}
+			if _, exists := attachment["type"]; exists {
+				t.Fatalf("explicit Kimi compat left type beside anyOf: %#v", attachment)
+			}
+			anyOf, ok := attachment["anyOf"].([]any)
+			if !ok || len(anyOf) != 2 {
+				t.Fatalf("attachment.anyOf = %#v, want two branches", attachment["anyOf"])
+			}
+			for index, rawBranch := range anyOf {
+				branch, ok := rawBranch.(map[string]any)
+				if !ok || branch["type"] != "object" {
+					t.Fatalf("attachment.anyOf[%d] = %#v, want type object", index, rawBranch)
+				}
 			}
 		})
 	}

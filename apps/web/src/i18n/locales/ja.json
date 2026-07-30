@@ -96,6 +96,9 @@
     "channel": {
       "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。"
     },
+    "compaction": {
+      "model_unavailable": "圧縮Modelを利用できません。有効でコンテキストウィンドウが宣言されたチャットModelを選択してください。"
+    },
     "profile": {
       "request_invalid": "プロフィール更新リクエストが無効です。",
       "title_model_invalid": "選択したタイトルModelは利用できないか、チャットModelではありません。",
@@ -130,6 +133,11 @@
       "reasoning_effort_required": "推論強度を選択して、もう一度お試しください。",
       "reasoning_effort_unavailable": "選択した推論強度はこの外部Agentで利用できなくなりました。",
       "config_update_failed": "外部Agentに選択した設定を適用できませんでした。もう一度お試しください。"
+    },
+    "session_runtime": {
+      "session_busy": "このセッションはまだ前のメッセージを処理しています。しばらくしてからもう一度お試しください。",
+      "invocation_conflict": "このメッセージは別の内容で既に送信されています。セッションを再読み込みして保存済みの内容を確認してください。",
+      "history_inconsistent": "会話履歴を正しく統合できませんでした。再読み込みして、もう一度お試しください。"
     }
   },
   "auth": {
@@ -477,6 +485,7 @@
     "updatesSection": "アップデート",
     "currentVersion": "バージョン v{version}",
     "checkHint": "最新リリースについては GitHub を確認してください。",
+    "desktopCheckHint": "新しい Desktop バージョンを確認します。",
     "checkForUpdates": "アップデートをチェックする",
     "checking": "チェック中…",
     "upToDate": "最新バージョンを使用しています",
@@ -487,6 +496,15 @@
     "releaseNotes": "リリースノート",
     "viewOnGitHub": "GitHub で見る",
     "checkFailed": "チェックに失敗しました",
+    "desktopUpdatesUnavailable": "自動アップデートを利用できません",
+    "desktopUpdatesUnavailableDesc": "このビルドにはアップデート配信元が設定されていません。",
+    "desktopUpdateAvailableDesc": "このバージョンをダウンロードし、Memoh を再起動してインストールします。",
+    "downloadUpdate": "アップデートをダウンロード",
+    "downloadingUpdate": "ダウンロード中… {progress}%",
+    "desktopUpdateDownloadedDesc": "アップデートの準備ができました。Memoh を再起動してインストールします。",
+    "restartToUpdate": "再起動して更新",
+    "retryUpdate": "再試行",
+    "desktopUpdateFailed": "Desktop のアップデートに失敗しました",
     "github": "GitHub",
     "docs": "ドキュメント",
     "feedback": "フィードバック",
@@ -1403,9 +1421,7 @@
     "emptyTitle": "MCPサーバーはありません",
     "emptyDescription": "MCPサーバーを追加してBotの機能を拡張します",
     "command": "コマンド",
-    "commandPlaceholder": "開始コマンドを入力してください",
-    "arguments": "引数",
-    "argumentsPlaceholder": "と入力して Enter キーを押して追加します",
+    "commandPlaceholder": "npx -y @modelcontextprotocol/server-everything",
     "cwd": "作業ディレクトリ",
     "cwdPlaceholder": "作業ディレクトリのパスを入力してください",
     "env": "環境",
@@ -1438,10 +1454,8 @@
     "importErrorJson": "無効JSON",
     "exportFailed": "MCPサーバーのエクスポートに失敗しました",
     "probe": "テスト接続",
-    "probing": "テスト中...",
     "probeSuccess": "接続が確認されました",
     "probeFailed": "接続テストに失敗しました",
-    "probeAborted": "接続テストが中止されました",
     "probeFailedNetwork": "接続テスト中のネットワークエラー",
     "probeRefresh": "リフレッシュ",
     "tools": "ツール",
@@ -1451,7 +1465,6 @@
     "statusConnected": "接続済み",
     "statusError": "エラー",
     "statusUnknown": "テストされていません",
-    "lastProbed": "最後にテストした",
     "authRequired": "許可が必要です",
     "oauth": {
       "title": "認証",
@@ -1479,9 +1492,13 @@
       "clientSecret": "クライアントシークレット",
       "clientSecretPlaceholder": "OAuth アプリのクライアント シークレット (必要な場合)",
       "clientIdHint": "認可サーバーは自動登録をサポートしていません。OAuth アプリを作成し、そのクライアント ID を入力してください。",
+      "signInRequired": "このサーバーを使用するにはサインインが必要です。",
+      "signInLabel": "サーバーサインイン",
+      "optionalHint": "このサーバーがサインインを求める場合のみ必要です。",
       "callbackUrl": "コールバックURL",
       "callbackUrlHint": "これをコールバック/リダイレクトとして設定しますURLOAuth アプリの設定で。",
-      "callbackMissingParams": "認証コードまたはステータスパラメータが欠落しています"
+      "callbackMissingParams": "認証コードまたはステータスパラメータが欠落しています",
+      "popupBlocked": "認可ウィンドウがブロックされました。このページのポップアップを許可して再試行してください。"
     },
     "servers": "サーバー",
     "addNew": "新しいサーバー",
@@ -1519,6 +1536,8 @@
     },
     "advancedSettings": "詳細設定",
     "advancedSettingsHint": "環境変数、ヘッダー、OAuth。",
+    "advancedHintStdio": "プロセスに渡す環境変数。",
+    "advancedHintRemote": "リクエストヘッダー。",
     "expand": "展開",
     "collapse": "折りたたむ",
     "envVars": "環境変数",
@@ -2379,7 +2398,7 @@
       "heartbeatModelPlaceholder": "チャット Modelを使用する (デフォルト)",
       "compactionEnabled": "コンテキスト圧縮を有効にする",
       "compactionDescription": "コンテキストが大きくなりすぎる場合、古いメッセージを自動的に要約する",
-      "compactionThreshold": "圧縮しきい値 (入力Token)",
+      "compactionThreshold": "圧縮しきい値 (入力Token、0 = 自動)",
       "compactionRatio": "圧縮率(%)",
       "compactionRatioDescription": "要約する古いメッセージの割合。最近のメッセージはそのまま保持されます。",
       "compactionModel": "圧縮Model",

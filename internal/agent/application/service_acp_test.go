@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -204,90 +203,13 @@ func TestStreamChatWSRejectsACPBotMismatchBeforePersistence(t *testing.T) {
 	}
 }
 
-func TestStreamChatWSRejectsConcurrentACPPromptForSameSession(t *testing.T) {
-	t.Parallel()
-
-	started := make(chan struct{})
-	release := make(chan struct{})
-	pool := &recordingACPPrompter{
-		result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"},
-		onPrompt: func() {
-			close(started)
-			<-release
-		},
-	}
-	resolver := &Service{
-		messageService: &recordingMessageService{},
-		acpPool:        pool,
-		assetLoader: &fakeGatewayAssetLoader{
-			openFn: func(context.Context, string, string) (io.ReadCloser, string, error) {
-				t.Fatal("busy turn must not open attachment data")
-				return nil, "", nil
-			},
-			accessPathFn: func(context.Context, string, string) (string, error) {
-				t.Fatal("busy turn must not resolve attachment paths")
-				return "", nil
-			},
-		},
-		botPermissions: allowWorkspaceExecFor("user-1"),
-		sessionService: &fakeBackgroundSessionService{
-			getFn: func(_ context.Context, sessionID string) (session.Thread, error) {
-				return session.Thread{
-					ID:    sessionID,
-					BotID: "bot-1",
-					Type:  session.TypeACPAgent,
-					Metadata: map[string]any{
-						"acp_agent_id":             "codex",
-						"project_path":             "/data/app",
-						"runtime_owner_account_id": "user-1",
-					},
-				}, nil
-			},
-		},
-		logger: slog.New(slog.DiscardHandler),
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- resolver.StreamChatWS(
-			context.Background(),
-			ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "first"},
-			make(chan WSStreamEvent, 8),
-			make(chan struct{}),
-		)
-	}()
-	<-started
-
-	err := resolver.StreamChatWS(
-		context.Background(),
-		ChatRequest{
-			BotID:    "bot-1",
-			ThreadID: "session-1",
-			Query:    "second",
-			Attachments: []ChatAttachment{{
-				Type:        "image",
-				ContentHash: "busy-image",
-			}},
-		},
-		make(chan WSStreamEvent, 8),
-		make(chan struct{}),
-	)
-	if err == nil {
-		t.Fatal("second StreamChatWS() error = nil, want busy feedback")
-	}
-	var feedback *acpfeedback.Error
-	if !errors.As(err, &feedback) || feedback.Code != acpfeedback.CodeRuntimeBusy || feedback.HTTPStatus != 409 {
-		t.Fatalf("second StreamChatWS() error = %v, want runtime busy feedback", err)
-	}
-
-	close(release)
-	if err := <-errCh; err != nil {
-		t.Fatalf("first StreamChatWS() error = %v", err)
-	}
-	if pool.calls != 1 {
-		t.Fatalf("ACP pool calls = %d, want only first prompt to reach pool", pool.calls)
-	}
-}
+// Single-session execution is no longer this layer's guarantee, and there is no
+// test for it here on purpose. An in-process check could only answer for one
+// server, so it moved to durable admission, where a concurrent invocation is
+// refused with a retryable session_busy before any runtime is asked to prompt.
+// See TestAdmitAnswersBusyForConcurrentInvocation in the sessionruntime package,
+// which also covers what the in-process version could not express: the rejected
+// invocation is admitted normally once the active run reaches a terminal state.
 
 func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 	t.Parallel()
@@ -1991,6 +1913,7 @@ func recordedMessages(inputs []messagepkg.PersistInput) []messagepkg.Message {
 			Content:        input.Content,
 			DisplayContent: input.DisplayText,
 			Metadata:       input.Metadata,
+			TurnID:         firstNonEmpty(input.TurnID, "test-turn"),
 		})
 	}
 	return messages

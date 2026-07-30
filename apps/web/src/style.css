@@ -690,7 +690,10 @@
   font-family: var(--memoh-code-font-family, ui-monospace, monospace);
 }
 
-.markstream-vue .code-block-container .code-block-content {
+/* markstream-vue 1.0.7 renamed .code-block-content to .code-block-shell-content
+ * (folding now uses a --collapsed modifier instead of max-height); retargeted
+ * so the line-height override keeps applying. */
+.markstream-vue .code-block-container .code-block-shell-content {
   font-size: var(--memoh-code-font-size, 13px);
   font-family: var(--memoh-code-font-family, ui-monospace, monospace);
   line-height: 1.5;

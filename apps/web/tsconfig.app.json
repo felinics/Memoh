@@ -6,6 +6,9 @@
     "lib": ["DOM","ESNext"],
     /* Linting */
     "strict": true,
+    // @vue/tsconfig 0.9.1 dropped this from its base (0.8.1 had it);
+    // pinned here to keep the TS 6 upgrade strictness-neutral.
+    "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,

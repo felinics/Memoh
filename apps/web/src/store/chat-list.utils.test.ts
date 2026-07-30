@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, isSessionVisibleInSidebarMode, latestOutputLine, normalizedRuntimeType, normalizedSessionMode, provisionalSessionTitle, reconcileById, segmentHasLiveBg, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, thinkingPeek, upsertById } from './chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, isSessionVisibleInSidebarMode, latestOutputLine, normalizedRuntimeType, normalizedSessionMode, provisionalSessionTitle, reconcileById, segmentHasLiveBg, segmentTurnBlocks, sortByRecency, splitActiveRail, summarizeRailSegment, thinkingPeek, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -115,7 +115,11 @@ describe('chat-list.utils', () => {
     const d = { id: 'd' }
     const e = { id: 'e', updated_at: '2026-01-03T00:00:00Z' }
 
-    expect(sortByRecency([a, b, c, d, e]).map(x => x.id)).toEqual(['b', 'e', 'c', 'a', 'd'])
+    expect(sortByRecency<{
+      id: string
+      updated_at?: string
+      created_at?: string
+    }>([a, b, c, d, e]).map(x => x.id)).toEqual(['b', 'e', 'c', 'a', 'd'])
   })
 
   it('sortByRecency does not mutate its input', () => {
@@ -172,48 +176,6 @@ describe('chat-list.utils', () => {
     expect(latestOutputLine('   \n  ')).toBe('')
   })
 
-  it('refreshes only for current session message_created events', () => {
-    expect(shouldRefreshFromMessageCreated('bot-1', 'session-1', null, {
-      type: 'message_created',
-      bot_id: 'bot-1',
-      message: {
-        id: 'm1',
-        bot_id: 'bot-1',
-        session_id: 'session-1',
-        role: 'user',
-        content: 'hello',
-        created_at: '2026-04-10T10:00:00Z',
-      },
-    })).toBe(true)
-
-    expect(shouldRefreshFromMessageCreated('bot-1', 'session-1', null, {
-      type: 'message_created',
-      bot_id: 'bot-1',
-      message: {
-        id: 'm2',
-        bot_id: 'bot-1',
-        session_id: 'session-2',
-        role: 'user',
-        content: 'hello',
-        created_at: '2026-04-10T10:00:00Z',
-      },
-    })).toBe(false)
-  })
-
-  it('does not refresh current session while a local stream is active', () => {
-    expect(shouldRefreshFromMessageCreated('bot-1', 'session-1', 'session-1', {
-      type: 'message_created',
-      bot_id: 'bot-1',
-      message: {
-        id: 'm3',
-        bot_id: 'bot-1',
-        session_id: 'session-1',
-        role: 'user',
-        content: 'hello',
-        created_at: '2026-04-10T10:00:00Z',
-      },
-    })).toBe(false)
-  })
 })
 
 describe('segmentTurnBlocks', () => {

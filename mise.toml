@@ -1,4 +1,5 @@
-experimental_monorepo_root = true
+min_version = "2026.6.6"
+monorepo_root = true
 
 [monorepo]
 config_roots = ["apps/web", "cmd/agent"]
@@ -128,6 +129,109 @@ run = "docker compose -f devenv/docker-compose.yml down --remove-orphans"
 [tasks."dev:down:selinux"]
 description = "Stop development environment on SELinux systems"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml down --remove-orphans"
+
+[tasks."test:session-runtime:acceptance:env"]
+description = "Start the isolated two-Server Valkey environment for Session Runtime acceptance tests"
+depends = ["//:dev:workspace-image"]
+run = """
+#!/bin/bash
+set -euo pipefail
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.override.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.cluster.override.yml \
+  up -d --build --wait --wait-timeout 180 postgres pgvector valkey migrate server server_b
+"""
+
+[tasks."test:session-runtime:acceptance:env:single"]
+description = "Start the isolated single-Server memory-backend acceptance environment"
+depends = ["//:dev:workspace-image"]
+run = """
+#!/bin/bash
+set -euo pipefail
+# A second Server left over from the cluster topology shares this PostgreSQL but
+# has its own liveness generation, so each reaper reads the other's live runs as
+# stranded and condemns them. Removing it is what makes "single" mean single.
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.override.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.cluster.override.yml \
+  rm -sf valkey server_b
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.override.yml \
+  up -d --build --wait --wait-timeout 180 postgres pgvector migrate server
+"""
+
+[tasks."test:session-runtime:acceptance:env:cluster"]
+description = "Start the isolated two-Server Valkey acceptance environment"
+depends = ["//:dev:workspace-image"]
+run = """
+#!/bin/bash
+set -euo pipefail
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.override.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.cluster.override.yml \
+  up -d --build --wait --wait-timeout 180 postgres pgvector valkey migrate server server_b
+"""
+
+[tasks."test:session-runtime:acceptance:env:down"]
+description = "Stop the Session Runtime acceptance environment without deleting its volumes"
+run = """
+#!/bin/bash
+set -euo pipefail
+docker compose \
+  -f devenv/docker-compose.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.override.yml \
+  -f internal/agent/runtime/session/acceptance/testdata/compose.cluster.override.yml \
+  down
+"""
+
+[tasks."test:session-runtime:acceptance"]
+description = "Run black-box Session Runtime acceptance tests against two real Server processes"
+env = { MEMOH_SESSION_RUNTIME_ACCEPTANCE = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE = "cluster" }
+run = """
+go test \
+  -tags=integration \
+  -count=1 \
+  -timeout=5m \
+  ./internal/agent/runtime/session/acceptance
+"""
+
+[tasks."test:session-runtime:acceptance:single"]
+description = "Run the black-box Session Runtime suite against one memory-backend Server"
+env = { MEMOH_SESSION_RUNTIME_ACCEPTANCE = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE = "single" }
+run = """
+go test \
+  -tags=integration \
+  -count=1 \
+  -timeout=5m \
+  ./internal/agent/runtime/session/acceptance
+"""
+
+[tasks."test:session-runtime:acceptance:cluster"]
+description = "Run the black-box Session Runtime suite against two Servers and isolated Valkey"
+env = { MEMOH_SESSION_RUNTIME_ACCEPTANCE = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE = "cluster", MEMOH_SESSION_RUNTIME_ACCEPTANCE_BACKEND_LOSS = "1" }
+run = """
+go test \
+  -tags=integration \
+  -count=1 \
+  -timeout=5m \
+  ./internal/agent/runtime/session/acceptance
+"""
+
+[tasks."test:session-runtime:acceptance:cluster:destructive"]
+description = "Run the isolated owner-restart decision black-box serially against the cluster topology"
+env = { MEMOH_SESSION_RUNTIME_ACCEPTANCE = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE = "cluster", MEMOH_SESSION_RUNTIME_ACCEPTANCE_CRASH = "1" }
+run = """
+go test \
+  -tags=integration \
+  -count=1 \
+  -timeout=5m \
+  -run '^TestSRDEC001DecisionPersistsRunAndTurnAcrossRestart$' \
+  ./internal/agent/runtime/session/acceptance
+"""
 
 [tasks."dev:logs"]
 description = "View development logs"

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	dbpkg "github.com/memohai/memoh/internal/db"
@@ -52,7 +53,8 @@ func TestPostgresReplaceTurnRetryHidesSupersededAssistant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("persist replacement assistant: %v", err)
 	}
-	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, user.ID, replacement.ID, "retry"); err != nil {
+	replacementTurnID, replacementTurnPosition := postgresReplacementIdentity(oldTurn)
+	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, replacementTurnID, replacementTurnPosition, user.ID, replacement.ID, "retry"); err != nil {
 		t.Fatalf("replace turn: %v", err)
 	}
 
@@ -115,7 +117,8 @@ func TestPostgresReplaceTurnAdvancesSessionCompactionEpoch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("persist replacement assistant: %v", err)
 	}
-	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, user.ID, replacement.ID, "retry"); err != nil {
+	replacementTurnID, replacementTurnPosition := postgresReplacementIdentity(oldTurn)
+	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, replacementTurnID, replacementTurnPosition, user.ID, replacement.ID, "retry"); err != nil {
 		t.Fatalf("replace turn: %v", err)
 	}
 
@@ -207,13 +210,19 @@ func TestPostgresReplaceTurnEditHidesSupersededTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("persist new assistant: %v", err)
 	}
-	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, newUser.ID, newAssistant.ID, "edit"); err != nil {
+	replacementTurnID, replacementTurnPosition := postgresReplacementIdentity(oldTurn)
+	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, replacementTurnID, replacementTurnPosition, newUser.ID, newAssistant.ID, "edit"); err != nil {
 		t.Fatalf("replace turn: %v", err)
 	}
 
 	assertPostgresVisibleMessageIDs(t, ctx, svc, newUser.ID, newAssistant.ID)
 	assertPostgresMessageVisibility(t, ctx, tx, oldUser.ID, false, true)
 	assertPostgresMessageVisibility(t, ctx, tx, oldAssistant.ID, false, true)
+}
+
+func postgresReplacementIdentity(oldTurn HistoryTurn) (string, *int64) {
+	position := oldTurn.Position + 1
+	return uuid.NewString(), &position
 }
 
 func TestPostgresRepairSupersededMessageVisibilityMigration(t *testing.T) {

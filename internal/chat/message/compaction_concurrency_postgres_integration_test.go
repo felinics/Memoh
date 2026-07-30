@@ -387,12 +387,14 @@ func TestPostgresReplaceTurnSeesConcurrentCompactionClaim(t *testing.T) {
 	replaced := make(chan replaceResult, 1)
 	go func() {
 		_, err := dbsqlc.New(replaceTx).ReplaceHistoryTurn(ctx, dbsqlc.ReplaceHistoryTurnParams{
-			OldTurnID:          mustTestUUID(t, fixture.turn.ID),
-			SessionID:          mustTestUUID(t, fixture.sessionID),
-			RequestMessageID:   mustTestUUID(t, fixture.user.ID),
-			AssistantMessageID: mustTestUUID(t, replacement.ID),
-			SupersededAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-			SupersededReason:   pgtype.Text{String: "retry", Valid: true},
+			OldTurnID:           mustTestUUID(t, fixture.turn.ID),
+			SessionID:           mustTestUUID(t, fixture.sessionID),
+			ReplacementTurnID:   mustTestUUID(t, uuid.NewString()),
+			ReplacementPosition: fixture.turn.Position + 1,
+			RequestMessageID:    mustTestUUID(t, fixture.user.ID),
+			AssistantMessageID:  mustTestUUID(t, replacement.ID),
+			SupersededAt:        pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			SupersededReason:    pgtype.Text{String: "retry", Valid: true},
 		})
 		replaced <- replaceResult{err: err}
 	}()

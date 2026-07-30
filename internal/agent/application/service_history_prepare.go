@@ -42,7 +42,6 @@ func (s *Service) prepareHistoryContext(
 		return preparedHistoryContext{}, err
 	}
 	compactableTokens := totalCompactableHistoryTokens(loaded)
-	loaded = injectWorkspaceTransitionRecords(loaded)
 	messages, records, estimatedTokens := trimMessagesAndRecordsByTokens(s.logger, loaded, contextTokenBudget)
 	return preparedHistoryContext{
 		messages:          messages,

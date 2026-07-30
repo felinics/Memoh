@@ -42,6 +42,18 @@ type MessageHandler struct {
 	logger         *slog.Logger
 }
 
+// UIMessageListResponse is the normalized, authoritative session history read by Web.
+type UIMessageListResponse struct {
+	Items []chatview.UITurn `json:"items" validate:"required"`
+}
+
+// UILocateMessageResponse is a normalized history window around one external message.
+type UILocateMessageResponse struct {
+	Items                   []chatview.UITurn `json:"items" validate:"required"`
+	TargetID                string            `json:"target_id" validate:"required" format:"uuid"`
+	TargetExternalMessageID string            `json:"target_external_message_id" validate:"required"`
+}
+
 // NewMessageHandler creates a MessageHandler.
 func NewMessageHandler(log *slog.Logger, messageService messagepkg.Service, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service, eventSubscribers ...messageevent.Subscriber) *MessageHandler {
 	var messageEvents messageevent.Subscriber
@@ -83,10 +95,10 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 	botGroup.DELETE("/messages", h.DeleteMessages)
 	botGroup.GET("/media/:content_hash", h.ServeMedia)
 
-	// SSE streams. Per-session messages are subscribed explicitly by the
-	// client; bot-wide activity carries only lightweight session metadata
-	// (no message bodies) for sidebar live-sort.
-	botGroup.GET("/sessions/:session_id/messages/events", h.StreamSessionMessageEvents)
+	// Bot-wide activity SSE, carrying only lightweight session metadata (no
+	// message bodies) for sidebar live-sort. A session's own contents are read
+	// through the session runtime over the chat WebSocket, which is what lets
+	// every subscriber of a session agree on what it has seen.
 	botGroup.GET("/sessions/events", h.StreamSessionsActivityEvents)
 }
 
@@ -121,14 +133,12 @@ func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 // @Description List messages for one session with optional pagination
 // @Tags messages
 // @Produce json
-// @Param bot_id path string true "Bot ID"
-// @Param session_id query string true "Session ID"
-// @Param limit query int false "Limit"
+// @Param bot_id path string true "Bot ID" format(uuid)
+// @Param session_id query string true "Session ID" format(uuid)
+// @Param limit query int false "Limit" default(30) minimum(1) maximum(100)
 // @Param before query string false "Before"
-// @Param before_message_id query string false "Message ID cursor before which to page"
-// @Param format query string false "Response format: ui returns normalized chat UI turns"
-// @Success 200 {object} map[string][]messagepkg.Message
-// @Success 200 {object} map[string][]chatview.UITurn "when format=ui"
+// @Param before_message_id query string false "Message ID cursor before which to page" format(uuid)
+// @Success 200 {object} UIMessageListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -165,7 +175,6 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		}
 	}
 	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
-	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
 
 	bot, _, sess, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
@@ -182,33 +191,23 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		// reverses the DESC DB rows). Do NOT reverse again: the before page
 		// and the turn-head extension both depend on monotonic ASC input.
 		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
-	case format == "ui":
-		messages, err = h.listLatestUIPageBySession(c.Request().Context(), sessionID, limit)
 	default:
-		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
-		if err == nil {
-			reverseMessages(messages)
-		}
+		messages, err = h.listLatestUIPageBySession(c.Request().Context(), sessionID, limit)
 	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	// format=ui converts each page independently, so a page that begins mid
-	// assistant turn (its earlier rows on the previous page) would render one
-	// reply as several turns/action bars. Extend the head back to a real turn
-	// boundary so a turn is never split across pages.
-	if format == "ui" && sessionID != "" && len(messages) > 0 {
+	// Each page is converted independently, so a page that begins mid assistant
+	// turn (its earlier rows on the previous page) would render one reply as
+	// several turns/action bars. Extend the head back to a real turn boundary
+	// so a turn is never split across pages.
+	if len(messages) > 0 {
 		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages, limit)
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
-	if format == "ui" {
-		items := chatview.ConvertMessagesToUITurns(messages)
-		h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
-		return c.JSON(http.StatusOK, map[string]any{
-			"items": items,
-		})
-	}
-	return c.JSON(http.StatusOK, map[string]any{"items": messages})
+	items := chatview.ConvertMessagesToUITurns(messages)
+	h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
+	return c.JSON(http.StatusOK, UIMessageListResponse{Items: items})
 }
 
 type latestUIMessageLister interface {
@@ -238,7 +237,8 @@ func (h *MessageHandler) listLatestUIPageBySession(ctx context.Context, sessionI
 	}
 
 	start := len(messages) - int(limit)
-	for start > 0 && !chatview.IsUITurnBoundary(messages[start]) {
+	turnID := strings.TrimSpace(messages[start].TurnID)
+	for start > 0 && turnID != "" && strings.TrimSpace(messages[start-1].TurnID) == turnID {
 		start--
 	}
 	return messages[start:], nil
@@ -249,12 +249,12 @@ func (h *MessageHandler) listLatestUIPageBySession(ctx context.Context, sessionI
 // @Description Locate a session message by external message ID and return nearby UI turns
 // @Tags messages
 // @Produce json
-// @Param bot_id path string true "Bot ID"
-// @Param session_id query string true "Session ID"
+// @Param bot_id path string true "Bot ID" format(uuid)
+// @Param session_id query string true "Session ID" format(uuid)
 // @Param external_message_id query string true "External message ID"
-// @Param before query int false "Messages before target"
-// @Param after query int false "Messages after target"
-// @Success 200 {object} map[string]any
+// @Param before query int false "Messages before target" default(30) minimum(0) maximum(100)
+// @Param after query int false "Messages after target" default(30) minimum(0) maximum(100)
+// @Success 200 {object} UILocateMessageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -303,10 +303,10 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, located.Messages)
 	items := chatview.ConvertMessagesToUITurns(located.Messages)
 	h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
-	return c.JSON(http.StatusOK, map[string]any{
-		"items":                      items,
-		"target_id":                  located.TargetID,
-		"target_external_message_id": externalMessageID,
+	return c.JSON(http.StatusOK, UILocateMessageResponse{
+		Items:                   items,
+		TargetID:                located.TargetID,
+		TargetExternalMessageID: externalMessageID,
 	})
 }
 
@@ -569,30 +569,37 @@ func reverseMessages(m []messagepkg.Message) {
 	}
 }
 
-// StreamMessageEvents was removed in favor of two narrower streams: a
-// per-session messages SSE (see message_stream.go) and a bot-wide lightweight
-// sessions activity SSE. Resolves a catch-up explosion where a stale client
-// `since=` cursor could force a multi-megabyte replay of bot history.
-// extendToUITurnHead prepends older session messages (oldest-first) until the
-// slice starts on a real UI turn boundary — a visible user message or a
-// background-task system turn. A turn is the unit of an action bar, so when a
-// fixed-size page lands in the middle of an assistant turn we pull the turn's
-// earlier rows back in. The extension budget keeps one pathologically long turn
+// extendToUITurnHead prepends older rows with the same authoritative turn_id.
+// A turn is the unit of an action bar, so a fixed-size page must not start in
+// the middle of one. The extension budget keeps one pathologically long turn
 // from turning a small UI page into a multi-thousand-row response.
 func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message, limit int32) []messagepkg.Message {
 	const batch = int32(50)
 	maxRows := uiTurnHeadExtensionLimit(len(messages), limit)
+	if len(messages) == 0 {
+		return messages
+	}
+	headTurnID := strings.TrimSpace(messages[0].TurnID)
+	if headTurnID == "" {
+		return messages
+	}
 	// messages is oldest-first (ASC). The cursor is the oldest row on the
-	// current page, and we pull rows before that row in visible turn order.
-	// ListBeforeMessageBySession already returns oldest-first, so prepend each
-	// batch directly; the combined slice stays monotonic and the turn converter
-	// (which scans in order) keeps one reply in a single turn.
-	for len(messages) > 0 && len(messages) < maxRows && !chatview.IsUITurnBoundary(messages[0]) {
+	// current page. Only the matching suffix of an older batch belongs to the
+	// same turn; rows before it belong to earlier turns and are not pulled in.
+	for len(messages) < maxRows {
 		older, err := h.messageService.ListBeforeMessageBySession(ctx, sessionID, messages[0].ID, batch)
 		if err != nil || len(older) == 0 {
 			break
 		}
 		fetched := len(older)
+		sameTurnStart := len(older)
+		for sameTurnStart > 0 && strings.TrimSpace(older[sameTurnStart-1].TurnID) == headTurnID {
+			sameTurnStart--
+		}
+		older = older[sameTurnStart:]
+		if len(older) == 0 {
+			break
+		}
 		if overflow := len(messages) + len(older) - maxRows; overflow > 0 {
 			older = older[overflow:]
 		}
@@ -600,7 +607,7 @@ func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID strin
 			break
 		}
 		messages = append(older, messages...)
-		if fetched < int(batch) {
+		if sameTurnStart > 0 || fetched < int(batch) {
 			break // reached the start of the session
 		}
 	}

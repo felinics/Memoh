@@ -29,6 +29,7 @@ import (
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	messageevent "github.com/memohai/memoh/internal/chat/event"
@@ -124,9 +125,6 @@ type Service struct {
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
-	sessionTurnMu       sync.Mutex
-	sessionTurnRefs     map[string]int // key: "botID:sessionID" → active turn refcount
-	sessionTurnLocks    map[string]*sync.Mutex
 	sessionCompactionMu sync.Mutex
 	sessionCompactions  map[string]*sessionCompactionGate
 	timeout             time.Duration
@@ -134,8 +132,8 @@ type Service struct {
 	clockLocation       *time.Location
 	logger              *slog.Logger
 	allowedTeam         string
-	turnIdempotencyOnce sync.Once
-	turnIdempotency     *idempotencyRegistry
+	sessionRuntime      turnAdmitter
+	decisionRuntime     *sessionruntime.Manager
 	turnHooks           *turnRuntimeHooks
 }
 
@@ -184,13 +182,10 @@ func NewService(
 		settingsService:     settingsService,
 		accountService:      accountService,
 		streamHTTPClient:    streamHTTPClient,
-		sessionTurnRefs:     make(map[string]int),
-		sessionTurnLocks:    make(map[string]*sync.Mutex),
 		timeout:             timeout,
 		memorySearchTimeout: defaultMemorySearchTimeout,
 		clockLocation:       clockLocation,
 		logger:              log.With(slog.String("service", "agent/application")),
-		turnIdempotency:     newIdempotencyRegistry(idempotencyCapacity),
 	}
 }
 
@@ -420,7 +415,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 			// summary. A noop (cooldown, in-flight, nothing markable) keeps
 			// this turn's context untouched — possibly still above the
 			// threshold — and the next turn re-evaluates.
-			if res := s.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget); res.Status == compaction.StatusOK {
+			if res := s.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget, chatModel.ID); res.Status == compaction.StatusOK {
 				prepared, loadErr = s.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
 				if loadErr != nil {
 					s.logger.Error("resolve: prepare history context failed",
@@ -572,9 +567,6 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 		}
 	}
 
-	doneTurn := s.enterSessionTurn(ctx, req.BotID, req.ThreadID)
-	defer doneTurn()
-
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
@@ -676,7 +668,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 	baseURL := providers.ProviderConfigString(provider, "base_url")
 	chatCompletionsCompat := models.ResolveChatCompletionsCompat(
 		baseURL,
-		providers.ProviderConfigString(provider, "chat_completions_compat"),
+		providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	)
 
 	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, provider.ClientType)

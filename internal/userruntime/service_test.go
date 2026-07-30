@@ -17,7 +17,10 @@ import (
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
-const serviceTestRuntimeID = "11111111-1111-4111-8111-111111111111"
+const (
+	serviceTestRuntimeID = "11111111-1111-4111-8111-111111111111"
+	serviceTestTeamID    = "22222222-2222-4222-8222-222222222222"
+)
 
 type serviceTestStore struct {
 	mu      sync.Mutex
@@ -29,7 +32,7 @@ func (s *serviceTestStore) CreateUserRuntime(_ context.Context, input dbstore.Cr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.runtime = dbstore.UserRuntimeRecord{
-		ID: serviceTestRuntimeID, UserID: input.UserID, Name: input.Name,
+		ID: serviceTestRuntimeID, TeamID: serviceTestTeamID, UserID: input.UserID, Name: input.Name,
 		APIToken: input.APIToken, CreatedAt: time.Now().UTC(),
 	}
 	s.revoked = false
@@ -93,7 +96,7 @@ func TestServiceRegistrationConnectionAndRevoke(t *testing.T) {
 	if err := ValidateKeyFormat(created.Key); err != nil {
 		t.Fatalf("created key is invalid: %v", err)
 	}
-	if created.ID != serviceTestRuntimeID || created.Online {
+	if created.ID != serviceTestRuntimeID || created.TeamID != serviceTestTeamID || created.Online {
 		t.Fatalf("created Runtime = %#v", created)
 	}
 	store.mu.Lock()
@@ -126,6 +129,9 @@ func TestServiceRegistrationConnectionAndRevoke(t *testing.T) {
 	}
 	if items[0].Key != created.Key {
 		t.Fatal("ListRuntimes() did not return the reusable API token")
+	}
+	if items[0].TeamID != serviceTestTeamID {
+		t.Fatalf("ListRuntimes() team ID = %q, want %q", items[0].TeamID, serviceTestTeamID)
 	}
 
 	if err := service.RevokeRuntime(context.Background(), "user-1", created.ID); err != nil {

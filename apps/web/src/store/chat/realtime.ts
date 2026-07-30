@@ -2,47 +2,62 @@ import { useRetryingStream } from '@/composables/useRetryingStream'
 import {
   connectWebSocket,
   streamBotSessionsActivityEvents,
-  streamSessionMessageEvents,
   type BotSessionActivityEvent,
   type ChatWebSocket,
-  type SessionMessageStreamEvent,
+  type UIRuntimeEvent,
   type UIStreamEvent,
   type WSClientMessage,
 } from '@/composables/api/useChat'
+import {
+  createRuntimeClient,
+  type RuntimeProjectionChange,
+} from './runtime-client'
 
 interface RetryingStream {
   start: (runAttempt: (signal: AbortSignal) => Promise<void>) => void
   stop: () => void
 }
 
-interface SessionMessagesConnection {
-  stream: RetryingStream
-  generation: number
+interface SessionRuntimeConnection {
+  prepared: boolean
+  pending: RuntimeProjectionChange[]
 }
 
 export interface ChatRealtimeCallbacks {
   onWebSocketEvent: (botId: string, event: UIStreamEvent) => void
-  prepareSessionMessages: (botId: string, sessionId: string) => Promise<void>
-  onSessionMessageEvent: (botId: string, sessionId: string, event: SessionMessageStreamEvent) => void
+  prepareSessionRuntime: (
+    botId: string,
+    sessionId: string,
+    applyBufferedProjections: () => void,
+  ) => Promise<void>
+  onRuntimeProjection: (
+    botId: string,
+    sessionId: string,
+    change: RuntimeProjectionChange,
+  ) => void
   onBotSessionsActivityEvent: (botId: string, event: BotSessionActivityEvent) => void
 }
 
 export interface ChatRealtimeTransport {
   connectWebSocket: typeof connectWebSocket
-  streamSessionMessageEvents: typeof streamSessionMessageEvents
   streamBotSessionsActivityEvents: typeof streamBotSessionsActivityEvents
   createRetryingStream: () => RetryingStream
 }
 
 const defaultTransport: ChatRealtimeTransport = {
   connectWebSocket,
-  streamSessionMessageEvents,
   streamBotSessionsActivityEvents,
   createRetryingStream: useRetryingStream,
 }
 
-// Owns chat transport lifecycles. Event interpretation stays with the store;
-// this controller only guarantees that superseded connections cannot emit.
+function isRuntimeEvent(event: UIStreamEvent): event is UIRuntimeEvent {
+  return event.type === 'runtime_snapshot'
+    || event.type === 'runtime_delta'
+    || event.type === 'runtime_dropped'
+}
+
+// Owns chat transport lifecycles. The WebSocket carries both turn commands and
+// session runtime subscriptions; the bot-wide SSE remains sidebar metadata only.
 export function createChatRealtimeController(
   callbacks: ChatRealtimeCallbacks,
   transport: ChatRealtimeTransport = defaultTransport,
@@ -51,14 +66,30 @@ export function createChatRealtimeController(
   let activeWebSocketBotId = ''
   let webSocketGeneration = 0
   let botSessionsActivityGeneration = 0
-  const sessionMessagesConnections = new Map<string, SessionMessagesConnection>()
+  const sessionRuntimeConnections = new Map<string, SessionRuntimeConnection>()
   const botSessionsActivityStream = transport.createRetryingStream()
+  const runtimeClient = createRuntimeClient({
+    send: message => activeWebSocket?.send(message),
+    onProjection: (sessionId, change) => {
+      const botId = activeWebSocketBotId
+      const connection = botId
+        ? sessionRuntimeConnections.get(sessionRuntimeKey(botId, sessionId))
+        : undefined
+      if (!botId || !connection) return
+      if (!connection.prepared) {
+        connection.pending.push(change)
+        return
+      }
+      callbacks.onRuntimeProjection(botId, sessionId, change)
+    },
+  })
 
   function stopWebSocket() {
     webSocketGeneration += 1
     const socket = activeWebSocket
     activeWebSocket = null
     activeWebSocketBotId = ''
+    runtimeClient.onDisconnected()
     socket?.close()
   }
 
@@ -70,10 +101,24 @@ export function createChatRealtimeController(
     const generation = webSocketGeneration
     activeWebSocketBotId = bid
     try {
-      activeWebSocket = transport.connectWebSocket(bid, (event) => {
+      const socket = transport.connectWebSocket(bid, (event) => {
         if (generation !== webSocketGeneration || activeWebSocketBotId !== bid) return
+        if (isRuntimeEvent(event)) {
+          runtimeClient.handleEvent(event)
+          return
+        }
         callbacks.onWebSocketEvent(bid, event)
       })
+      socket.onOpen = () => {
+        if (generation !== webSocketGeneration || activeWebSocketBotId !== bid) return
+        runtimeClient.onConnected()
+      }
+      socket.onClose = () => {
+        if (generation !== webSocketGeneration || activeWebSocketBotId !== bid) return
+        runtimeClient.onDisconnected()
+      }
+      activeWebSocket = socket
+      if (socket.connected) runtimeClient.onConnected()
     } catch (error) {
       activeWebSocketBotId = ''
       throw error
@@ -93,71 +138,70 @@ export function createChatRealtimeController(
     return true
   }
 
-  function abortWebSocketStream(streamId: string, botId?: string): boolean {
-    const id = streamId.trim()
+  function abortWebSocketRun(
+    runId: string,
+    botId?: string,
+    sessionId?: string,
+    controlId?: string,
+  ): boolean {
+    const id = runId.trim()
     const bid = botId?.trim()
-    if (!id || !activeWebSocket?.connected) return false
+    const sid = sessionId?.trim() ?? ''
+    const cid = controlId?.trim() ?? ''
+    if (!id || !sid || !cid || !activeWebSocket?.connected) return false
     if (bid && bid !== activeWebSocketBotId) return false
-    activeWebSocket.abort(id)
+    activeWebSocket.abort(id, sid, cid)
     return true
   }
 
-  function sessionMessagesKey(botId: string, sessionId: string) {
+  function sessionRuntimeKey(botId: string, sessionId: string) {
     return `${botId}\u0000${sessionId}`
   }
 
-  function stopSessionMessagesConnection(key: string, connection: SessionMessagesConnection) {
-    if (sessionMessagesConnections.get(key) !== connection) return
-    connection.generation += 1
-    sessionMessagesConnections.delete(key)
-    connection.stream.stop()
-  }
-
-  function stopSessionMessagesStream(botId?: string, sessionId?: string) {
+  function stopSessionRuntime(botId?: string, sessionId?: string) {
     if (botId === undefined && sessionId === undefined) {
-      for (const [key, connection] of sessionMessagesConnections) {
-        stopSessionMessagesConnection(key, connection)
+      for (const key of sessionRuntimeConnections.keys()) {
+        const [, sid = ''] = key.split('\u0000')
+        runtimeClient.unsubscribe(sid)
       }
+      sessionRuntimeConnections.clear()
       return
     }
 
     const bid = (botId ?? '').trim()
     const sid = (sessionId ?? '').trim()
     if (!bid || !sid) return
-    const key = sessionMessagesKey(bid, sid)
-    const connection = sessionMessagesConnections.get(key)
-    if (connection) stopSessionMessagesConnection(key, connection)
+    const key = sessionRuntimeKey(bid, sid)
+    if (!sessionRuntimeConnections.delete(key)) return
+    runtimeClient.unsubscribe(sid)
   }
 
-  function startSessionMessagesStream(botId: string, sessionId: string) {
+  function startSessionRuntime(botId: string, sessionId: string) {
     const bid = botId.trim()
     const sid = sessionId.trim()
     if (!bid || !sid) return
-    const key = sessionMessagesKey(bid, sid)
-    if (sessionMessagesConnections.has(key)) return
-
-    const connection: SessionMessagesConnection = {
-      stream: transport.createRetryingStream(),
-      generation: 0,
+    const key = sessionRuntimeKey(bid, sid)
+    if (sessionRuntimeConnections.has(key)) return
+    const connection: SessionRuntimeConnection = {
+      prepared: false,
+      pending: [],
     }
-    sessionMessagesConnections.set(key, connection)
-    connection.stream.start(async (signal) => {
-      const generation = ++connection.generation
-      const isCurrent = () => sessionMessagesConnections.get(key) === connection
-        && connection.generation === generation
-      try {
-        await callbacks.prepareSessionMessages(bid, sid)
-      } catch (error) {
-        if (isCurrent() && !signal.aborted) {
-          console.error('Failed to load session messages:', error)
-        }
+    sessionRuntimeConnections.set(key, connection)
+    runtimeClient.subscribe(sid)
+
+    const applyBufferedProjections = () => {
+      const pending = connection.pending.splice(0)
+      for (const change of pending) {
+        callbacks.onRuntimeProjection(bid, sid, change)
       }
-      if (!isCurrent() || signal.aborted) return
-      await transport.streamSessionMessageEvents(bid, sid, signal, (event) => {
-        if (!isCurrent() || signal.aborted) return
-        callbacks.onSessionMessageEvent(bid, sid, event)
+    }
+    void callbacks.prepareSessionRuntime(bid, sid, applyBufferedProjections)
+      .catch(error => console.error('Failed to load session messages:', error))
+      .finally(() => {
+        if (sessionRuntimeConnections.get(key) !== connection) return
+        connection.prepared = true
+        applyBufferedProjections()
       })
-    })
   }
 
   function stopBotSessionsActivityStream() {
@@ -181,7 +225,8 @@ export function createChatRealtimeController(
   }
 
   function stopStreams() {
-    stopSessionMessagesStream()
+    stopSessionRuntime()
+    runtimeClient.reset()
     stopBotSessionsActivityStream()
   }
 
@@ -190,10 +235,11 @@ export function createChatRealtimeController(
     stopWebSocket,
     ensureWebSocketConnected,
     sendWebSocketMessage,
-    abortWebSocketStream,
-    startSessionMessagesStream,
-    stopSessionMessagesStream,
+    abortWebSocketRun,
+    startSessionRuntime,
+    stopSessionRuntime,
     startBotSessionsActivityStream,
     stopStreams,
+    runtimeProjection: runtimeClient.projection,
   }
 }

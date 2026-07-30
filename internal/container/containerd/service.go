@@ -294,6 +294,11 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 	req.ImageRef = config.NormalizeImageRef(req.ImageRef)
 
 	ctx = s.withNamespace(ctx)
+	if _, err := s.client.LoadContainer(ctx, req.ID); err == nil {
+		return ContainerInfo{}, ErrAlreadyExists
+	} else if !errdefs.IsNotFound(err) {
+		return ContainerInfo{}, mapContainerdErr(err)
+	}
 	ctx, done, err := s.client.WithLease(ctx)
 	if err != nil {
 		return ContainerInfo{}, mapContainerdErr(err)

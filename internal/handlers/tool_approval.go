@@ -29,7 +29,8 @@ type toolApprovalResponder interface {
 }
 
 type ToolApprovalDecisionRequest struct {
-	Reason string `json:"reason,omitempty"`
+	ControlID string `json:"control_id,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 func NewToolApprovalHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, turnService turn.Service) *ToolApprovalHandler {
@@ -90,6 +91,7 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 	var req ToolApprovalDecisionRequest
 	_ = c.Bind(&req)
 	if err := h.turnService.RespondToolApproval(context.WithoutCancel(c.Request().Context()), turn.ToolApprovalResponse{
+		ControlID:              strings.TrimSpace(req.ControlID),
 		BotID:                  botID,
 		ActorChannelIdentityID: actorUserID,
 		ActorUserID:            actorUserID,

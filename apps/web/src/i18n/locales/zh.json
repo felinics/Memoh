@@ -99,6 +99,9 @@
     "channel": {
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。"
     },
+    "compaction": {
+      "model_unavailable": "压缩模型不可用。请选择一个已启用、且声明了上下文窗口的对话模型。"
+    },
     "profile": {
       "request_invalid": "个人资料更新请求无效。",
       "title_model_invalid": "所选标题模型不可用或不是聊天模型。",
@@ -133,6 +136,11 @@
       "reasoning_effort_required": "请选择推理强度后重试。",
       "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent。",
       "config_update_failed": "外部 Agent 无法应用所选设置，请重试。"
+    },
+    "session_runtime": {
+      "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
+      "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。",
+      "history_inconsistent": "会话历史无法正确合并，请刷新后重试。"
     }
   },
   "auth": {
@@ -480,6 +488,7 @@
     "updatesSection": "更新",
     "currentVersion": "当前版本 v{version}",
     "checkHint": "前往 GitHub 检查最新版本。",
+    "desktopCheckHint": "检查是否有新的 Desktop 版本。",
     "checkForUpdates": "检查更新",
     "checking": "检查中…",
     "upToDate": "已是最新版本",
@@ -490,6 +499,15 @@
     "releaseNotes": "更新日志",
     "viewOnGitHub": "在 GitHub 上查看",
     "checkFailed": "检查更新失败",
+    "desktopUpdatesUnavailable": "自动更新不可用",
+    "desktopUpdatesUnavailableDesc": "当前构建未配置更新源。",
+    "desktopUpdateAvailableDesc": "下载此版本后，重启 Memoh 即可安装。",
+    "downloadUpdate": "下载更新",
+    "downloadingUpdate": "正在下载… {progress}%",
+    "desktopUpdateDownloadedDesc": "更新已准备就绪，重启 Memoh 即可安装。",
+    "restartToUpdate": "重启并更新",
+    "retryUpdate": "重试",
+    "desktopUpdateFailed": "Desktop 更新失败",
     "github": "GitHub",
     "docs": "技术文档",
     "feedback": "问题反馈",
@@ -1451,9 +1469,7 @@
     "emptyTitle": "暂无 MCP 服务器",
     "emptyDescription": "添加 MCP 服务器以扩展 Bot 的能力",
     "command": "命令",
-    "commandPlaceholder": "输入启动命令",
-    "arguments": "参数",
-    "argumentsPlaceholder": "输入后按 Enter 添加",
+    "commandPlaceholder": "npx -y @modelcontextprotocol/server-everything",
     "cwd": "工作目录",
     "cwdPlaceholder": "输入工作目录路径",
     "env": "环境变量",
@@ -1486,10 +1502,8 @@
     "importErrorJson": "JSON 格式无效",
     "exportFailed": "导出 MCP 服务器失败",
     "probe": "测试连接",
-    "probing": "测试中...",
     "probeSuccess": "连接验证成功",
     "probeFailed": "连接测试失败",
-    "probeAborted": "连接测试已中止",
     "probeFailedNetwork": "连接测试期间发生网络错误",
     "probeRefresh": "刷新",
     "tools": "工具",
@@ -1499,8 +1513,6 @@
     "statusConnected": "已连接",
     "statusError": "错误",
     "statusUnknown": "未测试",
-    "lastProbed": "上次测试",
-    "testedAt": "{time}测试",
     "commandRequired": "请先填写启动命令。",
     "urlRequired": "请先填写端点 URL。",
     "authRequired": "需要授权",
@@ -1530,9 +1542,13 @@
       "clientSecret": "Client Secret",
       "clientSecretPlaceholder": "OAuth 应用的 Client Secret（如需要）",
       "clientIdHint": "该授权服务器不支持自动注册，请创建 OAuth 应用并输入其 Client ID。",
+      "signInRequired": "需要登录授权后才能使用此服务器。",
+      "signInLabel": "服务器登录",
+      "optionalHint": "仅当此服务器要求登录时才需要。",
       "callbackUrl": "回调地址",
       "callbackUrlHint": "请在 OAuth 应用设置中填入此回调地址。",
-      "callbackMissingParams": "缺少授权码或状态参数"
+      "callbackMissingParams": "缺少授权码或状态参数",
+      "popupBlocked": "授权窗口被浏览器拦截了,请允许此页面的弹出窗口后重试。"
     },
     "servers": "服务器",
     "addNew": "添加服务器",
@@ -1570,7 +1586,7 @@
     },
     "advancedSettings": "高级设置",
     "advancedHintStdio": "传给进程的环境变量。",
-    "advancedHintRemote": "请求头与授权。",
+    "advancedHintRemote": "请求头。",
     "expand": "展开",
     "collapse": "收起",
     "envVars": "环境变量",
@@ -2391,7 +2407,7 @@
       "heartbeatModelPlaceholder": "使用聊天模型（默认）",
       "compactionEnabled": "启用上下文压缩",
       "compactionDescription": "当对话上下文过长时，自动对旧消息进行摘要以节省 Token。",
-      "compactionThreshold": "压缩阈值（输入 token 数）",
+      "compactionThreshold": "压缩阈值（输入 token 数，0 表示自动）",
       "compactionRatio": "压缩比例（%）",
       "compactionRatioDescription": "指定需要压缩的旧消息比例，最近的消息将保持原样。",
       "compactionModel": "压缩模型",

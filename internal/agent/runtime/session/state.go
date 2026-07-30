@@ -12,6 +12,8 @@ import (
 
 func runtimeDeltaForAgentEvent(event native.StreamEvent, messages []chatview.UIMessage) (RuntimeDelta, bool) {
 	switch event.Type {
+	case native.EventAgentStart:
+		return RuntimeDelta{}, true
 	case native.EventAgentEnd, native.EventAgentAbort, native.EventError:
 		return RuntimeDelta{MessageUpserts: append([]chatview.UIMessage(nil), messages...)}, true
 	case native.EventRetry:
@@ -44,6 +46,20 @@ func runtimeDeltaForAgentEvent(event native.StreamEvent, messages []chatview.UIM
 	}
 }
 
+// pendingDecisionEvent distinguishes the initial request from a later
+// authoritative status update for the same decision. Both use the same stream
+// event vocabulary so the UI converter can update one tool block in place, but
+// only the initial pending event parks the run in waiting_decision.
+func pendingDecisionEvent(event native.StreamEvent) bool {
+	switch event.Type {
+	case native.EventToolApprovalRequest, native.EventUserInputRequest:
+	default:
+		return false
+	}
+	status := strings.TrimSpace(event.Status)
+	return status == "" || strings.EqualFold(status, "pending")
+}
+
 func runtimeRunPatch(snapshot Snapshot, status, runError, steer, lease bool) RuntimeDelta {
 	run := snapshot.CurrentRunView
 	if run == nil {
@@ -51,7 +67,7 @@ func runtimeRunPatch(snapshot Snapshot, status, runError, steer, lease bool) Run
 	}
 	updatedAt := run.UpdatedAt
 	patch := &CurrentRunPatch{
-		StreamID:  run.StreamID,
+		RunID:     run.RunID,
 		UpdatedAt: &updatedAt,
 	}
 	if status {
@@ -86,11 +102,16 @@ func (*Manager) leaseExpired(run *CurrentRunView, now time.Time) bool {
 }
 
 func isActiveRunStatus(status string) bool {
-	return strings.EqualFold(status, RunStatusAdmitting) || strings.EqualFold(status, RunStatusRunning) || strings.EqualFold(status, RunStatusAborting)
+	return strings.EqualFold(status, RunStatusAdmitting) ||
+		strings.EqualFold(status, RunStatusRunning) ||
+		strings.EqualFold(status, RunStatusWaitingDecision) ||
+		strings.EqualFold(status, RunStatusAborting)
 }
 
 func isEventAcceptingRunStatus(status string) bool {
-	return strings.EqualFold(status, RunStatusRunning) || strings.EqualFold(status, RunStatusAborting)
+	return strings.EqualFold(status, RunStatusRunning) ||
+		strings.EqualFold(status, RunStatusWaitingDecision) ||
+		strings.EqualFold(status, RunStatusAborting)
 }
 
 func (m *Manager) markLostIfExpired(snapshot *Snapshot, now time.Time) bool {
@@ -107,18 +128,11 @@ func (m *Manager) markLostIfExpired(snapshot *Snapshot, now time.Time) bool {
 	return true
 }
 
-func streamLeaseExpiry(snapshot Snapshot, streamID string, fallback time.Time) time.Time {
-	if snapshot.CurrentRunView != nil && snapshot.CurrentRunView.StreamID == streamID && snapshot.CurrentRunView.OwnerLeaseExpiresAt != nil {
+func streamLeaseExpiry(snapshot Snapshot, runID string, fallback time.Time) time.Time {
+	if snapshot.CurrentRunView != nil && snapshot.CurrentRunView.RunID == runID && snapshot.CurrentRunView.OwnerLeaseExpiresAt != nil {
 		return *snapshot.CurrentRunView.OwnerLeaseExpiresAt
 	}
 	return fallback
-}
-
-func nonNilQueue(queue []QueuedRunView) []QueuedRunView {
-	if queue != nil {
-		return queue
-	}
-	return []QueuedRunView{}
 }
 
 func runtimeEventEpoch(event Event) string {
@@ -131,14 +145,14 @@ func runtimeEventEpoch(event Event) string {
 	return ""
 }
 
-func streamRefForRun(botID, sessionID string, run *CurrentRunView) StreamRef {
+func runRefForRun(botID, sessionID string, run *CurrentRunView) RunRef {
 	if run == nil {
-		return StreamRef{}
+		return RunRef{}
 	}
-	return StreamRef{
+	return RunRef{
 		BotID:      strings.TrimSpace(botID),
 		SessionID:  strings.TrimSpace(sessionID),
-		StreamID:   strings.TrimSpace(run.StreamID),
+		RunID:      strings.TrimSpace(run.RunID),
 		OwnerID:    strings.TrimSpace(run.OwnerID),
 		Generation: strings.TrimSpace(run.Generation),
 	}
@@ -146,21 +160,21 @@ func streamRefForRun(botID, sessionID string, run *CurrentRunView) StreamRef {
 
 func runMatchesHandle(run *CurrentRunView, handle RunHandle) bool {
 	handle = handle.normalized()
-	return run != nil && run.StreamID == handle.StreamID && run.Generation == handle.Generation
+	return run != nil && run.RunID == handle.RunID && run.Generation == handle.Generation
 }
 
-func (m *Manager) streamRefForControl(ctrl *runControl) StreamRef {
+func (m *Manager) runRefForControl(ctrl *runControl) RunRef {
 	if ctrl == nil {
-		return StreamRef{}
+		return RunRef{}
 	}
 	ownerID := ""
 	if m != nil && m.distributed != nil {
 		ownerID = m.ownerID
 	}
-	return StreamRef{
+	return RunRef{
 		BotID:      ctrl.botID,
 		SessionID:  ctrl.sessionID,
-		StreamID:   ctrl.streamID,
+		RunID:      ctrl.runID,
 		OwnerID:    ownerID,
 		Generation: ctrl.generation,
 	}
@@ -257,7 +271,7 @@ func enqueueRuntimeEvent(ch chan Event, event Event) {
 		BotID:     event.BotID,
 		SessionID: event.SessionID,
 		Epoch:     event.Epoch,
-		StreamID:  event.StreamID,
+		RunID:     event.RunID,
 		Seq:       event.Seq,
 		Message:   "runtime subscriber buffer overflow",
 	}:

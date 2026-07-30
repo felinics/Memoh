@@ -1,4 +1,4 @@
-import { ref, toRaw } from 'vue'
+import { toRaw } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { createAssistantStreamRegistry } from './assistant-streams'
 import type { ChatAssistantTurn } from './types'
@@ -14,25 +14,23 @@ function assistantTurn(id: string): ChatAssistantTurn {
   }
 }
 
-function makeRegistry(activeSessionId: string | null = 'session-a') {
-  const currentBotId = ref<string | null>('bot-1')
-  const sessionId = ref<string | null>(activeSessionId)
+function makeRegistry() {
   const finishAssistantTurn = vi.fn((turn: ChatAssistantTurn) => {
     turn.streaming = false
   })
-  const registry = createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn })
-  return { registry, currentBotId, sessionId, finishAssistantTurn }
+  const registry = createAssistantStreamRegistry({ finishAssistantTurn })
+  return { registry, finishAssistantTurn }
 }
 
 function track(
   registry: ReturnType<typeof createAssistantStreamRegistry>,
-  streamId: string,
+  invocationId: string,
   targetSessionId = 'session-a',
   botId = 'bot-1',
 ) {
-  const turn = assistantTurn(`turn-${streamId}`)
+  const turn = assistantTurn(`turn-${invocationId}`)
   const completion = registry.trackAssistantStream({
-    streamId,
+    invocationId,
     assistantTurn: turn,
     botId,
     sessionId: targetSessionId,
@@ -41,126 +39,101 @@ function track(
 }
 
 describe('assistant stream registry', () => {
-  it('registers synchronously and resolves only after removing the active stream', async () => {
+  it('tracks submission promises without deciding session streaming truth', async () => {
     const { registry, finishAssistantTurn } = makeRegistry()
-    const { turn, completion } = track(registry, 'stream-1')
+    const { turn, completion } = track(registry, 'invocation-1')
 
-    expect(toRaw(registry.getAssistantStream('stream-1')!.assistantTurn)).toBe(turn)
-    expect(registry.streaming.value).toBe(true)
+    expect(toRaw(registry.getAssistantStream('invocation-1')!.assistantTurn)).toBe(turn)
+    expect(registry.assistantStreamsForSession('bot-1', 'session-a')).toHaveLength(1)
 
-    const settled = vi.fn()
-    const observed = completion.then(() => settled('resolved'))
-    registry.resolveAssistantStream('stream-1')
-    registry.resolveAssistantStream('stream-1')
-    await observed
+    registry.resolveAssistantStream('invocation-1')
+    await completion
 
-    expect(settled).toHaveBeenCalledOnce()
     expect(finishAssistantTurn).toHaveBeenCalledOnce()
     expect(turn.streaming).toBe(false)
-    expect(registry.getAssistantStream('stream-1')).toBeUndefined()
-    expect(registry.streaming.value).toBe(false)
+    expect(registry.getAssistantStream('invocation-1')).toBeUndefined()
   })
 
-  it('rejects blank and duplicate ids without replacing the original stream', async () => {
+  it('rejects blank and concurrently duplicated invocation ids', async () => {
     const { registry } = makeRegistry()
-    await expect(track(registry, ' ').completion).rejects.toThrow('stream_id is required')
+    await expect(track(registry, ' ').completion).rejects.toThrow('invocation_id is required')
 
-    const original = track(registry, 'stream-1')
-    const duplicate = track(registry, 'stream-1')
-    await expect(duplicate.completion).rejects.toThrow('stream_id stream-1 is already active')
-    expect(toRaw(registry.getAssistantStream('stream-1')!.assistantTurn)).toBe(original.turn)
+    const original = track(registry, 'invocation-1')
+    await expect(track(registry, 'invocation-1').completion)
+      .rejects.toThrow('invocation_id invocation-1 is already active')
 
     const failure = new Error('failed')
-    registry.rejectAssistantStream('stream-1', failure)
+    registry.rejectAssistantStream('invocation-1', failure)
     await expect(original.completion).rejects.toBe(failure)
-    expect(original.turn.streaming).toBe(false)
   })
 
-  it('discards a pre-dispatch stream as a settled terminal transition', async () => {
+  it('allows an invocation id to be retried after its prior submission settles', async () => {
     const { registry } = makeRegistry()
-    const entry = track(registry, 'stream-1')
-
-    registry.discardAssistantStream('stream-1')
-
-    await expect(entry.completion).resolves.toBeUndefined()
-    expect(entry.turn.streaming).toBe(false)
-    expect(registry.getAssistantStream('stream-1')).toBeUndefined()
-    expect(registry.isTerminalStream('stream-1')).toBe(true)
-    await expect(track(registry, 'stream-1').completion).rejects.toThrow('stream_id stream-1 is already terminal')
-  })
-
-  it('reactively prioritizes only the selected bot streaming session', async () => {
-    const { registry, currentBotId, sessionId } = makeRegistry('session-b')
-    const first = track(registry, 'stream-a', 'session-a')
-    const second = track(registry, 'stream-b', 'session-b')
-    const otherBot = track(registry, 'stream-other', 'session-b', 'bot-2')
-
-    expect(registry.streaming.value).toBe(true)
-    expect(registry.streamingSessionId.value).toBe('session-b')
-    expect(registry.assistantStreamsForSession('bot-1', 'session-a').map(stream => stream.streamId)).toEqual(['stream-a'])
-    expect(registry.assistantStreamsForSession('bot-2', 'session-a')).toEqual([])
-    expect(registry.isSessionStreaming('bot-1', 'session-b')).toBe(true)
-    expect(registry.isSessionStreaming('bot-2', 'session-b')).toBe(true)
-
-    sessionId.value = 'session-c'
-    expect(registry.streaming.value).toBe(false)
-    expect(registry.streamingSessionId.value).toBe('session-a')
-
-    currentBotId.value = 'bot-2'
-    expect(registry.streaming.value).toBe(false)
-    expect(registry.streamingSessionId.value).toBe('session-b')
-    currentBotId.value = 'bot-1'
-
-    registry.resolveAssistantStream('stream-a')
+    const first = track(registry, 'invocation-1')
+    registry.discardAssistantStream('invocation-1')
     await first.completion
-    expect(registry.streamingSessionId.value).toBe('session-b')
 
-    registry.resolveAssistantStream('stream-b')
-    await second.completion
-    expect(registry.streamingSessionId.value).toBeNull()
-
-    registry.resolveAssistantStream('stream-other')
-    await otherBot.completion
+    const retry = track(registry, 'invocation-1')
+    registry.resolveAssistantStream('invocation-1')
+    await expect(retry.completion).resolves.toBeUndefined()
   })
 
-  it('routes missing event ids only when the session has one unambiguous stream', async () => {
+  it('routes events by accepted run id and keeps deferred abort intent', async () => {
     const { registry } = makeRegistry()
-    const first = track(registry, 'stream-a')
+    const entry = track(registry, 'invocation-1')
 
-    expect(registry.streamIdForEvent('bot-1', { session_id: 'session-a' })).toBe('stream-a')
-    expect(registry.streamIdForEvent('bot-1', { stream_id: 'explicit', session_id: 'session-a' })).toBe('explicit')
+    expect(registry.requestAbort('invocation-1')).toBe('')
+    expect(registry.bindRunId('invocation-1', 'run-1', 'turn-1')).toMatchObject({
+      runId: 'run-1',
+      abortRequested: true,
+    })
+    expect(registry.invocationIdForEvent({
+      run_id: 'run-1',
+      session_id: 'session-a',
+    })).toBe('invocation-1')
+    expect(registry.requestAbort('invocation-1')).toBe('run-1')
 
-    const second = track(registry, 'stream-b')
-    expect(registry.streamIdForEvent('bot-1', { session_id: 'session-a' })).toBe('session:bot-1:session-a:agent-stream')
-    expect(registry.streamIdForEvent('bot-1', {}, '')).toBe('bot:bot-1:legacy-stream')
+    registry.resolveAssistantStream('invocation-1')
+    await entry.completion
 
-    registry.resolveAssistantStream('stream-a')
-    registry.resolveAssistantStream('stream-b')
-    await Promise.all([first.completion, second.completion])
+    expect(registry.invocationIdForEvent({
+      run_id: 'run-1',
+      session_id: 'session-a',
+    })).toBe('invocation-1')
   })
 
-  it('keeps a shared continuation turn streaming until every stream finishes', async () => {
+  it('never guesses that an unknown run belongs to the only local submission', async () => {
+    const { registry } = makeRegistry()
+    const local = track(registry, 'invocation-local')
+
+    expect(registry.invocationIdForEvent({
+      run_id: 'run-from-another-subscriber',
+      session_id: 'session-a',
+    })).toBe('run-from-another-subscriber')
+
+    registry.resolveAssistantStream('invocation-local')
+    await local.completion
+  })
+
+  it('binds a deferred draft stream to exactly one created session', async () => {
+    const { registry } = makeRegistry()
+    const deferred = track(registry, 'invocation-1', '')
+
+    expect(registry.isUnboundComposerStreaming('bot-1')).toBe(true)
+    expect(registry.activeUnboundInvocationIds('bot-1')).toEqual(['invocation-1'])
+    expect(registry.recordCreatedSession('invocation-1', 'session-created'))
+      .toBe('session-created')
+    expect(registry.recordCreatedSession('invocation-1', 'conflicting-session'))
+      .toBe('session-created')
+
+    registry.resolveAssistantStream('invocation-1')
+    await deferred.completion
+    expect(registry.createdSessionIdForInvocation('invocation-1')).toBe('session-created')
+  })
+
+  it('maps continuation block ids after blocks already in the assistant turn', async () => {
     const { registry } = makeRegistry()
     const turn = assistantTurn('shared-turn')
-    const first = registry.trackAssistantStream({
-      streamId: 'main-stream', assistantTurn: turn, botId: 'bot-1', sessionId: 'session-a',
-    })
-    const second = registry.trackAssistantStream({
-      streamId: 'response-stream', assistantTurn: turn, botId: 'bot-1', sessionId: 'session-a',
-    })
-
-    registry.resolveAssistantStream('response-stream')
-    await second
-    expect(turn.streaming).toBe(true)
-
-    registry.resolveAssistantStream('main-stream')
-    await first
-    expect(turn.streaming).toBe(false)
-  })
-
-  it('maps resumed stream block ids after the existing assistant turn', async () => {
-    const { registry } = makeRegistry()
-    const turn = assistantTurn('resumed-turn')
     turn.messages.push({
       id: 4,
       type: 'tool',
@@ -174,87 +147,36 @@ describe('assistant stream registry', () => {
       done: true,
     })
     const completion = registry.trackAssistantStream({
-      streamId: 'response-stream',
+      invocationId: 'response-invocation',
       assistantTurn: turn,
       botId: 'bot-1',
       sessionId: 'session-a',
     })
 
-    expect(registry.mapAssistantStreamMessage('response-stream', {
+    expect(registry.mapAssistantStreamMessage('response-invocation', {
       id: 0,
-      type: 'reasoning',
-      content: 'Continuing',
-    })).toMatchObject({ id: 5, content: 'Continuing' })
-    expect(registry.mapAssistantStreamMessage('response-stream', {
-      id: 0,
-      type: 'reasoning',
-      content: 'Continuing with more detail',
-    })).toMatchObject({ id: 5, content: 'Continuing with more detail' })
-    expect(registry.mapAssistantStreamMessage('response-stream', {
-      id: 1,
       type: 'text',
       content: 'Done',
-    })).toMatchObject({ id: 6, content: 'Done' })
+    })).toMatchObject({ id: 5 })
 
-    registry.resolveAssistantStream('response-stream')
+    registry.resolveAssistantStream('response-invocation')
     await completion
   })
 
-  it('binds a deferred stream once and retains created-session metadata past terminal', async () => {
-    const { registry, sessionId } = makeRegistry(null)
-    const deferred = track(registry, 'stream-1', '')
-
-    expect(registry.streaming.value).toBe(true)
-    expect(registry.streamingSessionId.value).toBeNull()
-    expect(registry.isUnboundComposerStreaming('bot-1')).toBe(true)
-    expect(registry.isUnboundComposerStreaming('bot-1', 'chat')).toBe(true)
-    expect(registry.isUnboundComposerStreaming('bot-2')).toBe(false)
-    expect(registry.activeUnboundStreamIds('bot-1')).toEqual(['stream-1'])
-    expect(registry.activeUnboundStreamIds('bot-1', 'other')).toEqual([])
-    registry.recordCreatedSession('stream-1', 'session-created')
-    registry.recordCreatedSession('stream-1', 'conflicting-session')
-    expect(registry.getAssistantStream('stream-1')?.sessionId).toBe('session-created')
-    expect(registry.createdSessionIdForStream('stream-1')).toBe('session-created')
-
-    sessionId.value = 'session-created'
-    expect(registry.streaming.value).toBe(true)
-    registry.resolveAssistantStream('stream-1')
-    await deferred.completion
-
-    expect(registry.createdSessionIdForStream('stream-1')).toBe('session-created')
-    registry.forgetCreatedSession('stream-1')
-    expect(registry.createdSessionIdForStream('stream-1')).toBe('')
-  })
-
-  it('records created-session metadata even after the pending entry is gone', async () => {
+  it('rejects every active submission in insertion order', async () => {
     const { registry } = makeRegistry()
-    registry.recordCreatedSession('late-stream', 'session-created')
-    registry.recordCreatedSession('late-stream', 'conflicting-session')
-    expect(registry.createdSessionIdForStream('late-stream')).toBe('session-created')
-
-    const terminal = track(registry, 'terminal-stream')
-    registry.resolveAssistantStream('terminal-stream')
-    await terminal.completion
-    expect(registry.isTerminalStream('terminal-stream')).toBe(true)
-    registry.clearStreamHistory()
-    expect(registry.createdSessionIdForStream('late-stream')).toBe('')
-    expect(registry.isTerminalStream('terminal-stream')).toBe(false)
-  })
-
-  it('rejects the global stream snapshot in insertion order', async () => {
-    const { registry } = makeRegistry()
-    const first = track(registry, 'stream-a1', 'session-a')
-    const second = track(registry, 'stream-b1', 'session-b')
-    const third = track(registry, 'stream-a2', 'session-a')
-    const completions = [first, second, third].map(entry => entry.completion.catch(error => error))
+    const entries = [
+      track(registry, 'invocation-a1'),
+      track(registry, 'invocation-b1', 'session-b'),
+      track(registry, 'invocation-a2'),
+    ]
+    const completions = entries.map(entry => entry.completion.catch(error => error))
     const failure = new Error('aborted')
     const beforeReject: string[] = []
 
-    registry.rejectAllStreams(failure, (streamId) => {
-      expect(registry.getAssistantStream(streamId)).toBeDefined()
-      beforeReject.push(streamId)
-    })
-    expect(beforeReject).toEqual(['stream-a1', 'stream-b1', 'stream-a2'])
+    registry.rejectAllStreams(failure, invocationId => beforeReject.push(invocationId))
+
+    expect(beforeReject).toEqual(['invocation-a1', 'invocation-b1', 'invocation-a2'])
     expect(await Promise.all(completions)).toEqual([failure, failure, failure])
   })
 })

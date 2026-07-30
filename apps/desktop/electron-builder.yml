@@ -20,14 +20,33 @@ files:
 mac:
   category: public.app-category.productivity
   minimumSystemVersion: '12.0'
+  hardenedRuntime: true
+  # Signing and notarization are opt-in and configured by scripts/build.mjs.
+  # Unsigned local/CI smoke builds disable identity auto-discovery.
   target:
     - dmg
+    - zip
   icon: build/icon.icon
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
-  notarize: true
 dmg:
   icon: build/icon.icns
   sign: true
+  # 双击自安装样式:卷宗名即 Finder 窗口标题;背景图(build/background.png +
+  # background@2x.png,660x440 逻辑)烤入装饰文案与品牌光晕。
+  title: Install Memoh
+  background: build/background.png
+  window:
+    width: 660
+    height: 440
+  iconSize: 128
+  # 只摆 app 一个活图标,居中偏下,对齐背景图光晕。显式给出 contents 后
+  # electron-builder 不再自动追加 /Applications 软链 —— 双击式不需要拖拽目标。
+  # x/y 复刻用户认可的预览 DMG(make-preview-dmg.sh 的 330/254);真机签名
+  # 打包挂载后若图标偏高/偏低,只需微调这里的 y。
+  contents:
+    - x: 330
+      y: 254
+      type: file
 linux:
   category: Utility
   target:

@@ -7,6 +7,7 @@ import {
 } from '../shared/keyboard-commands'
 import type { ServerConnectResult, ServerConnectionResult } from '../shared/server-connection'
 import type { DesktopRuntimeConfig, DesktopRuntimeState } from '../shared/remote-runtime'
+import type { DesktopUpdateInfo, DesktopUpdateState } from '../shared/updates'
 
 // Renderer query-cache invalidation payload. Mirrors the subset of
 // Pinia Colada's `UseQueryEntryFilter` that survives structured-clone
@@ -42,6 +43,18 @@ const api = {
       const listener = (_event: IpcRendererEvent, state: DesktopRuntimeState) => cb(state)
       ipcRenderer.on('desktop:runtime-state-changed', listener)
       return () => ipcRenderer.removeListener('desktop:runtime-state-changed', listener)
+    },
+    updates: {
+      getInfo: (): Promise<DesktopUpdateInfo> => ipcRenderer.invoke('desktop:updates:get-info'),
+      getState: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('desktop:updates:get-state'),
+      check: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('desktop:updates:check'),
+      download: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('desktop:updates:download'),
+      install: (): Promise<DesktopUpdateState> => ipcRenderer.invoke('desktop:updates:install'),
+      onStateChanged: (cb: (state: DesktopUpdateState) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, state: DesktopUpdateState) => cb(state)
+        ipcRenderer.on('desktop:updates:state-changed', listener)
+        return () => ipcRenderer.removeListener('desktop:updates:state-changed', listener)
+      },
     },
     // Push the renderer's authoritative menu accelerators (derived from the
     // Keyboard Shortcuts store) so the main process can rebuild native menu

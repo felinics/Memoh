@@ -1,0 +1,33 @@
+# Shared Valkey and cluster-only Session Runtime configuration. Layer this after
+# compose.override.yml; the single-Server suite deliberately omits this file.
+services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: memoh-runtime-valkey
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: "no"
+
+  server:
+    environment:
+      CONFIG_PATH: /workspace/internal/agent/runtime/session/acceptance/testdata/app.cluster.toml
+      NO_PROXY: "127.0.0.1,localhost,host.docker.internal,postgres,pgvector,valkey,server,server_b"
+      no_proxy: "127.0.0.1,localhost,host.docker.internal,postgres,pgvector,valkey,server,server_b"
+    depends_on:
+      valkey:
+        condition: service_healthy
+
+  server_b:
+    environment:
+      CONFIG_PATH: /workspace/internal/agent/runtime/session/acceptance/testdata/app.cluster.toml
+      NO_PROXY: "127.0.0.1,localhost,host.docker.internal,postgres,pgvector,valkey,server,server_b"
+      no_proxy: "127.0.0.1,localhost,host.docker.internal,postgres,pgvector,valkey,server,server_b"
+    depends_on:
+      valkey:
+        condition: service_healthy

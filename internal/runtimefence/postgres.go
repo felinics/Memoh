@@ -55,6 +55,10 @@ type pendingUserInputSuperseder interface {
 	SupersedePendingUserInputsBySession(ctx context.Context, arg sqlc.SupersedePendingUserInputsBySessionParams) ([]sqlc.UserInputRequest, error)
 }
 
+type waitingDecisionRunReclaimer interface {
+	ReclaimWaitingDecisionSessionRun(ctx context.Context, arg sqlc.ReclaimWaitingDecisionSessionRunParams) (sqlc.SessionRun, error)
+}
+
 // Activate is the persistence ownership cutover. Redis may already reserve the
 // successor as admitting, but a writer holding the previous token still
 // linearizes before this transaction if it acquired the session lock first.
@@ -100,6 +104,22 @@ func ActivateWithOptions(ctx context.Context, queries dbstore.Queries, fence Fen
 			return fmt.Errorf("unsupported preserved runtime decision kind %q", preserved.Kind)
 		}
 	}
+	var reclaimRunID pgtype.UUID
+	if reclaim := options.ReclaimWaitingDecision; reclaim != nil {
+		if options.PreserveDecision == nil {
+			return errors.New("waiting-decision reclaim requires a preserved decision")
+		}
+		if reclaim.PreviousToken <= 0 || fence.Token <= reclaim.PreviousToken {
+			return errors.New("waiting-decision reclaim fencing tokens are invalid")
+		}
+		if strings.TrimSpace(reclaim.OwnerID) == "" || strings.TrimSpace(reclaim.LiveGeneration) == "" {
+			return errors.New("waiting-decision reclaim owner and live generation are required")
+		}
+		reclaimRunID, err = dbpkg.ParseUUID(reclaim.RunID)
+		if err != nil {
+			return fmt.Errorf("invalid reclaimed runtime run id: %w", err)
+		}
+	}
 	inputResult, err := json.Marshal(map[string]any{
 		"status":      "canceled",
 		"reason":      "runtime_superseded",
@@ -140,6 +160,25 @@ func ActivateWithOptions(ctx context.Context, queries dbstore.Queries, fence Fen
 		if preserved := options.PreserveDecision; preserved != nil {
 			if err := claimPreservedDecision(ctx, txQueries, *preserved, preserveToolApprovalID, preserveUserInputID, pgBotID, pgSessionID, fence.Token); err != nil {
 				return err
+			}
+		}
+		if reclaim := options.ReclaimWaitingDecision; reclaim != nil {
+			reclaimer, ok := txQueries.(waitingDecisionRunReclaimer)
+			if !ok {
+				return errors.New("persistence store does not support waiting-decision run reclaim")
+			}
+			_, err := reclaimer.ReclaimWaitingDecisionSessionRun(ctx, sqlc.ReclaimWaitingDecisionSessionRunParams{
+				OwnerID:              pgtype.Text{String: strings.TrimSpace(reclaim.OwnerID), Valid: true},
+				NewFencingToken:      fence.Token,
+				LiveGeneration:       pgtype.Text{String: strings.TrimSpace(reclaim.LiveGeneration), Valid: true},
+				RunID:                reclaimRunID,
+				PreviousFencingToken: reclaim.PreviousToken,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrStale
+			}
+			if err != nil {
+				return fmt.Errorf("reclaim waiting-decision run: %w", err)
 			}
 		}
 		activated, err := activator.ActivateSessionRuntimeFence(ctx, sqlc.ActivateSessionRuntimeFenceParams{

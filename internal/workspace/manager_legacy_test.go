@@ -328,6 +328,40 @@ func TestStartWithImageClearsLegacyRouteForBridgeContainer(t *testing.T) {
 	}
 }
 
+func TestStartWithImageDoesNotRecreateExistingContainer(t *testing.T) {
+	dataRoot := t.TempDir()
+	runtimeDir := filepath.Join(dataRoot, "runtime")
+	if err := os.MkdirAll(runtimeDir, 0o750); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+
+	botID := "00000000-0000-0000-0000-000000000001"
+	svc := &legacyRouteTestService{
+		created: true,
+		container: ctr.ContainerInfo{
+			ID:    ContainerPrefix + botID,
+			Image: "docker.io/memohai/workspace:debian",
+		},
+	}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
+		DataRoot:     dataRoot,
+		RuntimeDir:   runtimeDir,
+		Snapshotter:  "overlayfs",
+		CNIBinaryDir: "/opt/cni/bin",
+		CNIConfigDir: "/etc/cni/net.d",
+	})
+
+	if err := m.StartWithImage(context.Background(), botID, ""); err != nil {
+		t.Fatalf("StartWithImage failed: %v", err)
+	}
+	if svc.createCalls != 0 {
+		t.Fatalf("existing container was recreated %d times", svc.createCalls)
+	}
+	if svc.startCalls != 1 {
+		t.Fatalf("existing container start calls = %d, want 1", svc.startCalls)
+	}
+}
+
 func TestWorkspaceInfoAddsACPToolsEndpointForProviderContainer(t *testing.T) {
 	svc := &workspaceInfoProviderTestService{
 		info: bridge.WorkspaceInfo{

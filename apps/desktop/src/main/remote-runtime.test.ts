@@ -15,6 +15,7 @@ const runtimeID = '11111111-1111-4111-8111-111111111111'
 const replacementRuntimeID = '22222222-2222-4222-8222-222222222222'
 const runtimeKey = `mrk_${'a'.repeat(64)}`
 const replacementRuntimeKey = `mrk_${'b'.repeat(64)}`
+const runtimeTeamId = '33333333-3333-4333-8333-333333333333'
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
@@ -25,7 +26,12 @@ describe('DesktopRemoteRuntimeManager', () => {
   it('restores an encrypted runtime configuration using main-process-owned connection values', async () => {
     const fixture = await createFixture()
     const first = fixture.manager({ createSession: resolvedSessionFactory() })
-    await first.configure({ runtimeId: runtimeID, name: 'Studio Mac', key: runtimeKey })
+    await first.configure({
+      runtimeId: runtimeID,
+      name: 'Studio Mac',
+      key: runtimeKey,
+      teamId: runtimeTeamId,
+    })
 
     const restoredFactory = vi.fn<RuntimeSessionFactory>(() => resolvedSession())
     const restored = fixture.manager({ createSession: restoredFactory })
@@ -42,6 +48,7 @@ describe('DesktopRemoteRuntimeManager', () => {
       {
         serverUrl: 'http://localhost:18080/',
         key: runtimeKey,
+        teamId: runtimeTeamId,
         workspaceBase: fixture.workspaceBase,
         insecureLocalhost: true,
       },
@@ -67,6 +74,30 @@ describe('DesktopRemoteRuntimeManager', () => {
       runtimeName: 'Test workstation',
       status: 'connecting',
     })
+  })
+
+  it('fails closed when a saved team ID is not a string', async () => {
+    const fixture = await createFixture()
+    const encryptedKey = fixture.encryption.encrypt(runtimeKey).toString('base64')
+    await writeFile(fixture.configPath, JSON.stringify({
+      version: 1,
+      runtimeId: runtimeID,
+      serverUrl: 'http://localhost:18080/',
+      teamId: 42,
+      encryptedKey,
+    }))
+    const decrypt = vi.spyOn(fixture.encryption, 'decrypt')
+    const factory = vi.fn<RuntimeSessionFactory>(() => resolvedSession())
+
+    const state = await fixture.manager({ createSession: factory }).restore()
+
+    expect(state).toMatchObject({
+      enabled: true,
+      status: 'error',
+      error: 'This computer\'s saved connection could not be read',
+    })
+    expect(decrypt).not.toHaveBeenCalled()
+    expect(factory).not.toHaveBeenCalled()
   })
 
   it('fails closed without decrypting when the saved server does not match the current server', async () => {
@@ -146,7 +177,12 @@ describe('DesktopRemoteRuntimeManager', () => {
     const observed: unknown[] = []
     manager.onStateChanged(state => observed.push(state))
 
-    const configured = await manager.configure({ runtimeId: runtimeID, name: 'Studio Mac', key: runtimeKey })
+    const configured = await manager.configure({
+      runtimeId: runtimeID,
+      name: 'Studio Mac',
+      key: runtimeKey,
+      teamId: runtimeTeamId,
+    })
     reportStatus?.('disconnected', `credential ${runtimeKey} was rejected`)
 
     const serializedState = JSON.stringify([configured, manager.runtimeState(), observed])
@@ -159,6 +195,7 @@ describe('DesktopRemoteRuntimeManager', () => {
       runtimeId: runtimeID,
       runtimeName: 'Studio Mac',
       serverUrl: 'http://localhost:18080/',
+      teamId: runtimeTeamId,
       encryptedKey: expect.any(String),
     }))
 

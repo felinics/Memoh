@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import type {
   BotSessionActivityEvent,
   ChatWebSocket,
-  SessionMessageStreamEvent,
   UIStreamEvent,
   WSClientMessage,
 } from '@/composables/api/useChat'
@@ -14,8 +13,8 @@ import {
 
 interface FakeRetryingStream {
   attempt: ((signal: AbortSignal) => Promise<void>) | null
-  start: ReturnType<typeof vi.fn>
-  stop: ReturnType<typeof vi.fn>
+  start: (attempt: (signal: AbortSignal) => Promise<void>) => void
+  stop: () => void
 }
 
 function createFakeRetryingStream(): FakeRetryingStream {
@@ -29,30 +28,37 @@ function createFakeRetryingStream(): FakeRetryingStream {
   return stream
 }
 
-function createSocket(connected = true): ChatWebSocket & { send: ReturnType<typeof vi.fn>, abort: ReturnType<typeof vi.fn>, close: ReturnType<typeof vi.fn> } {
+function createSocket(connected = true): ChatWebSocket & {
+  send: ReturnType<typeof vi.fn>
+  abort: ReturnType<typeof vi.fn>
+  close: ReturnType<typeof vi.fn>
+} {
   return {
     connected,
-    send: vi.fn(),
-    abort: vi.fn(),
-    close: vi.fn(),
+    send: vi.fn<(message: WSClientMessage) => void>(),
+    abort: vi.fn<(runId: string, sessionId: string, controlId: string) => void>(),
+    close: vi.fn<() => void>(),
     onOpen: null,
     onClose: null,
+  } as ChatWebSocket & {
+    send: ReturnType<typeof vi.fn>
+    abort: ReturnType<typeof vi.fn>
+    close: ReturnType<typeof vi.fn>
   }
 }
 
 function makeController() {
-  const sockets: Array<{ botId: string, handler: (event: UIStreamEvent) => void, socket: ReturnType<typeof createSocket> }> = []
-  const retryingStreams: FakeRetryingStream[] = []
-  const sessionHandlers: Array<{
+  const sockets: Array<{
     botId: string
-    sessionId: string
-    handler: (event: SessionMessageStreamEvent) => void
+    handler: (event: UIStreamEvent) => void
+    socket: ReturnType<typeof createSocket>
   }> = []
+  const retryingStreams: FakeRetryingStream[] = []
   const activityHandlers: Array<(event: BotSessionActivityEvent) => void> = []
   const callbacks: ChatRealtimeCallbacks = {
     onWebSocketEvent: vi.fn(),
-    prepareSessionMessages: vi.fn().mockResolvedValue(undefined),
-    onSessionMessageEvent: vi.fn(),
+    prepareSessionRuntime: vi.fn().mockResolvedValue(undefined),
+    onRuntimeProjection: vi.fn(),
     onBotSessionsActivityEvent: vi.fn(),
   }
   const transport: ChatRealtimeTransport = {
@@ -61,28 +67,28 @@ function makeController() {
       sockets.push({ botId, handler, socket })
       return socket
     }),
-    streamSessionMessageEvents: vi.fn(async (botId, sessionId, _signal, handler) => {
-      sessionHandlers.push({ botId, sessionId, handler })
-    }),
     streamBotSessionsActivityEvents: vi.fn(async (_botId, _signal, handler) => {
       activityHandlers.push(handler)
     }),
-    createRetryingStream: vi.fn(() => {
+    createRetryingStream: () => {
       const stream = createFakeRetryingStream()
       retryingStreams.push(stream)
       return stream
-    }),
+    },
   }
   const controller = createChatRealtimeController(callbacks, transport)
   return {
     callbacks,
-    transport,
     sockets,
-    sessionHandlers,
     activityHandlers,
     retryingStreams,
     controller,
   }
+}
+
+async function flushPromises() {
+  await Promise.resolve()
+  await Promise.resolve()
 }
 
 describe('chat realtime controller', () => {
@@ -93,22 +99,38 @@ describe('chat realtime controller', () => {
     controller.startWebSocket('bot-2')
 
     expect(first.socket.close).toHaveBeenCalledOnce()
-    first.handler({ type: 'start', stream_id: 'stale' } as UIStreamEvent)
-    sockets[1]!.handler({ type: 'start', stream_id: 'current' } as UIStreamEvent)
+    first.handler({
+      type: 'run_rejected',
+      invocation_id: 'stale',
+      session_id: 'session-1',
+      code: 'session_runtime.session_busy',
+      message: 'busy',
+    })
+    sockets[1]!.handler({
+      type: 'run_rejected',
+      invocation_id: 'current',
+      session_id: 'session-1',
+      code: 'session_runtime.session_busy',
+      message: 'busy',
+    })
 
     expect(callbacks.onWebSocketEvent).toHaveBeenCalledOnce()
-    expect(callbacks.onWebSocketEvent).toHaveBeenCalledWith('bot-2', expect.objectContaining({ stream_id: 'current' }))
+    expect(callbacks.onWebSocketEvent).toHaveBeenCalledWith(
+      'bot-2',
+      expect.objectContaining({ invocation_id: 'current' }),
+    )
   })
 
-  it('does not expose a socket and sends only through the matching connected bot', () => {
+  it('sends commands only through the matching connected bot', () => {
     const { controller, sockets } = makeController()
-    const message: WSClientMessage = { type: 'message', text: 'hello' }
+    const message: WSClientMessage = {
+      type: 'message',
+      invocation_id: 'invocation-1',
+      text: 'hello',
+    }
 
     expect(controller.sendWebSocketMessage('bot-1', message)).toBe(true)
     expect(sockets[0]!.socket.send).toHaveBeenCalledWith(message)
-    expect(controller.ensureWebSocketConnected('bot-1')).toBe(true)
-    expect(sockets).toHaveLength(1)
-
     expect(controller.sendWebSocketMessage('bot-2', message)).toBe(true)
     expect(sockets[0]!.socket.close).toHaveBeenCalledOnce()
     expect(sockets[1]!.socket.send).toHaveBeenCalledWith(message)
@@ -118,114 +140,127 @@ describe('chat realtime controller', () => {
     const { controller, sockets } = makeController()
     controller.startWebSocket('bot-1')
 
-    expect(controller.abortWebSocketStream('stream-1', 'bot-2')).toBe(false)
-    expect(controller.abortWebSocketStream('stream-1', 'bot-1')).toBe(true)
-    expect(sockets[0]!.socket.abort).toHaveBeenCalledOnce()
-    expect(sockets[0]!.socket.abort).toHaveBeenCalledWith('stream-1')
+    expect(controller.abortWebSocketRun(
+      'run-1',
+      'bot-2',
+      'session-1',
+      'control-1',
+    )).toBe(false)
+    expect(controller.abortWebSocketRun(
+      'run-1',
+      'bot-1',
+      'session-1',
+      'control-1',
+    )).toBe(true)
+    expect(sockets[0]!.socket.abort).toHaveBeenCalledWith(
+      'run-1',
+      'session-1',
+      'control-1',
+    )
   })
 
-  it('starts the same session once and prepares every retry attempt', async () => {
-    const { controller, callbacks, transport, retryingStreams, sessionHandlers } = makeController()
-    controller.startSessionMessagesStream('bot-1', 'session-1')
-    controller.startSessionMessagesStream(' bot-1 ', ' session-1 ')
+  it('hydrates once, then subscribes to the session runtime on the websocket', async () => {
+    const { controller, callbacks, sockets } = makeController()
+    controller.startWebSocket('bot-1')
+    controller.startSessionRuntime('bot-1', 'session-1')
+    controller.startSessionRuntime('bot-1', 'session-1')
+    await flushPromises()
 
-    const sessionRetry = retryingStreams[1]!
-    expect(transport.createRetryingStream).toHaveBeenCalledTimes(2)
-    expect(sessionRetry.start).toHaveBeenCalledOnce()
-
-    await sessionRetry.attempt!(new AbortController().signal)
-    const staleHandler = sessionHandlers[0]!.handler
-    await sessionRetry.attempt!(new AbortController().signal)
-    expect(callbacks.prepareSessionMessages).toHaveBeenCalledTimes(2)
-    expect(callbacks.prepareSessionMessages).toHaveBeenNthCalledWith(1, 'bot-1', 'session-1')
-    expect(callbacks.prepareSessionMessages).toHaveBeenNthCalledWith(2, 'bot-1', 'session-1')
-
-    staleHandler({ type: 'ping' } as SessionMessageStreamEvent)
-    sessionHandlers[1]!.handler({ type: 'ping' } as SessionMessageStreamEvent)
-
-    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledOnce()
-    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-1', { type: 'ping' })
+    expect(callbacks.prepareSessionRuntime).toHaveBeenCalledOnce()
+    expect(sockets[0]!.socket.send).toHaveBeenCalledWith({
+      type: 'runtime_subscribe',
+      session_id: 'session-1',
+    })
   })
 
-  it('keeps different session streams alive concurrently', async () => {
-    const { controller, callbacks, retryingStreams, sessionHandlers } = makeController()
-    controller.startSessionMessagesStream('bot-1', 'session-1')
-    controller.startSessionMessagesStream('bot-1', 'session-2')
+  it('routes runtime frames through the ordered projection client', async () => {
+    const { controller, callbacks, sockets } = makeController()
+    controller.startWebSocket('bot-1')
+    controller.startSessionRuntime('bot-1', 'session-1')
+    await flushPromises()
 
-    const firstRetry = retryingStreams[1]!
-    const secondRetry = retryingStreams[2]!
-    await firstRetry.attempt!(new AbortController().signal)
-    await secondRetry.attempt!(new AbortController().signal)
+    sockets[0]!.handler({
+      type: 'runtime_snapshot',
+      session_id: 'session-1',
+      epoch: 'epoch-1',
+      seq: 1,
+      snapshot: {
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        epoch: 'epoch-1',
+        seq: 1,
+        updated_at: '2026-07-27T08:00:00.000Z',
+      },
+    })
 
-    sessionHandlers.find(item => item.sessionId === 'session-1')!.handler({ type: 'ping' })
-    sessionHandlers.find(item => item.sessionId === 'session-2')!.handler({ type: 'ping' })
-
-    expect(firstRetry.stop).not.toHaveBeenCalled()
-    expect(secondRetry.stop).not.toHaveBeenCalled()
-    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledTimes(2)
-    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-1', { type: 'ping' })
-    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-2', { type: 'ping' })
+    expect(callbacks.onRuntimeProjection).toHaveBeenCalledOnce()
+    expect(controller.runtimeProjection('session-1')).toMatchObject({
+      epoch: 'epoch-1',
+      seq: 1,
+    })
   })
 
-  it('stops only the requested session and suppresses its late events', async () => {
-    const { controller, callbacks, retryingStreams, sessionHandlers } = makeController()
-    controller.startSessionMessagesStream('bot-1', 'session-1')
-    controller.startSessionMessagesStream('bot-1', 'session-2')
+  it('lets history apply buffered runtime state before hydration completes', async () => {
+    const { controller, callbacks, sockets } = makeController()
+    let applyBufferedProjections: (() => void) | undefined
+    let finishPreparation: (() => void) | undefined
+    callbacks.prepareSessionRuntime = vi.fn((_botId, _sessionId, applyBuffered) => {
+      applyBufferedProjections = applyBuffered
+      return new Promise<void>((resolve) => {
+        finishPreparation = resolve
+      })
+    })
+    controller.startWebSocket('bot-1')
+    controller.startSessionRuntime('bot-1', 'session-1')
 
-    const firstRetry = retryingStreams[1]!
-    const secondRetry = retryingStreams[2]!
-    await firstRetry.attempt!(new AbortController().signal)
-    await secondRetry.attempt!(new AbortController().signal)
-    const firstHandler = sessionHandlers.find(item => item.sessionId === 'session-1')!.handler
-    const secondHandler = sessionHandlers.find(item => item.sessionId === 'session-2')!.handler
+    sockets[0]!.handler({
+      type: 'runtime_snapshot',
+      session_id: 'session-1',
+      epoch: 'epoch-1',
+      seq: 1,
+      snapshot: {
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        epoch: 'epoch-1',
+        seq: 1,
+        updated_at: '2026-07-27T08:00:00.000Z',
+      },
+    })
+    expect(callbacks.onRuntimeProjection).not.toHaveBeenCalled()
 
-    controller.stopSessionMessagesStream('bot-1', 'session-1')
-    firstHandler({ type: 'ping' })
-    secondHandler({ type: 'ping' })
+    applyBufferedProjections?.()
+    expect(callbacks.onRuntimeProjection).toHaveBeenCalledOnce()
 
-    expect(firstRetry.stop).toHaveBeenCalledOnce()
-    expect(secondRetry.stop).not.toHaveBeenCalled()
-    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledOnce()
-    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-2', { type: 'ping' })
+    finishPreparation?.()
+    await flushPromises()
   })
 
-  it('restarts a stopped session without accepting events from the old connection', async () => {
-    const { controller, callbacks, retryingStreams, sessionHandlers } = makeController()
-    controller.startSessionMessagesStream('bot-1', 'session-1')
-    await retryingStreams[1]!.attempt!(new AbortController().signal)
-    const staleHandler = sessionHandlers[0]!.handler
+  it('unsubscribes a hidden session without stopping another session', async () => {
+    const { controller, sockets } = makeController()
+    controller.startWebSocket('bot-1')
+    controller.startSessionRuntime('bot-1', 'session-1')
+    controller.startSessionRuntime('bot-1', 'session-2')
+    await flushPromises()
 
-    controller.stopSessionMessagesStream('bot-1', 'session-1')
-    controller.startSessionMessagesStream('bot-1', 'session-1')
-    await retryingStreams[2]!.attempt!(new AbortController().signal)
-
-    staleHandler({ type: 'ping' })
-    sessionHandlers[1]!.handler({ type: 'ping' })
-
-    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledOnce()
-    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-1', { type: 'ping' })
-  })
-
-  it('stops every session stream when no target is provided', () => {
-    const { controller, retryingStreams } = makeController()
-    controller.startSessionMessagesStream('bot-1', 'session-1')
-    controller.startSessionMessagesStream('bot-1', 'session-2')
-
-    controller.stopSessionMessagesStream()
-
-    expect(retryingStreams[1]!.stop).toHaveBeenCalledOnce()
-    expect(retryingStreams[2]!.stop).toHaveBeenCalledOnce()
+    controller.stopSessionRuntime('bot-1', 'session-1')
+    expect(sockets[0]!.socket.send).toHaveBeenCalledWith({
+      type: 'runtime_unsubscribe',
+      session_id: 'session-1',
+    })
+    expect(sockets[0]!.socket.send).not.toHaveBeenCalledWith({
+      type: 'runtime_unsubscribe',
+      session_id: 'session-2',
+    })
   })
 
   it('suppresses bot activity from a stopped generation', async () => {
     const { controller, callbacks, retryingStreams, activityHandlers } = makeController()
     controller.startBotSessionsActivityStream('bot-1')
-    const activityRetry = retryingStreams[0]!
-    await activityRetry.attempt!(new AbortController().signal)
+    await retryingStreams[0]!.attempt!(new AbortController().signal)
     const staleHandler = activityHandlers[0]!
 
     controller.stopStreams()
-    staleHandler({ type: 'ping' } as BotSessionActivityEvent)
+    staleHandler({ type: 'ping' })
 
     expect(callbacks.onBotSessionsActivityEvent).not.toHaveBeenCalled()
   })

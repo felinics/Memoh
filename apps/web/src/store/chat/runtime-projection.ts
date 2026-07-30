@@ -1,0 +1,252 @@
+import type {
+  RuntimeCurrentRunView,
+  RuntimeDelta,
+  RuntimeRunOperation,
+  RuntimeSnapshot,
+  UIMessage,
+  UIRuntimeDeltaEvent,
+  UIRuntimeSnapshotEvent,
+  UITurn,
+} from '@/composables/api/useChat.types'
+
+export interface RuntimeTranscriptSlice {
+  runId: string
+  turnId: string
+  status: RuntimeCurrentRunView['status'] | null
+  operation: RuntimeRunOperation | null
+  turns: UITurn[]
+  streaming: boolean
+}
+
+export interface RuntimeProjectionState {
+  botId: string
+  sessionId: string
+  epoch: string
+  seq: number
+  currentRunView: RuntimeCurrentRunView | null
+  transcript: RuntimeTranscriptSlice
+}
+
+export type RuntimeProjectionInput = UIRuntimeSnapshotEvent | UIRuntimeDeltaEvent
+
+const activeRunStatuses = new Set<RuntimeCurrentRunView['status']>([
+  'admitting',
+  'running',
+  'waiting_decision',
+  'aborting',
+])
+
+export function isRuntimeRunActive(status?: string | null): boolean {
+  return activeRunStatuses.has(status as RuntimeCurrentRunView['status'])
+}
+
+function cloneUIMessage(message: UIMessage): UIMessage {
+  if (message.type === 'tool') {
+    return {
+      ...message,
+      progress: message.progress ? [...message.progress] : undefined,
+      approval: message.approval ? { ...message.approval } : undefined,
+      execution_location: message.execution_location ? { ...message.execution_location } : undefined,
+      user_input: message.user_input
+        ? {
+            ...message.user_input,
+            questions: message.user_input.questions?.map(question => ({
+              ...question,
+              options: question.options?.map(option => ({ ...option })),
+            })),
+          }
+        : undefined,
+      background_task: message.background_task ? { ...message.background_task } : undefined,
+    }
+  }
+  if (message.type === 'attachments') {
+    return {
+      ...message,
+      attachments: message.attachments.map(attachment => ({ ...attachment })),
+    }
+  }
+  return { ...message }
+}
+
+function cloneRunView(run: RuntimeCurrentRunView): RuntimeCurrentRunView {
+  return {
+    ...run,
+    messages: run.messages.map(cloneUIMessage),
+    request_user_turn: run.request_user_turn
+      ? {
+          ...run.request_user_turn,
+          attachments: run.request_user_turn.attachments?.map(attachment => ({ ...attachment })),
+          reply: run.request_user_turn.reply ? { ...run.request_user_turn.reply } : undefined,
+          forward: run.request_user_turn.forward ? { ...run.request_user_turn.forward } : undefined,
+        }
+      : undefined,
+    steer: run.steer ? { ...run.steer } : undefined,
+    operation: run.operation
+      ? {
+          ...run.operation,
+          replacement_user_turn: run.operation.replacement_user_turn
+            ? { ...run.operation.replacement_user_turn }
+            : undefined,
+        }
+      : undefined,
+  }
+}
+
+function emptyTranscript(): RuntimeTranscriptSlice {
+  return {
+    runId: '',
+    turnId: '',
+    status: null,
+    operation: null,
+    turns: [],
+    streaming: false,
+  }
+}
+
+function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptSlice {
+  if (!run) return emptyTranscript()
+  const turnId = run.turn_id.trim()
+  const turns: UITurn[] = []
+  const userTurn = run.request_user_turn ?? run.operation?.replacement_user_turn
+  if (userTurn) {
+    turns.push({
+      ...userTurn,
+      turn_id: turnId,
+      id: `runtime:${turnId}:user`,
+    })
+  }
+  turns.push({
+    turn_id: turnId,
+    role: 'assistant',
+    id: `runtime:${turnId}:assistant`,
+    timestamp: run.started_at,
+    messages: run.messages.map(cloneUIMessage),
+  })
+  if (run.error && !run.messages.some(message => message.type === 'error')) {
+    turns[turns.length - 1] = {
+      ...turns[turns.length - 1]!,
+      role: 'assistant',
+      messages: [
+        ...run.messages.map(cloneUIMessage),
+        { id: nextMessageId(run.messages), type: 'error', content: run.error },
+      ],
+    }
+  }
+  return {
+    runId: run.run_id,
+    turnId,
+    status: run.status,
+    operation: run.operation ? { ...run.operation } : null,
+    turns,
+    streaming: isRuntimeRunActive(run.status),
+  }
+}
+
+function nextMessageId(messages: UIMessage[]): number {
+  return messages.reduce((maximum, message) => Math.max(maximum, message.id), -1) + 1
+}
+
+function applyRunPatch(
+  run: RuntimeCurrentRunView | null,
+  delta: RuntimeDelta,
+): RuntimeCurrentRunView | null {
+  let next = delta.current_run_view
+    ? cloneRunView(delta.current_run_view)
+    : run
+      ? cloneRunView(run)
+      : null
+  if (!next) return null
+  const patch = delta.run
+  if (patch && patch.run_id === next.run_id) {
+    next = {
+      ...next,
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.error !== undefined ? { error: patch.error } : {}),
+      ...(patch.steer !== undefined ? { steer: { ...patch.steer } } : {}),
+      ...(patch.updated_at !== undefined ? { updated_at: patch.updated_at } : {}),
+      ...(patch.owner_lease_expires_at !== undefined
+        ? { owner_lease_expires_at: patch.owner_lease_expires_at }
+        : {}),
+    }
+  }
+
+  const messages = delta.reset_messages ? [] : next.messages.map(cloneUIMessage)
+  for (const append of delta.message_appends ?? []) {
+    const index = messages.findIndex(message => message.id === append.id && message.type === append.type)
+    if (index < 0) {
+      messages.push({ ...append })
+      continue
+    }
+    const current = messages[index]
+    if (current?.type !== 'text' && current?.type !== 'reasoning') continue
+    messages[index] = { ...current, content: current.content + append.content }
+  }
+  for (const append of delta.progress_appends ?? []) {
+    const index = messages.findIndex(message => message.id === append.id && message.type === 'tool')
+    if (index < 0) continue
+    const current = messages[index]
+    if (current?.type !== 'tool') continue
+    messages[index] = {
+      ...current,
+      ...(append.input !== undefined ? { input: append.input } : {}),
+      progress: [...(current.progress ?? []), append.progress],
+    }
+  }
+  for (const incoming of delta.message_upserts ?? []) {
+    const cloned = cloneUIMessage(incoming)
+    const toolCallId = cloned.type === 'tool' ? cloned.tool_call_id?.trim() : ''
+    const index = messages.findIndex(message =>
+      message.id === cloned.id
+      || (
+        toolCallId
+        && message.type === 'tool'
+        && message.tool_call_id?.trim() === toolCallId
+      ),
+    )
+    if (index < 0) messages.push(cloned)
+    else messages[index] = { ...cloned, id: messages[index]!.id }
+  }
+  messages.sort((left, right) => left.id - right.id)
+  return { ...next, messages }
+}
+
+export function createEmptyRuntimeProjection(sessionId = ''): RuntimeProjectionState {
+  return {
+    botId: '',
+    sessionId,
+    epoch: '',
+    seq: 0,
+    currentRunView: null,
+    transcript: emptyTranscript(),
+  }
+}
+
+export function reduceRuntimeProjection(
+  state: RuntimeProjectionState,
+  input: RuntimeProjectionInput,
+): RuntimeProjectionState {
+  if (input.type === 'runtime_snapshot') {
+    const snapshot: RuntimeSnapshot = input.snapshot
+    const currentRunView = snapshot.current_run_view
+      ? cloneRunView(snapshot.current_run_view)
+      : null
+    return {
+      botId: snapshot.bot_id,
+      sessionId: input.session_id,
+      epoch: input.epoch,
+      seq: input.seq,
+      currentRunView,
+      transcript: transcriptForRun(currentRunView),
+    }
+  }
+
+  const currentRunView = applyRunPatch(state.currentRunView, input.delta)
+  return {
+    ...state,
+    sessionId: input.session_id,
+    epoch: input.epoch,
+    seq: input.seq,
+    currentRunView,
+    transcript: transcriptForRun(currentRunView),
+  }
+}

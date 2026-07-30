@@ -23,6 +23,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/agent/application"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/apperror"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/bots"
@@ -37,18 +38,113 @@ import (
 	"github.com/memohai/memoh/internal/storage"
 )
 
-type fakeSessionTurnActiveChecker map[string]bool
+// decodeWSTestEvent captures what a send helper puts on the wire, without a
+// socket: the queue is the boundary those helpers actually write to.
+func decodeWSTestEvent(t *testing.T, send func(writer *wsWriter)) map[string]any {
+	t.Helper()
 
-func (f fakeSessionTurnActiveChecker) SessionTurnActive(botID, sessionID string) bool {
-	return f[strings.TrimSpace(botID)+":"+strings.TrimSpace(sessionID)]
+	writer := &wsWriter{ch: make(chan []byte, 1), stop: make(chan struct{}), done: make(chan struct{})}
+	send(writer)
+	select {
+	case data := <-writer.ch:
+		var event map[string]any
+		if err := json.Unmarshal(data, &event); err != nil {
+			t.Fatalf("unmarshal ws event: %v", err)
+		}
+		return event
+	default:
+		t.Fatal("send helper wrote nothing")
+		return nil
+	}
+}
+
+// The wire protocol names a turn by exactly one id at a time: the client's
+// invocation until the server has named a run, its run id from then on. Both at
+// once would let a second subscriber and the sender disagree about which name is
+// authoritative, which is the drift this shape exists to prevent.
+func TestWSTurnRefNamesATurnByOneIDAtATime(t *testing.T) {
+	t.Parallel()
+
+	ref := wsTurn(" invocation-1 ", " session-1 ")
+	before := ref.event("session_created")
+	if before.InvocationID != "invocation-1" || before.RunID != "" {
+		t.Fatalf("pre-run event = %#v, want invocation only", before)
+	}
+	if before.SessionID != "session-1" {
+		t.Fatalf("pre-run event session = %q, want session-1", before.SessionID)
+	}
+
+	after := ref.withRun(" run-1 ").event("error")
+	if after.RunID != "run-1" || after.InvocationID != "" {
+		t.Fatalf("post-run event = %#v, want run only", after)
+	}
+}
+
+func TestSendWSRunLifecycleEventsCarryStableCodes(t *testing.T) {
+	t.Parallel()
+
+	ref := wsTurn("invocation-1", "session-1")
+	accepted := decodeWSTestEvent(t, func(writer *wsWriter) {
+		sendWSRunAccepted(writer, ref.withRun("run-1"), wsRunAcceptance{Duplicate: true})
+	})
+	if accepted["type"] != "run_accepted" || accepted["run_id"] != "run-1" {
+		t.Fatalf("run_accepted = %#v", accepted)
+	}
+	// Acceptance is the one event that names both, because it is the handoff:
+	// the client only knows the invocation and needs to learn the run.
+	if accepted["invocation_id"] != "invocation-1" || accepted["duplicate"] != true {
+		t.Fatalf("run_accepted = %#v, want the invocation and duplicate marked", accepted)
+	}
+
+	rejected := decodeWSTestEvent(t, func(writer *wsWriter) {
+		sendWSRunRejected(writer, ref, apperror.CodeSessionBusy, "session already has an active run")
+	})
+	if rejected["type"] != "run_rejected" || rejected["invocation_id"] != "invocation-1" {
+		t.Fatalf("run_rejected = %#v", rejected)
+	}
+	// No run exists to name, and the client branches on the code, not the prose.
+	if _, present := rejected["run_id"]; present {
+		t.Fatalf("run_rejected named a run: %#v", rejected)
+	}
+	if rejected["code"] != string(apperror.CodeSessionBusy) {
+		t.Fatalf("run_rejected code = %#v, want %s", rejected["code"], apperror.CodeSessionBusy)
+	}
+}
+
+// A refusal to admit a run is not a stream failure, so it reaches the client as
+// run_rejected with the code it can act on rather than as an error event.
+func TestSendWSErrorFromErrorRejectsAdmissionSentinels(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want apperror.Code
+	}{
+		{name: "busy", err: sessionruntime.ErrSessionBusy, want: apperror.CodeSessionBusy},
+		{name: "conflict", err: sessionruntime.ErrInvocationConflict, want: apperror.CodeSessionInvocationConflict},
+	} {
+		event := decodeWSTestEvent(t, func(writer *wsWriter) {
+			sendWSErrorFromError(writer, wsTurn("invocation-1", "session-1").withRun("run-1"), fmt.Errorf("admit: %w", tc.err))
+		})
+		if event["type"] != "run_rejected" || event["code"] != string(tc.want) {
+			t.Fatalf("%s: event = %#v, want run_rejected %s", tc.name, event, tc.want)
+		}
+	}
+
+	stream := decodeWSTestEvent(t, func(writer *wsWriter) {
+		sendWSErrorFromError(writer, wsTurn("invocation-1", "session-1").withRun("run-1"), errors.New("model failed"))
+	})
+	if stream["type"] != "error" || stream["run_id"] != "run-1" {
+		t.Fatalf("stream failure = %#v, want an error naming the run", stream)
+	}
 }
 
 func TestNewWSAppErrorEventUsesPublicCatalogOnly(t *testing.T) {
 	t.Parallel()
 
 	event, ok := newWSAppErrorEvent(
-		"stream-1",
-		"session-1",
+		wsTurnRef{RunID: "run-1", SessionID: "session-1"},
 		apperror.Wrap(apperror.CodeACPConfigUpdateFailed, errors.New("SECRET transport path"), nil),
 	)
 	if !ok {
@@ -180,67 +276,6 @@ func TestWSWriterIgnoresLateSendsAfterClose(t *testing.T) {
 	}
 }
 
-func TestWSStreamRegistry_AbortsOnlyTargetStream(t *testing.T) {
-	t.Parallel()
-
-	registry := newWSStreamRegistry()
-	ctxA, cancelA := context.WithCancel(context.Background())
-	defer cancelA()
-	ctxB, cancelB := context.WithCancel(context.Background())
-	defer cancelB()
-	abortA := make(chan struct{}, 1)
-	abortB := make(chan struct{}, 1)
-
-	if err := registry.register(&activeWSStream{streamID: "stream-a", cancel: cancelA, abortCh: abortA}); err != nil {
-		t.Fatalf("register stream-a: %v", err)
-	}
-	if err := registry.register(&activeWSStream{streamID: "stream-b", cancel: cancelB, abortCh: abortB}); err != nil {
-		t.Fatalf("register stream-b: %v", err)
-	}
-
-	if !registry.abort("stream-a") {
-		t.Fatal("expected stream-a abort to succeed")
-	}
-
-	select {
-	case <-abortA:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for stream-a abort signal")
-	}
-	select {
-	case <-ctxA.Done():
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for stream-a context cancellation")
-	}
-	select {
-	case <-abortB:
-		t.Fatal("stream-b received abort signal")
-	default:
-	}
-	select {
-	case <-ctxB.Done():
-		t.Fatal("stream-b context was cancelled")
-	default:
-	}
-}
-
-func TestWSStreamRegistry_RejectsDuplicateStreamID(t *testing.T) {
-	t.Parallel()
-
-	registry := newWSStreamRegistry()
-	_, cancelA := context.WithCancel(context.Background())
-	defer cancelA()
-	_, cancelB := context.WithCancel(context.Background())
-	defer cancelB()
-
-	if err := registry.register(&activeWSStream{streamID: "stream-a", cancel: cancelA, abortCh: make(chan struct{}, 1)}); err != nil {
-		t.Fatalf("register stream-a: %v", err)
-	}
-	if err := registry.register(&activeWSStream{streamID: "stream-a", cancel: cancelB, abortCh: make(chan struct{}, 1)}); err == nil {
-		t.Fatal("expected duplicate stream id registration to fail")
-	}
-}
-
 func TestLocalChannelHandlerIssueRuntimeOwnerBearerToken(t *testing.T) {
 	t.Parallel()
 
@@ -273,79 +308,15 @@ func TestLocalChannelHandlerIssueRuntimeOwnerBearerToken(t *testing.T) {
 	}
 }
 
-func TestWSStreamRegistry_HasSessionTracksActiveStreams(t *testing.T) {
-	t.Parallel()
-
-	registry := newWSStreamRegistry()
-	_, cancelA := context.WithCancel(context.Background())
-	defer cancelA()
-	_, cancelB := context.WithCancel(context.Background())
-	defer cancelB()
-
-	if registry.hasSession("session-1") {
-		t.Fatal("empty registry reported active session")
-	}
-	if err := registry.register(&activeWSStream{streamID: "stream-a", sessionID: " session-1 ", cancel: cancelA, abortCh: make(chan struct{}, 1)}); err != nil {
-		t.Fatalf("register stream-a: %v", err)
-	}
-	if err := registry.register(&activeWSStream{streamID: "stream-b", sessionID: "session-2", cancel: cancelB, abortCh: make(chan struct{}, 1)}); err != nil {
-		t.Fatalf("register stream-b: %v", err)
-	}
-
-	if !registry.hasSession("session-1") {
-		t.Fatal("expected session-1 to be active")
-	}
-	if !registry.hasSession(" session-2 ") {
-		t.Fatal("expected trimmed session-2 to be active")
-	}
-	if registry.hasSession("session-3") {
-		t.Fatal("unexpected session-3 activity")
-	}
-
-	registry.finish("stream-a")
-	if registry.hasSession("session-1") {
-		t.Fatal("session-1 should be inactive after finish")
-	}
-	if !registry.hasSession("session-2") {
-		t.Fatal("session-2 should remain active")
-	}
-}
-
-func TestShouldRejectWSRequestedSkillsForActiveStream(t *testing.T) {
-	t.Parallel()
-
-	registry := newWSStreamRegistry()
-	_, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := registry.register(&activeWSStream{streamID: "stream-a", sessionID: "session-1", cancel: cancel, abortCh: make(chan struct{}, 1)}); err != nil {
-		t.Fatalf("register stream-a: %v", err)
-	}
-
-	if !shouldRejectWSSkillActivationForActiveStream(registry, nil, "bot-1", "session-1", true) {
-		t.Fatal("expected requested skills to reject against an active session")
-	}
-	if shouldRejectWSSkillActivationForActiveStream(registry, nil, "bot-1", "session-1", false) {
-		t.Fatal("ordinary messages should not reject against an active session")
-	}
-	if shouldRejectWSSkillActivationForActiveStream(registry, nil, "bot-1", "", true) {
-		t.Fatal("empty session should not reject as active")
-	}
-
-	activeTurns := fakeSessionTurnActiveChecker{"bot-1:session-global": true}
-	if !shouldRejectWSSkillActivationForActiveStream(newWSStreamRegistry(), activeTurns, "bot-1", "session-global", true) {
-		t.Fatal("expected requested skills to reject against a globally active session")
-	}
-}
-
 func TestWSRequestedSkillTurnRegistryReserve(t *testing.T) {
 	t.Parallel()
 
 	registry := newWSRequestedSkillTurnRegistry()
-	release, ok := registry.reserve("bot-1", "session-1", "stream-a")
+	release, ok := registry.reserve("bot-1", "session-1", "run-a")
 	if !ok {
 		t.Fatal("first reservation rejected")
 	}
-	if _, ok := registry.reserve("bot-1", "session-1", "stream-b"); ok {
+	if _, ok := registry.reserve("bot-1", "session-1", "run-b"); ok {
 		t.Fatal("second reservation for same bot/session should reject")
 	}
 	if _, ok := registry.reserve("bot-1", "session-2", "stream-c"); !ok {
@@ -546,6 +517,126 @@ func openLocalChannelTestWS(t *testing.T, handler *LocalChannelHandler, botID, u
 	return client
 }
 
+type wsDecisionDispatch struct {
+	botID       string
+	sessionID   string
+	runID       string
+	commandType string
+	targetID    string
+	payload     []byte
+}
+
+type testWSDecisionRuntime struct {
+	dispatches chan wsDecisionDispatch
+}
+
+func (*testWSDecisionRuntime) Admit(context.Context, sessionruntime.AdmitInput) (sessionruntime.Admission, error) {
+	return sessionruntime.Admission{}, errors.New("unexpected admission")
+}
+
+func (*testWSDecisionRuntime) FinishRun(context.Context, sessionruntime.RunHandle, string, string) error {
+	return nil
+}
+
+func (*testWSDecisionRuntime) AbortControl(context.Context, string, string, string, string) (bool, error) {
+	return false, nil
+}
+
+func (r *testWSDecisionRuntime) RouteDecisionResponse(_ context.Context, response sessionruntime.DecisionResponse) (sessionruntime.DecisionResponseResult, error) {
+	r.dispatches <- wsDecisionDispatch{
+		botID:       response.BotID,
+		sessionID:   response.SessionID,
+		runID:       response.RunID,
+		commandType: response.Type,
+		targetID:    response.DecisionID,
+		payload:     append([]byte(nil), response.Payload...),
+	}
+	return sessionruntime.DecisionResponseResult{Handled: true, Applied: true}, nil
+}
+
+func TestLocalChannelWSRoutesUserInputResponseByRunAndDecision(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID       = "11111111-1111-1111-1111-111111111111"
+		sessionID   = "22222222-2222-2222-2222-222222222222"
+		runID       = "33333333-3333-3333-3333-333333333333"
+		decisionID  = "44444444-4444-4444-4444-444444444444"
+		currentUser = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+		controlID   = "control-user-input"
+	)
+	queries := localChannelSessionAuthQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            sessionpkg.TypeChat,
+			SessionMode:     sessionpkg.TypeChat,
+			CreatedByUserID: testUUID(currentUser),
+			Metadata:        []byte(`{}`),
+		},
+		grants: []sqlc.ListBotUserGrantsForUserRow{{
+			ID:          testUUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+			BotID:       testUUID(botID),
+			SubjectType: bots.GrantSubjectUser,
+			UserID:      testUUID(currentUser),
+			Permissions: []byte(`["chat","workspace_exec"]`),
+		}},
+	}
+	runtime := &testWSDecisionRuntime{dispatches: make(chan wsDecisionDispatch, 1)}
+	handler := &LocalChannelHandler{
+		channelType:    channel.ChannelTypeLocal,
+		botService:     bots.NewService(nil, queries),
+		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		sessionService: sessionpkg.NewService(nil, queries, nil),
+		sessionRuntime: runtime,
+		agentService:   &application.Service{},
+		logger:         slog.Default(),
+	}
+
+	client := openLocalChannelTestWS(t, handler, botID, currentUser)
+	if err := client.WriteJSON(map[string]any{
+		"type":        "user_input_response",
+		"session_id":  sessionID,
+		"run_id":      runID,
+		"decision_id": decisionID,
+		"control_id":  controlID,
+		"answers": []map[string]any{{
+			"question_id": "q1",
+			"option_ids":  []string{"yes"},
+		}},
+	}); err != nil {
+		t.Fatalf("write user input response: %v", err)
+	}
+
+	var ack wsOutboundEvent
+	if err := client.ReadJSON(&ack); err != nil {
+		t.Fatalf("read user input ack: %v", err)
+	}
+	if ack.Type != "control_ack" || ack.RunID != runID || ack.ControlID != controlID || !ack.Applied {
+		t.Fatalf("control ack = %#v", ack)
+	}
+
+	select {
+	case call := <-runtime.dispatches:
+		if call.botID != botID || call.sessionID != sessionID || call.runID != runID {
+			t.Fatalf("decision scope = %#v", call)
+		}
+		if call.commandType != sessionruntime.CommandUserInputResponse || call.targetID != decisionID {
+			t.Fatalf("decision route = %#v", call)
+		}
+		var input application.UserInputResponseInput
+		if err := json.Unmarshal(call.payload, &input); err != nil {
+			t.Fatalf("decode routed payload: %v", err)
+		}
+		if input.ActorUserID != currentUser || input.UserInputID != decisionID || len(input.Answers) != 1 {
+			t.Fatalf("routed input = %#v", input)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("user input response was not routed")
+	}
+}
+
 func TestLocalChannelAuthorizeWSSessionScopesChatToCreator(t *testing.T) {
 	t.Parallel()
 
@@ -580,7 +671,7 @@ func TestLocalChannelAuthorizeWSSessionScopesChatToCreator(t *testing.T) {
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 	}
 
-	err := handler.authorizeWSSession(testEchoContext(currentUser), currentUser, botID, sessionID)
+	err := handler.authorizeWSSession(testEchoContext(currentUser).Request().Context(), currentUser, botID, sessionID)
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
 		t.Fatalf("authorizeWSSession() error = %v, want HTTP 404", err)
@@ -621,7 +712,7 @@ func TestLocalChannelAuthorizeWSSessionAllowsManageAccess(t *testing.T) {
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 	}
 
-	if err := handler.authorizeWSSession(testEchoContext(currentUser), currentUser, botID, sessionID); err != nil {
+	if err := handler.authorizeWSSession(testEchoContext(currentUser).Request().Context(), currentUser, botID, sessionID); err != nil {
 		t.Fatalf("authorizeWSSession() error = %v, want nil", err)
 	}
 }
@@ -689,10 +780,10 @@ func TestLocalChannelWSMessageAuthorizesSessionBeforeSlashCommand(t *testing.T) 
 	defer func() { _ = client.Close() }()
 
 	if err := client.WriteJSON(map[string]any{
-		"type":       "message",
-		"stream_id":  "stream-1",
-		"session_id": sessionID,
-		"text":       "/help",
+		"type":          "message",
+		"invocation_id": "invocation-1",
+		"session_id":    sessionID,
+		"text":          "/help",
 	}); err != nil {
 		t.Fatalf("write ws message: %v", err)
 	}
@@ -764,9 +855,9 @@ func TestLocalChannelWSQuickActionRequiresChatAccessWithoutSession(t *testing.T)
 	defer func() { _ = client.Close() }()
 
 	if err := client.WriteJSON(map[string]any{
-		"type":      "message",
-		"stream_id": "stream-1",
-		"text":      "/skill list",
+		"type":          "message",
+		"invocation_id": "invocation-1",
+		"text":          "/skill list",
 	}); err != nil {
 		t.Fatalf("write ws message: %v", err)
 	}
@@ -846,10 +937,10 @@ func TestLocalChannelWSSkillActivationRequiresChatAccessWithSession(t *testing.T
 	defer func() { _ = client.Close() }()
 
 	if err := client.WriteJSON(map[string]any{
-		"type":       "message",
-		"stream_id":  "stream-1",
-		"session_id": sessionID,
-		"text":       "/alpha",
+		"type":          "message",
+		"invocation_id": "invocation-1",
+		"session_id":    sessionID,
+		"text":          "/alpha",
 	}); err != nil {
 		t.Fatalf("write ws message: %v", err)
 	}
@@ -912,10 +1003,10 @@ func TestLocalChannelWSQuickActionHelpOmitsSkillsForACPSession(t *testing.T) {
 
 	client := openLocalChannelTestWS(t, handler, botID, currentUser)
 	if err := client.WriteJSON(map[string]any{
-		"type":       "message",
-		"stream_id":  "stream-1",
-		"session_id": sessionID,
-		"text":       "/help",
+		"type":          "message",
+		"invocation_id": "invocation-1",
+		"session_id":    sessionID,
+		"text":          "/help",
 	}); err != nil {
 		t.Fatalf("write ws message: %v", err)
 	}
@@ -983,10 +1074,10 @@ func TestLocalChannelWSQuickActionSkillListRejectsACPSession(t *testing.T) {
 
 	client := openLocalChannelTestWS(t, handler, botID, currentUser)
 	if err := client.WriteJSON(map[string]any{
-		"type":       "message",
-		"stream_id":  "stream-1",
-		"session_id": sessionID,
-		"text":       "/skill list",
+		"type":          "message",
+		"invocation_id": "invocation-1",
+		"session_id":    sessionID,
+		"text":          "/skill list",
 	}); err != nil {
 		t.Fatalf("write ws message: %v", err)
 	}
@@ -1000,6 +1091,81 @@ func TestLocalChannelWSQuickActionSkillListRejectsACPSession(t *testing.T) {
 	}
 	if event.Error == nil || event.Error.Code != slash.CodeUnsupportedSkillSlashContext {
 		t.Fatalf("error = %#v, want code %q", event.Error, slash.CodeUnsupportedSkillSlashContext)
+	}
+}
+
+// The client no longer names runs. A submission that still carries the old
+// client-minted id is not silently accepted under a new name: it is missing the
+// invocation this protocol requires, and abort has nothing to address without a
+// run id the server handed out.
+func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID       = "11111111-1111-1111-1111-111111111111"
+		sessionID   = "22222222-2222-2222-2222-222222222222"
+		currentUser = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	)
+	queries := localChannelSessionAuthQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            sessionpkg.TypeChat,
+			SessionMode:     sessionpkg.TypeChat,
+			CreatedByUserID: testUUID(currentUser),
+			Metadata:        []byte(`{}`),
+		},
+		grants: []sqlc.ListBotUserGrantsForUserRow{
+			{
+				ID:          testUUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+				BotID:       testUUID(botID),
+				SubjectType: bots.GrantSubjectUser,
+				UserID:      testUUID(currentUser),
+				Permissions: []byte(`["chat","workspace_exec"]`),
+			},
+		},
+	}
+	handler := &LocalChannelHandler{
+		channelType:    channel.ChannelTypeLocal,
+		botService:     bots.NewService(nil, queries),
+		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		sessionService: sessionpkg.NewService(nil, queries, nil),
+		agentService:   &application.Service{},
+		logger:         slog.Default(),
+	}
+
+	client := openLocalChannelTestWS(t, handler, botID, currentUser)
+
+	for _, tc := range []struct {
+		name    string
+		message map[string]any
+		want    string
+	}{
+		{
+			name:    "message with a legacy stream id and no invocation",
+			message: map[string]any{"type": "message", "stream_id": "legacy-stream", "session_id": sessionID, "text": "hello"},
+			want:    "invocation_id is required",
+		},
+		{
+			name:    "abort naming a stream instead of a run",
+			message: map[string]any{"type": "abort", "stream_id": "legacy-stream", "session_id": sessionID},
+			want:    "run_id is required",
+		},
+	} {
+		if err := client.WriteJSON(tc.message); err != nil {
+			t.Fatalf("%s: write ws message: %v", tc.name, err)
+		}
+		var event map[string]any
+		if err := client.ReadJSON(&event); err != nil {
+			t.Fatalf("%s: read ws event: %v", tc.name, err)
+		}
+		if event["type"] != "error" || event["message"] != tc.want {
+			t.Fatalf("%s: event = %#v, want error %q", tc.name, event, tc.want)
+		}
+		if _, present := event["stream_id"]; present {
+			t.Fatalf("%s: response echoed stream_id: %#v", tc.name, event)
+		}
 	}
 }
 

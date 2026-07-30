@@ -69,7 +69,7 @@ describe('useChat.ws', () => {
     const socket = MockWebSocket.instances[0]!
 
     expect(socket).toBeDefined()
-    ws.send({ type: 'message', stream_id: 'stream-1', text: 'hello', session_id: 'session-1' })
+    ws.send({ type: 'message', invocation_id: 'invocation-1', text: 'hello', session_id: 'session-1' })
     expect(socket.sent).toEqual([])
 
     socket.open()
@@ -77,7 +77,7 @@ describe('useChat.ws', () => {
     expect(socket.sent).toHaveLength(1)
     expect(JSON.parse(socket.sent[0]!)).toEqual({
       type: 'message',
-      stream_id: 'stream-1',
+      invocation_id: 'invocation-1',
       text: 'hello',
       session_id: 'session-1',
     })
@@ -88,15 +88,50 @@ describe('useChat.ws', () => {
     const socket = MockWebSocket.instances[0]!
     socket.open()
 
-    ws.abort('stream-1')
+    ws.abort('run-1', 'session-1', 'control-1')
 
     expect(JSON.parse(socket.sent[0]!)).toEqual({
       type: 'abort',
-      stream_id: 'stream-1',
+      run_id: 'run-1',
+      session_id: 'session-1',
+      control_id: 'control-1',
     })
   })
 
-  it('lets scripted server events drive each websocket client independently', () => {
+  it('replays an unacknowledged control with the same id', () => {
+    vi.useFakeTimers()
+    const ws = connectWebSocket('bot-1', vi.fn())
+    const first = MockWebSocket.instances[0]!
+    first.open()
+    ws.abort('run-1', 'session-1', 'control-1')
+
+    first.close()
+    vi.advanceTimersByTime(1000)
+    const second = MockWebSocket.instances[1]!
+    second.open()
+    expect(JSON.parse(second.sent[0]!)).toEqual({
+      type: 'abort',
+      run_id: 'run-1',
+      session_id: 'session-1',
+      control_id: 'control-1',
+    })
+
+    second.emit({
+      type: 'control_ack',
+      session_id: 'session-1',
+      run_id: 'run-1',
+      control: 'abort',
+      control_id: 'control-1',
+      applied: true,
+    })
+    second.close()
+    vi.advanceTimersByTime(1000)
+    const third = MockWebSocket.instances[2]!
+    third.open()
+    expect(third.sent).toEqual([])
+  })
+
+  it('routes runtime events independently per connection', () => {
     const firstHandler = vi.fn()
     const secondHandler = vi.fn()
     connectWebSocket('bot-1', firstHandler)
@@ -106,44 +141,85 @@ describe('useChat.ws', () => {
     first.open()
     second.open()
 
-    first.emit({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' })
-    second.emit({ type: 'message', stream_id: 'stream-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
+    first.emit({
+      type: 'runtime_snapshot',
+      session_id: 'session-1',
+      epoch: 'epoch-1',
+      seq: 1,
+      snapshot: {
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        epoch: 'epoch-1',
+        seq: 1,
+        updated_at: '2026-07-27T08:00:00Z',
+      },
+    })
+    second.emit({
+      type: 'runtime_delta',
+      session_id: 'session-2',
+      epoch: 'epoch-2',
+      seq: 2,
+      delta: {},
+    })
 
     expect(firstHandler).toHaveBeenCalledTimes(1)
-    expect(firstHandler).toHaveBeenCalledWith({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' })
+    expect(firstHandler).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'runtime_snapshot',
+      session_id: 'session-1',
+    }))
     expect(secondHandler).toHaveBeenCalledTimes(1)
-    expect(secondHandler).toHaveBeenCalledWith({ type: 'message', stream_id: 'stream-b', session_id: 'session-2', data: { id: 0, type: 'text', content: 'hello' } })
+    expect(secondHandler).toHaveBeenCalledWith({
+      type: 'runtime_delta',
+      session_id: 'session-2',
+      epoch: 'epoch-2',
+      seq: 2,
+      delta: {},
+    })
   })
 
-  it('reconnects after disconnect and flushes queued messages on the new socket', () => {
+  it('replays an unacknowledged invocation after reconnect and stops after acceptance', () => {
     vi.useFakeTimers()
-    const ws = connectWebSocket('bot-1', vi.fn())
+    const onStreamEvent = vi.fn()
+    const ws = connectWebSocket('bot-1', onStreamEvent)
     const first = MockWebSocket.instances[0]!
     first.open()
 
-    first.close()
-    expect(ws.connected).toBe(false)
-
     ws.send({
       type: 'message',
-      stream_id: 'stream-after-reconnect',
+      invocation_id: 'invocation-1',
       session_id: 'session-1',
       text: 'resume',
     })
+    expect(first.sent).toHaveLength(1)
 
+    first.close()
     vi.advanceTimersByTime(1000)
     const second = MockWebSocket.instances[1]!
-    expect(second).toBeDefined()
-    expect(second.sent).toEqual([])
-
     second.open()
 
     expect(JSON.parse(second.sent[0]!)).toEqual({
       type: 'message',
-      stream_id: 'stream-after-reconnect',
+      invocation_id: 'invocation-1',
       session_id: 'session-1',
       text: 'resume',
     })
+
+    second.emit({
+      type: 'run_accepted',
+      invocation_id: 'invocation-1',
+      session_id: 'session-1',
+      run_id: 'run-1',
+      turn_id: 'turn-1',
+      epoch: 'epoch-1',
+      seq: 1,
+    })
+    expect(onStreamEvent).toHaveBeenCalledOnce()
+
+    second.close()
+    vi.advanceTimersByTime(1000)
+    const third = MockWebSocket.instances[2]!
+    third.open()
+    expect(third.sent).toEqual([])
   })
 
   it('uses the configured absolute API base URL', () => {

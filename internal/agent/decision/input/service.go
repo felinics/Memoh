@@ -359,6 +359,7 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error
 		return Request{}, err
 	}
 	runtimeToken := runtimeFencingToken(ctx)
+	responseControlID, responsePayloadHash := decisionResponseIdentity(ctx)
 	var row sqlc.UserInputRequest
 	err = s.withRuntimeFence(ctx, req.BotID, req.SessionID, func(queries dbstore.Queries) error {
 		var submitErr error
@@ -367,6 +368,8 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error
 			ResultJson:                   resultJSON,
 			RespondedByChannelIdentityID: actorID,
 			RuntimeFencingToken:          runtimeToken,
+			ResponseControlID:            responseControlID,
+			ResponsePayloadHash:          responsePayloadHash,
 		})
 		return submitErr
 	})
@@ -391,6 +394,7 @@ func (s *Service) Cancel(ctx context.Context, input CancelInput) (Request, error
 		return Request{}, err
 	}
 	runtimeToken := runtimeFencingToken(ctx)
+	responseControlID, responsePayloadHash := decisionResponseIdentity(ctx)
 	var row sqlc.UserInputRequest
 	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
 		if err := validateUserInputFence(ctx, queries, id); err != nil {
@@ -402,10 +406,21 @@ func (s *Service) Cancel(ctx context.Context, input CancelInput) (Request, error
 			ResultJson:                   resultJSON,
 			RespondedByChannelIdentityID: actorID,
 			RuntimeFencingToken:          runtimeToken,
+			ResponseControlID:            responseControlID,
+			ResponsePayloadHash:          responsePayloadHash,
 		})
 		return cancelErr
 	})
 	return s.resolveAndNotify(ctx, input.RequestID, row, err)
+}
+
+func decisionResponseIdentity(ctx context.Context) (pgtype.Text, pgtype.Text) {
+	identity, ok := decision.ResponseIdentityFromContext(ctx)
+	if !ok {
+		return pgtype.Text{}, pgtype.Text{}
+	}
+	return pgtype.Text{String: identity.ControlID, Valid: true},
+		pgtype.Text{String: identity.PayloadHash, Valid: true}
 }
 
 func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID, reason string) ([]Request, error) {

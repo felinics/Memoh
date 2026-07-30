@@ -15,7 +15,7 @@ const (
 	headerBotID             = mcpgw.ToolHeaderBotID
 	headerChatID            = mcpgw.ToolHeaderChatID
 	headerSessionID         = mcpgw.ToolHeaderSessionID
-	headerStreamID          = mcpgw.ToolHeaderStreamID
+	headerRunID             = mcpgw.ToolHeaderRunID
 	headerSessionType       = mcpgw.ToolHeaderSessionType
 	headerRouteID           = mcpgw.ToolHeaderRouteID
 	headerChannelIdentityID = mcpgw.ToolHeaderChannelIdentityID

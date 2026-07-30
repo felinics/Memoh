@@ -43,19 +43,25 @@ type ListLogsResponse struct {
 
 // TriggerConfig holds the parameters needed to trigger a compaction.
 type TriggerConfig struct {
-	BotID            string
-	SessionID        string
-	ModelID          string
-	ClientType       string
-	APIKey           string //nolint:gosec // runtime credential, not a hardcoded secret
-	CodexAccountID   string
-	BaseURL          string
-	HTTPClient       *http.Client
-	Ratio            int
-	TotalInputTokens int
-	MaxCompactTokens int // if > 0, cap compaction input to this many tokens (e.g. 90% of model window)
-	TargetTokens     int // if > 0, compaction goal: reduce context to this many tokens (used by sync compaction)
-	PromptCacheTTL   string
+	BotID                 string
+	SessionID             string
+	ModelID               string // runtime model slug sent to the provider
+	ModelRecordID         string // models.id row UUID recorded as artifact/log provenance
+	ClientType            string
+	APIKey                string //nolint:gosec // runtime credential, not a hardcoded secret
+	CodexAccountID        string
+	BaseURL               string
+	ChatCompletionsCompat string
+	HTTPClient            *http.Client
+	Ratio                 int
+	TotalInputTokens      int
+	MaxCompactTokens      int // if > 0, cap compaction input to this many tokens (e.g. 85% of the summarizer window)
+	TargetTokens          int // if > 0, compaction goal: reduce context to this many tokens (used by sync compaction)
+	// SummaryWindowTokens is the summarizer model's full context window when
+	// declared; it bounds the summary output reserve. Zero means unknown and
+	// keeps the engine's conservative defaults.
+	SummaryWindowTokens int
+	PromptCacheTTL      string
 
 	// Manual marks a user-initiated compaction (slash command, HTTP endpoint).
 	// Such a request bypasses the per-session failure cooldown so a user who

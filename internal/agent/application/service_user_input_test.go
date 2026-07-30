@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/bots"
 	session "github.com/memohai/memoh/internal/chat/thread"
 )
@@ -321,6 +324,162 @@ func TestRespondUserInputContinuesChatSession(t *testing.T) {
 	}
 	if len(eventCh) != 0 {
 		t.Fatalf("chat continuation must not emit ack events, got %d", len(eventCh))
+	}
+}
+
+func TestRuntimeUserInputCommandCommitsAndResumesSameRun(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID     = "bot-1"
+		sessionID = "session-1"
+		runID     = "run-1"
+		inputID   = "input-1"
+	)
+	fake := &fakeUserInputService{
+		target: userinput.Request{
+			ID:         inputID,
+			BotID:      botID,
+			SessionID:  sessionID,
+			ToolCallID: "call-1",
+			ToolName:   userinput.ToolNameAskUser,
+			Status:     userinput.StatusPending,
+		},
+		resolved: chatResolvedRequest(),
+	}
+	releaseContinuation := make(chan struct{})
+	continuationStarted := make(chan struct{})
+	var continuationStartedOnce sync.Once
+	resolver := &Service{
+		userInput: fake,
+		continueUserInputFn: func(ctx context.Context, _ userinput.Request, _ UserInputResponseInput, _ sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+			continuationStartedOnce.Do(func() { close(continuationStarted) })
+			select {
+			case <-releaseContinuation:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			if err := sendAgentStreamEvent(ctx, eventCh, native.StreamEvent{Type: native.EventAgentStart}); err != nil {
+				return err
+			}
+			return sendAgentStreamEvent(ctx, eventCh, native.StreamEvent{Type: native.EventAgentEnd})
+		},
+	}
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+		OwnerID:       "owner-1",
+		StateTTL:      time.Minute,
+		OwnerLeaseTTL: time.Second,
+		CommandAckTTL: time.Second,
+	})
+	t.Cleanup(func() { _ = manager.Close() })
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("start runtime manager: %v", err)
+	}
+	resolver.SetSessionRuntime(manager)
+	if err := manager.StartRun(
+		context.Background(),
+		botID,
+		sessionID,
+		runID,
+		make(chan struct{}, 1),
+		func() {},
+		make(chan turn.InjectMessage, 1),
+	); err != nil {
+		t.Fatalf("start runtime run: %v", err)
+	}
+	handle := sessionruntime.RunHandle{
+		BotID:     botID,
+		SessionID: sessionID,
+		RunID:     runID,
+	}
+	snapshot, err := manager.Snapshot(context.Background(), botID, sessionID)
+	if err != nil || snapshot.CurrentRunView == nil {
+		t.Fatalf("load runtime run: %#v, %v", snapshot.CurrentRunView, err)
+	}
+	handle.Generation = snapshot.CurrentRunView.Generation
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
+		Type:        native.EventUserInputRequest,
+		ToolName:    userinput.ToolNameAskUser,
+		ToolCallID:  "call-1",
+		UserInputID: inputID,
+		Status:      "pending",
+	}); err != nil {
+		t.Fatalf("publish user input request: %v", err)
+	}
+
+	payload, err := json.Marshal(UserInputResponseInput{
+		BotID:       botID,
+		ThreadID:    sessionID,
+		UserInputID: inputID,
+		ExplicitID:  inputID,
+		Answers:     []userinput.QuestionAnswer{{QuestionID: "q1", Text: "continue"}},
+	})
+	if err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
+	handled, err := manager.DispatchRunCommand(
+		context.Background(),
+		botID,
+		sessionID,
+		runID,
+		sessionruntime.CommandUserInputResponse,
+		inputID,
+		payload,
+	)
+	if err != nil || !handled {
+		t.Fatalf("dispatch response = handled:%v err:%v", handled, err)
+	}
+	if fake.submitCalls != 1 {
+		t.Fatalf("submit calls = %d, want 1 before acknowledgement", fake.submitCalls)
+	}
+
+	snapshot, err = manager.Snapshot(context.Background(), botID, sessionID)
+	if err != nil || snapshot.CurrentRunView == nil {
+		t.Fatalf("load acknowledged decision snapshot: %#v, %v", snapshot.CurrentRunView, err)
+	}
+	if snapshot.CurrentRunView.Status != sessionruntime.RunStatusWaitingDecision {
+		t.Fatalf("run status before continuation = %q, want waiting_decision", snapshot.CurrentRunView.Status)
+	}
+	var projectedStatus string
+	var projectedCanRespond bool
+	for _, message := range snapshot.CurrentRunView.Messages {
+		if message.UserInput != nil && message.UserInput.UserInputID == inputID {
+			projectedStatus = message.UserInput.Status
+			projectedCanRespond = message.UserInput.CanRespond
+			break
+		}
+	}
+	if projectedStatus != userinput.StatusSubmitted || projectedCanRespond {
+		t.Fatalf("acknowledged decision projection = status:%q can_respond:%v, want submitted/false", projectedStatus, projectedCanRespond)
+	}
+
+	select {
+	case <-continuationStarted:
+		t.Fatal("continuation started before the deferred producer finished persistence")
+	case <-time.After(25 * time.Millisecond):
+	}
+	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+		t.Fatalf("park deferred producer: %v", err)
+	}
+	select {
+	case <-continuationStarted:
+	case <-time.After(time.Second):
+		t.Fatal("continuation did not start after the deferred producer finished")
+	}
+	close(releaseContinuation)
+	deadline := time.Now().Add(time.Second)
+	for {
+		snapshot, err = manager.Snapshot(context.Background(), botID, sessionID)
+		if err != nil {
+			t.Fatalf("load completed run: %v", err)
+		}
+		if snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status == sessionruntime.RunStatusCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("resumed run did not complete: %#v", snapshot.CurrentRunView)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

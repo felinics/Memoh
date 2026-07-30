@@ -18,34 +18,34 @@ type sessionCompactionReader struct {
 	closed bool
 }
 
-func (s *Service) DeferSessionCompaction(botID, sessionID, streamID string) func() {
+func (s *Service) DeferSessionCompaction(botID, sessionID, runID string) func() {
 	gate, key := s.acquireSessionCompactionGate(botID, sessionID)
 	if gate == nil {
 		return func() {}
 	}
 	gate.lock.RLock()
 	reader := &sessionCompactionReader{gate: gate, held: true}
-	streamID = strings.TrimSpace(streamID)
-	if streamID != "" {
+	runID = strings.TrimSpace(runID)
+	if runID != "" {
 		s.sessionCompactionMu.Lock()
 		if gate.readers == nil {
 			gate.readers = make(map[string]map[*sessionCompactionReader]struct{})
 		}
-		if gate.readers[streamID] == nil {
-			gate.readers[streamID] = make(map[*sessionCompactionReader]struct{})
+		if gate.readers[runID] == nil {
+			gate.readers[runID] = make(map[*sessionCompactionReader]struct{})
 		}
-		gate.readers[streamID][reader] = struct{}{}
+		gate.readers[runID][reader] = struct{}{}
 		s.sessionCompactionMu.Unlock()
 	}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			reader.close()
-			if streamID != "" {
+			if runID != "" {
 				s.sessionCompactionMu.Lock()
-				delete(gate.readers[streamID], reader)
-				if len(gate.readers[streamID]) == 0 {
-					delete(gate.readers, streamID)
+				delete(gate.readers[runID], reader)
+				if len(gate.readers[runID]) == 0 {
+					delete(gate.readers, runID)
 				}
 				s.sessionCompactionMu.Unlock()
 			}
@@ -104,12 +104,12 @@ func (s *Service) enterSessionCompaction(botID, sessionID string) func() {
 	}
 }
 
-func (s *Service) enterSessionCompactionForStream(botID, sessionID, streamID string) func() {
+func (s *Service) enterSessionCompactionForRun(botID, sessionID, runID string) func() {
 	gate, key := s.acquireSessionCompactionGate(botID, sessionID)
 	if gate == nil {
 		return func() {}
 	}
-	readers := s.sessionCompactionReaders(gate, streamID)
+	readers := s.sessionCompactionReaders(gate, runID)
 	suspended := make([]*sessionCompactionReader, 0, len(readers))
 	for _, reader := range readers {
 		if reader.suspend() {
@@ -129,18 +129,27 @@ func (s *Service) enterSessionCompactionForStream(botID, sessionID, streamID str
 	}
 }
 
-func (s *Service) sessionCompactionReaders(gate *sessionCompactionGate, streamID string) []*sessionCompactionReader {
-	streamID = strings.TrimSpace(streamID)
-	if streamID == "" {
+func (s *Service) sessionCompactionReaders(gate *sessionCompactionGate, runID string) []*sessionCompactionReader {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
 		return nil
 	}
 	s.sessionCompactionMu.Lock()
 	defer s.sessionCompactionMu.Unlock()
-	readers := make([]*sessionCompactionReader, 0, len(gate.readers[streamID]))
-	for reader := range gate.readers[streamID] {
+	readers := make([]*sessionCompactionReader, 0, len(gate.readers[runID]))
+	for reader := range gate.readers[runID] {
 		readers = append(readers, reader)
 	}
 	return readers
+}
+
+// sessionTurnKey names the per-session scope of process-local bookkeeping that
+// only makes sense inside one process: a compaction barrier and the ACP prompt
+// hubs. It is deliberately not an admission gate — single-session execution is
+// enforced durably by the session runtime, which is the only thing that can
+// answer for owners in other processes.
+func sessionTurnKey(botID, sessionID string) string {
+	return strings.TrimSpace(botID) + ":" + strings.TrimSpace(sessionID)
 }
 
 func (s *Service) acquireSessionCompactionGate(botID, sessionID string) (*sessionCompactionGate, string) {

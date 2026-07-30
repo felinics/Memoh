@@ -240,6 +240,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		heartbeatModelUUID = modelID
 	}
 	compactionModelUUID := pgtype.UUID{}
+	compactionModelIDSet := req.CompactionModelID != nil
 	if req.CompactionModelID != nil {
 		if value := strings.TrimSpace(*req.CompactionModelID); value != "" {
 			modelID, err := s.resolveModelUUID(ctx, value)
@@ -363,6 +364,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		ChatAcpProjectPath:     current.ChatACPProjectPath,
 		ChatAcpProjectMode:     current.ChatACPProjectMode,
 		HeartbeatModelID:       heartbeatModelUUID,
+		CompactionModelIDSet:   compactionModelIDSet,
 		CompactionModelID:      compactionModelUUID,
 		ImageModelID:           imageModelUUID,
 		SearchProviderID:       searchProviderUUID,

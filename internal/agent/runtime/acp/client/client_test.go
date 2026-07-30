@@ -782,7 +782,7 @@ func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
 			BotID:             "bot-1",
 			ChatID:            "chat-1",
 			SessionID:         "session-1",
-			StreamID:          "stream-1",
+			RunID:             "run-1",
 			SessionType:       "acp_agent",
 			ChannelIdentityID: "user-1",
 			SessionToken:      "token-1",
@@ -816,8 +816,8 @@ func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
 	if !hasCapturedHeader(headers, "X-Memoh-Session-Id", "session-1") {
 		t.Fatalf("missing session id header in %#v", headers)
 	}
-	if !hasCapturedHeader(headers, "X-Memoh-Stream-Id", "stream-1") {
-		t.Fatalf("missing stream id header in %#v", headers)
+	if !hasCapturedHeader(headers, "X-Memoh-Run-Id", "run-1") {
+		t.Fatalf("missing run id header in %#v", headers)
 	}
 	if !hasCapturedHeader(headers, "X-Memoh-Channel-Identity-Id", "user-1") {
 		t.Fatalf("missing channel identity header in %#v", headers)
@@ -1243,7 +1243,7 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 		baseSession: ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
-			StreamID:          "stream-1",
+			RunID:             "run-1",
 			ChannelIdentityID: "channel-1",
 			CurrentPlatform:   "web",
 			ConversationType:  "private",
@@ -1424,7 +1424,7 @@ func TestCallbackToolApprovalRejectionErrorsUsePromptToolOutputLimit(t *testing.
 				ToolSessionContext{
 					BotID:     "bot-1",
 					SessionID: "session-1",
-					StreamID:  "stream-1",
+					RunID:     "run-1",
 				},
 				acpprofile.DefaultToolQuirks(),
 			)
@@ -1670,7 +1670,7 @@ func TestRequestPermissionUnmappedToolAllowsWithoutApproval(t *testing.T) {
 				baseSession: ToolSessionContext{
 					BotID:             "bot-1",
 					SessionID:         "session-1",
-					StreamID:          "stream-1",
+					RunID:             "run-1",
 					ChannelIdentityID: "channel-1",
 				},
 				events: &toolEventEmitter{},
@@ -1860,7 +1860,7 @@ func TestRequestPermissionUnknownUnmappedToolCancels(t *testing.T) {
 				baseSession: ToolSessionContext{
 					BotID:             "bot-1",
 					SessionID:         "session-1",
-					StreamID:          "stream-1",
+					RunID:             "run-1",
 					ChannelIdentityID: "channel-1",
 				},
 				events: &toolEventEmitter{},
@@ -1905,7 +1905,7 @@ func TestRequestPermissionRejectedByMemohToolApprovalSelectsRejectOption(t *test
 		baseSession: ToolSessionContext{
 			BotID:     "bot-1",
 			SessionID: "session-1",
-			StreamID:  "stream-1",
+			RunID:     "run-1",
 		},
 		events: &toolEventEmitter{},
 	}
@@ -1965,7 +1965,7 @@ func TestRequestPermissionSystemRejectedByMemohToolApprovalCancels(t *testing.T)
 		baseSession: ToolSessionContext{
 			BotID:     "bot-1",
 			SessionID: "session-1",
-			StreamID:  "stream-1",
+			RunID:     "run-1",
 		},
 		events: &toolEventEmitter{},
 	}
@@ -2019,7 +2019,7 @@ func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
-			StreamID:          "stream-1",
+			RunID:             "run-1",
 			ChannelIdentityID: "channel-1",
 		},
 		acpprofile.DefaultToolQuirks(),
@@ -2093,7 +2093,7 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 		ToolSessionContext{
 			BotID:     "bot-1",
 			SessionID: "session-1",
-			StreamID:  "stream-1",
+			RunID:     "run-1",
 		},
 		acpprofile.DefaultToolQuirks(),
 	)
@@ -2168,7 +2168,7 @@ func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
-			StreamID:          "stream-1",
+			RunID:             "run-1",
 			ChannelIdentityID: "channel-1",
 		},
 		acpprofile.DefaultToolQuirks(),
@@ -2231,7 +2231,7 @@ func TestACPFileCallbacksRecheckRuntimeGuardAfterApproval(t *testing.T) {
 				context.Background(), client, "/data", "/data", time.Second,
 				nil, nil, false, nil, approval, nil,
 				ToolSessionContext{
-					BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1",
+					BotID: "bot-1", SessionID: "session-1", RunID: "run-1",
 					RuntimeGuard: func(context.Context) error {
 						guardCalls++
 						return guardErr
@@ -2264,7 +2264,7 @@ func TestACPCreateTerminalRechecksRuntimeGuardAfterApproval(t *testing.T) {
 		context.Background(), client, "/workspace", "/workspace", time.Second,
 		nil, nil, false, nil, approval, nil,
 		ToolSessionContext{
-			BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1",
+			BotID: "bot-1", SessionID: "session-1", RunID: "run-1",
 			RuntimeGuard: func(context.Context) error { return guardErr },
 		},
 		acpprofile.DefaultToolQuirks(),
@@ -2359,7 +2359,7 @@ func TestACPWorkspaceEffectsRejectStaleRedisOwner(t *testing.T) {
 	callbacks := newClientCallbacks(
 		ctx, bridgeClient, "/data", "/data", time.Second, nil, nil, false, nil, approval, nil,
 		ToolSessionContext{
-			BotID: botID, SessionID: sessionID, StreamID: streamA,
+			BotID: botID, SessionID: sessionID, RunID: streamA,
 			RuntimeGuard: func(guardCtx context.Context) error {
 				return owner.ValidateRunOwnership(guardCtx, ownerHandle)
 			},
@@ -2458,7 +2458,7 @@ func TestRequestPermissionNonInteractiveCancels(t *testing.T) {
 			BotID:             "bot-1",
 			SessionID:         "session-1",
 			ChannelIdentityID: "channel-1",
-			// No StreamID: nobody can see or answer the approval.
+			// No RunID: nobody can see or answer the approval.
 		},
 		events: &toolEventEmitter{},
 	}
@@ -2565,7 +2565,7 @@ func TestRequestPermissionScopeRejectsOutOfRootPaths(t *testing.T) {
 				baseSession: ToolSessionContext{
 					BotID:             "bot-1",
 					SessionID:         "session-1",
-					StreamID:          "stream-1",
+					RunID:             "run-1",
 					ChannelIdentityID: "channel-1",
 				},
 				events: &toolEventEmitter{},
@@ -2618,7 +2618,7 @@ func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
-			StreamID:          "stream-1",
+			RunID:             "run-1",
 			ChannelIdentityID: "channel-1",
 		},
 		acpprofile.DefaultToolQuirks(),
@@ -2686,7 +2686,7 @@ func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
-			StreamID:          "stream-1",
+			RunID:             "run-1",
 			ChannelIdentityID: "channel-1",
 		},
 		acpprofile.DefaultToolQuirks(),
@@ -2748,7 +2748,7 @@ func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
-			StreamID:          "stream-1",
+			RunID:             "run-1",
 			ChannelIdentityID: "channel-1",
 		},
 		acpprofile.DefaultToolQuirks(),

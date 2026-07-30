@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/memohai/memoh/internal/apperror"
 	messageevent "github.com/memohai/memoh/internal/chat/event"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	session "github.com/memohai/memoh/internal/chat/thread"
@@ -16,6 +17,85 @@ type forkAnchorMessageService struct {
 	recordingMessageService
 	visibleFrom []messagepkg.Message
 	before      []messagepkg.Message
+}
+
+type replacementOperationMessageService struct {
+	recordingMessageService
+	target messagepkg.Message
+	turn   messagepkg.HistoryTurn
+	latest messagepkg.HistoryTurn
+}
+
+func (s *replacementOperationMessageService) GetByIDBySession(context.Context, string, string) (messagepkg.Message, error) {
+	return s.target, nil
+}
+
+func (s *replacementOperationMessageService) GetVisibleTurnByMessage(context.Context, string, string) (messagepkg.HistoryTurn, error) {
+	return s.turn, nil
+}
+
+func (s *replacementOperationMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
+	return s.latest, nil
+}
+
+func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {
+	t.Run("retry begins at first assistant message", func(t *testing.T) {
+		messages := &replacementOperationMessageService{
+			target: messagepkg.Message{ID: "assistant-result", Role: "assistant"},
+			turn: messagepkg.HistoryTurn{
+				ID:                 "turn-old",
+				RequestMessageID:   "user-request",
+				AssistantMessageID: "assistant-first",
+			},
+			latest: messagepkg.HistoryTurn{ID: "turn-old"},
+		}
+		service := &Service{messageService: messages}
+
+		got, err := service.PrepareRetryLatestMessageOperation(context.Background(), "session-1", "assistant-result")
+		if err != nil {
+			t.Fatalf("prepare retry operation: %v", err)
+		}
+		if got != "assistant-first" {
+			t.Fatalf("replace from message = %q, want assistant-first", got)
+		}
+	})
+
+	t.Run("edit begins at persisted request message", func(t *testing.T) {
+		messages := &replacementOperationMessageService{
+			target: messagepkg.Message{ID: "user-request", Role: "user"},
+			turn: messagepkg.HistoryTurn{
+				ID:               "turn-old",
+				RequestMessageID: "user-request",
+			},
+			latest: messagepkg.HistoryTurn{ID: "turn-old"},
+		}
+		service := &Service{messageService: messages}
+
+		got, err := service.PrepareEditLatestMessageOperation(context.Background(), "session-1", "user-request")
+		if err != nil {
+			t.Fatalf("prepare edit operation: %v", err)
+		}
+		if got != "user-request" {
+			t.Fatalf("replace from message = %q, want user-request", got)
+		}
+	})
+
+	t.Run("retry rejects a turn without its canonical assistant anchor", func(t *testing.T) {
+		messages := &replacementOperationMessageService{
+			target: messagepkg.Message{ID: "assistant-result", Role: "assistant"},
+			turn: messagepkg.HistoryTurn{
+				ID:               "turn-old",
+				RequestMessageID: "user-request",
+			},
+			latest: messagepkg.HistoryTurn{ID: "turn-old"},
+		}
+		service := &Service{messageService: messages}
+
+		_, err := service.PrepareRetryLatestMessageOperation(context.Background(), "session-1", "assistant-result")
+		if got := apperror.CodeOf(err); got != apperror.CodeSessionHistoryInconsistent {
+			t.Fatalf("error code = %q, want %q", got, apperror.CodeSessionHistoryInconsistent)
+		}
+	})
 }
 
 func (s *forkAnchorMessageService) ListVisibleFromBySession(context.Context, string, string) ([]messagepkg.Message, error) {
@@ -68,7 +148,7 @@ func TestReplacePersistedTurnMovesForkAnchorMetadata(t *testing.T) {
 
 	if err := resolver.replacePersistedTurn(
 		context.Background(),
-		ChatRequest{ThreadID: "fork-session", HistoryCutoffBeforeMessageID: "assistant-old"},
+		ChatRequest{ThreadID: "fork-session", TurnID: "turn-new", TurnPosition: int64Pointer(2), HistoryCutoffBeforeMessageID: "assistant-old"},
 		"old-turn",
 		"request-2",
 		"retry",
@@ -109,14 +189,19 @@ func TestReplacePersistedTurnPublishesReplacementMessageEvent(t *testing.T) {
 	}
 
 	err := resolver.replacePersistedTurn(context.Background(), ChatRequest{
-		BotID:    "bot-1",
-		ThreadID: "session-1",
+		BotID:        "bot-1",
+		ThreadID:     "session-1",
+		TurnID:       "turn-new",
+		TurnPosition: int64Pointer(2),
 	}, "old-turn", "user-new", "retry", []messagepkg.Message{
 		{ID: "user-new", BotID: "bot-1", SessionID: "session-1", Role: "user"},
 		{ID: "assistant-new", BotID: "bot-1", SessionID: "session-1", Role: "assistant", CreatedAt: time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)},
 	})
 	if err != nil {
 		t.Fatalf("replace persisted turn: %v", err)
+	}
+	if messages.replacementTurnID != "turn-new" || messages.replacementTurnPosition == nil || *messages.replacementTurnPosition != 2 {
+		t.Fatalf("replacement identity = (%q, %v), want (turn-new, 2)", messages.replacementTurnID, messages.replacementTurnPosition)
 	}
 	if len(events.events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(events.events))
@@ -176,7 +261,7 @@ func TestReplacePersistedTurnClearsForkAnchorWhenNoInheritedAssistantRemains(t *
 
 	if err := resolver.replacePersistedTurn(
 		context.Background(),
-		ChatRequest{ThreadID: "fork-session", HistoryCutoffBeforeMessageID: "assistant-old"},
+		ChatRequest{ThreadID: "fork-session", TurnID: "turn-new", TurnPosition: int64Pointer(2), HistoryCutoffBeforeMessageID: "assistant-old"},
 		"old-turn",
 		"request-1",
 		"retry",
@@ -192,4 +277,8 @@ func TestReplacePersistedTurnClearsForkAnchorWhenNoInheritedAssistantRemains(t *
 	if _, ok := fork["fork_message_id"]; ok {
 		t.Fatalf("fork_message_id was not cleared: %#v", fork)
 	}
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
 }

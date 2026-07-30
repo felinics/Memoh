@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
@@ -14,6 +15,30 @@ func (*agentToolPlaceholderProvider) Name() string { return "tool-placeholder-mo
 
 func (*agentToolPlaceholderProvider) ListModels(context.Context) ([]sdk.Model, error) {
 	return nil, nil
+}
+
+type agentNonClosingStreamProvider struct{}
+
+func (*agentNonClosingStreamProvider) Name() string { return "non-closing-stream-mock" }
+
+func (*agentNonClosingStreamProvider) ListModels(context.Context) ([]sdk.Model, error) {
+	return nil, nil
+}
+
+func (*agentNonClosingStreamProvider) Test(context.Context) *sdk.ProviderTestResult {
+	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+}
+
+func (*agentNonClosingStreamProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
+	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
+}
+
+func (*agentNonClosingStreamProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+}
+
+func (*agentNonClosingStreamProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	return &sdk.StreamResult{Stream: make(chan sdk.StreamPart)}, nil
 }
 
 func (*agentToolPlaceholderProvider) Test(context.Context) *sdk.ProviderTestResult {
@@ -92,5 +117,45 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 	}
 	if events[3].Type != EventAgentEnd {
 		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[3])
+	}
+}
+
+func TestAgentStreamCancellationDoesNotWaitForProviderToClose(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	events := New(Deps{}).Stream(ctx, RunConfig{
+		Model: &sdk.Model{
+			ID:       "mock-model",
+			Provider: &agentNonClosingStreamProvider{},
+		},
+		Messages: []sdk.Message{sdk.UserMessage("keep streaming")},
+		Identity: SessionContext{BotID: "bot-1"},
+	})
+
+	first := <-events
+	if first.Type != EventAgentStart {
+		t.Fatalf("first event = %q, want %q", first.Type, EventAgentStart)
+	}
+	cancel()
+
+	select {
+	case event, ok := <-events:
+		if !ok {
+			t.Fatal("stream closed without an abort event")
+		}
+		if event.Type != EventAgentAbort {
+			t.Fatalf("terminal event = %q, want %q", event.Type, EventAgentAbort)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream did not stop after cancellation")
+	}
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("stream emitted an event after its terminal abort")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream did not close after its terminal abort")
 	}
 }

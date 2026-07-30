@@ -19,6 +19,7 @@ import (
 )
 
 type ToolApprovalResponseInput struct {
+	ControlID                  string
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string
@@ -32,9 +33,25 @@ type ToolApprovalResponseInput struct {
 	SuppressActivePromptAttach bool
 }
 
+type CommittedToolApprovalResponse struct {
+	request      toolapproval.Request
+	input        ToolApprovalResponseInput
+	isACP        bool
+	activePrompt *acpActivePromptSubscription
+	ackOnly      bool
+}
+
 func (s *Service) respondToolApproval(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	committed, err := s.CommitToolApprovalResponse(ctx, input)
+	if err != nil {
+		return err
+	}
+	return s.ContinueCommittedToolApprovalResponse(ctx, committed, eventCh)
+}
+
+func (s *Service) CommitToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput) (CommittedToolApprovalResponse, error) {
 	if s.toolApproval == nil {
-		return errors.New("tool approval service not configured")
+		return CommittedToolApprovalResponse{}, errors.New("tool approval service not configured")
 	}
 	target, err := s.toolApproval.ResolveTarget(ctx, toolapproval.ResolveInput{
 		BotID:                  input.BotID,
@@ -43,45 +60,94 @@ func (s *Service) respondToolApproval(ctx context.Context, input ToolApprovalRes
 		ReplyExternalMessageID: input.ReplyExternalMessageID,
 	})
 	if err != nil {
-		return err
+		return CommittedToolApprovalResponse{}, err
 	}
-	if isACP, err := s.isACPToolApprovalSession(ctx, target.SessionID); err != nil {
-		return err
-	} else if isACP {
-		return s.respondACPToolApproval(ctx, target, input, eventCh)
+	isACP, err := s.isACPToolApprovalSession(ctx, target.SessionID)
+	if err != nil {
+		return CommittedToolApprovalResponse{}, err
 	}
 	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
-	if err := s.authorizeToolApprovalResponse(ctx, target, input); err != nil {
-		return err
+	if isACP {
+		if err := s.authorizeACPToolApprovalResponse(ctx, target, input); err != nil {
+			return CommittedToolApprovalResponse{}, err
+		}
+	} else if err := s.authorizeToolApprovalResponse(ctx, target, input); err != nil {
+		return CommittedToolApprovalResponse{}, err
+	}
+	if isACP && !s.toolApproval.CanRespond(target) {
+		if _, err := s.toolApproval.Reject(ctx, target.ID, "", "tool approval expired: the requesting tool call is no longer waiting"); err != nil && !errors.Is(err, toolapproval.ErrAlreadyDecided) {
+			return CommittedToolApprovalResponse{}, err
+		}
+		return CommittedToolApprovalResponse{request: target, input: input, isACP: true, ackOnly: true}, nil
+	}
+	var activePrompt *acpActivePromptSubscription
+	if isACP && !input.SuppressActivePromptAttach {
+		activePrompt, _ = s.subscribeACPActivePrompt(
+			firstNonEmpty(target.BotID, input.BotID),
+			firstNonEmpty(target.SessionID, input.ThreadID),
+		)
 	}
 
-	var toolResult sdk.ToolResultPart
 	switch strings.ToLower(strings.TrimSpace(input.Decision)) {
 	case "approve", "approved":
-		approved, err := s.toolApproval.Approve(ctx, target.ID, input.ActorChannelIdentityID, input.Reason)
-		if err != nil {
-			return err
-		}
-		toolResult, err = s.executeApprovedTool(ctx, approved, input)
-		if err != nil {
-			return err
-		}
+		target, err = s.toolApproval.Approve(ctx, target.ID, input.ActorChannelIdentityID, input.Reason)
 	case "reject", "rejected":
-		rejected, err := s.toolApproval.Reject(ctx, target.ID, input.ActorChannelIdentityID, input.Reason)
+		target, err = s.toolApproval.Reject(ctx, target.ID, input.ActorChannelIdentityID, input.Reason)
+	default:
+		err = fmt.Errorf("unknown tool approval decision %q", input.Decision)
+	}
+	if err != nil {
+		if activePrompt != nil {
+			activePrompt.release()
+		}
+		return CommittedToolApprovalResponse{}, err
+	}
+	return CommittedToolApprovalResponse{
+		request:      target,
+		input:        input,
+		isACP:        isACP,
+		activePrompt: activePrompt,
+	}, nil
+}
+
+func (s *Service) ContinueCommittedToolApprovalResponse(ctx context.Context, committed CommittedToolApprovalResponse, eventCh chan<- WSStreamEvent) error {
+	target := committed.request
+	if strings.TrimSpace(target.ID) == "" {
+		return errors.New("committed tool approval response is missing its request")
+	}
+	if committed.ackOnly {
+		return emitApprovalAck(ctx, eventCh)
+	}
+	if committed.isACP {
+		if committed.activePrompt != nil {
+			return forwardACPActivePrompt(ctx, committed.activePrompt, eventCh, acpActivePromptForwardOptions{
+				SkipToolCallID: target.ToolCallID,
+				SkipApprovalID: target.ID,
+			})
+		}
+		return emitApprovalAck(ctx, eventCh)
+	}
+
+	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
+	var toolResult sdk.ToolResultPart
+	switch target.Status {
+	case toolapproval.StatusApproved:
+		result, err := s.executeApprovedTool(ctx, target, committed.input)
 		if err != nil {
 			return err
 		}
+		toolResult = result
+	case toolapproval.StatusRejected:
 		toolResult = sdk.ToolResultPart{
-			ToolCallID: rejected.ToolCallID,
-			ToolName:   rejected.ToolName,
-			Result:     s.limitToolResultText(rejectedToolResultText(input.Reason), rejected.ToolName),
+			ToolCallID: target.ToolCallID,
+			ToolName:   target.ToolName,
+			Result:     s.limitToolResultText(rejectedToolResultText(committed.input.Reason), target.ToolName),
 			IsError:    true,
 		}
 	default:
-		return fmt.Errorf("unknown tool approval decision %q", input.Decision)
+		return fmt.Errorf("committed tool approval has unexpected status %q", target.Status)
 	}
-
-	return s.storeToolResultAndContinue(ctx, target, input, toolResult, eventCh)
+	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, eventCh)
 }
 
 func (s *Service) toolOutputLimit() contextlimit.ToolOutputLimit {
@@ -117,54 +183,6 @@ func (s *Service) isACPToolApprovalSession(ctx context.Context, sessionID string
 		return false, err
 	}
 	return sessionpkg.IsACPRuntime(sess), nil
-}
-
-func (s *Service) respondACPToolApproval(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
-	if err := s.authorizeACPToolApprovalResponse(ctx, target, input); err != nil {
-		return err
-	}
-	if !s.toolApproval.CanRespond(target) {
-		_, err := s.toolApproval.Reject(ctx, target.ID, "", "tool approval expired: the requesting tool call is no longer waiting")
-		if err != nil && !errors.Is(err, toolapproval.ErrAlreadyDecided) {
-			return err
-		}
-		return emitApprovalAck(ctx, eventCh)
-	}
-	var activePrompt *acpActivePromptSubscription
-	if eventCh != nil && !input.SuppressActivePromptAttach {
-		activePrompt, _ = s.subscribeACPActivePrompt(
-			firstNonEmpty(target.BotID, input.BotID),
-			firstNonEmpty(target.SessionID, input.ThreadID),
-		)
-	}
-	switch strings.ToLower(strings.TrimSpace(input.Decision)) {
-	case "approve", "approved":
-		if _, err := s.toolApproval.Approve(ctx, target.ID, input.ActorChannelIdentityID, input.Reason); err != nil {
-			if activePrompt != nil {
-				activePrompt.release()
-			}
-			return err
-		}
-	case "reject", "rejected":
-		if _, err := s.toolApproval.Reject(ctx, target.ID, input.ActorChannelIdentityID, input.Reason); err != nil {
-			if activePrompt != nil {
-				activePrompt.release()
-			}
-			return err
-		}
-	default:
-		if activePrompt != nil {
-			activePrompt.release()
-		}
-		return fmt.Errorf("unknown tool approval decision %q", input.Decision)
-	}
-	if activePrompt != nil {
-		return forwardACPActivePrompt(ctx, activePrompt, eventCh, acpActivePromptForwardOptions{
-			SkipToolCallID: target.ToolCallID,
-			SkipApprovalID: target.ID,
-		})
-	}
-	return emitApprovalAck(ctx, eventCh)
 }
 
 func (s *Service) authorizeACPToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {

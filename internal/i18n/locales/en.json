@@ -460,7 +460,9 @@
       "unavailable": "Compaction isn't available right now.",
       "done": "✅ Context compacted.",
       "noop": "Nothing to compact right now.",
-      "noModel": "No compaction or chat model is configured for this bot."
+      "noModel": "No compaction or chat model is configured for this bot.",
+      "modelUnavailable": "The compaction model is unavailable (disabled, missing context window, or its provider cannot cap output).",
+      "windowTooSmall": "The compaction model's context window is too small to produce a summary. Choose a compaction model with a larger context window."
     },
     "toolApproval": {
       "unavailable": "⚠️ Approvals aren't available here right now.",

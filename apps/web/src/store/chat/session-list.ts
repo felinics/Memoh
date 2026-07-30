@@ -1,5 +1,5 @@
 import { computed, isRef, ref, type Ref } from 'vue'
-import type { SessionSummary, UITurn } from '@/composables/api/useChat.types'
+import type { SessionSummary } from '@/composables/api/useChat.types'
 import {
   isSessionVisibleInSidebarMode,
   sortByRecency,
@@ -8,12 +8,6 @@ import {
 import { serverMessageId } from '../chat-list.normalize'
 import type { ChatMessage } from './types'
 
-// Sessions-list bookkeeping + fork-anchor tracking.
-//
-// These two concerns live in ONE module on purpose: `preserveSessionSummary`
-// (fork-anchor metadata preservation) is invoked inside every session-list
-// mutation, so splitting them would create a circular seam for no benefit.
-//
 // The factory owns the list state (reactive array + non-reactive O(1) map +
 // remembered/deleted bookkeeping) and every local mutation. Anything that
 // calls a transport (fetch/delete/rename) or orchestrates across other
@@ -88,56 +82,6 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     return raw && typeof raw === 'object' ? raw as Record<string, unknown> : null
   }
 
-  function forkSourceAnchor(session: SessionSummary | null | undefined): string {
-    return String(forkSourceMetadata(session)?.fork_message_id ?? '').trim()
-  }
-
-  function forkAnchorFromUITurns(turns: UITurn[], session?: SessionSummary | null): string {
-    const cutoff = Date.parse(session?.created_at ?? '')
-    const hasCutoff = Number.isFinite(cutoff)
-    for (let i = turns.length - 1; i >= 0; i--) {
-      const turn = turns[i]
-      if (turn.role !== 'assistant') continue
-      const id = String(turn.id ?? '').trim()
-      if (!id) continue
-      if (!hasCutoff) return id
-      const timestamp = Date.parse(turn.timestamp)
-      if (Number.isFinite(timestamp) && timestamp <= cutoff) return id
-    }
-    return ''
-  }
-
-  function withForkAnchorFromUITurns(session: SessionSummary, turns: UITurn[]): SessionSummary {
-    const anchor = forkAnchorFromUITurns(turns, session)
-    if (!anchor) return session
-    const fork = forkSourceMetadata(session)
-    if (!fork) return session
-    if (forkSourceAnchor(session) === anchor) return session
-
-    const metadata = session.metadata && typeof session.metadata === 'object' ? session.metadata : {}
-    return {
-      ...session,
-      metadata: {
-        ...metadata,
-        forked_from: {
-          ...fork,
-          fork_message_id: anchor,
-        },
-      },
-    }
-  }
-
-  function syncForkAnchorFromUITurns(targetSessionId: string | undefined, turns: UITurn[]) {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!sid || turns.length === 0) return
-    const known = knownSessionSummary(sid)
-    if (!known || !forkSourceMetadata(known)) return
-    const anchored = withForkAnchorFromUITurns(known, turns)
-    if (anchored === known) return
-    upsertSession(anchored)
-    rememberSession(anchored)
-  }
-
   function forkMessageCandidates(message: ChatMessage): string[] {
     const out = [
       message.serverId,
@@ -156,18 +100,11 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
 
   function latestInheritedAssistantBefore(
     index: number,
-    session?: SessionSummary | null,
     transcript = activeMessages(),
   ): string {
-    const cutoff = Date.parse(session?.created_at ?? '')
-    const hasCutoff = Number.isFinite(cutoff)
     for (let i = index - 1; i >= 0; i--) {
       const message = transcript[i]
       if (message?.role !== 'assistant') continue
-      if (hasCutoff) {
-        const timestamp = Date.parse(message.timestamp)
-        if (!Number.isFinite(timestamp) || timestamp > cutoff) continue
-      }
       return serverMessageId(message) || message.id
     }
     return ''
@@ -191,7 +128,7 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
       .slice(targetIndex)
       .some(message => messageMatchesForkAnchor(message, currentAnchor))
     if (!replacedTailContainsAnchor) return null
-    const nextAnchor = latestInheritedAssistantBefore(targetIndex, known, transcript)
+    const nextAnchor = latestInheritedAssistantBefore(targetIndex, transcript)
     if (nextAnchor === currentAnchor) return null
 
     const metadata = known.metadata && typeof known.metadata === 'object' ? known.metadata : {}
@@ -217,29 +154,10 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
   }
 
   function preserveSessionSummary(incoming: SessionSummary, known?: SessionSummary | null): SessionSummary {
-    let next = incoming
-    if (known && !(next.title ?? '').trim() && (known.title ?? '').trim()) {
-      next = { ...next, title: known.title }
+    if (known && !(incoming.title ?? '').trim() && (known.title ?? '').trim()) {
+      return { ...incoming, title: known.title }
     }
-
-    const knownFork = forkSourceMetadata(known)
-    if (!knownFork || !forkSourceAnchor(known) || forkSourceAnchor(next)) {
-      return next
-    }
-
-    const incomingFork = forkSourceMetadata(next)
-    const metadata = next.metadata && typeof next.metadata === 'object' ? next.metadata : {}
-    return {
-      ...next,
-      metadata: {
-        ...metadata,
-        forked_from: {
-          ...knownFork,
-          ...(incomingFork ?? {}),
-          fork_message_id: knownFork.fork_message_id,
-        },
-      },
-    }
+    return incoming
   }
 
   // --- Session-list mutations ------------------------------------------------
@@ -439,9 +357,6 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     knownSessions,
     activeChatReadOnly,
     activeChatCanFork,
-    // fork anchor
-    withForkAnchorFromUITurns,
-    syncForkAnchorFromUITurns,
     updateForkAnchorForReplacedMessage,
     // mutations
     replaceSessions,

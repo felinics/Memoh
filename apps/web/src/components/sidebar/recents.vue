@@ -75,9 +75,12 @@
                Sits AFTER the virtualizer's height spacer so it lives at the
                natural end of the scroll content; the IntersectionObserver
                below uses scrollEl as its root and triggers the next page
-               200px before the user actually reaches the bottom. -->
+               200px before the user actually reaches the bottom.
+               Mounted only once the list overflows the viewport — see
+               shouldShowLoadMoreSentinel — so a short first paint cannot
+               falsely intersect and kick a page fetch that grows the spacer. -->
           <div
-            v-if="hasMoreSessions"
+            v-if="showLoadMoreSentinel"
             ref="loadMoreSentinel"
             data-testid="load-more-sentinel"
             class="h-px w-full"
@@ -159,7 +162,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
 import { Check, ChevronDown } from 'lucide-vue-next'
-import { useLocalStorage } from '@vueuse/core'
+import { useElementSize, useLocalStorage } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntersectionObserver } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
@@ -170,6 +173,11 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { isSessionVisibleInSidebarMode, sortByRecency, type SidebarSessionMode } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import {
+  didLoadMoreMakeProgress,
+  shouldPrefetchToFillViewport,
+  shouldShowLoadMoreSentinel,
+} from './recents-scroll'
 import {
   Button,
   TextButton,
@@ -202,6 +210,7 @@ const {
   loadingChats,
   hasMoreSessions,
   loadingMoreSessions,
+  sessionsCursor,
 } = storeToRefs(chatStore)
 
 // The list pivots between human conversations (Recent) and system run streams
@@ -255,6 +264,12 @@ function measureRow(el: unknown) {
 // scroll content and fires the next page 200px before the user reaches it.
 // The store's loadMoreSessions guards re-entry (loadingMoreSessions / cursor
 // exhaustion), so the observer can fire freely as the user scrolls.
+const { height: viewportHeight } = useElementSize(scrollEl)
+const showLoadMoreSentinel = computed(() => shouldShowLoadMoreSentinel({
+  hasMore: hasMoreSessions.value,
+  contentHeight: totalSize.value,
+  viewportHeight: viewportHeight.value,
+}))
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 useIntersectionObserver(
   loadMoreSentinel,
@@ -266,6 +281,42 @@ useIntersectionObserver(
     root: scrollEl,
     rootMargin: '0px 0px 200px 0px',
     threshold: 0,
+  },
+)
+
+// Short first pages never reach the sentinel gate above — keep paging until
+// the list overflows (or the cursor ends) so empty viewport space is filled
+// without relying on a falsely-intersecting sentinel.
+watch(
+  [
+    hasMoreSessions,
+    loadingChats,
+    loadingMoreSessions,
+    totalSize,
+    viewportHeight,
+    sessionsCursor,
+  ],
+  (curr, prev) => {
+    if (!shouldPrefetchToFillViewport({
+      hasMore: hasMoreSessions.value,
+      loading: loadingChats.value || loadingMoreSessions.value,
+      contentHeight: totalSize.value,
+      viewportHeight: viewportHeight.value,
+    })) return
+    // Failed / no-op loadMore: loading settles with the same cursor and height.
+    // Do not tight-loop; a later viewport/list change can try again.
+    if (
+      prev
+      && !didLoadMoreMakeProgress({
+        wasLoadingMore: prev[2],
+        isLoadingMore: curr[2],
+        previousCursor: prev[5],
+        currentCursor: curr[5],
+        previousContentHeight: prev[3],
+        currentContentHeight: curr[3],
+      })
+    ) return
+    void chatStore.loadMoreSessions()
   },
 )
 

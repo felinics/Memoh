@@ -581,13 +581,14 @@ func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenSto
 	return reg
 }
 
-func provideEmailChatGateway(turnService turn.Service, queries dbstore.Queries, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
-	return &emailTurnGateway{turnService: turnService, queries: queries, jwtSecret: cfg.Auth.JWTSecret, logger: log}
+func provideEmailChatGateway(turnService turn.Service, queries dbstore.Queries, sessionService *sessionpkg.Service, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
+	return &emailTurnGateway{turnService: turnService, queries: queries, sessions: sessionService, jwtSecret: cfg.Auth.JWTSecret, logger: log}
 }
 
 type emailTurnGateway struct {
 	turnService turn.Service
 	queries     dbstore.Queries
+	sessions    *sessionpkg.Service
 	jwtSecret   string
 	logger      *slog.Logger
 }
@@ -606,12 +607,25 @@ func (g *emailTurnGateway) TriggerBotChat(ctx context.Context, botID, content st
 	if err != nil {
 		return fmt.Errorf("generate email turn token: %w", err)
 	}
+	// Each inbound email runs in a thread of its own, which is what it already
+	// meant by carrying no thread at all: no shared history with the previous
+	// email. It needs a real one now because a turn is admitted against a thread,
+	// and that is what gives the run an owner, a fence, and a terminal state.
+	thread, err := g.sessions.Create(ctx, sessionpkg.CreateInput{
+		BotID:       botID,
+		ChannelType: "email",
+		Type:        "chat",
+	})
+	if err != nil {
+		return fmt.Errorf("create email turn thread: %w", err)
+	}
 	handle, err := g.turnService.StartTurn(ctx, turn.StartTurnCommand{
 		SchemaVersion:  1,
 		TeamID:         team.DefaultTeamID,
 		Mode:           turn.ModeChat,
 		BotID:          botID,
 		ChatID:         botID,
+		ThreadID:       thread.ID,
 		UserID:         ownerID,
 		Token:          "Bearer " + token,
 		Query:          content,

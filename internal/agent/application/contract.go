@@ -10,10 +10,20 @@ import (
 // turn. Transport callers should prefer turn.StartTurnCommand; the additional
 // channel and function fields below are strictly in-process runtime state.
 type ChatRequest struct {
-	BotID                        string                `json:"-"`
-	ChatID                       string                `json:"-"`
-	ThreadID                     string                `json:"-"`
-	StreamID                     string                `json:"-"`
+	BotID    string `json:"-"`
+	ChatID   string `json:"-"`
+	ThreadID string `json:"-"`
+	// RunID is the server-minted identity of this turn's run. Downstream state
+	// that must agree on "which turn is this" — the compaction barrier, the ACP
+	// session, interactive tool headers — keys on it.
+	RunID string `json:"-"`
+	// TurnID and TurnPosition are the turn admission already allocated for this
+	// run. They travel with the request so the persisted user turn lands under
+	// the id the client was handed at run_accepted, instead of the history layer
+	// minting a second one (SR-TURN-001). Empty means no admission decided the
+	// turn — channel inbound, schedules, heartbeats — and history allocates it.
+	TurnID                       string                `json:"-"`
+	TurnPosition                 *int64                `json:"-"`
 	Token                        string                `json:"-"`
 	UserID                       string                `json:"-"`
 	SourceChannelIdentityID      string                `json:"-"`

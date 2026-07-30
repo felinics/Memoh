@@ -36,6 +36,7 @@ func TestPostgresRuntimeFenceStaleACPHandleCannotCancelCurrentDecisions(t *testi
 		t.Fatalf("allocate owner A token: %v", err)
 	}
 	fenceA := runtimefence.Fence{BotID: botID.String(), SessionID: sessionID.String(), Token: tokenA}
+	createACPRuntimeFenceRun(t, ctx, pool, fenceA)
 	if err := runtimefence.Activate(ctx, store, fenceA); err != nil {
 		t.Fatalf("activate owner A token: %v", err)
 	}
@@ -44,6 +45,8 @@ func TestPostgresRuntimeFenceStaleACPHandleCannotCancelCurrentDecisions(t *testi
 		t.Fatalf("allocate owner B token: %v", err)
 	}
 	fenceB := runtimefence.Fence{BotID: botID.String(), SessionID: sessionID.String(), Token: tokenB}
+	finishACPRuntimeFenceRun(t, ctx, pool, fenceA)
+	createACPRuntimeFenceRun(t, ctx, pool, fenceB)
 	if err := runtimefence.Activate(ctx, store, fenceB); err != nil {
 		t.Fatalf("activate owner B token: %v", err)
 	}
@@ -210,4 +213,33 @@ func createACPRuntimeFenceFixtures(t *testing.T, ctx context.Context, pool *pgxp
 		t.Fatalf("parse ACP runtime fence session id: %v", err)
 	}
 	return botID, sessionID
+}
+
+func createACPRuntimeFenceRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fence runtimefence.Fence) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_runs (
+			run_id, bot_id, session_id, invocation_id, turn_id, turn_position,
+			state, input_json, input_fingerprint, owner_id, fencing_token,
+			owner_since, live_generation
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, 'running', '{}'::jsonb, $7, $8, $9, now(), $10)
+	`,
+		uuid.New(), fence.BotID, fence.SessionID, uuid.NewString(), uuid.New(), fence.Token,
+		"acp-runtime-fence-test", fmt.Sprintf("owner-%d", fence.Token), fence.Token,
+		fmt.Sprintf("generation-%d", fence.Token),
+	); err != nil {
+		t.Fatalf("create ACP runtime fence run: %v", err)
+	}
+}
+
+func finishACPRuntimeFenceRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fence runtimefence.Fence) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		UPDATE session_runs
+		SET state = 'lost', updated_at = now()
+		WHERE session_id = $1 AND fencing_token = $2
+	`, fence.SessionID, fence.Token); err != nil {
+		t.Fatalf("finish ACP runtime fence run: %v", err)
+	}
 }

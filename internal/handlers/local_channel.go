@@ -3,7 +3,9 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +13,6 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/application"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
 	chatview "github.com/memohai/memoh/internal/agent/view"
 	"github.com/memohai/memoh/internal/apperror"
@@ -35,6 +37,7 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/media"
+	"github.com/memohai/memoh/internal/runtimefence"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/slash"
 )
@@ -59,6 +62,7 @@ type LocalChannelHandler struct {
 	accountService      *accounts.Service
 	sessionService      *sessionpkg.Service
 	agentService        *application.Service
+	sessionRuntime      wsTurnAdmitter
 	commandHandler      *command.Handler
 	skillResolver       runtimeSkillResolver
 	mediaService        *media.Service
@@ -74,6 +78,15 @@ type LocalChannelHandler struct {
 type runtimeSkillResolver interface {
 	ListSafeSkillCatalog(ctx context.Context, botID string) ([]skillset.SafeCatalogItem, error)
 	ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skillset.ResolvedSkill, error)
+}
+
+// wsTurnAdmitter is the durable admission this entry point depends on. It is
+// declared as the one method the handler calls rather than as the manager type
+// so a test can admit without a database, and so the handler cannot reach for
+// snapshot or command routing that belongs to the runtime protocol instead.
+type wsTurnAdmitter interface {
+	Admit(ctx context.Context, in sessionruntime.AdmitInput) (sessionruntime.Admission, error)
+	FinishRun(ctx context.Context, handle sessionruntime.RunHandle, status, message string) error
 }
 
 // NewLocalChannelHandler creates a local channel handler.
@@ -94,6 +107,12 @@ func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *cha
 // SetAgentService configures the application service used for WebSocket turns.
 func (h *LocalChannelHandler) SetAgentService(service *application.Service) {
 	h.agentService = service
+}
+
+// SetSessionRuntime installs the durable admission gate for turn-starting
+// WebSocket messages.
+func (h *LocalChannelHandler) SetSessionRuntime(admitter wsTurnAdmitter) {
+	h.sessionRuntime = admitter
 }
 
 func (h *LocalChannelHandler) SetCommandHandler(handler *command.Handler) {
@@ -202,7 +221,7 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	sessionID := strings.TrimSpace(req.SessionID)
 	skillActivationAllowed := true
 	if sessionID != "" {
-		if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+		if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
 			return err
 		}
 		supported, supportErr := h.wsSessionSupportsRequestedSkills(c.Request().Context(), sessionID)
@@ -635,9 +654,16 @@ var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
+// wsClientMessage carries the two identifiers a client is allowed to name, and
+// they are not interchangeable. invocation_id is minted by the client and names
+// an *intent*: it is the idempotency key for starting a turn, so a redelivered
+// send resolves to the run it already started instead of a second one. run_id is
+// minted by the server and names a *run*: it is the only way to address work
+// that already exists, which is why abort and decision responses carry it. A
+// client can never name a run it has not been told about.
 type wsClientMessage struct {
 	Type              string                     `json:"type"`
-	StreamID          string                     `json:"stream_id,omitempty"`
+	RunID             string                     `json:"run_id,omitempty"`
 	Text              string                     `json:"text,omitempty"`
 	SessionID         string                     `json:"session_id,omitempty"`
 	InvocationID      string                     `json:"invocation_id,omitempty"`
@@ -648,31 +674,21 @@ type wsClientMessage struct {
 	ModelID           string                     `json:"model_id,omitempty"`
 	ReasoningEffort   string                     `json:"reasoning_effort,omitempty"`
 	WorkspaceTargetID string                     `json:"workspace_target_id,omitempty"`
-	ApprovalID        string                     `json:"approval_id,omitempty"`
-	UserInputID       string                     `json:"user_input_id,omitempty"`
-	ShortID           int                        `json:"short_id,omitempty"`
-	ToolCallID        string                     `json:"tool_call_id,omitempty"`
+	DecisionID        string                     `json:"decision_id,omitempty"`
 	Decision          string                     `json:"decision,omitempty"`
 	Reason            string                     `json:"reason,omitempty"`
 	Answers           []userinput.QuestionAnswer `json:"answers,omitempty"`
 	Canceled          bool                       `json:"canceled,omitempty"`
-}
-
-func turnQuestionAnswers(in []userinput.QuestionAnswer) []turn.QuestionAnswer {
-	if in == nil {
-		return nil
-	}
-	out := make([]turn.QuestionAnswer, len(in))
-	for i := range in {
-		out[i] = turn.QuestionAnswer{
-			QuestionID: in[i].QuestionID,
-			OptionIDs:  in[i].OptionIDs,
-			CustomText: in[i].CustomText,
-			Text:       in[i].Text,
-			Skipped:    in[i].Skipped,
-		}
-	}
-	return out
+	// Cursor is the subscriber's last observed position. It is carried here
+	// rather than in a separate message type because runtime_subscribe shares
+	// this envelope with every other inbound message.
+	Cursor *runtimeCursor `json:"cursor,omitempty"`
+	// ControlID is the client's name for a control request such as abort. It is
+	// the idempotency key: a client that retries an abort — or reissues one after
+	// reconnecting to a different server — is answered with the first attempt's
+	// outcome instead of executing a second control, and the ack it receives
+	// carries this id back so it can be matched to the request that caused it.
+	ControlID string `json:"control_id,omitempty"`
 }
 
 type webRequestedSkill struct {
@@ -680,35 +696,79 @@ type webRequestedSkill struct {
 }
 
 type wsOutboundEvent struct {
-	Type      string `json:"type"`
-	StreamID  string `json:"stream_id,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
+	Type string `json:"type"`
+	// RunID is set on everything that describes an existing run. InvocationID
+	// is set only where no run exists yet — acceptance, rejection, session
+	// creation, and validation failures — because those are the moments when the
+	// client's own name for the turn is the only one both sides share.
+	RunID        string `json:"run_id,omitempty"`
+	InvocationID string `json:"invocation_id,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	Code         string `json:"code,omitempty"`
+	// TurnID names the turn the run belongs to. Every subscriber of the session
+	// is shown the same one (SR-OBS-003), so it is what lets the client that sent
+	// the turn and one that only watches agree on which turn a run is executing.
+	TurnID string `json:"turn_id,omitempty"`
+	// Epoch and Seq are the session's authoritative position at the moment the
+	// run became observable. They use the same names as the subscription frames
+	// so a client orders acceptance against those frames with one comparison
+	// instead of two vocabularies.
+	Epoch string `json:"epoch,omitempty"`
+	Seq   int64  `json:"seq,omitempty"`
+	// Duplicate marks an acceptance that named a run the invocation had already
+	// started, which is what makes a redelivered send safe to answer.
+	Duplicate bool   `json:"duplicate,omitempty"`
 	Data      any    `json:"data,omitempty"`
 	Message   string `json:"message,omitempty"`
 	Feedback  any    `json:"feedback,omitempty"`
+	// Control, ControlID and Applied describe the outcome of a control request.
+	// Applied is reported separately from Code because "the run was already over"
+	// is not a failure: the control was resolved, it simply changed nothing, and a
+	// client must be able to tell that apart from a control that never landed.
+	Control   string `json:"control,omitempty"`
+	ControlID string `json:"control_id,omitempty"`
+	Applied   bool   `json:"applied,omitempty"`
 }
 
-type activeWSStream struct {
-	streamID  string
-	sessionID string
-	cancel    context.CancelFunc
-	abortCh   chan struct{}
+// wsTurnRef names the turn an outbound event belongs to. It exists because that
+// name changes exactly once — from the client's invocation to the server's run —
+// and threading two strings through every send site invited them to drift apart.
+type wsTurnRef struct {
+	RunID        string
+	InvocationID string
+	SessionID    string
 }
 
-type wsStreamRegistry struct {
-	mu   sync.Mutex
-	byID map[string]*activeWSStream
+func wsTurn(invocationID, sessionID string) wsTurnRef {
+	return wsTurnRef{InvocationID: strings.TrimSpace(invocationID), SessionID: strings.TrimSpace(sessionID)}
+}
+
+func (r wsTurnRef) withRun(runID string) wsTurnRef {
+	r.RunID = strings.TrimSpace(runID)
+	return r
+}
+
+func (r wsTurnRef) withSession(sessionID string) wsTurnRef {
+	r.SessionID = strings.TrimSpace(sessionID)
+	return r
+}
+
+// event names the turn the way the client can resolve it: once a run exists its
+// id is authoritative and the invocation is redundant, because a second
+// subscriber that never sent the invocation still has to recognise this run.
+func (r wsTurnRef) event(eventType string) wsOutboundEvent {
+	out := wsOutboundEvent{Type: eventType, SessionID: r.SessionID}
+	if r.RunID != "" {
+		out.RunID = r.RunID
+		return out
+	}
+	out.InvocationID = r.InvocationID
+	return out
 }
 
 type wsRequestedSkillTurnRegistry struct {
 	mu     sync.Mutex
 	active map[string]int
-}
-
-func newWSStreamRegistry() *wsStreamRegistry {
-	return &wsStreamRegistry{
-		byID: make(map[string]*activeWSStream),
-	}
 }
 
 func newWSRequestedSkillTurnRegistry() *wsRequestedSkillTurnRegistry {
@@ -719,9 +779,9 @@ func wsRequestedSkillTurnKey(botID, sessionID string) string {
 	return strings.TrimSpace(botID) + ":" + strings.TrimSpace(sessionID)
 }
 
-func (r *wsRequestedSkillTurnRegistry) reserve(botID, sessionID, streamID string) (func(), bool) {
+func (r *wsRequestedSkillTurnRegistry) reserve(botID, sessionID, invocationID string) (func(), bool) {
 	key := wsRequestedSkillTurnKey(botID, sessionID)
-	if r == nil || strings.TrimSpace(botID) == "" || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(streamID) == "" {
+	if r == nil || strings.TrimSpace(botID) == "" || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(invocationID) == "" {
 		return func() {}, true
 	}
 
@@ -751,9 +811,9 @@ func (r *wsRequestedSkillTurnRegistry) reserve(botID, sessionID, streamID string
 	}, true
 }
 
-func (r *wsRequestedSkillTurnRegistry) enter(botID, sessionID, streamID string) func() {
+func (r *wsRequestedSkillTurnRegistry) enter(botID, sessionID, invocationID string) func() {
 	key := wsRequestedSkillTurnKey(botID, sessionID)
-	if r == nil || strings.TrimSpace(botID) == "" || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(streamID) == "" {
+	if r == nil || strings.TrimSpace(botID) == "" || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(invocationID) == "" {
 		return func() {}
 	}
 	r.mu.Lock()
@@ -778,7 +838,7 @@ func (r *wsRequestedSkillTurnRegistry) enter(botID, sessionID, streamID string) 
 	}
 }
 
-func (h *LocalChannelHandler) reserveWSRequestedSkillTurn(botID, sessionID, streamID string) (func(), bool) {
+func (h *LocalChannelHandler) reserveWSRequestedSkillTurn(botID, sessionID, invocationID string) (func(), bool) {
 	if h == nil {
 		return func() {}, true
 	}
@@ -788,10 +848,10 @@ func (h *LocalChannelHandler) reserveWSRequestedSkillTurn(botID, sessionID, stre
 	}
 	registry := h.wsSkillTurns
 	h.wsSkillTurnsMu.Unlock()
-	return registry.reserve(botID, sessionID, streamID)
+	return registry.reserve(botID, sessionID, invocationID)
 }
 
-func (h *LocalChannelHandler) enterWSMessageTurn(botID, sessionID, streamID string) func() {
+func (h *LocalChannelHandler) enterWSMessageTurn(botID, sessionID, invocationID string) func() {
 	if h == nil {
 		return func() {}
 	}
@@ -801,87 +861,7 @@ func (h *LocalChannelHandler) enterWSMessageTurn(botID, sessionID, streamID stri
 	}
 	registry := h.wsSkillTurns
 	h.wsSkillTurnsMu.Unlock()
-	return registry.enter(botID, sessionID, streamID)
-}
-
-func (r *wsStreamRegistry) register(stream *activeWSStream) error {
-	streamID := strings.TrimSpace(stream.streamID)
-	if streamID == "" {
-		return errors.New("stream_id is required")
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.byID[streamID]; exists {
-		return fmt.Errorf("stream_id %q is already active", streamID)
-	}
-	stream.streamID = streamID
-	stream.sessionID = strings.TrimSpace(stream.sessionID)
-	r.byID[streamID] = stream
-	return nil
-}
-
-func (r *wsStreamRegistry) hasSession(sessionID string) bool {
-	sessionID = strings.TrimSpace(sessionID)
-	if r == nil || sessionID == "" {
-		return false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, stream := range r.byID {
-		if stream != nil && stream.sessionID == sessionID {
-			return true
-		}
-	}
-	return false
-}
-
-type sessionTurnActiveChecker interface {
-	SessionTurnActive(botID, sessionID string) bool
-}
-
-func shouldRejectWSSkillActivationForActiveStream(activeStreams *wsStreamRegistry, activeTurns sessionTurnActiveChecker, botID, sessionID string, hasSkillActivation bool) bool {
-	if !hasSkillActivation {
-		return false
-	}
-	if activeStreams != nil && activeStreams.hasSession(sessionID) {
-		return true
-	}
-	return activeTurns != nil && activeTurns.SessionTurnActive(botID, sessionID)
-}
-
-func (r *wsStreamRegistry) finish(streamID string) {
-	streamID = strings.TrimSpace(streamID)
-	if streamID == "" {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	stream := r.byID[streamID]
-	if stream == nil {
-		return
-	}
-	delete(r.byID, streamID)
-}
-
-func (r *wsStreamRegistry) abort(streamID string) bool {
-	streamID = strings.TrimSpace(streamID)
-	if streamID == "" {
-		return false
-	}
-
-	r.mu.Lock()
-	stream := r.byID[streamID]
-	r.mu.Unlock()
-	if stream == nil {
-		return false
-	}
-	select {
-	case stream.abortCh <- struct{}{}:
-	default:
-	}
-	stream.cancel()
-	return true
+	return registry.enter(botID, sessionID, invocationID)
 }
 
 // wsWriter serialises all WebSocket writes through a single goroutine to
@@ -977,50 +957,136 @@ func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID
 	return "Bearer " + signed
 }
 
-func sendWSError(writer *wsWriter, streamID, sessionID, message string) {
+func sendWSError(writer *wsWriter, ref wsTurnRef, message string) {
+	event := ref.event("error")
+	event.Message = message
+	writer.SendJSON(event)
+}
+
+// wsRunAcceptance is what a client needs beyond the run id to reconcile the turn
+// it rendered optimistically with the authoritative one: which turn the run
+// executes, and where in the session's stream it became observable.
+type wsRunAcceptance struct {
+	TurnID string
+	Cursor sessionruntime.Cursor
+	// Duplicate marks an acceptance that named a run the invocation had already
+	// started, so a redelivered send attaches to that turn instead of expecting
+	// a second one.
+	Duplicate bool
+}
+
+// sendWSRunAccepted tells the client the server's name for the turn it asked
+// for. It is the first event of every run and the only place a run id is
+// introduced, so it has to be written before anything that carries one.
+func sendWSRunAccepted(writer *wsWriter, ref wsTurnRef, accepted wsRunAcceptance) {
 	writer.SendJSON(wsOutboundEvent{
-		Type:      "error",
-		StreamID:  strings.TrimSpace(streamID),
-		SessionID: strings.TrimSpace(sessionID),
-		Message:   message,
+		Type:         "run_accepted",
+		RunID:        ref.RunID,
+		InvocationID: ref.InvocationID,
+		SessionID:    ref.SessionID,
+		TurnID:       accepted.TurnID,
+		Epoch:        accepted.Cursor.Epoch,
+		Seq:          accepted.Cursor.Seq,
+		Duplicate:    accepted.Duplicate,
 	})
 }
 
-func newWSAppErrorEvent(streamID, sessionID string, err error) (wsOutboundEvent, bool) {
+// sendWSRunRejected answers a submission that will not become a run. The code is
+// a stable apperror code rather than prose because the client branches on it: one
+// of these two is worth retrying unchanged and the other never is.
+func sendWSRunRejected(writer *wsWriter, ref wsTurnRef, code apperror.Code, message string) {
+	writer.SendJSON(wsOutboundEvent{
+		Type:         "run_rejected",
+		InvocationID: ref.InvocationID,
+		SessionID:    ref.SessionID,
+		Code:         string(code),
+		Message:      message,
+	})
+}
+
+// sendWSControlAck answers a control the client named. It is sent from whichever
+// connection received the request, which is frequently not the one executing the
+// run, so it reports what the control did rather than what this connection did.
+//
+// Applied false with an empty code is a resolved control that changed nothing —
+// the run had already finished — and is a different answer from a code, which
+// means the control never reached an owner and is worth retrying.
+func sendWSControlAck(writer *wsWriter, ref wsTurnRef, control, controlID string, applied bool, code string) {
+	writer.SendJSON(wsOutboundEvent{
+		Type:      "control_ack",
+		RunID:     ref.RunID,
+		SessionID: ref.SessionID,
+		Control:   control,
+		ControlID: controlID,
+		Applied:   applied,
+		Code:      code,
+	})
+}
+
+// wsRunRejectionCode maps the admission sentinels to the stable codes clients
+// branch on. Everything else is a stream error, not a refusal to run.
+func wsRunRejectionCode(err error) (apperror.Code, bool) {
+	switch {
+	case errors.Is(err, sessionruntime.ErrSessionBusy):
+		return apperror.CodeSessionBusy, true
+	case errors.Is(err, sessionruntime.ErrInvocationConflict):
+		return apperror.CodeSessionInvocationConflict, true
+	default:
+		return "", false
+	}
+}
+
+func newWSAppErrorEvent(ref wsTurnRef, err error) (wsOutboundEvent, bool) {
 	public, ok := apperror.PublicFrom(err, "")
 	if !ok {
 		return wsOutboundEvent{}, false
 	}
-	return wsOutboundEvent{
-		Type:      "error",
-		StreamID:  strings.TrimSpace(streamID),
-		SessionID: strings.TrimSpace(sessionID),
-		Message:   public.Detail,
-		Feedback:  public,
-	}, true
+	event := ref.event("error")
+	event.Message = public.Detail
+	event.Feedback = public
+	return event, true
 }
 
-func sendWSErrorFromError(writer *wsWriter, streamID, sessionID string, err error) {
-	if event, ok := newWSAppErrorEvent(streamID, sessionID, err); ok {
+func sendWSErrorFromError(writer *wsWriter, ref wsTurnRef, err error) {
+	// A refusal to run is not a stream failure: the turn never started, so the
+	// client is told which invocation was refused and why, by code.
+	if code, ok := wsRunRejectionCode(err); ok {
+		sendWSRunRejected(writer, ref.withRun(""), code, err.Error())
+		return
+	}
+	if event, ok := newWSAppErrorEvent(ref, err); ok {
 		writer.SendJSON(event)
 		return
 	}
 	feedback := acpFeedbackError(err)
 	if feedback == nil {
-		sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+		sendWSError(writer, ref, wsErrorMessage(err))
 		return
 	}
-	writer.SendJSON(wsOutboundEvent{
-		Type:      "error",
-		StreamID:  strings.TrimSpace(streamID),
-		SessionID: strings.TrimSpace(sessionID),
-		Message:   strings.TrimSpace(feedback.Message),
-		Feedback:  feedback,
-	})
+	event := ref.event("error")
+	event.Message = strings.TrimSpace(feedback.Message)
+	event.Feedback = feedback
+	writer.SendJSON(event)
 }
 
-func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Context, writer *wsWriter, botID, sessionID, streamID string, eventCh <-chan application.WSStreamEvent) {
-	converter := chatview.NewUIMessageStreamConverter()
+// forwardWSStreamEvents publishes the run's events to the session runtime,
+// which folds each one into the run's authoritative state so every subscriber
+// of the session sees it — including one attached to a different connection or
+// a different server, and including this client after it reconnects
+// (SR-OBS-003).
+//
+// The initiating socket is not a special case and receives nothing here beyond
+// errors. It reads the run the same way every other subscriber does, through
+// the snapshot and deltas of the session it subscribed to; rendering a second,
+// connection-local copy of the same events would be a projection only this
+// client can see, which is exactly the divergence SR-OBS-003 forbids.
+func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Context, writer *wsWriter, botID string, ref wsTurnRef, handle sessionruntime.RunHandle, eventCh <-chan application.WSStreamEvent) {
+	publisher := h.sessionRuntimePublisher()
+	if handle.FencingToken <= 0 {
+		// No admitted ownership, so there is nothing this process is allowed to
+		// write for the run. Only a caller that bypasses admission gets here.
+		publisher = nil
+	}
 	outboundAssetRefs := make([]messagepkg.AssetRef, 0)
 	for event := range eventCh {
 		processed := h.processWSEvent(ctx, botID, event)
@@ -1034,85 +1100,330 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 				continue
 			}
 
-			switch streamEvent.Type {
-			case native.EventAgentStart:
-				writer.SendJSON(wsOutboundEvent{
-					Type:      "start",
-					StreamID:  streamID,
-					SessionID: sessionID,
-				})
-				continue
-			case native.EventAgentEnd, native.EventAgentAbort:
-				for _, uiMessage := range converter.ConvertTerminalMessages(streamEvent.Messages) {
-					writer.SendJSON(wsOutboundEvent{
-						Type:      "message",
-						StreamID:  streamID,
-						SessionID: sessionID,
-						Data:      uiMessage,
-					})
+			if publisher != nil {
+				// Published before anything is said on this socket, so the
+				// session's state never lags behind what a client has already
+				// been told: a reconnecting subscriber must not be handed less
+				// than it saw.
+				//
+				// assetCtx, not ctx: an aborted run cancels ctx and its last
+				// events arrive after that, which is exactly when publishing them
+				// matters most.
+				if _, err := publisher.HandleAgentEvent(assetCtx, handle, streamEvent); err != nil {
+					if errors.Is(err, sessionruntime.ErrRunOwnershipLost) {
+						// A superseded owner has nothing left to publish and every
+						// later event would fail identically.
+						publisher = nil
+					}
+					h.logger.Warn("publish runtime run event failed",
+						slog.Any("error", err),
+						slog.String("bot_id", botID),
+						slog.String("run_id", ref.RunID),
+						slog.String("session_id", ref.SessionID))
 				}
-				writer.SendJSON(wsOutboundEvent{
-					Type:      "end",
-					StreamID:  streamID,
-					SessionID: sessionID,
-				})
-				continue
-			case native.EventError:
+			}
+
+			// An error is the one thing the run's published state cannot carry on
+			// its own: it names the run as failed but not what to tell this
+			// caller, which is still waiting on the send it made.
+			if streamEvent.Type == native.EventError {
 				message := strings.TrimSpace(streamEvent.Error)
 				if message == "" {
 					message = "stream error"
 				}
-				sendWSError(writer, streamID, sessionID, message)
-				continue
-			}
-
-			uiEvents := converter.HandleEvent(chatview.UIStreamEventFromAgentEvent(streamEvent))
-			for _, uiMessage := range uiEvents {
-				writer.SendJSON(wsOutboundEvent{
-					Type:      "message",
-					StreamID:  streamID,
-					SessionID: sessionID,
-					Data:      uiMessage,
-				})
+				sendWSError(writer, ref, message)
 			}
 		}
 	}
 	if len(outboundAssetRefs) > 0 {
-		h.agentService.LinkOutboundAssets(assetCtx, botID, sessionID, outboundAssetRefs)
+		h.agentService.LinkOutboundAssets(assetCtx, botID, ref.SessionID, outboundAssetRefs)
 	}
 }
 
-type wsStreamRunner func(ctx context.Context, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error
+// wsStreamRunner receives the run it is executing as, because the run id is
+// minted at admission and everything downstream — compaction barriers, ACP
+// sessions, interactive tool headers — has to agree on that one name.
+//
+// turn is the turn admission allocated for this run. It is separate from ref
+// because ref is how the *client* names the turn, while this is how the
+// *database* does: the same value would otherwise have to be threaded through
+// every send site that only cares about the client's name for it.
+type wsStreamRunner func(ctx context.Context, ref wsTurnRef, turn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error
 
-func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, activeStreams *wsStreamRegistry, writer *wsWriter, botID, sessionID, streamID, logLabel string, onFinish func(), runner wsStreamRunner) {
-	streamCtx, streamCancel := context.WithCancel(baseCtx)
+type wsRunAdmissionBuilder func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error)
+
+// wsAdmittedTurn is the turn identity a run was admitted with. A zero value
+// means no admission decided the turn, so the history layer allocates one.
+type wsAdmittedTurn struct {
+	TurnID   string
+	Position *int64
+}
+
+// wsSubmission is the canonical form of what a client sent. Its bytes decide
+// whether a repeated invocation is the same submit or a conflicting one, so it
+// carries only what the user actually submitted: no timestamps, no tokens, no
+// per-attempt ids. Field order is the encoding order, so equal submissions
+// encode equal.
+type wsSubmission struct {
+	Kind      string `json:"kind"`
+	SessionID string `json:"session_id"`
+	Text      string `json:"text,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	// Attachments is a digest rather than the files themselves. Two submissions
+	// differ if their attachments differ, which is all the fingerprint needs,
+	// and the durable row does not carry inlined uploads to learn it.
+	Attachments string `json:"attachments,omitempty"`
+}
+
+// digestWSAttachments summarises the attachments exactly as the client sent
+// them. The raw bytes are the identity: a redelivery repeats them, and any edit
+// to what was attached changes them.
+func digestWSAttachments(attachments []json.RawMessage) string {
+	if len(attachments) == 0 {
+		return ""
+	}
+	sum := sha256.New()
+	for _, attachment := range attachments {
+		sum.Write(attachment)
+		sum.Write([]byte{0})
+	}
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+// encode renders the submission for fingerprinting. A marshal error cannot come
+// from these field types, so it collapses to a payload that still differs per
+// invocation rather than to an admission that silently matches everything.
+func (s wsSubmission) encode() []byte {
+	payload, err := json.Marshal(s)
+	if err != nil {
+		return []byte(s.Kind + "\x00" + s.SessionID + "\x00" + s.Text + "\x00" + s.MessageID)
+	}
+	return payload
+}
+
+// wsRunAdmission is the outcome of naming one WebSocket turn.
+type wsRunAdmission struct {
+	RunID string
+	// TurnID and TurnPosition are the turn admission allocated. They are carried
+	// to the runner so the persisted user turn lands under the id the client was
+	// given, rather than a second one minted by the history layer.
+	TurnID       string
+	TurnPosition *int64
+	// Accepted is what the client is told once the run is about to execute. It
+	// is carried from admission rather than rebuilt at the send site because the
+	// turn id and the cursor exist only there: the ledger decides the first and
+	// the live reservation decides the second.
+	Accepted wsRunAcceptance
+	// Handle is the durable ownership this process holds, carrying the fencing
+	// token its terminal write must present.
+	Handle sessionruntime.RunHandle
+	// Execute is false when the run already exists under another owner or has
+	// already finished. The client has been told which run its invocation
+	// resolved to, and a second execution of it is the duplication admission
+	// exists to prevent.
+	Execute bool
+}
+
+// admitWSTurn turns a submission into a run this process may execute.
+func (h *LocalChannelHandler) admitWSTurn(ctx context.Context, writer *wsWriter, botID string, ref wsTurnRef, submission []byte, admissionBuilder wsRunAdmissionBuilder, abortCh chan struct{}, cancel context.CancelFunc, ownershipCancel context.CancelCauseFunc) (wsRunAdmission, bool) {
+	if h.sessionRuntime == nil {
+		sendWSError(writer, ref, "session runtime is not configured")
+		return wsRunAdmission{}, false
+	}
+	if admissionBuilder == nil {
+		admissionBuilder = func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+			return sessionruntime.RunAdmissionView{}, nil
+		}
+	}
+	admission, err := h.sessionRuntime.Admit(ctx, sessionruntime.AdmitInput{
+		BotID:        botID,
+		SessionID:    ref.SessionID,
+		InvocationID: ref.InvocationID,
+		Payload:      submission,
+		Execution: sessionruntime.Execution{
+			Admission: admissionBuilder,
+			AbortCh:   abortCh,
+			Cancel:    cancel,
+			// Revoking ownership cancels the run with a cause, which is what lets
+			// the execution below tell "this run was stopped" apart from "this run
+			// was taken away". Only the second must leave no durable trace.
+			OwnershipCancel: ownershipCancel,
+		},
+	})
+	if err != nil {
+		// ErrSessionBusy and ErrInvocationConflict arrive here as themselves and
+		// leave as run_rejected with the stable code the client branches on.
+		sendWSErrorFromError(writer, ref, err)
+		return wsRunAdmission{}, false
+	}
+	if !admission.Started {
+		// The run exists and its turn is already named, but this call reserved
+		// nothing, so there is no cursor to report: where the session stands now
+		// is what a subscription's snapshot answers.
+		sendWSRunAccepted(writer, ref.withRun(admission.RunID), wsRunAcceptance{TurnID: admission.TurnID, Duplicate: true})
+		return wsRunAdmission{RunID: admission.RunID}, true
+	}
+	return wsRunAdmission{
+		RunID:        admission.RunID,
+		TurnID:       admission.TurnID,
+		TurnPosition: &admission.TurnPosition,
+		Accepted:     wsRunAcceptance{TurnID: admission.TurnID, Cursor: admission.Cursor},
+		Handle:       admission.Handle,
+		Execute:      true,
+	}, true
+}
+
+// finishWSRun writes the run's terminal state under the token this process was
+// admitted with. It is the release of the session's single active slot: without
+// it the durable row stays active and the next submission is told the session is
+// busy until the reaper times the lease out.
+//
+// Only the stable error code reaches the run's published state. The underlying
+// error is a private diagnostic and stays in the log.
+func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAdmission, runErr error) {
+	if h.sessionRuntime == nil || admission.Handle.FencingToken <= 0 {
+		return
+	}
+	// This process reports only what it actually knows, which is whether the run
+	// failed: it holds the error. It does not know why an execution it was told
+	// to stop was stopped. Every abort now arrives as a routed control, which
+	// unblocks the runner and cancels its context, so the owner sees either a
+	// clean return or a bare cancellation and neither says "aborted".
+	//
+	// Anything that is not a failure is therefore left unnamed, and the manager
+	// resolves it from the intent already recorded against the run. Reporting a
+	// clean return as `completed` is what made a routed abort finalize as a
+	// successful turn (SR-CTL-001); a cancellation reported as `errored` blames
+	// the symptom.
+	status, message := "", ""
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		status = sessionruntime.RunStatusErrored
+		message = string(apperror.CodeOf(runErr))
+	}
+	switch err := h.sessionRuntime.FinishRun(ctx, admission.Handle, status, message); {
+	case errors.Is(err, sessionruntime.ErrRunOwnershipLost):
+		// Expected, not a failure: this process was superseded mid-run, so the
+		// terminal write was refused and the reaper names the outcome instead.
+		h.logger.Warn("skip finishing runtime run after ownership loss",
+			slog.String("run_id", admission.RunID))
+	case err != nil:
+		h.logger.Error("finish runtime run failed",
+			slog.Any("error", err),
+			slog.String("run_id", admission.RunID),
+			slog.String("status", status))
+	}
+}
+
+// abortWSRun stops a run the client named.
+//
+// It routes through the session runtime, which is the only way that works: a
+// run belongs to a session, not to a socket, so a client that reconnected — in
+// a cluster, routinely onto a server that has never heard of the run — has no
+// local execution to cancel. The manager knows which process owns the run and
+// can reach it (SR-CTL-001).
+//
+// Routing is also what decides the run's terminal state. The manager records
+// the abort intent and moves the run to `aborting` before anything is
+// cancelled, so the cancellation that follows is already explained; a local
+// cancel would race that write and let the run finish as `completed`.
+func (h *LocalChannelHandler) abortWSRun(ctx context.Context, writer *wsWriter, botID string, msg wsClientMessage, runID string) {
+	sessionID := strings.TrimSpace(msg.SessionID)
+	controlID := strings.TrimSpace(msg.ControlID)
+	ref := wsTurn(msg.InvocationID, sessionID).withRun(runID)
+
+	controller := h.sessionRuntimeController()
+	if controller == nil || sessionID == "" {
+		if controlID != "" {
+			sendWSControlAck(writer, ref, "abort", controlID, false, "")
+		}
+		return
+	}
+	applied, err := controller.AbortControl(ctx, botID, sessionID, runID, controlID)
+	if err != nil {
+		h.logger.Warn("route ws abort failed",
+			slog.Any("error", err),
+			slog.String("bot_id", botID),
+			slog.String("run_id", runID),
+			slog.String("session_id", sessionID))
+		if controlID != "" {
+			sendWSControlAck(writer, ref, "abort", controlID, false, string(apperror.CodeOf(err)))
+		}
+		return
+	}
+	if controlID != "" {
+		sendWSControlAck(writer, ref, "abort", controlID, applied, "")
+	}
+}
+
+// startWSStream is where a submission becomes a run: admission names the run,
+// the server publishes that name, and only then does anything execute. The id
+// comes from the ledger rather than from the client, which is what makes run
+// identity unforgeable and lets a second subscriber address the same run.
+//
+// submission is the canonical bytes that identify what was sent. The ledger
+// arbitrates every new turn: a repeated invocation resolves to its original
+// run, a session that is already running one rejects this, and the winner
+// receives a fencing token its durable writes carry. Decision responses do not
+// enter this path; they route to the existing run's owner.
+//
+// The returned ref carries the run id so callers describing the same turn — a
+// persisted user message, a late error — name it the way the client will.
+func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, writer *wsWriter, botID string, ref wsTurnRef, logLabel string, submission []byte, admissionBuilder wsRunAdmissionBuilder, onFinish func(), runner wsStreamRunner) (wsTurnRef, bool) {
+	// Cause-carrying so a lost owner lease is distinguishable downstream from an
+	// ordinary stop: both cancel this context, and only one of them means this
+	// process may no longer write for the run.
+	streamCtx, streamCancelCause := context.WithCancelCause(baseCtx)
+	streamCancel := func() { streamCancelCause(context.Canceled) }
 	abortCh := make(chan struct{}, 1)
-	if err := activeStreams.register(&activeWSStream{
-		streamID:  streamID,
-		sessionID: sessionID,
-		cancel:    streamCancel,
-		abortCh:   abortCh,
-	}); err != nil {
+
+	admission, ok := h.admitWSTurn(streamCtx, writer, botID, ref, submission, admissionBuilder, abortCh, streamCancel, streamCancelCause)
+	if !ok {
 		streamCancel()
 		if onFinish != nil {
 			onFinish()
 		}
-		sendWSError(writer, streamID, sessionID, err.Error())
-		return
+		return ref, false
+	}
+	ref = ref.withRun(admission.RunID)
+	if !admission.Execute {
+		streamCancel()
+		if onFinish != nil {
+			onFinish()
+		}
+		return ref, false
+	}
+	if admission.Handle.FencingToken > 0 {
+		streamCtx = runtimefence.WithContext(streamCtx, runtimefence.Fence{
+			BotID:     admission.Handle.BotID,
+			SessionID: admission.Handle.SessionID,
+			Token:     admission.Handle.FencingToken,
+		})
 	}
 
+	sendWSRunAccepted(writer, ref, admission.Accepted)
+
 	eventCh := make(chan application.WSStreamEvent, 64)
-	releaseCompaction := h.agentService.DeferSessionCompaction(botID, sessionID, streamID)
+	forwarded := make(chan struct{})
+	releaseCompaction := h.agentService.DeferSessionCompaction(botID, ref.SessionID, ref.RunID)
 	go func() {
 		defer streamCancel()
 		err := func() error {
-			defer activeStreams.finish(streamID)
 			if onFinish != nil {
 				defer onFinish()
 			}
 			defer close(eventCh)
-			return runner(streamCtx, eventCh, abortCh)
+			return runner(streamCtx, ref, wsAdmittedTurn{TurnID: admission.TurnID, Position: admission.TurnPosition}, eventCh, abortCh)
 		}()
+		// Every event this run produced has to be published before the run is
+		// declared finished, or a subscriber is shown the terminal state and then
+		// handed output that supposedly preceded it. The forwarder cannot outlive
+		// its channel — the runner closed it above — and its writes stop when the
+		// writer closes, so this waits on a drain that is already bounded.
+		<-forwarded
+		// The terminal write outlives the connection: a client that disappears
+		// mid-turn must still free the session, and baseCtx is already gone by
+		// the time an aborted run returns.
+		h.finishWSRun(context.WithoutCancel(baseCtx), admission, err)
 		if err != nil && connCtx.Err() == nil {
 			privateErr := err
 			if cause := apperror.CauseOf(err); cause != nil {
@@ -1123,15 +1434,18 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 				slog.String("error_code", string(apperror.CodeOf(err))),
 				slog.Any("error", privateErr),
 				slog.String("bot_id", botID),
-				slog.String("session_id", sessionID))
-			sendWSErrorFromError(writer, streamID, sessionID, err)
+				slog.String("run_id", ref.RunID),
+				slog.String("session_id", ref.SessionID))
+			sendWSErrorFromError(writer, ref, err)
 		}
 	}()
 
 	go func() {
+		defer close(forwarded)
 		defer releaseCompaction()
-		h.forwardWSStreamEvents(streamCtx, baseCtx, writer, botID, sessionID, streamID, eventCh)
+		h.forwardWSStreamEvents(streamCtx, baseCtx, writer, botID, ref, admission.Handle, eventCh)
 	}()
+	return ref, true
 }
 
 // HandleWebSocket godoc
@@ -1179,7 +1493,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	connCtx, connCancel := context.WithCancel(context.Background())
 	defer connCancel()
 	streamBaseCtx := context.WithoutCancel(c.Request().Context())
-	activeStreams := newWSStreamRegistry()
+
+	// Subscriptions observe sessions; they never own the runs behind them, so
+	// closing them on disconnect leaves a run executing for its other
+	// subscribers (SR-OBS-003).
+	subscriptions := newRuntimeSubscriptions(h.sessionRuntimeObserver(), writer, h.logger)
+	defer subscriptions.close()
+	authorizeSubscription := func(ctx context.Context, sessionID string) error {
+		return h.authorizeWSSession(ctx, channelIdentityID, botID, sessionID)
+	}
 
 	for {
 		_, raw, readErr := conn.ReadMessage()
@@ -1201,117 +1523,177 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			continue
 		}
 
+		if subscriptions.handle(streamBaseCtx, botID, runtimeClientMessage{
+			Type:      msg.Type,
+			SessionID: msg.SessionID,
+			Cursor:    msg.Cursor,
+		}, authorizeSubscription) {
+			continue
+		}
+
 		switch msg.Type {
 		case "abort":
-			streamID := strings.TrimSpace(msg.StreamID)
-			if streamID == "" {
-				sendWSError(writer, "", strings.TrimSpace(msg.SessionID), "stream_id is required")
+			// Abort is the one inbound message that addresses existing work, so
+			// it is the one that takes a run_id.
+			runID := strings.TrimSpace(msg.RunID)
+			if runID == "" {
+				sendWSError(writer, wsTurn("", msg.SessionID), "run_id is required")
 				continue
 			}
-			activeStreams.abort(streamID)
+			h.abortWSRun(streamBaseCtx, writer, botID, msg, runID)
 
 		case "tool_approval_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
+			runID := strings.TrimSpace(msg.RunID)
+			ref := wsTurn("", sessionID).withRun(runID)
 			if sessionID == "" {
-				sendWSError(writer, strings.TrimSpace(msg.StreamID), "", "session_id is required")
+				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
-			streamID := strings.TrimSpace(msg.StreamID)
-			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+			if runID == "" {
+				sendWSError(writer, ref, "run_id is required")
 				continue
 			}
-			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+			decisionID := strings.TrimSpace(msg.DecisionID)
+			if decisionID == "" {
+				sendWSError(writer, ref, "decision_id is required")
 				continue
 			}
-			explicitID := strings.TrimSpace(msg.ApprovalID)
-			if explicitID == "" && msg.ShortID > 0 {
-				explicitID = strconv.Itoa(msg.ShortID)
+			controlID := strings.TrimSpace(msg.ControlID)
+			if controlID == "" {
+				sendWSError(writer, ref, "control_id is required")
+				continue
 			}
-			suppressActivePromptAttach := activeStreams.hasSession(sessionID)
-			releaseWSMessageTurn := h.enterWSMessageTurn(botID, sessionID, streamID)
-
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws approval stream error", releaseWSMessageTurn,
-				func(ctx context.Context, eventCh chan<- application.WSStreamEvent, _ <-chan struct{}) error {
-					return h.agentService.RespondToolApproval(ctx, turn.ToolApprovalResponse{
-						BotID:                      botID,
-						ThreadID:                   sessionID,
-						ActorChannelIdentityID:     channelIdentityID,
-						ActorUserID:                channelIdentityID,
-						ApprovalID:                 strings.TrimSpace(msg.ApprovalID),
-						ExplicitID:                 explicitID,
-						Decision:                   strings.TrimSpace(msg.Decision),
-						Reason:                     strings.TrimSpace(msg.Reason),
-						ChatToken:                  bearerToken,
-						SuppressActivePromptAttach: suppressActivePromptAttach,
-					}, eventCh)
-				},
-			)
+			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, ref, wsErrorMessage(err))
+				continue
+			}
+			controller := h.sessionRuntimeController()
+			if controller == nil {
+				sendWSError(writer, ref, "session runtime is not configured")
+				continue
+			}
+			payload, err := json.Marshal(application.ToolApprovalResponseInput{
+				ControlID:                  controlID,
+				BotID:                      botID,
+				ThreadID:                   sessionID,
+				ActorChannelIdentityID:     channelIdentityID,
+				ActorUserID:                channelIdentityID,
+				ApprovalID:                 decisionID,
+				ExplicitID:                 decisionID,
+				Decision:                   strings.TrimSpace(msg.Decision),
+				Reason:                     strings.TrimSpace(msg.Reason),
+				SuppressActivePromptAttach: true,
+			})
+			if err != nil {
+				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeOf(err)))
+				continue
+			}
+			result, err := controller.RouteDecisionResponse(streamBaseCtx, sessionruntime.DecisionResponse{
+				ControlID: controlID, Type: sessionruntime.CommandToolApprovalResponse,
+				DecisionID: decisionID, BotID: botID, SessionID: sessionID, RunID: runID,
+				Payload: payload,
+			})
+			code := ""
+			if err != nil {
+				code = string(apperror.CodeOf(err))
+				h.logger.Warn("route ws tool approval response failed",
+					slog.Any("error", err),
+					slog.String("bot_id", botID),
+					slog.String("run_id", runID),
+					slog.String("session_id", sessionID),
+					slog.String("decision_id", decisionID))
+			}
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied && err == nil, code)
 
 		case "user_input_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
+			runID := strings.TrimSpace(msg.RunID)
+			ref := wsTurn("", sessionID).withRun(runID)
 			if sessionID == "" {
-				sendWSError(writer, strings.TrimSpace(msg.StreamID), "", "session_id is required")
+				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
-			streamID := strings.TrimSpace(msg.StreamID)
-			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+			if runID == "" {
+				sendWSError(writer, ref, "run_id is required")
 				continue
 			}
-			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+			decisionID := strings.TrimSpace(msg.DecisionID)
+			if decisionID == "" {
+				sendWSError(writer, ref, "decision_id is required")
 				continue
 			}
-			explicitID := strings.TrimSpace(msg.UserInputID)
-			if explicitID == "" && msg.ShortID > 0 {
-				explicitID = strconv.Itoa(msg.ShortID)
+			controlID := strings.TrimSpace(msg.ControlID)
+			if controlID == "" {
+				sendWSError(writer, ref, "control_id is required")
+				continue
 			}
-			suppressActivePromptAttach := activeStreams.hasSession(sessionID)
-			releaseWSMessageTurn := h.enterWSMessageTurn(botID, sessionID, streamID)
-
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws user input stream error", releaseWSMessageTurn,
-				func(ctx context.Context, eventCh chan<- application.WSStreamEvent, _ <-chan struct{}) error {
-					return h.agentService.RespondUserInput(ctx, turn.UserInputResponse{
-						BotID:                      botID,
-						ThreadID:                   sessionID,
-						ActorChannelIdentityID:     channelIdentityID,
-						ActorUserID:                channelIdentityID,
-						UserInputID:                strings.TrimSpace(msg.UserInputID),
-						ExplicitID:                 explicitID,
-						Answers:                    turnQuestionAnswers(msg.Answers),
-						Canceled:                   msg.Canceled,
-						Reason:                     strings.TrimSpace(msg.Reason),
-						ChatToken:                  bearerToken,
-						SuppressActivePromptAttach: suppressActivePromptAttach,
-					}, eventCh)
-				},
-			)
+			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, ref, wsErrorMessage(err))
+				continue
+			}
+			controller := h.sessionRuntimeController()
+			if controller == nil {
+				sendWSError(writer, ref, "session runtime is not configured")
+				continue
+			}
+			payload, err := json.Marshal(application.UserInputResponseInput{
+				ControlID:                  controlID,
+				BotID:                      botID,
+				ThreadID:                   sessionID,
+				ActorChannelIdentityID:     channelIdentityID,
+				ActorUserID:                channelIdentityID,
+				UserInputID:                decisionID,
+				ExplicitID:                 decisionID,
+				Answers:                    msg.Answers,
+				Canceled:                   msg.Canceled,
+				Reason:                     strings.TrimSpace(msg.Reason),
+				SuppressActivePromptAttach: true,
+			})
+			if err != nil {
+				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeOf(err)))
+				continue
+			}
+			result, err := controller.RouteDecisionResponse(streamBaseCtx, sessionruntime.DecisionResponse{
+				ControlID: controlID, Type: sessionruntime.CommandUserInputResponse,
+				DecisionID: decisionID, BotID: botID, SessionID: sessionID, RunID: runID,
+				Payload: payload,
+			})
+			code := ""
+			if err != nil {
+				code = string(apperror.CodeOf(err))
+				h.logger.Warn("route ws user input response failed",
+					slog.Any("error", err),
+					slog.String("bot_id", botID),
+					slog.String("run_id", runID),
+					slog.String("session_id", sessionID),
+					slog.String("decision_id", decisionID))
+			}
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied && err == nil, code)
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)
 			sessionID := strings.TrimSpace(msg.SessionID)
-			streamID := strings.TrimSpace(msg.StreamID)
+			ref := wsTurn(msg.InvocationID, sessionID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 
-			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+			if ref.InvocationID == "" {
+				sendWSError(writer, ref, "invocation_id is required")
 				continue
 			}
 			if sessionID != "" {
-				if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-					sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
+					sendWSError(writer, ref, wsErrorMessage(err))
 					continue
 				}
 			}
 			if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, ref, wsErrorMessage(err))
 				continue
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					sendWSError(writer, streamID, sessionID, err.Error())
+					sendWSError(writer, ref, err.Error())
 					continue
 				}
 			}
@@ -1327,7 +1709,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			case slash.DecisionNormalChat:
 			case slash.DecisionCommandAction:
 				if err := h.authorizeWSChatAccess(streamBaseCtx, channelIdentityID, botID); err != nil {
-					sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+					sendWSError(writer, ref, wsErrorMessage(err))
 					continue
 				}
 				actionID := webActionID(decision.Command.Resource, decision.Command.Action)
@@ -1335,7 +1717,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if strings.TrimSpace(sessionID) != "" {
 					supported, supportErr := h.wsSessionSupportsRequestedSkills(streamBaseCtx, sessionID)
 					if supportErr != nil {
-						sendWSErrorFromError(writer, streamID, sessionID, supportErr)
+						sendWSErrorFromError(writer, ref, supportErr)
 						continue
 					}
 					skillActivationAllowed = supported
@@ -1364,12 +1746,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 			hasSkillActivation := hasRequestedSkills || pendingSkillIntent != nil
 			if text == "" && len(msg.Attachments) == 0 && !hasSkillActivation {
-				sendWSError(writer, streamID, sessionID, "message text or attachments required")
+				sendWSError(writer, ref, "message text or attachments required")
 				continue
 			}
 			if sessionID == "" || hasSkillActivation {
 				if err := h.authorizeWSChatAccess(streamBaseCtx, channelIdentityID, botID); err != nil {
-					sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+					sendWSError(writer, ref, wsErrorMessage(err))
 					continue
 				}
 			}
@@ -1386,7 +1768,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			var requestedSkillContexts []turn.RequestedSkillContext
 			var skillActivation *turn.SkillActivation
 			userMessageKind := ""
-			userVisibleText := ""
+			userVisibleText := text
 			streamText := text
 			streamModelText := text
 			var err error
@@ -1401,13 +1783,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			if sessionID != "" {
 				sessionAuthorized = true
 				if hasSkillActivation {
-					if shouldRejectWSSkillActivationForActiveStream(activeStreams, h.agentService, botID, sessionID, true) {
-						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
-						continue
-					}
 					supported, supportErr := h.wsSessionSupportsRequestedSkills(streamBaseCtx, sessionID)
 					if supportErr != nil {
-						sendWSErrorFromError(writer, streamID, sessionID, supportErr)
+						sendWSErrorFromError(writer, ref, supportErr)
 						continue
 					}
 					if !supported {
@@ -1415,13 +1793,13 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						continue
 					}
 					var reserved bool
-					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, streamID)
+					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, ref.InvocationID)
 					if !reserved {
 						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
 						continue
 					}
 				} else {
-					releaseActiveWSTurn = h.enterWSMessageTurn(botID, sessionID, streamID)
+					releaseActiveWSTurn = h.enterWSMessageTurn(botID, sessionID, ref.InvocationID)
 				}
 			}
 
@@ -1463,44 +1841,43 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 			if sessionID == "" {
 				if h.sessionService == nil {
-					sendWSError(writer, streamID, "", "session service not configured")
+					sendWSError(writer, ref, "session service not configured")
 					releaseActiveWSTurnNow()
 					continue
 				}
 				created, createErr := h.createWSChatSession(streamBaseCtx, botID, channelIdentityID)
 				if createErr != nil {
-					sendWSError(writer, streamID, "", createErr.Error())
+					sendWSError(writer, ref, createErr.Error())
 					releaseActiveWSTurnNow()
 					continue
 				}
 				sessionID = created.ID
 				msg.SessionID = sessionID
+				ref = ref.withSession(sessionID)
 				if hasSkillActivation {
 					var reserved bool
-					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, streamID)
+					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, ref.InvocationID)
 					if !reserved {
 						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
 						continue
 					}
 				} else {
-					releaseActiveWSTurn = h.enterWSMessageTurn(botID, sessionID, streamID)
+					releaseActiveWSTurn = h.enterWSMessageTurn(botID, sessionID, ref.InvocationID)
 				}
-				writer.SendJSON(map[string]any{
-					"type":       "session_created",
-					"stream_id":  streamID,
-					"session_id": sessionID,
-				})
+				// The session exists before the run does, so this is announced
+				// under the client's own name for the turn.
+				writer.SendJSON(ref.event("session_created"))
 			}
 			if !sessionAuthorized {
-				if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-					sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
+					sendWSError(writer, ref, wsErrorMessage(err))
 					releaseActiveWSTurnNow()
 					continue
 				}
 			}
 			acpInfo, err := h.authorizeWSACPExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
 			if err != nil {
-				sendWSErrorFromError(writer, streamID, sessionID, err)
+				sendWSErrorFromError(writer, ref, err)
 				releaseActiveWSTurnNow()
 				continue
 			}
@@ -1519,13 +1896,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			externalMessageID := ""
 			var preparedActivationReq *application.ChatRequest
 			if hasSkillActivation {
-				externalMessageID = streamID
+				// The persisted user turn is deduplicated by the client's
+				// invocation id: it exists before any run does, and the
+				// invocation is precisely the key a redelivery would repeat.
+				externalMessageID = ref.InvocationID
 				ingestedActivationAttachments = h.ingestWSInboundAttachments(streamBaseCtx, botID, chatAttachments)
 				userReq := application.ChatRequest{
 					BotID:                   botID,
 					ChatID:                  botID,
 					ThreadID:                sessionID,
-					StreamID:                streamID,
 					UserID:                  channelIdentityID,
 					SourceChannelIdentityID: channelIdentityID,
 					ExternalMessageID:       externalMessageID,
@@ -1544,38 +1923,48 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				preparedReq, persisted, persistErr := h.agentService.ApplyUserMessageHookAndPersistUserTurn(streamBaseCtx, userReq)
 				if persistErr != nil {
-					sendWSErrorFromError(writer, streamID, sessionID, persistErr)
+					sendWSErrorFromError(writer, ref, persistErr)
 					releaseActiveWSTurnNow()
 					continue
 				}
 				preparedActivationReq = &preparedReq
 				persistedUserMessageID = persisted.ID
-				turns := chatview.ConvertMessagesToUITurns([]messagepkg.Message{persisted})
-				if len(turns) > 0 {
-					writer.SendJSON(wsOutboundEvent{
-						Type:      "user_message",
-						StreamID:  streamID,
-						SessionID: sessionID,
-						Data:      turns[0],
-					})
-				}
 				userMessagePersisted = true
 			}
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws stream error", releaseActiveWSTurn,
-				func(ctx context.Context, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
-					// Persist inbound attachments into the media store first so each
-					// carries a content_hash. Without one the file is still inlined
-					// for the model to see, but it is never linked to the stored user
-					// message and would vanish from history once the session refreshes.
-					ingestedAttachments := ingestedActivationAttachments
-					if !hasSkillActivation {
-						ingestedAttachments = h.ingestWSInboundAttachments(ctx, botID, chatAttachments)
-					}
+			submission := wsSubmission{
+				Kind:        "message",
+				SessionID:   sessionID,
+				Text:        userVisibleText,
+				Attachments: digestWSAttachments(msg.Attachments),
+			}.encode()
+			messageAdmission := &wsMessageAdmission{
+				handler: h,
+				botID:   botID,
+				request: chatview.UITurn{
+					Role:              "user",
+					Text:              userVisibleText,
+					UserMessageKind:   userMessageKind,
+					SkillActivation:   skillActivation,
+					Timestamp:         time.Now().UTC(),
+					Platform:          h.channelType.String(),
+					SenderUserID:      channelIdentityID,
+					ExternalMessageID: ref.InvocationID,
+				},
+				attachments: chatAttachments,
+			}
+			if hasSkillActivation {
+				messageAdmission.attachments = ingestedActivationAttachments
+				messageAdmission.attachmentsPrepared = true
+			}
+			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws stream error", submission, messageAdmission.build, releaseActiveWSTurn,
+				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
 					req := application.ChatRequest{
 						BotID:                   botID,
 						ChatID:                  botID,
 						ThreadID:                sessionID,
-						StreamID:                streamID,
+						RunID:                   runRef.RunID,
+						TurnID:                  admittedTurn.TurnID,
+						TurnPosition:            admittedTurn.Position,
 						UserID:                  channelIdentityID,
 						SourceChannelIdentityID: channelIdentityID,
 						ExternalMessageID:       externalMessageID,
@@ -1593,7 +1982,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						CurrentChannel:          h.channelType.String(),
 						ReplyTarget:             botID,
 						Channels:                []string{h.channelType.String()},
-						Attachments:             ingestedAttachments,
+						Attachments:             messageAdmission.preparedAttachments(),
 						RequestedSkills:         requestedSkillContexts,
 						SkipMemoryExtraction:    hasSkillActivation && userVisibleText == "",
 						SkipTitleGeneration:     hasSkillActivation && userVisibleText == "",
@@ -1620,70 +2009,85 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 		case "retry_message":
 			sessionID := strings.TrimSpace(msg.SessionID)
-			streamID := strings.TrimSpace(msg.StreamID)
+			ref := wsTurn(msg.InvocationID, sessionID)
 			messageID := strings.TrimSpace(msg.MessageID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
-			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+			if ref.InvocationID == "" {
+				sendWSError(writer, ref, "invocation_id is required")
 				continue
 			}
 			if sessionID == "" {
-				sendWSError(writer, streamID, "", "session_id is required")
+				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
 			if messageID == "" {
-				sendWSError(writer, streamID, sessionID, "message_id is required")
+				sendWSError(writer, ref, "message_id is required")
 				continue
 			}
-			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, ref, wsErrorMessage(err))
 				continue
 			}
 			if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, ref, wsErrorMessage(err))
 				continue
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					sendWSError(writer, streamID, sessionID, err.Error())
+					sendWSError(writer, ref, err.Error())
 					continue
 				}
 			}
 
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws retry stream error", nil,
-				func(ctx context.Context, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
-					return h.agentService.RetryLatestMessageWS(ctx, application.RetryLatestMessageInput{
-						BotID:                  botID,
-						SessionID:              sessionID,
-						StreamID:               streamID,
-						MessageID:              messageID,
-						ActorChannelIdentityID: channelIdentityID,
-						ActorUserID:            channelIdentityID,
-						ChatToken:              bearerToken,
-						Model:                  strings.TrimSpace(msg.ModelID),
-						ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
-						WorkspaceTargetID:      workspaceTargetID,
-						ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
-					}, eventCh, abortCh)
+			retrySubmission := wsSubmission{
+				Kind:      "retry_message",
+				SessionID: sessionID,
+				MessageID: messageID,
+			}.encode()
+			retryInput := application.RetryLatestMessageInput{
+				BotID:                  botID,
+				SessionID:              sessionID,
+				MessageID:              messageID,
+				ActorChannelIdentityID: channelIdentityID,
+				ActorUserID:            channelIdentityID,
+				ChatToken:              bearerToken,
+				Model:                  strings.TrimSpace(msg.ModelID),
+				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
+				WorkspaceTargetID:      workspaceTargetID,
+				ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
+			}
+			retryAdmission := &wsReplacementAdmission{
+				kind: sessionruntime.RunOperationRetry,
+				prepareAnchor: func(ctx context.Context) (string, error) {
+					return h.agentService.PrepareRetryLatestMessageOperation(ctx, sessionID, messageID)
+				},
+			}
+			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws retry stream error", retrySubmission, retryAdmission.build, nil,
+				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
+					input := retryInput
+					input.RunID = runRef.RunID
+					input.TurnID = admittedTurn.TurnID
+					input.TurnPosition = admittedTurn.Position
+					return h.agentService.RetryLatestMessageWS(ctx, input, eventCh, abortCh)
 				},
 			)
 
 		case "edit_message":
 			text := strings.TrimSpace(msg.Text)
 			sessionID := strings.TrimSpace(msg.SessionID)
-			streamID := strings.TrimSpace(msg.StreamID)
+			ref := wsTurn(msg.InvocationID, sessionID)
 			messageID := strings.TrimSpace(msg.MessageID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
-			if streamID == "" {
-				sendWSError(writer, "", sessionID, "stream_id is required")
+			if ref.InvocationID == "" {
+				sendWSError(writer, ref, "invocation_id is required")
 				continue
 			}
 			if sessionID == "" {
-				sendWSError(writer, streamID, "", "session_id is required")
+				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
 			if messageID == "" {
-				sendWSError(writer, streamID, sessionID, "message_id is required")
+				sendWSError(writer, ref, "message_id is required")
 				continue
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
@@ -1696,47 +2100,73 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			if text == "" && len(chatAttachments) == 0 {
-				sendWSError(writer, streamID, sessionID, "message text or attachments required")
+				sendWSError(writer, ref, "message text or attachments required")
 				continue
 			}
-			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, ref, wsErrorMessage(err))
 				continue
 			}
 			if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
-				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				sendWSError(writer, ref, wsErrorMessage(err))
 				continue
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					sendWSError(writer, streamID, sessionID, err.Error())
+					sendWSError(writer, ref, err.Error())
 					continue
 				}
 			}
 
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws edit stream error", nil,
-				func(ctx context.Context, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
-					ingestedAttachments := h.ingestWSInboundAttachments(ctx, botID, chatAttachments)
-					return h.agentService.EditLatestMessageWS(ctx, application.EditLatestMessageInput{
-						BotID:                  botID,
-						SessionID:              sessionID,
-						StreamID:               streamID,
-						MessageID:              messageID,
-						Text:                   text,
-						Attachments:            ingestedAttachments,
-						ActorChannelIdentityID: channelIdentityID,
-						ActorUserID:            channelIdentityID,
-						ChatToken:              bearerToken,
-						Model:                  strings.TrimSpace(msg.ModelID),
-						ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
-						WorkspaceTargetID:      workspaceTargetID,
-						ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
-					}, eventCh, abortCh)
+			editSubmission := wsSubmission{
+				Kind:        "edit_message",
+				SessionID:   sessionID,
+				Text:        text,
+				MessageID:   messageID,
+				Attachments: digestWSAttachments(msg.Attachments),
+			}.encode()
+			editInput := application.EditLatestMessageInput{
+				BotID:                  botID,
+				SessionID:              sessionID,
+				MessageID:              messageID,
+				Text:                   text,
+				ActorChannelIdentityID: channelIdentityID,
+				ActorUserID:            channelIdentityID,
+				ChatToken:              bearerToken,
+				Model:                  strings.TrimSpace(msg.ModelID),
+				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
+				WorkspaceTargetID:      workspaceTargetID,
+				ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
+			}
+			editAdmission := &wsReplacementAdmission{
+				handler: h,
+				botID:   botID,
+				kind:    sessionruntime.RunOperationEdit,
+				prepareAnchor: func(ctx context.Context) (string, error) {
+					return h.agentService.PrepareEditLatestMessageOperation(ctx, sessionID, messageID)
+				},
+				replacementUserTurn: &chatview.UITurn{
+					Role:         "user",
+					Text:         text,
+					Timestamp:    time.Now().UTC(),
+					Platform:     h.channelType.String(),
+					SenderUserID: channelIdentityID,
+				},
+				attachments: chatAttachments,
+			}
+			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws edit stream error", editSubmission, editAdmission.build, nil,
+				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
+					input := editInput
+					input.RunID = runRef.RunID
+					input.TurnID = admittedTurn.TurnID
+					input.TurnPosition = admittedTurn.Position
+					input.Attachments = editAdmission.preparedAttachments()
+					return h.agentService.EditLatestMessageWS(ctx, input, eventCh, abortCh)
 				},
 			)
 
 		default:
-			sendWSError(writer, strings.TrimSpace(msg.StreamID), strings.TrimSpace(msg.SessionID), "unknown message type: "+msg.Type)
+			sendWSError(writer, wsTurn(msg.InvocationID, msg.SessionID), "unknown message type: "+msg.Type)
 		}
 	}
 	return nil
@@ -1842,15 +2272,15 @@ func (h *LocalChannelHandler) authorizeWSChatAccess(ctx context.Context, channel
 	return err
 }
 
-func (h *LocalChannelHandler) authorizeWSSession(c echo.Context, channelIdentityID, botID, sessionID string) error {
+func (h *LocalChannelHandler) authorizeWSSession(ctx context.Context, channelIdentityID, botID, sessionID string) error {
 	if h.sessionService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
 	}
-	bot, perms, err := h.authorizeBotSessionAccess(c.Request().Context(), channelIdentityID, botID)
+	bot, perms, err := h.authorizeBotSessionAccess(ctx, channelIdentityID, botID)
 	if err != nil {
 		return err
 	}
-	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
+	sess, err := h.sessionService.Get(ctx, sessionID)
 	if err != nil || sess.BotID != bot.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}

@@ -1231,6 +1231,28 @@ startStream:
 			}
 			return nil
 		}
+		if errors.Is(startErr, turn.ErrSessionBusy) {
+			// The thread is already running a turn and the runtime persisted
+			// nothing for this message, so the platform's own retry is what
+			// carries it: the redelivery repeats this idempotency key and is
+			// admitted as the same invocation once the thread frees up. Reporting
+			// an error to the user would describe a transient queueing detail as a
+			// failure, so only the marker is cleared and the error is returned to
+			// the adapter, whose non-2xx response is what asks for the retry.
+			if p.logger != nil {
+				p.logger.Info(
+					"inbound turn deferred: thread busy",
+					slog.String("channel", msg.Channel.String()),
+					slog.String("external_message_id", sourceMessageID),
+				)
+			}
+			if statusNotifier != nil {
+				if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
+					p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
+				}
+			}
+			return startErr
+		}
 		if p.logger != nil {
 			p.logger.Error(
 				"start turn failed",

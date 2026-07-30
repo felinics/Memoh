@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -16,6 +17,7 @@ import {
 } from '../src/session'
 
 const runtimeKey = `mrk_${'a'.repeat(64)}`
+const runtimeTeamId = '11111111-1111-4111-8111-111111111111'
 
 describe('runtime handshake', () => {
   it('preserves an API base path when building the public WebSocket URL', () => {
@@ -37,12 +39,14 @@ describe('runtime handshake', () => {
     const headers = handshakeHeaders({
       serverUrl: 'https://example.test/api',
       key,
+      teamId: runtimeTeamId,
       workspaceBase: metadata.workspace_base,
     }, '1.2.3', metadata)
 
     expect(metadata.capabilities).toContain('host_fs')
     expect(headers['Sec-WebSocket-Protocol']).toBe(runtimeProtocolGrpc)
     expect(headers.Authorization).toBe(`Bearer ${key}`)
+    expect(headers['X-Team-ID']).toBe(runtimeTeamId)
     expect(headers).not.toHaveProperty('X-Memoh-Runtime-Hostname')
     const decoded = JSON.parse(Buffer.from(headers['X-Memoh-Runtime-Metadata'], 'base64url').toString('utf8'))
     expect(decoded).toEqual(metadata)
@@ -94,6 +98,7 @@ describe('runtime handshake', () => {
       const session = new RuntimeSession({
         serverUrl: `http://127.0.0.1:${port}/api`,
         key,
+        teamId: runtimeTeamId,
         workspaceBase: root,
         insecureLocalhost: true,
       }, {
@@ -104,6 +109,7 @@ describe('runtime handshake', () => {
       const request = await requestPromise
       expect(request.url).toBe('/api/runtimes/connect')
       expect(request.headers.authorization).toBe(`Bearer ${key}`)
+      expect(request.headers['x-team-id']).toBe(runtimeTeamId)
       expect(request.headers['sec-websocket-protocol']).toBe(runtimeProtocolGrpc)
       const encoded = request.headers['x-memoh-runtime-metadata']
       expect(typeof encoded).toBe('string')
@@ -125,4 +131,94 @@ describe('runtime handshake', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  it('includes a bounded server response body in handshake errors', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'memoh-runtime-rejection-'))
+    const controller = new AbortController()
+    let running: Promise<void> | undefined
+    let rejection: string | undefined
+    const server = new WebSocketServer({
+      port: 0,
+      verifyClient: (_info, done) => done(false, 400, 'X-Team-ID is required'),
+    })
+    try {
+      await new Promise<void>(resolve => server.once('listening', resolve))
+      const port = (server.address() as { port: number }).port
+      const session = new RuntimeSession({
+        serverUrl: `http://127.0.0.1:${port}/api`,
+        key: runtimeKey,
+        workspaceBase: root,
+        insecureLocalhost: true,
+      }, {
+        random: () => 0.5,
+        onStatus: (status, error) => {
+          if (status !== 'disconnected' || !error) return
+          rejection = error
+          controller.abort()
+        },
+      })
+
+      running = session.start(controller.signal)
+      await running
+
+      expect(rejection).toBe('runtime handshake rejected with HTTP 400: X-Team-ID is required')
+    } finally {
+      controller.abort()
+      await running?.catch(() => undefined)
+      await new Promise<void>(resolve => server.close(() => resolve()))
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('stops waiting when a handshake error body never ends', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'memoh-runtime-stalled-rejection-'))
+    const controller = new AbortController()
+    let running: Promise<void> | undefined
+    let rejection: string | undefined
+    let responseStartedResolve: (() => void) | undefined
+    const responseStarted = new Promise<void>((resolve) => {
+      responseStartedResolve = resolve
+    })
+    const server = createServer((_request, response) => {
+      response.writeHead(400, {
+        'Content-Length': '100',
+        'Content-Type': 'text/plain',
+      })
+      response.write('partial gateway error')
+      responseStartedResolve?.()
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(0, '127.0.0.1', resolve)
+      })
+      const port = (server.address() as { port: number }).port
+      const session = new RuntimeSession({
+        serverUrl: `http://127.0.0.1:${port}/api`,
+        key: runtimeKey,
+        workspaceBase: root,
+        insecureLocalhost: true,
+      }, {
+        random: () => 0.5,
+        onStatus: (status, error) => {
+          if (status !== 'disconnected' || !error) return
+          rejection = error
+          controller.abort()
+        },
+      })
+
+      running = session.start(controller.signal)
+      await responseStarted
+      await running
+
+      expect(rejection).toBe('runtime handshake rejected with HTTP 400: partial gateway error')
+    } finally {
+      controller.abort()
+      await running?.catch(() => undefined)
+      const closed = new Promise<void>(resolve => server.close(() => resolve()))
+      server.closeAllConnections()
+      await closed
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 10_000)
 })

@@ -182,11 +182,12 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 	}
 
 	modelCfg := models.SDKModelConfig{
-		ModelID:        model.ModelID,
-		ClientType:     provider.ClientType,
-		APIKey:         creds.APIKey,
-		CodexAccountID: creds.CodexAccountID,
-		BaseURL:        providers.ProviderConfigString(provider, "base_url"),
+		ModelID:               model.ModelID,
+		ClientType:            provider.ClientType,
+		APIKey:                creds.APIKey,
+		CodexAccountID:        creds.CodexAccountID,
+		BaseURL:               providers.ProviderConfigString(provider, "base_url"),
+		ChatCompletionsCompat: providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	}
 	sdkModel := models.NewSDKChatModel(modelCfg)
 

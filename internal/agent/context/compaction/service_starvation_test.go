@@ -14,11 +14,11 @@ import (
 func starvationCorpus(t *testing.T) []sqlc.ListUncompactedMessagesBySessionRow {
 	t.Helper()
 	return []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "assistant", `[{"type":"reasoning","text":"internal chain of thought"}]`, 400),                          // 0: renders empty
-		mkRow(t, "assistant", `[{"type":"tool-call","toolCallId":"U","toolName":"ask_user","input":{}}]`, 40),            // 1: must-keep call
-		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"U","toolName":"ask_user","output":"user said yes"}]`, 40), // 2: must-keep result
-		mkRow(t, "user", `"old question"`, 400),    // 3
-		mkRow(t, "assistant", `"old answer"`, 400), // 4
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"internal chain of thought"}]`, 400),                                       // 0: renders empty
+		mkRow(t, "assistant", `[{"type":"tool-call","toolCallId":"U","toolName":"ask_user","input":{}}]`, 40),                         // 1: must-keep call
+		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"U","toolName":"ask_user","output":"user said yes"}]`, 40),              // 2: must-keep result
+		mkRow(t, "user", `"old question about the migration plan with enough surrounding detail to be worth compressing"`, 400),       // 3
+		mkRow(t, "assistant", `"old answer walking through every step of the plan in enough words to outweigh a short summary"`, 400), // 4
 		mkRow(t, "user", `"current question"`, 40), // 5: protected current turn
 	}
 }

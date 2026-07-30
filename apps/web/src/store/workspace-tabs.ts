@@ -1,6 +1,7 @@
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
-import { useLocalStorage, useStorage } from '@vueuse/core'
+import { useLocalStorage } from '@vueuse/core'
+import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
 import type { DockviewApi, DockviewGroupPanel, SerializedDockview } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
@@ -42,7 +43,6 @@ const DEFAULT_CHAT_TITLE = 'New Session'
 // first splits off below the chat. ~1/3 mirrors VS Code's editor:panel ratio
 // (≈554:269) — enough room to work in without burying the conversation.
 const TERMINAL_PANEL_HEIGHT_RATIO = 1 / 3
-const workspaceLayoutStorage = typeof localStorage !== 'undefined' ? localStorage : undefined
 
 export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display' | 'schedule'
 
@@ -128,7 +128,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     localStorage.removeItem('workspace-tabs')
     localStorage.removeItem('workspace-panes')
   }
-  const storage = useStorage<WorkspaceLayoutStorage>('workspace-layout', {}, workspaceLayoutStorage)
+  // Per-Tab: the dockview layout is the full structure of THIS browser tab's
+  // panels — two tabs are two windows and must lay out independently. Was
+  // localStorage, which shared one layout across all tabs and broadcast every
+  // change, so tab A's split reflowed tab B. sessionStorage isolates it; the
+  // localStorage cold-start seed (same key) restores "reopen where I left off"
+  // after every tab closes, and migrates an existing localStorage layout for free.
+  const storage = useTabScopedStorage<WorkspaceLayoutStorage>('workspace-layout', {}, { seed: true })
 
   // ---- dockview wiring -----------------------------------------------------
 
@@ -173,6 +179,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // reordered or stacked. Reset on drag end.
   let dragSourceTerminal = false
   let draftChatQueued = false
+  // After restoring a NON-empty dock, ignore initialize()'s auto-picked
+  // sessionId (and other non-explicit selection churn). Otherwise a File /
+  // Preview workspace gets an extra Untitled/New Session tab punched in by
+  // selection watchers — the cold-start hijack this store exists to prevent.
+  // Explicit user actions (sidebar click, New Session, /new) either call the
+  // public open* APIs directly or set hasExplicitSessionSelection, both of
+  // which bypass this guard. Cleared when the dock is empty again.
+  let suppressSelectionDockMutations = false
   const reconcilingDeletedChatPanelIds = new Set<string>()
   const deletedSessionIdsByBot = new Map<string, Set<string>>()
   let suppressReconcileActivation = false
@@ -387,9 +401,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       suppressPersist = false
     }
     if (repairedEmptyTitles && !dockEmptyAfterRestore) persistLayout()
+    // Non-empty restore is authoritative for this tab's panels. Empty restore
+    // still needs the draft fallback, and may accept initialize()'s auto-pick
+    // (repointing that draft). Same product rule either way: never invent tabs
+    // on top of a restored workspace.
+    suppressSelectionDockMutations = !dockEmptyAfterRestore
     if (dockEmptyAfterRestore) ensureDraftChatPanel()
     syncDraftChatExplicitSelection()
-    syncRestoredChatSelection()
+    syncRestoredChatSelection({ preserveRestoredChat: true })
   }
 
   function domListener<K extends keyof DocumentEventMap>(
@@ -638,6 +657,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     panelDragging.value = false
     dragSourceTerminal = false
     draftChatQueued = false
+    suppressSelectionDockMutations = false
     reconcilingDeletedChatPanelIds.clear()
     releaseDeletedChatActivationNow()
   }
@@ -1027,6 +1047,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return
     const bid = (currentBotId.value ?? '').trim()
     if (!bid) return
+    // Public entry (sidebar New Session, /new, empty-dock fallback): the user
+    // asked for a draft, so stop shielding the restored layout from mutations.
+    suppressSelectionDockMutations = false
     const draftCandidates = opts?.groupId
       ? dock.getGroup(opts.groupId)?.panels ?? []
       : dock.panels
@@ -1089,11 +1112,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
   }
 
-  function syncRestoredChatSelection() {
+  function syncRestoredChatSelection(options?: { preserveRestoredChat?: boolean }) {
     const dock = api.value
     const sid = (chatStore.sessionId ?? '').trim()
     if (!dock) return
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
+    // Cold-start guard: non-explicit selection must not invent dock tabs after
+    // a non-empty restore. Explicit clicks bypass it. Separate from
+    // preserveRestoredChat, which only covers the empty-selection + restored
+    // real-session case below.
+    const blockNonExplicitOpen = suppressSelectionDockMutations && !explicitSelection
     const active = dock.activePanel
     const activeIsChat = !!active && panelComponentOf(active.id) === 'chat'
     const activeSession = activeIsChat ? panelSessionId(active) : null
@@ -1109,6 +1137,20 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         chatStore.focusChatView(active.id)
         return
       }
+      const existing = chatPanelForSession(sid)
+      if (existing) {
+        setNextChatActivationExplicit(existing.id, explicitSelection)
+        focusPanel(existing)
+        return
+      }
+      // Auto-picked / cold-start selection must not add a chat tab on top of a
+      // restored File/Preview (or any non-empty) workspace. If the restored
+      // active panel is already a different chat, pull selection onto it so
+      // Recents highlights the conversation on screen — not the auto-pick.
+      if (blockNonExplicitOpen) {
+        adoptActiveRestoredChatSelection(activeSession, active?.id)
+        return
+      }
       openSessionChat({ sessionId: sid, groupId, explicitSelection })
       return
     }
@@ -1121,7 +1163,38 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       chatStore.selectDraft({ explicitSelection })
       return
     }
+    if (options?.preserveRestoredChat || blockNonExplicitOpen) {
+      // A fresh top-level tab has no separately-seeded chat selection, but its
+      // restored workspace can already contain the chat the user was viewing.
+      // Keep that panel instead of interpreting the empty selection as a request
+      // for a second draft. Align the global selection to the preserved panel
+      // (non-explicit) so the Recents highlight matches the open conversation.
+      adoptActiveRestoredChatSelection(activeSession, active.id)
+      return
+    }
     openDraftChat({ groupId, explicitSelection })
+  }
+
+  // Align global selection to the chat on screen (or to none). Called after a
+  // non-empty restore blocks inventing tabs: if the active panel is a chat,
+  // Recents must highlight that session; if there is no chat to adopt,
+  // drop initialize()'s non-explicit auto-pick so Recents stays unselected.
+  function adoptActiveRestoredChatSelection(sessionId: string | null, panelId?: string) {
+    if (!sessionId || isDeletedSessionForCurrentBot(sessionId)) {
+      if (!chatStore.hasExplicitSessionSelection && (chatStore.sessionId ?? '').trim()) {
+        chatStore.resetToEmptyComposer({
+          clearPendingACP: false,
+          explicitSelection: false,
+          draftIntent: false,
+        })
+      }
+      return
+    }
+    if (panelId) chatStore.focusChatView(panelId)
+    // Already pointing at the preserved panel — leave explicitness alone.
+    if ((chatStore.sessionId ?? '').trim() === sessionId) return
+    // Non-explicit: layout ownership, not a user click.
+    selectChatSession(sessionId, false)
   }
 
   function syncDraftTargetFromState() {
@@ -1129,6 +1202,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock || suppressPersist) return
     if ((selection.sessionId ?? '').trim()) return
     if (chatStore.hasExplicitSessionSelection !== true && !chatStore.pendingACPSessionInput) return
+    // Explicit empty-composer / ACP draft staging is a real request to show a
+    // draft, even after a non-empty restore — clear the cold-start guard so
+    // syncRestoredChatSelection can open one.
+    if (suppressSelectionDockMutations) suppressSelectionDockMutations = false
     syncRestoredChatSelection()
   }
 
@@ -1223,16 +1300,22 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       const latestDock = api.value
       if (!latestDock || suppressPersist || latestDock.panels.length > 0) return
       if (!(currentBotId.value ?? '').trim()) return
-      // The active session's tab if one is selected, else a fresh draft (its
-      // activation resets the global view via selectDraft).
+      // Dock is empty again — cold-start shielding no longer applies.
+      suppressSelectionDockMutations = false
+      // Only an EXPLICIT selection may refill as that session. initialize()'s
+      // auto-pick leaves a non-explicit sessionId even when we refused to open
+      // its tab over a File/Preview restore; honoring it here would surface a
+      // random Untitled Session the moment the user closes the last file tab.
+      // Live tabs that already selected a session explicitly keep that refill.
       const sid = (chatStore.sessionId ?? '').trim()
-      if (sid && !isDeletedSessionForCurrentBot(sid)) {
+      const explicitSelection = chatStore.hasExplicitSessionSelection === true
+      if (sid && explicitSelection && !isDeletedSessionForCurrentBot(sid)) {
         openSessionChat({
           sessionId: sid,
-          explicitSelection: chatStore.hasExplicitSessionSelection === true,
+          explicitSelection: true,
         })
       } else {
-        openDraftChat({ explicitSelection: chatStore.hasExplicitSessionSelection === true })
+        openDraftChat({ explicitSelection })
       }
     })
   }
@@ -2104,16 +2187,21 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
     if (isDeletedSessionForCurrentBot(trimmed)) return
     const existing = chatPanelForSession(trimmed)
+    const explicitSelection = chatStore.hasExplicitSessionSelection === true
     if (existing) {
-      setNextChatActivationExplicit(existing.id, chatStore.hasExplicitSessionSelection === true)
+      setNextChatActivationExplicit(existing.id, explicitSelection)
       focusPanel(existing)
       return
     }
+    // initialize() auto-picks the latest history item with explicitSelection
+    // false. That must not open a chat tab over a restored File/Preview layout.
+    // Sidebar clicks go through openSessionChat directly (or set explicit).
+    if (suppressSelectionDockMutations && !explicitSelection) return
     // No tab yet: open one. If the group's ephemeral slot is a draft, this
     // repoints it in place (no stray draft tab); otherwise it adds a chat tab.
     openSessionChat({
       sessionId: trimmed,
-      explicitSelection: chatStore.hasExplicitSessionSelection === true,
+      explicitSelection,
     })
   })
 
@@ -2149,7 +2237,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     () => [chatStore.loadingChats, chatStore.sessions.length, currentBotId.value] as const,
     () => {
       if (chatStore.loadingChats) return
-      syncRestoredChatSelection()
+      // After chats load, reconcile selection ↔ dock. suppressSelectionDockMutations
+      // inside syncRestoredChatSelection still blocks auto-picked opens on a
+      // restored non-empty workspace.
+      syncRestoredChatSelection({
+        preserveRestoredChat: suppressSelectionDockMutations,
+      })
     },
   )
 

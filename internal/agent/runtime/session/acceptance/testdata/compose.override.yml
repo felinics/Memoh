@@ -1,0 +1,88 @@
+# Isolated state for Session Runtime acceptance tests. The second Server shares
+# PostgreSQL with the primary Server but has independent process-local state.
+services:
+  postgres:
+    volumes: !override
+      - session_runtime_postgres_data:/var/lib/postgresql
+
+  pgvector:
+    volumes: !override
+      - session_runtime_pgvector_data:/var/lib/postgresql
+
+  server:
+    restart: "no"
+    # Single-Server tuning by default; compose.cluster.override.yml replaces this
+    # key when the two-Server topology is layered on top.
+    environment:
+      CONFIG_PATH: /workspace/internal/agent/runtime/session/acceptance/testdata/app.single.toml
+    ports:
+      - "19091:9090"
+    volumes: !override
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - session_runtime_containerd_a:/var/lib/containerd
+      - session_runtime_cni_a:/var/lib/cni
+      - session_runtime_memoh_data_a:/opt/memoh/data
+      - /etc/cdi:/etc/cdi:ro
+      - /var/run/cdi:/var/run/cdi:ro
+      - ../.cache/memoh/workspace-debian.tar:/opt/memoh/dev-images/workspace-debian.tar:ro
+
+  server_b:
+    image: memoh-dev-server
+    container_name: memoh-runtime-server-b
+    working_dir: /workspace
+    privileged: true
+    pid: host
+    command: ["go", "run", "./cmd/agent", "serve"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.dev.toml
+      GOFLAGS: -buildvcs=false
+      TZ: "${MEMOH_DEV_TZ:-UTC}"
+      NO_PROXY: "127.0.0.1,localhost,host.docker.internal,postgres,pgvector,server,server_b"
+      no_proxy: "127.0.0.1,localhost,host.docker.internal,postgres,pgvector,server,server_b"
+    volumes:
+      # Compose resolves relative paths from the first file, devenv/docker-compose.yml.
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - session_runtime_containerd_b:/var/lib/containerd
+      - session_runtime_cni_b:/var/lib/cni
+      - session_runtime_memoh_data_b:/opt/memoh/data
+      - ../.cache/memoh/workspace-debian.tar:/opt/memoh/dev-images/workspace-debian.tar:ro
+    ports:
+      - "18083:8080"
+      - "19092:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgvector:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+volumes:
+  session_runtime_postgres_data:
+    driver: local
+  session_runtime_pgvector_data:
+    driver: local
+  session_runtime_containerd_a:
+    driver: local
+  session_runtime_cni_a:
+    driver: local
+  session_runtime_memoh_data_a:
+    driver: local
+  session_runtime_containerd_b:
+    driver: local
+  session_runtime_cni_b:
+    driver: local
+  session_runtime_memoh_data_b:
+    driver: local

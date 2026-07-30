@@ -1,58 +1,114 @@
 <template>
   <div class="space-y-6">
-    <!-- Connection: the form's primary concern. No section title — the back row
-         already reads "MCP", so a "Connection" heading would echo the rung above. -->
+    <!-- Identity header: who this is, whether it works, its on/off and delete —
+         everything about the SAVED entity lives here, so the form below is only
+         ever about editing the draft. Mirrors the provider detail's header card.
+         Rendered ONLY for a saved server: before creation there is no entity to
+         badge, toggle, or delete, so the whole card (and its Switch) stays out. -->
+    <section
+      v-if="serverId"
+      class="group/header flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3"
+    >
+      <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        <component
+          :is="connectionType === 'stdio' ? Terminal : Globe"
+          class="size-4"
+        />
+      </span>
+
+      <!-- Name: read-only text with a hover pencil (the profile-row pattern).
+           Edits land in the form draft — the footer Save is what commits them. -->
+      <div class="min-w-0 flex-1">
+        <div class="flex h-8 items-center gap-1.5">
+          <Input
+            v-if="nameEditing"
+            ref="nameInputRef"
+            v-model="nameDraft"
+            class="h-8 max-w-[20rem]"
+            :aria-label="$t('common.name')"
+            @keydown.enter="commitNameEdit"
+            @keydown.esc="cancelNameEdit"
+            @blur="commitNameEdit"
+          />
+          <template v-else>
+            <span class="truncate text-sm font-medium">
+              {{ form.name || $t('mcp.unnamedServer') }}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/header:opacity-100 focus-visible:opacity-100"
+              :aria-label="$t('common.edit')"
+              @click="startNameEdit"
+            >
+              <Pencil class="size-3.5" />
+            </Button>
+          </template>
+        </div>
+      </div>
+
+      <div class="ml-auto flex shrink-0 items-center gap-2">
+        <!-- The badge reports the last KNOWN result and holds still while a new
+             probe runs — progress already has a home (the test button's
+             spinner), so the badge only flips when a real result lands.
+             Semantic variants, never hand-injected colors. -->
+        <Badge
+          v-if="status === 'connected'"
+          variant="success"
+          size="sm"
+        >
+          {{ $t('mcp.statusConnected') }}
+        </Badge>
+        <Badge
+          v-else-if="status === 'error'"
+          variant="destructive"
+          size="sm"
+        >
+          {{ $t('mcp.statusError') }}
+        </Badge>
+        <ConfirmPopover
+          :message="$t('mcp.deleteConfirm')"
+          :cancel-text="$t('common.cancel')"
+          :confirm-text="$t('common.confirm')"
+          :loading="deleting"
+          variant="destructive"
+          @confirm="handleDelete"
+        >
+          <template #trigger>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              class="text-muted-foreground hover:text-destructive"
+              :aria-label="$t('common.delete')"
+            >
+              <Trash2 class="size-4" />
+            </Button>
+          </template>
+        </ConfirmPopover>
+        <Switch
+          :model-value="form.active"
+          :disabled="saving || activeSaving"
+          :aria-label="$t('common.enabled')"
+          @update:model-value="(v) => handleToggleActive(!!v)"
+        />
+      </div>
+    </section>
+
+    <!-- Connection: the form's only concern. No section title — on a saved
+         server the header card above already names the entity, so a heading
+         would echo it; on create the Name field below leads the card. -->
     <SettingsSection>
       <div class="space-y-5 p-4">
-        <!-- Name + the on/off intent share a row: what it's called, and whether
-             the bot may use it. -->
-        <div class="flex items-end gap-3">
-          <Field class="min-w-0 flex-1">
-            <FieldLabel>{{ $t('common.name') }}</FieldLabel>
-            <FieldControl>
-              <Input
-                v-model="form.name"
-                :placeholder="$t('mcp.placeholders.name')"
-              />
-            </FieldControl>
-          </Field>
-          <div class="flex h-9 shrink-0 items-center gap-3">
-            <!-- Delete sits beside the on/off intent — a quiet ghost affordance,
-                 the way every backend detail handles it, not a separate danger
-                 block that ambushes you the moment a server is saved. Saved
-                 servers only. -->
-            <ConfirmPopover
-              v-if="serverId"
-              :message="$t('mcp.deleteConfirm')"
-              :cancel-text="$t('common.cancel')"
-              :confirm-text="$t('common.confirm')"
-              :loading="deleting"
-              variant="destructive"
-              @confirm="handleDelete"
-            >
-              <template #trigger>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  class="text-muted-foreground hover:text-destructive"
-                  :aria-label="$t('common.delete')"
-                >
-                  <Trash2 class="size-4" />
-                </Button>
-              </template>
-            </ConfirmPopover>
-            <div class="flex items-center gap-2">
-              <Label
-                class="cursor-pointer text-muted-foreground"
-                @click="form.active = !form.active"
-              >
-                {{ $t('common.enabled') }}
-              </Label>
-              <Switch v-model="form.active" />
-            </div>
-          </div>
-        </div>
+        <Field v-if="!serverId">
+          <FieldLabel>{{ $t('common.name') }}</FieldLabel>
+          <FieldControl>
+            <Input
+              v-model="form.name"
+              :placeholder="$t('mcp.placeholders.name')"
+            />
+          </FieldControl>
+        </Field>
 
         <Field>
           <FieldLabel>{{ $t('mcp.transportType') }}</FieldLabel>
@@ -61,12 +117,17 @@
               :model-value="connectionType"
               :items="transportItems"
               class="w-full sm:w-fit"
-              @update:model-value="(v) => connectionType = v === 'remote' ? 'remote' : 'stdio'"
+              @update:model-value="handleTransportChange"
             />
           </FieldControl>
         </Field>
 
         <template v-if="connectionType === 'stdio'">
+          <!-- The launch line is ONE field: docs hand out whole commands
+               ("npx -y pkg"), so the form speaks that language. The official
+               mcpServers schema splits command/args at rest — we parse on save
+               and re-join on load (see shell-words.ts); what the user sees is
+               always the line itself. -->
           <Field>
             <FieldLabel>{{ $t('mcp.command') }}</FieldLabel>
             <FieldControl>
@@ -75,27 +136,6 @@
                 class="font-mono"
                 :placeholder="$t('mcp.commandPlaceholder')"
               />
-            </FieldControl>
-          </Field>
-          <Field>
-            <FieldLabel>{{ $t('mcp.arguments') }}</FieldLabel>
-            <FieldControl>
-              <TagsInput
-                v-model="argsTags"
-                :add-on-blur="true"
-                :duplicate="true"
-                class="font-mono"
-              >
-                <TagsInputItem
-                  v-for="tag in argsTags"
-                  :key="tag"
-                  :value="tag"
-                >
-                  <TagsInputItemText />
-                  <TagsInputItemDelete />
-                </TagsInputItem>
-                <TagsInputInput :placeholder="$t('mcp.argumentsPlaceholder')" />
-              </TagsInput>
             </FieldControl>
           </Field>
           <Field>
@@ -146,67 +186,70 @@
             </FieldControl>
           </Field>
         </template>
-
-        <!-- Connection result: only meaningful once the server exists. A failed
-             probe shows its raw handshake log inline, not behind a dialog. -->
-        <div
-          v-if="serverId"
-          class="space-y-2 border-t border-border pt-4"
-        >
-          <div class="flex flex-wrap items-center gap-2">
-            <Badge
-              v-if="status === 'connected'"
-              variant="outline"
-              size="sm"
-              class="border-success/30 text-success"
-            >
-              {{ $t('mcp.statusConnected') }}
-            </Badge>
-            <Badge
-              v-else-if="status === 'error'"
-              variant="outline"
-              size="sm"
-              class="border-destructive-border text-destructive"
-            >
-              {{ $t('mcp.statusError') }}
-            </Badge>
-            <Badge
-              v-else
-              variant="outline"
-              size="sm"
-              class="text-muted-foreground"
-            >
-              {{ $t('mcp.statusUnknown') }}
-            </Badge>
-            <span
-              v-if="probing"
-              class="text-xs text-muted-foreground"
-            >
-              {{ $t('mcp.probing') }}
-            </span>
-            <span
-              v-else-if="lastProbedAt"
-              class="text-xs text-muted-foreground"
-            >
-              {{ $t('mcp.testedAt', { time: relativeProbed }) }}
-            </span>
-          </div>
-          <pre
-            v-if="status === 'error' && statusMessage"
-            class="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground"
-          >{{ statusMessage }}</pre>
-        </div>
       </div>
+      <!-- Test + Save close the form card. Test re-probes the SAVED server (its
+           result lives on the button and the header badge — never a separate
+           status line), so it is disabled while the draft diverges. -->
+      <template #footer>
+        <span
+          v-if="serverId && hasChanges"
+          class="mr-auto text-xs text-muted-foreground"
+        >
+          {{ $t('common.unsaved') }}
+        </span>
+        <HoverCard :open-delay="120">
+          <HoverCardTrigger as-child>
+            <span>
+              <Button
+                v-if="serverId"
+                type="button"
+                variant="outline"
+                :disabled="hasChanges || saving || probing"
+                @click="handleProbe(serverId)"
+              >
+                <Spinner
+                  v-if="probing"
+                  class="size-4"
+                />
+                <CheckDrawIcon
+                  v-else-if="sessionProbeResult === 'ok'"
+                  class="size-4 text-success"
+                />
+                <AlertCircle
+                  v-else-if="sessionProbeResult === 'error'"
+                  class="size-4 text-destructive"
+                />
+                <RefreshCw
+                  v-else
+                  class="size-4"
+                />
+                {{ $t('mcp.probe') }}
+              </Button>
+            </span>
+          </HoverCardTrigger>
+          <HoverCardContent
+            v-if="sessionProbeResult === 'error' && statusMessage"
+            class="max-h-40 w-80 overflow-auto text-xs text-destructive whitespace-pre-wrap break-words"
+          >
+            {{ statusMessage }}
+          </HoverCardContent>
+        </HoverCard>
+        <Button
+          :disabled="probing || activeSaving || (!!serverId && !hasChanges)"
+          :loading="saving"
+          @click="handleSave"
+        >
+          {{ serverId ? $t('common.save') : $t('mcp.createServer') }}
+        </Button>
+      </template>
     </SettingsSection>
 
-    <!-- Advanced: env vars / headers / auth behind a named ActionCard entry
-         opening a focused dialog — the house replacement for the old in-card
-         "Advanced" expand row. No section label above: the card's own
-         title+description already carry the full naming (an h2 would just
-         repeat it). -->
+    <!-- Advanced: env vars / headers behind a named ActionCard entry opening a
+         focused dialog. The card's description names what's behind the door;
+         the dialog itself carries no subtitle — its section label already does. -->
     <ActionCard
       :title="$t('mcp.advancedSettings')"
-      :description="connectionType === 'stdio' ? $t('mcp.advancedHintStdio') : $t('mcp.advancedHintRemote')"
+      :description="advancedHint"
       @click="showAdvanced = true"
     >
       <template #icon>
@@ -214,15 +257,124 @@
       </template>
     </ActionCard>
 
+    <!-- Authentication: a FIRST-CLASS section, not an Advanced knob — when a
+         remote server needs sign-in, authorizing IS the main flow, so it sits
+         on the page as one quiet row that grows in place (AutoHeight) when the
+         flow needs more (credentials, the browser wait). Mirrors the provider
+         detail's OAuth section. Saved remote servers only — OAuth state is
+         stored against the connection row, so a draft has nothing to
+         authorize yet. -->
+    <SettingsSection
+      v-if="connectionType === 'remote' && serverId"
+      :title="$t('mcp.oauth.title')"
+    >
+      <AutoHeight>
+        <!-- First load: borrow the row height so the card doesn't jump when
+             the status lands. -->
+        <div
+          v-if="oauthStatusLoading && !oauthStatus"
+          class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+        >
+          <Spinner class="size-5 text-muted-foreground" />
+        </div>
+
+        <!-- Authorized: the row IS the status. Revoke severs a live
+             authorization the bot may be actively using, so it is
+             confirm-gated. -->
+        <SettingsRow
+          v-else-if="oauthAuthorized"
+          :label="$t('mcp.oauth.signInLabel')"
+          :description="$t('mcp.oauth.authorized')"
+        >
+          <ConfirmPopover
+            :message="$t('mcp.oauth.revokeConfirm')"
+            :cancel-text="$t('common.cancel')"
+            :confirm-text="$t('mcp.oauth.revoke')"
+            :loading="oauthRevoking"
+            @confirm="handleOAuthRevoke"
+          >
+            <template #trigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="shrink-0 text-muted-foreground"
+              >
+                {{ $t('mcp.oauth.revoke') }}
+              </Button>
+            </template>
+          </ConfirmPopover>
+        </SettingsRow>
+
+        <template v-else>
+          <SettingsRow
+            :label="$t('mcp.oauth.signInLabel')"
+            :description="oauthRowDescription"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              :loading="oauthDiscovering || oauthAuthorizing"
+              :disabled="oauthDiscovering || oauthAuthorizing"
+              loading-mode="manual"
+              @click="handleOAuthFlow"
+            >
+              <Loader2
+                v-if="oauthDiscovering || oauthAuthorizing"
+                class="size-4 animate-spin"
+              />
+              <KeyRound
+                v-else
+                class="size-4"
+              />
+              {{ oauthDiscovering ? $t('mcp.oauth.discovering') : oauthAuthorizing ? $t('mcp.oauth.authorizing') : $t('mcp.oauth.authorize') }}
+            </Button>
+          </SettingsRow>
+
+          <!-- No dynamic registration on the authorization server: the user
+               must bring their own OAuth App credentials. Appears only after a
+               discovery attempt found no registration endpoint. -->
+          <div
+            v-if="oauthNeedsClientId"
+            class="mx-4 space-y-4 border-b border-border pb-4 last:border-b-0"
+          >
+            <Field>
+              <FieldLabel>{{ $t('mcp.oauth.clientId') }}</FieldLabel>
+              <FieldControl>
+                <Input
+                  v-model="oauthClientId"
+                  class="font-mono"
+                  autocomplete="off"
+                  :placeholder="$t('mcp.oauth.clientIdPlaceholder')"
+                />
+              </FieldControl>
+            </Field>
+            <Field>
+              <FieldLabel>{{ $t('mcp.oauth.clientSecret') }}</FieldLabel>
+              <FieldControl>
+                <Input
+                  v-model="oauthClientSecret"
+                  type="password"
+                  class="font-mono"
+                  autocomplete="new-password"
+                  :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
+                />
+              </FieldControl>
+            </Field>
+          </div>
+        </template>
+      </AutoHeight>
+    </SettingsSection>
+
     <Dialog v-model:open="showAdvanced">
       <DialogPanel>
         <DialogHeader>
           <DialogTitle>{{ $t('mcp.advancedSettings') }}</DialogTitle>
-          <DialogDescription>{{ connectionType === 'stdio' ? $t('mcp.advancedHintStdio') : $t('mcp.advancedHintRemote') }}</DialogDescription>
         </DialogHeader>
         <DialogBody class="space-y-5">
-          <!-- stdio: process environment. remote: HTTP headers (+ env vars only when
-               a migrated config already carries ${VAR} substitutions). -->
+          <!-- stdio: process environment. remote: HTTP headers. -->
           <div
             v-if="connectionType === 'stdio'"
             class="space-y-2"
@@ -234,98 +386,17 @@
               :value-placeholder="$t('mcp.placeholders.envValue')"
             />
           </div>
-          <template v-else>
-            <div
-              v-if="envPairs.length > 0"
-              class="space-y-2"
-            >
-              <Label>{{ $t('mcp.envVars') }}</Label>
-              <KeyValueEditor
-                v-model="envPairs"
-                :key-placeholder="$t('mcp.placeholders.envKey')"
-                :value-placeholder="$t('mcp.placeholders.envValue')"
-              />
-            </div>
-            <div class="space-y-2">
-              <Label>{{ $t('mcp.httpHeaders') }}</Label>
-              <KeyValueEditor
-                v-model="headerPairs"
-                :key-placeholder="$t('mcp.placeholders.headerKey')"
-                :value-placeholder="$t('mcp.placeholders.headerValue')"
-              />
-            </div>
-
-            <!-- Authentication (remote, saved servers only). Spotlit when a probe
-                 reported it needs authorization and there's no token yet. -->
-            <div
-              v-if="serverId"
-              class="space-y-3 border-t border-border pt-4"
-            >
-              <div class="flex items-center justify-between gap-2">
-                <Label>{{ $t('mcp.oauth.title') }}</Label>
-                <Badge
-                  variant="outline"
-                  size="sm"
-                  :class="oauthStatus?.has_token ? 'border-success/30 text-success' : 'text-muted-foreground'"
-                >
-                  {{ oauthStatus?.has_token ? $t('mcp.oauth.authorized') : $t('mcp.oauth.notConfigured') }}
-                </Badge>
-              </div>
-
-              <template v-if="oauthNeedsClientId && (!oauthStatus?.has_token || oauthStatus?.expired)">
-                <p class="text-xs text-muted-foreground">
-                  {{ $t('mcp.oauth.clientIdHint') }}
-                </p>
-                <Field>
-                  <FieldLabel>{{ $t('mcp.oauth.clientId') }}</FieldLabel>
-                  <FieldControl>
-                    <Input
-                      v-model="oauthClientId"
-                      class="font-mono"
-                      autocomplete="off"
-                      :placeholder="$t('mcp.oauth.clientIdPlaceholder')"
-                    />
-                  </FieldControl>
-                </Field>
-                <Field>
-                  <FieldLabel>{{ $t('mcp.oauth.clientSecret') }}</FieldLabel>
-                  <FieldControl>
-                    <Input
-                      v-model="oauthClientSecret"
-                      type="password"
-                      class="font-mono"
-                      autocomplete="new-password"
-                      :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
-                    />
-                  </FieldControl>
-                </Field>
-              </template>
-
-              <Button
-                v-if="!oauthStatus?.has_token"
-                :loading="oauthDiscovering || oauthAuthorizing"
-                loading-mode="manual"
-                @click="handleOAuthFlow"
-              >
-                <Loader2
-                  v-if="oauthDiscovering || oauthAuthorizing"
-                  class="size-4 animate-spin"
-                />
-                <KeyRound
-                  v-else
-                  class="size-4"
-                />
-                {{ oauthDiscovering ? $t('mcp.oauth.discovering') : $t('mcp.oauth.authorize') }}
-              </Button>
-              <Button
-                v-else
-                variant="outline"
-                @click="handleOAuthRevoke"
-              >
-                {{ $t('mcp.oauth.revoke') }}
-              </Button>
-            </div>
-          </template>
+          <div
+            v-else
+            class="space-y-2"
+          >
+            <Label>{{ $t('mcp.httpHeaders') }}</Label>
+            <KeyValueEditor
+              v-model="headerPairs"
+              :key-placeholder="$t('mcp.placeholders.headerKey')"
+              :value-placeholder="$t('mcp.placeholders.headerValue')"
+            />
+          </div>
         </DialogBody>
       </DialogPanel>
     </Dialog>
@@ -360,56 +431,20 @@
         </div>
       </div>
     </SettingsSection>
-
-    <!-- Primary actions, right-aligned at the foot of the form. Export/Test are
-         secondary (outline); Save/Create is the charcoal primary. -->
-    <div class="flex flex-wrap items-center justify-end gap-2">
-      <Button
-        v-if="serverId"
-        variant="outline"
-        @click="handleExport"
-      >
-        <Download class="size-4" />
-        {{ $t('common.export') }}
-      </Button>
-      <Button
-        v-if="serverId"
-        variant="outline"
-        :disabled="saving"
-        @click="probing ? cancelProbe() : handleProbe(serverId)"
-      >
-        <Loader2
-          v-if="probing"
-          class="size-4 animate-spin"
-        />
-        <RefreshCw
-          v-else
-          class="size-4"
-        />
-        {{ probing ? $t('common.cancel') : $t('mcp.probe') }}
-      </Button>
-      <Button
-        :disabled="probing"
-        :loading="saving"
-        @click="handleSave"
-      >
-        {{ serverId ? $t('common.save') : $t('mcp.createServer') }}
-      </Button>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  ActionCard, Badge, Button, Dialog, DialogBody, DialogDescription, DialogHeader,
-  DialogPanel, DialogTitle, Field, FieldControl, FieldLabel, Input, Label, Select, SelectContent,
-  SelectItem, SelectTrigger, SelectValue, SegmentedControl, Switch, TagsInput,
-  TagsInputInput, TagsInputItem, TagsInputItemDelete, TagsInputItemText, toast,
+  ActionCard, AutoHeight, Badge, Button, Dialog, DialogBody, DialogHeader,
+  DialogPanel, DialogTitle, Field, FieldControl, FieldLabel, HoverCard, HoverCardContent,
+  HoverCardTrigger, Input, Label, Select, SelectContent,
+  SelectItem, SelectTrigger, SelectValue, SegmentedControl, Spinner, Switch, toast,
   type SegmentedItem,
 } from '@felinic/ui'
-import { Download, KeyRound, Loader2, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-vue-next'
+import { AlertCircle, Globe, KeyRound, Loader2, Pencil, RefreshCw, SlidersHorizontal, Terminal, Trash2 } from 'lucide-vue-next'
 import {
   postBotsByBotIdMcp, putBotsByBotIdMcpById, deleteBotsByBotIdMcpById,
   postBotsByBotIdMcpByIdProbe, getBotsByBotIdMcpByIdOauthStatus,
@@ -417,19 +452,23 @@ import {
   deleteBotsByBotIdMcpByIdOauthToken,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
-import type { McpUpsertRequest, McpMcpServerEntry, McpToolDescriptor, McpOAuthStatus } from '@memohai/sdk'
+import type { McpUpsertRequest, McpToolDescriptor, McpOAuthStatus } from '@memohai/sdk'
 import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
+import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import KeyValueEditor from '@/components/key-value-editor/index.vue'
 import type { KeyValuePair } from '@/components/key-value-editor/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { useClipboard } from '@/composables/useClipboard'
-import { formatRelativeTime } from '@/utils/date-time'
+import { joinShellWords, splitShellWords } from '@/utils/shell-words'
 import type { McpItem } from './mcp-types'
 
 const props = defineProps<{
   botId: string
   server: McpItem | null
+  // Set by the parent right after a create: this mount is the explicit redirect
+  // target for the freshly-minted server, so it probes itself once on entry.
+  autoProbe?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -438,21 +477,28 @@ const emit = defineEmits<{
   deleted: []
 }>()
 
-const { t, locale } = useI18n()
-const { copyText } = useClipboard()
+const { t } = useI18n()
+
+// The canonical reference server from the MCP docs — the default a create
+// falls back to when the command is left empty, so the one-click path builds
+// a server that actually connects and shows discovered tools. Same text as
+// mcp.commandPlaceholder (what the empty field suggests) — keep them in sync.
+const DEFAULT_STDIO_COMMAND = 'npx -y @modelcontextprotocol/server-everything'
 
 const serverId = ref('')
 const connectionType = ref<'stdio' | 'remote'>('stdio')
 const form = ref({ name: '', command: '', url: '', cwd: '', transport: 'http' as 'http' | 'sse', active: true })
-const argsTags = ref<string[]>([])
 const envPairs = ref<KeyValuePair[]>([])
 const headerPairs = ref<KeyValuePair[]>([])
 
 // Live connection result — owned locally so a probe never waits on a list reload.
 const status = ref('unknown')
 const statusMessage = ref('')
-const lastProbedAt = ref<string | null>(null)
 const tools = ref<McpToolDescriptor[]>([])
+// Transient, this-visit-only feedback for the test button. The header badge
+// owns the PERSISTED status; the button's check/alert only answers the probe
+// the user actually watched happen, so it always starts bare on (re)entry.
+const sessionProbeResult = ref<'ok' | 'error' | null>(null)
 
 const saving = ref(false)
 const probing = ref(false)
@@ -467,6 +513,8 @@ let oauthFlowCleanup: (() => void) | null = null
 const probeAuthRequired = ref(false)
 const oauthDiscovering = ref(false)
 const oauthAuthorizing = ref(false)
+const oauthRevoking = ref(false)
+const oauthStatusLoading = ref(false)
 const oauthStatus = ref<McpOAuthStatus | null>(null)
 const oauthClientId = ref('')
 const oauthClientSecret = ref('')
@@ -478,22 +526,172 @@ const transportItems = computed<SegmentedItem<string>[]>(() => [
   { value: 'remote', label: t('mcp.types.remote') },
 ])
 
-// The minimum a server needs to connect: stdio → a command, remote → a URL.
-const hasConnectionTarget = computed(() =>
-  connectionType.value === 'stdio'
-    ? form.value.command.trim() !== ''
-    : form.value.url.trim() !== '',
+// ---- Draft vs saved snapshot ----
+// The page's single source of truth rule: the status/probe always describes the
+// SAVED server, never the in-flight draft. The snapshot is what the server last
+// looked like (seeded from props, refreshed after every successful save), and
+// every "did anything change?" answer is a diff against it. `active` is
+// deliberately excluded from the draft — its switch commits on its own.
+interface DraftState {
+  connectionType: 'stdio' | 'remote'
+  name: string
+  command: string
+  url: string
+  cwd: string
+  transport: 'http' | 'sse'
+  args: string[]
+  env: Record<string, string>
+  headers: Record<string, string>
+}
+
+const savedSnapshot = ref<DraftState | null>(null)
+// Stashes keep the opposite transport's pairs alive across a round trip
+// (stdio → remote → stdio) so toggling the segment never silently destroys
+// typed rows; only cross-transport leakage into a SAVE is blocked.
+const envStash = ref<KeyValuePair[]>([])
+const headerStash = ref<KeyValuePair[]>([])
+
+function captureDraft(): DraftState {
+  // The command field is one line for the user; the draft keeps the parsed
+  // shape so snapshot diffs are semantic (re-whitespacing the line is not a
+  // change) and buildBody can emit the official command/args split.
+  const [command, ...args] = splitShellWords(form.value.command)
+  return {
+    connectionType: connectionType.value,
+    name: form.value.name,
+    command: command ?? '',
+    url: form.value.url,
+    cwd: form.value.cwd,
+    transport: form.value.transport,
+    args,
+    env: pairsToRecord(envPairs.value),
+    headers: pairsToRecord(headerPairs.value),
+  }
+}
+
+// env/headers compare key-by-key: re-adding an identical pair in a different
+// order is not a change, and JSON.stringify would call it one (phantom dirty).
+function recordEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  return aKeys.every((k) => a[k] === b[k])
+}
+
+function draftEqual(a: DraftState, b: DraftState): boolean {
+  return a.connectionType === b.connectionType
+    && a.name === b.name
+    && a.command === b.command
+    && a.url === b.url
+    && a.cwd === b.cwd
+    && a.transport === b.transport
+    && JSON.stringify(a.args) === JSON.stringify(b.args)
+    && recordEqual(a.env, b.env)
+    && recordEqual(a.headers, b.headers)
+}
+
+// A never-saved server counts as dirty once it carries any content worth
+// losing — flipping the transport alone is not content.
+function newDraftHasContent(d: DraftState): boolean {
+  return d.name.trim() !== ''
+    || d.command.trim() !== ''
+    || d.url.trim() !== ''
+    || d.cwd.trim() !== ''
+    || d.args.length > 0
+    || Object.keys(d.env).length > 0
+    || Object.keys(d.headers).length > 0
+}
+
+// Stashed rows are user input too: switching transport parks the opposite
+// side's pairs in the stash, so a new draft whose only content sits in the
+// stash (type env → switch to remote → leave) must still trip the guard.
+function stashHasContent(): boolean {
+  const has = (pairs: KeyValuePair[]) => pairs.some((p) => p.key.trim() !== '' || p.value.trim() !== '')
+  return has(envStash.value) || has(headerStash.value)
+}
+
+const hasChanges = computed(() => {
+  const snap = savedSnapshot.value
+  const cur = captureDraft()
+  return snap ? !draftEqual(snap, cur) : newDraftHasContent(cur) || stashHasContent()
+})
+
+// The fields a probe depends on — a rename-only save must not re-spawn the
+// process or re-hit the endpoint.
+function connectionFieldsChanged(a: DraftState, b: DraftState): boolean {
+  return a.connectionType !== b.connectionType
+    || a.command !== b.command
+    || a.url !== b.url
+    || a.cwd !== b.cwd
+    || a.transport !== b.transport
+    || JSON.stringify(a.args) !== JSON.stringify(b.args)
+    || !recordEqual(a.env, b.env)
+    || !recordEqual(a.headers, b.headers)
+}
+
+function handleTransportChange(v: string) {
+  const next = v === 'remote' ? 'remote' : 'stdio'
+  if (next === connectionType.value) return
+  if (next === 'remote') {
+    // stdio env means process env — meaningless on HTTP (the backend never
+    // stores env for remote configs, so there is no remote env editor).
+    envStash.value = envPairs.value
+    envPairs.value = []
+    if (headerPairs.value.length === 0 && headerStash.value.length > 0) {
+      headerPairs.value = headerStash.value
+    }
+  } else {
+    headerStash.value = headerPairs.value
+    headerPairs.value = []
+    if (envPairs.value.length === 0 && envStash.value.length > 0) {
+      envPairs.value = envStash.value
+    }
+  }
+  connectionType.value = next
+}
+
+// The advanced card's description names its whole content: per-transport extras
+// only (env vars / headers) — authorization has its own entry above.
+const advancedHint = computed(() =>
+  connectionType.value === 'stdio' ? t('mcp.advancedHintStdio') : t('mcp.advancedHintRemote'),
 )
 
-const relativeProbed = computed(() => formatRelativeTime(lastProbedAt.value, { locale: locale.value }))
+// ---- Name inline edit (header) ----
+// Commits to the DRAFT (form.name), never to the server — Save owns persistence.
+const nameEditing = ref(false)
+const nameDraft = ref('')
+const nameInputRef = ref<ComponentPublicInstance | null>(null)
 
-// Open the advanced dialog automatically when a probe says authorization is
-// missing — the probe is a user-initiated action, so the dialog opening in
-// response lands them on the auth section instead of a hidden one.
-const oauthSpotlight = computed(() =>
-  connectionType.value === 'remote' && probeAuthRequired.value && !oauthStatus.value?.has_token,
-)
-watch(oauthSpotlight, (on) => { if (on) showAdvanced.value = true })
+function startNameEdit() {
+  nameDraft.value = form.value.name
+  nameEditing.value = true
+  void nextTick(() => {
+    const el = nameInputRef.value?.$el as HTMLElement | undefined
+    ;(el instanceof HTMLInputElement ? el : el?.querySelector('input'))?.focus()
+  })
+}
+
+function commitNameEdit() {
+  if (!nameEditing.value) return
+  form.value.name = nameDraft.value.trim()
+  nameEditing.value = false
+}
+
+function cancelNameEdit() {
+  nameEditing.value = false
+}
+
+// The row's description is the one place auth state speaks: status when there
+// is something to report (authorized / expired / the probe asked for sign-in /
+// discovery needs manual credentials), and a calm "only if asked" note the
+// rest of the time — most remote servers never need this row touched.
+const oauthAuthorized = computed(() => !!oauthStatus.value?.has_token && !oauthStatus.value?.expired)
+const oauthRowDescription = computed(() => {
+  const s = oauthStatus.value
+  if (s?.has_token && s.expired) return t('mcp.oauth.expired')
+  if (probeAuthRequired.value && !s?.has_token) return t('mcp.oauth.signInRequired')
+  if (oauthNeedsClientId.value) return t('mcp.oauth.clientIdHint')
+  return t('mcp.oauth.optionalHint')
+})
 
 function configValue(config: Record<string, unknown>, key: string): string {
   const val = config?.[key]
@@ -521,6 +719,26 @@ function pairsToRecord(pairs: KeyValuePair[]): Record<string, string> {
   return out
 }
 
+// The snapshot mirrors what is STORED (raw cfg), not what the line renders to.
+// For a legacy config whose command token holds a whole line, the stored shape
+// ("npx -y pkg" as one token) differs from the parsed line ("npx" + args) —
+// so the repair surfaces as unsaved changes with Save enabled, and the next
+// Save writes the clean split.
+function snapshotFromServer(server: McpItem, draftConnectionType: 'stdio' | 'remote'): DraftState {
+  const cfg = server.config ?? {}
+  return {
+    connectionType: draftConnectionType,
+    name: server.name,
+    command: configValue(cfg, 'command').trim(),
+    url: configValue(cfg, 'url'),
+    cwd: configValue(cfg, 'cwd'),
+    transport: server.type === 'sse' ? 'sse' : 'http',
+    args: configArray(cfg, 'args'),
+    env: configMap(cfg, 'env'),
+    headers: configMap(cfg, 'headers'),
+  }
+}
+
 function seedFromServer(server: McpItem | null) {
   if (probeAbortController) {
     probeAbortController.abort()
@@ -528,24 +746,27 @@ function seedFromServer(server: McpItem | null) {
   }
   probing.value = false
   showAdvanced.value = false
+  nameEditing.value = false
+  sessionProbeResult.value = null
   probeAuthRequired.value = false
   oauthStatus.value = null
   oauthDiscovered.value = false
   oauthNeedsClientId.value = false
   oauthClientId.value = ''
   oauthClientSecret.value = ''
+  envStash.value = []
+  headerStash.value = []
 
   if (!server) {
     serverId.value = ''
     connectionType.value = 'stdio'
     form.value = { name: '', command: '', url: '', cwd: '', transport: 'http', active: true }
-    argsTags.value = []
     envPairs.value = []
     headerPairs.value = []
     status.value = 'unknown'
     statusMessage.value = ''
-    lastProbedAt.value = null
     tools.value = []
+    savedSnapshot.value = null
     return
   }
 
@@ -554,32 +775,28 @@ function seedFromServer(server: McpItem | null) {
   connectionType.value = server.type === 'stdio' ? 'stdio' : 'remote'
   form.value = {
     name: server.name,
-    command: configValue(cfg, 'command'),
+    command: joinShellWords(configValue(cfg, 'command'), configArray(cfg, 'args')),
     url: configValue(cfg, 'url'),
     cwd: configValue(cfg, 'cwd'),
     transport: server.type === 'sse' ? 'sse' : 'http',
     active: !!server.is_active,
   }
-  argsTags.value = configArray(cfg, 'args')
   envPairs.value = recordToPairs(configMap(cfg, 'env'))
   headerPairs.value = recordToPairs(configMap(cfg, 'headers'))
-  // NOTE: unlike the old inline expand (which auto-opened when env/headers were
-  // populated so configured values never sat hidden), the advanced surface is
-  // now a DIALOG — auto-popping a modal on page load would be hostile. The
-  // always-visible ActionCard entry is what keeps the facet discoverable.
   status.value = server.status || 'unknown'
   statusMessage.value = server.status_message || ''
-  lastProbedAt.value = server.last_probed_at
   tools.value = server.tools_cache ?? []
+  savedSnapshot.value = snapshotFromServer(server, connectionType.value)
 
   if (server.type !== 'stdio') void loadOAuthStatus()
 }
 
 seedFromServer(props.server)
+if (props.autoProbe && serverId.value) void handleProbe(serverId.value)
 
 // Re-seed only when a genuinely different server arrives (a new open session).
-// The create→edit transition passes back the same id we just minted, so it is
-// ignored here — local probe state survives.
+// The create→edit transition is an explicit redirect: the parent remounts this
+// component (fresh key) seeded from the reloaded list, so no id is special here.
 watch(() => props.server?.id, (id) => {
   if (id && id !== serverId.value) seedFromServer(props.server)
 })
@@ -589,57 +806,75 @@ onBeforeUnmount(() => {
   oauthFlowCleanup?.()
 })
 
-function buildRequestBody(): McpUpsertRequest {
+function buildBody(draft: DraftState, active: boolean): McpUpsertRequest {
   const body: McpUpsertRequest = {
-    name: form.value.name.trim() || t('mcp.unnamedServer'),
-    is_active: form.value.active,
+    name: draft.name.trim() || t('mcp.unnamedServer'),
+    is_active: active,
   }
-  if (connectionType.value === 'stdio') {
-    body.command = form.value.command.trim()
-    if (argsTags.value.length > 0) body.args = argsTags.value
-    const envRecord = pairsToRecord(envPairs.value)
-    if (Object.keys(envRecord).length > 0) body.env = envRecord
-    if (form.value.cwd.trim()) body.cwd = form.value.cwd.trim()
+  if (draft.connectionType === 'stdio') {
+    body.command = draft.command.trim()
+    if (draft.args.length > 0) body.args = draft.args
+    if (Object.keys(draft.env).length > 0) body.env = draft.env
+    if (draft.cwd.trim()) body.cwd = draft.cwd.trim()
   } else {
-    const templateVars = pairsToRecord(envPairs.value)
-    body.url = substituteTemplateVars(form.value.url.trim(), templateVars)
-    const headerRecord = pairsToRecord(headerPairs.value)
-    const resolvedHeaders = Object.fromEntries(
-      Object.entries(headerRecord).map(([key, value]) => [key, substituteTemplateVars(value, templateVars)]),
-    )
-    if (Object.keys(resolvedHeaders).length > 0) body.headers = resolvedHeaders
-    if (form.value.transport === 'sse') body.transport = 'sse'
+    // Remote url/headers are stored verbatim — env is a stdio-only concept
+    // (process environment), so there is no ${VAR} resolution for remote.
+    body.url = draft.url.trim()
+    if (Object.keys(draft.headers).length > 0) {
+      body.headers = { ...draft.headers }
+    }
+    if (draft.transport === 'sse') body.transport = 'sse'
   }
   return body
 }
 
-function substituteTemplateVars(value: string, vars: Record<string, string>) {
-  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, key: string) => vars[key] ?? match)
-}
-
 async function handleSave() {
+  // A save must not overlap the switch's own commit: the toggle PUT carries the
+  // pre-edit snapshot, and the save PUT carries the toggle's optimistic active —
+  // letting both fly lets whichever lands last silently revert the other. The
+  // UI disables the pair during either flight; this is the belt-and-suspenders.
+  if (activeSaving.value) return
   // Validate at submit rather than disabling the button: a stdio server needs a
   // command, a remote one needs an endpoint — anything else can't connect.
-  if (!hasConnectionTarget.value) {
+  const wasNew = !serverId.value
+  let draft = captureDraft()
+  if (wasNew && draft.connectionType === 'stdio' && !draft.command.trim()) {
+    // Create with the command left empty accepts the factory default (the same
+    // example the placeholder shows), so the one-click path actually connects.
+    // Edit mode never takes this branch: clearing a real server's command is a
+    // deliberate act and must keep erroring.
+    const [cmd, ...rest] = splitShellWords(DEFAULT_STDIO_COMMAND)
+    draft = { ...draft, command: cmd ?? '', args: rest }
+  }
+  const hasTarget = draft.connectionType === 'stdio' ? draft.command.trim() !== '' : draft.url.trim() !== ''
+  if (!hasTarget) {
     toast.error(connectionType.value === 'stdio' ? t('mcp.commandRequired') : t('mcp.urlRequired'))
     return
   }
   saving.value = true
   try {
-    const body = buildRequestBody()
-    if (!serverId.value) {
+    // Probing is expensive (a container process spawn or a network handshake),
+    // so it only follows a save that could change the answer. For a create the
+    // probe is not fired here: the parent remounts this detail at the new
+    // server's canonical state (autoProbe), and that mount runs it.
+    const needsProbe = !wasNew
+      && savedSnapshot.value !== null && connectionFieldsChanged(savedSnapshot.value, draft)
+    const body = buildBody(draft, form.value.active)
+    if (wasNew) {
       const { data } = await postBotsByBotIdMcp({ path: { bot_id: props.botId } as unknown as { bot_id: string }, body, throwOnError: true })
       const id = data?.id ?? ''
-      serverId.value = id
       toast.success(t('mcp.createSuccess'))
+      // Clean the draft for the brief window before the parent's redirect
+      // remount, so the leave-guard can't misfire on a just-created server.
+      savedSnapshot.value = draft
       if (id) emit('created', id)
       emit('changed')
-      if (id) void handleProbe(id)
     } else {
       await putBotsByBotIdMcpById({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, body, throwOnError: true })
       toast.success(t('mcp.updateSuccess'))
+      savedSnapshot.value = draft
       emit('changed')
-      void handleProbe(serverId.value)
+      if (needsProbe) void handleProbe(serverId.value)
     }
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('mcp.invalidConfig')))
@@ -648,41 +883,70 @@ async function handleSave() {
   }
 }
 
+// The Enabled switch is NOT part of the draft: on a saved server it commits
+// immediately (optimistic, rolling back on failure) — a switch reads as
+// instant, so making it wait for Save was a silent-data-loss trap. The request
+// carries the SNAPSHOT's other fields so in-flight draft edits are not
+// accidentally committed along with the toggle.
+const activeSaving = ref(false)
+async function handleToggleActive(value: boolean) {
+  if (!serverId.value) {
+    form.value.active = value
+    return
+  }
+  if (activeSaving.value || saving.value) return
+  const snap = savedSnapshot.value
+  if (!snap) return
+  const prev = form.value.active
+  form.value.active = value
+  activeSaving.value = true
+  try {
+    await putBotsByBotIdMcpById({
+      path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string },
+      body: buildBody(snap, value),
+      throwOnError: true,
+    })
+    emit('changed')
+  } catch (error) {
+    form.value.active = prev
+    toast.error(resolveApiErrorMessage(error, t('mcp.saveFailed')))
+  } finally {
+    activeSaving.value = false
+  }
+}
+
 async function handleProbe(id: string) {
   if (!id) return
   probing.value = true
   probeAuthRequired.value = false
-  if (probeAbortController) probeAbortController.abort()
-  probeAbortController = new AbortController()
+  probeAbortController?.abort()
+  // Each probe tracks its own controller: when probes overlap (autoProbe in
+  // flight + OAuth completion re-probe), the older one's finally must not
+  // blank the newer one's spinner/controller — only the latest clears.
+  const controller = new AbortController()
+  probeAbortController = controller
   try {
-    const { data } = await postBotsByBotIdMcpByIdProbe({ path: { bot_id: props.botId, id } as unknown as { bot_id: string, id: string }, throwOnError: true })
+    const { data } = await postBotsByBotIdMcpByIdProbe({ path: { bot_id: props.botId, id } as unknown as { bot_id: string, id: string }, signal: controller.signal, throwOnError: true })
     if (data) {
       status.value = data.status ?? status.value
       tools.value = data.tools ?? []
       statusMessage.value = data.error ?? ''
-      lastProbedAt.value = new Date().toISOString()
       probeAuthRequired.value = !!data.auth_required
+      sessionProbeResult.value = status.value === 'connected' ? 'ok' : 'error'
     }
     emit('changed')
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') return
     status.value = 'error'
     statusMessage.value = resolveApiErrorMessage(error, t('mcp.probeFailedNetwork'))
-    lastProbedAt.value = new Date().toISOString()
+    sessionProbeResult.value = 'error'
     emit('changed')
   } finally {
-    probing.value = false
-    probeAbortController = null
+    if (probeAbortController === controller) {
+      probing.value = false
+      probeAbortController = null
+    }
   }
-}
-
-function cancelProbe() {
-  if (probeAbortController) {
-    probeAbortController.abort()
-    probeAbortController = null
-  }
-  probing.value = false
-  toast.info(t('mcp.probeAborted'))
 }
 
 async function handleDelete() {
@@ -697,25 +961,6 @@ async function handleDelete() {
   } finally {
     deleting.value = false
   }
-}
-
-function handleExport() {
-  if (!serverId.value) return
-  const isStdio = connectionType.value === 'stdio'
-  const args = argsTags.value
-  const env = pairsToRecord(envPairs.value)
-  const headers = pairsToRecord(headerPairs.value)
-  const entry: McpMcpServerEntry = {
-    command: isStdio ? form.value.command.trim() || undefined : undefined,
-    args: isStdio && args.length ? args : undefined,
-    env: isStdio && Object.keys(env).length ? env : undefined,
-    cwd: isStdio && form.value.cwd.trim() ? form.value.cwd.trim() : undefined,
-    url: !isStdio ? form.value.url.trim() || undefined : undefined,
-    headers: !isStdio && Object.keys(headers).length ? headers : undefined,
-    transport: !isStdio && form.value.transport === 'sse' ? 'sse' : undefined,
-  }
-  copyText(JSON.stringify({ mcpServers: { [form.value.name.trim() || t('mcp.unnamedServer')]: entry } }, null, 2))
-  toast.success(t('mcp.copySuccess'))
 }
 
 // ---- OAuth (remote) ----
@@ -733,11 +978,14 @@ async function loadOAuthStatus() {
     oauthStatus.value = null
     return
   }
+  oauthStatusLoading.value = true
   try {
     const { data } = await getBotsByBotIdMcpByIdOauthStatus({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
     oauthStatus.value = data ?? null
   } catch {
     oauthStatus.value = null
+  } finally {
+    oauthStatusLoading.value = false
   }
 }
 
@@ -759,6 +1007,10 @@ async function handleOAuthDiscover(): Promise<boolean> {
 
 async function handleOAuthFlow() {
   if (!serverId.value) return
+  // One flow at a time: restarting re-navigates the same named popup, which
+  // aborts any in-flight callback — and a mid-exchange abort used to burn the
+  // single-use auth code. The button is disabled too; this is the guard.
+  if (oauthDiscovering.value || oauthAuthorizing.value) return
   if (!oauthDiscovered.value) {
     const discovered = await handleOAuthDiscover()
     if (!discovered) return
@@ -780,6 +1032,16 @@ async function handleOAuthFlow() {
     if (!data?.authorization_url) throw new Error(t('mcp.oauth.flowInitFailed'))
 
     const popup = await openOAuthURL(data.authorization_url)
+    if (!popup && !window.api?.desktop?.openExternalUrl) {
+      // window.open returned null: the browser blocked the popup. Fail fast
+      // with a signpost — with no window handle, the poll below has no close
+      // signal and would spin silently for 120s before a generic failure.
+      // (Desktop returns null by design: the URL went to the system browser
+      // and the token poll is the only completion signal.)
+      toast.error(t('mcp.oauth.popupBlocked'))
+      oauthAuthorizing.value = false
+      return
+    }
     let completed = false
     let pollTimer: ReturnType<typeof setInterval> | undefined
     const finishOAuth = async (result: 'success' | 'error', error?: string) => {
@@ -791,6 +1053,11 @@ async function handleOAuthFlow() {
       oauthAuthorizing.value = false
       await loadOAuthStatus()
       if (result === 'success') {
+        // The flow is done — close the authorization popup if it is still
+        // around (poll-based completion can win the race against the
+        // callback page's own postMessage + self-close). The section row
+        // flips to Authorized in place; nothing else needs to close.
+        popup?.close()
         toast.success(t('mcp.oauth.authSuccess'))
         void handleProbe(serverId.value)
       } else {
@@ -816,7 +1083,11 @@ async function handleOAuthFlow() {
       getBotsByBotIdMcpByIdOauthStatus({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
         .then(async ({ data: next }) => {
           if (completed) return
-          if (next?.configured) {
+          // Completion means the TOKEN LANDED — `configured` is already true
+          // once authorization starts (the endpoint is stored up front), so
+          // polling it fires a false success seconds after the user clicks
+          // Authorize, before they have even consented.
+          if (next?.has_token) {
             oauthStatus.value = next
             await finishOAuth('success')
             return
@@ -843,7 +1114,8 @@ async function openOAuthURL(url: string): Promise<Window | null> {
 }
 
 async function handleOAuthRevoke() {
-  if (!serverId.value) return
+  if (!serverId.value || oauthRevoking.value) return
+  oauthRevoking.value = true
   try {
     await deleteBotsByBotIdMcpByIdOauthToken({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
     toast.success(t('mcp.oauth.revokeSuccess'))
@@ -854,6 +1126,11 @@ async function handleOAuthRevoke() {
     await loadOAuthStatus()
   } catch {
     toast.error(t('mcp.oauth.revokeFailed'))
+  } finally {
+    oauthRevoking.value = false
   }
 }
+
+// The list host reads this to guard list↔detail transitions against unsaved edits.
+defineExpose({ hasChanges })
 </script>
