@@ -36,3 +36,27 @@ export function shouldPrefetchToFillViewport(opts: {
   if (opts.viewportHeight <= 0) return false
   return opts.contentHeight <= opts.viewportHeight
 }
+
+/**
+ * After loadMoreSessions settles, only continue viewport prefetch when the
+ * attempt made progress. A failed request leaves cursor + contentHeight
+ * unchanged; without this gate the loading flag flipping false retriggers the
+ * watch in a tight retry loop.
+ *
+ * Cursor advance with unchanged height is still progress: Schedule/Agent
+ * client filters can yield an empty page while nextCursor moves.
+ */
+export function didLoadMoreMakeProgress(opts: {
+  wasLoadingMore: boolean
+  isLoadingMore: boolean
+  previousCursor: string | null
+  currentCursor: string | null
+  previousContentHeight: number
+  currentContentHeight: number
+}): boolean {
+  if (!opts.wasLoadingMore || opts.isLoadingMore) return true
+  return (
+    opts.previousCursor !== opts.currentCursor
+    || opts.previousContentHeight !== opts.currentContentHeight
+  )
+}

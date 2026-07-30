@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { shouldPrefetchToFillViewport, shouldShowLoadMoreSentinel } from './recents-scroll'
+import {
+  didLoadMoreMakeProgress,
+  shouldPrefetchToFillViewport,
+  shouldShowLoadMoreSentinel,
+} from './recents-scroll'
 
 describe('shouldShowLoadMoreSentinel', () => {
   it('stays off while the virtualizer spacer is still short of the viewport', () => {
@@ -82,6 +86,52 @@ describe('shouldPrefetchToFillViewport', () => {
       loading: false,
       contentHeight: 0,
       viewportHeight: 400,
+    })).toBe(true)
+  })
+})
+
+describe('didLoadMoreMakeProgress', () => {
+  it('stops prefetch after a settled load that did not advance cursor or height', () => {
+    // Failed request (or no-op): loadingMore flipped false with nothing else
+    // changed — tight-looping here would hammer the sessions API.
+    expect(didLoadMoreMakeProgress({
+      wasLoadingMore: true,
+      isLoadingMore: false,
+      previousCursor: 'cursor-2',
+      currentCursor: 'cursor-2',
+      previousContentHeight: 180,
+      currentContentHeight: 180,
+    })).toBe(false)
+  })
+
+  it('continues after cursor advances even when visible height stays zero', () => {
+    // Schedule/Agent filter: a page can add zero visible rows while nextCursor moves.
+    expect(didLoadMoreMakeProgress({
+      wasLoadingMore: true,
+      isLoadingMore: false,
+      previousCursor: 'cursor-2',
+      currentCursor: 'cursor-3',
+      previousContentHeight: 0,
+      currentContentHeight: 0,
+    })).toBe(true)
+  })
+
+  it('continues when content grew or the transition is not a load settle', () => {
+    expect(didLoadMoreMakeProgress({
+      wasLoadingMore: true,
+      isLoadingMore: false,
+      previousCursor: 'cursor-2',
+      currentCursor: 'cursor-2',
+      previousContentHeight: 180,
+      currentContentHeight: 400,
+    })).toBe(true)
+    expect(didLoadMoreMakeProgress({
+      wasLoadingMore: false,
+      isLoadingMore: false,
+      previousCursor: 'cursor-2',
+      currentCursor: 'cursor-2',
+      previousContentHeight: 180,
+      currentContentHeight: 180,
     })).toBe(true)
   })
 })

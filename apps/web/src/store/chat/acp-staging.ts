@@ -207,17 +207,19 @@ export function createACPStaging(deps: ACPStagingDeps) {
     bumpSelectSessionRequest()
     explicitSessionSelection.value = false
     draftIntent.value = false
-    sessionId.value = null
+    // Stop the live session runtime before clearing sessionId — clearTranscriptForDraft
+    // reads the current id to unsubscribe.
     clearTranscriptForDraft()
+    sessionId.value = null
     stageACPSession(input, { explicitSelection: false })
   }
 
   function stageNewACPSession(input: ACPAgentSessionInput) {
     bumpSelectSessionRequest()
     clearPendingACPSession()
-    sessionId.value = null
     draftIntent.value = true
     clearTranscriptForDraft()
+    sessionId.value = null
     stageACPSession(input, { explicitSelection: true })
   }
 
@@ -226,10 +228,13 @@ export function createACPStaging(deps: ACPStagingDeps) {
     if (options.clearPendingACP !== false) {
       clearPendingACPSession()
     }
+    // Must run while sessionId is still set: clearTranscriptForDraft stops the
+    // session runtime by reading the current id. Nulling first leaves an orphan
+    // subscribe (File/Preview restore clearing initialize()'s auto-pick).
+    clearTranscriptForDraft()
     sessionId.value = null
     explicitSessionSelection.value = options.explicitSelection === true
     draftIntent.value = options.draftIntent ?? options.explicitSelection === true
-    clearTranscriptForDraft()
   }
 
   async function ensurePendingACPRuntime(): Promise<AcpagentRuntimeStatus | undefined> {

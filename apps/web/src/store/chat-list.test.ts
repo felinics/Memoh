@@ -111,6 +111,7 @@ const h = {
   sessionsActivityHandler: null as ((event: BotSessionActivityEvent) => void) | null,
   sendUpdates: [] as RuntimeTestUpdate[],
   sentWSMessages: [] as Array<Record<string, unknown>>,
+  runtimeUnsubscribes: [] as string[],
   wsRunIds: [] as string[],
   abortedWSRuns: [] as string[],
   lastRunId: '',
@@ -254,6 +255,7 @@ beforeEach(() => {
     h.wsRunSeq = 0
     h.runtimeBySession = new Map()
     h.sentWSMessages = []
+    h.runtimeUnsubscribes = []
     h.wsRunIds = []
     h.abortedWSRuns = []
     h.sendUpdates = [runtime.started, runtime.failed('model failed')]
@@ -404,7 +406,10 @@ beforeEach(() => {
             if (message.session_id) emitRuntimeSnapshot(onStreamEvent, message.session_id)
             return
           }
-          if (message.type === 'runtime_unsubscribe') return
+          if (message.type === 'runtime_unsubscribe') {
+            if (message.session_id) h.runtimeUnsubscribes.push(message.session_id)
+            return
+          }
           h.sentWSMessages.push(message as Record<string, unknown>)
           h.lastSessionId = message.session_id ?? ''
           if (
@@ -1368,6 +1373,34 @@ describe('chat-list store', () => {
       expect(store.pendingACPSessionMetadata).toBeNull()
       expect(store.hasExplicitSessionSelection).toBe(true)
       expect(api.createACPRuntime).not.toHaveBeenCalled()
+    })
+
+  it('unsubscribes the live session runtime when resetToEmptyComposer clears a selected session', async () => {
+      api.fetchSessions.mockResolvedValueOnce({
+        items: [{
+          id: 'session-live',
+          bot_id: 'bot-1',
+          title: 'Live',
+          type: 'chat',
+        }],
+        nextCursor: null,
+      })
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      await store.selectSession('session-live')
+      await flushPromises()
+      expect(store.sessionId).toBe('session-live')
+
+      h.runtimeUnsubscribes = []
+      store.resetToEmptyComposer({
+        clearPendingACP: false,
+        explicitSelection: false,
+        draftIntent: false,
+      })
+
+      expect(store.sessionId).toBeNull()
+      expect(h.runtimeUnsubscribes).toEqual(['session-live'])
     })
 
   it('keeps a manually staged ACP agent explicit so the default stage cannot reclaim it', async () => {

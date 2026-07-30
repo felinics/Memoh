@@ -173,7 +173,11 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { isSessionVisibleInSidebarMode, sortByRecency, type SidebarSessionMode } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { shouldPrefetchToFillViewport, shouldShowLoadMoreSentinel } from './recents-scroll'
+import {
+  didLoadMoreMakeProgress,
+  shouldPrefetchToFillViewport,
+  shouldShowLoadMoreSentinel,
+} from './recents-scroll'
 import {
   Button,
   TextButton,
@@ -206,6 +210,7 @@ const {
   loadingChats,
   hasMoreSessions,
   loadingMoreSessions,
+  sessionsCursor,
 } = storeToRefs(chatStore)
 
 // The list pivots between human conversations (Recent) and system run streams
@@ -289,14 +294,28 @@ watch(
     loadingMoreSessions,
     totalSize,
     viewportHeight,
+    sessionsCursor,
   ],
-  () => {
+  (curr, prev) => {
     if (!shouldPrefetchToFillViewport({
       hasMore: hasMoreSessions.value,
       loading: loadingChats.value || loadingMoreSessions.value,
       contentHeight: totalSize.value,
       viewportHeight: viewportHeight.value,
     })) return
+    // Failed / no-op loadMore: loading settles with the same cursor and height.
+    // Do not tight-loop; a later viewport/list change can try again.
+    if (
+      prev
+      && !didLoadMoreMakeProgress({
+        wasLoadingMore: prev[2],
+        isLoadingMore: curr[2],
+        previousCursor: prev[5],
+        currentCursor: curr[5],
+        previousContentHeight: prev[3],
+        currentContentHeight: curr[3],
+      })
+    ) return
     void chatStore.loadMoreSessions()
   },
 )
