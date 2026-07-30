@@ -1,8 +1,4 @@
 <template>
-  <!-- Graph section: a plain SettingsSection like every other tab section
-       (Status/Events on Hooks, the dated groups below) — same muted label,
-       same min-h-7 header row, same px-2 inset for the counts. The chart
-       fills the card body; the card's overflow-hidden clips its corners. -->
   <SettingsSection :title="$t('memory.graphTitle')">
     <template #actions>
       <div
@@ -14,457 +10,67 @@
       </div>
     </template>
 
-    <div class="relative h-[30rem]">
+    <div
+      class="relative h-[30rem]"
+      @wheel.capture.prevent="handleGraphWheel"
+      @pointerdown="handleGraphPointerDown"
+    >
       <PanePlaceholder
         v-if="loading"
         loading
       >
         {{ $t('common.loading') }}
       </PanePlaceholder>
-      <VChart
-        v-else-if="graphData && graphData.nodes.length > 0"
-        :option="chartOption"
-        :autoresize="chartAutoresize"
-        :update-options="chartUpdateOptions"
-        class="size-full"
-        @click="handleNodeClick"
-      />
+      <template v-else-if="graphData && graphData.nodes.length > 0">
+        <VChart
+          ref="chartRef"
+          :option="chartOption"
+          :autoresize="chartAutoresize"
+          :update-options="chartUpdateOptions"
+          class="size-full"
+          :class="{ invisible: !layoutReady }"
+        />
+        <PanePlaceholder
+          v-if="!layoutReady"
+          loading
+          class="absolute inset-0 z-10"
+        >
+          {{ $t('common.loading') }}
+        </PanePlaceholder>
+      </template>
       <PanePlaceholder v-else>
         {{ $t('memory.graphEmpty') }}
       </PanePlaceholder>
     </div>
-
-    <Dialog
-      :open="!!selectedNode"
-      @update:open="handleDialogOpen"
-    >
-      <DialogScrollContent class="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {{ selectedNodeTitle }}
-          </DialogTitle>
-        </DialogHeader>
-        <div
-          v-if="selectedNode"
-          class="space-y-3"
-        >
-          <div class="flex flex-wrap gap-2">
-            <Badge
-              v-if="selectedNode.slug"
-              variant="info"
-              size="sm"
-            >
-              {{ selectedNode.slug }}
-            </Badge>
-            <Badge
-              v-if="selectedNode.topic"
-              variant="success"
-              size="sm"
-            >
-              {{ selectedNode.topic }}
-            </Badge>
-          </div>
-          <p class="whitespace-pre-wrap text-control leading-relaxed text-foreground">
-            {{ selectedNode.memory }}
-          </p>
-        </div>
-      </DialogScrollContent>
-    </Dialog>
   </SettingsSection>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useDark } from '@vueuse/core'
-import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
-import type { ECElementEvent } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
-import { Badge, Dialog, DialogHeader, DialogScrollContent, DialogTitle, PanePlaceholder, SettingsSection } from '@felinic/ui'
-import {
-  getBotsByBotIdMemoryGraph,
-  type HandlersGraphEdge,
-  type HandlersGraphNode,
-  type HandlersGraphResponse,
-} from '@memohai/sdk'
+import VChart from 'vue-echarts'
+import { PanePlaceholder, SettingsSection } from '@felinic/ui'
+import { useMemoryGraphFromProps } from './memory-graph/useMemoryGraph'
 
 use([CanvasRenderer, GraphChart, TooltipComponent])
 
-type GraphNode = HandlersGraphNode
-type GraphEdge = HandlersGraphEdge
-
-interface GraphData {
-  nodes: GraphNode[]
-  edges: GraphEdge[]
-}
-
-interface ChartNodeData extends GraphNode {
-  id: string
-  name: string
-  displayName: string
-  symbolSize: number
-  itemStyle: { color: string }
-}
-
-interface GraphEdgeCandidate extends GraphEdge {
-  source: string
-  target: string
-  strength: number
-}
-
-interface ChartTheme {
-  label: string
-  line: string
-  /** Neutral color for subjects that hash to nothing. */
-  fallback: string
-  fontFamily: string
-  palette: string[]
-  // Tooltip surface tokens — echarts' default tooltip picks the node's own
-  // accent color for its border and a translucent white for the fill, which
-  // reads as a random colored frame. Pin it to the popover language instead.
-  popover: string
-  foreground: string
-  muted: string
-  border: string
-}
-
 const props = defineProps<{ botId: string }>()
-const MAX_VISIBLE_EDGES_PER_NODE = 4
 
-const isDark = useDark()
-const loading = ref(true)
-const graphData = ref<GraphData | null>(null)
-const selectedNode = ref<GraphNode | null>(null)
-let fetchSeq = 0
-const chartAutoresize = { throttle: 120 }
-const chartUpdateOptions = { lazyUpdate: true }
-
-const colorCanvas = typeof document !== 'undefined'
-  ? document.createElement('canvas').getContext('2d', { willReadFrequently: true })
-  : null
-
-function readColor(token: string, fallback: string): string {
-  if (typeof document === 'undefined') return fallback
-  const probe = document.createElement('span')
-  probe.style.color = `var(${token})`
-  probe.style.display = 'none'
-  document.body.appendChild(probe)
-  const resolved = getComputedStyle(probe).color
-  probe.remove()
-  if (!resolved) return fallback
-  if (!colorCanvas) return resolved
-  try {
-    colorCanvas.clearRect(0, 0, 1, 1)
-    colorCanvas.fillStyle = '#000'
-    colorCanvas.fillStyle = resolved
-    colorCanvas.fillRect(0, 0, 1, 1)
-    const [r = 0, g = 0, b = 0, a = 255] = colorCanvas.getImageData(0, 0, 1, 1).data
-    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
-  }
-  catch {
-    return fallback
-  }
-}
-
-const chartTheme = computed<ChartTheme>(() => {
-  void isDark.value
-  return {
-    label: readColor('--foreground', '#18181b'),
-    line: readColor('--border', '#d4d4d8'),
-    fallback: readColor('--accent-gray', '#5f5e59'),
-    fontFamily: typeof document !== 'undefined' ? getComputedStyle(document.body).fontFamily : 'inherit',
-    palette: [
-      readColor('--accent-blue', '#2383e2'),
-      readColor('--accent-green', '#448361'),
-      readColor('--accent-teal', '#2c8b9e'),
-      readColor('--accent-orange', '#d9730d'),
-      readColor('--accent-pink', '#c14c8a'),
-      readColor('--accent-red', '#cd3c3a'),
-      readColor('--accent-yellow', '#cb912f'),
-      readColor('--accent-purple', '#9065b0'),
-    ],
-    popover: readColor('--popover', '#ffffff'),
-    foreground: readColor('--foreground', '#18181b'),
-    muted: readColor('--muted-foreground', '#71717a'),
-    border: readColor('--border', '#e4e4e7'),
-  }
-})
-
-const selectedNodeTitle = computed(() => selectedNode.value ? displayName(selectedNode.value) : '')
-
-const graphEdges = computed<GraphEdgeCandidate[]>(() => {
-  const edges = graphData.value?.edges ?? []
-  return edges
-    .filter((edge): edge is GraphEdge & { source: string; target: string } => !!edge.source && !!edge.target)
-    .map((edge) => ({
-      ...edge,
-      strength: graphEdgeStrength(edge),
-    }))
-})
-
-const visibleGraphEdges = computed<GraphEdgeCandidate[]>(() => {
-  const degree = new Map<string, number>()
-  const selected: GraphEdgeCandidate[] = []
-
-  for (const edge of [...graphEdges.value].sort(compareGraphEdges)) {
-    const sourceDegree = degree.get(edge.source) ?? 0
-    const targetDegree = degree.get(edge.target) ?? 0
-    if (sourceDegree >= MAX_VISIBLE_EDGES_PER_NODE || targetDegree >= MAX_VISIBLE_EDGES_PER_NODE) {
-      continue
-    }
-    selected.push(edge)
-    degree.set(edge.source, sourceDegree + 1)
-    degree.set(edge.target, targetDegree + 1)
-  }
-
-  return selected.sort((a, b) => {
-    if (a.source !== b.source) return a.source < b.source ? -1 : 1
-    if (a.target !== b.target) return a.target < b.target ? -1 : 1
-    return graphRelRank(a.rel) - graphRelRank(b.rel)
-  })
-})
-
-const chartOption = computed(() => {
-  if (!graphData.value || graphData.value.nodes.length === 0) return {}
-  const theme = chartTheme.value
-  const nodes = graphData.value.nodes.filter((node): node is GraphNode & { id: string } => !!node.id)
-  const edges = visibleGraphEdges.value
-  return {
-    animation: false,
-    animationDurationUpdate: 0,
-    tooltip: {
-      trigger: 'item',
-      backgroundColor: theme.popover,
-      borderColor: theme.border,
-      borderWidth: 1,
-      padding: [8, 10],
-      // The default 0.4s transitionDuration makes the tooltip CHASE the
-      // cursor: it is mid-animation on every mousemove, and Chromium moves
-      // the composited layer at fractional offsets instead of re-rasterizing
-      // the text — visible as motion blur (worst on CJK glyphs) until the
-      // animation settles. Snapping to the cursor keeps the text sharp.
-      transitionDuration: 0,
-      // Keep the tooltip inside the chart so a node near the edge can't push
-      // it under the card's rounded clip.
-      confine: true,
-      textStyle: {
-        color: theme.foreground,
-        fontSize: 12,
-        fontFamily: theme.fontFamily,
-      },
-      // Radius/shadow can stay as CSS vars — the tooltip mounts inside our DOM.
-      // Wrapping is NOT the container's job: echarts sizes the tooltip to the
-      // content's intrinsic width, so a max-width here never engages. The
-      // formatter owns its own width cap instead.
-      extraCssText: 'border-radius: var(--radius-menu); box-shadow: var(--shadow-dropdown);',
-      formatter: (params: { dataType?: string; data?: ChartNodeData }) => {
-        if (params.dataType !== 'node' || !params.data) return ''
-        const text = params.data.memory || params.data.label || ''
-        const preview = text.length > 100 ? `${text.slice(0, 97)}...` : text
-        const title = `<div style="font-weight:500">${escapeTooltip(params.data.displayName)}</div>`
-        const body = preview
-          ? `<div style="margin-top:2px;color:${theme.muted}">${escapeTooltip(preview)}</div>`
-          : ''
-        return `<div style="max-width:16rem;white-space:normal;word-break:break-word">${title}${body}</div>`
-      },
-    },
-    series: [{
-      type: 'graph',
-      layout: 'force',
-      roam: true,
-      draggable: true,
-      label: {
-        show: true,
-        fontSize: 11,
-        color: theme.label,
-        fontFamily: theme.fontFamily,
-        formatter: (params: { data?: ChartNodeData }) => params.data?.displayName ?? '',
-      },
-      // Without this every label paints even when nodes cluster, producing the
-      // unreadable overlapping-label soup on dense graphs.
-      labelLayout: { hideOverlap: true },
-      force: {
-        initLayout: 'circular',
-        repulsion: 200,
-        edgeLength: [60, 160],
-        gravity: 0.08,
-        layoutAnimation: false,
-      },
-      lineStyle: {
-        color: theme.line,
-        width: 1,
-        curveness: 0.1,
-      },
-      emphasis: {
-        focus: 'adjacency',
-        lineStyle: { width: 3 },
-      },
-      // Echarts' default blur state crushes non-adjacent nodes to ~0.1 opacity,
-      // which reads as a washed-out, half-broken graph on hover. Own the fade.
-      blur: {
-        itemStyle: { opacity: 0.2 },
-        lineStyle: { opacity: 0.15 },
-        label: { opacity: 0.25 },
-      },
-      data: nodes.map((node): ChartNodeData => ({
-        ...node,
-        name: node.id,
-        displayName: displayName(node),
-        symbolSize: graphNodeSize(node.count),
-        itemStyle: {
-          color: subjectColor(node.subject || node.slug || node.topic, theme),
-        },
-      })),
-      links: edges.map((edge) => ({
-        source: edge.source,
-        target: edge.target,
-        value: edge.strength,
-        lineStyle: {
-          width: graphEdgeWidth(edge.strength),
-          opacity: graphEdgeOpacity(edge.strength),
-        },
-      })),
-    }],
-  }
-})
-
-function compareGraphEdges(a: GraphEdgeCandidate, b: GraphEdgeCandidate): number {
-  if (a.strength !== b.strength) return b.strength - a.strength
-  const relRank = graphRelRank(a.rel) - graphRelRank(b.rel)
-  if (relRank !== 0) return relRank
-  if (a.source !== b.source) return a.source < b.source ? -1 : 1
-  if (a.target !== b.target) return a.target < b.target ? -1 : 1
-  return 0
-}
-
-function graphEdgeStrength(edge: GraphEdge): number {
-  const weight = Number(edge.weight)
-  if (Number.isFinite(weight) && weight > 0) return weight
-  const count = Number(edge.count)
-  if (Number.isFinite(count) && count > 0) return count
-  return graphRelWeight(edge.rel)
-}
-
-function graphRelWeight(rel: string | undefined): number {
-  switch (rel) {
-    case 'refs': return 1.2
-    case 'same_profile': return 1
-    case 'same_topic': return 0.8
-    case 'same_day': return 0.5
-    default: return 0.4
-  }
-}
-
-function graphRelRank(rel: string | undefined): number {
-  switch (rel) {
-    case 'refs': return 0
-    case 'same_profile': return 1
-    case 'same_topic': return 2
-    case 'same_day': return 3
-    default: return 100
-  }
-}
-
-function graphEdgeWidth(strength: number): number {
-  return Math.min(3, 0.8 + Math.log2(strength + 1) * 0.55)
-}
-
-function graphEdgeOpacity(strength: number): number {
-  return Math.min(0.72, 0.32 + Math.log2(strength + 1) * 0.08)
-}
-
-function graphNodeSize(count: number | undefined): number {
-  const value = Number(count)
-  if (!Number.isFinite(value) || value <= 1) return 30
-  return Math.min(46, 30 + Math.log2(value) * 6)
-}
-
-function displayName(node: GraphNode): string {
-  return node.slug || node.subject || node.label || node.id || ''
-}
-
-function subjectColor(subject: string | undefined, theme: ChartTheme): string {
-  if (!subject || theme.palette.length === 0) return theme.fallback
-  let hash = 0
-  for (let i = 0; i < subject.length; i++) {
-    hash = ((hash << 5) - hash + subject.charCodeAt(i)) | 0
-  }
-  return theme.palette[Math.abs(hash) % theme.palette.length] ?? theme.fallback
-}
-
-function escapeTooltip(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll('\n', '<br>')
-}
-
-function isChartNodeData(data: unknown): data is ChartNodeData {
-  return typeof data === 'object'
-    && data !== null
-    && 'id' in data
-    && 'name' in data
-}
-
-function handleNodeClick(params: ECElementEvent) {
-  if (params.dataType === 'node' && isChartNodeData(params.data)) {
-    selectedNode.value = params.data
-  }
-}
-
-function handleDialogOpen(open: boolean) {
-  if (!open) {
-    selectedNode.value = null
-  }
-}
-
-function normalizeGraph(data: HandlersGraphResponse | undefined): GraphData {
-  return {
-    nodes: data?.nodes ?? [],
-    edges: data?.edges ?? [],
-  }
-}
-
-async function fetchGraph() {
-  const botId = props.botId.trim()
-  const seq = ++fetchSeq
-  if (!botId) {
-    graphData.value = null
-    loading.value = false
-    return
-  }
-
-  loading.value = true
-  try {
-    const { data } = await getBotsByBotIdMemoryGraph({
-      path: { bot_id: botId },
-      throwOnError: true,
-    })
-    if (seq === fetchSeq) {
-      graphData.value = normalizeGraph(data)
-    }
-  }
-  catch (error) {
-    if (seq === fetchSeq) {
-      console.error('failed to load memory graph', error)
-      graphData.value = { nodes: [], edges: [] }
-    }
-  }
-  finally {
-    if (seq === fetchSeq) {
-      loading.value = false
-    }
-  }
-}
-
-watch(() => props.botId, () => {
-  selectedNode.value = null
-  void fetchGraph()
-}, { immediate: true })
+const {
+  loading,
+  graphData,
+  visibleGraphEdges,
+  layoutReady,
+  chartRef,
+  chartOption,
+  chartAutoresize,
+  chartUpdateOptions,
+  handleGraphPointerDown,
+  handleGraphWheel,
+  fetchGraph,
+} = useMemoryGraphFromProps(props)
 
 defineExpose({ refresh: fetchGraph })
 </script>
