@@ -659,6 +659,9 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (Messag
 	if raw, ok := arguments["message"]; ok && raw != nil {
 		switch value := raw.(type) {
 		case string:
+			if looksLikeJSONEncodedOutboundMessage(value) {
+				return Message{}, errors.New(`message must be an object, not a JSON-encoded string; retry with "message": {"format": "markdown", "text": "..."} or use the top-level "text" field`)
+			}
 			msg.Text = strings.TrimSpace(value)
 		case map[string]any:
 			if err := validateOutboundMessageObject(value); err != nil {
@@ -682,6 +685,32 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (Messag
 		return Message{}, errOutboundMessageRequired
 	}
 	return msg, nil
+}
+
+func looksLikeJSONEncodedOutboundMessage(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	fields := []string{"format", "text", "parts", "attachments", "actions", "reply"}
+	var decoded map[string]any
+	if json.Unmarshal([]byte(trimmed), &decoded) == nil {
+		for _, field := range fields {
+			if _, ok := decoded[field]; ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "{"))
+	for _, field := range fields {
+		marker := `"` + field + `"`
+		if strings.HasPrefix(rest, marker) {
+			return strings.HasPrefix(strings.TrimSpace(rest[len(marker):]), ":")
+		}
+	}
+	return false
 }
 
 func validateOutboundMessageObject(raw map[string]any) error {

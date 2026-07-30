@@ -310,6 +310,67 @@ func TestSendDirectInvalidStructuredMessageWithAttachmentsReturnsParseError(t *t
 	}
 }
 
+func TestSendDirectRejectsJSONEncodedMessageBeforeSend(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		message string
+	}{
+		{
+			name:    "valid encoded object",
+			message: `{"format":"markdown","text":"hello"}`,
+		},
+		{
+			name:    "malformed encoded object from model",
+			message: `{"format":"markdown","text":"至于 Yoshino，你前面喊"主人"的账还没结。"} `,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := &testSender{}
+			exec := &Executor{
+				Sender:   sender,
+				Resolver: testResolver{},
+			}
+
+			_, err := exec.SendDirect(context.Background(), SessionContext{
+				BotID:           "bot_1",
+				CurrentPlatform: "telegram",
+			}, "chat-1", map[string]any{
+				"message": tc.message,
+			})
+			if err == nil || !strings.Contains(err.Error(), "message must be an object, not a JSON-encoded string") {
+				t.Fatalf("SendDirect error = %v, want JSON-encoded message type error", err)
+			}
+			if sender.called != 0 {
+				t.Fatalf("expected sender not called, got %d", sender.called)
+			}
+		})
+	}
+}
+
+func TestParseOutboundMessageKeepsPlainStringCompatibility(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"ordinary message",
+		`{"payload":"literal JSON that is not a message envelope"}`,
+		`{"payload":"literal text containing \"text\": as content"`,
+		"prefix { with no structured message fields",
+	}
+	for _, input := range tests {
+		msg, err := ParseOutboundMessage(map[string]any{"message": input}, "")
+		if err != nil {
+			t.Fatalf("ParseOutboundMessage(%q) returned error: %v", input, err)
+		}
+		if msg.Text != input {
+			t.Fatalf("ParseOutboundMessage(%q) text = %q", input, msg.Text)
+		}
+	}
+}
+
 func TestSendDirectInvalidAttachmentObjectReturnsError(t *testing.T) {
 	t.Parallel()
 
