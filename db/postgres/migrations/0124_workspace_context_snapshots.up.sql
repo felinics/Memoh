@@ -1,4 +1,4 @@
--- 0123_workspace_context_snapshots
+-- 0124_workspace_context_snapshots
 -- Persist the workspace-derived context used before an Agent model call so
 -- ordinary turns do not need to open the workspace runtime.
 
