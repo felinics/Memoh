@@ -47,7 +47,10 @@
         >
           {{ item.score.toFixed(2) }}
         </Badge>
-        <span class="ml-1 text-caption text-muted-foreground">
+        <span
+          v-if="showTimestamp"
+          class="ml-1 text-caption text-muted-foreground"
+        >
           {{ formatRelativeTime(item.created_at, { locale }) }}
         </span>
       </div>
@@ -80,8 +83,11 @@ const props = withDefaults(defineProps<{
   item: AdaptersMemoryItem & { id?: string; memory: string }
   locale: string
   showScore?: boolean
+  /** Dated stream groups already show the day in the section title. */
+  showTimestamp?: boolean
 }>(), {
   showScore: false,
+  showTimestamp: true,
 })
 
 defineEmits<{ edit: [] }>()
@@ -107,6 +113,6 @@ const hasMeta = computed(() =>
   confidence.value !== null
   || tags.value.length > 0
   || (props.showScore && typeof props.item.score === 'number')
-  || Boolean(props.item.created_at),
+  || (props.showTimestamp && Boolean(props.item.created_at)),
 )
 </script>

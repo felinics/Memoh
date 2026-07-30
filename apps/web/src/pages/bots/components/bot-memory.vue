@@ -282,6 +282,7 @@
           :key="item.id"
           :item="item"
           :locale="locale"
+          :show-timestamp="false"
           @edit="openEditDialog(item)"
         />
       </SettingsSection>
