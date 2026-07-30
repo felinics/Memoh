@@ -261,24 +261,29 @@ func TestDiscussACPTriggersCompaction(t *testing.T) {
 	}
 	a := newDiscussTestService(runner, agent, resolver)
 	var (
-		called      int
-		gotBotID    string
-		gotThreadID string
-		gotUserID   string
-		gotTokens   int
-		gotBudget   int
+		called       int
+		gotBotID     string
+		gotThreadID  string
+		gotUserID    string
+		gotTokens    int
+		gotBudget    int
+		gotArtifacts []string
 	)
-	a.turnHooks.compactDiscuss = func(_ context.Context, botID, threadID, userID string, compactable, budget int) {
+	a.turnHooks.compactDiscuss = func(_ context.Context, botID, threadID, userID string, compactable, budget int, artifactIDs []string) {
 		called++
 		gotBotID = botID
 		gotThreadID = threadID
 		gotUserID = userID
 		gotTokens = compactable
 		gotBudget = budget
+		gotArtifacts = append([]string(nil), artifactIDs...)
 	}
 	cmd := discussCommand()
 	cmd.UserID = "user-1"
-	cmd.DiscussMessages = []turn.DiscussMessage{{Role: "user", Content: strings.Repeat("x", 400)}}
+	cmd.DiscussMessages = []turn.DiscussMessage{
+		{Role: "user", Content: "<summary>old</summary>", CompactionArtifactID: "artifact-1"},
+		{Role: "user", Content: strings.Repeat("x", 400)},
+	}
 
 	h, err := a.StartTurn(context.Background(), cmd)
 	if err != nil {
@@ -292,8 +297,11 @@ func TestDiscussACPTriggersCompaction(t *testing.T) {
 	if gotBotID != "bot-1" || gotThreadID != "sess-1" || gotUserID != "user-1" {
 		t.Fatalf("compaction scope = %q/%q/%q", gotBotID, gotThreadID, gotUserID)
 	}
-	if gotTokens != 200 || gotBudget != 0 {
+	if gotTokens != 211 || gotBudget != 0 {
 		t.Fatalf("compaction pressure = %d tokens, budget %d", gotTokens, gotBudget)
+	}
+	if len(gotArtifacts) != 1 || gotArtifacts[0] != "artifact-1" {
+		t.Fatalf("observed artifacts = %v, want [artifact-1]", gotArtifacts)
 	}
 }
 
@@ -305,7 +313,7 @@ func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 	}
 	a := newDiscussTestService(runner, agent, resolver)
 	compactionTriggered := false
-	a.turnHooks.compactDiscuss = func(context.Context, string, string, string, int, int) {
+	a.turnHooks.compactDiscuss = func(context.Context, string, string, string, int, int, []string) {
 		compactionTriggered = true
 	}
 	cmd := discussCommand()

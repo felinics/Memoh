@@ -105,13 +105,19 @@ func TestBuildMessagesFromPipelineInsertsArtifactSummary(t *testing.T) {
 		logger:   slog.New(slog.DiscardHandler),
 	}
 
-	messages := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+	prepared := svc.prepareMessagesFromPipeline(context.Background(), ChatRequest{
 		BotID:    pipelineTestBotID,
 		ThreadID: pipelineTestSessionID,
 	}, 0)
+	messages := prepared.messages
 
 	if len(messages) != 2 {
 		t.Fatalf("expected summary + current message, got %d: %s", len(messages), messagesDebug(messages))
+	}
+	if !prepared.compactionArtifactsKnown ||
+		len(prepared.compactionArtifactIDs) != 1 ||
+		prepared.compactionArtifactIDs[0] != "44444444-4444-4444-4444-444444444444" {
+		t.Fatalf("pipeline compaction frontier = known:%v ids:%v", prepared.compactionArtifactsKnown, prepared.compactionArtifactIDs)
 	}
 	var summaryText string
 	if err := json.Unmarshal(messages[0].Content, &summaryText); err != nil {

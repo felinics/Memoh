@@ -302,7 +302,11 @@ type resolvedContext struct {
 	estimatedTokens             int // estimated input token count for compaction
 	compactableTokens           int // raw history eligible for compaction
 	compactableTokensKnown      bool
+	compactionInputTokens       int // active rolling summary plus uncompacted raw history
+	compactionInputTokensKnown  bool
 	contextTokenBudget          int // token budget used to clamp compaction triggers
+	compactionArtifactIDs       []string
+	compactionArtifactsKnown    bool
 }
 
 func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext, error) {
@@ -371,8 +375,17 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	var estimatedTokens int
 	var compactableTokens int
 	var compactableTokensKnown bool
+	var compactionInputTokens int
+	var compactionInputTokensKnown bool
+	var compactionArtifactIDs []string
+	var compactionArtifactsKnown bool
 	if usePipeline {
-		messages = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+		prepared := s.prepareMessagesFromPipeline(ctx, req, contextTokenBudget)
+		messages = prepared.messages
+		compactionInputTokens = prepared.compactionInputTokens
+		compactionInputTokensKnown = true
+		compactionArtifactIDs = prepared.compactionArtifactIDs
+		compactionArtifactsKnown = prepared.compactionArtifactsKnown
 	} else {
 		historyFallback := historyScopeFallbackFromChatRequest(req)
 		prepared, loadErr := s.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
@@ -389,49 +402,10 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		estimatedTokens = prepared.estimatedTokens
 		compactableTokens = prepared.compactableTokens
 		compactableTokensKnown = true
-		// When context reaches the shared budget share, run synchronous
-		// compaction before sending the request. contextTokenBudget is the
-		// authoritative limit for how much context the user wants to send
-		// to the LLM.
-		compactionThreshold := 0
-		if contextTokenBudget > 0 {
-			compactionThreshold = contextTokenBudget * compactionBudgetThresholdPercent / 100
-		}
-		// The trigger only counts raw (compactable) rows: active summaries can
-		// never be compacted away, so including them would make the trigger
-		// self-sustaining once accumulated summaries cross the threshold.
-		if compactionThreshold > 0 && compactableTokens >= compactionThreshold {
-			s.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
-				slog.String("bot_id", req.BotID),
-				slog.Int("estimated_tokens", estimatedTokens),
-				slog.Int("compactable_tokens", compactableTokens),
-				slog.Int("context_token_budget", contextTokenBudget),
-				slog.Int("compaction_threshold", compactionThreshold),
-			)
-			// Reload and post-process only when this run actually produced a
-			// summary. A noop (cooldown, in-flight, nothing markable) keeps
-			// this turn's context untouched — possibly still above the
-			// threshold — and the next turn re-evaluates.
-			if res := s.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget); res.Status == compaction.StatusOK {
-				prepared, loadErr = s.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
-				if loadErr != nil {
-					s.logger.Error("resolve: prepare history context failed",
-						slog.String("bot_id", req.BotID),
-						slog.String("stage", "post_compaction"),
-						slog.Any("error", loadErr),
-					)
-					return resolvedContext{}, loadErr
-				}
-				messages = prepared.messages
-				historyRecords = prepared.records
-				estimatedTokens = prepared.estimatedTokens
-				compactableTokens = prepared.compactableTokens
-				// Remove tool messages from the recent context — they are large
-				// and unnecessary when we already have a summary. Keep only
-				// user/assistant conversation turns.
-				messages = stripToolMessagesWhenCompactionSummaryIsActive(messages, historyRecords)
-			}
-		}
+		compactionInputTokens = prepared.compactionInputTokens
+		compactionInputTokensKnown = true
+		compactionArtifactIDs = prepared.compactionArtifactIDs
+		compactionArtifactsKnown = prepared.compactionArtifactsKnown
 	}
 	if notice := s.currentWorkspaceContextMessage(ctx, req); notice != nil {
 		messages = append(messages, *notice)
@@ -538,7 +512,11 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		estimatedTokens:             estimatedTokens,
 		compactableTokens:           compactableTokens,
 		compactableTokensKnown:      compactableTokensKnown,
+		compactionInputTokens:       compactionInputTokens,
+		compactionInputTokensKnown:  compactionInputTokensKnown,
 		contextTokenBudget:          contextTokenBudget,
+		compactionArtifactIDs:       compactionArtifactIDs,
+		compactionArtifactsKnown:    compactionArtifactsKnown,
 	}, nil
 }
 

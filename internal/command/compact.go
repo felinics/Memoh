@@ -101,6 +101,10 @@ func (h *Handler) buildCompactConfig(cc CommandContext, sessionID string) (compa
 		return compaction.TriggerConfig{}, fmt.Errorf("failed to resolve credentials: %w", err)
 	}
 
+	ratio := botSettings.CompactionRatio
+	if ratio <= 0 || ratio > 100 {
+		ratio = 80
+	}
 	cfg := compaction.TriggerConfig{
 		BotID:                 cc.BotID,
 		SessionID:             sessionID,
@@ -110,12 +114,15 @@ func (h *Handler) buildCompactConfig(cc CommandContext, sessionID string) (compa
 		CodexAccountID:        creds.CodexAccountID,
 		BaseURL:               providers.ProviderConfigString(compactProvider, "base_url"),
 		ChatCompletionsCompat: providers.ProviderConfigString(compactProvider, models.ChatCompletionsCompatConfigKey),
-		Ratio:                 100,
+		Ratio:                 ratio,
 		TotalInputTokens:      1,
+		Rolling:               true,
+		SummaryTargetTokens:   compaction.RollingSummaryTargetTokens(botSettings.CompactionThreshold, ratio),
 		PromptCacheTTL:        providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
 		Manual:                true,
 	}
 	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
+		cfg.ModelContextTokens = *compactModel.Config.ContextWindow
 		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
 	}
 	return cfg, nil

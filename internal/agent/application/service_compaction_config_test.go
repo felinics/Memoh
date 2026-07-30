@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/memohai/memoh/internal/agent/context/compaction"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -89,6 +90,9 @@ func TestBuildCompactionConfigKeepsRatioSelection(t *testing.T) {
 	if cfg.MaxCompactTokens != 180000 {
 		t.Fatalf("MaxCompactTokens = %d, want 180000 (90%% of context window)", cfg.MaxCompactTokens)
 	}
+	if cfg.ModelContextTokens != 200000 {
+		t.Fatalf("ModelContextTokens = %d, want 200000", cfg.ModelContextTokens)
+	}
 }
 
 func TestEffectiveCompactionThreshold(t *testing.T) {
@@ -100,7 +104,7 @@ func TestEffectiveCompactionThreshold(t *testing.T) {
 		budget    int
 		want      int
 	}{
-		{name: "clamps to budget share when user threshold exceeds it", threshold: 100000, budget: 10000, want: 7000},
+		{name: "keeps configured threshold when chat send budget is lower", threshold: 100000, budget: 10000, want: 100000},
 		{name: "keeps lower user threshold", threshold: 5000, budget: 200000, want: 5000},
 		{name: "keeps threshold when budget unknown", threshold: 100000, budget: 0, want: 100000},
 		{name: "zero threshold stays disabled", threshold: 0, budget: 200000, want: 0},
@@ -125,10 +129,10 @@ func TestAsyncCompactionInputTokensPrefersKnownCompactableHistory(t *testing.T) 
 		want          int
 	}{
 		{
-			name:          "excludes summaries and prompt overhead",
-			resolved:      resolvedContext{compactableTokens: 4000, compactableTokensKnown: true},
+			name:          "uses rolling summary plus raw history",
+			resolved:      resolvedContext{compactionInputTokens: 7000, compactionInputTokensKnown: true, compactableTokens: 4000, compactableTokensKnown: true},
 			providerInput: 9000,
-			want:          4000,
+			want:          7000,
 		},
 		{
 			name:          "known summary-only history stays zero",
@@ -150,6 +154,17 @@ func TestAsyncCompactionInputTokensPrefersKnownCompactableHistory(t *testing.T) 
 				t.Fatalf("asyncCompactionInputTokens() = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRollingSummaryTargetTokens(t *testing.T) {
+	t.Parallel()
+
+	if got := compaction.RollingSummaryTargetTokens(100000, 40); got != 40000 {
+		t.Fatalf("RollingSummaryTargetTokens(100000, 40) = %d, want 40000", got)
+	}
+	if got := compaction.RollingSummaryTargetTokens(3, 1); got != 1 {
+		t.Fatalf("small positive target = %d, want floor 1", got)
 	}
 }
 

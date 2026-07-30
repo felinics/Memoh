@@ -34,6 +34,7 @@ type Queries interface {
 	ClearBotRuntimeData(ctx context.Context, botID pgtype.UUID) error
 	ClearMCPOAuthTokens(ctx context.Context, connectionID pgtype.UUID) error
 	CompleteCompactionLog(ctx context.Context, arg dbsqlc.CompleteCompactionLogParams) (dbsqlc.BotHistoryMessageCompact, error)
+	CompleteRollingCompactionLog(ctx context.Context, arg dbsqlc.CompleteRollingCompactionLogParams) (dbsqlc.CompleteRollingCompactionLogRow, error)
 	CompleteHeartbeatLog(ctx context.Context, arg dbsqlc.CompleteHeartbeatLogParams) (dbsqlc.BotHeartbeatLog, error)
 	CompleteScheduleLog(ctx context.Context, arg dbsqlc.CompleteScheduleLogParams) (dbsqlc.ScheduleLog, error)
 	CountAccounts(ctx context.Context) (int64, error)

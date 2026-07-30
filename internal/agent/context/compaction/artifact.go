@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
@@ -83,6 +84,8 @@ type artifactMetadata struct {
 	Coverage      []byte
 	AnchorStartMs int64
 	AnchorEndMs   int64
+	Level         int32
+	ParentIDs     []pgtype.UUID
 }
 
 func artifactMetadataFor(items []CompactionCandidate, ids []pgtype.UUID) (artifactMetadata, error) {
@@ -115,6 +118,60 @@ func artifactMetadataFor(items []CompactionCandidate, ids []pgtype.UUID) (artifa
 		return artifactMetadata{}, fmt.Errorf("encode compaction artifact coverage: %w", err)
 	}
 	metadata := artifactMetadata{Coverage: encoded}
+	if len(covered) > 0 {
+		metadata.AnchorStartMs = covered[0].CreatedAtMs
+		metadata.AnchorEndMs = covered[len(covered)-1].CreatedAtMs
+	}
+	return metadata, nil
+}
+
+// rollingArtifactMetadata derives one replacement artifact from every active
+// parent summary plus the newly compacted raw rows. Its coverage is the exact
+// union of both, allowing the read path to expose only this terminal summary
+// after the parents are superseded atomically.
+func rollingArtifactMetadata(selected artifactMetadata, parents []Artifact) (artifactMetadata, error) {
+	selectedCoverage, err := DecodeArtifactCoverage(selected.Coverage)
+	if err != nil {
+		return artifactMetadata{}, err
+	}
+	covered := make([]CoveredSource, 0, len(selectedCoverage))
+	parentIDs := make([]pgtype.UUID, 0, len(parents))
+	seen := make(map[string]struct{})
+	maxLevel := -1
+	appendCoverage := func(sources []CoveredSource) {
+		for _, source := range sources {
+			key := source.Ref.StableKey()
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			covered = append(covered, source)
+		}
+	}
+	for _, parent := range parents {
+		parsed, parseErr := uuid.Parse(strings.TrimSpace(parent.ID))
+		if parseErr != nil {
+			return artifactMetadata{}, fmt.Errorf("compaction artifact: invalid parent id %q: %w", parent.ID, parseErr)
+		}
+		parentIDs = append(parentIDs, pgtype.UUID{Bytes: parsed, Valid: true})
+		if parent.Level > maxLevel {
+			maxLevel = parent.Level
+		}
+		appendCoverage(parent.Coverage)
+	}
+	appendCoverage(selectedCoverage)
+	sort.SliceStable(covered, func(i, j int) bool {
+		return covered[i].CreatedAtMs < covered[j].CreatedAtMs
+	})
+	encoded, err := json.Marshal(covered)
+	if err != nil {
+		return artifactMetadata{}, fmt.Errorf("encode rolling compaction artifact coverage: %w", err)
+	}
+	metadata := artifactMetadata{
+		Coverage:  encoded,
+		Level:     int32(maxLevel + 1), //nolint:gosec // artifact depth is bounded by compaction runs
+		ParentIDs: parentIDs,
+	}
 	if len(covered) > 0 {
 		metadata.AnchorStartMs = covered[0].CreatedAtMs
 		metadata.AnchorEndMs = covered[len(covered)-1].CreatedAtMs

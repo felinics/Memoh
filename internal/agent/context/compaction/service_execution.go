@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -16,6 +17,9 @@ import (
 )
 
 func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) (Result, error) {
+	if cfg.Rolling && cfg.SummaryTargetTokens <= 0 {
+		return Result{}, errors.New("compaction: rolling summary target must be positive")
+	}
 	rows, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
 		return Result{}, err
@@ -35,8 +39,29 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{Status: StatusNoop}, nil
 	}
 
+	frontier, err := NewArtifactProjection(s.queries).LoadActiveSession(ctx, ArtifactOwner{BotID: cfg.BotID, SessionID: cfg.SessionID, SessionIDKnown: true})
+	if err != nil {
+		return Result{}, err
+	}
+	for _, issue := range frontier.Issues {
+		s.logger.Warn("compaction: ignored invalid artifact lineage", slog.String("issue", issue.Error()))
+	}
+	if cfg.ObservedArtifactsKnown && frontierAdvancedSinceObservation(frontier.Artifacts, cfg.ObservedArtifactIDs) {
+		s.logger.Info("compaction: skipped stale context pressure after frontier advanced",
+			slog.String("bot_id", cfg.BotID),
+			slog.String("session_id", cfg.SessionID),
+			slog.Int("observed_artifacts", len(cfg.ObservedArtifactIDs)),
+			slog.Int("active_artifacts", len(frontier.Artifacts)),
+		)
+		return Result{Status: StatusNoop}, nil
+	}
+
 	var toCompact []CompactionCandidate
-	if cfg.TargetTokens > 0 {
+	if cfg.Rolling {
+		// A rolling pass folds every safely renderable raw row into one
+		// replacement summary. The ratio controls output size, not selection.
+		toCompact = messages
+	} else if cfg.TargetTokens > 0 {
 		// Sync compaction: compress enough messages to bring context
 		// down to TargetTokens. Calculate how many tokens to keep
 		// (newest messages) and compact everything older.
@@ -57,27 +82,39 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if maxCompactTokens <= 0 {
 		maxCompactTokens = 30000
 	}
+	if cfg.Rolling && cfg.ModelContextTokens > 0 {
+		promptReserve := cfg.ModelContextTokens / 100
+		if promptReserve < 1024 {
+			promptReserve = 1024
+		}
+		inputBudget := cfg.ModelContextTokens - cfg.SummaryTargetTokens - promptReserve
+		if inputBudget < maxCompactTokens {
+			maxCompactTokens = inputBudget
+		}
+	}
+	if maxCompactTokens <= 0 {
+		return Result{}, fmt.Errorf(
+			"compaction: summary target %d leaves no input capacity in model context %d",
+			cfg.SummaryTargetTokens,
+			cfg.ModelContextTokens,
+		)
+	}
 
-	frontier, err := NewArtifactProjection(s.queries).LoadActiveSession(ctx, ArtifactOwner{BotID: cfg.BotID, SessionID: cfg.SessionID, SessionIDKnown: true})
-	if err != nil {
-		return Result{}, err
-	}
-	for _, issue := range frontier.Issues {
-		s.logger.Warn("compaction: ignored invalid artifact lineage", slog.String("issue", issue.Error()))
-	}
 	var priorSummaries []string
 	for _, artifact := range frontier.Artifacts {
 		if strings.TrimSpace(artifact.Summary) != "" {
 			priorSummaries = append(priorSummaries, artifact.Summary)
 		}
 	}
-	priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens/4)
+	if !cfg.Rolling {
+		priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens/4)
+	}
 	priorTokens := priorContextTokens(priorSummaries)
-	// capPriorSummaries always keeps the newest summary, so a single oversized
-	// one can exceed its allowance; floor the entries budget at half the total
-	// so compaction keeps making progress.
 	entriesBudget := maxCompactTokens - priorTokens
-	if entriesBudget < maxCompactTokens/2 {
+	if !cfg.Rolling && entriesBudget < maxCompactTokens/2 {
+		// capPriorSummaries always keeps the newest summary, so a single
+		// oversized one can exceed its allowance; floor the entries budget at
+		// half the total so legacy segmented compaction keeps making progress.
 		entriesBudget = maxCompactTokens / 2
 	}
 
@@ -87,20 +124,31 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		slog.Int("max_compact_tokens", maxCompactTokens),
 		slog.Int("prior_context_tokens", priorTokens),
 	)
-	toCompact = trimCompactMessages(toCompact, entriesBudget)
-	// The progress guarantee may keep one oversized markable group past the
-	// entries budget; the prior context is reference-only, so shrink it (down
-	// to nothing) before letting the combined prompt exceed MaxCompactTokens.
-	if entriesCost := markableCompactCost(toCompact); entriesCost+priorTokens > maxCompactTokens {
-		priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens-entriesCost)
-		priorTokens = priorContextTokens(priorSummaries)
+	if !cfg.Rolling {
+		toCompact = trimCompactMessages(toCompact, entriesBudget)
+		// The progress guarantee may keep one oversized markable group past
+		// the entries budget; legacy prior context is reference-only, so shrink
+		// it before letting the combined prompt exceed MaxCompactTokens.
+		if entriesCost := markableCompactCost(toCompact); entriesCost+priorTokens > maxCompactTokens {
+			priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens-entriesCost)
+			priorTokens = priorContextTokens(priorSummaries)
+		}
 	}
 	s.logger.Info("compaction: after trim",
 		slog.Int("messages", len(toCompact)),
 		slog.Int("prior_summaries", len(priorSummaries)),
 	)
 
-	entries, compactedMessageIDs := buildEntriesAndIDs(toCompact)
+	var entries []messageEntry
+	var compactedMessageIDs []pgtype.UUID
+	if cfg.Rolling {
+		entries, compactedMessageIDs, err = buildRollingEntriesAndIDs(toCompact)
+		if err != nil {
+			return Result{}, err
+		}
+	} else {
+		entries, compactedMessageIDs = buildEntriesAndIDs(toCompact)
+	}
 	if len(entries) == 0 || len(compactedMessageIDs) == 0 {
 		// No complete group survived: every selected group had a row that rendered
 		// empty (a reasoning-only message, or a tool exchange whose result renders
@@ -108,6 +156,16 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		// ids, so summarizing here would either destroy rows for a junk summary or
 		// mark rows we cannot faithfully summarize. Leave them in raw history.
 		return Result{Status: StatusNoop}, nil
+	}
+	if cfg.Rolling {
+		inputCost := entriesPromptCost(entries) + priorTokens
+		if inputCost > maxCompactTokens {
+			return Result{}, fmt.Errorf(
+				"compaction: rolling input %d exceeds model input budget %d; configure a larger compaction model",
+				inputCost,
+				maxCompactTokens,
+			)
+		}
 	}
 	expectedCompactIDs, err := expectedCompactionClaims(rows, compactedMessageIDs)
 	if err != nil {
@@ -157,23 +215,37 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
+	if cfg.Rolling {
+		artifact, err = rollingArtifactMetadata(artifact, frontier.Artifacts)
+		if err != nil {
+			_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+			return Result{}, err
+		}
+	}
 
 	// A single markable group larger than the whole budget survives trim by
 	// design (progress guarantee); truncate its rendered entries rather than
 	// send a prompt the model rejects on every pass. Entry floors can still
 	// exceed the budget when that group holds enough rows, so recheck and
 	// surface the overshoot instead of claiming an unconditional cap.
-	entries = capEntriesToBudget(entries, maxCompactTokens-priorTokens)
-	if cost := entriesPromptCost(entries); cost+priorTokens > maxCompactTokens {
-		s.logger.Warn("compaction: entry floors exceed the budget, prompt may overflow the compaction window",
-			slog.Int("entries", len(entries)),
-			slog.Int("entry_tokens", cost),
-			slog.Int("max_compact_tokens", maxCompactTokens),
-			slog.String("session_id", cfg.SessionID),
-		)
+	if !cfg.Rolling {
+		entries = capEntriesToBudget(entries, maxCompactTokens-priorTokens)
+		if cost := entriesPromptCost(entries); cost+priorTokens > maxCompactTokens {
+			s.logger.Warn("compaction: entry floors exceed the budget, prompt may overflow the compaction window",
+				slog.Int("entries", len(entries)),
+				slog.Int("entry_tokens", cost),
+				slog.Int("max_compact_tokens", maxCompactTokens),
+				slog.String("session_id", cfg.SessionID),
+			)
+		}
 	}
 
+	selectedSystemPrompt := systemPrompt
 	userPrompt := buildUserPrompt(priorSummaries, entries)
+	if cfg.Rolling {
+		selectedSystemPrompt = rollingSystemPrompt(cfg.SummaryTargetTokens)
+		userPrompt = buildRollingUserPrompt(priorSummaries, entries)
+	}
 
 	model := models.NewSDKChatModel(models.SDKModelConfig{
 		ClientType:            cfg.ClientType,
@@ -187,14 +259,18 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	systemPromptDecorated, sdkMessages, _ := models.ApplyPromptCache(
 		model, cfg.PromptCacheTTL,
-		systemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
+		selectedSystemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
 	)
 
-	result, err := sdk.GenerateTextResult(ctx,
+	generateOptions := []sdk.GenerateOption{
 		sdk.WithModel(model),
 		sdk.WithSystem(systemPromptDecorated),
 		sdk.WithMessages(sdkMessages),
-	)
+	}
+	if cfg.SummaryTargetTokens > 0 {
+		generateOptions = append(generateOptions, sdk.WithMaxTokens(cfg.SummaryTargetTokens))
+	}
+	result, err := sdk.GenerateTextResult(ctx, generateOptions...)
 	if err != nil {
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
@@ -208,14 +284,44 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	usageJSON, _ := json.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
-	if err := s.completeLog(persistCtx, logID, "ok", result.Text, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact); err != nil {
+	completeErr := error(nil)
+	if cfg.Rolling {
+		completeErr = s.completeRollingLog(persistCtx, logID, result.Text, len(compactedMessageIDs), usageJSON, modelUUID, artifact)
+	} else {
+		completeErr = s.completeLog(persistCtx, logID, "ok", result.Text, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact)
+	}
+	if completeErr != nil {
 		// The rows are already marked, but the log never reached status=ok, so
 		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
 		// here would claim a summary that was never persisted.
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, err
+		_ = s.completeLog(persistCtx, logID, "error", "", completeErr.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, completeErr
+	}
+	if cfg.Rolling {
+		s.logger.Info("compaction: rolling summary persisted",
+			slog.String("session_id", cfg.SessionID),
+			slog.Int("summary_tokens", estimateBytesAsTokens(result.Text)),
+			slog.Int("summary_target_tokens", cfg.SummaryTargetTokens),
+			slog.Int("raw_messages_compacted", len(compactedMessageIDs)),
+			slog.Int("superseded_summaries", len(artifact.ParentIDs)),
+		)
 	}
 	return Result{Status: StatusOK, Summary: result.Text, MessageCount: len(compactedMessageIDs)}, nil
+}
+
+func frontierAdvancedSinceObservation(active []Artifact, observedIDs []string) bool {
+	observed := make(map[string]struct{}, len(observedIDs))
+	for _, id := range observedIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			observed[id] = struct{}{}
+		}
+	}
+	for _, artifact := range active {
+		if _, ok := observed[strings.TrimSpace(artifact.ID)]; !ok {
+			return true
+		}
+	}
+	return false
 }
 
 func expectedCompactionClaims(rows []sqlc.ListUncompactedMessagesBySessionRow, messageIDs []pgtype.UUID) ([]pgtype.UUID, error) {
@@ -256,6 +362,34 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 	})
 	if err != nil {
 		s.logger.Error("failed to complete compaction log", slog.String("error", err.Error()))
+		return err
+	}
+	return nil
+}
+
+func (s *Service) completeRollingLog(
+	ctx context.Context,
+	logID pgtype.UUID,
+	summary string,
+	messageCount int,
+	usage []byte,
+	modelID pgtype.UUID,
+	artifact artifactMetadata,
+) error {
+	_, err := s.queries.CompleteRollingCompactionLog(ctx, sqlc.CompleteRollingCompactionLogParams{
+		ID:            logID,
+		ParentIds:     artifact.ParentIDs,
+		MessageCount:  int32(messageCount), //nolint:gosec // count always small
+		Summary:       summary,
+		Usage:         usage,
+		ModelID:       modelID,
+		Coverage:      artifact.Coverage,
+		AnchorStartMs: artifact.AnchorStartMs,
+		AnchorEndMs:   artifact.AnchorEndMs,
+		ArtifactLevel: artifact.Level,
+	})
+	if err != nil {
+		s.logger.Error("failed to complete rolling compaction log", slog.String("error", err.Error()))
 		return err
 	}
 	return nil

@@ -14,26 +14,43 @@ import (
 	"github.com/memohai/memoh/internal/chat/timeline"
 )
 
-// buildMessagesFromPipeline assembles chat context from the DCP pipeline's
+type preparedPipelineHistoryContext struct {
+	messages                 []ModelMessage
+	compactionInputTokens    int
+	compactionArtifactIDs    []string
+	compactionArtifactsKnown bool
+}
+
+// buildMessagesFromPipeline retains the narrow message-only helper used by
+// focused tests; resolve uses prepareMessagesFromPipeline so async compaction
+// also receives the frontier snapshot paired with those messages.
+func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) []ModelMessage {
+	return s.prepareMessagesFromPipeline(ctx, req, contextTokenBudget).messages
+}
+
+// prepareMessagesFromPipeline assembles chat context from the DCP pipeline's
 // RenderedContext (RC) merged with assistant/tool turns (TR) from
 // bot_history_messages. This gives chat mode the same event-driven context
 // that discuss mode uses, replacing the legacy loadMessages path.
-func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) []ModelMessage {
+func (s *Service) prepareMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) preparedPipelineHistoryContext {
 	sessionID := strings.TrimSpace(req.ThreadID)
 	if s.pipeline == nil || sessionID == "" {
-		return nil
+		return preparedPipelineHistoryContext{}
 	}
 	rc := s.pipeline.GetRC(sessionID)
 	if len(rc) == 0 {
-		return nil
+		return preparedPipelineHistoryContext{}
 	}
 
 	trs := s.loadTurnResponses(ctx, sessionID)
-	artifacts := s.loadTimelineArtifacts(ctx, req.BotID, sessionID)
+	artifacts, artifactIDs, artifactsKnown := s.loadTimelineArtifactsSnapshot(ctx, req.BotID, sessionID)
 
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
-		return nil
+		return preparedPipelineHistoryContext{
+			compactionArtifactIDs:    artifactIDs,
+			compactionArtifactsKnown: artifactsKnown,
+		}
 	}
 
 	messages := make([]ModelMessage, 0, len(composed.Messages))
@@ -59,21 +76,26 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 		messages = trimPipelineMessagesByTokens(s.logger, messages, pinned, contextTokenBudget)
 	}
 
-	return messages
+	return preparedPipelineHistoryContext{
+		messages:                 messages,
+		compactionInputTokens:    composed.EstimatedTokens,
+		compactionArtifactIDs:    artifactIDs,
+		compactionArtifactsKnown: artifactsKnown,
+	}
 }
 
 // loadTimelineArtifacts projects the session's active compaction frontier for
 // timeline composition. Failures degrade to uncompacted context.
-func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID string) []timeline.CompactionArtifact {
+func (s *Service) loadTimelineArtifactsSnapshot(ctx context.Context, botID, sessionID string) ([]timeline.CompactionArtifact, []string, bool) {
 	if s.queries == nil {
-		return nil
+		return nil, nil, false
 	}
-	artifacts, err := compaction.NewTimelineArtifactSource(s.queries).ActiveCompactionArtifacts(ctx, botID, sessionID)
+	frontier, err := s.loadActiveCompactionFrontier(ctx, botID, sessionID)
 	if err != nil {
 		s.logger.Warn("load compaction artifacts failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		return nil
+		return nil, nil, false
 	}
-	return artifacts
+	return compaction.TimelineArtifacts(frontier.Artifacts), activeCompactionArtifactIDs(frontier.Artifacts), true
 }
 
 // trimPipelineMessagesByTokens trims pipeline-assembled messages to fit within

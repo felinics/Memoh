@@ -54,13 +54,41 @@ type TriggerConfig struct {
 	HTTPClient            *http.Client
 	Ratio                 int
 	TotalInputTokens      int
+	ModelContextTokens    int
 	MaxCompactTokens      int // if > 0, cap compaction input to this many tokens (e.g. 90% of model window)
 	TargetTokens          int // if > 0, compaction goal: reduce context to this many tokens (used by sync compaction)
+	Rolling               bool
+	SummaryTargetTokens   int // rolling summary output ceiling; e.g. 40% of a 100K threshold is 40K
 	PromptCacheTTL        string
+
+	// ObservedArtifactIDs is the active compaction frontier that was visible
+	// when the caller measured context pressure. Automatic async triggers may
+	// wait behind an in-flight compaction; if the frontier advances meanwhile,
+	// their token count describes stale, pre-compaction context and must not
+	// start another summarizer call.
+	ObservedArtifactIDs    []string
+	ObservedArtifactsKnown bool
 
 	// Manual marks a user-initiated compaction (slash command, HTTP endpoint).
 	// Such a request bypasses the per-session failure cooldown so a user who
 	// just fixed their credentials/model isn't told "done" while nothing runs.
 	// Automatic per-request paths leave this false to keep the cooldown backstop.
 	Manual bool
+}
+
+// RollingSummaryTargetTokens interprets ratio as the desired replacement
+// summary size relative to the configured trigger threshold. For example,
+// 40% of a 100K threshold is a 40K summary ceiling.
+func RollingSummaryTargetTokens(threshold, ratio int) int {
+	if threshold <= 0 || ratio <= 0 {
+		return 0
+	}
+	if ratio > 100 {
+		ratio = 100
+	}
+	target := threshold * ratio / 100
+	if target == 0 {
+		return 1
+	}
+	return target
 }

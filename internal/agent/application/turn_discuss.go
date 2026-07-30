@@ -25,7 +25,7 @@ type turnRuntimeHooks struct {
 	resolveRunConfig func(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
 	inlineImages     func(context.Context, string, []timeline.ImageAttachmentRef) []sdk.ImagePart
 	storeRound       func(context.Context, string, string, string, string, []sdk.Message, string) error
-	compactDiscuss   func(context.Context, string, string, string, int, int)
+	compactDiscuss   func(context.Context, string, string, string, int, int, []string)
 }
 
 // startDiscussTurn orchestrates one discuss turn: resolve the run config,
@@ -204,15 +204,17 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	s.triggerDiscussCompaction(ctx, cmd, resolved.ContextTokenBudget)
 }
 
-// triggerDiscussCompaction computes pressure before detaching so the
-// background job retains only scalar request data, not the full context.
+// triggerDiscussCompaction computes pressure and snapshots the visible
+// compaction frontier before detaching, so a queued background trigger can
+// detect that its context became stale while another compaction completed.
 func (s *Service) triggerDiscussCompaction(ctx context.Context, cmd turn.StartTurnCommand, contextTokenBudget int) {
-	compactable := discussCompactableTokens(cmd.DiscussMessages)
-	if compactable <= 0 {
+	inputTokens := discussCompactableTokens(cmd.DiscussMessages)
+	if inputTokens <= 0 {
 		return
 	}
+	observedArtifactIDs := discussCompactionArtifactIDs(cmd.DiscussMessages)
 	if s.turnHooks != nil && s.turnHooks.compactDiscuss != nil {
-		s.turnHooks.compactDiscuss(ctx, cmd.BotID, cmd.ThreadID, cmd.UserID, compactable, contextTokenBudget)
+		s.turnHooks.compactDiscuss(ctx, cmd.BotID, cmd.ThreadID, cmd.UserID, inputTokens, contextTokenBudget, observedArtifactIDs)
 		return
 	}
 	if s.compactionService == nil || s.settingsService == nil {
@@ -224,32 +226,50 @@ func (s *Service) triggerDiscussCompaction(ctx context.Context, cmd turn.StartTu
 		cmd.BotID,
 		cmd.ThreadID,
 		cmd.UserID,
-		compactable,
+		inputTokens,
 		contextTokenBudget,
+		observedArtifactIDs,
 	)
 }
 
 // maybeCompactDiscuss re-evaluates compaction pressure after either native or
 // ACP discuss turns with the same trigger policy as the chat path.
-func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, userID string, compactable, contextTokenBudget int) {
+func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, userID string, inputTokens, contextTokenBudget int, observedArtifactIDs []string) {
 	s.maybeCompact(ctx, ChatRequest{BotID: botID, ThreadID: threadID, UserID: userID}, resolvedContext{
-		compactableTokens:      compactable,
-		compactableTokensKnown: true,
-		contextTokenBudget:     contextTokenBudget,
-	}, compactable)
+		compactionInputTokens:      inputTokens,
+		compactionInputTokensKnown: true,
+		contextTokenBudget:         contextTokenBudget,
+		compactionArtifactIDs:      append([]string(nil), observedArtifactIDs...),
+		compactionArtifactsKnown:   true,
+	}, inputTokens)
 }
 
-// discussCompactableTokens estimates the raw history share of a discuss
-// context, excluding artifact summaries, in the chat trigger's token unit.
+// discussCompactableTokens estimates the effective rolling context: the active
+// summary plus all raw history accumulated since it. The historical function
+// name is retained for compatibility with focused tests.
 func discussCompactableTokens(messages []turn.DiscussMessage) int {
 	total := 0
 	for _, message := range messages {
-		if message.CompactionArtifactID != "" {
-			continue
-		}
 		total += estimateDiscussMessageTokens(message)
 	}
 	return total
+}
+
+func discussCompactionArtifactIDs(messages []turn.DiscussMessage) []string {
+	seen := make(map[string]struct{})
+	ids := make([]string, 0)
+	for _, message := range messages {
+		id := strings.TrimSpace(message.CompactionArtifactID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // trimDiscussMessagesByTokens keeps the newest context within the same 70%

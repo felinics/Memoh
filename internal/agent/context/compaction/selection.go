@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -436,6 +437,37 @@ func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.U
 		g = runEnd
 	}
 	return nil, nil
+}
+
+// buildRollingEntriesAndIDs renders one atomic roll-up over the complete raw
+// history. Unlike segmented compaction, rolling compaction may cross
+// must-keep and empty-rendering islands because every row is claimed by the
+// same replacement artifact, so no raw row can be reordered around it.
+// Empty internal events receive an explicit placeholder; malformed rows are
+// rejected before any database mutation because they cannot produce durable
+// coverage safely.
+func buildRollingEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.UUID, error) {
+	entries := make([]messageEntry, 0, len(items))
+	ids := make([]pgtype.UUID, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.Record.Ref.ID) == "" {
+			return nil, nil, fmt.Errorf(
+				"compaction: rolling history contains unparseable source %s",
+				formatUUID(item.ID),
+			)
+		}
+		role := strings.TrimSpace(item.Record.ModelMessage.Role)
+		if role == "" {
+			role = "history"
+		}
+		content := strings.TrimSpace(renderCandidateEntry(item.Record))
+		if content == "" {
+			content = "[no user-visible text in this stored " + role + " event]"
+		}
+		entries = append(entries, messageEntry{Role: role, Content: content})
+		ids = append(ids, item.ID)
+	}
+	return entries, ids, nil
 }
 
 // trimCompactMessages caps one compaction call's input to maxTokens by keeping

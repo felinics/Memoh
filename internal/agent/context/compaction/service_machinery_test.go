@@ -20,9 +20,10 @@ import (
 // --- stub summarizer model (intercepts the SDK HTTP call) ---------------------
 
 type stubModel struct {
-	summary string
-	calls   int
-	prompt  string // decoded text of the captured request messages
+	summary   string
+	calls     int
+	prompt    string // decoded text of the captured request messages
+	maxTokens int
 }
 
 func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -30,6 +31,16 @@ func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Body != nil {
 		body, _ := io.ReadAll(req.Body)
 		s.prompt = decodePromptMessages(body)
+		var generation struct {
+			MaxCompletionTokens int `json:"max_completion_tokens"`
+			MaxTokens           int `json:"max_tokens"`
+		}
+		if json.Unmarshal(body, &generation) == nil {
+			s.maxTokens = generation.MaxCompletionTokens
+			if s.maxTokens == 0 {
+				s.maxTokens = generation.MaxTokens
+			}
+		}
 	}
 	resp := `{"id":"stub","object":"chat.completion","created":0,"model":"stub",` +
 		`"choices":[{"index":0,"message":{"role":"assistant","content":` + jsonStr(s.summary) + `},"finish_reason":"stop"}],` +
@@ -93,6 +104,7 @@ type fakeQueries struct {
 	markArg        sqlc.MarkMessagesCompactedParams
 	queryCalls     []string
 	completed      sqlc.CompleteCompactionLogParams
+	rollingDone    sqlc.CompleteRollingCompactionLogParams
 	completeCalls  []sqlc.CompleteCompactionLogParams
 	completeErrors []error
 }
@@ -157,6 +169,38 @@ func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.Complete
 	}
 	f.completed = arg
 	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
+}
+
+func (f *fakeQueries) CompleteRollingCompactionLog(_ context.Context, arg sqlc.CompleteRollingCompactionLogParams) (sqlc.CompleteRollingCompactionLogRow, error) {
+	if f.onComplete != nil {
+		f.onComplete()
+	}
+	if f.completeErr != nil {
+		return sqlc.CompleteRollingCompactionLogRow{}, f.completeErr
+	}
+	f.rollingDone = arg
+	f.completed = sqlc.CompleteCompactionLogParams{
+		ID:            arg.ID,
+		Status:        StatusOK,
+		Summary:       arg.Summary,
+		MessageCount:  arg.MessageCount,
+		Usage:         arg.Usage,
+		ModelID:       arg.ModelID,
+		Coverage:      arg.Coverage,
+		AnchorStartMs: arg.AnchorStartMs,
+		AnchorEndMs:   arg.AnchorEndMs,
+	}
+	return sqlc.CompleteRollingCompactionLogRow{
+		ID:            arg.ID,
+		Status:        StatusOK,
+		Summary:       arg.Summary,
+		MessageCount:  arg.MessageCount,
+		Coverage:      arg.Coverage,
+		AnchorStartMs: arg.AnchorStartMs,
+		AnchorEndMs:   arg.AnchorEndMs,
+		ArtifactLevel: arg.ArtifactLevel,
+		ParentIds:     arg.ParentIds,
+	}, nil
 }
 
 // --- harness ------------------------------------------------------------------
@@ -283,6 +327,186 @@ func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
 	}
 	if strings.Contains(stub.prompt, "The following are summaries of earlier parts") {
 		t.Fatalf("whitespace-only prior summary injected as prior context:\n%s", stub.prompt)
+	}
+}
+
+func TestDoCompactionSkipsStaleQueuedTriggerAfterNewSummary(t *testing.T) {
+	rows := machineryCorpus(t)
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "SUMMARY-OK"}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 0)
+	cfg.Ratio = 40
+	cfg.TotalInputTokens = 100000
+	cfg.ObservedArtifactsKnown = true
+
+	first, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("first RunCompactionSync: %v", err)
+	}
+	if first.Status != StatusOK || stub.calls != 1 {
+		t.Fatalf("first compaction = status %q, model calls %d; want ok/1", first.Status, stub.calls)
+	}
+
+	marked := idSet(q.markedIDs)
+	remaining := make([]sqlc.ListUncompactedMessagesBySessionRow, 0, len(rows)-len(marked))
+	for _, row := range rows {
+		if !marked[row.ID] {
+			remaining = append(remaining, row)
+		}
+	}
+	q.uncompacted = remaining
+	q.priorLogs = []sqlc.BotHistoryMessageCompact{{
+		ID:              q.completed.ID,
+		BotID:           pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true},
+		SessionID:       pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true},
+		Status:          "ok",
+		Summary:         q.completed.Summary,
+		MessageCount:    q.completed.MessageCount,
+		Coverage:        q.completed.Coverage,
+		AnchorStartMs:   q.completed.AnchorStartMs,
+		AnchorEndMs:     q.completed.AnchorEndMs,
+		ArtifactVersion: 1,
+	}}
+	q.created = false
+	q.markedIDs = nil
+
+	second, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("stale RunCompactionSync: %v", err)
+	}
+	if second.Status != StatusNoop {
+		t.Fatalf("stale compaction status = %q, want noop", second.Status)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("stale pressure started another summarizer call: calls=%d, want 1", stub.calls)
+	}
+	if q.created || len(q.markedIDs) != 0 {
+		t.Fatalf("stale pressure mutated compaction state: created=%v marked=%d", q.created, len(q.markedIDs))
+	}
+}
+
+func TestFrontierAdvancedSinceObservation(t *testing.T) {
+	t.Parallel()
+
+	active := []Artifact{{ID: "artifact-1"}, {ID: "artifact-2"}}
+	if frontierAdvancedSinceObservation(active, []string{"artifact-2", "artifact-1"}) {
+		t.Fatal("the same frontier in a different observation order must remain current")
+	}
+	if !frontierAdvancedSinceObservation(active, []string{"artifact-1"}) {
+		t.Fatal("an unseen active artifact must make the pressure snapshot stale")
+	}
+	if frontierAdvancedSinceObservation(nil, nil) {
+		t.Fatal("an empty initial frontier must not be stale")
+	}
+}
+
+func TestRollingCompactionReplacesParentsAndCompactsAllRawHistory(t *testing.T) {
+	rows := machineryCorpus(t)
+	stub := &stubModel{summary: "ONE-ROLLING-SUMMARY"}
+	cfg := machineryConfig(stub, 0)
+	cfg.Rolling = true
+	cfg.SummaryTargetTokens = 40000
+	cfg.ModelContextTokens = 1000000
+	cfg.MaxCompactTokens = 900000
+
+	parentID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	q := &fakeQueries{
+		uncompacted: rows,
+		priorLogs: []sqlc.BotHistoryMessageCompact{{
+			ID:              parentID,
+			BotID:           pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true},
+			SessionID:       pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true},
+			Status:          StatusOK,
+			Summary:         "PREVIOUS-ROLLING-SUMMARY",
+			Coverage:        testCoverageJSON(t, "parent-source"),
+			ArtifactVersion: ArtifactVersion,
+			ArtifactLevel:   3,
+		}},
+	}
+
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if res.Status != StatusOK {
+		t.Fatalf("status = %q, want ok", res.Status)
+	}
+	if len(q.markedIDs) != len(rows) {
+		t.Fatalf("marked %d raw rows, want all %d", len(q.markedIDs), len(rows))
+	}
+	if !strings.Contains(stub.prompt, "PREVIOUS-ROLLING-SUMMARY") ||
+		!strings.Contains(stub.prompt, "recent answer") {
+		t.Fatalf("rolling prompt did not combine prior summary and all raw history:\n%s", stub.prompt)
+	}
+	if strings.Contains(stub.prompt, "Do NOT include, repeat") {
+		t.Fatalf("rolling prompt retained the legacy instruction to omit prior context")
+	}
+	if stub.maxTokens != 40000 {
+		t.Fatalf("model output cap = %d, want 40000", stub.maxTokens)
+	}
+	if len(q.rollingDone.ParentIds) != 1 || q.rollingDone.ParentIds[0] != parentID {
+		t.Fatalf("rolling parents = %v, want [%v]", q.rollingDone.ParentIds, parentID)
+	}
+	if q.rollingDone.ArtifactLevel != 4 {
+		t.Fatalf("rolling artifact level = %d, want 4", q.rollingDone.ArtifactLevel)
+	}
+	coverage, err := DecodeArtifactCoverage(q.rollingDone.Coverage)
+	if err != nil {
+		t.Fatalf("DecodeArtifactCoverage: %v", err)
+	}
+	if len(coverage) != len(rows)+1 {
+		t.Fatalf("rolling coverage = %d sources, want parent + %d raw rows", len(coverage), len(rows))
+	}
+}
+
+func TestRollingCompactionRejectsPartialInputInsteadOfLooping(t *testing.T) {
+	rows := machineryCorpus(t)
+	stub := &stubModel{summary: "unused"}
+	cfg := machineryConfig(stub, 0)
+	cfg.Rolling = true
+	cfg.SummaryTargetTokens = 40
+	cfg.ModelContextTokens = 1100
+	cfg.MaxCompactTokens = 990
+	q := &fakeQueries{uncompacted: rows}
+
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "rolling input") {
+		t.Fatalf("error = %v, want rolling input budget failure", err)
+	}
+	if stub.calls != 0 || q.created || len(q.markedIDs) != 0 {
+		t.Fatalf("oversized rolling pass must not partially mutate state: calls=%d created=%v marked=%d",
+			stub.calls, q.created, len(q.markedIDs))
+	}
+}
+
+func TestRollingCompactionCrossesEmptyAndMustKeepIslands(t *testing.T) {
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `[{"type":"text","text":"old question"}]`, 100),
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"internal thought"}]`, 100),
+		mkRow(t, "assistant", `[{"type":"tool-call","toolCallId":"ask-1","toolName":"ask_user","input":{"question":"confirm?"}}]`, 100),
+		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"ask-1","toolName":"ask_user","result":"yes"}]`, 100),
+		mkRow(t, "assistant", `[{"type":"text","text":"continued answer"}]`, 100),
+	}
+	stub := &stubModel{summary: "ROLLING"}
+	cfg := machineryConfig(stub, 0)
+	cfg.Rolling = true
+	cfg.SummaryTargetTokens = 40000
+	cfg.ModelContextTokens = 1000000
+	cfg.MaxCompactTokens = 900000
+	q := &fakeQueries{uncompacted: rows}
+
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if res.Status != StatusOK || len(q.markedIDs) != len(rows) {
+		t.Fatalf("rolling result = %q, marked %d/%d", res.Status, len(q.markedIDs), len(rows))
+	}
+	if !strings.Contains(stub.prompt, "no user-visible text") ||
+		!strings.Contains(stub.prompt, "ask_user") ||
+		!strings.Contains(stub.prompt, "continued answer") {
+		t.Fatalf("rolling prompt did not preserve the full history around islands:\n%s", stub.prompt)
 	}
 }
 

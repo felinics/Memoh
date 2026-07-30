@@ -89,6 +89,103 @@ RETURNING compact.id, compact.bot_id, compact.session_id, compact.status, compac
           compact.artifact_level, compact.parent_ids, compact.superseded_by, compact.superseded_at,
           compact.compaction_epoch, compact.started_at, compact.completed_at, compact.team_id;
 
+-- name: CompleteRollingCompactionLog :one
+WITH target_compact AS MATERIALIZED (
+  SELECT compact.id, compact.bot_id, compact.session_id, compact.compaction_epoch, compact.team_id
+  FROM bot_history_message_compacts compact
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = sqlc.arg(id)
+    AND compact.status = 'pending'
+),
+owner_session AS MATERIALIZED (
+  SELECT session.id, session.bot_id, session.compaction_epoch, session.team_id
+  FROM bot_sessions session
+  JOIN target_compact compact
+    ON compact.session_id = session.id
+   AND compact.bot_id = session.bot_id
+   AND compact.compaction_epoch = session.compaction_epoch
+   AND compact.team_id = session.team_id
+  WHERE session.team_id = public.memoh_current_team_id()
+  FOR UPDATE OF session
+),
+requested_parents AS MATERIALIZED (
+  SELECT DISTINCT requested.id
+  FROM unnest(sqlc.arg(parent_ids)::uuid[]) AS requested(id)
+),
+locked_parents AS MATERIALIZED (
+  SELECT parent.id
+  FROM bot_history_message_compacts parent
+  JOIN requested_parents requested ON requested.id = parent.id
+  JOIN owner_session owner
+    ON owner.id = parent.session_id
+   AND owner.bot_id = parent.bot_id
+   AND owner.compaction_epoch = parent.compaction_epoch
+   AND owner.team_id = parent.team_id
+  WHERE parent.team_id = public.memoh_current_team_id()
+    AND parent.status = 'ok'
+    AND NULLIF(BTRIM(parent.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+    AND parent.superseded_by IS NULL
+    AND parent.superseded_at IS NULL
+  ORDER BY parent.id
+  FOR UPDATE OF parent
+),
+validated AS MATERIALIZED (
+  SELECT compact.*
+  FROM target_compact compact
+  JOIN owner_session owner
+    ON owner.id = compact.session_id
+   AND owner.bot_id = compact.bot_id
+   AND owner.compaction_epoch = compact.compaction_epoch
+   AND owner.team_id = compact.team_id
+  WHERE cardinality(sqlc.arg(parent_ids)::uuid[]) = (SELECT count(*) FROM requested_parents)
+    AND cardinality(sqlc.arg(parent_ids)::uuid[]) = (SELECT count(*) FROM locked_parents)
+    AND (
+      SELECT count(*)
+      FROM bot_history_messages source_message
+      WHERE source_message.team_id = compact.team_id
+        AND source_message.compact_id = compact.id
+    ) = sqlc.arg(message_count)::integer
+),
+updated_child AS (
+  UPDATE bot_history_message_compacts compact
+  SET status = 'ok',
+      summary = sqlc.arg(summary),
+      message_count = sqlc.arg(message_count)::integer,
+      error_message = '',
+      usage = sqlc.arg(usage),
+      model_id = sqlc.arg(model_id),
+      coverage = sqlc.arg(coverage),
+      anchor_start_ms = sqlc.arg(anchor_start_ms),
+      anchor_end_ms = sqlc.arg(anchor_end_ms),
+      artifact_level = sqlc.arg(artifact_level),
+      parent_ids = sqlc.arg(parent_ids)::uuid[],
+      completed_at = now()
+  FROM validated
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = validated.id
+    AND compact.team_id = validated.team_id
+    AND compact.status = 'pending'
+  RETURNING compact.*
+),
+superseded_parents AS (
+  UPDATE bot_history_message_compacts parent
+  SET superseded_by = child.id,
+      superseded_at = now()
+  FROM updated_child child
+  JOIN locked_parents locked ON true
+  WHERE parent.team_id = public.memoh_current_team_id()
+    AND parent.id = locked.id
+    AND parent.team_id = child.team_id
+  RETURNING parent.id
+)
+SELECT child.id, child.bot_id, child.session_id, child.status, child.summary,
+       child.message_count, child.error_message, child.usage, child.model_id,
+       child.artifact_version, child.coverage, child.anchor_start_ms, child.anchor_end_ms,
+       child.artifact_level, child.parent_ids, child.superseded_by, child.superseded_at,
+       child.compaction_epoch, child.started_at, child.completed_at, child.team_id
+FROM updated_child child
+WHERE (SELECT count(*) FROM superseded_parents) = cardinality(child.parent_ids);
+
 -- name: GetCompactionLogByID :one
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,

@@ -139,6 +139,181 @@ func (q *Queries) CompleteCompactionLog(ctx context.Context, arg CompleteCompact
 	return i, err
 }
 
+const completeRollingCompactionLog = `-- name: CompleteRollingCompactionLog :one
+WITH target_compact AS MATERIALIZED (
+  SELECT compact.id, compact.bot_id, compact.session_id, compact.compaction_epoch, compact.team_id
+  FROM bot_history_message_compacts compact
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = $1
+    AND compact.status = 'pending'
+),
+owner_session AS MATERIALIZED (
+  SELECT session.id, session.bot_id, session.compaction_epoch, session.team_id
+  FROM bot_sessions session
+  JOIN target_compact compact
+    ON compact.session_id = session.id
+   AND compact.bot_id = session.bot_id
+   AND compact.compaction_epoch = session.compaction_epoch
+   AND compact.team_id = session.team_id
+  WHERE session.team_id = public.memoh_current_team_id()
+  FOR UPDATE OF session
+),
+requested_parents AS MATERIALIZED (
+  SELECT DISTINCT requested.id
+  FROM unnest($2::uuid[]) AS requested(id)
+),
+locked_parents AS MATERIALIZED (
+  SELECT parent.id
+  FROM bot_history_message_compacts parent
+  JOIN requested_parents requested ON requested.id = parent.id
+  JOIN owner_session owner
+    ON owner.id = parent.session_id
+   AND owner.bot_id = parent.bot_id
+   AND owner.compaction_epoch = parent.compaction_epoch
+   AND owner.team_id = parent.team_id
+  WHERE parent.team_id = public.memoh_current_team_id()
+    AND parent.status = 'ok'
+    AND NULLIF(BTRIM(parent.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+    AND parent.superseded_by IS NULL
+    AND parent.superseded_at IS NULL
+  ORDER BY parent.id
+  FOR UPDATE OF parent
+),
+validated AS MATERIALIZED (
+  SELECT compact.id, compact.bot_id, compact.session_id, compact.compaction_epoch, compact.team_id
+  FROM target_compact compact
+  JOIN owner_session owner
+    ON owner.id = compact.session_id
+   AND owner.bot_id = compact.bot_id
+   AND owner.compaction_epoch = compact.compaction_epoch
+   AND owner.team_id = compact.team_id
+  WHERE cardinality($2::uuid[]) = (SELECT count(*) FROM requested_parents)
+    AND cardinality($2::uuid[]) = (SELECT count(*) FROM locked_parents)
+    AND (
+      SELECT count(*)
+      FROM bot_history_messages source_message
+      WHERE source_message.team_id = compact.team_id
+        AND source_message.compact_id = compact.id
+    ) = $3::integer
+),
+updated_child AS (
+  UPDATE bot_history_message_compacts compact
+  SET status = 'ok',
+      summary = $4,
+      message_count = $3::integer,
+      error_message = '',
+      usage = $5,
+      model_id = $6,
+      coverage = $7,
+      anchor_start_ms = $8,
+      anchor_end_ms = $9,
+      artifact_level = $10,
+      parent_ids = $2::uuid[],
+      completed_at = now()
+  FROM validated
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id = validated.id
+    AND compact.team_id = validated.team_id
+    AND compact.status = 'pending'
+  RETURNING compact.id, compact.bot_id, compact.session_id, compact.status, compact.summary, compact.message_count, compact.error_message, compact.usage, compact.model_id, compact.artifact_version, compact.coverage, compact.anchor_start_ms, compact.anchor_end_ms, compact.artifact_level, compact.parent_ids, compact.superseded_by, compact.superseded_at, compact.compaction_epoch, compact.started_at, compact.completed_at, compact.team_id
+),
+superseded_parents AS (
+  UPDATE bot_history_message_compacts parent
+  SET superseded_by = child.id,
+      superseded_at = now()
+  FROM updated_child child
+  JOIN locked_parents locked ON true
+  WHERE parent.team_id = public.memoh_current_team_id()
+    AND parent.id = locked.id
+    AND parent.team_id = child.team_id
+  RETURNING parent.id
+)
+SELECT child.id, child.bot_id, child.session_id, child.status, child.summary,
+       child.message_count, child.error_message, child.usage, child.model_id,
+       child.artifact_version, child.coverage, child.anchor_start_ms, child.anchor_end_ms,
+       child.artifact_level, child.parent_ids, child.superseded_by, child.superseded_at,
+       child.compaction_epoch, child.started_at, child.completed_at, child.team_id
+FROM updated_child child
+WHERE (SELECT count(*) FROM superseded_parents) = cardinality(child.parent_ids)
+`
+
+type CompleteRollingCompactionLogParams struct {
+	ID            pgtype.UUID   `json:"id"`
+	ParentIds     []pgtype.UUID `json:"parent_ids"`
+	MessageCount  int32         `json:"message_count"`
+	Summary       string        `json:"summary"`
+	Usage         []byte        `json:"usage"`
+	ModelID       pgtype.UUID   `json:"model_id"`
+	Coverage      []byte        `json:"coverage"`
+	AnchorStartMs int64         `json:"anchor_start_ms"`
+	AnchorEndMs   int64         `json:"anchor_end_ms"`
+	ArtifactLevel int32         `json:"artifact_level"`
+}
+
+type CompleteRollingCompactionLogRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	SessionID       pgtype.UUID        `json:"session_id"`
+	Status          string             `json:"status"`
+	Summary         string             `json:"summary"`
+	MessageCount    int32              `json:"message_count"`
+	ErrorMessage    string             `json:"error_message"`
+	Usage           []byte             `json:"usage"`
+	ModelID         pgtype.UUID        `json:"model_id"`
+	ArtifactVersion int32              `json:"artifact_version"`
+	Coverage        []byte             `json:"coverage"`
+	AnchorStartMs   int64              `json:"anchor_start_ms"`
+	AnchorEndMs     int64              `json:"anchor_end_ms"`
+	ArtifactLevel   int32              `json:"artifact_level"`
+	ParentIds       []pgtype.UUID      `json:"parent_ids"`
+	SupersededBy    pgtype.UUID        `json:"superseded_by"`
+	SupersededAt    pgtype.Timestamptz `json:"superseded_at"`
+	CompactionEpoch int64              `json:"compaction_epoch"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	TeamID          pgtype.UUID        `json:"team_id"`
+}
+
+func (q *Queries) CompleteRollingCompactionLog(ctx context.Context, arg CompleteRollingCompactionLogParams) (CompleteRollingCompactionLogRow, error) {
+	row := q.db.QueryRow(ctx, completeRollingCompactionLog,
+		arg.ID,
+		arg.ParentIds,
+		arg.MessageCount,
+		arg.Summary,
+		arg.Usage,
+		arg.ModelID,
+		arg.Coverage,
+		arg.AnchorStartMs,
+		arg.AnchorEndMs,
+		arg.ArtifactLevel,
+	)
+	var i CompleteRollingCompactionLogRow
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.Status,
+		&i.Summary,
+		&i.MessageCount,
+		&i.ErrorMessage,
+		&i.Usage,
+		&i.ModelID,
+		&i.ArtifactVersion,
+		&i.Coverage,
+		&i.AnchorStartMs,
+		&i.AnchorEndMs,
+		&i.ArtifactLevel,
+		&i.ParentIds,
+		&i.SupersededBy,
+		&i.SupersededAt,
+		&i.CompactionEpoch,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
 const countCompactionLogsByBot = `-- name: CountCompactionLogsByBot :one
 SELECT count(*) FROM bot_history_message_compacts WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 `

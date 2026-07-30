@@ -146,20 +146,33 @@ func (b compactionArtifactBoundary) includes(artifact compaction.Artifact) bool 
 }
 
 func (s *Service) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord, boundary compactionArtifactBoundary) ([]historyfrag.HistoryRecord, error) {
+	replaced, _, _, err := s.replaceCompactedMessagesWithSnapshot(ctx, sessionID, scope, messages, boundary)
+	return replaced, err
+}
+
+func (s *Service) replaceCompactedMessagesWithSnapshot(
+	ctx context.Context,
+	sessionID string,
+	scope contextfrag.Scope,
+	messages []historyfrag.HistoryRecord,
+	boundary compactionArtifactBoundary,
+) ([]historyfrag.HistoryRecord, []string, bool, error) {
 	if s.queries == nil {
-		return messages, nil
+		return messages, nil, false, nil
 	}
 	if strings.TrimSpace(sessionID) == "" {
 		// Sessionless (chat-scoped) loads have no session log list to draw from;
 		// resolve each in-window compact group individually.
-		return s.replaceRecentCompactedMessages(ctx, scope, messages, boundary)
+		replaced, err := s.replaceRecentCompactedMessages(ctx, scope, messages, boundary)
+		return replaced, nil, false, err
 	}
 	frontier, err := s.loadActiveCompactionFrontier(ctx, scope.BotID, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, false, err
 	}
+	artifactIDs := activeCompactionArtifactIDs(frontier.Artifacts)
 	if len(frontier.Artifacts) == 0 {
-		return messages, nil
+		return messages, artifactIDs, true, nil
 	}
 	owner := compaction.ArtifactOwner{BotID: scope.BotID, SessionID: sessionID, SessionIDKnown: true}
 	catalog := compaction.NewArtifactCatalog()
@@ -180,7 +193,17 @@ func (s *Service) replaceCompactedMessages(ctx context.Context, sessionID string
 	if len(sessionSummaries) > 0 {
 		messages = mergeMissingCompactionSummaries(messages, sessionSummaries)
 	}
-	return s.refreshCompactedSummaryCoverage(ctx, messages, resolve), nil
+	return s.refreshCompactedSummaryCoverage(ctx, messages, resolve), artifactIDs, true, nil
+}
+
+func activeCompactionArtifactIDs(artifacts []compaction.Artifact) []string {
+	ids := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if id := strings.TrimSpace(artifact.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // missingCompactionArtifacts filters the active frontier down to summaries not

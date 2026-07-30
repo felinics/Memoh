@@ -18,6 +18,19 @@ For tool results, only include key outcomes; ignore intermediate steps or errors
 
 Output ONLY the summary of the new conversation segment. No preamble, no headers.`
 
+func rollingSystemPrompt(targetTokens int) string {
+	return fmt.Sprintf(`You maintain one rolling summary for an ongoing conversation. Replace the previous rolling summary and the newly accumulated raw history with one self-contained summary that preserves:
+- Key facts, decisions, agreements, unresolved work, and current state
+- User preferences, requests, constraints, and corrections
+- Names, dates, numbers, credentials references, paths, IDs, and other specific details needed to continue
+- Important tool actions and their outcomes
+
+<prior_context>, when present, is the existing rolling summary. Fold all of its still-relevant information into the replacement summary together with the new history. Remove duplication, but never omit prior facts merely because they appeared in <prior_context>.
+
+Use at most %d tokens. Preserve as much useful detail as fits; do not pad to reach the limit.
+Output ONLY the replacement rolling summary. No preamble and no commentary about the summarization process.`, targetTokens)
+}
+
 type messageEntry struct {
 	Role    string
 	Content string
@@ -37,6 +50,21 @@ func buildUserPrompt(priorSummaries []string, messages []messageEntry) string {
 	for _, m := range messages {
 		fmt.Fprintf(&sb, "%s: %s\n", m.Role, m.Content)
 	}
+	return sb.String()
+}
+
+func buildRollingUserPrompt(priorSummaries []string, messages []messageEntry) string {
+	var sb strings.Builder
+	if len(priorSummaries) > 0 {
+		sb.WriteString("<prior_context>\n")
+		sb.WriteString(strings.Join(priorSummaries, "\n---\n"))
+		sb.WriteString("\n</prior_context>\n\n")
+	}
+	sb.WriteString("<new_history>\n")
+	for _, m := range messages {
+		fmt.Fprintf(&sb, "%s: %s\n", m.Role, m.Content)
+	}
+	sb.WriteString("</new_history>")
 	return sb.String()
 }
 

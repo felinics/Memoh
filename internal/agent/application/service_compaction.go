@@ -12,28 +12,23 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-// compactionBudgetThresholdPercent is the shared budget share at which
-// compaction triggers: the pre-send synchronous backstop fires when
-// compactable history reaches it, and async triggers clamp the user
-// threshold to it so they fire before the blocking backstop does.
+// compactionBudgetThresholdPercent is the share of a chat model's context
+// reserved for history before the ordinary pre-send trimming path intervenes.
 const compactionBudgetThresholdPercent = 70
 
-// effectiveCompactionThreshold clamps the user-configured absolute threshold
-// to the budget share, so an absolute default (e.g. 100000) still fires on
-// models whose context window never reaches it. A non-positive threshold
-// keeps async compaction disabled.
+// effectiveCompactionThreshold preserves the user-configured absolute
+// threshold. Pre-send trimming separately protects the chat model's context
+// window; changing the compaction threshold here would break the configured
+// rolling-summary cycle (for example, 100K -> 40K).
 func effectiveCompactionThreshold(threshold, contextTokenBudget int) int {
-	if threshold <= 0 || contextTokenBudget <= 0 {
-		return threshold
-	}
-	budgetThreshold := contextTokenBudget * compactionBudgetThresholdPercent / 100
-	if budgetThreshold > 0 && budgetThreshold < threshold {
-		return budgetThreshold
-	}
+	_ = contextTokenBudget
 	return threshold
 }
 
 func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int {
+	if rc.compactionInputTokensKnown {
+		return rc.compactionInputTokens
+	}
 	if rc.compactableTokensKnown {
 		return rc.compactableTokens
 	}
@@ -88,6 +83,10 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		// so the compaction service doesn't run hooks + fail on empty UUIDs.
 		return
 	}
+	cfg.ObservedArtifactIDs = append([]string(nil), rc.compactionArtifactIDs...)
+	cfg.ObservedArtifactsKnown = rc.compactionArtifactsKnown
+	cfg.Rolling = true
+	cfg.SummaryTargetTokens = compaction.RollingSummaryTargetTokens(threshold, cfg.Ratio)
 	if err := s.compactionService.RunCompaction(ctx, cfg); err != nil {
 		s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
 	}
@@ -200,6 +199,7 @@ func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, bo
 
 	// Cap compaction input to 90% of the compaction model's context window.
 	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
+		cfg.ModelContextTokens = *compactModel.Config.ContextWindow
 		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
 	}
 
