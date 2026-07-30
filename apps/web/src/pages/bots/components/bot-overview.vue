@@ -1,11 +1,9 @@
 <template>
   <!-- Overview is the bot's "lobby", modeled on a real product dashboard:
-       where it's reachable (platforms), the couple of settings worth surfacing
-       (model + memory), then a usage visualization built from actual data
-       (token stat row + a daily bar chart). No filler rows that just mirror the
-       left nav. Health checks stay demoted to an issue banner + dialog so a
-       healthy bot reads calm. PageShell owns the max-w-3xl column, the tab
-       vertical rhythm, and the title, so this page never hand-rolls the shell. -->
+       where it's reachable (platforms), live runtime telemetry, token usage,
+       then memory stats. No filler rows that mirror the left nav — model and
+       provider setup live on their own tabs. Health checks stay demoted to an
+       issue banner + dialog so a healthy bot reads calm. -->
   <PageShell
     variant="tab"
     :title="$t('bots.tabs.overview')"
@@ -180,66 +178,8 @@
         </p>
       </section>
 
-      <!-- Memory: same lightweight telemetry scale as Runtime — title row plus
-           three metric tiles. Full sync / path details live on the Memory tab. -->
-      <section
-        v-if="showMemorySection"
-        class="space-y-2.5"
-      >
-        <div class="flex items-center gap-2 px-2">
-          <h2 class="text-[13px] font-medium text-muted-foreground">
-            {{ $t('bots.overview.memoryTitle') }}
-          </h2>
-        </div>
-
-        <div
-          v-if="memoryLoading"
-          class="grid grid-cols-3 gap-3"
-        >
-          <Skeleton
-            v-for="i in 3"
-            :key="i"
-            class="h-[4.5rem] rounded-[var(--radius-menu-shell)]"
-          />
-        </div>
-
-        <template v-else>
-          <div class="grid grid-cols-3 gap-3">
-            <MetricReadout
-              v-for="m in memoryMetricCards"
-              :key="m.key"
-              :label="m.label"
-              :value="m.value"
-            />
-          </div>
-
-          <p
-            v-if="memoryStatsNote"
-            class="px-2 text-xs text-muted-foreground"
-          >
-            {{ memoryStatsNote }}
-          </p>
-        </template>
-      </section>
-
-      <!-- Core setup: the model this bot thinks with. Memory telemetry sits in
-           its own block above; everything else lives in its own tab. -->
-      <SettingsSection :title="$t('bots.overview.configTitle')">
-        <SettingsRow
-          :label="$t('bots.overview.modelLabel')"
-          :description="modelName"
-        >
-          <span
-            v-if="reasoningOn"
-            class="rounded bg-accent px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
-          >{{ reasoningLabel }}</span>
-        </SettingsRow>
-      </SettingsSection>
-
-      <!-- Usage: a real data visualization (stat row + daily token bar chart)
-           from the token-usage feed — the dashboard's "numbers", kept last so
-           identity, reachability and setup read first. Same echarts recipe as
-           the dedicated Usage page. -->
+      <!-- Usage: token stat row + daily bar chart — the dashboard's "numbers",
+           sitting above memory telemetry so it reads earlier on the page. -->
       <SettingsSection :title="$t('bots.overview.usageTitle')">
         <div class="space-y-4 p-4">
           <div class="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
@@ -280,6 +220,48 @@
         </div>
       </SettingsSection>
 
+      <!-- Memory: lightweight telemetry below usage. Full sync / path details
+           live on the Memory tab. -->
+      <section
+        v-if="showMemorySection"
+        class="space-y-2.5"
+      >
+        <div class="flex items-center gap-2 px-2">
+          <h2 class="text-[13px] font-medium text-muted-foreground">
+            {{ $t('bots.overview.memoryTitle') }}
+          </h2>
+        </div>
+
+        <div
+          v-if="memoryLoading"
+          class="grid grid-cols-3 gap-3"
+        >
+          <Skeleton
+            v-for="i in 3"
+            :key="i"
+            class="h-[4.5rem] rounded-[var(--radius-menu-shell)]"
+          />
+        </div>
+
+        <template v-else>
+          <div class="grid grid-cols-3 gap-3">
+            <MetricReadout
+              v-for="m in memoryMetricCards"
+              :key="m.key"
+              :label="m.label"
+              :value="m.value"
+            />
+          </div>
+
+          <p
+            v-if="memoryStatsNote"
+            class="px-2 text-xs text-muted-foreground"
+          >
+            {{ memoryStatsNote }}
+          </p>
+        </template>
+      </section>
+
       <BotChecksPanel
         v-model:open="checksOpen"
         :bot-id="botId"
@@ -307,7 +289,6 @@ import {
   getBotsByBotIdTokenUsage,
   getBotsByBotIdContainer,
   getBotsByBotIdContainerMetrics,
-  getModels,
   getChannels,
   getBotsByIdChannelByPlatform,
   type HandlersChannelMeta,
@@ -363,14 +344,6 @@ const { data: settings } = useQuery({
   enabled: () => !!botId.value,
 })
 
-const { data: models } = useQuery({
-  key: () => ['models'],
-  query: async () => {
-    const { data } = await getModels({ throwOnError: true })
-    return data
-  },
-})
-
 const { data: memoryStatus, isLoading: memoryLoading } = useQuery({
   key: () => ['bot-memory-status', botId.value],
   query: async () => {
@@ -413,13 +386,6 @@ function channelTitle(meta: HandlersChannelMeta) {
   return channelTypeDisplayName(t, meta.type, meta.display_name)
 }
 
-const modelName = computed(() => {
-  const id = settings.value?.chat_model_id
-  if (!id) return t('bots.overview.modelNone')
-  const model = (models.value ?? []).find((m) => (m.id || m.model_id) === id)
-  return model?.name || model?.model_id || id
-})
-
 // Reminders: a single, extensible "do this next" list for setup steps that the
 // dedicated surfaces don't already nag about. Platforms (connect) and the issue
 // banner (diagnostics) own their own signals, so reminders deliberately covers
@@ -450,14 +416,6 @@ const reminders = computed<BotReminder[]>(() => {
     })
   }
   return list
-})
-
-const reasoningOn = computed(() => !!settings.value?.reasoning_enabled)
-const reasoningLabel = computed(() => {
-  const effort = settings.value?.reasoning_effort
-  return effort
-    ? `${t('bots.overview.reasoningBadge')} · ${effort}`
-    : t('bots.overview.reasoningBadge')
 })
 
 const showMemorySection = computed(() => !!settings.value?.memory_provider_id)
