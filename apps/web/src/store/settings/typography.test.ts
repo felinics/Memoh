@@ -16,10 +16,9 @@ import {
 // The default stacks after serialization (generic keywords stay bare, concrete
 // names get quoted).
 const UI_FALLBACK_SERIALIZED = 'system-ui, sans-serif'
-const CODE_FALLBACK_SERIALIZED = 'ui-monospace, monospace'
-// cssCodeFontFamilyStyleValue appends this CJK tail to every code stack (#851);
-// it ends in generic monospace as the final catch-all.
-const CODE_CJK_TAIL_SERIALIZED = '"MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", monospace'
+// CJK concrete families sit before the terminal generic monospace catch-all (#851).
+const CODE_CJK_CORE_SERIALIZED = '"MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC"'
+const CODE_STACK_WITH_CJK = `ui-monospace, ${CODE_CJK_CORE_SERIALIZED}, monospace`
 
 describe('typography settings', () => {
   afterEach(() => {
@@ -68,18 +67,13 @@ describe('typography settings', () => {
       .toBe('Inter, sans-serif')
   })
 
-  it('appends the CJK fallback tail to every code stack (#851)', () => {
-    // Default stack gets the tail.
-    expect(cssCodeFontFamilyStyleValue(''))
-      .toBe(`${CODE_FALLBACK_SERIALIZED}, ${CODE_CJK_TAIL_SERIALIZED}`)
-    // Custom stacks get it after the default fallback…
+  it('inserts the CJK stack before terminal monospace on every code stack (#851)', () => {
+    expect(cssCodeFontFamilyStyleValue('')).toBe(CODE_STACK_WITH_CJK)
     expect(cssCodeFontFamilyStyleValue('JetBrains Mono'))
-      .toBe(`"JetBrains Mono", ${CODE_FALLBACK_SERIALIZED}, ${CODE_CJK_TAIL_SERIALIZED}`)
-    // …and even when the custom stack ends in a generic family (where
-    // cssFontStack appends nothing), so a Latin-only custom font can never
-    // lose the CJK fallback.
+      .toBe(`"JetBrains Mono", ${CODE_STACK_WITH_CJK}`)
+    // User stacks ending in generic monospace still get CJK ahead of the catch-all.
     expect(cssCodeFontFamilyStyleValue('JetBrains Mono, monospace'))
-      .toBe(`"JetBrains Mono", monospace, ${CODE_CJK_TAIL_SERIALIZED}`)
+      .toBe(`"JetBrains Mono", ${CODE_CJK_CORE_SERIALIZED}, monospace`)
   })
 
   it('normalizes free-text font family input before storing it', () => {
@@ -146,8 +140,8 @@ describe('typography settings', () => {
     expect(properties.get('--memoh-ui-font-family')).toBe(`"A \\"Quoted\\" Font", ${UI_FALLBACK_SERIALIZED}`)
     expect(properties.get('--font-sans')).toBe(`"A \\"Quoted\\" Font", ${UI_FALLBACK_SERIALIZED}`)
     expect(properties.get('--memoh-ui-font-size')).toBe('14px')
-    expect(properties.get('--memoh-code-font-family')).toBe(`"Mono\\\\Font", ${CODE_FALLBACK_SERIALIZED}, ${CODE_CJK_TAIL_SERIALIZED}`)
-    expect(properties.get('--font-mono')).toBe(`"Mono\\\\Font", ${CODE_FALLBACK_SERIALIZED}, ${CODE_CJK_TAIL_SERIALIZED}`)
+    expect(properties.get('--memoh-code-font-family')).toBe(cssCodeFontFamilyStyleValue('Mono\\Font'))
+    expect(properties.get('--font-mono')).toBe(cssCodeFontFamilyStyleValue('Mono\\Font'))
     expect(properties.get('--memoh-code-font-size')).toBe('13px')
     expect(properties.has('--memoh-text-xs')).toBe(false)
     expect(properties.has('--chat-markdown-h1-font-size')).toBe(false)
@@ -185,6 +179,6 @@ describe('typography settings', () => {
     expect(properties.has('--font-mono')).toBe(false)
     expect(properties.has('--memoh-ui-font-size')).toBe(false)
     expect(properties.get('--memoh-ui-font-family')).toBe(UI_FALLBACK_SERIALIZED)
-    expect(properties.get('--memoh-code-font-family')).toBe(`${CODE_FALLBACK_SERIALIZED}, ${CODE_CJK_TAIL_SERIALIZED}`)
+    expect(properties.get('--memoh-code-font-family')).toBe(CODE_STACK_WITH_CJK)
   })
 })

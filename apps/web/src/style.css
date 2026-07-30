@@ -367,7 +367,7 @@
   /* Pre-boot default for var(--memoh-code-font-family, …) consumers
    * (markstream code below); once settings apply, the inline variable
    * carries the same tail from typography.ts. */
-  --memoh-code-font-family-default: ui-monospace, monospace, "MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC";
+  --memoh-code-font-family-default: ui-monospace, "MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", monospace;
 }
 
 @layer components {
