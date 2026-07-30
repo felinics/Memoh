@@ -26,11 +26,13 @@ export function shouldShowLoadMoreSentinel(opts: {
 export function shouldPrefetchToFillViewport(opts: {
   hasMore: boolean
   loading: boolean
-  itemCount: number
   contentHeight: number
   viewportHeight: number
 }): boolean {
-  if (!opts.hasMore || opts.loading || opts.itemCount === 0) return false
+  // Do not gate on visible row count: the API returns mixed session types and
+  // Recents filters client-side (Schedule / Agent). A page can yield zero rows
+  // for the active filter while nextCursor is still set — keep paging.
+  if (!opts.hasMore || opts.loading) return false
   if (opts.viewportHeight <= 0) return false
   return opts.contentHeight <= opts.viewportHeight
 }

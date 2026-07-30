@@ -45,7 +45,6 @@ describe('shouldPrefetchToFillViewport', () => {
     expect(shouldPrefetchToFillViewport({
       hasMore: true,
       loading: false,
-      itemCount: 5,
       contentHeight: 180,
       viewportHeight: 400,
     })).toBe(true)
@@ -55,7 +54,6 @@ describe('shouldPrefetchToFillViewport', () => {
     expect(shouldPrefetchToFillViewport({
       hasMore: true,
       loading: false,
-      itemCount: 40,
       contentHeight: 1200,
       viewportHeight: 400,
     })).toBe(false)
@@ -65,23 +63,25 @@ describe('shouldPrefetchToFillViewport', () => {
     expect(shouldPrefetchToFillViewport({
       hasMore: true,
       loading: false,
-      itemCount: 5,
       contentHeight: 180,
       viewportHeight: 0,
     })).toBe(false)
     expect(shouldPrefetchToFillViewport({
       hasMore: true,
       loading: true,
-      itemCount: 5,
       contentHeight: 180,
       viewportHeight: 400,
     })).toBe(false)
+  })
+
+  it('keeps paging when the active filter yields zero visible rows', () => {
+    // Mixed-type API page + Schedule/Agent client filter: spacer stays 0 while
+    // hasMore is still true. Stopping here would strand an empty Recents list.
     expect(shouldPrefetchToFillViewport({
       hasMore: true,
       loading: false,
-      itemCount: 0,
       contentHeight: 0,
       viewportHeight: 400,
-    })).toBe(false)
+    })).toBe(true)
   })
 })

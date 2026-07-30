@@ -289,13 +289,11 @@ watch(
     loadingMoreSessions,
     totalSize,
     viewportHeight,
-    () => visibleSessions.value.length,
   ],
   () => {
     if (!shouldPrefetchToFillViewport({
       hasMore: hasMoreSessions.value,
       loading: loadingChats.value || loadingMoreSessions.value,
-      itemCount: visibleSessions.value.length,
       contentHeight: totalSize.value,
       viewportHeight: viewportHeight.value,
     })) return
