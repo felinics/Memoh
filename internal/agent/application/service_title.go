@@ -24,7 +24,44 @@ import (
 const (
 	titlePromptMaxInputChars = 500
 	titleGenerateTimeout     = 60 * time.Second
+	// titleGenerateMaxTokens pins the completion budget. Without an explicit
+	// cap the budget falls back to provider/server defaults; reasoning models
+	// burn that budget on hidden thinking before answering and can return an
+	// empty title on long inputs (observed with deepseek-v4 thinking enabled,
+	// which the endpoint turns on server-side). 4096 leaves ample headroom —
+	// the title itself is ~20 tokens.
+	titleGenerateMaxTokens = 4096
 )
+
+// titleGenerationPrompt produces short sidebar titles: a noun phrase naming
+// the topic, not a summary of the request. Tuned in an offline A/B
+// experiment (2026-07, small reasoning models, real first user messages):
+// bare rules left models parroting the user's request verbatim with a
+// trailing question mark, while worked examples carry the target style.
+// Keep the "rules + examples" shape when editing, and keep example inputs
+// disjoint from real traffic so the model generalizes instead of copying.
+const titleGenerationPrompt = `Generate a short title for this conversation, in the same language as the user's message.
+
+Rules:
+- A noun phrase naming the TOPIC, not a summary of the request.
+- Chinese titles: 6-10 characters preferred; never shorter than 4 or longer than 12. English titles: 2-6 words.
+- Keep concrete proper nouns (products, technologies, places).
+- Prefer concrete specifics over abstract categories: name the actual thing (the damage, the tool, the symptom), not the class of problem.
+- Vivid wording from the user's own message may be kept as-is; don't sand casual rants down into officialese.
+- For two-entity topics, use the "X与Y" form.
+- Allowed suffixes when one is needed: 分析/解析/介绍/建议/疑问/困惑/误解/修复/控制/设计/差异 — pick by topic nature, or use no suffix.
+- No ending punctuation, no quotes.
+- If the message is meaningless (a number, a sticker, a single character), return exactly: 新对话
+- Return ONLY the title text.
+
+Examples of the rules (do not copy their content):
+- "烤箱预热要多久" → "烤箱预热时长" (concrete noun, no suffix)
+- "为什么 Kubernetes 的滚动更新这么慢" → "K8s滚动更新缓慢分析" (technical, suffix 分析)
+- "我到底是感冒还是过敏" → "感冒还是过敏性鼻炎" (keep the user's own contrast)
+- "无糖可乐里的糖醇是不是更健康" → "无糖与糖醇区别" (two-entity X与Y form)
+- "楼下的装修电钻吵了一整周" → "装修电钻噪声困扰" (casual complaint, vivid word kept)
+
+User: `
 
 // SessionService is the interface the application service uses for session metadata updates.
 type SessionService interface {
@@ -169,9 +206,7 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 		return ""
 	}
 
-	prompt := "Generate a concise title (max 30 characters) for a conversation that starts with the following user message. " +
-		"Return ONLY the title text, nothing else.\n\n" +
-		"User: " + userSnippet
+	prompt := titleGenerationPrompt + userSnippet
 
 	authService := providers.NewService(nil, s.queries, "")
 	authCtx := oauthctx.WithUserID(ctx, userID)
@@ -204,6 +239,7 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 		sdk.WithModel(sdkModel),
 		sdk.WithSystem(system),
 		sdk.WithMessages(messages),
+		sdk.WithMaxTokens(titleGenerateMaxTokens),
 	)
 	if err != nil {
 		s.logger.Warn("title gen: LLM call failed", slog.Any("error", err))
