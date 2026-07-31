@@ -206,7 +206,7 @@
 </template>
 
 <script setup lang="ts">
-import { ActionCard, Button, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input } from '@felinic/ui'
+import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@felinic/ui'
@@ -215,15 +215,11 @@ import { useMutation } from '@pinia/colada'
 import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus, postBotsByIdChannelByPlatformWebhookEndpoint } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
 import ChannelField from './channel-field.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { useClipboard } from '@/composables/useClipboard'
 import { useLineWebhookPublicBase } from '../composables/use-line-webhook-public-base'
 
 export interface BotChannelItem {

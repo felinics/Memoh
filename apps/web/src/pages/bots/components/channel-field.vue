@@ -107,7 +107,7 @@ import {
 } from '@felinic/ui'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import type { ChannelFieldSchema } from '@memohai/sdk'
-import SettingsRow from '@/components/settings/row.vue'
+import { SettingsRow } from '@felinic/ui'
 
 const props = defineProps<{
   field: ChannelFieldSchema

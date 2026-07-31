@@ -293,8 +293,8 @@ import {
   putBotsByBotIdScheduleById,
 } from '@memohai/sdk'
 import type { ScheduleCreateRequest, ScheduleSchedule, ScheduleUpdateRequest } from '@memohai/sdk'
+import { FieldStack } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import FieldStack from '@/components/settings/field-stack.vue'
 import {
   describeCron,
   defaultScheduleFormState,

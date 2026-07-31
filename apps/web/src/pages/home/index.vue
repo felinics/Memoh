@@ -18,11 +18,11 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getBotsById } from '@memohai/sdk'
+import { PanePlaceholder } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
 import ChatWorkspace from './components/chat-workspace.vue'
-import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 
 const route = useRoute()
 const router = useRouter()

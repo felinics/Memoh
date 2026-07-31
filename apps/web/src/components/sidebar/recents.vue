@@ -167,7 +167,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntersectionObserver } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { ConfirmDeleteDialog, toast } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { isSessionVisibleInSidebarMode, sortByRecency, type SidebarSessionMode } from '@/store/chat-list.utils'
@@ -195,7 +195,6 @@ import {
   DialogFooter,
 } from '@felinic/ui'
 import SessionItem from './session-item.vue'
-import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
 // The narrow native scrollbar for sidebar scroll panes — shared with
 // panel-schedule.vue, so it must not live in this file's scoped style.
 import '@/styles/sidebar-scroll.css'

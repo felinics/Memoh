@@ -189,8 +189,6 @@ import { postProviders, postProvidersByIdImportModels, postProvidersFromTemplate
 import type { ProvidersCreateRequest, ProvidertemplatesGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
-import FormDialogShell from '@/components/form-dialog-shell/index.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import {
@@ -198,7 +196,7 @@ import {
   isManagedOAuthClientType,
   MANUAL_LLM_CLIENT_TYPE_LIST,
 } from '@/constants/client-types'
-import { toast } from '@felinic/ui'
+import { FieldStack, FormDialogShell, toast } from '@felinic/ui'
 import { computed, ref, watch } from 'vue'
 import { providerPresets } from '@/constants/provider-presets'
 import type { ProviderPreset } from '@/constants/provider-presets'

@@ -348,7 +348,7 @@
 import { ArrowDownToLine, Eye, EyeOff, Plus, SlidersHorizontal, SquarePen, Trash2 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { ConfirmPopover, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Badge,
@@ -357,14 +357,7 @@ import {
   Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle,
   Label, Textarea,
 } from '@felinic/ui'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
-import FormStack from '@/components/settings/form-stack.vue'
-import PageShell from '@/components/page-shell/index.vue'
 import {
   getBotsById,
   getBotsByBotIdContainerSkills,

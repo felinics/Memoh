@@ -104,7 +104,7 @@ import {
 import { Search, Plus, Upload } from 'lucide-vue-next'
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import PersonaTile from '@/components/persona-tile/index.vue'
+import { PersonaTile } from '@felinic/ui'
 import BotCard from './components/bot-card.vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getBotsQuery, getBotsQueryKey } from '@memohai/sdk/colada'

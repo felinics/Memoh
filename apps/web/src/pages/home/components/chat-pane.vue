@@ -725,7 +725,7 @@ import {
   Monitor,
   Server,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
+import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
@@ -736,8 +736,6 @@ import type { AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, 
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
-import PanePlaceholder from '@/components/pane-placeholder/index.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { useChatScroll } from '../composables/useChatScroll'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'

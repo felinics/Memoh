@@ -137,11 +137,7 @@ import {
   Textarea,
   toast,
 } from '@felinic/ui'
-import PageShell from '@/components/page-shell/index.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
+import { FieldStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   cloneToolApprovalConfig,

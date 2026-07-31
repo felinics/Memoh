@@ -82,9 +82,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, Input } from '@felinic/ui'
+import { Button, Input, PanePlaceholder } from '@felinic/ui'
 import { ArrowRight, Globe, RefreshCw } from 'lucide-vue-next'
-import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import { sdkApiUrl } from '@/lib/api-client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { defaultBrowserAddress, parseBrowserAddress } from '@/utils/browser-address'

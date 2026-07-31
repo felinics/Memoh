@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, Kbd, KbdGroup } from '@felinic/ui'
+import { Button, Kbd, KbdGroup, SettingsRow } from '@felinic/ui'
 import { RotateCcw } from 'lucide-vue-next'
 import { comboFromBinding, displayKeyCombo } from '@/lib/keyboard-combo'
 import { detectPlatform, type KeyboardBinding } from '@/lib/keyboard-bindings'
 import { useKeyboardShortcutsStore } from '@/store/keyboard-shortcuts'
-import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   binding: KeyboardBinding

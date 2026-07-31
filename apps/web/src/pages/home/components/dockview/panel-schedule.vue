@@ -51,7 +51,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { ConfirmDeleteDialog, InlineLoadingRow, toast } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   deleteBotsByBotIdScheduleById,
@@ -62,8 +62,6 @@ import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import ScheduleEditor from '@/pages/bots/components/schedule-editor.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
-import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
 
 const props = defineProps<{
   params: {

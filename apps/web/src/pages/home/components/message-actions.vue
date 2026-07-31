@@ -145,6 +145,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PencilLine, RotateCcw } from 'lucide-vue-next'
+import { useClipboard } from '@felinic/ui'
 import CopyConnectedIcon from './copy-connected-icon.vue'
 import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import DotsIcon from './dots-icon.vue'
@@ -161,7 +162,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuItem,
 } from '@felinic/ui'
-import { useClipboard } from '@/composables/useClipboard'
 
 const props = defineProps<{
   copyText: string

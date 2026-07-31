@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { ConfirmPopover, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { Box } from 'lucide-vue-next'
 import {
   ActionCard, Button, Badge, Dialog, DialogBody, DialogDescription, DialogHeader, DialogPanel, DialogTitle,
@@ -10,9 +10,6 @@ import {
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
 } from '@felinic/ui'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import PageShell from '@/components/page-shell/index.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import ModelSelect from './model-select.vue'
 import { filterCompactionModels } from './compaction-models'
 import {
@@ -24,8 +21,6 @@ import type { SettingsSettings, SettingsUpsertRequest, CompactionLog } from '@me
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{

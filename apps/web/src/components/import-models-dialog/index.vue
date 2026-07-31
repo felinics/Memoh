@@ -33,11 +33,10 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation } from '@pinia/colada'
-import { toast } from '@felinic/ui'
+import { FormDialogShell, toast } from '@felinic/ui'
 import { FileInput, RefreshCw } from 'lucide-vue-next'
 import { Button } from '@felinic/ui'
 import type { ButtonVariants } from '@felinic/ui'
-import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 

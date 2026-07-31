@@ -350,14 +350,12 @@ import {
 } from '@felinic/ui'
 import { getBotsQuery } from '@memohai/sdk/colada'
 import { getBotsByBotIdTokenUsage, getBotsByBotIdTokenUsageRecords } from '@memohai/sdk'
+import { MetricReadout, PageShell, SettingsSection } from '@felinic/ui'
 import BotSelect from '@/components/bot-select/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import MetricReadout from '@/components/settings/metric-readout.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { formatDateTimeShort } from '@/utils/date-time'
-import PageShell from '@/components/page-shell/index.vue'
 
 use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 

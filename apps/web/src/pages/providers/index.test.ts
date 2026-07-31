@@ -54,7 +54,38 @@ vi.mock('lucide-vue-next', () => ({
 
 vi.mock('@felinic/ui', () => {
   const Passthrough = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.())
+  const BackendCard = {
+    props: ['name'],
+    emits: ['click'],
+    setup(props: { name: string }, { emit }: { emit: (event: 'click') => void }) {
+      return () => h('button', {
+        'data-provider': props.name,
+        'onClick': () => emit('click'),
+      }, props.name)
+    },
+  }
+  const DetailPane = {
+    props: ['backLabel', 'width', 'loading'],
+    emits: ['back'],
+    setup(
+      props: { loading?: boolean },
+      { slots, emit }: { slots: Slots, emit: (event: 'back') => void },
+    ) {
+      return () => h('div', { 'data-testid': 'detail-pane' }, [
+        h('button', { 'data-testid': 'back', onClick: () => emit('back') }, 'back'),
+        props.loading
+          ? h('div', { 'data-testid': 'detail-pane-skeleton' })
+          : slots.default?.(),
+      ])
+    },
+  }
+  const SwapTransition = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.())
+  const PageShell = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', [slots.actions?.(), slots.default?.()])
   return {
+    BackendCard,
+    DetailPane,
+    SwapTransition,
+    PageShell,
     Button: Passthrough,
     Empty: Passthrough,
     EmptyContent: Passthrough,
@@ -82,41 +113,6 @@ vi.mock('@/components/add-provider/index.vue', () => ({
   },
 }))
 vi.mock('@/components/provider-icon/index.vue', () => ({ default: () => h('span') }))
-vi.mock('@/components/settings/backend-card.vue', () => ({
-  default: {
-    props: ['name'],
-    emits: ['click'],
-    setup(props: { name: string }, { emit }: { emit: (event: 'click') => void }) {
-      return () => h('button', {
-        'data-provider': props.name,
-        'onClick': () => emit('click'),
-      }, props.name)
-    },
-  },
-}))
-vi.mock('@/components/settings/detail-pane.vue', () => ({
-  default: {
-    props: ['backLabel', 'width', 'loading'],
-    emits: ['back'],
-    setup(
-      props: { loading?: boolean },
-      { slots, emit }: { slots: Slots, emit: (event: 'back') => void },
-    ) {
-      return () => h('div', { 'data-testid': 'detail-pane' }, [
-        h('button', { 'data-testid': 'back', onClick: () => emit('back') }, 'back'),
-        props.loading
-          ? h('div', { 'data-testid': 'detail-pane-skeleton' })
-          : slots.default?.(),
-      ])
-    },
-  },
-}))
-vi.mock('@/components/settings/swap-transition.vue', () => ({
-  default: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.()),
-}))
-vi.mock('@/components/page-shell/index.vue', () => ({
-  default: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', [slots.actions?.(), slots.default?.()]),
-}))
 vi.mock('./model-setting.vue', () => ({
   default: {
     props: ['provider'],

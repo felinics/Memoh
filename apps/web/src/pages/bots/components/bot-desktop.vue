@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Switch, toast } from '@felinic/ui'
+import { PageShell, SettingsRow, SettingsSection, Switch, toast } from '@felinic/ui'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import {
   getBotsByBotIdContainerDisplay,
@@ -62,9 +62,6 @@ import {
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import DisplayPane from '@/pages/home/components/display-pane.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import PageShell from '@/components/page-shell/index.vue'
 
 const props = defineProps<{
   botId: string

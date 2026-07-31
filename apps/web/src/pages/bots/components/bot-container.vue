@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { toast } from '@felinic/ui'
+import { CalloutBanner, ConfirmPopover, InlineLoadingRow, MetricReadout, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useQuery } from '@pinia/colada'
@@ -44,14 +44,7 @@ import {
   DialogFooter,
   DialogClose,
 } from '@felinic/ui'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
-import PageShell from '@/components/page-shell/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import MetricReadout from '@/components/settings/metric-readout.vue'
-import CalloutBanner from '@/components/callout-banner/index.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'

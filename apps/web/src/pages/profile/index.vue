@@ -127,17 +127,13 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useQuery } from '@pinia/colada'
 import { useRouter } from 'vue-router'
-import { toast } from '@felinic/ui'
+import { ConfirmPopover, PageShell, SettingsRow, SettingsSection, toast, useClipboard } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { Button, Skeleton } from '@felinic/ui'
 import { Check, Copy } from 'lucide-vue-next'
 
-import PageShell from '@/components/page-shell/index.vue'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import SettingsSection from '@/components/settings/section.vue'
 import ProfileIdentity from './components/profile-identity.vue'
 import PasswordSection from './components/password-section.vue'
 import ConnectedAccountsSection from './components/connected-accounts-section.vue'
@@ -147,7 +143,6 @@ import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePassw
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
-import { useClipboard } from '@/composables/useClipboard'
 
 type UserAccount = AccountsAccount
 

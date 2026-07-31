@@ -34,11 +34,10 @@
 </template>
 
 <script setup lang="ts">
+import { SettingsRow, SettingsSection } from '@felinic/ui'
 import SearchProviderSelect from './search-provider-select.vue'
 import FetchProviderSelect from './fetch-provider-select.vue'
 import MemoryProviderSelect from './memory-provider-select.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
 import type {
   SettingsSettings,
   AdaptersProviderGetResponse,

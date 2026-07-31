@@ -111,14 +111,9 @@ import type {
   AdaptersProviderGetResponse,
   AdaptersProviderMeta,
 } from '@memohai/sdk'
-import { toast } from '@felinic/ui'
+import { ConfirmPopover, FieldStack, FormStack, SettingsSection, SettingsShell, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
-import SettingsShell from '@/components/settings-shell/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
-import FormStack from '@/components/settings/form-stack.vue'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()

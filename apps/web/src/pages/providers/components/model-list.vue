@@ -142,9 +142,9 @@ import {
   PaginationPrevious,
 } from '@felinic/ui'
 import { Search, List } from 'lucide-vue-next'
+import { SettingsSection } from '@felinic/ui'
 import CreateModel from '@/components/create-model/index.vue'
 import ImportModelsDialog from '@/components/import-models-dialog/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
 import ModelItem from './model-item.vue'
 import type { ModelsGetResponse } from '@memohai/sdk'
 

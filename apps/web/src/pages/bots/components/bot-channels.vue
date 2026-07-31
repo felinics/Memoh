@@ -146,11 +146,9 @@ import {
 import { useQuery } from '@pinia/colada'
 import { getChannels, getBotsByIdChannelByPlatform } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'
+import { BackendCard, PageShell, SwapTransition } from '@felinic/ui'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
-import BackendCard from '@/components/settings/backend-card.vue'
-import SwapTransition from '@/components/settings/swap-transition.vue'
-import PageShell from '@/components/page-shell/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 

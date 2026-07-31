@@ -106,7 +106,7 @@ import { ref, watch, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { Plus } from 'lucide-vue-next'
-import { toast } from '@felinic/ui'
+import { ConfirmDeleteDialog, toast } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button, Spinner,
@@ -118,7 +118,6 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleListItem from '@/pages/bots/components/schedule-list-item.vue'
-import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
 import SidebarPanelHeader from './panel-header.vue'
 // The narrow native scrollbar this template's `sidebar-scroll` class relies on.
 // Without this import the class was silently inert (it used to be defined only

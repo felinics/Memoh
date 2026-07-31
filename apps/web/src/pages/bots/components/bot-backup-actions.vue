@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { InlineLoadingRow, toast } from '@felinic/ui'
 import {
   Button,
   Dialog,
@@ -22,7 +22,6 @@ import {
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import BotImportPanel from './bot-import-panel.vue'
 import BackupSectionCards from './backup-section-cards.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 
 const props = defineProps<{
   botId: string

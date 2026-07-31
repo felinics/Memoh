@@ -105,13 +105,11 @@
 
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@felinic/ui'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SettingsRow, SettingsSection, Switch } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import ModelSelect from './model-select.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
 import type { AcpprofilePublicProfile, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 
 type InteractionSettingsForm = SettingsSettings & {

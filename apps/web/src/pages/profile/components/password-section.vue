@@ -89,8 +89,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@felinic/ui'
-import FieldStack from '@/components/settings/field-stack.vue'
-import FormStack from '@/components/settings/form-stack.vue'
+import { FieldStack, FormStack } from '@felinic/ui'
 import PasswordInput from '@/components/password-input/index.vue'
 
 const props = defineProps<{

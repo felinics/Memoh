@@ -23,7 +23,7 @@ describe('ModelListRow', () => {
     // The shim import pulls the whole @felinic/ui barrel through the transform
     // pipeline — under full-suite load that first touch can exceed the default
     // 5s test timeout, so this test gets a wider budget.
-    const ModelListRow = (await import('./model-list-row.vue')).default
+    const { ModelListRow } = await import('@felinic/ui')
     root = document.createElement('div')
     document.body.append(root)
     app = createApp(ModelListRow, {

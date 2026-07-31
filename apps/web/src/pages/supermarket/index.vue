@@ -117,7 +117,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Search, Github } from 'lucide-vue-next'
-import { Input, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@felinic/ui'
+import { Button, InlineLoadingRow, Input, PageShell, Tabs, TabsContent, TabsList, TabsTrigger } from '@felinic/ui'
 import {
   getSupermarketPlugins,
   getSupermarketSkills,
@@ -126,8 +126,6 @@ import {
 } from '@memohai/sdk'
 import { toast } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import PageShell from '@/components/page-shell/index.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import PluginCard from './components/plugin-card.vue'
 import SkillCard from './components/skill-card.vue'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'

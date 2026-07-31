@@ -158,7 +158,7 @@ import {
   Copy,
   HelpCircle,
 } from 'lucide-vue-next'
-import { useClipboard } from '@/composables/useClipboard'
+import { useClipboard } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 type BotCheck = BotsBotCheck

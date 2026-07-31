@@ -20,6 +20,7 @@ const EmptyComponent = (name: string) => defineComponent({
 
 vi.mock('@felinic/ui', () => ({
   Badge: SlotComponent('Badge'),
+  ConfirmPopover: SlotComponent('ConfirmPopover'),
   Button: SlotComponent('Button'),
   Spinner: EmptyComponent('Spinner'),
   Switch: EmptyComponent('Switch'),
@@ -31,10 +32,6 @@ vi.mock('lucide-vue-next', () => ({
   Settings: EmptyComponent('Settings'),
   Trash2: EmptyComponent('Trash2'),
   Zap: EmptyComponent('Zap'),
-}))
-
-vi.mock('@/components/confirm-popover/index.vue', () => ({
-  default: SlotComponent('ConfirmPopover'),
 }))
 
 vi.mock('@/components/model-description-tooltip/index.vue', () => ({

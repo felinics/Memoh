@@ -617,7 +617,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { ConfirmPopover, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Plus,
@@ -662,16 +662,11 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from '@felinic/ui'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
-import PageShell from '@/components/page-shell/index.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import BotUserAccess from './bot-user-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
 import type { AclObservedConversationCandidate, AclRule, AclSourceScope, ChannelaccessManager, HandlersChannelMeta } from '@memohai/sdk'
 import {
   getChannels,

@@ -17,10 +17,10 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { PanePlaceholder } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
-import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import FilesPane from './files-pane.vue'
 
 const { t } = useI18n()

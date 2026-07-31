@@ -42,6 +42,24 @@ vi.mock('@felinic/ui', async () => {
       return () => h('div', { 'data-option-value': props.value }, slots.default?.())
     },
   })
+  const SettingsSection = defineComponent({
+    setup(_props, { slots }) {
+      return () => h('section', slots.default?.())
+    },
+  })
+  const SettingsRow = defineComponent({
+    props: {
+      label: { type: String, default: '' },
+      description: { type: String, default: '' },
+    },
+    setup(props, { slots }) {
+      return () => h('div', { 'data-settings-row': props.label }, [
+        h('span', props.label),
+        h('p', props.description),
+        slots.default?.(),
+      ])
+    },
+  })
   return {
     Select,
     SelectContent: Passthrough,
@@ -49,36 +67,8 @@ vi.mock('@felinic/ui', async () => {
     SelectTrigger: Passthrough,
     SelectValue: Passthrough,
     Switch: Passthrough,
-  }
-})
-
-vi.mock('@/components/settings/section.vue', async () => {
-  const { defineComponent, h } = await import('vue')
-  return {
-    default: defineComponent({
-      setup(_props, { slots }) {
-        return () => h('section', slots.default?.())
-      },
-    }),
-  }
-})
-
-vi.mock('@/components/settings/row.vue', async () => {
-  const { defineComponent, h } = await import('vue')
-  return {
-    default: defineComponent({
-      props: {
-        label: { type: String, default: '' },
-        description: { type: String, default: '' },
-      },
-      setup(props, { slots }) {
-        return () => h('div', { 'data-settings-row': props.label }, [
-          h('span', props.label),
-          h('p', props.description),
-          slots.default?.(),
-        ])
-      },
-    }),
+    SettingsSection,
+    SettingsRow,
   }
 })
 

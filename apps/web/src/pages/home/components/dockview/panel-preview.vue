@@ -37,7 +37,7 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch 
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { FileText } from 'lucide-vue-next'
-import { toast } from '@felinic/ui'
+import { PanePlaceholder, toast } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { getBotsByBotIdContainerFsRead } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -46,7 +46,6 @@ import { useChatStore } from '@/store/chat-list'
 import { usePanelVisible } from './use-panel-visible'
 import PanelBreadcrumb from './panel-breadcrumb.vue'
 import DockPanelFrame from './panel-frame.vue'
-import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 
 const MarkdownPreview = defineAsyncComponent(() => import('@/components/markdown-preview/index.vue'))
 const HtmlPreview = defineAsyncComponent(() => import('@/components/html-preview/index.vue'))

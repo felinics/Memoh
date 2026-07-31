@@ -55,7 +55,7 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { BotsBot } from '@memohai/sdk'
-import PersonaTile from '@/components/persona-tile/index.vue'
+import { PersonaTile } from '@felinic/ui'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 

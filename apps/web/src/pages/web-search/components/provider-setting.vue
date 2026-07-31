@@ -136,12 +136,7 @@ import {
   FormField,
   Switch,
 } from '@felinic/ui'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
-import SettingsShell from '@/components/settings-shell/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
 import BraveSettings from './brave-settings.vue'
 import BingSettings from './bing-settings.vue'
 import GoogleSettings from './google-settings.vue'
@@ -169,7 +164,7 @@ import type {
   SearchprovidersUpdateRequest,
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { ConfirmPopover, FieldStack, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
 import { normalizeProviderConfigFields } from '@/utils/provider-template'
 
 const { t } = useI18n()

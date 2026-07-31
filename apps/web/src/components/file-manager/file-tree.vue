@@ -2,7 +2,7 @@
 import { inject, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
+import { InlineLoadingRow } from '@felinic/ui'
 import { sortDirsFirst } from './utils'
 import { FileTreeKey } from './file-tree-context'
 import FileTreeNode from './file-tree-node.vue'

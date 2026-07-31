@@ -132,7 +132,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Badge, Button, Empty, EmptyDescription, EmptyTitle, Skeleton, Switch, toast } from '@felinic/ui'
+import { Badge, Button, Empty, EmptyDescription, EmptyTitle, PageShell, Skeleton, StatusDot, SwapTransition, Switch, toast } from '@felinic/ui'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
@@ -140,9 +140,6 @@ import { getAcpProfiles, getBotsById, putBotsById } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotsUpdateBotRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import SettingsAcpDetail from './settings-acp-detail.vue'
-import PageShell from '@/components/page-shell/index.vue'
-import SwapTransition from '@/components/settings/swap-transition.vue'
-import StatusDot from '@/components/status-dot/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {

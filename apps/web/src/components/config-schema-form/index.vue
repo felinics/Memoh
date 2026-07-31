@@ -52,7 +52,7 @@ import {
 import { computed, defineComponent, h, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-vue-next'
-import FieldStack from '@/components/settings/field-stack.vue'
+import { FieldStack } from '@felinic/ui'
 import type { ConfigSchema, ConfigSchemaField } from './types'
 import { cloneConfig, getPathValue, setPathValue } from './utils'
 

@@ -111,10 +111,9 @@ import z from 'zod'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import { useI18n } from 'vue-i18n'
+import { FieldStack, FormDialogShell } from '@felinic/ui'
 import { useKeyValueTags } from '@/composables/useKeyValueTags'
 import { useCreatePlatform } from '@/composables/api/usePlatform'
-import FormDialogShell from '@/components/form-dialog-shell/index.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
 const configTags = useKeyValueTags()

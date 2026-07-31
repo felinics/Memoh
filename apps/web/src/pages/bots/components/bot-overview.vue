@@ -278,7 +278,7 @@ import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
-import { Badge, Button, Skeleton } from '@felinic/ui'
+import { Badge, Button, CalloutBanner, MetricReadout, PageShell, SettingsRow, SettingsSection, Skeleton } from '@felinic/ui'
 import {
   getBotsById,
   getBotsByBotIdSettings,
@@ -293,11 +293,6 @@ import {
   type HandlersDailyTokenUsage,
 } from '@memohai/sdk'
 import BotChecksPanel from './bot-checks-panel.vue'
-import PageShell from '@/components/page-shell/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import MetricReadout from '@/components/settings/metric-readout.vue'
-import CalloutBanner from '@/components/callout-banner/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'

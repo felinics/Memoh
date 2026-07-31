@@ -14,7 +14,7 @@ import {
   type ChipButton,
 } from './file-conflict'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { DiffTitleBar, PanePlaceholder, toast } from '@felinic/ui'
 import { File, FileX, Download, RefreshCw, GitCompare, X } from 'lucide-vue-next'
 import { Button } from '@felinic/ui'
 import {
@@ -27,8 +27,6 @@ import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import MonacoDiff from '@/components/monaco-editor/diff.vue'
-import DiffTitleBar from '@/components/diff-title-bar/index.vue'
-import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { formatRelativeTime } from '@/utils/date-time'
 import { isTextFile, isImageFile } from './utils'

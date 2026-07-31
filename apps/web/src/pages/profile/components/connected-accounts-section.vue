@@ -161,8 +161,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { Plus, Trash2, Copy, Check, RefreshCw, ArrowRight } from 'lucide-vue-next'
-import { toast } from '@felinic/ui'
-import { useClipboard } from '@/composables/useClipboard'
+import { ConfirmPopover, SettingsRow, SettingsSection, toast, useClipboard } from '@felinic/ui'
 import {
   Button,
   Spinner,
@@ -171,9 +170,6 @@ import {
   AvatarFallback,
   Input,
 } from '@felinic/ui'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'

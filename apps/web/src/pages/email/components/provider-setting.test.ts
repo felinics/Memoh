@@ -85,8 +85,14 @@ vi.mock('@felinic/ui', async () => {
   const FormField = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.({
     componentField: {},
   }))
+  const Section = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('section', [slots.default?.(), slots.footer?.()])
   return {
     Button,
+    ConfirmPopover: Passthrough,
+    SettingsShell: Passthrough,
+    SettingsSection: Section,
+    SettingsRow: Passthrough,
+    FieldStack: Passthrough,
     FormControl: Passthrough,
     FormField,
     Input: Passthrough,
@@ -103,23 +109,8 @@ vi.mock('@felinic/ui', async () => {
   }
 })
 
-vi.mock('@/components/confirm-popover/index.vue', () => ({
-  default: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.()),
-}))
 vi.mock('@/components/loading-button/index.vue', () => ({
   default: (_props: Record<string, unknown>, { attrs, slots }: { attrs: Record<string, unknown>, slots: Slots }) => h('button', attrs, slots.default?.()),
-}))
-vi.mock('@/components/settings-shell/index.vue', () => ({
-  default: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.()),
-}))
-vi.mock('@/components/settings/section.vue', () => ({
-  default: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('section', [slots.default?.(), slots.footer?.()]),
-}))
-vi.mock('@/components/settings/row.vue', () => ({
-  default: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.()),
-}))
-vi.mock('@/components/settings/field-stack.vue', () => ({
-  default: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.()),
 }))
 vi.mock('@/components/email-provider-icon/index.vue', () => ({ default: () => h('span') }))
 

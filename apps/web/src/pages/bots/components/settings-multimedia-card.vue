@@ -61,9 +61,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { SettingsRow, SettingsSection } from '@felinic/ui'
 import ModelSelect from './model-select.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
 import type {
   SettingsSettings,
   AudioSpeechModelResponse,

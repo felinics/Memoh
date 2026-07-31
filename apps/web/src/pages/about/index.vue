@@ -250,14 +250,13 @@ import {
 import MarkdownRender from 'markstream-vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import SettingsRow from '@/components/settings/row.vue'
-import SettingsSection from '@/components/settings/section.vue'
 import {
   DesktopShellKey,
   DesktopUpdatesKey,
   type DesktopUpdateInfo,
   type DesktopUpdateState,
 } from '@/lib/desktop-shell'
+import { SettingsRow, SettingsSection } from '@felinic/ui'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useSettingsStore } from '@/store/settings'
 import { useUpdateStore } from '@/store/update'

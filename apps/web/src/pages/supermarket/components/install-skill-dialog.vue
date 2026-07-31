@@ -57,7 +57,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { FieldStack, toast } from '@felinic/ui'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
   Button,
@@ -68,7 +68,6 @@ import {
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import BotSelect from '@/components/bot-select/index.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
 
 const props = defineProps<{
   open: boolean

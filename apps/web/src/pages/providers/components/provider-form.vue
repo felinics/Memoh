@@ -333,12 +333,8 @@ import {
   Spinner,
 } from '@felinic/ui'
 import { AlertCircle, KeyRound, RefreshCw } from 'lucide-vue-next'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
-import DeviceCodePanel from '@/components/device-code-panel/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import SettingsSection from '@/components/settings/section.vue'
 import {
   isManagedOAuthClientType,
   MANUAL_LLM_CLIENT_TYPE_LIST,
@@ -361,7 +357,7 @@ import type {
   ProvidersTestResponse,
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { ConfirmPopover, DeviceCodePanel, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 
 const { t } = useI18n()

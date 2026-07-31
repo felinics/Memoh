@@ -256,17 +256,11 @@ import {
   toast,
 } from '@felinic/ui'
 import { MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
-import PageShell from '@/components/page-shell/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
-import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
-import FormStack from '@/components/settings/form-stack.vue'
 import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
 } from '@/lib/desktop-shell'
+import { ConfirmDeleteDialog, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{

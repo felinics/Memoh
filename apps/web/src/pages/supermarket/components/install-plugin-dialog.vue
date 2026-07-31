@@ -139,10 +139,10 @@ import {
   type PluginsSkillResource,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
+import { FieldStack } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { emitBotPluginsUpdated } from '@/utils/bot-plugin-events'
 import BotSelect from '@/components/bot-select/index.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
 
 const props = defineProps<{
   open: boolean

@@ -36,14 +36,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { SettingsRow, SettingsSection } from '@felinic/ui'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { emptyTimezoneValue } from '@/utils/timezones'
 import { ISO639_LANGUAGES } from '@/utils/languages'
 import type { SettingsSettings } from '@memohai/sdk'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
 
 const { t } = useI18n()
 

@@ -279,7 +279,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { FieldStack, FormStack, InlineLoadingRow, SettingsSection, toast, useClipboard } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button,
@@ -298,7 +298,6 @@ import {
   type AcpprofilePublicProfile,
 } from '@memohai/sdk'
 import { useACPOAuth } from '@/composables/useACPOAuth'
-import { useClipboard } from '@/composables/useClipboard'
 import {
   HERMES_CUSTOM_MODEL_VALUE,
   HERMES_PROVIDER_PRESETS,
@@ -320,10 +319,6 @@ import {
   type ACPForm,
 } from '@/utils/acp'
 import { oauthStatusTextKey } from '@/utils/oauth/status-text'
-import SettingsSection from '@/components/settings/section.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
-import FormStack from '@/components/settings/form-stack.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 
 const props = defineProps<{
   botId: string

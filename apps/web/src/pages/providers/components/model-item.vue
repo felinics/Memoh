@@ -138,7 +138,7 @@ import {
   toast,
 } from '@felinic/ui'
 import { Zap, Settings, Trash2, Binary } from 'lucide-vue-next'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import { ConfirmPopover } from '@felinic/ui'
 import ModelDescriptionTooltip from '@/components/model-description-tooltip/index.vue'
 import { postModelsByIdTest, putModelsById } from '@memohai/sdk'
 import type { ModelsGetResponse, ModelsTestResponse, ModelsUpdateRequest } from '@memohai/sdk'

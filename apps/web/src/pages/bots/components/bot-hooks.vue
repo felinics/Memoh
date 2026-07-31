@@ -219,9 +219,7 @@ import {
   postBotsByBotIdHooksTest,
 } from '@memohai/sdk'
 import type { HandlersHookEventInfo } from '@memohai/sdk'
-import PageShell from '@/components/page-shell/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
+import { PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{

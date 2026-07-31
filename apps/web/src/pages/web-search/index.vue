@@ -9,15 +9,11 @@ import type {
   SearchprovidersProviderMeta,
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
+import { BackendCard, DetailPane, PageShell, SectionGroup, SwapTransition } from '@felinic/ui'
 import FetchProviderSetting from './components/fetch-provider-setting.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
-import BackendCard from '@/components/settings/backend-card.vue'
-import DetailPane from '@/components/settings/detail-pane.vue'
-import PageShell from '@/components/page-shell/index.vue'
-import SectionGroup from '@/components/section-group/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
-import SwapTransition from '@/components/settings/swap-transition.vue'
 import { providerConfigDefaults } from '@/utils/provider-template'
 
 const { t } = useI18n()

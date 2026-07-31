@@ -436,12 +436,9 @@ import type {
   AdaptersMemoryStatusResponse,
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import { ConfirmPopover, MetricReadout, PageShell, SettingsSection } from '@felinic/ui'
 import { formatRelativeTime } from '@/utils/date-time'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import PageShell from '@/components/page-shell/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import MetricReadout from '@/components/settings/metric-readout.vue'
 import MemoryGraph from './memory-graph.vue'
 import MemoryCard from './memory-card.vue'
 import MemoryAdvancedActions from './memory-advanced-actions.vue'

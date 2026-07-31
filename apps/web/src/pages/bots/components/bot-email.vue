@@ -210,10 +210,9 @@ import {
   TableHeader,
   TableRow,
 } from '@felinic/ui'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { Plus } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
-import { toast } from '@felinic/ui'
+import { ConfirmPopover, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
@@ -226,10 +225,6 @@ import {
 } from '@memohai/sdk'
 import type { EmailProviderResponse, EmailBindingResponse, EmailOutboxItemResponse } from '@memohai/sdk'
 import { formatDateTime } from '@/utils/date-time'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import PageShell from '@/components/page-shell/index.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 
 const props = defineProps<{ botId: string }>()

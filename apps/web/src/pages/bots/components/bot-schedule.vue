@@ -139,7 +139,7 @@ import {
 } from 'lucide-vue-next'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@felinic/ui'
+import { InlineLoadingRow, PageShell, toast } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button,
@@ -153,12 +153,10 @@ import {
   putBotsByBotIdScheduleById,
 } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
-import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleEditor from './schedule-editor.vue'
 import ScheduleListItem from './schedule-list-item.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 
 const props = defineProps<{
   botId: string

@@ -35,10 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button } from '@felinic/ui'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
+import { Button, ConfirmPopover, SettingsRow, SettingsSection } from '@felinic/ui'
 
 defineProps<{
   deleteLoading: boolean

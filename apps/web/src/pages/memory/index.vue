@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { computed, provide, ref } from 'vue'
 import { useQuery } from '@pinia/colada'
-import { BackendCard, Button, PageShell, SectionGroup } from '@felinic/ui'
+import { BackendCard, Button, DetailPane, PageShell, SectionGroup, SwapTransition } from '@felinic/ui'
 import { getMemoryProviders, getMemoryProvidersMeta } from '@memohai/sdk'
 import type { AdaptersProviderGetResponse, AdaptersProviderMeta } from '@memohai/sdk'
 import { Brain } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import BuiltinConfig from './components/builtin-config.vue'
 import ProviderSetting from './components/provider-setting.vue'
-import DetailPane from '@/components/settings/detail-pane.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
-import SwapTransition from '@/components/settings/swap-transition.vue'
 import { providerConfigDefaults } from '@/utils/provider-template'
 
 const { t } = useI18n()

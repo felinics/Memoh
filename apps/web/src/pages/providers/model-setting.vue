@@ -71,11 +71,9 @@
 </template>
 
 <script setup lang="ts">
-import { Button, Switch } from '@felinic/ui'
+import { Button, ConfirmPopover, SettingsShell, Switch } from '@felinic/ui'
 import { Trash2 } from 'lucide-vue-next'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
-import SettingsShell from '@/components/settings-shell/index.vue'
 import { avatarInitials } from '@/composables/useAvatarInitials'
 
 import ProviderForm from './components/provider-form.vue'

@@ -242,7 +242,7 @@ import {
   Switch,
 } from '@felinic/ui'
 import { computed, inject, reactive, ref, watch } from 'vue'
-import { toast } from '@felinic/ui'
+import { FieldStack, FormStack, ModelListRow, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getVideoProvidersById, getVideoProvidersByIdModels, getVideoProvidersMeta, postProvidersFromTemplate, postVideoProvidersByIdImportModels, putProvidersById, putVideoModelsById } from '@memohai/sdk'
@@ -250,13 +250,7 @@ import type { ProvidersGetResponse, VideoModelResponse, VideoProviderResponse } 
 import LoadingButton from '@/components/loading-button/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
-import SettingsShell from '@/components/settings-shell/index.vue'
 import PasswordInput from '@/components/password-input/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import ModelListRow from '@/components/settings/model-list-row.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
-import FormStack from '@/components/settings/form-stack.vue'
 import { useProviderTemplateModels } from '@/composables/useProviderTemplateModels'
 
 interface VideoFieldSchema {

@@ -137,8 +137,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ExternalLink, PackageOpen, Store } from 'lucide-vue-next'
-import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle, Switch, toast } from '@felinic/ui'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
+import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, Switch, toast } from '@felinic/ui'
 import {
   getBotsByBotIdPlugins,
   getBotsByBotIdPluginsByIdOauthStatus,
@@ -149,11 +148,8 @@ import {
   type PluginsManifest,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
-import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { BOT_PLUGINS_UPDATED_EVENT, isBotPluginsUpdatedEvent } from '@/utils/bot-plugin-events'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 
 const props = defineProps<{

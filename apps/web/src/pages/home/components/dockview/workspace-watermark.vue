@@ -8,7 +8,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import PanePlaceholder from '@/components/pane-placeholder/index.vue'
+import { PanePlaceholder } from '@felinic/ui'
 
 const { t } = useI18n()
 </script>

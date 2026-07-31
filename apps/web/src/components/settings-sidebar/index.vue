@@ -169,6 +169,7 @@ import {
   Video,
 } from 'lucide-vue-next'
 import AppearanceIcon from './appearance-icon.vue'
+import { NavItem } from '@felinic/ui'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useChatStore } from '@/store/chat-list'
 import { useUserStore } from '@/store/user'
@@ -183,7 +184,6 @@ import {
   SidebarMenuItem,
 } from '@felinic/ui'
 import { DesktopShellKey } from '@/lib/desktop-shell'
-import NavItem from './nav-item.vue'
 
 const props = withDefaults(defineProps<{
   hideHeader?: boolean

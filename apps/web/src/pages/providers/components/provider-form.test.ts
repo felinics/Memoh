@@ -54,9 +54,14 @@ vi.mock('@felinic/ui', async () => {
     errorMessage: '',
   }))
   const Button = (_props: Record<string, unknown>, { attrs, slots }: { attrs: Record<string, unknown>, slots: Slots }) => h('button', attrs, slots.default?.())
+  const DeviceCodePanel = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', { 'data-testid': 'device-code' }, slots.default?.())
   return {
     AutoHeight: Passthrough,
     Button,
+    ConfirmPopover: Passthrough,
+    DeviceCodePanel,
+    SettingsRow: Passthrough,
+    SettingsSection: Passthrough,
     FormControl: Passthrough,
     FormField,
     FormItem: Passthrough,
@@ -79,11 +84,7 @@ vi.mock('@felinic/ui', async () => {
   }
 })
 
-vi.mock('@/components/confirm-popover/index.vue', () => ({ default: { template: '<div><slot /></div>' } }))
-vi.mock('@/components/device-code-panel/index.vue', () => ({ default: { template: '<div data-testid="device-code"><slot /></div>' } }))
 vi.mock('@/components/loading-button/index.vue', () => ({ default: { template: '<div><slot /></div>' } }))
-vi.mock('@/components/settings/row.vue', () => ({ default: { template: '<div><slot /></div>' } }))
-vi.mock('@/components/settings/section.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 
 describe('provider OAuth model sync', () => {
   beforeEach(() => {

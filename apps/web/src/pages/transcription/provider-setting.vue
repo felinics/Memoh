@@ -207,7 +207,7 @@
 <script setup lang="ts">
 import { computed, inject, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { toast } from '@felinic/ui'
+import { ModelListRow, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import {
   getTranscriptionProvidersById,
@@ -232,10 +232,6 @@ import ProviderIcon from '@/components/provider-icon/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ModelConfigEditor from '@/pages/speech/components/model-config-editor.vue'
 import CreateModel from '@/components/create-model/index.vue'
-import SettingsShell from '@/components/settings-shell/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import ModelListRow from '@/components/settings/model-list-row.vue'
 import { useProviderTemplateModels } from '@/composables/useProviderTemplateModels'
 
 interface FieldSchema { key: string, type: string, title?: string, description?: string, enum?: string[], order?: number }

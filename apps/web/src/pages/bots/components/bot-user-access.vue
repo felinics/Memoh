@@ -221,16 +221,11 @@ import {
   EmptyTitle,
   SegmentedControl,
 } from '@felinic/ui'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import { ConfirmPopover, FieldStack, FormStack, InlineLoadingRow, SettingsRow, SettingsSection } from '@felinic/ui'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { BOT_PERMISSION_ORDER, expandBotPermissions, type BotPermission } from '@/utils/bot-permissions'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
-import FormStack from '@/components/settings/form-stack.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
 import {
   getBotsByBotIdUserAccess,
   getBotsByBotIdUserAccessCandidates,

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMonaco } from 'stream-monaco'
+import { DiffTitleBar } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
-import DiffTitleBar from '@/components/diff-title-bar/index.vue'
 import { getLanguageByFilename } from '@/components/file-manager/utils'
 
 // Side-by-side Monaco diff editor used by the Compare view inside the file

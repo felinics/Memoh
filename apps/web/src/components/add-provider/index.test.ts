@@ -52,19 +52,6 @@ vi.mock('@/components/provider-icon/index.vue', () => ({
   default: () => h('span'),
 }))
 
-vi.mock('@/components/form-dialog-shell/index.vue', () => ({
-  default: {
-    props: ['open', 'title', 'cancelText', 'submitText', 'submitDisabled', 'loading'],
-    emits: ['update:open', 'submit'],
-    setup(props: { submitDisabled?: boolean }, { slots }: { slots: Slots }) {
-      return () => h('div', [
-        slots.body?.(),
-        h('button', { 'type': 'submit', 'disabled': props.submitDisabled, 'data-testid': 'submit' }),
-      ])
-    },
-  },
-}))
-
 vi.mock('@/components/searchable-select-popover/index.vue', () => ({
   default: {
     props: ['modelValue', 'options', 'placeholder', 'searchPlaceholder', 'emptyText'],
@@ -96,8 +83,19 @@ vi.mock('@felinic/ui', async () => {
     }), {
     emits: ['update:modelValue'],
   })
+  const FormDialogShell = {
+    props: ['open', 'title', 'cancelText', 'submitText', 'submitDisabled', 'loading'],
+    emits: ['update:open', 'submit'],
+    setup(props: { submitDisabled?: boolean }, { slots }: { slots: Slots }) {
+      return () => h('div', [
+        slots.body?.(),
+        h('button', { 'type': 'submit', 'disabled': props.submitDisabled, 'data-testid': 'submit' }),
+      ])
+    },
+  }
   return {
     Button: Passthrough,
+    FormDialogShell,
     FORM_ITEM_INJECTION_KEY: Symbol('form-item'),
     // FieldStack moved into @felinic/ui (host file is a re-export shim) — the
     // mock must define it or the shim's import fails.

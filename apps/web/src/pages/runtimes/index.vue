@@ -331,19 +331,12 @@ import {
   toast,
 } from '@felinic/ui'
 import { Copy, Laptop, Plus, Trash2 } from 'lucide-vue-next'
-import PageShell from '@/components/page-shell/index.vue'
-import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
-import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
-import FormStack from '@/components/settings/form-stack.vue'
+import { ConfirmPopover, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
 import { sdkApiBaseUrl } from '@/lib/api-client'
 import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
 } from '@/lib/desktop-shell'
-import { useClipboard } from '@/composables/useClipboard'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { buildRuntimeConnectCommand } from './command'
 

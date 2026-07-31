@@ -34,9 +34,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Check, Copy } from 'lucide-vue-next'
-import { Button, toast } from '@felinic/ui'
+import { Button, toast, useClipboard } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { useClipboard } from '@/composables/useClipboard'
 import CodeBlock from './code-block.vue'
 
 interface CodeFenceNode {
