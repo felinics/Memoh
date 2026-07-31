@@ -24,13 +24,14 @@ import (
 const (
 	titlePromptMaxInputChars = 500
 	titleGenerateTimeout     = 60 * time.Second
-	// titleGenerateMaxTokens pins the completion budget. Without an explicit
-	// cap the budget falls back to provider/server defaults; reasoning models
-	// burn that budget on hidden thinking before answering and can return an
-	// empty title on long inputs (observed with deepseek-v4 thinking enabled,
-	// which the endpoint turns on server-side). 4096 leaves ample headroom —
-	// the title itself is ~20 tokens.
-	titleGenerateMaxTokens = 4096
+	// titleGenerateMaxTokens caps the title completion. Reasoning models burn
+	// budget on hidden thinking before answering, so the cap must clear their
+	// thinking plus a short title (provider defaults can be far smaller, which
+	// truncates the response to an empty title). But it must also leave room
+	// for the prompt on short-context chat models — provider templates still
+	// catalog 4097-token ones — or the request is rejected outright. 2048
+	// sits between the two failure modes.
+	titleGenerateMaxTokens = 2048
 )
 
 // titleGenerationPrompt produces short sidebar titles: a noun phrase naming
@@ -48,8 +49,8 @@ Rules:
 - Keep concrete proper nouns (products, technologies, places).
 - Prefer concrete specifics over abstract categories: name the actual thing (the damage, the tool, the symptom), not the class of problem.
 - Vivid wording from the user's own message may be kept as-is; don't sand casual rants down into officialese.
-- For two-entity topics, use the "X与Y" form.
-- Allowed suffixes when one is needed: 分析/解析/介绍/建议/疑问/困惑/误解/修复/控制/设计/差异 — pick by topic nature, or use no suffix.
+- For two-entity topics in Chinese, use the "X与Y" form; in English, use "X and Y".
+- For Chinese titles, allowed suffixes when one is needed: 分析/解析/介绍/建议/疑问/困惑/误解/修复/控制/设计/差异 — pick by topic nature, or use no suffix. English titles use plain noun phrases.
 - No ending punctuation, no quotes.
 - If the message is meaningless (a number, a sticker, a single character), return exactly: 新对话
 - Return ONLY the title text.
