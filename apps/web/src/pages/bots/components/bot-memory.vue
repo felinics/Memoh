@@ -155,6 +155,14 @@
       />
     </section>
 
+    <!-- Advanced: manual sync + path/index metrics (moved from General settings). -->
+    <MemoryAdvancedActions
+      :bot-id="props.botId"
+      :memory-status="memoryStatus"
+      :status-loading="memoryStatusLoading"
+      @synced="handleAdvancedSynced"
+    />
+
     <!-- Server-side recall over the wiki store; results render in place of the
          dated stream. -->
     <section class="mb-4">
@@ -436,6 +444,7 @@ import SettingsSection from '@/components/settings/section.vue'
 import MetricReadout from '@/components/settings/metric-readout.vue'
 import MemoryGraph from './memory-graph.vue'
 import MemoryCard from './memory-card.vue'
+import MemoryAdvancedActions from './memory-advanced-actions.vue'
 import { useMemoryGroups } from './use-memory-groups'
 import { MEMORY_LAYERS, useMemoryFilter } from './use-memory-filter'
 
@@ -460,6 +469,7 @@ const compactLoading = ref(false)
 const ingestLoading = ref(false)
 const memories = ref<MemoryItem[]>([])
 const memoryStatus = ref<AdaptersMemoryStatusResponse | null>(null)
+const memoryStatusLoading = ref(false)
 const loadError = ref('')
 
 const graphRef = ref<InstanceType<typeof MemoryGraph> | null>(null)
@@ -576,9 +586,11 @@ async function loadMemoryStatus() {
   const botId = props.botId.trim()
   if (!botId) {
     memoryStatus.value = null
+    memoryStatusLoading.value = false
     return
   }
 
+  memoryStatusLoading.value = true
   try {
     const { data } = await getBotsByBotIdMemoryStatus({
       path: { bot_id: botId },
@@ -590,7 +602,14 @@ async function loadMemoryStatus() {
     // list itself reports its own loadError, so there is nothing to surface.
     console.error('Failed to load memory status:', error)
     memoryStatus.value = null
+  } finally {
+    memoryStatusLoading.value = false
   }
+}
+
+async function handleAdvancedSynced() {
+  await Promise.all([loadMemories(), loadMemoryStatus()])
+  graphRef.value?.refresh?.()
 }
 
 // Debounced server search: fire after the user pauses typing. The layer chips

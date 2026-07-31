@@ -144,7 +144,7 @@
             variant="secondary"
             size="sm"
           >
-            {{ runtimeStatusBadgeLabel }}
+            {{ runtimeStatusLabel }}
           </Badge>
           <span
             v-if="runtimeSampledAt"
@@ -166,6 +166,13 @@
             :sub="m.sub"
           />
         </div>
+
+        <p
+          v-if="runtimeMetricsNote"
+          class="px-2 text-xs text-muted-foreground"
+        >
+          {{ runtimeMetricsNote }}
+        </p>
       </section>
 
       <!-- Usage: token stat row + daily bar chart — the dashboard's "numbers",
@@ -210,8 +217,8 @@
         </div>
       </SettingsSection>
 
-      <!-- Memory: lightweight telemetry below usage. Full sync / path details
-           live on the Memory tab. -->
+      <!-- Memory: lightweight telemetry below usage. Manual sync and path
+           metrics live on the Memory tab (Advanced). -->
       <section
         v-if="showMemorySection"
         class="space-y-2.5"
@@ -541,11 +548,6 @@ const runtimeStatusKey = computed(() => {
 
 // Status label reuses the Container tab vocabulary. Badge is always secondary
 // (neutral gray) — green "Running" was too loud for a quiet telemetry row.
-// Badge label: unavailable-metrics note takes the badge slot; otherwise Running/Stopped.
-const runtimeStatusBadgeLabel = computed(() =>
-  runtimeMetricsNote.value || runtimeStatusLabel.value,
-)
-
 const runtimeStatusLabel = computed(() => {
   switch (runtimeStatusKey.value) {
     case 'running': return t('bots.container.statusRunning')

@@ -33,7 +33,7 @@
         <PanePlaceholder
           v-if="!layoutReady"
           loading
-          class="absolute inset-0 z-10"
+          class="absolute inset-0 z-(--z-raised)"
         >
           {{ $t('common.loading') }}
         </PanePlaceholder>
