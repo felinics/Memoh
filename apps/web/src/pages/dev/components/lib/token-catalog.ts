@@ -59,9 +59,8 @@ export const tokenGroups: TokenGroup[] = [
     label: 'Sidebar',
     tokens: [
       'sidebar', 'sidebar-foreground',
-      'sidebar-primary', 'sidebar-primary-foreground',
       'sidebar-accent', 'sidebar-accent-foreground',
-      'sidebar-border', 'sidebar-ring',
+      'sidebar-border',
     ],
   },
   {
