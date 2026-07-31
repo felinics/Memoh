@@ -60,10 +60,12 @@ const entries = computed(() => {
   }
   // canceled / expired / failed: no answers recorded — show what was asked
   // with an unanswered marker (questions from the live request state, or the
-  // tool input for pre-v2 history).
+  // tool input for pre-v2 history). The terminal status can live in either
+  // the result OR userInput.status (a canceled request may end result-less).
   const questions = props.block.userInput?.questions?.map(q => q.text)
     ?? legacyQuestions(props.block.input)
-  const note = result?.status === 'canceled'
+  const status = result?.status ?? props.block.userInput?.status
+  const note = status === 'canceled'
     ? t('chat.answers.cancelled')
     : t('chat.answers.unanswered')
   return questions.map((q, i) => ({ id: `q${i}`, question: q, answer: note, unanswered: true }))
