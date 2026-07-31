@@ -54,7 +54,7 @@ if [ "${MEMOH_INTERNAL_RPC_SHARED_SECRET+x}" = x ] && [ -n "$MEMOH_INTERNAL_RPC_
 else
   INTERNAL_RPC_SHARED_SECRET_SET=false
 fi
-if [ "${MEMOH_CONNECT_IT_MODE+x}" = x ]; then
+if [ "${MEMOH_CONNECT_IT_MODE+x}" = x ] && [ -n "$MEMOH_CONNECT_IT_MODE" ]; then
   CONNECT_IT_MODE_SET=true
 else
   CONNECT_IT_MODE_SET=false
@@ -567,6 +567,9 @@ show_failure_logs() {
   echo ""
   echo "${RED}Startup failed. Recent database, migration, server, and channel logs:${NC}"
   log_services="postgres migrate server channel"
+  if [ "${CONNECT_IT_MODE:-}" = "embedded" ]; then
+    log_services="$log_services connect-it connect-it-web"
+  fi
   $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES logs --no-color --tail=200 $log_services || true
 }
 
@@ -945,8 +948,11 @@ if [ "$CONNECT_IT_MODE" = "embedded" ]; then
   COMPOSE_PROFILES="$COMPOSE_PROFILES --profile connectors"
   MEMOH_CONNECT_IT_BASE_URL="http://connect-it:8080"
   echo "${GREEN}✓ Connect-It connectors enabled${NC}"
+  if [ -z "$MEMOH_CONNECT_IT_PUBLIC_BASE_URL" ]; then
+    echo "${YELLOW}ℹ Connector OAuth callbacks default to http://localhost:${MEMOH_CONNECT_IT_PORT:-8083}; set MEMOH_CONNECT_IT_PUBLIC_BASE_URL when Memoh is used from other machines${NC}"
+  fi
   if [ "$USE_CN_MIRROR" = true ]; then
-    echo "${YELLOW}ℹ Connect-It images come from ghcr.io; memoh.cn mirror does not cover them${NC}"
+    echo "${YELLOW}ℹ Connect-It images come from ghcr.io; memoh.cn mirror does not cover them. Set MEMOH_CONNECT_IT_MODE=disabled to skip them${NC}"
   fi
 else
   MEMOH_CONNECT_IT_BASE_URL=""
@@ -1021,7 +1027,7 @@ echo ""
 echo "  🔑 Admin login:       ${ADMIN_USER} / ${ADMIN_PASS}"
 echo ""
 if [ "$CONNECT_IT_MODE" = "embedded" ]; then
-  echo "  🔗 Connect-It admin:  ${MEMOH_CONNECT_IT_PUBLIC_BASE_URL:-http://localhost:8083} (admin / ${MEMOH_CONNECT_IT_ADMIN_PASSWORD})"
+  echo "  🔗 Connect-It admin:  ${MEMOH_CONNECT_IT_PUBLIC_BASE_URL:-http://localhost:${MEMOH_CONNECT_IT_PORT:-8083}} (admin / ${MEMOH_CONNECT_IT_ADMIN_PASSWORD})"
   echo ""
 fi
 COMPOSE_CMD="$DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES"
