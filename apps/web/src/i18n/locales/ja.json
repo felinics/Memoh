@@ -615,6 +615,11 @@
     "panel": {
       "regionLabel": "保留中の項目"
     },
+    "answers": {
+      "skipped": "スキップ",
+      "cancelled": "キャンセル",
+      "unanswered": "未回答"
+    },
     "tools": {
       "read": "読む",
       "write": "書く",

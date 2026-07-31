@@ -646,6 +646,11 @@
     "panel": {
       "regionLabel": "Pending items"
     },
+    "answers": {
+      "skipped": "Skipped",
+      "cancelled": "Cancelled",
+      "unanswered": "No answer"
+    },
     "tools": {
       "read": "Read",
       "write": "Write",

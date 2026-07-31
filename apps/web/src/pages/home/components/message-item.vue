@@ -298,6 +298,13 @@
               :active="message.streaming && node.lastIndex === message.messages.length - 1"
             />
 
+            <!-- Completed ask_user: the Q&A card, broken out of the process
+                 group so it reads as conversation content, not tool machinery. -->
+            <ChatAnswersCard
+              v-else-if="node.kind === 'answers'"
+              :block="node.block"
+            />
+
             <template v-else>
               <!-- Text block -->
               <!-- Headings split into two spacing groups, not one flat ramp:
@@ -413,6 +420,7 @@ import { Avatar, AvatarImage, AvatarFallback, Button, Textarea } from '@felinic/
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
+import ChatAnswersCard from './chat-answers-card.vue'
 import { toolSegmentCategoryForBlock } from './tool-call-registry'
 import type { ToolSegmentCategory } from './tool-call-registry'
 import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
@@ -821,8 +829,25 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
 //  - Every other block type (text / error / attachments) keeps its place.
 // Keyed by stable block id.
 type ProcessNode = { kind: 'process'; key: string; items: ContentBlock[]; cat: ToolSegmentCategory | null; lastIndex: number }
+type AnswersNode = { kind: 'answers'; key: string; block: ContentBlock; index: number }
 type BlockNode = { kind: 'block'; key: string; block: ContentBlock; index: number }
-type RenderNode = ProcessNode | BlockNode
+type RenderNode = ProcessNode | AnswersNode | BlockNode
+
+// A completed ask_user is content, not process: it carries the Q&A record, so
+// it breaks out of the tool group and renders as an answers card in the text
+// flow. A pending one has no result yet and stays in the group (its input
+// form lives elsewhere). Content-based check — works for pre-v2 history too.
+function isCompletedAskUser(block: ContentBlock): boolean {
+  if (block.type !== 'tool') return false
+  const b = block as ToolCallBlockType
+  if (b.toolName !== 'ask_user') return false
+  const r = b.result as { status?: unknown; answers?: unknown } | null
+  if (!r || typeof r !== 'object') return false
+  return Array.isArray(r.answers)
+    || r.status === 'canceled'
+    || r.status === 'expired'
+    || r.status === 'failed'
+}
 
 const renderNodes = computed<RenderNode[]>(() => {
   if (props.message.role !== 'assistant') return []
@@ -830,6 +855,11 @@ const renderNodes = computed<RenderNode[]>(() => {
   let run: ProcessNode | null = null
   props.message.messages.forEach((block, index) => {
     if (!isVisibleAssistantBlock(block)) return
+    if (isCompletedAskUser(block)) {
+      run = null
+      nodes.push({ kind: 'answers', key: `a${block.id}`, block, index })
+      return
+    }
     if (block.type === 'tool' || block.type === 'reasoning') {
       const cat = block.type === 'tool'
         ? toolSegmentCategoryForBlock(block as ToolCallBlockType)

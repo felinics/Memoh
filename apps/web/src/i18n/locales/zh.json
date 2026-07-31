@@ -646,6 +646,11 @@
     "panel": {
       "regionLabel": "待处理事项"
     },
+    "answers": {
+      "skipped": "已跳过",
+      "cancelled": "已取消",
+      "unanswered": "未作答"
+    },
     "tools": {
       "read": "读取",
       "write": "写入",
