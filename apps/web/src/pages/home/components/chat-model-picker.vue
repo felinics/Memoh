@@ -195,10 +195,6 @@ const props = defineProps<{
   }>
 }>()
 
-const emit = defineEmits<{
-  close: []
-}>()
-
 const modelValue = defineModel<string>({ default: '' })
 const reasoningEffort = defineModel<string>('reasoningEffort', { default: '' })
 
@@ -432,17 +428,19 @@ const currentReasoningLabelKey = computed(() =>
   currentReasoningOption.value?.labelKey ?? EFFORT_LABELS[currentReasoningValue.value] ?? 'chat.reasoningOff',
 )
 
-// Picking a model by its name commits the choice and dismisses the menu.
+// Selection applies immediately and the popover STAYS OPEN on purpose (#899):
+// the user can hop between models (and efforts) to compare without reopening
+// the menu. Dismissal is the popover's own business — outside click / Esc.
 function commitModel(value: string) {
   reasoningOpen.value = false
   if (value !== modelValue.value) modelValue.value = value
-  emit('close')
 }
 
 function setEffort(level: string) {
+  // Keep the effort flyout open after a pick (#899): the check mark just
+  // moves. Collapsing on every click made a shaky double-click land on the
+  // backdrop and dismiss the whole popover.
   reasoningEffort.value = level
-  reasoningOpen.value = false
-  emit('close')
 }
 
 watch(() => props.open, (v) => {

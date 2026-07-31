@@ -623,7 +623,6 @@
                         :open="modelPopoverOpen"
                         @update:model-value="onComposerModelValueSelected"
                         @update:reasoning-effort="onComposerReasoningEffortSelected"
-                        @close="modelPopoverOpen = false"
                       />
                     </PopoverContent>
                   </Popover>
@@ -1930,9 +1929,8 @@ async function selectMemohAgent() {
 }
 
 function onModelSelected() {
-  // The picker drives dismissal via @close (so opening a model's reasoning
-  // options can adopt it without collapsing the menu); here we only sanitise
-  // the effort when the new model can't reason.
+  // The popover stays open on selection (#899) — dismissal is outside click /
+  // Esc. Here we only sanitise the effort when the new model can't reason.
   if (!activeModelSupportsReasoning.value) {
     overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
   }
