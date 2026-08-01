@@ -207,7 +207,6 @@ Memoh/
 │   └── app.windows.toml        #   Windows config
 ├── devenv/                     # Dev environment
 │   ├── docker-compose.yml      #   Main dev compose
-│   ├── docker-compose.minify.yml #  Minified services compose
 │   ├── docker-compose.selinux.yml # SELinux overlay compose
 │   └── app.dev.toml            #   Dev config (connects to devenv docker-compose)
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, toolkit/)
@@ -255,7 +254,6 @@ Bot persona templates (not developer guides):
 | Command | Description |
 |---------|-------------|
 | `mise run dev` | Start the containerized dev environment (all services) |
-| `mise run dev:minify` | Start dev environment with minified services |
 | `mise run dev:selinux` | Start dev environment on SELinux systems |
 | `mise run dev:down` | Stop the dev environment |
 | `mise run dev:logs` | View dev environment logs |

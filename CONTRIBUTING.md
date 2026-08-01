@@ -68,7 +68,6 @@ image testing, override `MEMOH_DEV_CONNECT_IT_SERVER_IMAGE` or
 
 ```bash
 mise run dev                              # Start all services
-mise run dev:minify                       # Start the minified dev stack
 mise run dev:selinux                      # Start all services on SELinux hosts
 mise run dev:down                         # Stop the dev stack
 mise run dev:logs                         # View dev logs

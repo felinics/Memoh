@@ -87,16 +87,6 @@ description = "Start development environment with Cloudflare Quick Tunnel for we
 depends = ["//:dev:workspace-image"]
 run = "scripts/dev-compose.sh devenv/docker-compose.yml devenv/docker-compose.webhook-tunnel.yml"
 
-[tasks."dev:minify"]
-description = "Start development environment with minified services"
-depends = ["//:dev:workspace-image"]
-run = "scripts/dev-compose.sh devenv/docker-compose.minify.yml"
-
-[tasks."dev:minify:webhook-tunnel"]
-description = "Start minified development environment with Cloudflare Quick Tunnel for webhooks"
-depends = ["//:dev:workspace-image"]
-run = "scripts/dev-compose.sh devenv/docker-compose.minify.yml devenv/docker-compose.webhook-tunnel.yml"
-
 [tasks."dev:selinux"]
 description = "Start development environment on SELinux systems"
 depends = ["//:dev:workspace-image"]
