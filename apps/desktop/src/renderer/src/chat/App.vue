@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, watch } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@memohai/web/store/settings'
@@ -26,7 +26,13 @@ provide(DesktopUpdatesKey, {
   install: window.api.desktop.updates.install,
   onStateChanged: window.api.desktop.updates.onStateChanged,
 } satisfies DesktopUpdateBridge)
-useSettingsStore()
+const settingsStore = useSettingsStore()
+watch(
+  () => settingsStore.theme,
+  themeSource => void window.api.desktop.setThemeSource(themeSource).catch((error) => {
+    console.warn('failed to synchronize desktop native theme', error)
+  }),
+)
 
 // Mirror apps/web App.vue: keep chat dockview/scroll alive (DOM attached,
 // full-size) while in settings, so returning has no black flash / re-scroll /
@@ -55,7 +61,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onDevKey))
 
 <template>
   <section>
-    <MainSection v-if="isAppArea" />
+    <MainSection
+      v-if="isAppArea"
+      :data-native-sidebar-underlay-clear="isSettingsRoute || undefined"
+    />
     <!-- Permanent fixed settings layer (see apps/web App.vue): TRANSPARENT wrapper
          toggled with `visibility` only. settings-section paints its own opaque
          bg, so chat (not black) shows behind its slide/fade. No v-if (avoids

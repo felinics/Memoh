@@ -6,11 +6,13 @@
   <aside
     ref="asideEl"
     class="relative h-full"
-    :style="{ '--sidebar-width': desktopShell ? '15rem' : `${sidebarWidth}px` }"
+    :style="{ '--sidebar-width': desktopShell ? 'var(--desktop-sidebar-width)' : `${sidebarWidth}px` }"
   >
     <Sidebar
       collapsible="none"
       :class="['workspace-divider-r', desktopShell && 'h-dvh']"
+      data-native-sidebar-surface
+      data-native-sidebar-tint
     >
       <div
         v-if="macTrafficReserve"

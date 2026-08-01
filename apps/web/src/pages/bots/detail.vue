@@ -13,6 +13,7 @@
     <section
       v-if="show"
       class="absolute inset-0 flex flex-col bg-background"
+      data-desktop-window-layer
     >
       <div class="flex-1 relative">
         <MasterDetailSidebarLayout
