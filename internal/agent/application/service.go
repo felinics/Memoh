@@ -1283,6 +1283,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		cfg.System += "\n\n" + formatServiceHookContext(hooks.EventAfterPromptBuild, afterPromptContext)
 	}
 
+	cfg.InlineImages = filterVisionImageParts(cfg.InlineImages)
 	if cfg.Query != "" {
 		var extra []sdk.MessagePart
 		for _, img := range cfg.InlineImages {

@@ -91,6 +91,7 @@ func (s *Service) describeImagePartsWithAuxiliaryVision(
 	if s == nil || primarySupportsVision {
 		return ""
 	}
+	images = filterVisionImageParts(images)
 	cfg := s.auxiliaryVision.normalized()
 	if !cfg.enabled() {
 		return ""

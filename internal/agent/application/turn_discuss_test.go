@@ -678,6 +678,18 @@ func TestInjectImagePartsIntoLastUserMessage_SkipsEmptyImage(t *testing.T) {
 	}
 }
 
+func TestInjectImagePartsIntoLastUserMessage_SkipsImageTypedVideo(t *testing.T) {
+	msgs := []sdk.Message{sdk.UserMessage("hello")}
+	parts := []sdk.ImagePart{{
+		Image:     "data:video/webm;base64,abc",
+		MediaType: "video/webm",
+	}}
+	injectImagePartsIntoLastUserMessage(msgs, parts)
+	if len(msgs[0].Content) != 1 {
+		t.Fatalf("expected video/webm to be skipped, got %d parts", len(msgs[0].Content))
+	}
+}
+
 func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) bool {
 	for i := len(frags) - 1; i >= 0; i-- {
 		frag := frags[i]

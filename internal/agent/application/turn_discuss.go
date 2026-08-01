@@ -518,9 +518,9 @@ func (s *Service) resolveDiscussRunConfig(
 
 func (s *Service) inlineDiscussImages(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart {
 	if s.turnHooks != nil && s.turnHooks.inlineImages != nil {
-		return s.turnHooks.inlineImages(ctx, botID, refs)
+		return filterVisionImageParts(s.turnHooks.inlineImages(ctx, botID, refs))
 	}
-	return s.InlineImageAttachments(ctx, botID, refs)
+	return filterVisionImageParts(s.InlineImageAttachments(ctx, botID, refs))
 }
 
 func (s *Service) streamDiscussAgent(ctx context.Context, cfg native.RunConfig) <-chan native.StreamEvent {
@@ -587,11 +587,10 @@ func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePa
 	if len(parts) == 0 {
 		return
 	}
+	parts = filterVisionImageParts(parts)
 	extra := make([]sdk.MessagePart, 0, len(parts))
 	for _, p := range parts {
-		if strings.TrimSpace(p.Image) != "" {
-			extra = append(extra, p)
-		}
+		extra = append(extra, p)
 	}
 	if len(extra) == 0 {
 		return

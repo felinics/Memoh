@@ -3,6 +3,8 @@ package application
 import (
 	"strings"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/models"
 )
@@ -92,6 +94,28 @@ func isGatewayNativeAttachment(att gatewayAttachment) bool {
 	default:
 		return false
 	}
+}
+
+// filterVisionImageParts is the final safety boundary before sdk.ImagePart
+// values reach any vision model. Some channel paths (notably Discuss) resolve
+// images directly and therefore do not pass through gatewayAttachment routing.
+func filterVisionImageParts(parts []sdk.ImagePart) []sdk.ImagePart {
+	filtered := make([]sdk.ImagePart, 0, len(parts))
+	for _, part := range parts {
+		payload := strings.TrimSpace(part.Image)
+		if payload == "" {
+			continue
+		}
+		mime := attachmentpkg.NormalizeMime(part.MediaType)
+		if dataURLMime := attachmentpkg.MimeFromDataURL(payload); dataURLMime != "" {
+			mime = dataURLMime
+		}
+		if mime != "" && !strings.HasPrefix(mime, "image/") {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	return filtered
 }
 
 // attachmentsToAny converts typed gateway attachments to []any for JSON serialization.
