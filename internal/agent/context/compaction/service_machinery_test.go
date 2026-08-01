@@ -442,8 +442,8 @@ func TestRollingCompactionReplacesParentsAndCompactsAllRawHistory(t *testing.T) 
 	if strings.Contains(stub.prompt, "Do NOT include, repeat") {
 		t.Fatalf("rolling prompt retained the legacy instruction to omit prior context")
 	}
-	if stub.maxTokens != 40000 {
-		t.Fatalf("model output cap = %d, want 40000", stub.maxTokens)
+	if stub.maxTokens != ConservativeSummaryOutputTokens {
+		t.Fatalf("model output cap = %d, want %d", stub.maxTokens, ConservativeSummaryOutputTokens)
 	}
 	if len(q.rollingDone.ParentIds) != 1 || q.rollingDone.ParentIds[0] != parentID {
 		t.Fatalf("rolling parents = %v, want [%v]", q.rollingDone.ParentIds, parentID)

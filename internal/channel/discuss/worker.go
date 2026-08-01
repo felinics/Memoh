@@ -28,7 +28,7 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 	idle := time.NewTimer(discussIdleTimeout)
 	defer idle.Stop()
 
-	var latestRC timeline.RenderedContext
+	var latest discussEnvelope
 	for {
 		select {
 		case <-sess.stopCh:
@@ -36,33 +36,33 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 		case <-idle.C:
 			log.Info("discuss session idle timeout, exiting")
 			return
-		case rc := <-sess.rcCh:
-			latestRC = rc
+		case envelope := <-sess.rcCh:
+			latest = envelope
 			idle.Reset(discussIdleTimeout)
 		}
 
 	drain:
 		for {
 			select {
-			case rc := <-sess.rcCh:
-				latestRC = rc
+			case envelope := <-sess.rcCh:
+				latest = mergeDiscussEnvelopes(latest, envelope)
 			default:
 				break drain
 			}
 		}
 
-		if len(latestRC) == 0 {
+		if len(latest.rc) == 0 {
 			continue
 		}
-		if !timeline.HasUncoveredExternalEvent(latestRC, sess.lastProcessed) {
+		if !timeline.HasUncoveredExternalEvent(latest.rc, sess.lastProcessed) {
 			continue
 		}
-		d.handleReply(ctx, sess, latestRC, log)
+		d.handleReply(ctx, sess, latest.rc, latest.forceReply, log)
 	}
 }
 
-func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger) {
-	d.handleReplyWithTurn(ctx, sess, rc, log, d.turnServiceSnapshot())
+func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, forceReply bool, log *slog.Logger) {
+	d.handleReplyWithTurnForce(ctx, sess, rc, forceReply, log, d.turnServiceSnapshot())
 }
 
 // loadArtifacts projects the session's active compaction frontier. Failures
@@ -83,6 +83,12 @@ func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg DiscussSessionCon
 // workers obtain the current service through turnServiceSnapshot.
 func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger, turnSvc turn.Service) {
 	cfg := d.sessionConfigSnapshot(sess)
+	d.handleReplyWithTurnForce(ctx, sess, rc, cfg.ForceReply, log, turnSvc)
+}
+
+func (d *DiscussDriver) handleReplyWithTurnForce(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, forceReply bool, log *slog.Logger, turnSvc turn.Service) {
+	cfg := d.sessionConfigSnapshot(sess)
+	cfg.ForceReply = forceReply
 	trs := d.history.Load(ctx, cfg.ThreadID)
 
 	// Cold-start / post-idle initialisation combines the durable position with

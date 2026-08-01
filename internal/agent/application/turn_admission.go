@@ -25,6 +25,7 @@ import (
 // stub here would only assert that the stub agrees with itself.
 type turnAdmitter interface {
 	Admit(context.Context, sessionruntime.AdmitInput) (sessionruntime.Admission, error)
+	InjectRun(context.Context, sessionruntime.RunHandle, turn.InjectMessage) error
 	FinishRun(ctx context.Context, handle sessionruntime.RunHandle, status, message string) error
 }
 

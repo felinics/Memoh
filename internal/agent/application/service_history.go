@@ -14,6 +14,7 @@ import (
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/memohai/memoh/internal/textutil"
 )
 
 func injectWorkspaceTransitionRecords(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
@@ -293,9 +294,9 @@ func estimateMessageTokens(msg ModelMessage) int {
 	text := msg.TextContent()
 	if len(text) == 0 {
 		data, _ := json.Marshal(msg.Content)
-		return len(data) / 4
+		return textutil.EstimateTokensFromBytes(len(data))
 	}
-	return len(text) / 4
+	return textutil.EstimateTokensFromBytes(len(text))
 }
 
 func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]ModelMessage, int) {

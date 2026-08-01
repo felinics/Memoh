@@ -250,7 +250,7 @@ func (m *Manager) restorePreservedIntoSnapshot(
 		return err
 	}
 
-	_ = os.Remove(bp)
+	m.removePreservedBackup(botID, bp)
 	return nil
 }
 
@@ -268,7 +268,22 @@ func (m *Manager) restorePreservedDataViaGRPC(ctx context.Context, botID string)
 	if err := m.importDataViaGRPC(ctx, botID, f); err != nil {
 		return err
 	}
-	return os.Remove(bp)
+	m.removePreservedBackup(botID, bp)
+	return nil
+}
+
+func (m *Manager) removePreservedBackup(botID, path string) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		logger := m.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("remove restored workspace backup failed",
+			slog.String("bot_id", botID),
+			slog.String("path", path),
+			slog.Any("error", err),
+		)
+	}
 }
 
 // errMountNotSupported indicates the backend doesn't support snapshot mounts

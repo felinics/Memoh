@@ -80,10 +80,21 @@ type DiscussDriver struct {
 
 type discussSession struct {
 	config        DiscussSessionConfig
-	rcCh          chan timeline.RenderedContext
+	rcCh          chan discussEnvelope
+	queueMu       sync.Mutex
 	stopCh        chan struct{}
 	cancel        context.CancelFunc
 	lastProcessed timeline.DiscussCursorPosition
+}
+
+type discussEnvelope struct {
+	rc         timeline.RenderedContext
+	forceReply bool
+}
+
+func mergeDiscussEnvelopes(current, next discussEnvelope) discussEnvelope {
+	next.forceReply = current.forceReply || next.forceReply
+	return next
 }
 
 // NewDiscussDriver creates a new DiscussDriver.
@@ -127,7 +138,7 @@ func (d *DiscussDriver) NotifyRC(_ context.Context, sessionID string, rc timelin
 		sessCtx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in sess.cancel
 		sess = &discussSession{
 			config: config,
-			rcCh:   make(chan timeline.RenderedContext, 16),
+			rcCh:   make(chan discussEnvelope, 16),
 			stopCh: make(chan struct{}),
 			cancel: cancel,
 		}
@@ -138,15 +149,19 @@ func (d *DiscussDriver) NotifyRC(_ context.Context, sessionID string, rc timelin
 	}
 	d.mu.Unlock()
 
+	envelope := discussEnvelope{rc: rc, forceReply: config.ForceReply}
+	sess.queueMu.Lock()
+	defer sess.queueMu.Unlock()
 	select {
-	case sess.rcCh <- rc:
+	case sess.rcCh <- envelope:
 	default:
 		select {
-		case <-sess.rcCh:
+		case dropped := <-sess.rcCh:
+			envelope = mergeDiscussEnvelopes(dropped, envelope)
 		default:
 		}
 		select {
-		case sess.rcCh <- rc:
+		case sess.rcCh <- envelope:
 		default:
 		}
 	}

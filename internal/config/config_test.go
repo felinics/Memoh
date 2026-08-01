@@ -253,6 +253,7 @@ func TestLoadAppliesAuxiliaryVisionEnvOverrides(t *testing.T) {
 	t.Setenv("MEMOH_AUXILIARY_VISION_PROVIDER", "openai-codex")
 	t.Setenv("MEMOH_AUXILIARY_VISION_PROMPT", "describe every image")
 	t.Setenv("MEMOH_AUXILIARY_VISION_MAX_RETRIES", "3")
+	t.Setenv("MEMOH_AUXILIARY_VISION_TIMEOUT", "45s")
 
 	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
 	if err != nil {
@@ -261,8 +262,17 @@ func TestLoadAppliesAuxiliaryVisionEnvOverrides(t *testing.T) {
 	if cfg.Agent.AuxiliaryVisionModel != "gpt-5.6-luna" ||
 		cfg.Agent.AuxiliaryVisionProvider != "openai-codex" ||
 		cfg.Agent.AuxiliaryVisionPrompt != "describe every image" ||
-		cfg.Agent.AuxiliaryVisionMaxRetries != 3 {
+		cfg.Agent.AuxiliaryVisionMaxRetries != 3 ||
+		cfg.Agent.AuxiliaryVisionTimeoutDuration() != 45*time.Second {
 		t.Fatalf("auxiliary vision config = %#v", cfg.Agent)
+	}
+}
+
+func TestLoadRejectsInvalidAuxiliaryVisionTimeout(t *testing.T) {
+	t.Setenv("MEMOH_AUXILIARY_VISION_TIMEOUT", "forever")
+	_, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err == nil || !strings.Contains(err.Error(), "auxiliary_vision_timeout") {
+		t.Fatalf("error = %v, want invalid auxiliary vision timeout", err)
 	}
 }
 

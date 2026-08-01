@@ -11,14 +11,15 @@ import (
 )
 
 type fakeRateStore struct {
-	bots       []botRate
-	setBot     botRate
-	resetBot   botRate
-	keywordBot botRate
-	setRate    float64
-	selector   string
-	keyword    string
-	err        error
+	bots           []botRate
+	setBot         botRate
+	resetBot       botRate
+	keywordBot     botRate
+	setRate        float64
+	selector       string
+	keyword        string
+	keywordChanged bool
+	err            error
 }
 
 func (s *fakeRateStore) List(context.Context) ([]botRate, error) {
@@ -36,10 +37,10 @@ func (s *fakeRateStore) Reset(_ context.Context, selector string) (botRate, erro
 	return s.resetBot, s.err
 }
 
-func (s *fakeRateStore) AddKeyword(_ context.Context, selector, keyword string) (botRate, error) {
+func (s *fakeRateStore) AddKeyword(_ context.Context, selector, keyword string) (botRate, bool, error) {
 	s.selector = selector
 	s.keyword = keyword
-	return s.keywordBot, s.err
+	return s.keywordBot, s.keywordChanged, s.err
 }
 
 func (s *fakeRateStore) RemoveKeyword(_ context.Context, selector, keyword string) (botRate, error) {
@@ -142,7 +143,7 @@ func TestExecuteKeywordAdd(t *testing.T) {
 	store := &fakeRateStore{keywordBot: botRate{
 		ID:   "bot-id",
 		Name: "alice",
-	}}
+	}, keywordChanged: true}
 	var stdout, stderr bytes.Buffer
 	exitCode := execute(
 		context.Background(),
@@ -158,6 +159,18 @@ func TestExecuteKeywordAdd(t *testing.T) {
 		t.Fatalf("AddKeyword() selector/keyword = %q/%q", store.selector, store.keyword)
 	}
 	if !strings.Contains(stdout.String(), "小雪") || !strings.Contains(stdout.String(), "立即生效") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestExecuteKeywordAddReportsExistingKeyword(t *testing.T) {
+	store := &fakeRateStore{keywordBot: botRate{ID: "bot-id", Name: "alice"}}
+	var stdout, stderr bytes.Buffer
+	exitCode := execute(context.Background(), config{action: "keyword-add", selector: "alice", keyword: "小雪"}, store, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("execute() = %d, stderr = %s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "已存在") || !strings.Contains(stdout.String(), "未做变更") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }

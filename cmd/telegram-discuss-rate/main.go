@@ -69,7 +69,7 @@ type rateStore interface {
 	List(context.Context) ([]botRate, error)
 	Set(context.Context, string, float64) (botRate, error)
 	Reset(context.Context, string) (botRate, error)
-	AddKeyword(context.Context, string, string) (botRate, error)
+	AddKeyword(context.Context, string, string) (botRate, bool, error)
 	RemoveKeyword(context.Context, string, string) (botRate, error)
 }
 
@@ -140,18 +140,16 @@ func execute(ctx context.Context, cfg config, store rateStore, stdout, stderr io
 			formatPercent(bot.effectiveRate()),
 		)
 	case "keyword-add":
-		bot, err := store.AddKeyword(ctx, cfg.selector, cfg.keyword)
+		bot, changed, err := store.AddKeyword(ctx, cfg.selector, cfg.keyword)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "错误：添加关键词失败：%v\n", err)
 			return 1
 		}
-		_, _ = fmt.Fprintf(
-			stdout,
-			"已为 %s (%s) 添加强制回复关键词 %q，立即生效。\n",
-			bot.Name,
-			bot.ID,
-			cfg.keyword,
-		)
+		if changed {
+			_, _ = fmt.Fprintf(stdout, "已为 %s (%s) 添加强制回复关键词 %q，立即生效。\n", bot.Name, bot.ID, cfg.keyword)
+		} else {
+			_, _ = fmt.Fprintf(stdout, "%s (%s) 已存在强制回复关键词 %q，未做变更。\n", bot.Name, bot.ID, cfg.keyword)
+		}
 	case "keyword-remove":
 		bot, err := store.RemoveKeyword(ctx, cfg.selector, cfg.keyword)
 		if err != nil {
@@ -357,18 +355,19 @@ func (s *dockerRateStore) Reset(ctx context.Context, selector string) (botRate, 
 	return s.resolve(ctx, bot.ID)
 }
 
-func (s *dockerRateStore) AddKeyword(ctx context.Context, selector, keyword string) (botRate, error) {
+func (s *dockerRateStore) AddKeyword(ctx context.Context, selector, keyword string) (botRate, bool, error) {
 	bot, err := s.resolve(ctx, selector)
 	if err != nil {
-		return botRate{}, err
+		return botRate{}, false, err
 	}
 	for _, existing := range bot.ForceReplyKeywords {
 		if strings.EqualFold(existing, keyword) {
-			return bot, nil
+			return bot, false, nil
 		}
 	}
 	keywords := append(append([]string(nil), bot.ForceReplyKeywords...), keyword)
-	return s.updateKeywords(ctx, bot.ID, keywords)
+	updated, err := s.updateKeywords(ctx, bot.ID, keywords)
+	return updated, err == nil, err
 }
 
 func (s *dockerRateStore) RemoveKeyword(ctx context.Context, selector, keyword string) (botRate, error) {

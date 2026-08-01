@@ -129,6 +129,52 @@ func TestInstantiateAllLoadsConfiguredProvidersIntoRegistry(t *testing.T) {
 	}
 }
 
+func TestRegistryReplaceDoesNotExposeAStaleReloadWindow(t *testing.T) {
+	t.Parallel()
+
+	registry := NewRegistry(slog.Default())
+	oldCloseCalls := &atomic.Int32{}
+	oldProvider := &bootstrapProvider{providerType: "old", closeCalls: oldCloseCalls}
+	if err := registry.RegisterContext(context.Background(), "provider-1", oldProvider); err != nil {
+		t.Fatalf("register old provider: %v", err)
+	}
+	factoryStarted := make(chan struct{})
+	releaseFactory := make(chan struct{})
+	newProvider := &bootstrapProvider{providerType: "new"}
+	registry.RegisterFactory("new", func(context.Context, string, string, map[string]any) (Provider, error) {
+		close(factoryStarted)
+		<-releaseFactory
+		return newProvider, nil
+	})
+
+	replaceDone := make(chan error, 1)
+	go func() {
+		_, err := registry.Replace(context.Background(), "provider-1", "new", nil)
+		replaceDone <- err
+	}()
+	<-factoryStarted
+	getDone := make(chan Provider, 1)
+	go func() {
+		provider, _ := registry.Get(context.Background(), "provider-1")
+		getDone <- provider
+	}()
+	select {
+	case provider := <-getDone:
+		t.Fatalf("Get returned during replacement: %#v", provider)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseFactory)
+	if err := <-replaceDone; err != nil {
+		t.Fatalf("Replace() error = %v", err)
+	}
+	if got := <-getDone; got != newProvider {
+		t.Fatalf("Get() = %#v, want replacement %#v", got, newProvider)
+	}
+	if oldCloseCalls.Load() != 1 {
+		t.Fatalf("old provider close calls = %d, want 1", oldCloseCalls.Load())
+	}
+}
+
 func TestSetRegistryLoadsPersistedProviderOnCacheMiss(t *testing.T) {
 	t.Parallel()
 

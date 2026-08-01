@@ -8,7 +8,7 @@ import (
 func TestCapPriorSummariesKeepsNewestWithinBudget(t *testing.T) {
 	t.Parallel()
 
-	big := strings.Repeat("x", 400) // ~100 tokens each
+	big := strings.Repeat("x", 200) // ~100 tokens each
 	summaries := []string{"oldest " + big, "middle " + big, "newest " + big}
 
 	capped := capPriorSummaries(summaries, 220)

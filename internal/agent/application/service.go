@@ -96,34 +96,36 @@ type workspaceTargetResolver interface {
 
 // Service orchestrates chat with the internal agent.
 type Service struct {
-	agent              *native.Agent
-	modelsService      *models.Service
-	queries            dbstore.Queries
-	memoryRegistry     *memprovider.Registry
-	messageService     messagepkg.Service
-	settingsService    *settings.Service
-	accountService     *accounts.Service
-	sessionService     SessionService
-	acpPool            acpPrompter
-	compactionService  *compaction.Service
-	eventPublisher     messageevent.Publisher
-	skillLoader        SkillLoader
-	assetLoader        gatewayAssetLoader
-	platformIdentities PlatformIdentitySource
-	auxiliaryVision    AuxiliaryVisionConfig
-	auxiliaryVisionGen auxiliaryVisionGenerateFunc
-	botPermissions     botPermissionChecker
-	workspaceTargets   workspaceTargetResolver
-	pipeline           *timeline.Pipeline
-	streamHTTPClient   *http.Client
-	bgManager          *background.Manager
-	toolApproval       *toolapproval.Service
-	userInput          userInputService
-	hookService        *hooks.Service
-	memoryContextMu    sync.Mutex
-	memoryContextCache *memprovider.MemoryContextCache
-	acpPromptMu        sync.Mutex
-	acpPromptHubs      map[string]*acpActivePromptHub
+	agent               *native.Agent
+	modelsService       *models.Service
+	queries             dbstore.Queries
+	memoryRegistry      *memprovider.Registry
+	messageService      messagepkg.Service
+	settingsService     *settings.Service
+	accountService      *accounts.Service
+	sessionService      SessionService
+	acpPool             acpPrompter
+	compactionService   *compaction.Service
+	eventPublisher      messageevent.Publisher
+	skillLoader         SkillLoader
+	assetLoader         gatewayAssetLoader
+	platformIdentities  PlatformIdentitySource
+	auxiliaryVisionMu   sync.RWMutex
+	auxiliaryVision     AuxiliaryVisionConfig
+	auxiliaryVisionGen  auxiliaryVisionGenerateFunc
+	auxiliaryVisionWait auxiliaryVisionWaitFunc
+	botPermissions      botPermissionChecker
+	workspaceTargets    workspaceTargetResolver
+	pipeline            *timeline.Pipeline
+	streamHTTPClient    *http.Client
+	bgManager           *background.Manager
+	toolApproval        *toolapproval.Service
+	userInput           userInputService
+	hookService         *hooks.Service
+	memoryContextMu     sync.Mutex
+	memoryContextCache  *memprovider.MemoryContextCache
+	acpPromptMu         sync.Mutex
+	acpPromptHubs       map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error

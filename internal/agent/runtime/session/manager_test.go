@@ -668,6 +668,40 @@ func TestFinishRunSerializesInjectSendAndClose(t *testing.T) {
 	}
 }
 
+func TestDirectInjectUnblocksBeforeAbortClosesChannel(t *testing.T) {
+	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-direct-inject-close")
+	injectCh := make(chan turn.InjectMessage, 1)
+	injectCh <- turn.InjectMessage{Text: "fill buffer"}
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, "stream-direct-inject-close", make(chan struct{}, 1), func() {}, injectCh); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, testSessionID, "stream-direct-inject-close")
+	ctrl := manager.localControlForHandle(handle)
+	if ctrl == nil {
+		t.Fatal("missing local run control")
+	}
+
+	injectDone := make(chan error, 1)
+	go func() {
+		injectDone <- manager.InjectRun(context.Background(), handle, turn.InjectMessage{Text: "blocked injection"})
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for ctrl.injectMu.TryLock() {
+		ctrl.injectMu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("direct injector never entered the run-control send section")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	ctrl.stopCommands()
+	if err := <-injectDone; !errors.Is(err, ErrRunOwnershipLost) {
+		t.Fatalf("InjectRun error = %v, want ErrRunOwnershipLost", err)
+	}
+	waitInjectChannelClosed(t, injectCh)
+}
+
 func waitInjectChannelClosed(t *testing.T, injectCh <-chan turn.InjectMessage) {
 	t.Helper()
 	deadline := time.After(time.Second)

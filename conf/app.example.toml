@@ -73,8 +73,9 @@ system_files_max_bytes = 32768
 # override these values; see docker-compose.yml.
 auxiliary_vision_model = ""
 auxiliary_vision_provider = ""
-auxiliary_vision_prompt = ""
+# auxiliary_vision_prompt = "Describe every image in detail."
 auxiliary_vision_max_retries = 3
+auxiliary_vision_timeout = "60s"
 
 [session_runtime]
 # Stores live run snapshots for WebSocket attach/reconnect. memory is best for

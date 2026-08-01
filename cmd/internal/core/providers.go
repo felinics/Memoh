@@ -486,6 +486,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 		Provider:   cfg.Agent.AuxiliaryVisionProvider,
 		Prompt:     cfg.Agent.AuxiliaryVisionPrompt,
 		MaxRetries: cfg.Agent.AuxiliaryVisionMaxRetries,
+		Timeout:    cfg.Agent.AuxiliaryVisionTimeoutDuration(),
 	})
 	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
 	// Every turn entry point goes through admission, so a service without it can

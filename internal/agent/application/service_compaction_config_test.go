@@ -99,21 +99,23 @@ func TestEffectiveCompactionThreshold(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name      string
-		threshold int
-		budget    int
-		want      int
+		name         string
+		threshold    int
+		modelContext int
+		ratio        int
+		want         int
 	}{
-		{name: "keeps configured threshold when chat send budget is lower", threshold: 100000, budget: 10000, want: 100000},
-		{name: "keeps lower user threshold", threshold: 5000, budget: 200000, want: 5000},
-		{name: "keeps threshold when budget unknown", threshold: 100000, budget: 0, want: 100000},
-		{name: "zero threshold stays disabled", threshold: 0, budget: 200000, want: 0},
+		{name: "default 128k budget keeps configured threshold", threshold: 100000, modelContext: 128000, ratio: 80, want: 100000},
+		{name: "small compaction model triggers before overflow", threshold: 100000, modelContext: 32000, ratio: 80, want: 22976},
+		{name: "keeps lower user threshold", threshold: 5000, modelContext: 200000, ratio: 80, want: 5000},
+		{name: "keeps threshold when model window unknown", threshold: 100000, modelContext: 0, ratio: 80, want: 100000},
+		{name: "zero threshold stays disabled", threshold: 0, modelContext: 200000, ratio: 80, want: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := effectiveCompactionThreshold(tc.threshold, tc.budget); got != tc.want {
-				t.Fatalf("effectiveCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.want)
+			if got := effectiveCompactionThreshold(tc.threshold, tc.modelContext, tc.ratio); got != tc.want {
+				t.Fatalf("effectiveCompactionThreshold(%d, %d, %d) = %d, want %d", tc.threshold, tc.modelContext, tc.ratio, got, tc.want)
 			}
 		})
 	}
@@ -160,10 +162,10 @@ func TestAsyncCompactionInputTokensPrefersKnownCompactableHistory(t *testing.T) 
 func TestRollingSummaryTargetTokens(t *testing.T) {
 	t.Parallel()
 
-	if got := compaction.RollingSummaryTargetTokens(100000, 40); got != 40000 {
-		t.Fatalf("RollingSummaryTargetTokens(100000, 40) = %d, want 40000", got)
+	if got := compaction.RollingSummaryTargetTokens(100000, 40, 1000000); got != 16384 {
+		t.Fatalf("RollingSummaryTargetTokens(100000, 40, 1000000) = %d, want 16384", got)
 	}
-	if got := compaction.RollingSummaryTargetTokens(3, 1); got != 1 {
+	if got := compaction.RollingSummaryTargetTokens(3, 1, 128000); got != 1 {
 		t.Fatalf("small positive target = %d, want floor 1", got)
 	}
 }

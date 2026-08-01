@@ -58,7 +58,7 @@ type TriggerConfig struct {
 	MaxCompactTokens      int // if > 0, cap compaction input to this many tokens (e.g. 90% of model window)
 	TargetTokens          int // if > 0, compaction goal: reduce context to this many tokens (used by sync compaction)
 	Rolling               bool
-	SummaryTargetTokens   int // rolling summary output ceiling; e.g. 40% of a 100K threshold is 40K
+	SummaryTargetTokens   int // rolling summary output ceiling after model-window and output-limit clamping
 	PromptCacheTTL        string
 
 	// ObservedArtifactIDs is the active compaction frontier that was visible
@@ -76,10 +76,20 @@ type TriggerConfig struct {
 	Manual bool
 }
 
+const (
+	// SummaryWindowFractionDenominator keeps enough of the model window for the
+	// history being summarized. A replacement summary may use at most one
+	// quarter of the configured context window.
+	SummaryWindowFractionDenominator = 4
+	// ConservativeSummaryOutputTokens is used until model records expose a
+	// provider-independent maximum-output-token capability.
+	ConservativeSummaryOutputTokens = 16384
+)
+
 // RollingSummaryTargetTokens interprets ratio as the desired replacement
-// summary size relative to the configured trigger threshold. For example,
-// 40% of a 100K threshold is a 40K summary ceiling.
-func RollingSummaryTargetTokens(threshold, ratio int) int {
+// summary size relative to the configured trigger threshold, then clamps that
+// target to both a quarter of the model window and a conservative output cap.
+func RollingSummaryTargetTokens(threshold, ratio, modelContextTokens int) int {
 	if threshold <= 0 || ratio <= 0 {
 		return 0
 	}
@@ -88,7 +98,39 @@ func RollingSummaryTargetTokens(threshold, ratio int) int {
 	}
 	target := threshold * ratio / 100
 	if target == 0 {
-		return 1
+		target = 1
+	}
+	return clampSummaryTargetTokens(target, modelContextTokens)
+}
+
+// ManualSummaryTargetTokens provides a positive target for user-initiated
+// rolling compaction even when automatic compaction (threshold=0) is disabled.
+func ManualSummaryTargetTokens(modelContextTokens int) int {
+	target := ConservativeSummaryOutputTokens
+	if modelContextTokens > 0 {
+		target = modelContextTokens / SummaryWindowFractionDenominator
+	}
+	if target <= 0 {
+		target = 1
+	}
+	return clampSummaryTargetTokens(target, modelContextTokens)
+}
+
+func clampSummaryTargetTokens(target, modelContextTokens int) int {
+	if target <= 0 {
+		return 0
+	}
+	if modelContextTokens > 0 {
+		windowTarget := modelContextTokens / SummaryWindowFractionDenominator
+		if windowTarget <= 0 {
+			windowTarget = 1
+		}
+		if target > windowTarget {
+			target = windowTarget
+		}
+	}
+	if target > ConservativeSummaryOutputTokens {
+		target = ConservativeSummaryOutputTokens
 	}
 	return target
 }

@@ -533,6 +533,13 @@ func TestEffectiveDiscussMessageTokenBudget(t *testing.T) {
 			want:                89600,
 		},
 		{
+			name:                "advertised million token window remains hard capped",
+			contextTokenBudget:  1000000,
+			compactionEnabled:   false,
+			compactionThreshold: 0,
+			want:                256000,
+		},
+		{
 			name:                "higher threshold does not expand model budget",
 			contextTokenBudget:  100000,
 			compactionEnabled:   true,

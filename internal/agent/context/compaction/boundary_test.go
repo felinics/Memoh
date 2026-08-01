@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/textutil"
 )
 
 func toolCallRow(t *testing.T, tokens int) sqlc.ListUncompactedMessagesBySessionRow {
@@ -20,8 +21,8 @@ func toolResultRow(t *testing.T, tokens int) sqlc.ListUncompactedMessagesBySessi
 // trim tests drive the rendered-byte budget directly.
 func textRow(t *testing.T, role string, tokens int) sqlc.ListUncompactedMessagesBySessionRow {
 	t.Helper()
-	body := make([]byte, 0, tokens*4)
-	for len(body) < tokens*4 {
+	body := make([]byte, 0, tokens*textutil.EstimatedBytesPerToken)
+	for len(body) < tokens*textutil.EstimatedBytesPerToken {
 		body = append(body, 'x')
 	}
 	return mkRow(t, role, `"`+string(body)+`"`, 0)
@@ -220,7 +221,7 @@ func TestTrimCompactMessagesKeepsOldestAndToolExchangeIntact(t *testing.T) {
 		textRow(t, "assistant", 100),
 	}
 	items, _ := itemsFromRows(rows)
-	trimmed := trimCompactMessages(items, 120)
+	trimmed := trimCompactMessages(items, 160)
 	if len(trimmed) != 3 {
 		t.Fatalf("trimmed = %d, want the oldest exchange plus the first text row", len(trimmed))
 	}

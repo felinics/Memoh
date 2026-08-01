@@ -83,7 +83,9 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 		errs:   make(chan error, 1),
 		ctx:    runCtx,
 		cancel: cancel,
-		inject: injectCh,
+		injectFn: func(ctx context.Context, msg turn.InjectMessage) error {
+			return s.sessionRuntime.InjectRun(ctx, admission.Handle, msg)
+		},
 		addAssets: func(refs []turn.OutboundAssetRef) {
 			assetMu.Lock()
 			defer assetMu.Unlock()
@@ -108,12 +110,11 @@ type runHandle struct {
 	errs      chan error
 	ctx       context.Context
 	cancel    context.CancelFunc
-	inject    chan turn.InjectMessage
+	injectFn  func(context.Context, turn.InjectMessage) error
 	addAssets func([]turn.OutboundAssetRef)
 
-	// injectMu guards inject against send-after-close: the pump closes the
-	// channel when the run ends so the application's forwarding goroutine
-	// (which ranges over it) can exit instead of leaking per turn.
+	// injectMu only guards the handle lifecycle. The session runtime owns both
+	// sends to and closure of the shared channel under its own run-control lock.
 	injectMu     sync.Mutex
 	injectClosed bool
 
@@ -134,26 +135,31 @@ func (h *runHandle) Cancel()                   { h.cancel() }
 
 func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	h.injectMu.Lock()
-	defer h.injectMu.Unlock()
 	if h.injectClosed {
+		h.injectMu.Unlock()
 		if err := h.ctx.Err(); err != nil {
 			return err
 		}
 		return errors.New("turn: run already finished")
 	}
-	select {
-	case h.inject <- msg:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-h.ctx.Done():
-		return h.ctx.Err()
+	injectFn := h.injectFn
+	h.injectMu.Unlock()
+	if injectFn == nil {
+		return errors.New("turn: run does not accept injected messages")
 	}
+
+	if err := injectFn(ctx, msg); err != nil {
+		if runErr := h.ctx.Err(); runErr != nil {
+			return runErr
+		}
+		return err
+	}
+	return nil
 }
 
 // disableInject stops direct handle injection before the session runtime
-// finishes the run. The session runtime owns closing the shared channel so its
-// routed steer sender and the close are serialized by the same lock.
+// finishes the run. Actual sends and closure stay serialized by the session
+// runtime's run-control lock.
 func (h *runHandle) disableInject() {
 	h.injectMu.Lock()
 	defer h.injectMu.Unlock()
@@ -214,8 +220,9 @@ func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {
 // pump forwards the application's chunk/error pair into the handle's channels,
 // wrapping each chunk as a turn.Event with a monotonically increasing Seq.
 func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, errCh <-chan error) {
-	// Deferred order (LIFO): detect external cancellation, cancel, close
-	// inject, release a failed claim, then close the channel pair — so by
+	// Deferred order (LIFO): detect external cancellation, cancel, disable
+	// handle injection, finish the runtime (which closes inject), then close
+	// the channel pair — so by
 	// the time a consumer observes the closed channels, the idempotency
 	// claim of a failed/canceled run has already been released.
 	defer close(h.events)

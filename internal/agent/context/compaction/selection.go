@@ -9,6 +9,7 @@ import (
 
 	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	"github.com/memohai/memoh/internal/textutil"
 )
 
 type CompactPolicy string
@@ -212,14 +213,14 @@ func estimateItemTokens(item CompactionCandidate) int {
 			}
 		}
 	}
-	return len(item.RawContent) / 4
+	return textutil.EstimateTokensFromBytes(len(item.RawContent))
 }
 
 func estimateBytesAsTokens(value string) int {
 	if value == "" {
 		return 0
 	}
-	return (len(value) + 3) / 4
+	return textutil.EstimateTokensFromBytes(len(value))
 }
 
 // splitByRatio splits items so that roughly the first ratio% (by token weight)

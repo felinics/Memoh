@@ -134,7 +134,7 @@
           v-for="key in requiredFieldsKeys"
           :key="key"
           v-model="form.credentials[key]"
-          :field="orderedFields[key]"
+          :field="getOrderedField(key)"
           :field-key="key"
         />
       </SettingsSection>
@@ -163,12 +163,59 @@
               v-for="key in optionalFieldsKeys"
               :key="key"
               v-model="form.credentials[key]"
-              :field="orderedFields[key]"
+              :field="getOrderedField(key)"
               :field-key="key"
             />
           </DialogBody>
         </DialogPanel>
       </Dialog>
+
+      <SettingsSection
+        v-if="isTelegram"
+        :title="$t('bots.channels.telegramDiscussTitle')"
+      >
+        <SettingsRow
+          :label="$t('bots.channels.telegramPassiveRate')"
+          :description="$t('bots.channels.telegramPassiveRateDescription')"
+        >
+          <div class="flex w-48 items-center gap-3">
+            <Slider
+              :model-value="[telegramPassiveRate]"
+              :min="0"
+              :max="1"
+              :step="0.01"
+              :disabled="!telegramPolicyLoaded || isBusy"
+              class="min-w-0 flex-1"
+              @update:model-value="updateTelegramPassiveRate"
+            />
+            <span class="w-10 text-right text-xs tabular-nums text-muted-foreground">
+              {{ Math.round(telegramPassiveRate * 100) }}%
+            </span>
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          :label="$t('bots.channels.telegramForceReplyKeywords')"
+          :description="$t('bots.channels.telegramForceReplyKeywordsDescription')"
+        >
+          <TagsInput
+            :model-value="telegramForceReplyKeywords"
+            :add-on-blur="true"
+            :disabled="!telegramPolicyLoaded || isBusy"
+            class="w-72"
+            @update:model-value="(values) => telegramForceReplyKeywords = normalizeTelegramKeywords(values.map(String))"
+          >
+            <TagsInputItem
+              v-for="keyword in telegramForceReplyKeywords"
+              :key="keyword.toLocaleLowerCase()"
+              :value="keyword"
+            >
+              <TagsInputItemText />
+              <TagsInputItemDelete />
+            </TagsInputItem>
+            <TagsInputInput :placeholder="$t('bots.channels.telegramForceReplyKeywordsPlaceholder')" />
+          </TagsInput>
+        </SettingsRow>
+      </SettingsSection>
     </template>
 
     <!-- Removing a connection is irreversible, so it sits in its own card -->
@@ -206,13 +253,16 @@
 </template>
 
 <script setup lang="ts">
-import { ActionCard, Button, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input } from '@felinic/ui'
+import {
+  ActionCard, Button, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, Slider,
+  TagsInput, TagsInputInput, TagsInputItem, TagsInputItemDelete, TagsInputItemText,
+} from '@felinic/ui'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { useMutation } from '@pinia/colada'
-import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus, postBotsByIdChannelByPlatformWebhookEndpoint } from '@memohai/sdk'
+import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
+import { getBotsById, putBotsById, putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus, postBotsByIdChannelByPlatformWebhookEndpoint } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
@@ -246,6 +296,22 @@ const { t } = useI18n()
 const botIdRef = computed(() => props.botId)
 const platformType = computed(() => String(props.channelItem.meta.type || '').trim())
 const channelTitle = computed(() => channelTypeDisplayName(t, props.channelItem.meta.type, props.channelItem.meta.display_name))
+const isTelegram = computed(() => platformType.value === 'telegram')
+const queryCache = useQueryCache()
+
+const TELEGRAM_PASSIVE_RATE_KEY = 'telegram_discuss_passive_sample_rate'
+const TELEGRAM_FORCE_REPLY_KEYWORDS_KEY = 'telegram_discuss_force_reply_keywords'
+const DEFAULT_TELEGRAM_PASSIVE_RATE = 0.25
+const EMPTY_CHANNEL_FIELD: ChannelFieldSchema = {}
+
+const { data: bot } = useQuery({
+  key: () => ['bot', botIdRef.value],
+  query: async () => {
+    const { data } = await getBotsById({ path: { id: botIdRef.value }, throwOnError: true })
+    return data
+  },
+  enabled: () => isTelegram.value && !!botIdRef.value,
+})
 
 const action = ref<'save' | 'toggle' | 'delete' | 'webhook' | ''>('')
 const isBusy = computed(() => action.value !== '')
@@ -255,6 +321,11 @@ const lastSavedConfigId = ref('')
 const form = reactive<{ credentials: Record<string, unknown>; disabled: boolean }>({ credentials: {}, disabled: false })
 const initialCredentialsString = ref('')
 const isAdvancedExpanded = ref(false)
+const telegramPassiveRate = ref(DEFAULT_TELEGRAM_PASSIVE_RATE)
+const telegramForceReplyKeywords = ref<string[]>([])
+const savedTelegramPassiveRate = ref(DEFAULT_TELEGRAM_PASSIVE_RATE)
+const savedTelegramForceReplyKeywords = ref<string[]>([])
+const telegramPolicyLoaded = ref(false)
 
 const { mutateAsync: upsertChannel } = useMutation({
   mutation: async ({ platform, data }: { platform: string; data: ChannelUpsertConfigRequest }) => {
@@ -288,8 +359,12 @@ const orderedFields = computed(() => {
   return Object.fromEntries(entries) as Record<string, ChannelFieldSchema>
 })
 
-const requiredFieldsKeys = computed(() => Object.keys(orderedFields.value).filter(k => orderedFields.value[k].required))
-const optionalFieldsKeys = computed(() => Object.keys(orderedFields.value).filter(k => !orderedFields.value[k].required))
+const requiredFieldsKeys = computed(() => Object.keys(orderedFields.value).filter(k => orderedFields.value[k]?.required))
+const optionalFieldsKeys = computed(() => Object.keys(orderedFields.value).filter(k => !orderedFields.value[k]?.required))
+
+function getOrderedField(key: string): ChannelFieldSchema {
+  return orderedFields.value[key] ?? EMPTY_CHANNEL_FIELD
+}
 
 const currentInboundMode = computed(() => String(form.credentials.inboundMode ?? form.credentials.inbound_mode ?? '').trim().toLowerCase())
 const isFeishuWebhook = computed(() => platformType.value === 'feishu' && currentInboundMode.value === 'webhook')
@@ -336,21 +411,81 @@ function initForm() {
   // a DIALOG — auto-popping a modal on init would be hostile; the
   // always-visible ActionCard entry keeps the facet discoverable.
   isAdvancedExpanded.value = false
-  emit('update:dirty', false)
 }
 
 watch(() => props.channelItem, initForm, { immediate: true })
 
 // Stringify the reactive proxy (not toRaw) so the computed actually tracks nested
 // credential edits — otherwise Save never re-enables after a field changes.
-const isFormDirty = computed(() => JSON.stringify(form.credentials) !== initialCredentialsString.value)
-watch(isFormDirty, (val) => emit('update:dirty', val))
+const isChannelFormDirty = computed(() => JSON.stringify(form.credentials) !== initialCredentialsString.value)
+const isTelegramPolicyDirty = computed(() => isTelegram.value && telegramPolicyLoaded.value && (
+  telegramPassiveRate.value !== savedTelegramPassiveRate.value
+  || JSON.stringify(telegramForceReplyKeywords.value) !== JSON.stringify(savedTelegramForceReplyKeywords.value)
+))
+const isFormDirty = computed(() => isChannelFormDirty.value || isTelegramPolicyDirty.value)
+watch(isFormDirty, (val) => emit('update:dirty', val), { immediate: true })
+
+watch(bot, (value) => {
+  if (!isTelegram.value || !value) return
+  const metadata = isRecord(value.metadata) ? value.metadata : {}
+  const rate = normalizeTelegramPassiveRate(metadata[TELEGRAM_PASSIVE_RATE_KEY])
+  const keywords = normalizeTelegramKeywords(metadata[TELEGRAM_FORCE_REPLY_KEYWORDS_KEY])
+  telegramPassiveRate.value = rate
+  telegramForceReplyKeywords.value = keywords
+  savedTelegramPassiveRate.value = rate
+  savedTelegramForceReplyKeywords.value = [...keywords]
+  telegramPolicyLoaded.value = true
+}, { immediate: true })
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function normalizeTelegramPassiveRate(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+    ? value
+    : DEFAULT_TELEGRAM_PASSIVE_RATE
+}
+
+function normalizeTelegramKeywords(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const keywords: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const keyword = item.trim()
+    const identity = keyword.toLocaleLowerCase()
+    if (!keyword || seen.has(identity)) continue
+    seen.add(identity)
+    keywords.push(keyword)
+  }
+  return keywords
+}
+
+async function saveTelegramPolicy() {
+  if (!isTelegramPolicyDirty.value) return
+  if (!bot.value || !telegramPolicyLoaded.value) {
+    throw new Error('Telegram discuss policy is not loaded')
+  }
+  const metadata = isRecord(bot.value.metadata) ? { ...bot.value.metadata } : {}
+  metadata[TELEGRAM_PASSIVE_RATE_KEY] = telegramPassiveRate.value
+  metadata[TELEGRAM_FORCE_REPLY_KEYWORDS_KEY] = [...telegramForceReplyKeywords.value]
+  await putBotsById({ path: { id: botIdRef.value }, body: { metadata }, throwOnError: true })
+  savedTelegramPassiveRate.value = telegramPassiveRate.value
+  savedTelegramForceReplyKeywords.value = [...telegramForceReplyKeywords.value]
+  void queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
+  void queryCache.invalidateQueries({ key: ['bot'] })
+}
+
+function updateTelegramPassiveRate(value: number[] | undefined) {
+  telegramPassiveRate.value = value?.[0] ?? telegramPassiveRate.value
+}
 
 function validateRequired(): boolean {
   for (const key of requiredFieldsKeys.value) {
     const val = form.credentials[key]
     if (!val || (typeof val === 'string' && val.trim() === '')) {
-      toast.error(t('bots.channels.requiredField', { field: orderedFields.value[key].title || key }))
+      toast.error(t('bots.channels.requiredField', { field: orderedFields.value[key]?.title || key }))
       return false
     }
   }
@@ -369,6 +504,7 @@ async function handleSave() {
   try {
     const cleanCreds = Object.fromEntries(Object.entries(form.credentials).filter(([k, v]) => k !== 'status' && k !== 'disabled' && v !== '' && v !== undefined && v !== null))
     const result = await upsertChannel({ platform: platformType.value, data: { credentials: cleanCreds, disabled: form.disabled } })
+    await saveTelegramPolicy()
     lastSavedConfigId.value = String(result?.id || lastSavedConfigId.value || '').trim()
     initialCredentialsString.value = JSON.stringify(form.credentials)
     toast.success(t('bots.channels.saveSuccess'))

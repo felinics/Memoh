@@ -4,10 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/channel"
 )
+
+const discussReplyFallbackTimeout = 30 * time.Second
 
 func (*DiscussDriver) sendReplyFallback(
 	ctx context.Context,
@@ -28,7 +31,9 @@ func (*DiscussDriver) sendReplyFallback(
 	if message.IsEmpty() {
 		return
 	}
-	if err := cfg.ReplySender.Send(ctx, channel.OutboundMessage{
+	sendCtx, cancel := context.WithTimeout(ctx, discussReplyFallbackTimeout)
+	defer cancel()
+	if err := cfg.ReplySender.Send(sendCtx, channel.OutboundMessage{
 		Target:  strings.TrimSpace(cfg.ReplyTarget),
 		Message: message,
 	}); err != nil {
@@ -62,7 +67,7 @@ func latestReplyMessage(messages []turn.ModelMessage, platform string) channel.M
 
 func replyMessage(text, platform string) channel.Message {
 	text = strings.TrimSpace(text)
-	if text == "" || strings.EqualFold(text, "NO_REPLY") {
+	if text == "" || channel.IsSilentReplyText(text) {
 		return channel.Message{}
 	}
 	message := channel.Message{Text: text}

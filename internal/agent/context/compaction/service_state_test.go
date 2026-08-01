@@ -399,10 +399,10 @@ func TestDoCompactionSacrificesPriorContextForOversizedEntries(t *testing.T) {
 	if strings.Contains(stub.prompt, prior) {
 		t.Fatal("full prior context must not ride along with oversized entries")
 	}
-	// stub.prompt concatenates the fixed system prompt (~190 tokens) and the
-	// user-prompt wrapper (~90 tokens) on top of the budgeted prior+entries;
+	// stub.prompt concatenates the fixed system and user-prompt wrappers
+	// (conservatively estimated at no more than ~640 tokens) on top of the budgeted prior+entries;
 	// an additive-budget regression overshoots this bound by the full prior.
-	if got := estimateBytesAsTokens(stub.prompt); got > 1000+320 {
+	if got := estimateBytesAsTokens(stub.prompt); got > 1000+640 {
 		t.Fatalf("combined prompt ~%d tokens, want within MaxCompactTokens plus the fixed overhead", got)
 	}
 }
@@ -426,7 +426,7 @@ func TestDoCompactionCountsPriorSeparatorsInSharedBudget(t *testing.T) {
 	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
 		t.Fatalf("RunCompactionSync = %v, %v", res, err)
 	}
-	if got := estimateBytesAsTokens(stub.prompt); got > 1000+320 {
+	if got := estimateBytesAsTokens(stub.prompt); got > 1000+640 {
 		t.Fatalf("combined prompt ~%d tokens: prior separators must count toward the shared budget", got)
 	}
 }
@@ -457,7 +457,7 @@ func TestDoCompactionTruncatesEntriesPastTheTotalCap(t *testing.T) {
 	if !strings.Contains(stub.prompt, truncationMarker) {
 		t.Fatal("an entry larger than the whole budget must be truncated, not sent verbatim")
 	}
-	if got := estimateBytesAsTokens(stub.prompt); got > 1000+320 {
+	if got := estimateBytesAsTokens(stub.prompt); got > 1000+640 {
 		t.Fatalf("combined prompt ~%d tokens, want within the total cap plus fixed overhead", got)
 	}
 }

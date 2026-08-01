@@ -3,6 +3,8 @@ package compaction
 import (
 	"fmt"
 	"strings"
+
+	"github.com/memohai/memoh/internal/textutil"
 )
 
 const systemPrompt = `You are a conversation summarizer. Given a conversation history, produce a concise summary that preserves:
@@ -132,7 +134,7 @@ func capEntriesToBudget(entries []messageEntry, maxTokens int) []messageEntry {
 		cost := costOf(entry)
 		if cost > avail {
 			truncated := entry
-			budgetBytes := (avail - overhead) * 4
+			budgetBytes := (avail - overhead) * textutil.EstimatedBytesPerToken
 			if budgetBytes > len(truncationMarker) {
 				truncated.Content = truncateBytes(entry.Content, budgetBytes-len(truncationMarker))
 			} else {
@@ -177,7 +179,7 @@ func capPriorSummaries(summaries []string, maxTokens int) []string {
 	}
 	kept := summaries[start:]
 	if len(kept) == 1 && estimateBytesAsTokens(kept[0])+priorSeparatorTokens > maxTokens {
-		budgetBytes := (maxTokens-priorSeparatorTokens)*4 - len(truncationMarker)
+		budgetBytes := (maxTokens-priorSeparatorTokens)*textutil.EstimatedBytesPerToken - len(truncationMarker)
 		if budgetBytes <= 0 {
 			return nil
 		}

@@ -172,6 +172,42 @@ func (r *Registry) Instantiate(ctx context.Context, id, providerType string, con
 	return r.instantiate(ctx, key, providerType, config)
 }
 
+// Replace constructs and installs a provider while holding the registry lock,
+// so concurrent Get calls can observe either the old instance or the fully
+// constructed replacement, never a cache miss that reloads stale DB config.
+func (r *Registry) Replace(ctx context.Context, id, providerType string, config map[string]any) (Provider, error) {
+	id = strings.TrimSpace(id)
+	providerType = strings.TrimSpace(providerType)
+	key, err := r.key(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	factory, ok := r.factories[providerType]
+	if !ok {
+		previous := r.instances[key]
+		delete(r.instances, key)
+		r.mu.Unlock()
+		closeProvider(previous)
+		return nil, fmt.Errorf("unknown memory provider type: %s", providerType)
+	}
+	replacement, err := factory(ctx, key.teamID, key.providerID, config)
+	if err != nil {
+		previous := r.instances[key]
+		delete(r.instances, key)
+		r.mu.Unlock()
+		closeProvider(previous)
+		return nil, fmt.Errorf("replace memory provider %s (%s) for team %s: %w", key.providerID, providerType, key.teamID, err)
+	}
+	previous := r.instances[key]
+	r.instances[key] = replacement
+	r.mu.Unlock()
+	if previous != replacement {
+		closeProvider(previous)
+	}
+	return replacement, nil
+}
+
 func (r *Registry) instantiate(ctx context.Context, key registryKey, providerType string, config map[string]any) (Provider, error) {
 	// Factory construction is serialized with Remove. Besides deduplicating
 	// concurrent cache misses, this prevents an in-flight old configuration

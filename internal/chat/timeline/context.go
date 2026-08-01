@@ -2,12 +2,11 @@ package timeline
 
 import (
 	"encoding/json"
-	"math"
 	"sort"
 	"strings"
-)
 
-const charsPerToken = 2
+	"github.com/memohai/memoh/internal/textutil"
+)
 
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
 // used as the "TR" stream in context composition.
@@ -390,7 +389,7 @@ func estimateMessagesTokens(messages []ContextMessage) int {
 
 func estimateMessageTokens(m ContextMessage) int {
 	if len(m.RawContent) > 0 {
-		return int(math.Ceil(float64(len(m.RawContent)) / charsPerToken))
+		return textutil.EstimateTokensFromBytes(len(m.RawContent))
 	}
-	return int(math.Ceil(float64(len(m.Content)) / charsPerToken))
+	return textutil.EstimateTokensFromBytes(len(m.Content))
 }

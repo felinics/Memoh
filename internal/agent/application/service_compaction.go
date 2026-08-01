@@ -14,14 +14,33 @@ import (
 
 // compactionBudgetThresholdPercent is the share of a chat model's context
 // reserved for history before the ordinary pre-send trimming path intervenes.
-const compactionBudgetThresholdPercent = 70
+const (
+	compactionBudgetThresholdPercent = 70
+	// maxDiscussMessageTokenBudget is the final guard against advertised model
+	// windows that are larger than a compatibility endpoint accepts in one
+	// request. It applies even when Bot compaction is disabled.
+	maxDiscussMessageTokenBudget = 256000
+)
 
-// effectiveCompactionThreshold preserves the user-configured absolute
-// threshold. Pre-send trimming separately protects the chat model's context
-// window; changing the compaction threshold here would break the configured
-// rolling-summary cycle (for example, 100K -> 40K).
-func effectiveCompactionThreshold(threshold, contextTokenBudget int) int {
-	_ = contextTokenBudget
+// effectiveCompactionThreshold brings an invalid threshold forward just enough
+// for the configured compaction model to accept the history plus its summary.
+// Valid user thresholds remain unchanged.
+func effectiveCompactionThreshold(threshold, modelContextTokens, ratio int) int {
+	if threshold <= 0 || modelContextTokens <= 0 {
+		return threshold
+	}
+	if ratio <= 0 || ratio > 100 {
+		ratio = 80
+	}
+	summaryTarget := compaction.RollingSummaryTargetTokens(threshold, ratio, modelContextTokens)
+	promptReserve := modelContextTokens / 100
+	if promptReserve < 1024 {
+		promptReserve = 1024
+	}
+	safeThreshold := modelContextTokens - summaryTarget - promptReserve
+	if safeThreshold > 0 && safeThreshold < threshold {
+		return safeThreshold
+	}
 	return threshold
 }
 
@@ -55,7 +74,8 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		)
 		return
 	}
-	threshold := effectiveCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
+	modelContextTokens := s.compactionModelContextTokens(ctx, botSettings.CompactionModelID)
+	threshold := effectiveCompactionThreshold(botSettings.CompactionThreshold, modelContextTokens, botSettings.CompactionRatio)
 	if !compaction.ShouldCompact(inputTokens, threshold) {
 		s.logger.Info("compaction: skipped, below threshold",
 			slog.Int("input_tokens", inputTokens),
@@ -86,10 +106,21 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 	cfg.ObservedArtifactIDs = append([]string(nil), rc.compactionArtifactIDs...)
 	cfg.ObservedArtifactsKnown = rc.compactionArtifactsKnown
 	cfg.Rolling = true
-	cfg.SummaryTargetTokens = compaction.RollingSummaryTargetTokens(threshold, cfg.Ratio)
+	cfg.SummaryTargetTokens = compaction.RollingSummaryTargetTokens(threshold, cfg.Ratio, cfg.ModelContextTokens)
 	if err := s.compactionService.RunCompaction(ctx, cfg); err != nil {
 		s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
 	}
+}
+
+func (s *Service) compactionModelContextTokens(ctx context.Context, modelID string) int {
+	if s.modelsService == nil || strings.TrimSpace(modelID) == "" {
+		return 0
+	}
+	model, err := s.modelsService.GetByID(ctx, modelID)
+	if err != nil || model.Config.ContextWindow == nil || *model.Config.ContextWindow <= 0 {
+		return 0
+	}
+	return *model.Config.ContextWindow
 }
 
 // runCompactionSync runs compaction synchronously when context reaches

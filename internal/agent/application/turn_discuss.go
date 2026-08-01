@@ -14,9 +14,10 @@ import (
 	"github.com/memohai/memoh/internal/agent/turn"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/memohai/memoh/internal/textutil"
 )
 
-const discussForceReplyInstruction = "Operator directive: the latest incoming message matched a configured force-reply keyword. You must send a concise, relevant reply to that message through the available messaging capability. Do not stay silent or respond only in private text."
+const discussForceReplyInstruction = "Operator directive: channel policy requires a reply to the latest addressed incoming message. You must send a concise, relevant reply through the available messaging capability. Do not stay silent or respond only in private text."
 
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
 // Production leaves them nil and calls the Service's own orchestration methods
@@ -55,7 +56,6 @@ func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel con
 			errs:      make(chan error, 1),
 			ctx:       ctx,
 			cancel:    cancel,
-			inject:    make(chan turn.InjectMessage), // unused in discuss mode
 			addAssets: func([]turn.OutboundAssetRef) {},
 			finishRun: finishRun,
 		},
@@ -171,7 +171,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// auxiliary vision model describes them and the observation is appended to
 	// the latest user message.
 	if len(cmd.DiscussImageRefs) > 0 &&
-		(runConfig.SupportsImageInput || s.auxiliaryVision.normalized().enabled()) {
+		(runConfig.SupportsImageInput || s.auxiliaryVisionConfigSnapshot().enabled()) {
 		refs := make([]timeline.ImageAttachmentRef, len(cmd.DiscussImageRefs))
 		for i, r := range cmd.DiscussImageRefs {
 			refs[i] = timeline.ImageAttachmentRef{ContentHash: r.ContentHash, Mime: r.Mime}
@@ -374,6 +374,9 @@ func discussMessageTokenBudget(contextTokenBudget int) int {
 	if budget == 0 {
 		return 1
 	}
+	if budget > maxDiscussMessageTokenBudget {
+		return maxDiscussMessageTokenBudget
+	}
 	return budget
 }
 
@@ -407,11 +410,7 @@ func latestSafeDiscussCutoff(messages []turn.DiscussMessage) int {
 }
 
 func estimateDiscussMessageTokens(message turn.DiscussMessage) int {
-	// Keep this estimate aligned with chat/timeline context composition. Group
-	// histories contain a large share of CJK text, where the old bytes/4
-	// estimate could undercount by roughly half and bypass the pre-send trim.
-	const charsPerToken = 2
-	return (discussMessageContentBytes(message) + charsPerToken - 1) / charsPerToken
+	return textutil.EstimateTokensFromBytes(discussMessageContentBytes(message))
 }
 
 func discussMessageContentBytes(message turn.DiscussMessage) int {

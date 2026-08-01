@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -176,8 +178,30 @@ func TestParseConfigDefaultsToDryRunAndRestart(t *testing.T) {
 	if !cfg.restart || !cfg.useSudo {
 		t.Fatalf("unexpected defaults: restart=%v sudo=%v", cfg.restart, cfg.useSudo)
 	}
-	if cfg.timeout != 2*time.Minute {
-		t.Fatalf("timeout = %v, want 2m", cfg.timeout)
+	if cfg.timeout != 10*time.Minute {
+		t.Fatalf("timeout = %v, want 10m", cfg.timeout)
+	}
+}
+
+func TestDockerOutputKeepsStderrOutOfJSON(t *testing.T) {
+	t.Parallel()
+
+	var warnings bytes.Buffer
+	runner := &commandRunner{
+		stderr: &warnings,
+		dockerCommandFn: func(ctx context.Context, _ ...string) *exec.Cmd {
+			return exec.CommandContext(ctx, "sh", "-c", `printf '%s' '{"route_count":1}'; printf '%s' 'NOTICE: maintenance' >&2`)
+		},
+	}
+	output, err := runner.dockerOutput(context.Background(), "exec", "postgres")
+	if err != nil {
+		t.Fatalf("dockerOutput() error = %v", err)
+	}
+	if got := string(output); got != `{"route_count":1}` {
+		t.Fatalf("stdout = %q, want clean JSON", got)
+	}
+	if !strings.Contains(warnings.String(), "NOTICE: maintenance") {
+		t.Fatalf("stderr = %q, want psql notice", warnings.String())
 	}
 }
 

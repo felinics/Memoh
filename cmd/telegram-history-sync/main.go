@@ -95,10 +95,11 @@ type applyResult struct {
 }
 
 type commandRunner struct {
-	useSudo bool
-	stdin   io.Reader
-	stdout  io.Writer
-	stderr  io.Writer
+	useSudo         bool
+	stdin           io.Reader
+	stdout          io.Writer
+	stderr          io.Writer
+	dockerCommandFn func(context.Context, ...string) *exec.Cmd
 }
 
 func main() {
@@ -284,7 +285,7 @@ func parseConfig(args []string, stderr io.Writer) (config, error) {
 		defaultPostgresDatabase,
 		"PostgreSQL 数据库",
 	)
-	fs.DurationVar(&cfg.timeout, "timeout", 2*time.Minute, "单个数据库/容器操作超时")
+	fs.DurationVar(&cfg.timeout, "timeout", 10*time.Minute, "单个数据库/容器操作超时")
 
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
@@ -524,16 +525,27 @@ func (r *commandRunner) compose(ctx context.Context, cfg config, args ...string)
 func (r *commandRunner) dockerOutput(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := r.dockerCommand(ctx, args...)
 	cmd.Stdin = r.stdin
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("docker %s: %w: %s", strings.Join(args, " "), err, truncate(output.Bytes(), 1000))
+		diagnostic := bytes.TrimSpace(stderr.Bytes())
+		if len(diagnostic) == 0 {
+			diagnostic = bytes.TrimSpace(stdout.Bytes())
+		}
+		return nil, fmt.Errorf("docker %s: %w: %s", strings.Join(args, " "), err, truncate(diagnostic, 1000))
 	}
-	return output.Bytes(), nil
+	if stderr.Len() > 0 && r.stderr != nil {
+		_, _ = r.stderr.Write(stderr.Bytes())
+	}
+	return stdout.Bytes(), nil
 }
 
 func (r *commandRunner) dockerCommand(ctx context.Context, args ...string) *exec.Cmd {
+	if r.dockerCommandFn != nil {
+		return r.dockerCommandFn(ctx, args...)
+	}
 	if r.useSudo {
 		sudoArgs := []string{"-n", "docker"}
 		sudoArgs = append(sudoArgs, args...)

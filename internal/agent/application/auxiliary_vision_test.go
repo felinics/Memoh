@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
@@ -22,6 +24,7 @@ func TestDescribeImagesWithAuxiliaryVisionRetriesThreeTimes(t *testing.T) {
 			Prompt:     "describe in detail",
 			MaxRetries: 3,
 		},
+		auxiliaryVisionWait: func(context.Context, time.Duration) error { return nil },
 	}
 	service.auxiliaryVisionGen = func(_ context.Context, _ string, prompt string, caption string, images []sdk.ImagePart) (string, error) {
 		calls++
@@ -29,7 +32,7 @@ func TestDescribeImagesWithAuxiliaryVisionRetriesThreeTimes(t *testing.T) {
 			t.Fatalf("unexpected generator input: prompt=%q caption=%q images=%#v", prompt, caption, images)
 		}
 		if calls <= 3 {
-			return "", errors.New("temporary failure")
+			return "", errors.New("api error 503: temporary failure")
 		}
 		return "图片中是一只坐在窗边的猫。", nil
 	}
@@ -52,6 +55,81 @@ func TestDescribeImagesWithAuxiliaryVisionRetriesThreeTimes(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("vision context missing %q: %s", want, got)
 		}
+	}
+}
+
+func TestRetryAuxiliaryVisionDoesNotRetryDeterministicErrors(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	_, err := retryAuxiliaryVisionWithWait(context.Background(), 10, func(context.Context) (string, error) {
+		calls++
+		return "", errors.New("auxiliary vision model does not support image input")
+	}, func(context.Context, time.Duration) error {
+		t.Fatal("deterministic error must not enter backoff")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected deterministic error")
+	}
+	if calls != 1 {
+		t.Fatalf("generator calls = %d, want 1", calls)
+	}
+}
+
+func TestRetryAuxiliaryVisionUsesBoundedExponentialBackoff(t *testing.T) {
+	t.Parallel()
+
+	var delays []time.Duration
+	calls := 0
+	got, err := retryAuxiliaryVisionWithWait(context.Background(), 5, func(context.Context) (string, error) {
+		calls++
+		if calls < 4 {
+			return "", errors.New("status code 503")
+		}
+		return "described", nil
+	}, func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	})
+	if err != nil || got != "described" {
+		t.Fatalf("result = %q, err = %v", got, err)
+	}
+	want := []time.Duration{500 * time.Millisecond, time.Second, 2 * time.Second}
+	if !reflect.DeepEqual(delays, want) {
+		t.Fatalf("retry delays = %v, want %v", delays, want)
+	}
+}
+
+func TestAuxiliaryVisionHasIndependentTimeout(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		logger: slog.New(slog.DiscardHandler),
+		auxiliaryVision: AuxiliaryVisionConfig{
+			Model:   "vision-model",
+			Timeout: 20 * time.Millisecond,
+		},
+		auxiliaryVisionGen: func(ctx context.Context, _ string, _ string, _ string, _ []sdk.ImagePart) (string, error) {
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("auxiliary vision call has no deadline")
+			}
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	}
+	started := time.Now()
+	got := service.describeImagesWithAuxiliaryVision(context.Background(), ChatRequest{BotID: "bot-1"}, false, []gatewayAttachment{{
+		Type:      "image",
+		Mime:      "image/png",
+		Transport: gatewayTransportInlineDataURL,
+		Payload:   "data:image/png;base64,AAAA",
+	}})
+	if got != "" {
+		t.Fatalf("vision context = %q, want empty on timeout", got)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("independent timeout took %s", elapsed)
 	}
 }
 

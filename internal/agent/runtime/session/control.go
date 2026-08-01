@@ -215,6 +215,40 @@ func (c *runControl) sendInject(ctx context.Context, message turn.InjectMessage)
 	}
 }
 
+// InjectRun delivers a direct in-process injection through the same run-control
+// lock that owns channel closure. A stopped lifecycle wakes a blocked sender
+// before closeInject can close the channel, eliminating send-on-closed races.
+func (m *Manager) InjectRun(ctx context.Context, handle RunHandle, message turn.InjectMessage) error {
+	ctrl := m.localControlForHandle(handle)
+	if ctrl == nil {
+		return ErrRunOwnershipLost
+	}
+	return ctrl.inject(ctx, message)
+}
+
+func (c *runControl) inject(ctx context.Context, message turn.InjectMessage) error {
+	if c == nil {
+		return ErrRunOwnershipLost
+	}
+	c.injectMu.Lock()
+	defer c.injectMu.Unlock()
+	if c.injectClosed || c.injectCh == nil {
+		return ErrRunOwnershipLost
+	}
+	var lifecycleDone <-chan struct{}
+	if c.lifecycleCtx != nil {
+		lifecycleDone = c.lifecycleCtx.Done()
+	}
+	select {
+	case c.injectCh <- message:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-lifecycleDone:
+		return ErrRunOwnershipLost
+	}
+}
+
 func (c *runControl) closeInject() {
 	if c == nil {
 		return

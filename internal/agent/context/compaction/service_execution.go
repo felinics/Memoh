@@ -17,6 +17,9 @@ import (
 )
 
 func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) (Result, error) {
+	if cfg.Rolling {
+		cfg.SummaryTargetTokens = clampSummaryTargetTokens(cfg.SummaryTargetTokens, cfg.ModelContextTokens)
+	}
 	if cfg.Rolling && cfg.SummaryTargetTokens <= 0 {
 		return Result{}, errors.New("compaction: rolling summary target must be positive")
 	}
@@ -57,16 +60,17 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 
 	var toCompact []CompactionCandidate
-	if cfg.Rolling {
+	switch {
+	case cfg.Rolling:
 		// A rolling pass folds every safely renderable raw row into one
 		// replacement summary. The ratio controls output size, not selection.
 		toCompact = messages
-	} else if cfg.TargetTokens > 0 {
+	case cfg.TargetTokens > 0:
 		// Sync compaction: compress enough messages to bring context
 		// down to TargetTokens. Calculate how many tokens to keep
 		// (newest messages) and compact everything older.
 		toCompact = splitByTarget(messages, cfg.TargetTokens)
-	} else {
+	default:
 		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
 	}
 	if len(toCompact) == 0 {
@@ -161,9 +165,12 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		inputCost := entriesPromptCost(entries) + priorTokens
 		if inputCost > maxCompactTokens {
 			return Result{}, fmt.Errorf(
-				"compaction: rolling input %d exceeds model input budget %d; configure a larger compaction model",
+				"compaction: rolling input %d exceeds model input budget %d (context=%d, summary_target=%d, ratio=%d); configure a larger compaction model or lower the trigger threshold",
 				inputCost,
 				maxCompactTokens,
+				cfg.ModelContextTokens,
+				cfg.SummaryTargetTokens,
+				cfg.Ratio,
 			)
 		}
 	}
@@ -284,7 +291,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	usageJSON, _ := json.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
-	completeErr := error(nil)
+	var completeErr error
 	if cfg.Rolling {
 		completeErr = s.completeRollingLog(persistCtx, logID, result.Text, len(compactedMessageIDs), usageJSON, modelUUID, artifact)
 	} else {

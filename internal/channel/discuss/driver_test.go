@@ -50,6 +50,53 @@ func TestExtractNewImageRefs_IncludesMultiple(t *testing.T) {
 	}
 }
 
+func TestMergeDiscussEnvelopesPreservesEarlierForceReply(t *testing.T) {
+	t.Parallel()
+
+	first := discussEnvelope{
+		rc:         timeline.RenderedContext{{ReceivedAtMs: 100}},
+		forceReply: true,
+	}
+	second := discussEnvelope{
+		rc:         timeline.RenderedContext{{ReceivedAtMs: 200}},
+		forceReply: false,
+	}
+
+	got := mergeDiscussEnvelopes(first, second)
+	if !got.forceReply {
+		t.Fatal("a later passive event must not clear an earlier force-reply trigger in the same batch")
+	}
+	if len(got.rc) != 1 || got.rc[0].ReceivedAtMs != 200 {
+		t.Fatalf("latest rendered context = %#v, want cursor 200", got.rc)
+	}
+}
+
+func TestHandleReplyUsesBatchedForceReplyInsteadOfLatestSessionConfig(t *testing.T) {
+	t.Parallel()
+
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">please reply</message>`}},
+	}}
+	svc := &fakeTurnService{}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{
+		BotID:            "bot-1",
+		ThreadID:         "sess-1",
+		ConversationType: "group",
+		ForceReply:       false,
+	}}
+
+	driver.handleReplyWithTurnForce(context.Background(), sess, rc, true, driver.logger, svc)
+
+	if svc.calls != 1 {
+		t.Fatalf("StartTurn calls = %d, want 1", svc.calls)
+	}
+	if !svc.lastCmd.DiscussForceReply || !svc.lastCmd.DiscussAddressed {
+		t.Fatalf("batched force reply was lost: %+v", svc.lastCmd)
+	}
+}
+
 func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 	rc := timeline.RenderedContext{
 		{
@@ -291,7 +338,7 @@ func TestLatestReplyMessage_SuppressesNoReplyAndReasoning(t *testing.T) {
 	}
 	message := latestReplyMessage([]turn.ModelMessage{
 		{Role: "assistant", Content: reasoning},
-		{Role: "assistant", Content: turn.NewTextContent("NO_REPLY")},
+		{Role: "assistant", Content: turn.NewTextContent("NO_REPLY.")},
 	}, "telegram")
 	if !message.IsEmpty() {
 		t.Fatalf("message = %#v, want empty", message)

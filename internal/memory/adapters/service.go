@@ -320,11 +320,10 @@ func (s *Service) tryEvictAndReinstantiate(ctx context.Context, id, providerType
 	if s.registry == nil {
 		return
 	}
-	if err := s.registry.Remove(ctx, id); err != nil {
-		s.logger.Warn("evict memory provider failed", slog.String("id", id), slog.Any("error", err))
-		return
+	if _, err := s.registry.Replace(ctx, id, providerType, config); err != nil {
+		s.logger.Warn("replace memory provider failed",
+			slog.String("id", id), slog.String("provider", providerType), slog.Any("error", err))
 	}
-	s.tryInstantiate(ctx, id, providerType, config)
 }
 
 func isValidProviderType(t ProviderType) bool {

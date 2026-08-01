@@ -10,6 +10,7 @@ import (
 
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/textutil"
 )
 
 func testUUID(t *testing.T) pgtype.UUID {
@@ -47,12 +48,12 @@ func TestEstimateItemTokensPrefersOutputTokensThenContentFallback(t *testing.T) 
 	}
 	items, _ := itemsFromRows(rows)
 	got := itemTokens(items)
-	// First: persisted usage outputTokens. Second: len(content)/4 = 402/4 = 100.
+	// First: persisted usage outputTokens. Second: the shared bytes/token fallback.
 	if got[0] != 50 {
 		t.Fatalf("usage token estimate = %d, want 50", got[0])
 	}
-	if got[1] != len(items[1].RawContent)/4 {
-		t.Fatalf("content token estimate = %d, want %d", got[1], len(items[1].RawContent)/4)
+	if want := textutil.EstimateTokensFromBytes(len(items[1].RawContent)); got[1] != want {
+		t.Fatalf("content token estimate = %d, want %d", got[1], want)
 	}
 }
 
@@ -439,7 +440,7 @@ func TestTrimCompactMessagesAccountsForDirectedSignalHeaders(t *testing.T) {
 	}
 	items, _ := itemsFromRows(rows)
 
-	trimmed := trimCompactMessages(items, 300)
+	trimmed := trimCompactMessages(items, 600)
 	if len(trimmed) != 2 {
 		t.Fatalf("trimmed count = %d, want 2 after accounting for header tokens", len(trimmed))
 	}

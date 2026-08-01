@@ -42,7 +42,6 @@ import (
 var base64Std = base64.StdEncoding
 
 const (
-	silentReplyToken        = "NO_REPLY"
 	minDuplicateTextLength  = 10
 	processingStatusTimeout = 60 * time.Second
 )
@@ -1480,7 +1479,7 @@ startStream:
 			continue
 		}
 		plainText := strings.TrimSpace(outMessage.PlainText())
-		if isSilentReplyText(plainText) {
+		if channel.IsSilentReplyText(plainText) {
 			continue
 		}
 		if isMessagingToolDuplicate(plainText, sentTexts) {
@@ -2640,60 +2639,6 @@ func normalizeReplyTarget(registry *channel.Registry, channelType channel.Channe
 		return strings.TrimSpace(normalized)
 	}
 	return strings.TrimSpace(target)
-}
-
-func isSilentReplyText(text string) bool {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return false
-	}
-	token := []rune(silentReplyToken)
-	value := []rune(trimmed)
-	if len(value) < len(token) {
-		return false
-	}
-	if hasTokenPrefix(value, token) {
-		return true
-	}
-	if hasTokenSuffix(value, token) {
-		return true
-	}
-	return false
-}
-
-func hasTokenPrefix(value []rune, token []rune) bool {
-	if len(value) < len(token) {
-		return false
-	}
-	for i := range token {
-		if value[i] != token[i] {
-			return false
-		}
-	}
-	if len(value) == len(token) {
-		return true
-	}
-	return !isWordChar(value[len(token)])
-}
-
-func hasTokenSuffix(value []rune, token []rune) bool {
-	if len(value) < len(token) {
-		return false
-	}
-	start := len(value) - len(token)
-	for i := range token {
-		if value[start+i] != token[i] {
-			return false
-		}
-	}
-	if start == 0 {
-		return true
-	}
-	return !isWordChar(value[start-1])
-}
-
-func isWordChar(value rune) bool {
-	return value == '_' || unicode.IsLetter(value) || unicode.IsDigit(value)
 }
 
 func normalizeTextForComparison(text string) string {
@@ -3986,7 +3931,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 				continue
 			}
 			plainText := strings.TrimSpace(outMessage.PlainText())
-			if isSilentReplyText(plainText) || isMessagingToolDuplicate(plainText, sentTexts) {
+			if channel.IsSilentReplyText(plainText) || isMessagingToolDuplicate(plainText, sentTexts) {
 				continue
 			}
 			if outMessage.Reply == nil && sourceMessageID != "" {

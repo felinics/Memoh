@@ -94,6 +94,21 @@ func (a *scriptedAdmitter) FinishRun(_ context.Context, handle sessionruntime.Ru
 	return nil
 }
 
+func (a *scriptedAdmitter) InjectRun(ctx context.Context, handle sessionruntime.RunHandle, message turn.InjectMessage) error {
+	a.mu.Lock()
+	injectCh := a.injects[handle.RunID]
+	a.mu.Unlock()
+	if injectCh == nil {
+		return sessionruntime.ErrRunOwnershipLost
+	}
+	select {
+	case injectCh <- message:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (a *scriptedAdmitter) admitted() []sessionruntime.AdmitInput {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -626,7 +641,6 @@ func TestRunEndLeavesSharedInjectCloseToSessionRuntime(t *testing.T) {
 		errs:      make(chan error, 1),
 		ctx:       context.Background(),
 		cancel:    func() {},
-		inject:    injectCh,
 		addAssets: func([]turn.OutboundAssetRef) {},
 		finishRun: func(string, error) {
 			close(injectCh)

@@ -200,6 +200,16 @@ func (h *CompactionHandler) buildTriggerConfig(ctx context.Context, botID, sessi
 	if ratio <= 0 || ratio > 100 {
 		ratio = 80
 	}
+	modelContextTokens := 0
+	maxCompactTokens := 0
+	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
+		modelContextTokens = *compactModel.Config.ContextWindow
+		maxCompactTokens = modelContextTokens * 90 / 100
+	}
+	summaryTargetTokens := compaction.RollingSummaryTargetTokens(botSettings.CompactionThreshold, ratio, modelContextTokens)
+	if summaryTargetTokens <= 0 {
+		summaryTargetTokens = compaction.ManualSummaryTargetTokens(modelContextTokens)
+	}
 	cfg := compaction.TriggerConfig{
 		BotID:                 botID,
 		SessionID:             sessionID,
@@ -212,13 +222,11 @@ func (h *CompactionHandler) buildTriggerConfig(ctx context.Context, botID, sessi
 		Ratio:                 ratio,
 		TotalInputTokens:      1,
 		Rolling:               true,
-		SummaryTargetTokens:   compaction.RollingSummaryTargetTokens(botSettings.CompactionThreshold, ratio),
+		ModelContextTokens:    modelContextTokens,
+		MaxCompactTokens:      maxCompactTokens,
+		SummaryTargetTokens:   summaryTargetTokens,
 		PromptCacheTTL:        providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
 		Manual:                true,
-	}
-	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
-		cfg.ModelContextTokens = *compactModel.Config.ContextWindow
-		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
 	}
 	return cfg, nil
 }
