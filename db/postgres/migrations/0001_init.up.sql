@@ -257,7 +257,7 @@ CREATE TABLE IF NOT EXISTS bots (
   persist_full_tool_results BOOLEAN NOT NULL DEFAULT false,
   show_tool_calls_in_im BOOLEAN NOT NULL DEFAULT false,
   tool_approval_config JSONB NOT NULL DEFAULT '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'::jsonb,
-  display_enabled BOOLEAN NOT NULL DEFAULT false,
+  display_enabled BOOLEAN NOT NULL DEFAULT true,
   overlay_provider TEXT NOT NULL DEFAULT '',
   overlay_enabled BOOLEAN NOT NULL DEFAULT false,
   overlay_config JSONB NOT NULL DEFAULT '{}'::jsonb,
