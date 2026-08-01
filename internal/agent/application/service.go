@@ -1526,17 +1526,10 @@ func extractNativeImageParts(attachments []any) []sdk.ImagePart {
 	var parts []sdk.ImagePart
 	for _, att := range attachments {
 		ga, ok := att.(gatewayAttachment)
-		if !ok || ga.Type != "image" {
-			continue
-		}
-		transport := strings.ToLower(strings.TrimSpace(ga.Transport))
-		if transport != gatewayTransportInlineDataURL && transport != gatewayTransportPublicURL {
+		if !ok || !isGatewayNativeAttachment(ga) {
 			continue
 		}
 		payload := strings.TrimSpace(ga.Payload)
-		if payload == "" {
-			continue
-		}
 		parts = append(parts, sdk.ImagePart{
 			Image:     payload,
 			MediaType: strings.TrimSpace(ga.Mime),

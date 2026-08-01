@@ -51,6 +51,36 @@ func TestRouteAttachmentsByCapability_ImageURLIsNative(t *testing.T) {
 	assert.Empty(t, result.Fallback)
 }
 
+func TestRouteAttachmentsByCapability_ImageTypedVideoFallsBack(t *testing.T) {
+	compatibilities := []string{"vision"}
+	attachments := []gatewayAttachment{
+		{
+			Type:      "image",
+			Mime:      "video/webm",
+			Transport: gatewayTransportInlineDataURL,
+			Payload:   "data:video/webm;base64,abc",
+		},
+	}
+	result := routeAttachmentsByCapability(compatibilities, attachments)
+	assert.Empty(t, result.Native)
+	assert.Len(t, result.Fallback, 1)
+}
+
+func TestRouteAttachmentsByCapability_DataURLMimeOverridesDeclaredMime(t *testing.T) {
+	compatibilities := []string{"vision"}
+	attachments := []gatewayAttachment{
+		{
+			Type:      "image",
+			Mime:      "image/png",
+			Transport: gatewayTransportInlineDataURL,
+			Payload:   "data:video/webm;base64,abc",
+		},
+	}
+	result := routeAttachmentsByCapability(compatibilities, attachments)
+	assert.Empty(t, result.Native)
+	assert.Len(t, result.Fallback, 1)
+}
+
 func TestRouteAttachmentsByCapability_UnknownType(t *testing.T) {
 	compatibilities := []string{"vision"}
 	attachments := []gatewayAttachment{

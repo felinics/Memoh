@@ -80,6 +80,32 @@ func TestDescribeImagesWithAuxiliaryVisionSkipsVisionCapablePrimary(t *testing.T
 	}
 }
 
+func TestDescribeImagesWithAuxiliaryVisionSkipsImageTypedVideo(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		auxiliaryVision: AuxiliaryVisionConfig{Model: "gpt-5.6-luna", MaxRetries: 3},
+		auxiliaryVisionGen: func(context.Context, string, string, string, []sdk.ImagePart) (string, error) {
+			t.Fatal("auxiliary model must not receive video/webm as image input")
+			return "", nil
+		},
+	}
+	got := service.describeImagesWithAuxiliaryVision(
+		context.Background(),
+		ChatRequest{},
+		false,
+		[]gatewayAttachment{{
+			Type:      "image",
+			Mime:      "video/webm",
+			Transport: gatewayTransportInlineDataURL,
+			Payload:   "data:video/webm;base64,AAAA",
+		}},
+	)
+	if got != "" {
+		t.Fatalf("vision context = %q, want empty", got)
+	}
+}
+
 func TestRetryAuxiliaryVisionStopsOnCanceledContext(t *testing.T) {
 	t.Parallel()
 

@@ -3,6 +3,7 @@ package application
 import (
 	"strings"
 
+	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/models"
 )
 
@@ -72,7 +73,22 @@ func isGatewayNativeAttachment(att gatewayAttachment) bool {
 		if transport != gatewayTransportInlineDataURL && transport != gatewayTransportPublicURL {
 			return false
 		}
-		return strings.TrimSpace(att.Payload) != ""
+		payload := strings.TrimSpace(att.Payload)
+		if payload == "" {
+			return false
+		}
+		// Telegram animated stickers can retain the logical "image" type while
+		// their actual payload is video/webm. Sending those to an image-only API
+		// produces a deterministic HTTP 400, so trust the data URL MIME first and
+		// reject any known non-image payload. Public image URLs with no MIME are
+		// still allowed because the provider can inspect the remote response.
+		mime := attachmentpkg.NormalizeMime(att.Mime)
+		if transport == gatewayTransportInlineDataURL {
+			if dataURLMime := attachmentpkg.MimeFromDataURL(payload); dataURLMime != "" {
+				mime = dataURLMime
+			}
+		}
+		return mime == "" || strings.HasPrefix(mime, "image/")
 	default:
 		return false
 	}
