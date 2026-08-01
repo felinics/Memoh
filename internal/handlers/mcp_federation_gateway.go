@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -29,9 +28,9 @@ func NewMCPFederationGateway(log *slog.Logger, handler *ContainerdHandler) *MCPF
 	return &MCPFederationGateway{
 		handler: handler,
 		logger:  log.With(slog.String("gateway", "mcp_federation")),
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		// Federation operations carry their own context deadlines. A client-wide
+		// timeout would also cap reading a valid long-running tools/call stream.
+		client: &http.Client{},
 	}
 }
 
@@ -108,9 +107,9 @@ func (g *MCPFederationGateway) connectStreamableSession(ctx context.Context, con
 		Version: "v1",
 	}, nil)
 	transport := &sdkmcp.StreamableClientTransport{
-		Endpoint:   url,
-		HTTPClient: g.connectionHTTPClient(ctx, connection),
-		MaxRetries: -1,
+		Endpoint:             url,
+		HTTPClient:           g.connectionHTTPClient(ctx, connection),
+		DisableStandaloneSSE: true,
 	}
 	return client.Connect(ctx, transport, nil)
 }
@@ -196,7 +195,7 @@ func resolveSSEEndpointCandidates(config map[string]any) []string {
 func (g *MCPFederationGateway) connectionHTTPClient(ctx context.Context, connection mcpgw.Connection) *http.Client {
 	base := g.client
 	if base == nil {
-		base = &http.Client{Timeout: 30 * time.Second}
+		base = &http.Client{}
 	}
 	headers := normalizeHeaderMap(connection.Config["headers"])
 

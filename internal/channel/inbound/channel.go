@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -133,6 +134,15 @@ type DefaultChatRuntimeReader interface {
 	DefaultChatRuntime(ctx context.Context, botID string) (DefaultChatRuntimeSettings, error)
 }
 
+type TelegramDiscussPolicy struct {
+	PassiveSampleRate  float64
+	ForceReplyKeywords []string
+}
+
+type TelegramDiscussPolicyReader interface {
+	TelegramDiscussPolicy(ctx context.Context, botID string) (TelegramDiscussPolicy, error)
+}
+
 type ACPAgentSetupReader interface {
 	ACPAgentSetupMetadata(ctx context.Context, botID string) (map[string]any, error)
 }
@@ -179,35 +189,37 @@ type NewSessionSpec struct {
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
-	turnSvc             turn.Service
-	routeResolver       RouteResolver
-	message             messagepkg.Writer
-	mediaService        mediaIngestor
-	reactor             channelReactor
-	commandHandler      CommandHandler
-	registry            *channel.Registry
-	logger              *slog.Logger
-	jwtSecret           string
-	tokenTTL            time.Duration
-	identity            *IdentityResolver
-	policy              PolicyService
-	dispatcher          *RouteDispatcher
-	acl                 chatACL
-	observer            channel.StreamObserver
-	speechService       speechSynthesizer
-	speechModelResolver speechModelResolver
-	transcriber         transcriptionRecognizer
-	sttModelResolver    transcriptionModelResolver
-	sessionEnsurer      SessionEnsurer
-	pipeline            *timeline.Pipeline
-	eventStore          *timeline.EventStore
-	discussDriver       *discuss.DiscussDriver
-	imDisplayOptions    IMDisplayOptionsReader
-	defaultChatRuntime  DefaultChatRuntimeReader
-	acpAgentSetup       ACPAgentSetupReader
-	acpProfiles         turn.ACPProfileResolver
-	permissionChecker   BotPermissionChecker
-	skillResolver       RequestedSkillResolver
+	turnSvc               turn.Service
+	routeResolver         RouteResolver
+	message               messagepkg.Writer
+	mediaService          mediaIngestor
+	reactor               channelReactor
+	commandHandler        CommandHandler
+	registry              *channel.Registry
+	logger                *slog.Logger
+	jwtSecret             string
+	tokenTTL              time.Duration
+	identity              *IdentityResolver
+	policy                PolicyService
+	dispatcher            *RouteDispatcher
+	acl                   chatACL
+	observer              channel.StreamObserver
+	speechService         speechSynthesizer
+	speechModelResolver   speechModelResolver
+	transcriber           transcriptionRecognizer
+	sttModelResolver      transcriptionModelResolver
+	sessionEnsurer        SessionEnsurer
+	pipeline              *timeline.Pipeline
+	eventStore            *timeline.EventStore
+	discussDriver         *discuss.DiscussDriver
+	imDisplayOptions      IMDisplayOptionsReader
+	defaultChatRuntime    DefaultChatRuntimeReader
+	telegramDiscussPolicy TelegramDiscussPolicyReader
+	acpAgentSetup         ACPAgentSetupReader
+	acpProfiles           turn.ACPProfileResolver
+	permissionChecker     BotPermissionChecker
+	skillResolver         RequestedSkillResolver
+	discussSample         func() float64
 
 	// activeStreams maps "botID:routeID" to a context.CancelFunc for the
 	// currently running agent stream. Used by /stop to abort generation
@@ -364,6 +376,13 @@ func (p *ChannelInboundProcessor) SetDefaultChatRuntime(reader DefaultChatRuntim
 		return
 	}
 	p.defaultChatRuntime = reader
+}
+
+func (p *ChannelInboundProcessor) SetTelegramDiscussPolicy(reader TelegramDiscussPolicyReader) {
+	if p == nil {
+		return
+	}
+	p.telegramDiscussPolicy = reader
 }
 
 func (p *ChannelInboundProcessor) SetACPAgentSetupReader(reader ACPAgentSetupReader) {
@@ -867,26 +886,38 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		eventID, latestRC = persistAndProjectEvent(ctx, store, p.pipeline, p.logger, identity.BotID, sessionID, event)
 	}
 
-	// Discuss mode: dispatch to the discuss driver and return.
-	// The discuss driver autonomously decides whether to call the LLM.
+	// Discuss mode: sample passive Telegram traffic before notifying the
+	// discuss driver. Every message has already entered the durable timeline.
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
-		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
-		sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
-		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, discuss.DiscussSessionConfig{
-			TeamID:            cfg.TeamID,
-			BotID:             identity.BotID,
-			ThreadID:          sessionID,
-			RouteID:           resolved.RouteID,
-			UserID:            strings.TrimSpace(identity.UserID),
-			ChannelIdentityID: identity.ChannelIdentityID,
-			ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
-			CurrentPlatform:   msg.Channel.String(),
-			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
-			ConversationName:  strings.TrimSpace(msg.Conversation.Name),
-			SessionToken:      sessionToken,
-			ChatToken:         chatToken,
-			ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
-		})
+		notify, sampleRate, forceReply := p.shouldNotifyDiscuss(ctx, identity.BotID, msg, shouldTrigger)
+		if notify {
+			chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
+			sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
+			p.discussDriver.NotifyRC(ctx, sessionID, latestRC, discuss.DiscussSessionConfig{
+				TeamID:            cfg.TeamID,
+				BotID:             identity.BotID,
+				ThreadID:          sessionID,
+				RouteID:           resolved.RouteID,
+				UserID:            strings.TrimSpace(identity.UserID),
+				ChannelIdentityID: identity.ChannelIdentityID,
+				ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
+				CurrentPlatform:   msg.Channel.String(),
+				ConversationType:  strings.TrimSpace(msg.Conversation.Type),
+				ConversationName:  strings.TrimSpace(msg.Conversation.Name),
+				SessionToken:      sessionToken,
+				ChatToken:         chatToken,
+				ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
+				ForceReply:        forceReply,
+				ReplySender:       sender,
+			})
+		} else if p.logger != nil {
+			p.logger.Debug(
+				"telegram discuss context not sampled",
+				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+				slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
+				slog.Float64("sample_rate", sampleRate),
+			)
+		}
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		return nil
 	}
@@ -1600,6 +1631,56 @@ func shouldTriggerAssistantResponse(msg channel.InboundMessage) bool {
 	}
 	if metadataBool(msg.Metadata, "is_reply_to_bot") {
 		return true
+	}
+	return false
+}
+
+func (p *ChannelInboundProcessor) shouldNotifyDiscuss(
+	ctx context.Context,
+	botID string,
+	msg channel.InboundMessage,
+	force bool,
+) (bool, float64, bool) {
+	rate := channel.DefaultTelegramDiscussPassiveSampleRate
+	if msg.Channel != channel.ChannelTypeTelegram {
+		return true, rate, force
+	}
+	if force {
+		return true, rate, true
+	}
+	var keywords []string
+	if p != nil && p.telegramDiscussPolicy != nil {
+		policy, err := p.telegramDiscussPolicy.TelegramDiscussPolicy(ctx, strings.TrimSpace(botID))
+		if err == nil {
+			if policy.PassiveSampleRate >= 0 && policy.PassiveSampleRate <= 1 {
+				rate = policy.PassiveSampleRate
+			}
+			keywords = policy.ForceReplyKeywords
+		} else if p.logger != nil {
+			p.logger.Warn(
+				"failed to load telegram discuss policy; using default",
+				slog.String("bot_id", strings.TrimSpace(botID)),
+				slog.Any("error", err),
+			)
+		}
+	}
+	if messageMatchesKeyword(msg.Message.Text, keywords) {
+		return true, rate, true
+	}
+	sample := rand.Float64
+	if p != nil && p.discussSample != nil {
+		sample = p.discussSample
+	}
+	return sample() < rate, rate, false
+}
+
+func messageMatchesKeyword(message string, keywords []string) bool {
+	message = strings.ToLower(message)
+	for _, keyword := range keywords {
+		keyword = strings.ToLower(strings.TrimSpace(keyword))
+		if keyword != "" && strings.Contains(message, keyword) {
+			return true
+		}
 	}
 	return false
 }

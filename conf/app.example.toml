@@ -68,6 +68,13 @@ jwt_expires_in = "168h"
 tool_output_max_bytes = 65536
 tool_output_max_lines = 2000
 system_files_max_bytes = 32768
+# Optional global fallback for image understanding when a Bot's main model
+# does not support vision. Environment variables with the same MEMOH_ prefix
+# override these values; see docker-compose.yml.
+auxiliary_vision_model = ""
+auxiliary_vision_provider = ""
+auxiliary_vision_prompt = ""
+auxiliary_vision_max_retries = 3
 
 [session_runtime]
 # Stores live run snapshots for WebSocket attach/reconnect. memory is best for

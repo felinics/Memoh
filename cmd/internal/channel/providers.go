@@ -246,6 +246,7 @@ func provideChannelRouter(
 	processor.SetTranscriptionService(audioService, &settingsTranscriptionModelResolver{settings: settingsService})
 	processor.SetIMDisplayOptions(&settingsIMDisplayOptions{settings: settingsService})
 	processor.SetDefaultChatRuntime(&settingsDefaultChatRuntime{settings: settingsService})
+	processor.SetTelegramDiscussPolicy(&botTelegramDiscussPolicyReader{bots: botService})
 	processor.SetACPAgentSetupReader(&botACPAgentSetupReader{bots: botService})
 	processor.SetACPProfileResolver(acpprofileadapter.NewCatalog())
 	processor.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
@@ -485,6 +486,39 @@ func (r *settingsDefaultChatRuntime) DefaultChatRuntime(ctx context.Context, bot
 		ProjectPath: s.ChatACPProjectPath,
 		ProjectMode: s.ChatACPProjectMode,
 	}, nil
+}
+
+type botTelegramDiscussPolicyReader struct {
+	bots *bots.Service
+}
+
+func (r *botTelegramDiscussPolicyReader) TelegramDiscussPolicy(
+	ctx context.Context,
+	botID string,
+) (inbound.TelegramDiscussPolicy, error) {
+	policy := inbound.TelegramDiscussPolicy{
+		PassiveSampleRate: channel.DefaultTelegramDiscussPassiveSampleRate,
+	}
+	if r == nil || r.bots == nil {
+		return policy, nil
+	}
+	bot, err := r.bots.GetForAccess(ctx, botID)
+	if err != nil {
+		return inbound.TelegramDiscussPolicy{}, err
+	}
+	value, ok := bot.Metadata[channel.TelegramDiscussPassiveSampleRateMetadataKey].(float64)
+	if ok && value >= 0 && value <= 1 {
+		policy.PassiveSampleRate = value
+	}
+	rawKeywords, _ := bot.Metadata[channel.TelegramDiscussForceReplyKeywordsMetadataKey].([]any)
+	for _, raw := range rawKeywords {
+		keyword, _ := raw.(string)
+		keyword = strings.TrimSpace(keyword)
+		if keyword != "" {
+			policy.ForceReplyKeywords = append(policy.ForceReplyKeywords, keyword)
+		}
+	}
+	return policy, nil
 }
 
 type botACPAgentSetupReader struct {

@@ -112,6 +112,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 	if !started || outcome.cancelled || outcome.runtimeType == "" {
 		return
 	}
+	d.sendReplyFallback(ctx, cfg, outcome, log)
 	if outcome.runtimeType == sessionRuntimeACPAgent {
 		if outcome.skipped || (outcome.streamed && outcome.terminal && !outcome.failed) {
 			d.cursor.Advance(ctx, sess, cfg, plan.consumed, log)

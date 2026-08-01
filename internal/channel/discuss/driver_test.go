@@ -81,6 +81,272 @@ func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 	}
 }
 
+func TestHandleReplyWithTurn_TelegramFallsBackToAssistantText(t *testing.T) {
+	messages, err := json.Marshal([]turn.ModelMessage{{
+		Role:    "assistant",
+		Content: turn.NewTextContent("I am here **now**."),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replySender := &fakeDiscussReplySender{}
+	svc := &fakeTurnService{streamEvents: []agentevent.StreamEvent{{
+		Type:     agentevent.AgentEnd,
+		Messages: messages,
+	}}}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{
+		TeamID:          "team-1",
+		BotID:           "bot-1",
+		ThreadID:        "sess-1",
+		CurrentPlatform: "telegram",
+		ReplyTarget:     "chat-1",
+		ForceReply:      true,
+		ReplySender:     replySender,
+	}}
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">bot keyword</message>`}},
+	}}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if len(replySender.sent) != 1 {
+		t.Fatalf("fallback sends = %d, want 1", len(replySender.sent))
+	}
+	got := replySender.sent[0]
+	if got.Target != "chat-1" || got.Message.Text != "I am here **now**." {
+		t.Fatalf("fallback message = %#v", got)
+	}
+	if got.Message.Format != channel.MessageFormatMarkdown {
+		t.Fatalf("fallback format = %q, want markdown", got.Message.Format)
+	}
+}
+
+func TestHandleReplyWithTurn_TelegramDoesNotDuplicateSuccessfulSend(t *testing.T) {
+	messages, err := json.Marshal([]turn.ModelMessage{{
+		Role:    "assistant",
+		Content: turn.NewTextContent("already delivered"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replySender := &fakeDiscussReplySender{}
+	svc := &fakeTurnService{streamEvents: []agentevent.StreamEvent{
+		{
+			Type:     agentevent.ToolCallEnd,
+			ToolName: "send",
+			Result: map[string]any{
+				"ok":       true,
+				"platform": "telegram",
+				"target":   "chat-1",
+			},
+		},
+		{Type: agentevent.AgentEnd, Messages: messages},
+	}}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{
+		TeamID:          "team-1",
+		BotID:           "bot-1",
+		ThreadID:        "sess-1",
+		CurrentPlatform: "telegram",
+		ReplyTarget:     "chat-1",
+		ForceReply:      true,
+		ReplySender:     replySender,
+	}}
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">bot keyword</message>`}},
+	}}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if len(replySender.sent) != 0 {
+		t.Fatalf("fallback sends = %d, want 0 after successful send tool", len(replySender.sent))
+	}
+}
+
+func TestHandleReplyWithTurn_TerminalSendResultPreventsFallback(t *testing.T) {
+	toolResult, err := json.Marshal([]map[string]any{{
+		"type":     "tool-result",
+		"toolName": "send",
+		"result": map[string]any{
+			"ok":        true,
+			"bot_id":    "bot-1",
+			"target":    "chat-1",
+			"platform":  "telegram",
+			"delivered": "current_conversation",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := json.Marshal([]turn.ModelMessage{
+		{Role: "tool", Content: toolResult},
+		{Role: "assistant", Content: turn.NewTextContent("already sent; keep observing")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replySender := &fakeDiscussReplySender{}
+	svc := &fakeTurnService{streamEvents: []agentevent.StreamEvent{{
+		Type:     agentevent.AgentEnd,
+		Messages: messages,
+	}}}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{
+		TeamID:          "team-1",
+		BotID:           "bot-1",
+		ThreadID:        "sess-1",
+		CurrentPlatform: "telegram",
+		ReplyTarget:     "chat-1",
+		ForceReply:      true,
+		ReplySender:     replySender,
+	}}
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">bot keyword</message>`}},
+	}}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if len(replySender.sent) != 0 {
+		t.Fatalf("fallback sends = %d, want 0 after terminal send result", len(replySender.sent))
+	}
+}
+
+func TestHandleReplyWithTurn_PassiveTelegramDoesNotFallback(t *testing.T) {
+	messages, err := json.Marshal([]turn.ModelMessage{{
+		Role:    "assistant",
+		Content: turn.NewTextContent("private observation"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replySender := &fakeDiscussReplySender{}
+	svc := &fakeTurnService{streamEvents: []agentevent.StreamEvent{{
+		Type:     agentevent.AgentEnd,
+		Messages: messages,
+	}}}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{
+		TeamID:          "team-1",
+		BotID:           "bot-1",
+		ThreadID:        "sess-1",
+		CurrentPlatform: "telegram",
+		ReplyTarget:     "chat-1",
+		ReplySender:     replySender,
+	}}
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">ordinary chatter</message>`}},
+	}}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if len(replySender.sent) != 0 {
+		t.Fatalf("fallback sends = %d, want 0 for passive Telegram discuss", len(replySender.sent))
+	}
+}
+
+func TestHandleReplyWithTurn_NonTelegramDoesNotFallback(t *testing.T) {
+	messages, err := json.Marshal([]turn.ModelMessage{{
+		Role:    "assistant",
+		Content: turn.NewTextContent("private discuss output"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replySender := &fakeDiscussReplySender{}
+	svc := &fakeTurnService{streamEvents: []agentevent.StreamEvent{{
+		Type:     agentevent.AgentEnd,
+		Messages: messages,
+	}}}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{
+		TeamID:          "team-1",
+		BotID:           "bot-1",
+		ThreadID:        "sess-1",
+		CurrentPlatform: "discord",
+		ReplyTarget:     "channel-1",
+		ForceReply:      true,
+		ReplySender:     replySender,
+	}}
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">hello</message>`}},
+	}}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if len(replySender.sent) != 0 {
+		t.Fatalf("fallback sends = %d, want 0 for non-Telegram discuss", len(replySender.sent))
+	}
+}
+
+func TestLatestReplyMessage_SuppressesNoReplyAndReasoning(t *testing.T) {
+	reasoning, err := json.Marshal([]turn.ContentPart{{Type: "reasoning", Text: "private reasoning"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := latestReplyMessage([]turn.ModelMessage{
+		{Role: "assistant", Content: reasoning},
+		{Role: "assistant", Content: turn.NewTextContent("NO_REPLY")},
+	}, "telegram")
+	if !message.IsEmpty() {
+		t.Fatalf("message = %#v, want empty", message)
+	}
+}
+
+func TestSuccessfulCurrentReplyRejectsFailedOrDifferentTargetSend(t *testing.T) {
+	command := turn.StartTurnCommand{CurrentChannel: "telegram", ReplyTarget: "chat-1"}
+	tests := []struct {
+		name  string
+		event agentevent.StreamEvent
+		want  bool
+	}{
+		{
+			name: "current conversation",
+			event: agentevent.StreamEvent{
+				Type:     agentevent.ToolCallEnd,
+				ToolName: "send",
+				Result:   map[string]any{"ok": true, "platform": "telegram", "target": "chat-1"},
+			},
+			want: true,
+		},
+		{
+			name: "tool error",
+			event: agentevent.StreamEvent{
+				Type:     agentevent.ToolCallEnd,
+				ToolName: "send",
+				Error:    "delivery failed",
+			},
+		},
+		{
+			name: "different target",
+			event: agentevent.StreamEvent{
+				Type:     agentevent.ToolCallEnd,
+				ToolName: "send",
+				Result:   map[string]any{"ok": true, "platform": "telegram", "target": "chat-2"},
+			},
+		},
+		{
+			name: "sticker tool",
+			event: agentevent.StreamEvent{
+				Type:     agentevent.ToolCallEnd,
+				ToolName: "sticker_send_telegram_sticker",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := successfulCurrentReply(tt.event, command); got != tt.want {
+				t.Fatalf("successfulCurrentReply() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 	rc := timeline.RenderedContext{
 		{
@@ -481,12 +747,13 @@ func TestAgentEventToChannelEventMapsACPDecisionRequests(t *testing.T) {
 // a run-resolved event first, then either a skip marker (ACP participation
 // gate) or a terminal agent event stream.
 type fakeTurnService struct {
-	runtimeType string // empty means the native model runtime
-	startErr    error
-	streamErr   error
-	onStart     func(turn.StartTurnCommand)
-	calls       int
-	lastCmd     turn.StartTurnCommand
+	runtimeType  string // empty means the native model runtime
+	startErr     error
+	streamErr    error
+	streamEvents []agentevent.StreamEvent
+	onStart      func(turn.StartTurnCommand)
+	calls        int
+	lastCmd      turn.StartTurnCommand
 }
 
 func (f *fakeTurnService) StartTurn(_ context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
@@ -521,8 +788,14 @@ func (f *fakeTurnService) StartTurn(_ context.Context, cmd turn.StartTurnCommand
 			h.errs <- f.streamErr
 			return
 		}
-		end, _ := json.Marshal(agentevent.StreamEvent{Type: agentevent.AgentEnd})
-		emit(string(agentevent.AgentEnd), end)
+		streamEvents := f.streamEvents
+		if len(streamEvents) == 0 {
+			streamEvents = []agentevent.StreamEvent{{Type: agentevent.AgentEnd}}
+		}
+		for _, streamEvent := range streamEvents {
+			payload, _ := json.Marshal(streamEvent)
+			emit(string(streamEvent.Type), payload)
+		}
 	}()
 	return h, nil
 }
@@ -550,6 +823,19 @@ func (h *fakeRunHandle) Errs() <-chan error                             { return
 func (*fakeRunHandle) Inject(context.Context, turn.InjectMessage) error { return nil }
 func (*fakeRunHandle) AddOutboundAssets([]turn.OutboundAssetRef)        {}
 func (*fakeRunHandle) Cancel()                                          {}
+
+type fakeDiscussReplySender struct {
+	sent []channel.OutboundMessage
+	err  error
+}
+
+func (s *fakeDiscussReplySender) Send(_ context.Context, msg channel.OutboundMessage) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.sent = append(s.sent, msg)
+	return nil
+}
 
 type fakeDiscussCursorStore struct {
 	position       timeline.DiscussCursorPosition

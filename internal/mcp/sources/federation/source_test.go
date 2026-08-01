@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
 )
@@ -27,14 +28,18 @@ type testGateway struct {
 	listStdio []mcpgw.ToolDescriptor
 
 	lastCallType string
+	callTimeout  time.Duration
 }
 
 func (g *testGateway) ListHTTPConnectionTools(_ context.Context, _ mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
 	return g.listHTTP, nil
 }
 
-func (g *testGateway) CallHTTPConnectionTool(_ context.Context, _ mcpgw.Connection, _ string, _ map[string]any) (map[string]any, error) {
+func (g *testGateway) CallHTTPConnectionTool(ctx context.Context, _ mcpgw.Connection, _ string, _ map[string]any) (map[string]any, error) {
 	g.lastCallType = "http"
+	if deadline, ok := ctx.Deadline(); ok {
+		g.callTimeout = time.Until(deadline)
+	}
 	return map[string]any{"result": map[string]any{"ok": true, "route": "http"}}, nil
 }
 
@@ -123,6 +128,25 @@ func TestSourceCallToolRoutesToSSEConnection(t *testing.T) {
 	}
 	if ok, _ := result["ok"].(bool); !ok {
 		t.Fatalf("expected ok=true in result")
+	}
+}
+
+func TestSourceCallToolAllowsLongRunningHTTPTools(t *testing.T) {
+	gateway := &testGateway{
+		listHTTP: []mcpgw.ToolDescriptor{{
+			Name: "research", InputSchema: map[string]any{"type": "object"},
+		}},
+	}
+	lister := &testConnectionLister{items: []mcpgw.Connection{{
+		ID: "conn-http", Name: "Remote", Type: "http", Active: true,
+		Config: map[string]any{"url": "http://example.com/mcp"},
+	}}}
+	source := NewSource(slog.Default(), gateway, lister)
+	if _, err := source.CallTool(context.Background(), mcpgw.ToolSessionContext{BotID: "bot-1"}, "remote_research", nil); err != nil {
+		t.Fatalf("call long-running HTTP tool failed: %v", err)
+	}
+	if gateway.callTimeout < 59*time.Minute {
+		t.Fatalf("HTTP tool call timeout = %s, want approximately %s", gateway.callTimeout, mcpCallTimeout)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	agentevent "github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/agent/turn"
@@ -17,12 +18,15 @@ type discussTurnRunner struct {
 }
 
 type discussRunOutcome struct {
-	runtimeType string
-	streamed    bool
-	terminal    bool
-	failed      bool
-	skipped     bool
-	cancelled   bool
+	runtimeType      string
+	streamed         bool
+	terminal         bool
+	completed        bool
+	failed           bool
+	skipped          bool
+	cancelled        bool
+	currentReplySent bool
+	finalMessages    []turn.ModelMessage
 }
 
 // Run starts one Agent turn and reduces its ordered event stream to the
@@ -63,8 +67,23 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 					outcome.failed = true
 					log.Error("discuss stream error", slog.String("error", streamEvent.Error))
 				}
+				if successfulCurrentReply(streamEvent, command) {
+					outcome.currentReplySent = true
+				}
 				if streamEvent.Type == agentevent.AgentEnd || streamEvent.Type == agentevent.AgentAbort {
 					outcome.terminal = true
+					outcome.completed = streamEvent.Type == agentevent.AgentEnd
+					if len(streamEvent.Messages) > 0 {
+						var messages []turn.ModelMessage
+						if decodeErr := json.Unmarshal(streamEvent.Messages, &messages); decodeErr != nil {
+							log.Warn("discuss: decode terminal messages failed", slog.Any("error", decodeErr))
+						} else {
+							outcome.finalMessages = messages
+							if successfulCurrentReplyInMessages(messages, command) {
+								outcome.currentReplySent = true
+							}
+						}
+					}
 				}
 				r.projector.Broadcast(command.BotID, streamEvent)
 			}
@@ -84,4 +103,69 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 		}
 	}
 	return outcome, true
+}
+
+func successfulCurrentReply(event agentevent.StreamEvent, command turn.StartTurnCommand) bool {
+	if event.Type != agentevent.ToolCallEnd || strings.TrimSpace(event.Error) != "" {
+		return false
+	}
+	toolName := strings.TrimSpace(event.ToolName)
+	if toolName != "send" && toolName != "send_message" {
+		return false
+	}
+	result, ok := event.Result.(map[string]any)
+	if !ok {
+		// A successful tool-end event is the strongest signal available for
+		// runtimes that do not return the native messaging result envelope.
+		return true
+	}
+	return successfulCurrentReplyResult(result, command)
+}
+
+func successfulCurrentReplyInMessages(messages []turn.ModelMessage, command turn.StartTurnCommand) bool {
+	type toolResultPart struct {
+		Type     string         `json:"type"`
+		ToolName string         `json:"toolName"`
+		Result   map[string]any `json:"result"`
+	}
+	for _, message := range messages {
+		if message.Role != "tool" || len(message.Content) == 0 {
+			continue
+		}
+		var parts []toolResultPart
+		if err := json.Unmarshal(message.Content, &parts); err != nil {
+			continue
+		}
+		for _, part := range parts {
+			if part.Type != "tool-result" || (part.ToolName != "send" && part.ToolName != "send_message") {
+				continue
+			}
+			if successfulCurrentReplyResult(part.Result, command) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func successfulCurrentReplyResult(result map[string]any, command turn.StartTurnCommand) bool {
+	if delivered, present := result["ok"].(bool); present && !delivered {
+		return false
+	}
+	if platform := resultString(result, "platform"); platform != "" &&
+		strings.TrimSpace(command.CurrentChannel) != "" &&
+		!strings.EqualFold(platform, strings.TrimSpace(command.CurrentChannel)) {
+		return false
+	}
+	if target := resultString(result, "target"); target != "" &&
+		strings.TrimSpace(command.ReplyTarget) != "" &&
+		target != strings.TrimSpace(command.ReplyTarget) {
+		return false
+	}
+	return true
+}
+
+func resultString(result map[string]any, key string) string {
+	value, _ := result[key].(string)
+	return strings.TrimSpace(value)
 }

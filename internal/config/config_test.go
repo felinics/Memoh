@@ -248,6 +248,32 @@ func TestLoadAppliesInternalRPCListenEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesAuxiliaryVisionEnvOverrides(t *testing.T) {
+	t.Setenv("MEMOH_AUXILIARY_VISION_MODEL", "gpt-5.6-luna")
+	t.Setenv("MEMOH_AUXILIARY_VISION_PROVIDER", "openai-codex")
+	t.Setenv("MEMOH_AUXILIARY_VISION_PROMPT", "describe every image")
+	t.Setenv("MEMOH_AUXILIARY_VISION_MAX_RETRIES", "3")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Agent.AuxiliaryVisionModel != "gpt-5.6-luna" ||
+		cfg.Agent.AuxiliaryVisionProvider != "openai-codex" ||
+		cfg.Agent.AuxiliaryVisionPrompt != "describe every image" ||
+		cfg.Agent.AuxiliaryVisionMaxRetries != 3 {
+		t.Fatalf("auxiliary vision config = %#v", cfg.Agent)
+	}
+}
+
+func TestLoadRejectsInvalidAuxiliaryVisionMaxRetries(t *testing.T) {
+	t.Setenv("MEMOH_AUXILIARY_VISION_MAX_RETRIES", "many")
+	_, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err == nil || !strings.Contains(err.Error(), "MEMOH_AUXILIARY_VISION_MAX_RETRIES") {
+		t.Fatalf("error = %v, want invalid environment value", err)
+	}
+}
+
 func TestLoadRejectsInvalidWebhookTunnelMode(t *testing.T) {
 	t.Parallel()
 

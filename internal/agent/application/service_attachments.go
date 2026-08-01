@@ -27,7 +27,10 @@ func (s *Service) routeAndMergeAttachments(ctx context.Context, model models.Get
 	if len(req.Attachments) == 0 && len(req.ReplyAttachments) == 0 {
 		return []any{}
 	}
-	typed := s.prepareGatewayAttachments(ctx, req)
+	return s.routePreparedGatewayAttachments(model, s.prepareGatewayAttachments(ctx, req))
+}
+
+func (s *Service) routePreparedGatewayAttachments(model models.GetResponse, typed []gatewayAttachment) []any {
 	routed := routeAttachmentsByCapability(model.Config.Compatibilities, typed)
 	for i := range routed.Fallback {
 		fallbackPath := strings.TrimSpace(routed.Fallback[i].FallbackPath)

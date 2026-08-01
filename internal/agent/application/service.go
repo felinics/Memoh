@@ -110,6 +110,8 @@ type Service struct {
 	skillLoader        SkillLoader
 	assetLoader        gatewayAssetLoader
 	platformIdentities PlatformIdentitySource
+	auxiliaryVision    AuxiliaryVisionConfig
+	auxiliaryVisionGen auxiliaryVisionGenerateFunc
 	botPermissions     botPermissionChecker
 	workspaceTargets   workspaceTargetResolver
 	pipeline           *timeline.Pipeline
@@ -429,7 +431,14 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	messages = repairToolCallClosures(messages, syntheticToolClosureError)
 
 	displayName := s.resolveDisplayName(ctx, req)
-	mergedAttachments := s.routeAndMergeAttachments(ctx, chatModel, req)
+	preparedAttachments := s.prepareGatewayAttachments(ctx, req)
+	mergedAttachments := s.routePreparedGatewayAttachments(chatModel, preparedAttachments)
+	auxiliaryVisionContext := s.describeImagesWithAuxiliaryVision(
+		ctx,
+		req,
+		runCfg.SupportsImageInput,
+		preparedAttachments,
+	)
 
 	tz := runCfg.Identity.TimezoneLocation
 	if tz == nil {
@@ -455,6 +464,8 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	if strings.TrimSpace(modelQuery) != strings.TrimSpace(req.Query) {
 		headerifiedModelQuery = turnpkg.FormatUserHeader(headerInput, modelQuery)
 	}
+	headerifiedQuery = appendAuxiliaryVisionContext(headerifiedQuery, auxiliaryVisionContext)
+	headerifiedModelQuery = appendAuxiliaryVisionContext(headerifiedModelQuery, auxiliaryVisionContext)
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	forkMessages := nonNilModelMessages(messages)
 	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
@@ -464,6 +475,8 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	// for storeRound so the user message gets persisted.
 	if !usePipeline && !req.ReusePersistedUserMessage {
 		runCfg.Query = headerifiedModelQuery
+	} else if usePipeline {
+		runCfg.Messages = appendAuxiliaryVisionToLastUserMessage(runCfg.Messages, auxiliaryVisionContext)
 	}
 	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)

@@ -195,6 +195,31 @@ func TestBuildSkipsImageRefsCoveredByArtifacts(t *testing.T) {
 	}
 }
 
+func TestBuildForceReplyMarksDiscussTurnAddressed(t *testing.T) {
+	rc := timeline.RenderedContext{{
+		MessageID:    "m1",
+		ReceivedAtMs: 100,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: "keyword hit"}},
+	}}
+	plan, ok := discussTriggerBuilder{}.Build(
+		DiscussSessionConfig{ConversationType: "group", ForceReply: true},
+		rc,
+		nil,
+		timeline.DiscussCursorPosition{},
+		nil,
+	)
+	if !ok {
+		t.Fatal("expected a composed plan")
+	}
+	if !plan.command.DiscussAddressed || !plan.command.DiscussForceReply {
+		t.Fatalf(
+			"force reply flags = addressed:%v force:%v, want true/true",
+			plan.command.DiscussAddressed,
+			plan.command.DiscussForceReply,
+		)
+	}
+}
+
 func TestHandleReplyWithTurn_ColdStartAnchorCoversCursorBearingSegments(t *testing.T) {
 	// Idle eviction makes cold start a hot path: the durable cursor row may be
 	// absent while persisted replies prove the context was already answered.

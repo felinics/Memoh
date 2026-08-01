@@ -28,6 +28,12 @@ type DiscussStreamBroadcaster interface {
 	PublishEvent(routeKey string, event channel.StreamEvent)
 }
 
+// DiscussReplySender is the per-inbound channel sender retained by a discuss
+// session for deterministic reply fallback delivery.
+type DiscussReplySender interface {
+	Send(ctx context.Context, msg channel.OutboundMessage) error
+}
+
 // DiscussDriverDeps holds dependencies injected into the DiscussDriver.
 type DiscussDriverDeps struct {
 	Turn           turn.Service
@@ -53,6 +59,8 @@ type DiscussSessionConfig struct {
 	SessionToken      string //nolint:gosec // session credential material
 	ChatToken         string //nolint:gosec // scoped chat routing token
 	ToolHTTPURL       string
+	ForceReply        bool
+	ReplySender       DiscussReplySender
 }
 
 // DiscussDriver owns worker lifecycle only. Trigger construction, history,

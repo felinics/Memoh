@@ -118,6 +118,10 @@ type StartTurnCommand struct {
 	// participation gate and skip the run when false. Mention/reply details
 	// stay attached to their canonical timeline messages.
 	DiscussAddressed bool
+	// DiscussForceReply is an operator policy for the latest message. It
+	// requires the runtime to speak instead of taking discuss mode's normal
+	// silent path.
+	DiscussForceReply bool
 }
 
 // DiscussMessage is one composed context message for a discuss turn.

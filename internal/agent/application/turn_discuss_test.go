@@ -99,6 +99,32 @@ func discussCommand() turn.StartTurnCommand {
 	}
 }
 
+func TestDiscussForceReplyAddsNativeInstruction(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: native.RunConfig{System: "base system"},
+			ModelID:   "model-1",
+		},
+	}
+	service := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	cmd := discussCommand()
+	cmd.DiscussForceReply = true
+
+	handle, err := service.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, handle)
+
+	if agent.lastConfig == nil {
+		t.Fatal("expected native agent to run")
+	}
+	if !strings.Contains(agent.lastConfig.System, discussForceReplyInstruction) {
+		t.Fatalf("system prompt = %q, want force-reply instruction", agent.lastConfig.System)
+	}
+}
+
 func TestDiscussInlinesImages(t *testing.T) {
 	agent := &fakeAgentStreamer{}
 	resolver := &fakeDiscussService{
@@ -186,6 +212,57 @@ func TestDiscussNoInlineWhenNoVision(t *testing.T) {
 	}
 }
 
+func TestDiscussUsesAuxiliaryVisionWhenPrimaryHasNoVision(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: native.RunConfig{SupportsImageInput: false},
+			ModelID:   "model-1",
+		},
+		inlineFn: func(_ context.Context, _ string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart {
+			if len(refs) != 1 || refs[0].ContentHash != "img-hash" {
+				t.Fatalf("unexpected refs: %v", refs)
+			}
+			return []sdk.ImagePart{{Image: "data:image/jpeg;base64,FAKE", MediaType: "image/jpeg"}}
+		},
+	}
+	service := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	service.SetAuxiliaryVisionConfig(AuxiliaryVisionConfig{
+		Model:      "gpt-5.6-luna",
+		Prompt:     "describe in detail",
+		MaxRetries: 3,
+	})
+	service.auxiliaryVisionGen = func(_ context.Context, _ string, _ string, caption string, images []sdk.ImagePart) (string, error) {
+		if !strings.Contains(caption, "photo") || len(images) != 1 {
+			t.Fatalf("caption = %q, images = %#v", caption, images)
+		}
+		return "图片里有一只猫。", nil
+	}
+	cmd := discussCommand()
+	cmd.UserID = "user-1"
+	cmd.DiscussImageRefs = []turn.DiscussImageRef{{ContentHash: "img-hash", Mime: "image/jpeg"}}
+
+	h, err := service.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	if agent.lastConfig == nil {
+		t.Fatal("expected agent to be called")
+	}
+	if got := sdkMessageText(agent.lastConfig.Messages[len(agent.lastConfig.Messages)-1]); !strings.Contains(got, "图片里有一只猫") || !strings.Contains(got, "auxiliary_vision_description") {
+		t.Fatalf("last user message = %q, want auxiliary vision description", got)
+	}
+	for _, message := range agent.lastConfig.Messages {
+		for _, part := range message.Content {
+			if _, ok := part.(sdk.ImagePart); ok {
+				t.Fatal("primary model must receive text description rather than image parts")
+			}
+		}
+	}
+}
+
 func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	agent := &fakeAgentStreamer{}
 	runner := &fakeRunner{chunks: []string{`{"type":"agent_end"}`}}
@@ -250,6 +327,26 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	}
 	if !sawTerminal {
 		t.Fatal("expected terminal agent_end event forwarded from the runtime")
+	}
+}
+
+func TestDiscussForceReplyAddsACPInstruction(t *testing.T) {
+	runner := &fakeRunner{chunks: []string{`{"type":"agent_end"}`}}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{RuntimeType: sessionpkg.RuntimeACPAgent},
+	}
+	service := newDiscussTestService(runner, &fakeAgentStreamer{}, resolver)
+	cmd := discussCommand()
+	cmd.DiscussForceReply = true
+
+	handle, err := service.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, handle)
+
+	if !strings.Contains(runner.gotReq.Query, discussForceReplyInstruction) {
+		t.Fatalf("ACP query = %q, want force-reply instruction", runner.gotReq.Query)
 	}
 }
 

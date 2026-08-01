@@ -15,9 +15,13 @@ import (
 
 const cacheTTL = 5 * time.Second
 
-// mcpCallTimeout caps individual MCP tool calls and tool listing to prevent
-// stuck external MCP servers from blocking the agent indefinitely.
-const mcpCallTimeout = 60 * time.Second
+const (
+	// Tool discovery should be quick even when the remote server is unhealthy.
+	mcpListTimeout = 60 * time.Second
+	// Some MCP tools, including deep-research jobs, legitimately run for many
+	// minutes. Keep a finite upper bound without cancelling healthy work early.
+	mcpCallTimeout = 60 * time.Minute
+)
 
 type ConnectionLister interface {
 	ListActiveByBot(ctx context.Context, botID string) ([]mcpgw.Connection, error)
@@ -197,7 +201,7 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 			})
 			for _, connection := range items {
 				var connTools []mcpgw.ToolDescriptor
-				listCtx, listCancel := context.WithTimeout(ctx, mcpCallTimeout)
+				listCtx, listCancel := context.WithTimeout(ctx, mcpListTimeout)
 				switch strings.ToLower(strings.TrimSpace(connection.Type)) {
 				case "http":
 					connTools, err = s.gateway.ListHTTPConnectionTools(listCtx, connection)

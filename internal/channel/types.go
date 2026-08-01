@@ -45,6 +45,12 @@ const (
 	ConversationTypeThread  = "thread"
 )
 
+const (
+	TelegramDiscussPassiveSampleRateMetadataKey  = "telegram_discuss_passive_sample_rate"
+	TelegramDiscussForceReplyKeywordsMetadataKey = "telegram_discuss_force_reply_keywords"
+	DefaultTelegramDiscussPassiveSampleRate      = 0.25
+)
+
 // NormalizeConversationType normalizes conversation type values within the
 // channel abstraction domain: private/group/thread.
 func NormalizeConversationType(raw string) string {

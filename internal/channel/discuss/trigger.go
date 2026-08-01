@@ -25,7 +25,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 	}
 
 	isMentioned := wasRecentlyMentioned(rc, after)
-	addressed := isMentioned || turn.IsPrivateConversationType(cfg.ConversationType)
+	addressed := isMentioned || turn.IsPrivateConversationType(cfg.ConversationType) || cfg.ForceReply
 	msgs := make([]turn.DiscussMessage, 0, len(composed.Messages))
 	for _, message := range composed.Messages {
 		msgs = append(msgs, turn.DiscussMessage{
@@ -63,6 +63,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			DiscussMessages:         msgs,
 			DiscussImageRefs:        imageRefs,
 			DiscussAddressed:        addressed,
+			DiscussForceReply:       cfg.ForceReply,
 		},
 		consumed:        timeline.ConsumedDiscussCursor(rc),
 		messageCount:    len(composed.Messages),

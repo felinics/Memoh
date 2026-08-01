@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -48,7 +49,14 @@ func TestFederationGatewayHTTPConnectionViaSDK(t *testing.T) {
 	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
 		return server
 	}, nil)
-	httpServer := httptest.NewServer(withAuthHeader(handler, "Bearer test-token"))
+	var standaloneSSERequests atomic.Int32
+	methodCountingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			standaloneSSERequests.Add(1)
+		}
+		handler.ServeHTTP(w, r)
+	})
+	httpServer := httptest.NewServer(withAuthHeader(methodCountingHandler, "Bearer test-token"))
 	defer httpServer.Close()
 
 	gateway := &MCPFederationGateway{
@@ -78,6 +86,16 @@ func TestFederationGatewayHTTPConnectionViaSDK(t *testing.T) {
 		t.Fatalf("call http tool failed: %v", err)
 	}
 	assertEchoResult(t, payload, "hello-http")
+	if got := standaloneSSERequests.Load(); got != 0 {
+		t.Fatalf("standalone SSE GET requests = %d, want 0", got)
+	}
+}
+
+func TestFederationGatewayHTTPClientHasNoGlobalTimeout(t *testing.T) {
+	gateway := NewMCPFederationGateway(nil, nil)
+	if gateway.client.Timeout != 0 {
+		t.Fatalf("HTTP client timeout = %s, want context-managed timeout", gateway.client.Timeout)
+	}
 }
 
 func TestFederationGatewaySSEConnectionViaSDK(t *testing.T) {

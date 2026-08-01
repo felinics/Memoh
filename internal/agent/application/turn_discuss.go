@@ -16,6 +16,8 @@ import (
 	"github.com/memohai/memoh/internal/chat/timeline"
 )
 
+const discussForceReplyInstruction = "Operator directive: the latest incoming message matched a configured force-reply keyword. You must send a concise, relevant reply to that message through the available messaging capability. Do not stay silent or respond only in private text."
+
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
 // Production leaves them nil and calls the Service's own orchestration methods
 // and native Agent directly.
@@ -160,16 +162,31 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	runConfig.Messages = discussMessagesToSDK(contextMessages)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
+	if cmd.DiscussForceReply {
+		runConfig.System = strings.TrimSpace(runConfig.System + "\n\n" + discussForceReplyInstruction)
+	}
 
-	// Inline image attachments from new RC segments so the model receives
-	// them as native vision input (ImagePart) on the first encounter.
-	if runConfig.SupportsImageInput && len(cmd.DiscussImageRefs) > 0 {
+	// Resolve image attachments from new RC segments on first encounter. A
+	// vision-capable primary model receives them directly; otherwise the global
+	// auxiliary vision model describes them and the observation is appended to
+	// the latest user message.
+	if len(cmd.DiscussImageRefs) > 0 &&
+		(runConfig.SupportsImageInput || s.auxiliaryVision.normalized().enabled()) {
 		refs := make([]timeline.ImageAttachmentRef, len(cmd.DiscussImageRefs))
 		for i, r := range cmd.DiscussImageRefs {
 			refs[i] = timeline.ImageAttachmentRef{ContentHash: r.ContentHash, Mime: r.Mime}
 		}
 		imageParts := s.inlineDiscussImages(ctx, cmd.BotID, refs)
-		injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
+		if runConfig.SupportsImageInput {
+			injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
+		} else {
+			visionContext := s.describeImagePartsWithAuxiliaryVision(ctx, ChatRequest{
+				BotID:  cmd.BotID,
+				UserID: cmd.UserID,
+				Query:  lastUserSDKMessageText(runConfig.Messages),
+			}, false, imageParts)
+			runConfig.Messages = appendAuxiliaryVisionToLastUserMessage(runConfig.Messages, visionContext)
+		}
 	}
 	runConfig = runConfig.RefreshContextFrag()
 
@@ -406,6 +423,9 @@ func discussMessageContentBytes(message turn.DiscussMessage) int {
 
 func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
 	prompt := discussACPFullContextPrompt(cmd.DiscussMessages)
+	if cmd.DiscussForceReply {
+		prompt = strings.TrimSpace(prompt + "\n\n" + discussForceReplyInstruction)
+	}
 	if strings.TrimSpace(prompt) == "" {
 		// No composable context: end without a skip marker so the caller
 		// does not advance its consumed cursor (pre-port semantics).
