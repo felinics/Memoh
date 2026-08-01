@@ -27,82 +27,35 @@
         />
       </div>
 
+      <!-- 连接器是首位 tab 且是默认选中项,而它是否存在要等 capabilities 拉回来才知道。
+           在 loaded 之前渲染 tab 条会先画出 [插件][技能]/选中插件,ping 落地后整条重排并
+           改选中——所以这里等 loaded 再渲染,一次画对。已加载过(store 常驻)则无感。 -->
+      <InlineLoadingRow
+        v-if="!capabilitiesStore.loaded"
+        class="justify-center py-8"
+      >
+        {{ $t('common.loading') }}
+      </InlineLoadingRow>
+
       <Tabs
+        v-else
         v-model="activeTab"
         class="w-full"
       >
         <TabsList>
-          <TabsTrigger value="plugins">
-            {{ $t('supermarket.pluginSection') }}
-          </TabsTrigger>
-          <TabsTrigger value="skills">
-            {{ $t('supermarket.skillsSection') }}
-          </TabsTrigger>
           <TabsTrigger
             v-if="capabilitiesStore.connectors"
             value="connectors"
           >
             {{ $t('supermarket.connectorsSection') }}
           </TabsTrigger>
+          <TabsTrigger value="plugins">
+            {{ $t('supermarket.pluginSection') }}
+          </TabsTrigger>
+          <TabsTrigger value="skills">
+            {{ $t('supermarket.skillsSection') }}
+          </TabsTrigger>
         </TabsList>
-
-        <!-- Plugins Tab -->
-        <TabsContent value="plugins">
-          <InlineLoadingRow
-            v-if="pluginsLoading"
-            class="justify-center py-8"
-          >
-            {{ $t('common.loading') }}
-          </InlineLoadingRow>
-
-          <div
-            v-else-if="!plugins.length"
-            class="py-8 text-center text-xs text-muted-foreground"
-          >
-            {{ $t('supermarket.noPluginResults') }}
-          </div>
-
-          <div
-            v-else
-            class="grid grid-cols-1 sm:grid-cols-2 gap-4"
-          >
-            <PluginCard
-              v-for="plugin in plugins"
-              :key="plugin.id"
-              :plugin="plugin"
-              @install="openPluginInstall"
-            />
-          </div>
-        </TabsContent>
-
-        <!-- Skills Tab -->
-        <TabsContent value="skills">
-          <InlineLoadingRow
-            v-if="skillsLoading"
-            class="justify-center py-8"
-          >
-            {{ $t('common.loading') }}
-          </InlineLoadingRow>
-
-          <div
-            v-else-if="!skills.length"
-            class="py-8 text-center text-xs text-muted-foreground"
-          >
-            {{ $t('supermarket.noSkillResults') }}
-          </div>
-
-          <div
-            v-else
-            class="grid grid-cols-1 sm:grid-cols-2 gap-4"
-          >
-            <SkillCard
-              v-for="skill in skills"
-              :key="skill.id"
-              :skill="skill"
-              @install="openSkillInstall"
-            />
-          </div>
-        </TabsContent>
 
         <TabsContent
           v-if="capabilitiesStore.connectors"
@@ -165,6 +118,64 @@
                 </Button>
               </template>
             </MarketItemCard>
+          </div>
+        </TabsContent>
+
+        <!-- Plugins Tab -->
+        <TabsContent value="plugins">
+          <InlineLoadingRow
+            v-if="pluginsLoading"
+            class="justify-center py-8"
+          >
+            {{ $t('common.loading') }}
+          </InlineLoadingRow>
+
+          <div
+            v-else-if="!plugins.length"
+            class="py-8 text-center text-xs text-muted-foreground"
+          >
+            {{ $t('supermarket.noPluginResults') }}
+          </div>
+
+          <div
+            v-else
+            class="grid grid-cols-1 sm:grid-cols-2 gap-4"
+          >
+            <PluginCard
+              v-for="plugin in plugins"
+              :key="plugin.id"
+              :plugin="plugin"
+              @install="openPluginInstall"
+            />
+          </div>
+        </TabsContent>
+
+        <!-- Skills Tab -->
+        <TabsContent value="skills">
+          <InlineLoadingRow
+            v-if="skillsLoading"
+            class="justify-center py-8"
+          >
+            {{ $t('common.loading') }}
+          </InlineLoadingRow>
+
+          <div
+            v-else-if="!skills.length"
+            class="py-8 text-center text-xs text-muted-foreground"
+          >
+            {{ $t('supermarket.noSkillResults') }}
+          </div>
+
+          <div
+            v-else
+            class="grid grid-cols-1 sm:grid-cols-2 gap-4"
+          >
+            <SkillCard
+              v-for="skill in skills"
+              :key="skill.id"
+              :skill="skill"
+              @install="openSkillInstall"
+            />
           </div>
         </TabsContent>
       </Tabs>
@@ -233,17 +244,23 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const capabilitiesStore = useCapabilitiesStore()
-const tabParam = useSyncedQueryParam('tab', 'plugins')
+// Empty default (not 'plugins'): the landing tab depends on a capability that is
+// only known after ping, so the fallback below owns it instead of the composable —
+// an empty param means "no explicit tab", and nothing gets written into the URL.
+const tabParam = useSyncedQueryParam('tab', '')
 // Settings pages are KeepAlive-cached and share the `tab` query key, so a
 // foreign value (e.g. bot detail's ?tab=memory) can land in the synced param
 // while this page is deactivated. Render anything outside this page's own
-// tabs as 'plugins'; writes go back through the synced param.
+// tabs as the default tab; writes go back through the synced param.
 const activeTab = computed({
   get: () => {
     const valid = capabilitiesStore.connectors
-      ? ['plugins', 'skills', 'connectors']
+      ? ['connectors', 'plugins', 'skills']
       : ['plugins', 'skills']
-    return valid.includes(tabParam.value) ? tabParam.value : 'plugins'
+    // Connectors leads the tab strip, so it is also the default landing tab
+    // wherever the capability exists; otherwise plugins keeps that role.
+    const fallback = capabilitiesStore.connectors ? 'connectors' : 'plugins'
+    return valid.includes(tabParam.value) ? tabParam.value : fallback
   },
   set: (value: string) => {
     tabParam.value = value

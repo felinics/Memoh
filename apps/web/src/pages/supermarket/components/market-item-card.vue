@@ -2,6 +2,8 @@
   <!-- 超市列表卡的形状 owner:plugin-card / skill-card 原本各手写一份同形结构,
        且 hover 反馈只有 skill 那份有(plugin 卡悬停无任何反馈,是可见 bug)。
        归一后:图标槽(#leading)+ 标题 + 主页外链 + 两行截断描述 + 尾部动作槽(#actions)。
+       卡高固定:描述框恒占两行(min-h-8 = 2 × text-xs 的 1rem 行高),短描述不塌、长描述
+       被 line-clamp-2 省略,所以每张卡的高度都是 p-4 + 标题行 + 两行描述,网格不再参差。
        根是 Card[role=button](两处原本就这么写,天然避开 button 嵌套陷阱),
        整卡点击/回车/空格 → emit('open');#actions 区域和主页外链要同时 stop 掉 click 和
        keydown——根的 keydown.enter.prevent 会吞掉嵌套交互元素的原生回车激活,只 stop click 不够。
@@ -39,7 +41,8 @@
           <ExternalLink class="size-3" />
         </a>
       </div>
-      <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+      <!-- overflow-wrap:anywhere:描述里的长 URL / 无空格 token 否则会横向顶破卡片 -->
+      <p class="mt-1 line-clamp-2 min-h-8 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
         {{ description }}
       </p>
     </div>
