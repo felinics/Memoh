@@ -92,7 +92,7 @@ services:
   # Connect-It owns the connect_it schema and creates it on startup; it only
   # needs postgres, never Memoh's migrations.
   connect-it:
-    image: "${MEMOH_DEV_CONNECT_IT_SERVER_IMAGE:-ghcr.io/memohai/connect-it-server:sha-5aafc1b}"
+    image: "${MEMOH_DEV_CONNECT_IT_IMAGE:-ghcr.io/memohai/connect-it:0.1.1}"
     container_name: memoh-dev-connect-it
     environment:
       DATABASE_URL: "postgres://memoh:memoh123@postgres:5432/memoh?sslmode=disable&search_path=connect_it"
@@ -100,28 +100,19 @@ services:
       CONNECT_IT_SECRET_KEY: "${MEMOH_DEV_CONNECT_IT_SECRET_KEY:-1:1111111111111111111111111111111111111111111111111111111111111111}"
       COOKIE_SECRET: "${MEMOH_DEV_CONNECT_IT_COOKIE_SECRET:-memoh-connect-it-dev-cookie-secret}"
       CONNECT_IT_ADMIN_PASSWORD: "${MEMOH_DEV_CONNECT_IT_ADMIN_PASSWORD:-admin123}"
-      CONNECT_IT_BASE_URL: "${MEMOH_DEV_CONNECT_IT_BASE_URL:-http://localhost:18083}"
-      LISTEN_ADDR: ":8080"
+      CONNECT_IT_BASE_URL: "${MEMOH_DEV_CONNECT_IT_BASE_URL:-http://localhost:18421}"
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,server,connect-it,connect-it-web,memoh-dev-postgres,memoh-dev-server,memoh-dev-connect-it,memoh-dev-connect-it-web"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,server,connect-it,memoh-dev-postgres,memoh-dev-server,memoh-dev-connect-it"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,server,connect-it,connect-it-web,memoh-dev-postgres,memoh-dev-server,memoh-dev-connect-it,memoh-dev-connect-it-web"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
-  connect-it-web:
-    image: "${MEMOH_DEV_CONNECT_IT_WEB_IMAGE:-ghcr.io/memohai/connect-it-web:sha-5aafc1b}"
-    container_name: memoh-dev-connect-it-web
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,server,connect-it,memoh-dev-postgres,memoh-dev-server,memoh-dev-connect-it"
     ports:
       # Loopback only: the dev stack ships a publicly-known bootstrap API
       # token, and real third-party credentials live behind this port.
-      - "127.0.0.1:${MEMOH_DEV_CONNECT_IT_PORT:-18083}:8080"
+      - "127.0.0.1:${MEMOH_DEV_CONNECT_IT_PORT:-18421}:8421"
     depends_on:
-      connect-it:
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
@@ -146,10 +137,10 @@ services:
       #   HTTP_PROXY=http://host.docker.internal:7890 mise run dev
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,pgvector,server,web,migrate,deps,connect-it,connect-it-web,webhook-tunnel,memoh-dev-postgres,memoh-dev-pgvector,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-connect-it,memoh-dev-connect-it-web,memoh-dev-webhook-tunnel"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,pgvector,server,web,migrate,deps,connect-it,webhook-tunnel,memoh-dev-postgres,memoh-dev-pgvector,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-connect-it,memoh-dev-webhook-tunnel"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,web,migrate,deps,connect-it,connect-it-web,webhook-tunnel,memoh-dev-postgres,memoh-dev-pgvector,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-connect-it,memoh-dev-connect-it-web,memoh-dev-webhook-tunnel"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,web,migrate,deps,connect-it,webhook-tunnel,memoh-dev-postgres,memoh-dev-pgvector,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-connect-it,memoh-dev-webhook-tunnel"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:

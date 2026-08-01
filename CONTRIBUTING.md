@@ -34,14 +34,14 @@ mise run dev       # Start the full containerized dev environment
 5. Web frontend with Vite hot reload
 
 The dev stack uses `devenv/app.dev.toml` directly and does not overwrite the repo root `config.toml`.
-Default host ports are shifted away from the production compose stack: Web `18082`, API `18080`, Connect-It `18083`, Postgres `15432`.
+Default host ports are shifted away from the production compose stack: Web `18082`, API `18080`, Connect-It `18421`, Postgres `15432`.
 
 ### Connect-It
 
-The dev Compose files pull the pinned multi-architecture images
-`ghcr.io/memohai/connect-it-server:sha-5aafc1b` and
-`ghcr.io/memohai/connect-it-web:sha-5aafc1b`; no Connect-It source checkout is
-required. Connect-It uses the same `memoh` PostgreSQL database as Memoh, with
+The dev Compose files pull the pinned multi-architecture image
+`ghcr.io/memohai/connect-it:0.1.1`; no Connect-It source checkout is required.
+The image serves the API, MCP endpoint, and admin UI from one container.
+Connect-It uses the same `memoh` PostgreSQL database as Memoh, with
 its independently migrated tables isolated in the `connect_it` schema. The
 schema is owned, created, and migrated by the Connect-It server itself on
 startup; Memoh's migrations never touch it.
@@ -51,7 +51,7 @@ the Connect-It container seeds it as an API token at startup
 (`CONNECT_IT_BOOTSTRAP_API_TOKEN`) and the Memoh server presents it as its
 bearer token. The Connectors tab is therefore available from the first
 startup, with no token minting or caching involved. The admin UI remains
-available at `http://localhost:18083` with the development credentials
+available at `http://localhost:18421` with the development credentials
 `admin` / `admin123`. The Connect-It port binds to loopback only: the token
 is public, so the deployment must not be reachable from the LAN. If the
 bootstrap token was revoked through the admin UI, rotate it once with
@@ -61,8 +61,7 @@ is seeded as a fresh token and the revoked one stays revoked.
 Override the host UI port with `MEMOH_DEV_CONNECT_IT_PORT`, the public OAuth callback
 address with `MEMOH_DEV_CONNECT_IT_BASE_URL`, or point at an external Connect-It
 deployment with `MEMOH_CONNECT_IT_BASE_URL` and `MEMOH_CONNECT_IT_API_TOKEN`. For
-image testing, override `MEMOH_DEV_CONNECT_IT_SERVER_IMAGE` or
-`MEMOH_DEV_CONNECT_IT_WEB_IMAGE`.
+image testing, override `MEMOH_DEV_CONNECT_IT_IMAGE`.
 
 ## Daily Development
 

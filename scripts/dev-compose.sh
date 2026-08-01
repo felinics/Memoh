@@ -22,7 +22,7 @@ done
 # MEMOH_CONNECT_IT_API_TOKEN to target an external Connect-It deployment.
 dev_bootstrap_token="cit_1111111111111111111111111111111111111111111111111111111111111111"
 
-export MEMOH_CONNECT_IT_BASE_URL="${MEMOH_CONNECT_IT_BASE_URL:-http://connect-it:8080}"
+export MEMOH_CONNECT_IT_BASE_URL="${MEMOH_CONNECT_IT_BASE_URL:-http://connect-it:8421}"
 export MEMOH_CONNECT_IT_API_TOKEN="${MEMOH_CONNECT_IT_API_TOKEN:-${dev_bootstrap_token}}"
 
-exec "${compose[@]}" up --build
+exec "${compose[@]}" up --build --remove-orphans

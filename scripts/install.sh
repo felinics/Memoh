@@ -60,7 +60,8 @@ else
   CONNECT_IT_MODE_SET=false
 fi
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
-PROJECT_CONTAINERS="memoh-postgres memoh-pgvector memoh-migrate memoh-server memoh-channel memoh-web memoh-webhook-tunnel memoh-connect-it memoh-connect-it-web"
+PROJECT_CONTAINERS="memoh-postgres memoh-pgvector memoh-migrate memoh-server memoh-channel memoh-web memoh-webhook-tunnel memoh-connect-it"
+LEGACY_PROJECT_CONTAINERS="memoh-connect-it-web"
 PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_pgvector_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_openviking_data"
 
 EXISTING_CONFIG_SOURCE=""
@@ -354,7 +355,7 @@ detect_existing_installation() {
     fi
   done
 
-  for container in $PROJECT_CONTAINERS; do
+  for container in $PROJECT_CONTAINERS $LEGACY_PROJECT_CONTAINERS; do
     if $DOCKER container inspect "$container" >/dev/null 2>&1; then
       EXISTING_DOCKER_STATE=true
       EXISTING_DOCKER_CONTAINERS=true
@@ -462,6 +463,10 @@ load_existing_settings() {
     [ -n "$value" ] && MEMOH_CONNECT_IT_API_TOKEN="${MEMOH_CONNECT_IT_API_TOKEN:-$value}"
     value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_CONNECT_IT_PUBLIC_BASE_URL" || true)
     [ -n "$value" ] && MEMOH_CONNECT_IT_PUBLIC_BASE_URL="${MEMOH_CONNECT_IT_PUBLIC_BASE_URL:-$value}"
+    value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_CONNECT_IT_PORT" || true)
+    [ -n "$value" ] && MEMOH_CONNECT_IT_PORT="${MEMOH_CONNECT_IT_PORT:-$value}"
+    value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_CONNECT_IT_IMAGE" || true)
+    [ -n "$value" ] && MEMOH_CONNECT_IT_IMAGE="${MEMOH_CONNECT_IT_IMAGE:-$value}"
   fi
 }
 
@@ -554,7 +559,7 @@ prompt_install_mode() {
 
 cleanup_existing_installation() {
   echo "${YELLOW}Removing existing Memoh Docker containers, volumes, and network...${NC}"
-  for container in $PROJECT_CONTAINERS; do
+  for container in $PROJECT_CONTAINERS $LEGACY_PROJECT_CONTAINERS; do
     $DOCKER rm -f "$container" >/dev/null 2>&1 || true
   done
   for volume in $PROJECT_VOLUMES; do
@@ -568,7 +573,7 @@ show_failure_logs() {
   echo "${RED}Startup failed. Recent database, migration, server, and channel logs:${NC}"
   log_services="postgres migrate server channel"
   if [ "${CONNECT_IT_MODE:-}" = "embedded" ]; then
-    log_services="$log_services connect-it connect-it-web"
+    log_services="$log_services connect-it"
   fi
   $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES logs --no-color --tail=200 $log_services || true
 }
@@ -670,6 +675,8 @@ MEMOH_CONNECT_IT_SECRET_KEY="${MEMOH_CONNECT_IT_SECRET_KEY:-}"
 MEMOH_CONNECT_IT_COOKIE_SECRET="${MEMOH_CONNECT_IT_COOKIE_SECRET:-}"
 MEMOH_CONNECT_IT_API_TOKEN="${MEMOH_CONNECT_IT_API_TOKEN:-}"
 MEMOH_CONNECT_IT_PUBLIC_BASE_URL="${MEMOH_CONNECT_IT_PUBLIC_BASE_URL:-}"
+MEMOH_CONNECT_IT_PORT="${MEMOH_CONNECT_IT_PORT:-8421}"
+MEMOH_CONNECT_IT_IMAGE="${MEMOH_CONNECT_IT_IMAGE:-}"
 PG_PASS="memoh123"
 WORKSPACE="$WORKSPACE_DEFAULT"
 MEMOH_DATA_DIR="$MEMOH_DATA_DIR_DEFAULT"
@@ -919,7 +926,7 @@ export MEMOH_WEBHOOK_TUNNEL_MODE="$WEBHOOK_TUNNEL_MODE"
 export MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR="${MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR:-:18734}"
 export MEMOH_WEBHOOK_TUNNEL_METRICS_URL="${MEMOH_WEBHOOK_TUNNEL_METRICS_URL:-http://webhook-tunnel:18735}"
 
-# Connect-It connectors: embedded runs the co-hosted Connect-It containers and
+# Connect-It connectors: embedded runs the co-hosted Connect-It container and
 # wires Memoh to them with generated credentials; disabled leaves the feature
 # off. Credentials are generated once and reused across upgrades, so toggling
 # the mode later keeps existing connections working.
@@ -946,10 +953,10 @@ esac
 [ -n "$MEMOH_CONNECT_IT_API_TOKEN" ] || MEMOH_CONNECT_IT_API_TOKEN="cit_$(gen_hex)"
 if [ "$CONNECT_IT_MODE" = "embedded" ]; then
   COMPOSE_PROFILES="$COMPOSE_PROFILES --profile connectors"
-  MEMOH_CONNECT_IT_BASE_URL="http://connect-it:8080"
+  MEMOH_CONNECT_IT_BASE_URL="http://connect-it:8421"
   echo "${GREEN}✓ Connect-It connectors enabled${NC}"
   if [ -z "$MEMOH_CONNECT_IT_PUBLIC_BASE_URL" ]; then
-    echo "${YELLOW}ℹ Connector OAuth callbacks default to http://localhost:${MEMOH_CONNECT_IT_PORT:-8083}; set MEMOH_CONNECT_IT_PUBLIC_BASE_URL when Memoh is used from other machines${NC}"
+    echo "${YELLOW}ℹ Connector OAuth callbacks default to http://localhost:${MEMOH_CONNECT_IT_PORT}; set MEMOH_CONNECT_IT_PUBLIC_BASE_URL when Memoh is used from other machines${NC}"
   fi
   if [ "$USE_CN_MIRROR" = true ]; then
     echo "${YELLOW}ℹ Connect-It images come from ghcr.io; memoh.cn mirror does not cover them. Set MEMOH_CONNECT_IT_MODE=disabled to skip them${NC}"
@@ -964,6 +971,8 @@ export MEMOH_CONNECT_IT_ADMIN_PASSWORD
 export MEMOH_CONNECT_IT_SECRET_KEY
 export MEMOH_CONNECT_IT_COOKIE_SECRET
 export MEMOH_CONNECT_IT_PUBLIC_BASE_URL
+export MEMOH_CONNECT_IT_PORT
+export MEMOH_CONNECT_IT_IMAGE
 
 : > .env
 write_env_value "POSTGRES_PASSWORD" "$PG_PASS"
@@ -983,6 +992,8 @@ write_env_value "MEMOH_CONNECT_IT_SECRET_KEY" "$MEMOH_CONNECT_IT_SECRET_KEY"
 write_env_value "MEMOH_CONNECT_IT_COOKIE_SECRET" "$MEMOH_CONNECT_IT_COOKIE_SECRET"
 write_env_value "MEMOH_CONNECT_IT_API_TOKEN" "$MEMOH_CONNECT_IT_API_TOKEN"
 write_env_value "MEMOH_CONNECT_IT_PUBLIC_BASE_URL" "$MEMOH_CONNECT_IT_PUBLIC_BASE_URL"
+write_env_value "MEMOH_CONNECT_IT_PORT" "$MEMOH_CONNECT_IT_PORT"
+write_env_value "MEMOH_CONNECT_IT_IMAGE" "$MEMOH_CONNECT_IT_IMAGE"
 echo "${GREEN}✓ Database backend: ${DATABASE_DRIVER}${NC}"
 echo "${GREEN}✓ Workspace backend: ${CONTAINER_BACKEND}${NC}"
 
@@ -996,7 +1007,7 @@ $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES pull
 
 echo ""
 echo "${GREEN}Starting services (first startup may take a few minutes)...${NC}"
-if ! $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES up -d; then
+if ! $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES up -d --remove-orphans; then
   show_failure_logs
   exit 1
 fi
@@ -1027,7 +1038,7 @@ echo ""
 echo "  🔑 Admin login:       ${ADMIN_USER} / ${ADMIN_PASS}"
 echo ""
 if [ "$CONNECT_IT_MODE" = "embedded" ]; then
-  echo "  🔗 Connect-It admin:  ${MEMOH_CONNECT_IT_PUBLIC_BASE_URL:-http://localhost:${MEMOH_CONNECT_IT_PORT:-8083}} (admin / ${MEMOH_CONNECT_IT_ADMIN_PASSWORD})"
+  echo "  🔗 Connect-It admin:  ${MEMOH_CONNECT_IT_PUBLIC_BASE_URL:-http://localhost:${MEMOH_CONNECT_IT_PORT}} (admin / ${MEMOH_CONNECT_IT_ADMIN_PASSWORD})"
   echo ""
 fi
 COMPOSE_CMD="$DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES"

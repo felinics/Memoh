@@ -208,14 +208,14 @@ func TestLoadAppliesWebhookTunnelEnvOverrides(t *testing.T) {
 }
 
 func TestLoadAppliesConnectItEnvOverrides(t *testing.T) {
-	t.Setenv("MEMOH_CONNECT_IT_BASE_URL", "http://connect-it:8080")
+	t.Setenv("MEMOH_CONNECT_IT_BASE_URL", "http://connect-it:8421")
 	t.Setenv("MEMOH_CONNECT_IT_API_TOKEN", "test-token")
 
 	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.ConnectIt.BaseURL != "http://connect-it:8080" || cfg.ConnectIt.APIToken != "test-token" {
+	if cfg.ConnectIt.BaseURL != "http://connect-it:8421" || cfg.ConnectIt.APIToken != "test-token" {
 		t.Fatalf("connect-it config = %#v", cfg.ConnectIt)
 	}
 }
@@ -232,13 +232,13 @@ func TestConnectItConfigValidationRequiresCompletePair(t *testing.T) {
 		{
 			name: "configured",
 			config: ConnectItConfig{
-				BaseURL:  "http://connect-it:8080",
+				BaseURL:  "http://connect-it:8421",
 				APIToken: "cit_test",
 			},
 		},
 		{
 			name:    "missing token",
-			config:  ConnectItConfig{BaseURL: "http://connect-it:8080"},
+			config:  ConnectItConfig{BaseURL: "http://connect-it:8421"},
 			wantErr: true,
 		},
 		{
