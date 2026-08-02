@@ -231,7 +231,6 @@ CREATE TABLE IF NOT EXISTS bots (
   status TEXT NOT NULL DEFAULT 'ready',
   language TEXT NOT NULL DEFAULT 'auto',
   command_ui_language TEXT NOT NULL DEFAULT 'auto',
-  reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   chat_runtime TEXT NOT NULL DEFAULT 'model' CHECK (chat_runtime IN ('model', 'acp_agent')),
@@ -269,6 +268,7 @@ CREATE TABLE IF NOT EXISTS bots (
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
   -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0093).
+  -- It is also the single on/off source: 'disable' means no reasoning (see 0126).
   CONSTRAINT bots_name_format_check CHECK (name ~ '^[a-z0-9][a-z0-9-]{1,62}$')
 );
 

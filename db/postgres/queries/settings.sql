@@ -2,7 +2,6 @@
 SELECT
   bots.id AS bot_id,
   bots.language,
-  bots.reasoning_enabled,
   bots.reasoning_effort,
   bots.heartbeat_enabled,
   bots.heartbeat_interval,
@@ -50,7 +49,6 @@ WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $1;
 WITH updated AS (
   UPDATE bots
   SET language = sqlc.arg(language),
-      reasoning_enabled = sqlc.arg(reasoning_enabled),
       reasoning_effort = sqlc.arg(reasoning_effort),
       heartbeat_enabled = sqlc.arg(heartbeat_enabled),
       heartbeat_interval = sqlc.arg(heartbeat_interval),
@@ -93,12 +91,11 @@ WITH updated AS (
       command_ui_language = sqlc.arg(command_ui_language),
       updated_at = now()
   WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  RETURNING bots.id, bots.language, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
   updated.language,
-  updated.reasoning_enabled,
   updated.reasoning_effort,
   updated.heartbeat_enabled,
   updated.heartbeat_interval,
@@ -145,7 +142,6 @@ LEFT JOIN models AS video_models ON video_models.id = updated.video_model_id AND
 UPDATE bots
 SET language = 'auto',
     command_ui_language = 'auto',
-    reasoning_enabled = false,
     reasoning_effort = 'medium',
     heartbeat_enabled = false,
     heartbeat_interval = 1440,

@@ -173,11 +173,10 @@ func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentCont
 		return CurrentContext{}, err
 	}
 	return CurrentContext{
-		ChatModel:        h.resolveModelName(cc, s.ChatModelID),
-		HeartbeatModel:   h.resolveModelName(cc, s.HeartbeatModelID),
-		ReasoningEnabled: s.ReasoningEnabled,
-		ReasoningEffort:  s.ReasoningEffort,
-		ContextWindow:    h.resolveContextWindow(cc),
+		ChatModel:       h.resolveModelName(cc, s.ChatModelID),
+		HeartbeatModel:  h.resolveModelName(cc, s.HeartbeatModelID),
+		ReasoningEffort: s.ReasoningEffort,
+		ContextWindow:   h.resolveContextWindow(cc),
 	}, nil
 }
 

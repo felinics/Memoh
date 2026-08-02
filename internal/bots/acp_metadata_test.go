@@ -100,7 +100,7 @@ func mustJSON(value map[string]any) []byte {
 func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) != 24 {
+			if len(dest) != 23 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -112,21 +112,20 @@ func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) 
 			*dest[6].(*bool) = true
 			*dest[7].(*string) = BotStatusReady
 			*dest[8].(*string) = "en"
-			*dest[9].(*bool) = false
-			*dest[10].(*string) = "medium"
+			*dest[9].(*string) = "medium"
+			*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[13].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[14].(*bool) = false
-			*dest[15].(*int32) = 30
-			*dest[16].(*string) = ""
-			*dest[17].(*bool) = false
-			*dest[18].(*int32) = 100000
-			*dest[19].(*pgtype.Int4) = pgtype.Int4{}
-			*dest[20].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[21].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[13].(*bool) = false
+			*dest[14].(*int32) = 30
+			*dest[15].(*string) = ""
+			*dest[16].(*bool) = false
+			*dest[17].(*int32) = 100000
+			*dest[18].(*pgtype.Int4) = pgtype.Int4{}
+			*dest[19].(*pgtype.UUID) = pgtype.UUID{}
+			*dest[20].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[23].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}
@@ -135,7 +134,7 @@ func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) 
 func makeUpdateBotProfileRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) != 20 {
+			if len(dest) != 19 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -147,17 +146,16 @@ func makeUpdateBotProfileRowWithMetadata(botID, ownerUserID pgtype.UUID, metadat
 			*dest[6].(*bool) = true
 			*dest[7].(*string) = BotStatusCreating
 			*dest[8].(*string) = "en"
-			*dest[9].(*bool) = false
-			*dest[10].(*string) = "medium"
+			*dest[9].(*string) = "medium"
+			*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[13].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[14].(*bool) = false
-			*dest[15].(*int32) = 30
-			*dest[16].(*string) = ""
-			*dest[17].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[13].(*bool) = false
+			*dest[14].(*int32) = 30
+			*dest[15].(*string) = ""
+			*dest[16].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

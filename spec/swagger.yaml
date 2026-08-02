@@ -4847,9 +4847,10 @@ definitions:
       persist_full_tool_results:
         type: boolean
       reasoning_effort:
+        description: |-
+          ReasoningEffort is the single on/off source for reasoning:
+          models.ReasoningEffortDisable means no reasoning, any other value is a tier.
         type: string
-      reasoning_enabled:
-        type: boolean
       search_provider_id:
         type: string
       show_tool_calls_in_im:
@@ -4969,8 +4970,6 @@ definitions:
         type: boolean
       reasoning_effort:
         type: string
-      reasoning_enabled:
-        type: boolean
       search_provider_id:
         type: string
       show_tool_calls_in_im:

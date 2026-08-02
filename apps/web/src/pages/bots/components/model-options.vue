@@ -1,89 +1,186 @@
 <template>
-  <div :class="menuSearchHeaderClass">
-    <input
-      v-model="searchTerm"
-      role="combobox"
-      :aria-controls="listboxId"
-      :aria-expanded="open"
-      :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
-      :placeholder="$t('bots.settings.searchModel')"
-      aria-label="Search models"
-      :class="menuSearchInputClass"
-      @keydown="onKeydown"
-    >
-  </div>
-
-  <div
-    :id="listboxId"
-    ref="scrollEl"
-    :class="virtualListboxClass"
-    role="listbox"
-  >
+  <!-- The Popover root is renderless (reka's PopoverRoot only provides context),
+       so wrapping unconditionally costs nothing when the reasoning footer is off. -->
+  <Popover v-model:open="reasoningOpen">
     <div
-      v-if="rows.length === 0"
-      class="py-6 text-center text-control text-muted-foreground"
+      :class="menuSearchHeaderClass"
+      @pointerenter="reasoningOpen = false"
     >
-      {{ $t('bots.settings.noModel') }}
+      <input
+        v-model="searchTerm"
+        role="combobox"
+        :aria-controls="listboxId"
+        :aria-expanded="open"
+        :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
+        :placeholder="$t('bots.settings.searchModel')"
+        aria-label="Search models"
+        :class="menuSearchInputClass"
+        @keydown="onKeydown"
+      >
     </div>
 
     <div
-      v-else
-      :style="{ height: `${totalSize}px`, width: '100%', position: 'relative' }"
+      :id="listboxId"
+      ref="scrollEl"
+      :class="virtualListboxClass"
+      role="listbox"
+      @pointerenter="reasoningOpen = false"
     >
       <div
-        v-for="vRow in virtualRows"
-        :key="vRow.key"
-        :ref="measureRow"
-        :data-index="vRow.virtual.index"
-        :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
+        v-if="rows.length === 0"
+        class="py-6 text-center text-control text-muted-foreground"
+      >
+        {{ $t('bots.settings.noModel') }}
+      </div>
+
+      <div
+        v-else
+        :style="{ height: `${totalSize}px`, width: '100%', position: 'relative' }"
       >
         <div
-          v-if="vRow.row.type === 'header'"
-          :class="menuLabelClass"
+          v-for="vRow in virtualRows"
+          :key="vRow.key"
+          :ref="measureRow"
+          :data-index="vRow.virtual.index"
+          :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
         >
-          {{ vRow.row.label }}
-        </div>
-
-        <ModelDescriptionTooltip
-          v-else
-          :description="vRow.row.option.description"
-        >
-          <button
-            :id="`${listboxId}-${vRow.virtual.index}`"
-            type="button"
-            role="option"
-            :aria-selected="modelValue === vRow.row.option.value"
-            :aria-setsize="optionCount"
-            :aria-posinset="vRow.row.posinset"
-            :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
-            :class="menuItemClass"
-            @click="$emit('update:modelValue', vRow.row.option.value)"
-            @pointermove="activeIndex = vRow.virtual.index"
+          <div
+            v-if="vRow.row.type === 'header'"
+            :class="menuLabelClass"
           >
-            <span
-              class="min-w-0 flex-1 truncate text-left"
-              :title="vRow.row.option.label"
-            >{{ vRow.row.option.label }}</span>
-            <Check
-              v-if="modelValue === vRow.row.option.value"
-              class="ml-2 size-4 shrink-0"
-            />
-          </button>
-        </ModelDescriptionTooltip>
+            {{ vRow.row.label }}
+          </div>
+
+          <ModelDescriptionTooltip
+            v-else
+            :description="vRow.row.option.description"
+            :open="openDescriptionTooltipKey === vRow.row.key"
+            @update:open="setDescriptionTooltipOpen(vRow.row.key, $event)"
+          >
+            <button
+              :id="`${listboxId}-${vRow.virtual.index}`"
+              type="button"
+              role="option"
+              :aria-selected="modelValue === vRow.row.option.value"
+              :aria-setsize="optionCount"
+              :aria-posinset="vRow.row.posinset"
+              :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
+              :class="menuItemClass"
+              @click="commitModel(vRow.row.option.value)"
+              @pointermove="activeIndex = vRow.virtual.index"
+            >
+              <span
+                class="min-w-0 flex-1 truncate text-left"
+                :title="vRow.row.option.label"
+              >{{ vRow.row.option.label }}</span>
+              <Check
+                v-if="modelValue === vRow.row.option.value"
+                class="ml-2 size-4 shrink-0"
+              />
+            </button>
+          </ModelDescriptionTooltip>
+        </div>
       </div>
     </div>
-  </div>
+
+    <!-- Reasoning effort lives in the model menu, not beside it: the tiers a model
+         offers depend on the model, so picking one without the other is a two-stop
+         trip through a menu that already knows the answer. -->
+    <template v-if="showReasoning">
+      <div :class="menuSeparatorClass" />
+      <div class="p-1.5 pt-0">
+        <PopoverAnchor as-child>
+          <button
+            type="button"
+            :aria-label="$t('chat.reasoningEffort')"
+            :class="menuItemClass"
+            :data-disabled="canSelectReasoning ? undefined : ''"
+            :disabled="!canSelectReasoning"
+            @pointerenter="reasoningOpen = true"
+            @click="reasoningOpen = true"
+          >
+            <Lightbulb :style="{ opacity: EFFORT_OPACITY[currentReasoningValue] ?? 0.5 }" />
+            <span class="min-w-0 flex-1 truncate text-left">{{ currentReasoningLabel || $t(currentReasoningLabelKey) }}</span>
+            <ChevronRight class="ml-2" />
+          </button>
+        </PopoverAnchor>
+      </div>
+    </template>
+
+    <PopoverContent
+      v-if="showReasoning"
+      menu
+      side="right"
+      align="start"
+      :side-offset="12"
+      :align-offset="-4"
+      :align-flip="false"
+      :collision-padding="8"
+      class="w-44"
+      @open-auto-focus.prevent
+    >
+      <div :class="menuChromeClass">
+        <div
+          ref="reasoningScrollEl"
+          :class="virtualListboxClass"
+        >
+          <div class="flex flex-col gap-0.5">
+            <ModelDescriptionTooltip
+              v-for="option in availableReasoningOptions"
+              :key="option.value"
+              :description="option.description"
+              :open="openDescriptionTooltipKey === `reasoning:${option.value}`"
+              @update:open="setDescriptionTooltipOpen(`reasoning:${option.value}`, $event)"
+            >
+              <button
+                type="button"
+                :class="menuItemClass"
+                @click="setEffort(option.value)"
+              >
+                <Lightbulb :style="{ opacity: EFFORT_OPACITY[option.value] ?? 0.5 }" />
+                <span class="min-w-0 flex-1 truncate text-left">{{ option.label || $t(option.labelKey ?? 'chat.reasoningOff') }}</span>
+                <Check
+                  v-if="selectedReasoningValue === option.value"
+                  class="ml-2 size-4 shrink-0"
+                />
+              </button>
+            </ModelDescriptionTooltip>
+          </div>
+        </div>
+      </div>
+    </PopoverContent>
+  </Popover>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { Check } from 'lucide-vue-next'
-import { menuItemClass, menuLabelClass, menuSearchHeaderClass, menuSearchInputClass, virtualListboxClass } from '@felinic/ui'
+import { useEventListener } from '@vueuse/core'
+import { Check, ChevronRight, Lightbulb } from 'lucide-vue-next'
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  menuChromeClass,
+  menuItemClass,
+  menuLabelClass,
+  menuSearchHeaderClass,
+  menuSearchInputClass,
+  menuSeparatorClass,
+  virtualListboxClass,
+} from '@felinic/ui'
 import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 import ModelDescriptionTooltip from '@/components/model-description-tooltip/index.vue'
 import { getModelDescription, matchesModelSearch } from '@/utils/model-description'
+import {
+  EFFORT_LABELS,
+  EFFORT_OPACITY,
+  REASONING_EFFORT_DISABLE,
+  availableEffortsForMode,
+  resolveEffortLevels,
+  resolveThinkingMode,
+} from './reasoning-effort'
 
 export interface ModelOption {
   value: string
@@ -95,6 +192,8 @@ export interface ModelOption {
   keywords: string[]
   compatibilities?: string[]
   contextWindow?: number
+  providerId: string
+  config?: ModelsGetResponse['config']
 }
 
 interface HeaderRow {
@@ -120,6 +219,13 @@ interface NoneRow {
 
 type Row = HeaderRow | ItemRow | NoneRow
 
+interface ReasoningOption {
+  value: string
+  label?: string
+  labelKey?: string
+  description?: string
+}
+
 const props = defineProps<{
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
@@ -128,16 +234,32 @@ const props = defineProps<{
   showTags?: boolean
   showIcons?: boolean
   noneLabel?: string
+  // Opt in to the reasoning-effort footer. Off by default so the embedding/tts/…
+  // pickers that share this component stay a plain model list.
+  showReasoning?: boolean
+  // Runtime-supplied tiers (ACP agents report their own). When omitted, the tiers
+  // are derived from the selected model's capabilities.
+  reasoningOptions?: Array<{
+    value: string
+    label: string
+    description?: string
+  }>
 }>()
 
-const emit = defineEmits<{
-  'update:modelValue': [value: string]
-}>()
-
+// No explicit defineEmits for update:modelValue — defineModel already declares
+// it, and declaring both widens the emit signature to (...args: unknown[]),
+// which breaks callers that bind :model-value + @update:model-value explicitly.
 const modelValue = defineModel<string>({ default: '' })
+const reasoningEffort = defineModel<string>('reasoningEffort', { default: '' })
 
 const searchTerm = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
+const reasoningScrollEl = ref<HTMLElement | null>(null)
+const reasoningOpen = ref(false)
+const openDescriptionTooltipKey = ref<string | null>(null)
+// Sort order is captured when the picker opens. Changing models inside the same
+// open menu must not make the list jump under the pointer.
+const pinnedSortValue = ref('')
 
 const providerMap = computed(() => {
   const map = new Map<string, string>()
@@ -165,6 +287,8 @@ const options = computed<ModelOption[]>(() =>
       keywords: [model.model_id ?? '', model.name ?? ''],
       compatibilities: config?.compatibilities,
       contextWindow: config?.context_window,
+      providerId,
+      config: model.config,
     }
   }),
 )
@@ -179,6 +303,7 @@ const noneOption = computed<ModelOption | undefined>(() =>
         groupKey: '',
         groupLabel: '',
         keywords: [props.noneLabel],
+        providerId: '',
       }
     : undefined,
 )
@@ -199,7 +324,20 @@ const filteredGroups = computed(() => {
     }
     groups.get(opt.groupKey)!.items.push(opt)
   }
-  return Array.from(groups.values())
+
+  // Float the model that was active when this menu opened. During one open
+  // interaction, changing the effort can update the selection without reordering.
+  const list = Array.from(groups.values())
+  const selected = options.value.find((o) => o.value === pinnedSortValue.value)
+  if (!selected) return list
+  list.sort((a, b) => Number(b.key === selected.groupKey) - Number(a.key === selected.groupKey))
+  const activeGroup = list.find((g) => g.key === selected.groupKey)
+  if (activeGroup) {
+    activeGroup.items = [...activeGroup.items].sort(
+      (a, b) => Number(b.value === selected.value) - Number(a.value === selected.value),
+    )
+  }
+  return list
 })
 
 // Flatten the grouped options into one linear list so the dropdown can be
@@ -270,22 +408,117 @@ const measureRow = (el: unknown) => {
   if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
 }
 
+// Selection applies immediately and the popover STAYS OPEN on purpose (#899):
+// the user can hop between models (and efforts) to compare without reopening the
+// menu. Dismissal is the host popover's business — outside click / Esc / its own
+// watcher on the selected value.
+function commitModel(value: string) {
+  reasoningOpen.value = false
+  if (value !== modelValue.value) modelValue.value = value
+}
+
 const listboxId = useId()
 const { activeIndex, onKeydown, reset: resetActive } = useListboxKeyboard<Row>({
   rows,
   scrollToIndex: (index) => virtualizer.value.scrollToIndex(index),
   onSelect: (row) => {
-    if (row.type === 'item' || row.type === 'none') emit('update:modelValue', row.option.value)
+    if (row.type === 'item' || row.type === 'none') commitModel(row.option.value)
   },
 })
+
+function setDescriptionTooltipOpen(key: string, open: boolean) {
+  if (open) {
+    openDescriptionTooltipKey.value = key
+  } else if (openDescriptionTooltipKey.value === key) {
+    openDescriptionTooltipKey.value = null
+  }
+}
+
+useEventListener(scrollEl, 'scroll', () => {
+  reasoningOpen.value = false
+  openDescriptionTooltipKey.value = null
+}, { passive: true })
+
+useEventListener(reasoningScrollEl, 'scroll', () => {
+  openDescriptionTooltipKey.value = null
+}, { passive: true })
+
+const activeModel = computed(() =>
+  options.value.find((o) => o.value === modelValue.value),
+)
+
+const activeClientType = computed(() =>
+  props.providers.find((p) => p.id === activeModel.value?.providerId)?.client_type,
+)
+
+const nativeAvailableEfforts = computed(() => {
+  if (!activeModel.value) return []
+  return availableEffortsForMode(
+    resolveThinkingMode(activeModel.value.config),
+    resolveEffortLevels(activeModel.value.config, activeClientType.value),
+  )
+})
+
+const availableReasoningOptions = computed<ReasoningOption[]>(() => {
+  if (props.reasoningOptions !== undefined) {
+    return props.reasoningOptions.flatMap((option) => {
+      const value = option.value.trim()
+      if (!value) return []
+      return [{
+        value,
+        label: option.label.trim() || value,
+        description: option.description?.trim() || undefined,
+      }]
+    })
+  }
+  return nativeAvailableEfforts.value.map(value => ({
+    value,
+    labelKey: EFFORT_LABELS[value] ?? 'chat.reasoningOff',
+  }))
+})
+
+const canSelectReasoning = computed(() => availableReasoningOptions.value.length > 0)
+
+const selectedReasoningValue = computed(() =>
+  reasoningEffort.value || REASONING_EFFORT_DISABLE,
+)
+
+const currentReasoningValue = computed(() =>
+  canSelectReasoning.value ? selectedReasoningValue.value : REASONING_EFFORT_DISABLE,
+)
+
+const currentReasoningOption = computed(() =>
+  availableReasoningOptions.value.find(option => option.value === currentReasoningValue.value),
+)
+
+const currentReasoningLabel = computed(() => currentReasoningOption.value?.label ?? '')
+const currentReasoningLabelKey = computed(() =>
+  currentReasoningOption.value?.labelKey ?? EFFORT_LABELS[currentReasoningValue.value] ?? 'chat.reasoningOff',
+)
+
+function setEffort(level: string) {
+  // Keep the effort flyout open after a pick (#899): the check mark just
+  // moves. Collapsing on every click made a shaky double-click land on the
+  // backdrop and dismiss the whole popover.
+  reasoningEffort.value = level
+}
 
 watch(() => props.open, (v) => {
   if (v) {
     searchTerm.value = ''
+    pinnedSortValue.value = modelValue.value
+    openDescriptionTooltipKey.value = null
     resetActive()
     nextTick(() => virtualizer.value.scrollToOffset(0))
+  } else {
+    reasoningOpen.value = false
+    openDescriptionTooltipKey.value = null
   }
-})
+}, { immediate: true })
 
-watch(searchTerm, () => virtualizer.value.scrollToOffset(0))
+watch(searchTerm, () => {
+  reasoningOpen.value = false
+  openDescriptionTooltipKey.value = null
+  virtualizer.value.scrollToOffset(0)
+})
 </script>

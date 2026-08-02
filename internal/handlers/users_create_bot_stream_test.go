@@ -558,7 +558,7 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		metadata = []byte(`{}`)
 	}
 	return &createBotStreamRow{scanFunc: func(dest ...any) error {
-		if len(dest) < 20 {
+		if len(dest) < 19 {
 			return pgx.ErrNoRows
 		}
 		*dest[0].(*pgtype.UUID) = botID
@@ -570,27 +570,26 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		*dest[6].(*bool) = true
 		*dest[7].(*string) = status
 		*dest[8].(*string) = "en"
-		*dest[9].(*bool) = false
-		*dest[10].(*string) = "medium"
+		*dest[9].(*string) = "medium"
+		*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[13].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[14].(*bool) = false
-		*dest[15].(*int32) = 30
-		*dest[16].(*string) = ""
-		if len(dest) == 20 {
-			*dest[17].(*[]byte) = append([]byte(nil), metadata...)
+		*dest[13].(*bool) = false
+		*dest[14].(*int32) = 30
+		*dest[15].(*string) = ""
+		if len(dest) == 19 {
+			*dest[16].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			return nil
 		}
-		*dest[17].(*bool) = false
-		*dest[18].(*int32) = 200
-		*dest[19].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
-		*dest[20].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[21].(*[]byte) = append([]byte(nil), metadata...)
+		*dest[16].(*bool) = false
+		*dest[17].(*int32) = 200
+		*dest[18].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
+		*dest[19].(*pgtype.UUID) = pgtype.UUID{}
+		*dest[20].(*[]byte) = append([]byte(nil), metadata...)
+		*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-		*dest[23].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		return nil
 	}}
 }

@@ -328,6 +328,18 @@ func settingsLabels(raw []byte) []string {
 		}
 		return "off"
 	}
+	// Reasoning has two archive shapes: the retired reasoning_enabled flag, and
+	// the current effort field where "disable" is off. Prefer the legacy flag when
+	// present so old archives preview the state they will actually import as.
+	reasoningStr := func() string {
+		if v, ok := m["reasoning_enabled"].(bool); ok && !v {
+			return "off"
+		}
+		if v, ok := m["reasoning_effort"].(string); ok && modelpkg.IsReasoningDisabled(v) {
+			return "off"
+		}
+		return "on"
+	}
 	out := []string{}
 	if v := str("language"); v != "" {
 		out = append(out, "language: "+v)
@@ -338,7 +350,7 @@ func settingsLabels(raw []byte) []string {
 	if v := str("acl_default_effect"); v != "" {
 		out = append(out, "acl default: "+v)
 	}
-	out = append(out, "reasoning: "+boolStr("reasoning_enabled"))
+	out = append(out, "reasoning: "+reasoningStr())
 	out = append(out, "heartbeat: "+boolStr("heartbeat_enabled"))
 	out = append(out, "compaction: "+boolStr("compaction_enabled"))
 	return out
@@ -895,7 +907,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.ChatACPAgentID = current.ChatACPAgentID
 				eff.ChatACPProjectPath = current.ChatACPProjectPath
 				eff.ChatACPProjectMode = current.ChatACPProjectMode
-				eff.ReasoningEnabled = current.ReasoningEnabled
 				eff.ReasoningEffort = current.ReasoningEffort
 				eff.HeartbeatEnabled = current.HeartbeatEnabled
 				eff.HeartbeatInterval = current.HeartbeatInterval
@@ -938,7 +949,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	displayEnabled := eff.DisplayEnabled
 	overlayEnabled := eff.OverlayEnabled
 	overlayProvider := eff.OverlayProvider
-	reasoningEnabled := eff.ReasoningEnabled
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
 		ChatModelID:             modelID(eff.ChatModelID, deps.models),
@@ -955,7 +965,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		Language:                eff.Language,
 		AclDefaultEffect:        eff.AclDefaultEffect,
 		Timezone:                &timezone,
-		ReasoningEnabled:        &reasoningEnabled,
 		ReasoningEffort:         &reasoningEffort,
 		HeartbeatEnabled:        &heartbeatEnabled,
 		HeartbeatInterval:       &heartbeatInterval,

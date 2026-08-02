@@ -442,7 +442,6 @@ const form = reactive<SettingsForm>({
   video_model_id: '',
   timezone: '',
   language: '',
-  reasoning_enabled: false,
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
 })
@@ -463,7 +462,6 @@ watch(settings, (val) => {
     form.transcription_model_id = val.transcription_model_id ?? ''
     form.video_model_id = val.video_model_id ?? ''
     form.language = val.language ?? ''
-    form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
     form.show_tool_calls_in_im = val.show_tool_calls_in_im ?? false
   }
@@ -490,7 +488,6 @@ const hasSettingsChanges = computed(() => {
     || form.transcription_model_id !== (s.transcription_model_id ?? '')
     || form.video_model_id !== (s.video_model_id ?? '')
     || form.language !== (s.language ?? '')
-    || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
     || form.show_tool_calls_in_im !== (s.show_tool_calls_in_im ?? false)
   )

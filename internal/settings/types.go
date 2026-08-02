@@ -17,23 +17,24 @@ const (
 )
 
 type Settings struct {
-	ChatModelID             string             `json:"chat_model_id"`
-	ChatRuntime             string             `json:"chat_runtime"`
-	ChatACPAgentID          string             `json:"chat_acp_agent_id,omitempty"`
-	ChatACPProjectPath      string             `json:"chat_acp_project_path,omitempty"`
-	ChatACPProjectMode      string             `json:"chat_acp_project_mode,omitempty"`
-	ImageModelID            string             `json:"image_model_id"`
-	SearchProviderID        string             `json:"search_provider_id"`
-	FetchProviderID         string             `json:"fetch_provider_id"`
-	MemoryProviderID        string             `json:"memory_provider_id"`
-	TtsModelID              string             `json:"tts_model_id"`
-	TranscriptionModelID    string             `json:"transcription_model_id"`
-	VideoModelID            string             `json:"video_model_id"`
-	Language                string             `json:"language"`
-	CommandUILanguage       string             `json:"command_ui_language"`
-	AclDefaultEffect        string             `json:"acl_default_effect"`
-	Timezone                string             `json:"timezone"`
-	ReasoningEnabled        bool               `json:"reasoning_enabled"`
+	ChatModelID          string `json:"chat_model_id"`
+	ChatRuntime          string `json:"chat_runtime"`
+	ChatACPAgentID       string `json:"chat_acp_agent_id,omitempty"`
+	ChatACPProjectPath   string `json:"chat_acp_project_path,omitempty"`
+	ChatACPProjectMode   string `json:"chat_acp_project_mode,omitempty"`
+	ImageModelID         string `json:"image_model_id"`
+	SearchProviderID     string `json:"search_provider_id"`
+	FetchProviderID      string `json:"fetch_provider_id"`
+	MemoryProviderID     string `json:"memory_provider_id"`
+	TtsModelID           string `json:"tts_model_id"`
+	TranscriptionModelID string `json:"transcription_model_id"`
+	VideoModelID         string `json:"video_model_id"`
+	Language             string `json:"language"`
+	CommandUILanguage    string `json:"command_ui_language"`
+	AclDefaultEffect     string `json:"acl_default_effect"`
+	Timezone             string `json:"timezone"`
+	// ReasoningEffort is the single on/off source for reasoning:
+	// models.ReasoningEffortDisable means no reasoning, any other value is a tier.
 	ReasoningEffort         string             `json:"reasoning_effort"`
 	HeartbeatEnabled        bool               `json:"heartbeat_enabled"`
 	HeartbeatInterval       int                `json:"heartbeat_interval"`
@@ -69,7 +70,6 @@ type UpsertRequest struct {
 	CommandUILanguage       string              `json:"command_ui_language,omitempty"`
 	AclDefaultEffect        string              `json:"acl_default_effect,omitempty"`
 	Timezone                *string             `json:"timezone,omitempty"`
-	ReasoningEnabled        *bool               `json:"reasoning_enabled,omitempty"`
 	ReasoningEffort         *string             `json:"reasoning_effort,omitempty"`
 	HeartbeatEnabled        *bool               `json:"heartbeat_enabled,omitempty"`
 	HeartbeatInterval       *int                `json:"heartbeat_interval,omitempty"`

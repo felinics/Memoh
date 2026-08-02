@@ -19,7 +19,6 @@ type Bot struct {
 	Status                  string             `json:"status"`
 	Language                string             `json:"language"`
 	CommandUiLanguage       string             `json:"command_ui_language"`
-	ReasoningEnabled        bool               `json:"reasoning_enabled"`
 	ReasoningEffort         string             `json:"reasoning_effort"`
 	ChatModelID             pgtype.UUID        `json:"chat_model_id"`
 	ChatRuntime             string             `json:"chat_runtime"`

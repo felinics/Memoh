@@ -22,19 +22,19 @@ vi.mock('@felinic/ui', () => ({
   Popover: SlotComponent('Popover'),
   PopoverAnchor: SlotComponent('PopoverAnchor'),
   PopoverContent: SlotComponent('PopoverContent'),
-  ScrollArea: defineComponent({
-    name: 'ScrollArea',
-    setup(_, { slots }) {
-      return () => h('div', { 'data-slot': 'scroll-area-viewport' }, slots.default?.())
-    },
-  }),
+  menuChromeClass: 'menu-chrome',
+  menuItemClass: 'menu-item',
+  menuLabelClass: 'menu-label',
+  menuSearchHeaderClass: 'menu-search-header',
+  menuSearchInputClass: 'menu-search-input',
+  menuSeparatorClass: 'menu-separator',
+  virtualListboxClass: 'virtual-listbox',
 }))
 
 vi.mock('lucide-vue-next', () => ({
   Check: EmptyComponent('Check'),
   ChevronRight: EmptyComponent('ChevronRight'),
   Lightbulb: EmptyComponent('Lightbulb'),
-  X: EmptyComponent('X'),
 }))
 
 vi.mock('@tanstack/vue-virtual', () => ({
@@ -43,6 +43,7 @@ vi.mock('@tanstack/vue-virtual', () => ({
     getVirtualItems: () => [{ index: 0, key: 'model-1', start: 0 }],
     measureElement: vi.fn(),
     scrollToOffset: vi.fn(),
+    scrollToIndex: vi.fn(),
   }),
 }))
 
@@ -67,7 +68,7 @@ vi.mock('@/components/model-description-tooltip/index.vue', () => ({
   }),
 }))
 
-describe('ChatModelPicker', () => {
+describe('ModelOptions', () => {
   let app: ReturnType<typeof createApp> | undefined
   let root: HTMLDivElement | undefined
 
@@ -79,10 +80,10 @@ describe('ChatModelPicker', () => {
   })
 
   async function mountPicker(overrides: Record<string, unknown> = {}) {
-    const ChatModelPicker = (await import('./chat-model-picker.vue')).default
+    const ModelOptions = (await import('./model-options.vue')).default
     root = document.createElement('div')
     document.body.append(root)
-    app = createApp(ChatModelPicker, {
+    app = createApp(ModelOptions, {
       models: [{
         id: 'model-1',
         model_id: 'model-1',
@@ -95,6 +96,7 @@ describe('ChatModelPicker', () => {
       modelType: 'chat',
       open: true,
       modelValue: 'model-1',
+      showReasoning: true,
       reasoningEffort: 'disable',
       ...overrides,
     })
@@ -108,16 +110,16 @@ describe('ChatModelPicker', () => {
   it('dismisses an open model description when the list scrolls', async () => {
     const el = await mountPicker()
     const tooltip = el.querySelector<HTMLElement>('[data-model-tooltip]')
-    const viewport = el.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
+    const listbox = el.querySelector<HTMLElement>('[role="listbox"]')
 
     expect(tooltip).not.toBeNull()
-    expect(viewport).not.toBeNull()
+    expect(listbox).not.toBeNull()
 
     tooltip!.dispatchEvent(new Event('pointerenter'))
     await nextTick()
     expect(tooltip!.dataset.open).toBe('true')
 
-    viewport!.dispatchEvent(new Event('scroll'))
+    listbox!.dispatchEvent(new Event('scroll'))
     await nextTick()
     expect(tooltip!.dataset.open).toBe('false')
   })
@@ -141,29 +143,32 @@ describe('ChatModelPicker', () => {
     expect(updateReasoning).toHaveBeenCalledWith('balanced')
   })
 
-  it('bounds a long agent-provided reasoning list and dismisses its tooltip on scroll', async () => {
-    const el = await mountPicker({
-      reasoningOptions: Array.from({ length: 10 }, (_, index) => ({
-        value: `effort-${index}`,
-        label: `Effort ${index}`,
-        description: `Description ${index}`,
-      })),
-    })
-    const host = el.querySelector<HTMLElement>('.reasoning-effort-list')
-    const tooltip = Array.from(el.querySelectorAll<HTMLElement>('[data-model-tooltip]'))
-      .find(item => item.textContent?.includes('Effort 0'))
-    const viewport = host?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
+  it('omits the reasoning footer unless the consumer opts in', async () => {
+    // The embedding/tts pickers share this component and must stay a plain model
+    // list — no effort row, no flyout.
+    const el = await mountPicker({ showReasoning: false })
+    expect(el.querySelector('[aria-label="chat.reasoningEffort"]')).toBeNull()
+  })
 
-    expect(host?.style.height).toBe('288px')
-    expect(tooltip).toBeDefined()
-    expect(viewport).not.toBeNull()
+  it('keeps the model list keyboard-navigable', async () => {
+    // The merged picker replaced a Chat-only implementation that had no keyboard
+    // support; losing the listbox roving focus here would be a silent regression.
+    const el = await mountPicker()
+    const input = el.querySelector<HTMLInputElement>('input[role="combobox"]')
+    expect(input).not.toBeNull()
 
-    tooltip!.dispatchEvent(new Event('pointerenter'))
+    input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
     await nextTick()
-    expect(tooltip!.dataset.open).toBe('true')
+    expect(el.querySelector('[data-highlighted]')).not.toBeNull()
+  })
 
-    viewport!.dispatchEvent(new Event('scroll'))
+  it('commits a model selection through the v-model contract', async () => {
+    const updateModel = vi.fn()
+    const el = await mountPicker({ modelValue: '', 'onUpdate:modelValue': updateModel })
+    const option = Array.from(el.querySelectorAll('button')).find(button => button.textContent?.includes('Model 1'))
+    expect(option).toBeDefined()
+    option!.click()
     await nextTick()
-    expect(tooltip!.dataset.open).toBe('false')
+    expect(updateModel).toHaveBeenCalledWith('model-1')
   })
 })

@@ -63,6 +63,72 @@ const (
 	ReasoningEffortMax     = "max"
 )
 
+// ReasoningEffortDisable turns reasoning off. It is not a wire tier a model can
+// advertise — it is the settings/override value that says "send no reasoning at
+// all", which is why IsValidReasoningEffort rejects it. Since bots dropped the
+// separate reasoning_enabled flag, this is the only representation of "off".
+const ReasoningEffortDisable = "disable"
+
+// orderedReasoningEfforts lists the real tiers weakest to strongest. Order is
+// what NearestEffortToMedium walks, so it must stay monotonic.
+var orderedReasoningEfforts = []string{
+	ReasoningEffortNone,
+	ReasoningEffortMinimal,
+	ReasoningEffortLow,
+	ReasoningEffortMedium,
+	ReasoningEffortHigh,
+	ReasoningEffortXHigh,
+	ReasoningEffortMax,
+}
+
+// IsReasoningDisabled reports whether an effort value means "no reasoning".
+func IsReasoningDisabled(effort string) bool {
+	return strings.TrimSpace(effort) == ReasoningEffortDisable
+}
+
+// NearestEffortToMedium picks the tier closest to medium from levels, breaking
+// ties toward the weaker tier. It is the fallback when a model does not
+// advertise medium: [minimal low] -> low, [high max] -> high, [low high] -> low.
+// Ignores values outside the known tier list (including "disable"), and returns
+// "" when levels has no usable tier.
+//
+// Keep in sync with nearestEffortToMedium in
+// apps/web/src/pages/bots/components/reasoning-effort.ts.
+func NearestEffortToMedium(levels []string) string {
+	mediumIdx := -1
+	for i, e := range orderedReasoningEfforts {
+		if e == ReasoningEffortMedium {
+			mediumIdx = i
+			break
+		}
+	}
+
+	best, bestIdx, bestDistance := "", 0, 0
+	for _, level := range levels {
+		idx := -1
+		for i, e := range orderedReasoningEfforts {
+			if e == level {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			continue
+		}
+		distance := idx - mediumIdx
+		if distance < 0 {
+			distance = -distance
+		}
+		// Ties break toward the weaker tier (smaller index) rather than toward
+		// whichever came first, because levels arrives in registry order and is
+		// not guaranteed to be sorted.
+		if best == "" || distance < bestDistance || (distance == bestDistance && idx < bestIdx) {
+			best, bestIdx, bestDistance = level, idx, distance
+		}
+	}
+	return best
+}
+
 // ThinkingMode describes how a model's extended-thinking control behaves. It is
 // the capability-discovery output that the UI and wire layer key off of.
 //

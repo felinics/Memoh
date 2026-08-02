@@ -45,10 +45,6 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 				case "--acl_default_effect":
 					i++
 					req.AclDefaultEffect = args[i]
-				case "--reasoning_enabled":
-					i++
-					v := strings.ToLower(args[i]) == "true"
-					req.ReasoningEnabled = &v
 				case "--reasoning_effort":
 					i++
 					req.ReasoningEffort = &args[i]
@@ -177,13 +173,7 @@ func commandLanguageResultFor(cc CommandContext, current, resource, action strin
 // place) and drill-downs to the /reasoning and /model pickers. Reuses
 // settingsService.UpsertBot — no backend changes.
 func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result {
-	reasoning := cc.T("cmd.common.off")
-	if s.ReasoningEnabled {
-		reasoning = strings.TrimSpace(s.ReasoningEffort)
-		if reasoning == "" {
-			reasoning = cc.T("cmd.common.on")
-		}
-	}
+	reasoning := formatReasoningLabel(cc, s)
 	heartbeat := cc.T("cmd.common.off")
 	if s.HeartbeatEnabled {
 		heartbeat = cc.T("cmd.settings.heartbeatOnEvery", map[string]any{"minutes": s.HeartbeatInterval})

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   captureChatPaneSendContext,
+  composerHasNoModel,
   matchesChatPaneSendContext,
   shouldRefreshACPComposerConfig,
 } from './chat-pane-send'
@@ -71,5 +72,21 @@ describe('chat pane send context', () => {
       errorCode: 'acp.model_unavailable',
     }, false)).toBe(false)
     expect(shouldRefreshACPComposerConfig({ ok: true }, true)).toBe(false)
+  })
+})
+
+describe('composer model gate', () => {
+  it('blocks a native composer with no chat model', () => {
+    expect(composerHasNoModel(false, '')).toBe(true)
+    expect(composerHasNoModel(false, '   ')).toBe(true)
+  })
+
+  it('allows a native composer once a model is selected', () => {
+    expect(composerHasNoModel(false, 'model-1')).toBe(false)
+  })
+
+  it('never blocks an ACP composer, whose agent supplies its own model', () => {
+    expect(composerHasNoModel(true, '')).toBe(false)
+    expect(composerHasNoModel(true, 'model-1')).toBe(false)
   })
 })

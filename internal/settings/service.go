@@ -105,7 +105,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
+	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
 	// A read error here must abort: falling through would leave `current` at the
 	// model defaults and silently overwrite a saved chat_runtime=acp_agent (and
 	// its agent id) on the next save. ErrNoRows is impossible because the bot
@@ -137,9 +137,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if effect := strings.TrimSpace(req.AclDefaultEffect); effect != "" {
 		current.AclDefaultEffect = effect
-	}
-	if req.ReasoningEnabled != nil {
-		current.ReasoningEnabled = *req.ReasoningEnabled
 	}
 	if req.ReasoningEffort != nil && isValidReasoningEffort(*req.ReasoningEffort) {
 		current.ReasoningEffort = *req.ReasoningEffort
@@ -352,7 +349,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		Timezone:                   timezoneValue,
 		Language:                   current.Language,
 		CommandUiLanguage:          current.CommandUILanguage,
-		ReasoningEnabled:           current.ReasoningEnabled,
 		ReasoningEffort:            current.ReasoningEffort,
 		HeartbeatEnabled:           current.HeartbeatEnabled,
 		HeartbeatInterval:          int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
@@ -415,12 +411,11 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return nil
 }
 
-func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
+func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
 	settings := Settings{
 		Language:                strings.TrimSpace(language),
 		CommandUILanguage:       strings.TrimSpace(commandUILanguage),
 		AclDefaultEffect:        strings.TrimSpace(aclDefaultEffect),
-		ReasoningEnabled:        reasoningEnabled,
 		ReasoningEffort:         strings.TrimSpace(reasoningEffort),
 		HeartbeatEnabled:        heartbeatEnabled,
 		HeartbeatInterval:       int(heartbeatInterval),
@@ -494,7 +489,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 	return normalizeBotSettingsFields(
 		row.Language,
 		row.CommandUiLanguage,
-		row.ReasoningEnabled,
 		row.ReasoningEffort,
 		row.HeartbeatEnabled,
 		row.HeartbeatInterval,
@@ -530,7 +524,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 	return normalizeBotSettingsFields(
 		row.Language,
 		row.CommandUiLanguage,
-		row.ReasoningEnabled,
 		row.ReasoningEffort,
 		row.HeartbeatEnabled,
 		row.HeartbeatInterval,
@@ -565,7 +558,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 func normalizeBotSettingsFields(
 	language string,
 	commandUILanguage string,
-	reasoningEnabled bool,
 	reasoningEffort string,
 	heartbeatEnabled bool,
 	heartbeatInterval int32,
@@ -595,7 +587,7 @@ func normalizeBotSettingsFields(
 	overlayEnabled bool,
 	overlayConfig []byte,
 ) Settings {
-	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionTargetPercent)
+	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionTargetPercent)
 	if timezone.Valid {
 		settings.Timezone = timezone.String
 	}

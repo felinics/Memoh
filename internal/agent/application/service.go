@@ -778,7 +778,7 @@ func supportsImageInputForModel(m models.GetResponse) bool {
 
 const (
 	reasoningEffortAdaptive = "adaptive"
-	reasoningEffortDisable  = "disable"
+	reasoningEffortDisable  = models.ReasoningEffortDisable
 )
 
 // resolveReasoningConfig makes the single reasoning decision for a call, driven
@@ -817,10 +817,11 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
 	case requested != "":
 		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort(requested, botSettings, effortLevels), OffEffort: offEffort}
-	case botSettings.ReasoningEnabled:
-		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
-	default:
+	case reasoningEffortDisabled(botSettings.ReasoningEffort):
+		// The bot's stored effort is the only on/off source; "disable" is off.
 		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
+	default:
+		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
 	}
 }
 
@@ -857,8 +858,10 @@ func pickEffort(requested string, botSettings settings.Settings, effortLevels []
 	if hasEffort(effortLevels, models.ReasoningEffortMedium) {
 		return models.ReasoningEffortMedium
 	}
-	if len(effortLevels) > 0 {
-		return effortLevels[0]
+	// No medium: land on the tier closest to it rather than on effortLevels[0],
+	// which is whatever the registry listed first (usually the weakest tier).
+	if nearest := models.NearestEffortToMedium(effortLevels); nearest != "" {
+		return nearest
 	}
 	return models.ReasoningEffortMedium
 }
@@ -927,7 +930,7 @@ func offEffortFor(effortLevels []string) string {
 }
 
 func reasoningEffortDisabled(effort string) bool {
-	return strings.TrimSpace(effort) == reasoningEffortDisable
+	return models.IsReasoningDisabled(effort)
 }
 
 func offEffortOrEmpty(rc *models.ReasoningConfig) string {

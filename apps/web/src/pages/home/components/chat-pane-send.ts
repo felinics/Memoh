@@ -26,6 +26,19 @@ export function matchesChatPaneSendContext(
     && context.composerScope === (composerScope || 'chat')
 }
 
+// composerHasNoModel gates both the send button and the keyboard send path, so
+// it lives here rather than inline in the pane: the two call sites must agree,
+// and this is the only piece of that decision worth testing on its own.
+//
+// Only a native composer can be model-less in a way that blocks sending. An ACP
+// agent supplies its own default model, so an empty selection there is normal.
+export function composerHasNoModel(
+  activeUsesACPComposer: boolean,
+  selectedModelId: string,
+): boolean {
+  return !activeUsesACPComposer && !selectedModelId.trim()
+}
+
 const ACP_STALE_CONFIG_CODES = new Set([
   'acp.model_unavailable',
   'acp.reasoning_effort_unavailable',

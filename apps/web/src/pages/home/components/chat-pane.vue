@@ -612,18 +612,23 @@
                       >
                         {{ $t('common.loading') }}
                       </InlineLoadingRow>
-                      <ChatModelPicker
+                      <div
                         v-else
-                        :model-value="overrideModelId"
-                        :reasoning-effort="overrideReasoningEffort"
-                        :reasoning-options="composerReasoningOptions"
-                        :models="composerModels"
-                        :providers="composerModelProviders"
-                        model-type="chat"
-                        :open="modelPopoverOpen"
-                        @update:model-value="onComposerModelValueSelected"
-                        @update:reasoning-effort="onComposerReasoningEffortSelected"
-                      />
+                        :class="menuChromeClass"
+                      >
+                        <ModelOptions
+                          :model-value="overrideModelId"
+                          :reasoning-effort="overrideReasoningEffort"
+                          :reasoning-options="composerReasoningOptions"
+                          :models="composerModels"
+                          :providers="composerModelProviders"
+                          model-type="chat"
+                          :open="modelPopoverOpen"
+                          show-reasoning
+                          @update:model-value="onComposerModelValueSelected"
+                          @update:reasoning-effort="onComposerReasoningEffortSelected"
+                        />
+                      </div>
                     </PopoverContent>
                   </Popover>
 
@@ -656,7 +661,7 @@
                     <Button
                       type="button"
                       variant="brand"
-                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending)"
+                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel)"
                       :aria-label="streaming ? 'Stop generating response' : 'Send message'"
                       class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
@@ -725,7 +730,7 @@ import {
   Monitor,
   Server,
 } from 'lucide-vue-next'
-import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Spinner, toast } from '@felinic/ui'
+import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Spinner, menuChromeClass, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
@@ -747,8 +752,8 @@ import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
-import ChatModelPicker from './chat-model-picker.vue'
-import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
+import ModelOptions from '@/pages/bots/components/model-options.vue'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, nearestEffortToMedium, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
@@ -756,7 +761,7 @@ import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useCom
 import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultQuickActionText, isCommandResultItemSelectable } from './slash-command-result'
-import { captureChatPaneSendContext, matchesChatPaneSendContext, shouldRefreshACPComposerConfig } from './chat-pane-send'
+import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, shouldRefreshACPComposerConfig } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
@@ -1644,9 +1649,21 @@ const availableReasoningEfforts = computed(() =>
   availableEffortsForMode(activeThinkingMode.value, resolveEffortLevels(activeModel.value?.config, activeModelClientType.value)),
 )
 
+// A native composer with no chat model cannot answer, so the trigger says so
+// ("None") instead of the old "Default" placeholder, which named a model that
+// does not exist.
+const composerHasNoModel = computed(() =>
+  hasNoComposerModel(activeUsesACPComposer.value, overrideModelId.value),
+)
+
 const selectedModelLabel = computed(() => {
   const current = composerModels.value.find(model => model.id === overrideModelId.value)
-  return current?.name || current?.model_id || overrideModelId.value || t('chat.modelDefault')
+  if (current?.name || current?.model_id) return current.name || current.model_id
+  // A configured-but-missing id still shows the raw id rather than "None": the
+  // model list can lag behind settings, and a transient gap must not read as
+  // "unconfigured".
+  if (overrideModelId.value) return overrideModelId.value
+  return composerHasNoModel.value ? t('common.none') : t('chat.modelDefault')
 })
 
 const selectedReasoningLabel = computed(() => {
@@ -1681,11 +1698,10 @@ function initFromBotSettings() {
     overrideModelId.value = botSettings.value.chat_model_id ?? ''
   }
   if (!overrideReasoningEffort.value) {
-    if (botSettings.value.reasoning_enabled && botSettings.value.reasoning_effort) {
-      overrideReasoningEffort.value = botSettings.value.reasoning_effort
-    } else {
-      overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
-    }
+    // reasoning_effort is the bot's whole reasoning decision now, including
+    // "disable"; an empty value only means settings have not loaded a tier yet,
+    // which resolves to medium the same way the backend does.
+    overrideReasoningEffort.value = botSettings.value.reasoning_effort || 'medium'
   }
 }
 
@@ -1695,7 +1711,12 @@ watch(availableReasoningEfforts, (efforts) => {
   if (activeUsesACPComposer.value) return
   const current = overrideReasoningEffort.value
   if (!current || current === REASONING_EFFORT_DISABLE || efforts.includes(current)) return
-  overrideReasoningEffort.value = efforts.includes('medium') ? 'medium' : efforts[0] ?? REASONING_EFFORT_DISABLE
+  // efforts[0] is always REASONING_EFFORT_DISABLE (availableEffortsForMode
+  // prepends it), so falling back to it silently turned reasoning off whenever a
+  // model lacked the selected tier. Land on the nearest real tier instead.
+  overrideReasoningEffort.value = efforts.includes('medium')
+    ? 'medium'
+    : nearestEffortToMedium(efforts) || REASONING_EFFORT_DISABLE
 }, { immediate: true })
 
 watch(currentBotId, () => {
@@ -2359,6 +2380,9 @@ async function handleSend() {
     || loadingMessages.value
     || activeChatReadOnly.value
     || composerConfigPending.value
+    // Keyboard send bypasses the disabled button, so the no-model gate is
+    // repeated here rather than living only on the control.
+    || composerHasNoModel.value
   ) return
   if (text.startsWith('/') && files.length) {
     composerError.value = ''

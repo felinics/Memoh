@@ -311,7 +311,7 @@
       "unknownOption": "未知选项：{option}\n\n{usage}",
       "unknownLanguage": "未知语言 {value}。请选择 auto、en、zh 或 ja。",
       "unavailable": "设置暂不可用。",
-      "updateUsage": "用法：/settings update [选项]\n\n选项：\n- --language <值>\n- --acl_default_effect <allow|deny>\n- --reasoning_enabled <true|false>\n- --reasoning_effort <none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <分钟>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n（命令界面语言：/settings language <auto|en|zh|ja>）",
+      "updateUsage": "用法：/settings update [选项]\n\n选项：\n- --language <值>\n- --acl_default_effect <allow|deny>\n- --reasoning_effort <disable|none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <分钟>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n（命令界面语言：/settings language <auto|en|zh|ja>）",
       "langJa": "日本語"
     },
     "language": {

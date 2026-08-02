@@ -27,11 +27,13 @@
       <div :class="menuChromeClass">
         <ModelOptions
           v-model="selected"
+          v-model:reasoning-effort="reasoningEffort"
           :models="models"
           :providers="providers"
           :model-type="modelType"
           :open="open"
           :none-label="noneLabel"
+          :show-reasoning="showReasoning"
         />
       </div>
     </PopoverContent>
@@ -42,8 +44,10 @@
 import { computed, ref, watch } from 'vue'
 import { ChevronsUpDown } from 'lucide-vue-next'
 import { Popover, PopoverTrigger, PopoverContent, menuChromeClass, selectTriggerClass } from '@felinic/ui'
+import { useI18n } from 'vue-i18n'
 import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import ModelOptions from './model-options.vue'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE } from './reasoning-effort'
 
 const props = defineProps<{
   models: ModelsGetResponse[]
@@ -51,17 +55,35 @@ const props = defineProps<{
   modelType: ModelsModelType
   placeholder?: string
   noneLabel?: string
+  showReasoning?: boolean
 }>()
 
 const selected = defineModel<string>({ default: '' })
+const reasoningEffort = defineModel<string>('reasoningEffort', { default: '' })
 const open = ref(false)
 
+// Picking a model closes the menu; picking an effort does not — the effort
+// flyout is a sub-menu of the same decision, so collapsing on every tier tap
+// would force a reopen to compare tiers.
 watch(selected, () => {
   open.value = false
 })
 
-const displayLabel = computed(() => {
+const { t } = useI18n()
+
+const modelLabel = computed(() => {
   const model = props.models.find((m) => (m.id || m.model_id) === selected.value)
   return model?.name || model?.model_id || selected.value
+})
+
+// The effort moved inside this menu, so the trigger has to carry it — otherwise
+// the value is invisible until the menu is reopened. "Off" is not appended: a
+// bare model name already reads as "no reasoning".
+const displayLabel = computed(() => {
+  if (!props.showReasoning || !modelLabel.value) return modelLabel.value
+  const effort = reasoningEffort.value
+  if (!effort || effort === REASONING_EFFORT_DISABLE) return modelLabel.value
+  const key = EFFORT_LABELS[effort]
+  return `${modelLabel.value} · ${key ? t(key) : effort}`
 })
 </script>

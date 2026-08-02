@@ -21561,10 +21561,8 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "reasoning_effort": {
+                    "description": "ReasoningEffort is the single on/off source for reasoning:\nmodels.ReasoningEffortDisable means no reasoning, any other value is a tier.",
                     "type": "string"
-                },
-                "reasoning_enabled": {
-                    "type": "boolean"
                 },
                 "search_provider_id": {
                     "type": "string"
@@ -21743,9 +21741,6 @@ const docTemplate = `{
                 },
                 "reasoning_effort": {
                     "type": "string"
-                },
-                "reasoning_enabled": {
-                    "type": "boolean"
                 },
                 "search_provider_id": {
                     "type": "string"

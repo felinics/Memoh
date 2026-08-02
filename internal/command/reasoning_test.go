@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/i18n"
+	"github.com/memohai/memoh/internal/models"
 )
 
 func TestReasoningRegisteredWithAliases(t *testing.T) {
@@ -25,7 +26,7 @@ func TestReasoningRegisteredWithAliases(t *testing.T) {
 
 func TestReasoningResultMarksCurrent(t *testing.T) {
 	t.Parallel()
-	res := reasoningResult(i18n.New("en"), true, "medium")
+	res := reasoningResult(i18n.New("en"), "medium")
 	if res.Interactive == nil || res.Interactive.Kind != InteractiveChoices || res.Interactive.Choices == nil {
 		t.Fatalf("expected a choices interactive, got %+v", res.Interactive)
 	}
@@ -33,12 +34,12 @@ func TestReasoningResultMarksCurrent(t *testing.T) {
 	if !strings.Contains(res.Text, "Current: medium") {
 		t.Errorf("missing current line: %s", res.Text)
 	}
-	assertReasoningMarked(t, reasoningResult(i18n.New("en"), false, "high"), "off")
+	assertReasoningMarked(t, reasoningResult(i18n.New("en"), models.ReasoningEffortDisable), "off")
 }
 
 func TestReasoningChoicesIncludeFullBackendEffortLadder(t *testing.T) {
 	t.Parallel()
-	res := reasoningResult(i18n.New("en"), true, "xhigh")
+	res := reasoningResult(i18n.New("en"), "xhigh")
 	assertReasoningMarked(t, res, "xhigh")
 	labels := make(map[string]bool)
 	for _, c := range res.Interactive.Choices.Choices {

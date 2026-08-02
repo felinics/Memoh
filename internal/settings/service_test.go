@@ -15,7 +15,6 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMDefault(t *testing.T) {
 
 	row := sqlc.GetSettingsByBotIDRow{
 		Language:            "en",
-		ReasoningEnabled:    false,
 		ReasoningEffort:     "medium",
 		HeartbeatEnabled:    false,
 		HeartbeatInterval:   60,
@@ -170,7 +169,7 @@ func TestUpsertRequestShowToolCallsInIM_PointerSemantics(t *testing.T) {
 func TestNormalizeBotSettingDefaultHeartbeatInterval(t *testing.T) {
 	t.Parallel()
 
-	got := normalizeBotSetting("en", "auto", "allow", false, "medium", false, 0, false, 0, pgtype.Int4{})
+	got := normalizeBotSetting("en", "auto", "allow", "medium", false, 0, false, 0, pgtype.Int4{})
 	if got.HeartbeatInterval != DefaultHeartbeatInterval {
 		t.Fatalf("heartbeat interval = %d, want %d", got.HeartbeatInterval, DefaultHeartbeatInterval)
 	}
@@ -251,7 +250,7 @@ func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
 		if !isValidReasoningEffort(effort) {
 			t.Fatalf("isValidReasoningEffort(%q) = false, want true", effort)
 		}
-		got := normalizeBotSetting("en", "auto", "allow", true, effort, false, 60, false, 0, pgtype.Int4{})
+		got := normalizeBotSetting("en", "auto", "allow", effort, false, 60, false, 0, pgtype.Int4{})
 		if got.ReasoningEffort != effort {
 			t.Fatalf("normalizeBotSetting effort = %q, want %q", got.ReasoningEffort, effort)
 		}

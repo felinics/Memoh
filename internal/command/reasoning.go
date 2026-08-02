@@ -43,7 +43,7 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if err != nil {
 				return nil, err
 			}
-			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort), nil
+			return reasoningResult(cc.L, s.ReasoningEffort), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -61,11 +61,11 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			req := settings.UpsertRequest{}
 			switch {
 			case level == "off":
-				off := false
-				req.ReasoningEnabled = &off
+				// "off" is the user-facing token; storage represents it as the
+				// "disable" effort now that bots have no separate on/off flag.
+				disable := models.ReasoningEffortDisable
+				req.ReasoningEffort = &disable
 			case validEffort(level):
-				on := true
-				req.ReasoningEnabled = &on
 				req.ReasoningEffort = &level
 			default:
 				return &Result{Text: cc.T("cmd.reasoning.unknownLevel", map[string]any{"level": fmt.Sprintf("%q", cc.Args[0])})}, nil
@@ -77,7 +77,7 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if err != nil {
 				return nil, err
 			}
-			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort), nil
+			return reasoningResult(cc.L, s.ReasoningEffort), nil
 		},
 	})
 	return g
@@ -92,23 +92,24 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 // time (IsWrite), so a non-owner tap returns a clear "owner only" message rather
 // than the buttons being hidden — hiding them also hid them from owners whose
 // Telegram identity isn't resolved as owner, killing the feature.
-func reasoningResult(t *i18n.Localizer, enabled bool, effort string) *Result {
+func reasoningResult(t *i18n.Localizer, effort string) *Result {
 	effort = strings.ToLower(strings.TrimSpace(effort))
-	current := t.T("cmd.common.off")
-	if enabled {
-		current = effort
-		if current == "" {
-			current = t.T("cmd.common.on")
-		}
+	disabled := models.IsReasoningDisabled(effort)
+	current := effort
+	switch {
+	case disabled:
+		current = t.T("cmd.common.off")
+	case current == "":
+		current = t.T("cmd.common.on")
 	}
 	header := MdBold(t.T("cmd.reasoning.header")) + "\n" + t.T("cmd.reasoning.current", map[string]any{"level": current})
 	choices := make([]ListItem, 0, len(reasoningChoices))
 	for _, lvl := range reasoningChoices {
 		selected := false
 		if lvl == "off" {
-			selected = !enabled
+			selected = disabled
 		} else {
-			selected = enabled && lvl == effort
+			selected = !disabled && lvl == effort
 		}
 		choices = append(choices, ListItem{
 			Label:    lvl,
