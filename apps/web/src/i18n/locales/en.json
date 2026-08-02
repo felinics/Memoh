@@ -920,6 +920,7 @@
     "infoNoSkills": "No skills used in this session",
     "infoNoData": "No data available",
     "compactNow": "Compact Now",
+    "compactContext": "Compact context",
     "compactSuccess": "Context compaction completed",
     "compactFailed": "Context compaction failed",
     "sessionStreaming": "Generating",

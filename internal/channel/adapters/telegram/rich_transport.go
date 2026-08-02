@@ -75,7 +75,10 @@ func sendTelegramRichMessageReturnMessage(
 		payload["chat_id"] = strconv.FormatInt(parsedChatID, 10)
 	}
 	if replyTo > 0 {
-		payload["reply_parameters"] = map[string]any{"message_id": replyTo}
+		payload["reply_parameters"] = map[string]any{
+			"message_id":                  replyTo,
+			"allow_sending_without_reply": true,
+		}
 	}
 	markup := telegramInlineKeyboard(actions)
 	if markup != nil && len(markup.InlineKeyboard) > 0 {

@@ -813,6 +813,7 @@ func (a *TelegramAdapter) promptAskUserText(bot *tele.Bot, loc *i18n.Localizer, 
 	}
 	if cardMsgID > 0 {
 		opts.ReplyTo = &tele.Message{ID: cardMsgID, Chat: &tele.Chat{ID: cardChatID}}
+		opts.AllowWithoutReply = true
 	}
 	sent, err := bot.Send(tele.ChatID(cardChatID), prompt, opts)
 	if err != nil || sent == nil {
@@ -1487,10 +1488,7 @@ func sendTelegramTextReturnMessage(bot *tele.Bot, target string, text string, re
 	if parseErr != nil {
 		return 0, 0, parseErr
 	}
-	opts := &tele.SendOptions{ParseMode: parseMode}
-	if replyTo > 0 {
-		opts.ReplyTo = &tele.Message{ID: replyTo}
-	}
+	opts := telegramSendOptions(parseMode, replyTo)
 	sent, err := bot.Send(recipient, text, opts)
 	if err != nil {
 		return 0, 0, err
@@ -1545,10 +1543,7 @@ func sendTelegramTextWithActionsReturnMessage(bot *tele.Bot, target string, text
 	if err != nil {
 		return 0, 0, err
 	}
-	opts := &tele.SendOptions{ParseMode: parseMode}
-	if replyTo > 0 {
-		opts.ReplyTo = &tele.Message{ID: replyTo}
-	}
+	opts := telegramSendOptions(parseMode, replyTo)
 	if markup != nil && len(markup.InlineKeyboard) > 0 {
 		opts.ReplyMarkup = markup
 	}
@@ -1891,13 +1886,23 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tele.Bot, target strin
 }
 
 func telegramAttachmentSendOptions(parseMode string, replyTo int, actions []channel.Action) *tele.SendOptions {
-	opts := &tele.SendOptions{ParseMode: parseMode}
-	if replyTo > 0 {
-		opts.ReplyTo = &tele.Message{ID: replyTo}
-	}
+	opts := telegramSendOptions(parseMode, replyTo)
 	markup := telegramInlineKeyboard(actions)
 	if markup != nil && len(markup.InlineKeyboard) > 0 {
 		opts.ReplyMarkup = markup
+	}
+	return opts
+}
+
+// telegramSendOptions keeps a reply when Telegram can still resolve the
+// source message, but asks Telegram to deliver the outbound message normally
+// when that source disappeared while a long-running command or model turn was
+// in flight. Retrying the same stale reply ID cannot recover the send.
+func telegramSendOptions(parseMode string, replyTo int) *tele.SendOptions {
+	opts := &tele.SendOptions{ParseMode: parseMode}
+	if replyTo > 0 {
+		opts.ReplyTo = &tele.Message{ID: replyTo}
+		opts.AllowWithoutReply = true
 	}
 	return opts
 }

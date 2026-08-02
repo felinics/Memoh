@@ -72,7 +72,7 @@ func TestProjectModelMessageHeadersProjectsMultipartTextOnly(t *testing.T) {
 	}
 }
 
-func TestProjectDiscussToolHistoryCollapsesSuccessfulSendAndPrivateText(t *testing.T) {
+func TestProjectDiscussToolHistoryKeepsMinimalSuccessfulSendClosureAndDropsPrivateText(t *testing.T) {
 	t.Parallel()
 
 	messages := []sdk.Message{
@@ -97,15 +97,36 @@ func TestProjectDiscussToolHistoryCollapsesSuccessfulSendAndPrivateText(t *testi
 	}
 
 	projected := projectDiscussToolHistory(messages)
-	if len(projected) != 2 {
+	if len(projected) != 3 {
 		t.Fatalf("projected messages = %#v", projected)
 	}
-	visible, ok := projected[0].Content[0].(sdk.TextPart)
-	if projected[0].Role != sdk.MessageRoleAssistant || !ok || visible.Text != "visible reply" {
-		t.Fatalf("visible projection = %#v", projected[0])
+	call, ok := projected[0].Content[0].(sdk.ToolCallPart)
+	if projected[0].Role != sdk.MessageRoleAssistant || !ok {
+		t.Fatalf("send call projection = %#v", projected[0])
 	}
-	if projected[1].Role != sdk.MessageRoleUser {
-		t.Fatalf("last role = %q", projected[1].Role)
+	if call.ToolCallID != "send-1" || call.ToolName != "send" {
+		t.Fatalf("send call identity = %#v", call)
+	}
+	input, ok := call.Input.(map[string]any)
+	if !ok || input["text"] != "visible reply" {
+		t.Fatalf("minimal send input = %#v", call.Input)
+	}
+	if _, exists := input["target"]; exists {
+		t.Fatalf("current-conversation target leaked into projection: %#v", input)
+	}
+	result, ok := projected[1].Content[0].(sdk.ToolResultPart)
+	if projected[1].Role != sdk.MessageRoleTool || !ok {
+		t.Fatalf("send result projection = %#v", projected[1])
+	}
+	if result.ToolCallID != call.ToolCallID || result.ToolName != "send" || result.IsError {
+		t.Fatalf("send result closure = %#v", result)
+	}
+	resultPayload, ok := result.Result.(map[string]any)
+	if !ok || len(resultPayload) != 1 || resultPayload["ok"] != true {
+		t.Fatalf("minimal send result = %#v", result.Result)
+	}
+	if projected[2].Role != sdk.MessageRoleUser {
+		t.Fatalf("last role = %q", projected[2].Role)
 	}
 	if got := messages[0].Content[0].(sdk.TextPart).Text; got != "private deliberation that was never shown" {
 		t.Fatalf("canonical input mutated: %q", got)
@@ -149,12 +170,97 @@ func TestProjectDiscussToolHistoryCollapsesStickerSearchAndCombinedSend(t *testi
 	}
 
 	projected := projectDiscussToolHistory(messages)
-	if len(projected) != 1 {
+	if len(projected) != 0 {
+		t.Fatalf("deprecated Sticker MCP history leaked into projection: %#v", projected)
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"search_telegram_stickers", "send_telegram_sticker", "S007", "[Sent"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("projection contains deprecated Sticker history %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+func TestProjectDiscussToolHistoryKeepsFirstPartyStickerSendAsProtocolPair(t *testing.T) {
+	t.Parallel()
+
+	messages := []sdk.Message{
+		{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{
+				sdk.ReasoningPart{Text: "choose a sticker privately"},
+				sdk.ToolCallPart{
+					ToolCallID: "send-sticker-1",
+					ToolName:   "send",
+					Input: map[string]any{
+						"platform":   "telegram",
+						"target":     "current-chat",
+						"text":       "晚安",
+						"reply_to":   "42",
+						"sticker_id": "S012",
+					},
+				},
+			},
+		},
+		sdk.ToolMessage(sdk.ToolResultPart{
+			ToolCallID: "send-sticker-1",
+			ToolName:   "send",
+			Result:     map[string]any{"structuredContent": map[string]any{"ok": true}},
+		}),
+	}
+
+	projected := projectDiscussToolHistory(messages)
+	if len(projected) != 2 {
 		t.Fatalf("projected messages = %#v", projected)
 	}
-	text, ok := projected[0].Content[0].(sdk.TextPart)
-	if !ok || text.Text != "晚安\n[Sent Telegram sticker S007]" {
-		t.Fatalf("combined send projection = %#v", projected[0])
+	call, ok := projected[0].Content[0].(sdk.ToolCallPart)
+	if !ok {
+		t.Fatalf("projected call = %#v", projected[0])
+	}
+	input, ok := call.Input.(map[string]any)
+	if !ok || input["text"] != "晚安" || input["reply_to"] != "42" || input["sticker_id"] != "S012" {
+		t.Fatalf("first-party sticker send input = %#v", call.Input)
+	}
+	if len(input) != 3 {
+		t.Fatalf("routing metadata was not minimized: %#v", input)
+	}
+	if _, ok := projected[1].Content[0].(sdk.ToolResultPart); !ok {
+		t.Fatalf("projected result = %#v", projected[1])
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "[Sent") || strings.Contains(string(encoded), "choose a sticker privately") {
+		t.Fatalf("private or synthetic prose leaked into projection: %s", encoded)
+	}
+}
+
+func TestProjectDiscussToolHistoryDropsFailedDeprecatedStickerClosure(t *testing.T) {
+	t.Parallel()
+
+	messages := []sdk.Message{
+		{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ToolCallPart{
+				ToolCallID: "legacy-sticker-1",
+				ToolName:   "sticker_send_telegram_sticker",
+				Input:      map[string]any{"sticker_id": "REMOVED-ID"},
+			}},
+		},
+		sdk.ToolMessage(sdk.ToolResultPart{
+			ToolCallID: "legacy-sticker-1",
+			ToolName:   "sticker_send_telegram_sticker",
+			Result:     map[string]any{"ok": false, "error": "unknown sticker"},
+			IsError:    true,
+		}),
+	}
+
+	if projected := projectDiscussToolHistory(messages); len(projected) != 0 {
+		t.Fatalf("failed deprecated Sticker closure leaked into projection: %#v", projected)
 	}
 }
 

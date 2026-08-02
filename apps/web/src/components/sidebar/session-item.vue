@@ -80,6 +80,22 @@
               @click.stop
             >
               <DropdownMenuItem
+                v-if="canCompact"
+                :disabled="compacting || streaming"
+                @select="$emit('compact', session)"
+              >
+                <Spinner
+                  v-if="compacting"
+                  class="mr-2 size-3.5"
+                />
+                <Minimize2
+                  v-else
+                  class="mr-2 size-3.5"
+                />
+                {{ t('chat.compactContext') }}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator v-if="canCompact" />
+              <DropdownMenuItem
                 @select="$emit('rename', session)"
               >
                 <Pencil class="mr-2 size-3.5" />
@@ -110,6 +126,21 @@
         {{ t('common.open') }}
       </ContextMenuItem>
       <ContextMenuSeparator />
+      <ContextMenuItem
+        v-if="canCompact"
+        :disabled="compacting || streaming"
+        @select="$emit('compact', session)"
+      >
+        <Spinner
+          v-if="compacting"
+          class="mr-2 size-3.5"
+        />
+        <Minimize2
+          v-else
+          class="mr-2 size-3.5"
+        />
+        {{ t('chat.compactContext') }}
+      </ContextMenuItem>
       <ContextMenuItem @select="$emit('rename', session)">
         <Pencil class="mr-2 size-3.5" />
         {{ t('common.rename') }}
@@ -127,7 +158,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { LoaderCircle, MessageSquare, Minimize2, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
@@ -140,6 +171,8 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  Spinner,
 } from '@felinic/ui'
 import { acpAgentDisplayName, acpAgentIcon, normalizeACPAgentID } from '@/utils/acp'
 import { splitScriptRuns } from '@/utils/script-runs'
@@ -149,11 +182,13 @@ const props = defineProps<{
   session: SessionSummary
   isActive: boolean
   streaming?: boolean
+  compacting?: boolean
 }>()
 
 defineEmits<{
   select: [session: SessionSummary]
   openNewTab: [session: SessionSummary]
+  compact: [session: SessionSummary]
   rename: [session: SessionSummary]
   delete: [session: SessionSummary]
 }>()
@@ -177,6 +212,11 @@ const acpAgentId = computed(() => normalizeACPAgentID(
   props.session.runtime_metadata?.acp_agent_id ?? props.session.metadata?.acp_agent_id,
 ))
 const isACPSession = computed(() => normalizedRuntimeType(props.session) === 'acp_agent')
+const canCompact = computed(() => {
+  if (isACPSession.value) return false
+  const mode = (props.session.session_mode || props.session.type || '').trim().toLowerCase()
+  return mode === 'chat' || mode === 'discuss'
+})
 const acpAgentLabel = computed(() => acpAgentDisplayName(acpAgentId.value, t('chat.sessionTypeACPAgent')))
 
 function routeMeta(): Record<string, unknown> {

@@ -63,8 +63,10 @@
                 :session="vRow.session"
                 :is-active="sessionId === vRow.session.id"
                 :streaming="chatStore.isSessionStreaming(currentBotId, vRow.session.id)"
+                :compacting="compactingSessionIds.has(vRow.session.id)"
                 @select="handleSelect"
                 @open-new-tab="handleOpenNewTab"
+                @compact="compactSession"
                 @rename="openRenameSessionDialog"
                 @delete="confirmDeleteSession"
               />
@@ -164,6 +166,8 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntersectionObserver } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { useQueryCache } from '@pinia/colada'
+import { postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
 import { toast } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
@@ -195,6 +199,7 @@ import '@/styles/sidebar-scroll.css'
 const { t } = useI18n()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
+const queryCache = useQueryCache()
 const {
   sessions,
   sessionId,
@@ -293,6 +298,32 @@ function handleOpenNewTab(session: SessionSummary) {
     sessionId: session.id,
     title: (session.title ?? '').trim() || t('chat.untitledSession'),
   })
+}
+
+const compactingSessionIds = ref(new Set<string>())
+
+async function compactSession(session: SessionSummary) {
+  const botId = (session.bot_id || currentBotId.value || '').trim()
+  const targetSessionId = session.id.trim()
+  if (!botId || !targetSessionId || compactingSessionIds.value.has(targetSessionId)) return
+
+  compactingSessionIds.value = new Set(compactingSessionIds.value).add(targetSessionId)
+  try {
+    await postBotsByBotIdSessionsBySessionIdCompact({
+      path: { bot_id: botId, session_id: targetSessionId },
+      throwOnError: true,
+    })
+    toast.success(t('chat.compactSuccess'))
+    queryCache.invalidateQueries({ key: ['session-status', botId, targetSessionId] })
+  }
+  catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('chat.compactFailed')))
+  }
+  finally {
+    const pending = new Set(compactingSessionIds.value)
+    pending.delete(targetSessionId)
+    compactingSessionIds.value = pending
+  }
 }
 
 const deleteSessionDialogOpen = ref(false)

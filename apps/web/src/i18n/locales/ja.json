@@ -886,6 +886,7 @@
     "infoNoSkills": "このセッションではスキルは使用されていません",
     "infoNoData": "利用可能なデータがありません",
     "compactNow": "今すぐコンパクトに",
+    "compactContext": "コンテキストを圧縮",
     "compactSuccess": "コンテキストの圧縮が完了しました",
     "compactFailed": "コンテキストの圧縮に失敗しました",
     "sessionStreaming": "生成中",

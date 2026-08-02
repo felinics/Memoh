@@ -920,6 +920,7 @@
     "infoNoSkills": "此会话未使用任何 Skill",
     "infoNoData": "暂无数据",
     "compactNow": "立即压缩",
+    "compactContext": "压缩上下文",
     "compactSuccess": "上下文压缩完成",
     "compactFailed": "上下文压缩失败",
     "sessionStreaming": "生成中",

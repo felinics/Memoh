@@ -868,6 +868,9 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 	}
 	if len(tools) > 0 && cfg.SupportsToolCall {
 		opts = append(opts, sdk.WithTools(tools))
+		if cfg.RequireToolCall && hasSDKTool(tools, "send") {
+			opts = append(opts, sdk.WithToolChoice("required"))
+		}
 	}
 	approvalHandler := cfg.ToolApprovalHandler
 	if a != nil && a.hookService != nil {
@@ -894,6 +897,15 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 		},
 	})...)
 	return opts
+}
+
+func hasSDKTool(tools []sdk.Tool, name string) bool {
+	for i := range tools {
+		if strings.TrimSpace(tools[i].Name) == name {
+			return true
+		}
+	}
+	return false
 }
 
 // assembleTools collects tools from all registered ToolProviders, along with

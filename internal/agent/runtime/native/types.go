@@ -107,14 +107,18 @@ type RunConfig struct {
 	CanRequestUserInput         bool
 	SupportsImageInput          bool
 	SupportsToolCall            bool
-	ChannelPolicy               channelpolicy.Policy
-	MemoryInstructions          bool
-	InlineImages                []sdk.ImagePart
-	Identity                    SessionContext
-	Bot                         BotInfo
-	Skills                      []SkillEntry
-	LoopDetection               LoopDetectionConfig
-	Retry                       RetryConfig
+	// RequireToolCall asks the provider to return at least one tool call instead
+	// of finishing with ordinary Assistant text. It is used for addressed
+	// Discuss turns where a first-party send tool is available.
+	RequireToolCall    bool
+	ChannelPolicy      channelpolicy.Policy
+	MemoryInstructions bool
+	InlineImages       []sdk.ImagePart
+	Identity           SessionContext
+	Bot                BotInfo
+	Skills             []SkillEntry
+	LoopDetection      LoopDetectionConfig
+	Retry              RetryConfig
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier

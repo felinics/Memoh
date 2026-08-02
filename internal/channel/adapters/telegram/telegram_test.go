@@ -798,6 +798,9 @@ func TestTelegramAdapter_SendRichPartsUsesRichMessage(t *testing.T) {
 	if reply == nil || reply["message_id"] != float64(42) {
 		t.Fatalf("expected reply_parameters message id, got %#v", reply)
 	}
+	if reply["allow_sending_without_reply"] != true {
+		t.Fatalf("expected a missing reply source to degrade to a normal send, got %#v", reply)
+	}
 	if _, ok := gotBody["reply_markup"]; !ok {
 		t.Fatalf("expected inline keyboard reply_markup, got %v", gotBody)
 	}
@@ -1105,10 +1108,10 @@ func TestTelegramDescriptorUsesRichTextChunkLimit(t *testing.T) {
 	}
 }
 
-func TestTelegramAttachmentSendOptionsCarriesActions(t *testing.T) {
+func TestTelegramAttachmentSendOptionsCarriesActionsAndToleratesMissingReply(t *testing.T) {
 	t.Parallel()
 
-	opts := telegramAttachmentSendOptions("", 0, []channel.Action{{
+	opts := telegramAttachmentSendOptions("", 42, []channel.Action{{
 		Label: "Open",
 		URL:   "https://example.com",
 	}})
@@ -1118,6 +1121,9 @@ func TestTelegramAttachmentSendOptionsCarriesActions(t *testing.T) {
 	btn := opts.ReplyMarkup.InlineKeyboard[0][0]
 	if btn.Text != "Open" || btn.URL != "https://example.com" {
 		t.Fatalf("unexpected inline keyboard button: %+v", btn)
+	}
+	if opts.ReplyTo == nil || opts.ReplyTo.ID != 42 || !opts.AllowWithoutReply {
+		t.Fatalf("reply options should keep the quote when available and still send when it disappears: %+v", opts)
 	}
 }
 

@@ -116,3 +116,47 @@ func TestRenderDeletedMessagePopulatesSlotIdentityAndEditTime(t *testing.T) {
 		t.Fatalf("deleted segment lost slot metadata: %+v", seg)
 	}
 }
+
+func TestRenderMessageDoesNotDuplicateUsernameAlreadyInDisplayName(t *testing.T) {
+	msg := &ICMessage{
+		MessageID:    "msg-username",
+		ReceivedAtMs: 1000,
+		TimestampSec: 1,
+		Sender: &CanonicalUser{
+			ID:          "user-1",
+			DisplayName: "Hatsuyuki (@hatsuyuki)",
+			Username:    "hatsuyuki",
+		},
+		ReplyToMessageID: "msg-parent",
+		ReplyToSender: &CanonicalUser{
+			ID:          "user-2",
+			DisplayName: "Alice (@alice)",
+			Username:    "alice",
+		},
+		ReplyToPreview: "hello",
+		Content:        []ContentNode{{Type: "text", Text: "reply"}},
+		Conversation:   ConversationMeta{Channel: "telegram", ConversationType: "group"},
+	}
+
+	seg := renderMessage(msg, RenderParams{})
+	if len(seg.Content) != 1 {
+		t.Fatalf("content pieces = %d, want 1", len(seg.Content))
+	}
+	rendered := seg.Content[0].Text
+	for _, duplicated := range []string{
+		"Hatsuyuki (@hatsuyuki) (@hatsuyuki)",
+		"Alice (@alice) (@alice)",
+	} {
+		if strings.Contains(rendered, duplicated) {
+			t.Fatalf("rendered sender duplicated username %q: %s", duplicated, rendered)
+		}
+	}
+	for _, want := range []string{
+		`sender="Hatsuyuki (@hatsuyuki)"`,
+		`<in-reply-to id="msg-parent" sender="Alice (@alice)">hello</in-reply-to>`,
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered message missing %q: %s", want, rendered)
+		}
+	}
+}

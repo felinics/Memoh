@@ -271,6 +271,24 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 		t.Fatalf("Usage should not expose Telegram Markdown math guidance for non-Telegram sessions, got:\n%s", got)
 	}
 
+	discussSession := SessionContext{SessionType: sessionmode.Discuss, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
+	got = provider.Usage(context.Background(), discussSession, availableToolsForTest(ToolSend()))
+	for _, want := range []string{"every addressed or forced turn", "successful current-conversation `send`", "cannot replace `send`", "never emit delivery markers"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Discuss usage should enforce the send delivery boundary containing %q, got:\n%s", want, got)
+		}
+	}
+	discussTools, err := provider.Tools(context.Background(), discussSession)
+	if err != nil {
+		t.Fatalf("Tools discuss session: %v", err)
+	}
+	discussSend := toolByNameForTest(t, discussTools, ToolSend())
+	for _, want := range []string{"Every addressed or forced Discuss turn", "call this tool successfully", "ordinary Assistant text is private and never delivered"} {
+		if !strings.Contains(discussSend.Description, want) {
+			t.Fatalf("Discuss send description should enforce delivery boundary containing %q, got:\n%s", want, discussSend.Description)
+		}
+	}
+
 	backgroundSession := SessionContext{SessionType: sessionmode.Heartbeat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), backgroundSession, availableToolsForTest(ToolReact()))
 	if strings.Contains(got, "Omit `target`") || strings.Contains(got, "unless the current conversation target is explicit") || !strings.Contains(got, "Specify `platform` and `target`") {

@@ -73,6 +73,64 @@ func TestBuildGenerateOptionsPreservesDeepSeekReasoningDisabled(t *testing.T) {
 	}
 }
 
+func TestBuildGenerateOptionsRequiresToolCallWhenSendIsAvailable(t *testing.T) {
+	t.Parallel()
+
+	provider := &recordingReasoningProvider{}
+	cfg := RunConfig{
+		Model: &sdk.Model{
+			ID:       "deepseek-v4-flash",
+			Provider: provider,
+			Type:     sdk.ModelTypeChat,
+		},
+		SupportsToolCall: true,
+		RequireToolCall:  true,
+	}
+	tools := []sdk.Tool{{
+		Name: "send",
+		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+			return map[string]any{"ok": true}, nil
+		},
+	}}
+
+	opts := (*Agent)(nil).buildGenerateOptions(cfg, tools, tools, nil)
+	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
+		t.Fatalf("generate text result: %v", err)
+	}
+	if got := provider.params.ToolChoice; got != "required" {
+		t.Fatalf("tool choice = %#v, want required", got)
+	}
+}
+
+func TestBuildGenerateOptionsDoesNotRequireMissingSendTool(t *testing.T) {
+	t.Parallel()
+
+	provider := &recordingReasoningProvider{}
+	cfg := RunConfig{
+		Model: &sdk.Model{
+			ID:       "deepseek-v4-flash",
+			Provider: provider,
+			Type:     sdk.ModelTypeChat,
+		},
+		SupportsToolCall: true,
+		RequireToolCall:  true,
+	}
+	tools := []sdk.Tool{{
+		Name: "web_search",
+		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+			return map[string]any{"ok": true}, nil
+		},
+	}}
+
+	opts := (*Agent)(nil).buildGenerateOptions(cfg, tools, tools, nil)
+	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
+		t.Fatalf("generate text result: %v", err)
+	}
+	if provider.params.ToolChoice != nil {
+		t.Fatalf("tool choice = %#v, want nil without send", provider.params.ToolChoice)
+	}
+}
+
 type recordingPromptCacheProvider struct {
 	mu     sync.Mutex
 	calls  int

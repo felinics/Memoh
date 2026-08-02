@@ -133,6 +133,9 @@ func TestDiscussForceReplyUsesEphemeralTailSignal(t *testing.T) {
 	if agent.lastConfig.System != "base system" {
 		t.Fatalf("force reply changed stable system prompt: %q", agent.lastConfig.System)
 	}
+	if !agent.lastConfig.RequireToolCall {
+		t.Fatal("forced discuss reply did not require a tool call")
+	}
 	if len(agent.lastConfig.Messages) == 0 || !isDiscussForceReplySignal(agent.lastConfig.Messages[len(agent.lastConfig.Messages)-1]) {
 		t.Fatalf("messages do not end with force-reply signal: %#v", agent.lastConfig.Messages)
 	}

@@ -37,7 +37,7 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 	if sendRef, ok := available.Ref(ToolSend()); ok {
 		switch session.SessionType {
 		case sessionmode.Discuss:
-			parts = append(parts, "Call "+sendRef+" for every public reply in the observed conversation. Ordinary Assistant text is private working output and is not delivered; if you do not call "+sendRef+", you stay silent.")
+			parts = append(parts, "In Discuss, every addressed or forced turn must finish with a successful current-conversation "+sendRef+" call. Put only final audience-facing content in "+sendRef+", set `reply_to` when replying to a specific message ID, and never emit delivery markers such as `[Sent ...]`. Ordinary Assistant text is private, never delivered, and cannot replace "+sendRef+".")
 		case sessionmode.Schedule, sessionmode.Heartbeat:
 			parts = append(parts, "Use "+sendRef+" only when the background task needs to notify a person or channel; specify `platform` and `target`.")
 		default:
@@ -274,12 +274,12 @@ func messagingSessionSupportsMarkdownMath(session SessionContext) bool {
 func sendToolPromptMetadata(session SessionContext) (description string, platformDescription string, targetDescription string, required []string) {
 	if session.SessionType == sessionmode.Discuss {
 		if session.CanOmitMessagingTarget() {
-			return "Publish a reply into the observed conversation. Call this for every reply that people should see; ordinary Assistant text is not delivered. When target is omitted, sends to the observed conversation. When target is specified, sends to that channel/person.",
+			return "Publish an audience-visible reply. Every addressed or forced Discuss turn must call this tool successfully before ending; ordinary Assistant text is private and never delivered. Omit target for the observed conversation; specify target only for another channel/person.",
 				"Channel platform name. Defaults to current session platform.",
 				"Channel target (chat/group/thread ID). Optional — omit to send in the observed conversation.",
 				[]string{}
 		}
-		return "Publish a reply into the observed conversation or another channel/person. Call this for every reply that people should see; ordinary Assistant text is not delivered. Specify platform and target in this session.",
+		return "Publish an audience-visible reply. Every addressed or forced Discuss turn must call this tool successfully before ending; ordinary Assistant text is private and never delivered. Specify platform and target in this session.",
 			"Channel platform name. Required in this session.",
 			"Channel target (chat/group/thread ID). Required in this session.",
 			[]string{"platform", "target"}

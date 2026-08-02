@@ -195,7 +195,10 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		// Keep the stable system/tools prefix identical for forced and sampled
 		// turns. The static discuss contract defines this service-only signal;
 		// appending it after media enrichment keeps images attached to the real
-		// incoming message. The signal is removed before persistence below.
+		// incoming message. The signal is removed before persistence below. The
+		// request-level tool choice enforces the same boundary without changing
+		// the cacheable prompt prefix; native only applies it when send is exposed.
+		runConfig.RequireToolCall = true
 		runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(discussForceReplySignal))
 	}
 	runConfig = runConfig.RefreshContextFrag()

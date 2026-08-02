@@ -137,29 +137,41 @@ func projectSDKMessageHeaders(messages []sdk.Message, mode string) []sdk.Message
 
 // projectDiscussToolHistory keeps the canonical transcript untouched while
 // presenting a smaller, audience-accurate history to the next discuss turn.
-// All ordinary assistant text remains private. Successful
-// current-conversation sends are replaced by the text/sticker that was
-// actually delivered, and their
-// protocol call/result pair is removed.
+// All ordinary assistant text remains private. Successful first-party sends
+// to the current conversation retain a minimal protocol-valid call/result
+// pair so the model can distinguish published output from private work without
+// learning synthetic delivery prose. Deprecated Sticker MCP calls are removed
+// with their results so old tool names and catalog IDs do not leak forward.
 func projectDiscussToolHistory(messages []sdk.Message) []sdk.Message {
 	if len(messages) == 0 {
 		return messages
 	}
-	successful := make(map[string]sdk.ToolResultPart)
+	results := make(map[string]sdk.ToolResultPart)
+	deprecated := make(map[string]struct{})
 	for _, message := range messages {
-		if message.Role != sdk.MessageRoleTool {
-			continue
-		}
-		for _, part := range message.Content {
-			result, ok := sdkToolResultPart(part)
-			if !ok || result.IsError || !toolResultSucceeded(result.Result) {
-				continue
+		switch message.Role {
+		case sdk.MessageRoleAssistant:
+			for _, part := range message.Content {
+				call, ok := sdkToolCallPart(part)
+				if !ok || !isDeprecatedTelegramStickerTool(call.ToolName) {
+					continue
+				}
+				if callID := strings.TrimSpace(call.ToolCallID); callID != "" {
+					deprecated[callID] = struct{}{}
+				}
 			}
-			successful[strings.TrimSpace(result.ToolCallID)] = result
+		case sdk.MessageRoleTool:
+			for _, part := range message.Content {
+				result, ok := sdkToolResultPart(part)
+				if !ok {
+					continue
+				}
+				results[strings.TrimSpace(result.ToolCallID)] = result
+			}
 		}
 	}
 
-	collapsed := make(map[string]struct{})
+	minimized := make(map[string]struct{})
 	out := make([]sdk.Message, 0, len(messages))
 	for _, message := range messages {
 		projected := message
@@ -178,30 +190,30 @@ func projectDiscussToolHistory(messages []sdk.Message) []sdk.Message {
 					continue
 				}
 				callID := strings.TrimSpace(call.ToolCallID)
-				result, ok := successful[callID]
-				if !ok {
+				if isDeprecatedTelegramStickerTool(call.ToolName) {
+					continue
+				}
+				result, hasResult := results[callID]
+				resultToolName := strings.TrimSpace(result.ToolName)
+				if callID == "" || strings.TrimSpace(call.ToolName) != "send" || !hasResult ||
+					(resultToolName != "" && resultToolName != "send") || result.IsError ||
+					!toolResultSucceeded(result.Result) || !toolResultDeliveredToCurrentConversation(result.Result) {
 					projected.Content = append(projected.Content, part)
 					continue
 				}
-				if isStickerSearchTool(call.ToolName) {
-					collapsed[callID] = struct{}{}
-					continue
-				}
-				if !isVisibleDiscussSendTool(call.ToolName) ||
-					(strings.TrimSpace(call.ToolName) == "send" && !toolResultDeliveredToCurrentConversation(result.Result)) {
-					projected.Content = append(projected.Content, part)
-					continue
-				}
-				collapsed[callID] = struct{}{}
-				if visible := visibleDiscussSendSummary(call); visible != "" {
-					projected.Content = append(projected.Content, sdk.TextPart{Text: visible})
-				}
+				minimized[callID] = struct{}{}
+				projected.Content = append(projected.Content, minimalDiscussSendCall(call))
 			}
 		case sdk.MessageRoleTool:
 			for _, part := range message.Content {
 				result, ok := sdkToolResultPart(part)
 				if ok {
-					if _, skip := collapsed[strings.TrimSpace(result.ToolCallID)]; skip {
+					callID := strings.TrimSpace(result.ToolCallID)
+					if _, skip := deprecated[callID]; skip || isDeprecatedTelegramStickerTool(result.ToolName) {
+						continue
+					}
+					if _, compact := minimized[callID]; compact {
+						projected.Content = append(projected.Content, minimalDiscussSendResult(result))
 						continue
 					}
 				}
@@ -215,6 +227,31 @@ func projectDiscussToolHistory(messages []sdk.Message) []sdk.Message {
 		}
 	}
 	return out
+}
+
+func minimalDiscussSendCall(call sdk.ToolCallPart) sdk.ToolCallPart {
+	input := normalizeToolInputMap(call.Input)
+	minimal := make(map[string]any, 5)
+	// Current-conversation routing is implicit. Keep only audience-visible
+	// payload fields and the reply reference needed to understand the exchange.
+	for _, key := range []string{"text", "reply_to", "sticker_id", "attachments", "message"} {
+		if value, ok := input[key]; ok {
+			minimal[key] = value
+		}
+	}
+	return sdk.ToolCallPart{
+		ToolCallID: strings.TrimSpace(call.ToolCallID),
+		ToolName:   "send",
+		Input:      minimal,
+	}
+}
+
+func minimalDiscussSendResult(result sdk.ToolResultPart) sdk.ToolResultPart {
+	return sdk.ToolResultPart{
+		ToolCallID: strings.TrimSpace(result.ToolCallID),
+		ToolName:   "send",
+		Result:     map[string]any{"ok": true},
+	}
 }
 
 func sdkToolCallPart(part sdk.MessagePart) (sdk.ToolCallPart, bool) {
@@ -281,42 +318,10 @@ func toolResultDeliveredToCurrentConversation(result any) bool {
 	return true
 }
 
-func isVisibleDiscussSendTool(name string) bool {
+func isDeprecatedTelegramStickerTool(name string) bool {
 	name = strings.TrimSpace(name)
-	return name == "send" || name == "send_telegram_sticker" || strings.HasSuffix(name, "_send_telegram_sticker")
-}
-
-func isStickerSearchTool(name string) bool {
-	name = strings.TrimSpace(name)
-	return name == "search_telegram_stickers" || strings.HasSuffix(name, "_search_telegram_stickers")
-}
-
-func visibleDiscussSendSummary(call sdk.ToolCallPart) string {
-	input := normalizeToolInputMap(call.Input)
-	text, _ := input["text"].(string)
-	text = strings.TrimSpace(text)
-	if text == "" {
-		if message, ok := input["message"].(map[string]any); ok {
-			text, _ = message["text"].(string)
-			text = strings.TrimSpace(text)
-		}
-	}
-	stickerID, _ := input["sticker_id"].(string)
-	stickerID = strings.TrimSpace(stickerID)
-	if stickerID != "" {
-		marker := "[Sent Telegram sticker " + stickerID + "]"
-		if text == "" {
-			return marker
-		}
-		return text + "\n" + marker
-	}
-	if text != "" {
-		return text
-	}
-	if _, ok := input["attachments"]; ok {
-		return "[Sent attachment]"
-	}
-	return "[Sent message]"
+	return name == "send_telegram_sticker" || strings.HasSuffix(name, "_send_telegram_sticker") ||
+		name == "search_telegram_stickers" || strings.HasSuffix(name, "_search_telegram_stickers")
 }
 
 func normalizeToolInputMap(input any) map[string]any {

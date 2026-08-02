@@ -276,10 +276,7 @@ func formatSender(user *CanonicalUser, contactNames map[string]string) string {
 	}
 	if contactNames != nil {
 		if name, ok := contactNames[user.ID]; ok {
-			if user.Username != "" && user.Username != name {
-				return name + " (@" + user.Username + ")"
-			}
-			return name
+			return formatDisplayNameWithUsername(name, user.Username)
 		}
 	}
 	displayName := user.DisplayName
@@ -289,10 +286,20 @@ func formatSender(user *CanonicalUser, contactNames map[string]string) string {
 		}
 		return user.ID
 	}
-	if user.Username != "" && user.Username != displayName {
-		return displayName + " (@" + user.Username + ")"
+	return formatDisplayNameWithUsername(displayName, user.Username)
+}
+
+func formatDisplayNameWithUsername(displayName, username string) string {
+	displayName = strings.TrimSpace(displayName)
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	if displayName == "" {
+		return username
 	}
-	return displayName
+	if username == "" || strings.EqualFold(displayName, username) || strings.EqualFold(displayName, "@"+username) ||
+		strings.HasSuffix(strings.ToLower(displayName), strings.ToLower("(@"+username+")")) {
+		return displayName
+	}
+	return displayName + " (@" + username + ")"
 }
 
 func resolveForwardFrom(info *ForwardInfo, contactNames map[string]string) string {
