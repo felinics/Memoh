@@ -74,6 +74,20 @@ func (c *SendToolStreamCoordinator) entry(key SendToolStreamKey) (*sendToolStrea
 	return entry, true
 }
 
+func (c *SendToolStreamCoordinator) existing(key SendToolStreamKey) (*sendToolStreamEntry, bool) {
+	if c == nil {
+		return nil, false
+	}
+	key = key.normalized()
+	if !key.valid() {
+		return nil, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry := c.entries[key]
+	return entry, entry != nil
+}
+
 // Attach transfers stream ownership to the coordinator. False means final
 // delivery already fell back to a one-shot send, so the caller must close the
 // newly opened preview instead of exposing a stale partial message.
@@ -128,6 +142,15 @@ func (c *SendToolStreamCoordinator) Finalize(ctx context.Context, key SendToolSt
 		c.expire(key)
 		return false, nil
 	case <-ctx.Done():
+		entry.mu.Lock()
+		if !entry.finished {
+			entry.finished = true
+			if entry.stream != nil {
+				_ = entry.stream.Close(context.WithoutCancel(ctx))
+			}
+		}
+		entry.mu.Unlock()
+		c.expire(key)
 		return false, ctx.Err()
 	}
 
@@ -143,7 +166,10 @@ func (c *SendToolStreamCoordinator) Finalize(ctx context.Context, key SendToolSt
 	}); err != nil {
 		_ = entry.stream.Close(context.WithoutCancel(ctx))
 		c.expire(key)
-		return false, err
+		// An attached stream may have committed the final event before the
+		// transport surfaced an error. Claim ownership so Manager.Send never
+		// performs an immediate one-shot fallback and duplicates the message.
+		return true, err
 	}
 	_ = entry.stream.Push(ctx, StreamEvent{Type: StreamEventStatus, Status: StreamStatusCompleted})
 	// The final message has already been committed. A close error must never
@@ -154,17 +180,25 @@ func (c *SendToolStreamCoordinator) Finalize(ctx context.Context, key SendToolSt
 }
 
 func (c *SendToolStreamCoordinator) Abort(ctx context.Context, key SendToolStreamKey) {
-	entry, ok := c.entry(key)
+	entry, ok := c.existing(key)
 	if !ok {
 		return
 	}
 	entry.mu.Lock()
-	if !entry.finished {
-		entry.finished = true
-		if entry.stream != nil {
-			_ = entry.stream.Push(ctx, StreamEvent{Type: StreamEventError, Error: "send was not completed"})
-			_ = entry.stream.Close(ctx)
-		}
+	if entry.finished {
+		entry.mu.Unlock()
+		// Timed-out entries are tombstones. Retain them until expiry so late
+		// preview events cannot reopen a stream after one-shot delivery.
+		return
+	}
+	entry.finished = true
+	if !entry.attached {
+		close(entry.ready)
+	}
+	if entry.stream != nil {
+		// An abandoned preview is transport cleanup, not a permanent audience-
+		// visible error. The final send path will either commit or fall back.
+		_ = entry.stream.Close(ctx)
 	}
 	entry.mu.Unlock()
 	c.remove(key)

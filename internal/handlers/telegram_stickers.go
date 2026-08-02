@@ -104,11 +104,6 @@ func (h *MCPHandler) ListTelegramStickers(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if model != "" {
-		if err := h.activateTelegramStickerVisionProfile(ctx, conn, botID, model, promptVersion); err != nil {
-			return h.stickerServiceError("activate recognition profile", err)
-		}
-	}
 	resp, err := h.doTelegramStickerRequest(ctx, conn, http.MethodGet, endpoint)
 	if err != nil {
 		return h.stickerServiceError("list", err)
@@ -504,26 +499,6 @@ func (h *MCPHandler) telegramStickerVisionProfile(ctx context.Context, botID str
 		return "", "", true, nil
 	}
 	return h.stickerVision.TelegramStickerVisionConfig(ctx, botID)
-}
-
-func (h *MCPHandler) activateTelegramStickerVisionProfile(ctx context.Context, conn mcp.Connection, botID, model, promptVersion string) error {
-	_, endpoint, err := h.telegramStickerEndpoint(ctx, botID, "/api/profile")
-	if err != nil {
-		return err
-	}
-	payload, err := json.Marshal(map[string]string{"model": model, "prompt_version": promptVersion})
-	if err != nil {
-		return err
-	}
-	resp, err := h.doTelegramStickerJSONRequest(ctx, conn, http.MethodPost, endpoint, payload)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("profile status %d", resp.StatusCode)
-	}
-	return nil
 }
 
 func (h *MCPHandler) telegramStickerEndpoint(ctx context.Context, botID, apiPath string) (mcp.Connection, string, error) {

@@ -119,13 +119,16 @@ func (c *telegramClient) DownloadStickerMedia(
 	}
 	filePath := strings.TrimSpace(file.FilePath)
 	if filePath == "" {
-		return nil, "", errors.New("Telegram getFile returned an empty file_path")
+		return nil, "", errors.New("telegram getFile returned an empty file_path")
 	}
 	endpoint := strings.TrimRight(c.baseURL, "/") + "/file/bot" + c.token + "/" + strings.TrimLeft(filePath, "/")
+	// #nosec G704 -- the base URL is fixed to Telegram by default and can only
+	// be overridden by trusted operator configuration for compatible gateways.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("build Telegram file request: %w", err)
 	}
+	// #nosec G704 -- see the operator-controlled endpoint boundary above.
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("download Telegram sticker media: %w", err)
@@ -139,7 +142,7 @@ func (c *telegramClient) DownloadStickerMedia(
 		return nil, "", fmt.Errorf("read Telegram sticker media: %w", err)
 	}
 	if len(data) > maxStickerMediaBytes {
-		return nil, "", errors.New("Telegram sticker media exceeds 20 MiB")
+		return nil, "", errors.New("telegram sticker media exceeds 20 MiB")
 	}
 	return data, stickerMediaType(filePath, resp.Header.Get("Content-Type")), nil
 }
@@ -171,12 +174,15 @@ func stickerMediaType(filePath, contentType string) string {
 func telegramCall[T any](ctx context.Context, client *telegramClient, method string, form url.Values) (T, error) {
 	var zero T
 	endpoint := strings.TrimRight(client.baseURL, "/") + "/bot" + client.token + "/" + method
+	// #nosec G704 -- the base URL is fixed to Telegram by default and can only
+	// be overridden by trusted operator configuration for compatible gateways.
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return zero, fmt.Errorf("build Telegram %s request: %w", method, err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
+	// #nosec G704 -- see the operator-controlled endpoint boundary above.
 	resp, err := client.httpClient.Do(req)
 	if err != nil {
 		return zero, fmt.Errorf("call Telegram %s: %w", method, err)
@@ -188,7 +194,7 @@ func telegramCall[T any](ctx context.Context, client *telegramClient, method str
 		return zero, fmt.Errorf("read Telegram %s response: %w", method, err)
 	}
 	if len(body) > maxTelegramResponseBytes {
-		return zero, fmt.Errorf("Telegram %s response is too large", method)
+		return zero, fmt.Errorf("telegram %s response is too large", method)
 	}
 
 	var envelope struct {
@@ -205,7 +211,7 @@ func telegramCall[T any](ctx context.Context, client *telegramClient, method str
 		if description == "" {
 			description = http.StatusText(resp.StatusCode)
 		}
-		return zero, fmt.Errorf("Telegram %s failed (%d): %s", method, envelope.ErrorCode, description)
+		return zero, fmt.Errorf("telegram %s failed (%d): %s", method, envelope.ErrorCode, description)
 	}
 
 	var result T
@@ -247,9 +253,6 @@ func newStickerServiceProvider(
 	catalog *stickerCatalog,
 ) (*stickerServiceProvider, error) {
 	setName = strings.TrimSpace(setName)
-	if len(parseStickerSetNames(setName)) == 0 {
-		return nil, errors.New("TELEGRAM_STICKER_MCP_SET_NAME is required")
-	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 20 * time.Second}
 	}
@@ -275,14 +278,14 @@ func (p *stickerServiceProvider) Resolve(req *mcp.CallToolRequest) (*stickerServ
 }
 
 func (p *stickerServiceProvider) ResolveHeader(header http.Header) (*stickerService, error) {
-	token := strings.TrimSpace(header.Get(telegramBotTokenHeader))
+	token := strings.TrimSpace(header.Get(telegramBotHeader))
 	if token == "" {
 		token = p.fallbackToken
 	}
 	if token == "" {
 		return nil, fmt.Errorf(
 			"%s request header is required for HTTP transport; TELEGRAM_STICKER_MCP_BOT_TOKEN is the stdio fallback",
-			telegramBotTokenHeader,
+			telegramBotHeader,
 		)
 	}
 	rawSetNames := strings.TrimSpace(header.Get(telegramStickerSetHeader))
@@ -366,7 +369,7 @@ func newStickerCollectionService(sets []*stickerService) *stickerService {
 
 func stickerSetAlias(setName string) string {
 	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(setName))))
-	return strings.ToUpper(hex.EncodeToString(sum[:3]))
+	return strings.ToUpper(hex.EncodeToString(sum[:8]))
 }
 
 func collectionStickerID(setName, localID string) string {
@@ -375,14 +378,23 @@ func collectionStickerID(setName, localID string) string {
 
 func (s *stickerService) collectionSticker(stickerID string) (*stickerService, string, error) {
 	stickerID = normalizeStickerID(stickerID)
+	var matched *stickerService
+	matchedLocalID := ""
 	for _, set := range s.sets {
 		prefix := stickerSetAlias(set.setName) + "-"
 		if strings.HasPrefix(stickerID, prefix) {
 			localID := strings.TrimPrefix(stickerID, prefix)
 			if localID != "" {
-				return set, localID, nil
+				if matched != nil {
+					return nil, "", fmt.Errorf("sticker_id %q has an ambiguous Sticker Set prefix", stickerID)
+				}
+				matched = set
+				matchedLocalID = localID
 			}
 		}
+	}
+	if matched != nil {
+		return matched, matchedLocalID, nil
 	}
 	return nil, "", fmt.Errorf("sticker_id %q was not found in configured Sticker Sets", stickerID)
 }
@@ -406,7 +418,7 @@ func newStickerServiceWithMetadataKey(
 	setName = strings.TrimSpace(setName)
 	setMetadataKey = strings.TrimSpace(setMetadataKey)
 	if api == nil {
-		return nil, errors.New("Telegram API client is required")
+		return nil, errors.New("telegram API client is required")
 	}
 	if setName == "" {
 		return nil, errors.New("TELEGRAM_STICKER_MCP_SET_NAME is required")
@@ -415,7 +427,7 @@ func newStickerServiceWithMetadataKey(
 		return nil, errors.New("sticker catalog is required")
 	}
 	if setMetadataKey == "" {
-		return nil, errors.New("Sticker Set metadata cache key is required")
+		return nil, errors.New("sticker set metadata cache key is required")
 	}
 	return &stickerService{
 		api:            api,
@@ -428,7 +440,7 @@ func newStickerServiceWithMetadataKey(
 type sendStickerInput struct {
 	ChatID    string `json:"chat_id" jsonschema:"Telegram target from the current message metadata"`
 	Text      string `json:"text,omitempty" jsonschema:"Optional visible text to send before the sticker"`
-	StickerID string `json:"sticker_id,omitempty" jsonschema:"Exact sticker ID from the tool schema, for example S001"`
+	StickerID string `json:"sticker_id,omitempty" jsonschema:"Exact content-stable sticker ID from the tool schema"`
 }
 
 type sendStickerOutput struct {
@@ -534,7 +546,7 @@ func (s *stickerService) CachedDescribedSet(ctx context.Context) (describedStick
 		return describedStickerSet{}, err
 	}
 	stickers := make([]describedSticker, 0, len(set.Stickers))
-	for index, sticker := range set.Stickers {
+	for _, sticker := range set.Stickers {
 		if strings.TrimSpace(sticker.FileID) == "" || strings.TrimSpace(sticker.FileUniqueID) == "" {
 			continue
 		}
@@ -552,7 +564,7 @@ func (s *stickerService) CachedDescribedSet(ctx context.Context) (describedStick
 			description = strings.TrimSpace(entry.Description)
 		}
 		stickers = append(stickers, describedSticker{
-			ID:           candidateID(index),
+			ID:           candidateID(sticker.FileUniqueID),
 			FileID:       sticker.FileID,
 			FileUniqueID: sticker.FileUniqueID,
 			Emoji:        strings.TrimSpace(sticker.Emoji),
@@ -592,14 +604,14 @@ func (s *stickerService) aggregateDescribedSets(ctx context.Context, cached bool
 	return result, nil
 }
 
-func (s *stickerService) WarmDescriptions() {
+func (s *stickerService) WarmDescriptions(ctx context.Context) {
 	if len(s.sets) > 0 {
 		for _, set := range s.sets {
-			set.WarmDescriptions()
+			set.WarmDescriptions(ctx)
 		}
 		return
 	}
-	if !s.canWarmDescriptions(context.Background()) {
+	if !s.canWarmDescriptions(ctx) {
 		return
 	}
 	s.warmMu.Lock()
@@ -610,20 +622,23 @@ func (s *stickerService) WarmDescriptions() {
 	s.warming = true
 	s.warmMu.Unlock()
 
-	go func() {
+	backgroundCtx := context.WithoutCancel(ctx)
+	go func(parent context.Context) {
 		defer func() {
 			s.warmMu.Lock()
 			s.warming = false
 			s.warmMu.Unlock()
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
 		defer cancel()
 		if _, err := s.DescribedSet(ctx); err != nil {
-			log.Printf("background parsing for sticker set %s failed: %v", s.setName, err)
+			// #nosec G706 -- %q escapes control characters in the remote set name.
+			log.Printf("background parsing for sticker set %q failed: %v", s.setName, err)
 			return
 		}
-		log.Printf("background parsing for sticker set %s completed", s.setName)
-	}()
+		// #nosec G706 -- %q escapes control characters in the remote set name.
+		log.Printf("background parsing for sticker set %q completed", s.setName)
+	}(backgroundCtx)
 }
 
 func (s *stickerService) descriptionProfile(ctx context.Context) (stickerDescriptionProfile, bool, error) {
@@ -671,6 +686,9 @@ func (s *stickerService) getStickerSet(ctx context.Context) (telegramStickerSet,
 		return telegramStickerSet{}, err
 	}
 	if found {
+		if err := validateStickerCandidateIDs(cached); err != nil {
+			return telegramStickerSet{}, err
+		}
 		s.storeStickerSetInMemory(cached)
 		return cached, nil
 	}
@@ -702,13 +720,32 @@ func (s *stickerService) fetchAndCacheStickerSet(ctx context.Context) (telegramS
 		return telegramStickerSet{}, err
 	}
 	if len(set.Stickers) == 0 {
-		return telegramStickerSet{}, fmt.Errorf("Telegram sticker set %q is empty", s.setName)
+		return telegramStickerSet{}, fmt.Errorf("telegram sticker set %q is empty", s.setName)
+	}
+	if err := validateStickerCandidateIDs(set); err != nil {
+		return telegramStickerSet{}, err
 	}
 	if err := s.catalog.cache.PutStickerSet(ctx, s.setMetadataKey, set); err != nil {
 		return telegramStickerSet{}, err
 	}
 	s.storeStickerSetInMemory(set)
 	return set, nil
+}
+
+func validateStickerCandidateIDs(set telegramStickerSet) error {
+	seen := make(map[string]string, len(set.Stickers))
+	for _, sticker := range set.Stickers {
+		uniqueID := strings.TrimSpace(sticker.FileUniqueID)
+		if uniqueID == "" {
+			continue
+		}
+		id := candidateID(uniqueID)
+		if previous, exists := seen[id]; exists && previous != uniqueID {
+			return fmt.Errorf("sticker set %q contains an ambiguous stable ID %q", set.Name, id)
+		}
+		seen[id] = uniqueID
+	}
+	return nil
 }
 
 func (s *stickerService) stickerSetInMemory() (telegramStickerSet, bool) {

@@ -53,7 +53,9 @@ func TestMergeTelegramStickerIntoSingleFirstPartySend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !isSuccessfulCurrentSendResult(output, RunConfig{}) {
+	if !isSuccessfulCurrentSendResult(output, RunConfig{Identity: SessionContext{
+		CurrentPlatform: "telegram", ReplyTarget: "chat-1",
+	}}) {
 		t.Fatalf("combined send result = %#v", output)
 	}
 	if len(nativeInputs) != 1 || nativeInputs[0]["text"] != "hello" {
@@ -64,7 +66,7 @@ func TestMergeTelegramStickerIntoSingleFirstPartySend(t *testing.T) {
 	}
 }
 
-func TestMergedStickerSendDoesNotReportPartialDeliveryAsSuccess(t *testing.T) {
+func TestMergedStickerSendReportsCommittedTextWithoutRetryingIt(t *testing.T) {
 	t.Parallel()
 	nativeCalls := 0
 	tools := mergeTelegramStickerSendTools(agenttools.SessionContext{
@@ -85,10 +87,52 @@ func TestMergedStickerSendDoesNotReportPartialDeliveryAsSuccess(t *testing.T) {
 			Execute: func(*sdk.ToolExecContext, any) (any, error) { return nil, errors.New("Sticker failed") },
 		},
 	})
-	_, err := tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
+	output, err := tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
 		"text": "hello", "sticker_id": "S001",
 	})
-	if err == nil || nativeCalls != 1 {
+	if err != nil || nativeCalls != 1 {
 		t.Fatalf("partial send err=%v nativeCalls=%d", err, nativeCalls)
+	}
+	result, ok := output.(map[string]any)
+	if !ok || result["ok"] != false || result["text_delivered"] != true || result["sticker_delivered"] != false {
+		t.Fatalf("partial delivery envelope = %#v", output)
+	}
+	if !isSuccessfulCurrentSendResult(output, RunConfig{Identity: SessionContext{
+		CurrentPlatform: "telegram", ReplyTarget: "chat-1",
+	}}) {
+		t.Fatalf("committed text did not terminate the local send loop: %#v", output)
+	}
+}
+
+func TestMergedStickerSendRejectsUnknownIDBeforeSendingText(t *testing.T) {
+	t.Parallel()
+	nativeCalls := 0
+	stickerCalls := 0
+	tools := mergeTelegramStickerSendTools(agenttools.SessionContext{
+		CurrentPlatform: "telegram", ReplyTarget: "chat-1",
+	}, []sdk.Tool{
+		{
+			Name: "send", Parameters: map[string]any{"properties": map[string]any{"text": map[string]any{"type": "string"}}},
+			Execute: func(*sdk.ToolExecContext, any) (any, error) {
+				nativeCalls++
+				return map[string]any{"ok": true}, nil
+			},
+		},
+		{
+			Name: "send_telegram_sticker",
+			Parameters: map[string]any{"properties": map[string]any{
+				"sticker_id": map[string]any{"type": "string", "enum": []any{"S001"}},
+			}},
+			Execute: func(*sdk.ToolExecContext, any) (any, error) {
+				stickerCalls++
+				return map[string]any{"ok": true}, nil
+			},
+		},
+	})
+	_, err := tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
+		"text": "must not send", "sticker_id": "S999",
+	})
+	if err == nil || nativeCalls != 0 || stickerCalls != 0 {
+		t.Fatalf("unknown ID err=%v nativeCalls=%d stickerCalls=%d", err, nativeCalls, stickerCalls)
 	}
 }

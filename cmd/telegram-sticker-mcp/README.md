@@ -21,13 +21,13 @@ the same endpoint.
 
 ## Configuration
 
-Copy the example values into the repository root `.env` (or pass another file
-with `-env-file`):
+Copy the example values into a service-owned, mode-`0600` environment file
+outside source control (or pass another file with `-env-file`):
 
 ```dotenv
 TELEGRAM_STICKER_MCP_SET_NAME=myadestes_1_amashiro_natsuki_plus_nacho_neko
 # Optional legacy cache key only; no LLM call is made by this service.
-TELEGRAM_STICKER_MCP_VISION_MODEL=gemini-3.1-pro-preview
+TELEGRAM_STICKER_MCP_VISION_MODEL=legacy-vision-model-id
 TELEGRAM_STICKER_MCP_CACHE_PATH=telegram-sticker-cache.sqlite
 ```
 
@@ -85,7 +85,7 @@ A standard `mcpServers` entry for stdio is:
       "command": "/absolute/path/to/telegram-sticker-mcp",
       "args": [
         "-env-file",
-        "/absolute/path/to/Memoh/.env"
+        "/etc/memoh/telegram-sticker-mcp.env"
       ]
     }
   }
@@ -111,9 +111,10 @@ TELEGRAM_STICKER_MCP_TRANSPORT=http
 TELEGRAM_STICKER_MCP_ADDR=127.0.0.1:8091
 ```
 
-Then connect Memoh to `http://127.0.0.1:8091/mcp`. The installed service is
-intended for the internal network and does not require an `Authorization`
-header.
+Then connect Memoh to `http://127.0.0.1:8091/mcp`. A loopback-only listener may
+omit bearer authentication. Any non-loopback listener (including `0.0.0.0`)
+must also set `TELEGRAM_STICKER_MCP_AUTH_TOKEN`; clients send the same value as
+`Authorization: Bearer <token>`.
 
 The equivalent standard HTTP configuration is:
 
@@ -123,6 +124,7 @@ The equivalent standard HTTP configuration is:
     "telegram-stickers": {
       "url": "http://127.0.0.1:8091/mcp",
       "headers": {
+        "Authorization": "Bearer replace-with-a-random-service-token",
         "X-Telegram-Bot-Token": "123456789:first-service-token",
         "X-Telegram-Sticker-Set": "myadestes_1_amashiro_natsuki_plus_nacho_neko,another_sticker_set_by_example_bot"
       }
@@ -140,6 +142,7 @@ Telegram bots:
     "telegram-stickers-service-a": {
       "url": "http://127.0.0.1:8091/mcp",
       "headers": {
+        "Authorization": "Bearer replace-with-the-shared-service-token",
         "X-Telegram-Bot-Token": "123456789:first-service-token",
         "X-Telegram-Sticker-Set": "myadestes_1_amashiro_natsuki_plus_nacho_neko"
       }
@@ -147,6 +150,7 @@ Telegram bots:
     "telegram-stickers-service-b": {
       "url": "http://127.0.0.1:8091/mcp",
       "headers": {
+        "Authorization": "Bearer replace-with-the-shared-service-token",
         "X-Telegram-Bot-Token": "987654321:second-service-token",
         "X-Telegram-Sticker-Set": "another_sticker_set_by_example_bot"
       }
@@ -159,7 +163,9 @@ Telegram bots:
 `X-Telegram-Sticker-Set` selects its Sticker Set list for that MCP connection.
 All selected sets appear to the model as one flat catalog; management responses
 also retain per-set groups for the Web UI.
-The installed internal-network service does not require `Authorization`.
+Memoh's ordinary MCP list/get responses redact both bearer credentials and
+Telegram bot tokens. Explicit MCP export remains the credential-transfer
+boundary and therefore includes configured secrets.
 
 When Memoh itself runs in Docker, bind the MCP server to an address reachable
 from that container and use the corresponding internal hostname instead of
@@ -174,7 +180,7 @@ Memoh calls `send_telegram_sticker` behind its first-party `send` tool:
 ```json
 {
   "chat_id": "-1001234567890",
-  "sticker_id": "3CF26A-S017"
+  "sticker_id": "A1B2C3D4E5F60708-S0123456789ABCDEF"
 }
 ```
 
@@ -190,9 +196,21 @@ manual recognition results. Memoh proxies these as its first-party Telegram
 Sticker settings UI without exposing MCP headers or Provider credentials to the
 browser.
 
-The six-character prefix identifies the source set without exposing its name
-in every enum value, and remains stable when unrelated sets are added or
-removed.
+The 16-character prefix identifies the source set without exposing its name.
+The local `S…` portion is derived from Telegram's `file_unique_id`, so inserting
+or reordering stickers cannot silently redirect an old ID to different media.
+Both portions use 64-bit SHA-256 prefixes; collisions are rejected instead of
+selecting the first matching set.
+
+## Deployment boundary
+
+This command remains a transitional sidecar for the current release because
+its SQLite catalog/cache and existing per-bot MCP connections are already
+deployed. Keeping that boundary for the hardening release avoids coupling a
+security fix to a cache migration. The process owns Telegram media/catalog
+access only: it receives no LLM Provider credentials and performs no model
+calls. A later migration can move the catalog backend in-process after its
+cache and connection data have an explicit migration path.
 
 Sticker Set metadata and visual descriptions persist in SQLite across service
 restarts. Metadata has no TTL: normal reads never re-fetch the set from

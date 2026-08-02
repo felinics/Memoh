@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/mcp"
 )
@@ -108,7 +109,7 @@ func (h *MCPHandler) List(c echo.Context) error {
 		}
 		items = visible
 	}
-	return c.JSON(http.StatusOK, mcp.ListResponse{Items: items})
+	return c.JSON(http.StatusOK, mcp.ListResponse{Items: mcp.RedactConnectionList(items)})
 }
 
 // Create godoc
@@ -140,9 +141,9 @@ func (h *MCPHandler) Create(c echo.Context) error {
 	}
 	resp, err := h.service.Create(c.Request().Context(), botID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Wrap(apperror.CodeMCPConfigInvalid, err, nil)
 	}
-	return c.JSON(http.StatusCreated, resp)
+	return c.JSON(http.StatusCreated, mcp.RedactConnectionSecrets(resp))
 }
 
 // Get godoc
@@ -179,7 +180,7 @@ func (h *MCPHandler) Get(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, mcp.RedactConnectionSecrets(resp))
 }
 
 // Update godoc
@@ -219,9 +220,9 @@ func (h *MCPHandler) Update(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Wrap(apperror.CodeMCPConfigInvalid, err, nil)
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, mcp.RedactConnectionSecrets(resp))
 }
 
 // Delete godoc
@@ -365,9 +366,9 @@ func (h *MCPHandler) Import(c echo.Context) error {
 	}
 	items, err := h.service.Import(c.Request().Context(), botID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Wrap(apperror.CodeMCPConfigInvalid, err, nil)
 	}
-	return c.JSON(http.StatusOK, mcp.ListResponse{Items: items})
+	return c.JSON(http.StatusOK, mcp.ListResponse{Items: mcp.RedactConnectionList(items)})
 }
 
 // BatchDeleteRequest is the body for batch delete.

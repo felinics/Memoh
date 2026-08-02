@@ -440,6 +440,18 @@ func TestSuccessfulCurrentReplyRejectsFailedOrDifferentTargetSend(t *testing.T) 
 			},
 		},
 		{
+			name: "text committed before Sticker failure",
+			event: agentevent.StreamEvent{
+				Type:     agentevent.ToolCallEnd,
+				ToolName: "send",
+				Result: map[string]any{
+					"ok": false, "text_delivered": true, "sticker_delivered": false,
+					"platform": "telegram", "target": "chat-1",
+				},
+			},
+			want: true,
+		},
+		{
 			name: "sticker tool",
 			event: agentevent.StreamEvent{
 				Type:     agentevent.ToolCallEnd,

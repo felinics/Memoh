@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,7 +28,7 @@ const (
 	sendToolName             = "send_telegram_sticker"
 	sendToolDescription      = "Internal Telegram sticker delivery backend. The Memoh agent merges its stable sticker catalog into the first-party send tool."
 	stickerGuideBase         = "在当前会话是 Telegram 时，通常每条对外信息都应至少配一张贴合语境的贴纸，并在同一次 `send` 调用中同时设置文本与 `sticker_id`；只有完整目录里确实没有合适候选时才省略。请根据视觉描述选择，不要只看原始 emoji，也不要重复发送含义相同的贴纸。用户明确要求 Unicode emoji 时不要用贴纸代替。"
-	telegramBotTokenHeader   = "X-Telegram-Bot-Token"
+	telegramBotHeader        = "X-Telegram-Bot-Token"
 	telegramStickerSetHeader = "X-Telegram-Sticker-Set"
 )
 
@@ -43,19 +44,25 @@ type config struct {
 }
 
 func main() {
+	if err := runMain(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runMain() error {
 	envFile := flag.String("env-file", ".env", "optional dotenv file")
 	flag.Parse()
 
 	if err := loadDotenv(*envFile); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	cache, err := openStickerDescriptionCache(cfg.CachePath)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer func() { _ = cache.Close() }()
 	// Sticker recognition is intentionally not performed in this process.
@@ -64,34 +71,35 @@ func main() {
 	describer := newCacheOnlyStickerDescriber(cfg.VisionModel)
 	catalog, err := newStickerCatalog(cache, describer)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	provider, err := newStickerServiceProvider(cfg.SetName, cfg.BotToken, cfg.APIBase, nil, catalog)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	switch cfg.Transport {
 	case "stdio":
 		service, err := provider.Resolve(nil)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		catalog, err := service.CachedDescribedSet(context.Background())
 		if err != nil {
-			log.Fatalf("load cached Sticker Set for MCP schema: %v", err)
+			return fmt.Errorf("load cached Sticker Set for MCP schema: %w", err)
 		}
 		server := newMCPServer(provider.Resolve, catalog, "")
 		if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-			log.Fatal(err)
+			return err
 		}
 	case "http":
 		if err := runHTTP(provider, cfg); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			return err
 		}
 	default:
-		log.Fatalf("unsupported TELEGRAM_STICKER_MCP_TRANSPORT %q (want stdio or http)", cfg.Transport)
+		return fmt.Errorf("unsupported TELEGRAM_STICKER_MCP_TRANSPORT %q (want stdio or http)", cfg.Transport)
 	}
+	return nil
 }
 
 type stickerServiceResolver func(*mcp.CallToolRequest) (*stickerService, error)
@@ -166,7 +174,7 @@ func cachedStickerGuide(ctx context.Context, service *stickerService) (string, e
 	if err != nil {
 		return "", err
 	}
-	service.WarmDescriptions()
+	service.WarmDescriptions(ctx)
 	return formatStickerGuide(output), nil
 }
 
@@ -254,19 +262,43 @@ func loadConfig() (config, error) {
 	if cfg.Transport == "" {
 		cfg.Transport = "stdio"
 	}
-	if cfg.Transport == "stdio" && cfg.BotToken == "" {
-		return config{}, errors.New("TELEGRAM_STICKER_MCP_BOT_TOKEN is required")
-	}
-	if cfg.SetName == "" {
-		return config{}, errors.New("TELEGRAM_STICKER_MCP_SET_NAME is required")
-	}
 	if cfg.CachePath == "" {
 		cfg.CachePath = "telegram-sticker-cache.sqlite"
 	}
 	if cfg.Addr == "" {
 		cfg.Addr = "127.0.0.1:8091"
 	}
+	switch cfg.Transport {
+	case "stdio":
+		if cfg.BotToken == "" {
+			return config{}, errors.New("TELEGRAM_STICKER_MCP_BOT_TOKEN is required")
+		}
+		if cfg.SetName == "" {
+			return config{}, errors.New("TELEGRAM_STICKER_MCP_SET_NAME is required")
+		}
+	case "http":
+		if _, _, err := net.SplitHostPort(cfg.Addr); err != nil {
+			return config{}, fmt.Errorf("invalid TELEGRAM_STICKER_MCP_ADDR: %w", err)
+		}
+		if cfg.AuthToken == "" && !isLoopbackListenAddr(cfg.Addr) {
+			return config{}, errors.New("TELEGRAM_STICKER_MCP_AUTH_TOKEN is required when HTTP listens on a non-loopback address")
+		}
+	default:
+		return config{}, fmt.Errorf("unsupported TELEGRAM_STICKER_MCP_TRANSPORT %q (want stdio or http)", cfg.Transport)
+	}
 	return cfg, nil
+}
+
+func isLoopbackListenAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(host), "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && ip.IsLoopback()
 }
 
 func runHTTP(provider *stickerServiceProvider, cfg config) error {
@@ -276,7 +308,7 @@ func runHTTP(provider *stickerServiceProvider, cfg config) error {
 			return newMCPServer(provider.Resolve, describedStickerSet{}, err.Error())
 		}
 		catalog, err := service.CachedDescribedSet(req.Context())
-		service.WarmDescriptions()
+		service.WarmDescriptions(req.Context())
 		if err != nil {
 			return newMCPServer(provider.Resolve, describedStickerSet{Name: service.setName}, err.Error())
 		}
@@ -297,12 +329,12 @@ func runHTTP(provider *stickerServiceProvider, cfg config) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	go func(parent context.Context) {
+		<-parent.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), 10*time.Second)
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownCtx)
-	}()
+	}(ctx)
 	log.Printf("%s listening on %s", serverName, cfg.Addr)
 	return httpServer.ListenAndServe()
 }
@@ -371,9 +403,12 @@ func stickerManagementHandler(provider *stickerServiceProvider) http.Handler {
 				http.Error(w, "sticker preview is unavailable", http.StatusNotFound)
 				return
 			}
-			w.Header().Set("Content-Type", contentType)
+			w.Header().Set("Content-Type", safeStickerPreviewContentType(contentType))
+			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("Cache-Control", "private, max-age=3600")
 			w.WriteHeader(http.StatusOK)
+			// #nosec G705 -- this authenticated endpoint intentionally returns
+			// bounded Telegram media with an allowlisted MIME type and nosniff.
 			_, _ = w.Write(data)
 		case req.Method == http.MethodPost && action == "recognition":
 			var input struct {
@@ -397,6 +432,16 @@ func stickerManagementHandler(provider *stickerServiceProvider) http.Handler {
 			http.NotFound(w, req)
 		}
 	})
+}
+
+func safeStickerPreviewContentType(contentType string) string {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	switch mediaType {
+	case "image/webp", "image/png", "image/jpeg", "video/webm", "application/gzip":
+		return mediaType
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func decodeManagementJSON(req *http.Request, output any) error {
@@ -439,6 +484,7 @@ func loadDotenv(path string) error {
 	if path == "" {
 		return nil
 	}
+	// #nosec G304 -- the dotenv path is an explicit operator-supplied CLI value.
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

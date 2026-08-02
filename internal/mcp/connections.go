@@ -280,6 +280,16 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	if name == "" {
 		return Connection{}, errors.New("name is required")
 	}
+	existing, existingErr := s.Get(ctx, botID, id)
+	if hasRedactedHeader(req.Headers) {
+		if existingErr != nil {
+			return Connection{}, existingErr
+		}
+		req.Headers, err = restoreRedactedHeaders(req.Headers, existing)
+		if err != nil {
+			return Connection{}, err
+		}
+	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
 		return Connection{}, err
@@ -306,7 +316,7 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 		// that re-authorization is needed. Clear BEFORE the row update: if
 		// the update then fails, the safe side is a dropped grant, never a
 		// credential attached to a target it was not minted for.
-		if existing, getErr := s.Get(ctx, botID, id); getErr == nil {
+		if existingErr == nil {
 			if sameOAuthResource(existing, config) {
 				authType = strings.TrimSpace(existing.AuthType)
 			} else if existing.AuthType == "oauth" {
@@ -621,6 +631,9 @@ func inferTypeAndConfig(req UpsertRequest) (string, map[string]any, error) {
 
 	config["url"] = strings.TrimSpace(req.URL)
 	if len(req.Headers) > 0 {
+		if hasRedactedHeader(req.Headers) {
+			return "", nil, errors.New("redacted MCP headers are valid only when updating an existing connection")
+		}
 		config["headers"] = req.Headers
 	}
 	transport := strings.ToLower(strings.TrimSpace(req.Transport))

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -52,12 +54,11 @@ func (c *stickerCatalog) DescribeSet(
 	defer c.mu.Unlock()
 
 	type pendingSticker struct {
-		index   int
 		sticker telegramSticker
 	}
 	descriptions := make(map[string]string, len(set.Stickers))
 	pending := make([]pendingSticker, 0)
-	for index, sticker := range set.Stickers {
+	for _, sticker := range set.Stickers {
 		if strings.TrimSpace(sticker.FileID) == "" || strings.TrimSpace(sticker.FileUniqueID) == "" {
 			continue
 		}
@@ -71,7 +72,7 @@ func (c *stickerCatalog) DescribeSet(
 			return nil, err
 		}
 		if !found {
-			pending = append(pending, pendingSticker{index: index, sticker: sticker})
+			pending = append(pending, pendingSticker{sticker: sticker})
 			continue
 		}
 		if entry.Status == descriptionStatusReady && entry.Description != "" {
@@ -91,7 +92,7 @@ func (c *stickerCatalog) DescribeSet(
 				if cacheErr := c.cacheFailure(ctx, item.sticker.FileUniqueID, attempts); cacheErr != nil {
 					return nil, cacheErr
 				}
-				log.Printf("skip sticker %s: media download failed: %v", candidateID(item.index), err)
+				log.Printf("skip sticker %s: media download failed: %v", candidateID(item.sticker.FileUniqueID), err)
 				continue
 			}
 			visionInputs = append(visionInputs, stickerVisionInput{
@@ -134,13 +135,13 @@ func (c *stickerCatalog) DescribeSet(
 	}
 
 	result := make([]describedSticker, 0, len(descriptions))
-	for index, sticker := range set.Stickers {
+	for _, sticker := range set.Stickers {
 		description := descriptions[sticker.FileUniqueID]
 		if description == "" {
 			continue
 		}
 		result = append(result, describedSticker{
-			ID:           candidateID(index),
+			ID:           candidateID(sticker.FileUniqueID),
 			FileID:       sticker.FileID,
 			FileUniqueID: sticker.FileUniqueID,
 			Emoji:        strings.TrimSpace(sticker.Emoji),
@@ -160,7 +161,7 @@ func (c *stickerCatalog) CachedSet(
 	promptVersion string,
 ) ([]describedSticker, error) {
 	result := make([]describedSticker, 0, len(set.Stickers))
-	for index, sticker := range set.Stickers {
+	for _, sticker := range set.Stickers {
 		if strings.TrimSpace(sticker.FileID) == "" || strings.TrimSpace(sticker.FileUniqueID) == "" {
 			continue
 		}
@@ -177,7 +178,7 @@ func (c *stickerCatalog) CachedSet(
 			continue
 		}
 		result = append(result, describedSticker{
-			ID:           candidateID(index),
+			ID:           candidateID(sticker.FileUniqueID),
 			FileID:       sticker.FileID,
 			FileUniqueID: sticker.FileUniqueID,
 			Emoji:        strings.TrimSpace(sticker.Emoji),
@@ -280,6 +281,7 @@ func (c *stickerCatalog) putCacheEntry(
 	)
 }
 
-func candidateID(index int) string {
-	return fmt.Sprintf("S%03d", index+1)
+func candidateID(fileUniqueID string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(fileUniqueID)))
+	return "S" + strings.ToUpper(hex.EncodeToString(sum[:8]))
 }

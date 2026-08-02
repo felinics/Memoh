@@ -366,6 +366,35 @@ func TestToolGatewayServiceFailsClosedWhenPolicyCannotLoad(t *testing.T) {
 	}
 }
 
+func TestToolGatewayStickerToolHidingIsTelegramOnly(t *testing.T) {
+	t.Parallel()
+
+	provider := &gatewayTestProvider{tools: []ToolDescriptor{{
+		Name: "send_telegram_sticker", InputSchema: map[string]any{"type": "object"},
+	}}}
+	service := NewToolGatewayService(slog.Default(), []ToolSource{provider})
+
+	telegramTools, err := service.ListTools(context.Background(), ToolSessionContext{
+		BotID: "bot-1", CurrentPlatform: "telegram",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(telegramTools) != 0 {
+		t.Fatalf("Telegram exposed internal Sticker backend: %#v", telegramTools)
+	}
+
+	discordTools, err := service.ListTools(context.Background(), ToolSessionContext{
+		BotID: "bot-1", CurrentPlatform: "discord",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(discordTools) != 1 || discordTools[0].Name != "send_telegram_sticker" {
+		t.Fatalf("non-Telegram same-named tool was hidden: %#v", discordTools)
+	}
+}
+
 func TestToolGatewayServiceLookupTool(t *testing.T) {
 	provider := &gatewayTestProvider{
 		tools: []ToolDescriptor{

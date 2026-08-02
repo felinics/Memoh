@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 
+set -e
+
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 if ! command -v go >/dev/null 2>&1; then
@@ -9,3 +11,4 @@ fi
 
 echo "Check Go test..."
 go test ./...
+(cd cmd/telegram-sticker-mcp && go test ./...)

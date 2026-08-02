@@ -36,6 +36,28 @@ func TestStickerToolSchemaBytesAreStableAcrossCatalogOrder(t *testing.T) {
 	}
 }
 
+func TestCandidateIDIsContentStableAcrossCatalogOrder(t *testing.T) {
+	t.Parallel()
+
+	first := []telegramSticker{
+		{FileUniqueID: "unique-a"},
+		{FileUniqueID: "unique-b"},
+	}
+	before := map[string]string{}
+	for _, sticker := range first {
+		before[sticker.FileUniqueID] = candidateID(sticker.FileUniqueID)
+	}
+	second := []telegramSticker{first[1], {FileUniqueID: "unique-new"}, first[0]}
+	for _, sticker := range second {
+		if previous, exists := before[sticker.FileUniqueID]; exists && candidateID(sticker.FileUniqueID) != previous {
+			t.Fatalf("candidate ID changed after reorder: %q", sticker.FileUniqueID)
+		}
+	}
+	if before["unique-a"] == before["unique-b"] || len(before["unique-a"]) != 17 {
+		t.Fatalf("candidate IDs are not distinct 64-bit hashes: %#v", before)
+	}
+}
+
 type fakeTelegramAPI struct {
 	mu            sync.Mutex
 	set           telegramStickerSet
@@ -198,16 +220,18 @@ func TestSendByIDDistinguishesStickersWithTheSameEmoji(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	laughID := candidateID("laugh-unique")
+	cryID := candidateID("cry-unique")
 	if len(described.Stickers) != 2 ||
-		described.Stickers[0].ID != "S001" ||
-		described.Stickers[1].ID != "S002" ||
+		described.Stickers[0].ID != laughID ||
+		described.Stickers[1].ID != cryID ||
 		!strings.Contains(described.Stickers[1].Description, "委屈") {
 		t.Fatalf("unexpected described stickers: %#v", described.Stickers)
 	}
 	result, err := service.SendByID(context.Background(), sendStickerInput{
 		ChatID:    "-100123",
 		Text:      "给你",
-		StickerID: "s002",
+		StickerID: strings.ToLower(cryID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -294,18 +318,19 @@ func TestExternalDescriptionProfileSwitchesCacheWithoutAutomaticRecognition(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(exposed.Stickers) != 1 || exposed.Stickers[0].ID != "S001" || exposed.Stickers[0].Description != "" {
+	stickerID := candidateID("u1")
+	if len(exposed.Stickers) != 1 || exposed.Stickers[0].ID != stickerID || exposed.Stickers[0].Description != "" {
 		t.Fatalf("pending sticker was not exposed in stable catalog: %#v", exposed)
 	}
 	if _, err := service.SendByID(context.Background(), sendStickerInput{
-		ChatID: "chat-1", StickerID: "S001",
+		ChatID: "chat-1", StickerID: stickerID,
 	}); err != nil {
 		t.Fatalf("send pending sticker by stable ID: %v", err)
 	}
 	if api.sentChatID != "chat-1" || api.sentFileID != "f1" {
 		t.Fatalf("pending sticker delivery = chat %q file %q", api.sentChatID, api.sentFileID)
 	}
-	stored, err := service.StoreDescription(context.Background(), "S001", "web-model", "web-prompt-v1", "新模型描述")
+	stored, err := service.StoreDescription(context.Background(), stickerID, "web-model", "web-prompt-v1", "新模型描述")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +531,8 @@ func TestCatalogAndManualRecognitionRetry(t *testing.T) {
 	describer.err = nil
 	describer.descriptions = map[string]string{"image": "角色微笑挥手打招呼"}
 	describer.mu.Unlock()
-	entry, err := service.RetryDescription(context.Background(), "s001")
+	stickerID := candidateID("u1")
+	entry, err := service.RetryDescription(context.Background(), strings.ToLower(stickerID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +543,7 @@ func TestCatalogAndManualRecognitionRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].ID != "S001" {
+	if len(results) != 1 || results[0].ID != stickerID {
 		t.Fatalf("search results = %#v", results)
 	}
 }
@@ -592,7 +618,8 @@ func TestStickerGuideAndMCPExposeStableCompactTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(guide, "S001：角色微笑挥手打招呼") ||
+	stickerID := candidateID("u1")
+	if !strings.Contains(guide, stickerID+"：角色微笑挥手打招呼") ||
 		!strings.Contains(guide, "不要只看原始 emoji") {
 		t.Fatalf("unexpected guide: %s", guide)
 	}
@@ -633,7 +660,7 @@ func TestStickerGuideAndMCPExposeStableCompactTools(t *testing.T) {
 	properties, _ := schema["properties"].(map[string]any)
 	stickerSchema, _ := properties["sticker_id"].(map[string]any)
 	description, _ := stickerSchema["description"].(string)
-	if !strings.Contains(description, "S001：角色微笑挥手打招呼") {
+	if !strings.Contains(description, stickerID+"：角色微笑挥手打招呼") {
 		t.Fatalf("sticker catalog missing from schema: %#v", stickerSchema)
 	}
 }
@@ -696,7 +723,7 @@ func TestCachedStickerGuideDoesNotWaitForBackgroundParsing(t *testing.T) {
 			if guideErr != nil {
 				t.Fatal(guideErr)
 			}
-			if !strings.Contains(guide, "S001：角色微笑挥手") {
+			if !strings.Contains(guide, candidateID("u1")+"：角色微笑挥手") {
 				t.Fatalf("unexpected cached guide: %s", guide)
 			}
 			break
@@ -727,7 +754,7 @@ func TestStickerServiceProviderIsolatesTokenAndStickerSet(t *testing.T) {
 	}
 	request := func(token, setName string) *mcp.CallToolRequest {
 		header := make(http.Header)
-		header.Set(telegramBotTokenHeader, token)
+		header.Set(telegramBotHeader, token)
 		header.Set(telegramStickerSetHeader, setName)
 		return &mcp.CallToolRequest{Extra: &mcp.RequestExtra{Header: header}}
 	}
@@ -774,7 +801,7 @@ func TestStickerServiceProviderMergesSetsWithStableIDs(t *testing.T) {
 	}
 	header := func(sets string) http.Header {
 		value := make(http.Header)
-		value.Set(telegramBotTokenHeader, "bot-token")
+		value.Set(telegramBotHeader, "bot-token")
 		value.Set(telegramStickerSetHeader, sets)
 		return value
 	}
@@ -882,8 +909,10 @@ func setRequiredConfigEnvironment(t *testing.T, transport string) {
 	t.Setenv("TELEGRAM_STICKER_MCP_SET_NAME", "set")
 	t.Setenv("TELEGRAM_STICKER_MCP_TRANSPORT", transport)
 	t.Setenv("TELEGRAM_STICKER_MCP_VISION_API_KEY", "vision-key")
-	t.Setenv("TELEGRAM_STICKER_MCP_VISION_MODEL", "gemini-3.1-pro-preview")
+	t.Setenv("TELEGRAM_STICKER_MCP_VISION_MODEL", "legacy-vision-model-id")
 	t.Setenv("TELEGRAM_STICKER_MCP_CACHE_PATH", filepath.Join(t.TempDir(), "cache.sqlite"))
+	t.Setenv("TELEGRAM_STICKER_MCP_ADDR", "")
+	t.Setenv("TELEGRAM_STICKER_MCP_AUTH_TOKEN", "")
 }
 
 func TestLoadConfigAllowsHTTPWithoutGlobalTelegramToken(t *testing.T) {
@@ -894,8 +923,39 @@ func TestLoadConfigAllowsHTTPWithoutGlobalTelegramToken(t *testing.T) {
 	}
 	if cfg.BotToken != "" ||
 		cfg.Transport != "http" ||
-		cfg.VisionModel != "gemini-3.1-pro-preview" {
+		cfg.VisionModel != "legacy-vision-model-id" {
 		t.Fatalf("unexpected HTTP config: %#v", cfg)
+	}
+}
+
+func TestLoadConfigRequiresBearerForNonLoopbackHTTP(t *testing.T) {
+	setRequiredConfigEnvironment(t, "http")
+	t.Setenv("TELEGRAM_STICKER_MCP_ADDR", "0.0.0.0:8091")
+	_, err := loadConfig()
+	if err == nil || !strings.Contains(err.Error(), "TELEGRAM_STICKER_MCP_AUTH_TOKEN") {
+		t.Fatalf("unexpected public HTTP config error: %v", err)
+	}
+
+	t.Setenv("TELEGRAM_STICKER_MCP_AUTH_TOKEN", "service-secret")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Addr != "0.0.0.0:8091" || cfg.AuthToken != "service-secret" {
+		t.Fatalf("authenticated public HTTP config = %#v", cfg)
+	}
+}
+
+func TestLoadConfigAllowsDynamicSetAndIPv6LoopbackHTTP(t *testing.T) {
+	setRequiredConfigEnvironment(t, "http")
+	t.Setenv("TELEGRAM_STICKER_MCP_SET_NAME", "")
+	t.Setenv("TELEGRAM_STICKER_MCP_ADDR", "[::1]:8091")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SetName != "" || !isLoopbackListenAddr(cfg.Addr) {
+		t.Fatalf("dynamic-set loopback config = %#v", cfg)
 	}
 }
 
@@ -921,7 +981,7 @@ func TestRequireBearer(t *testing.T) {
 		{name: "valid", header: "Bearer secret", status: http.StatusNoContent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/mcp", nil)
 			req.Header.Set("Authorization", tc.header)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
@@ -929,5 +989,23 @@ func TestRequireBearer(t *testing.T) {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.status)
 			}
 		})
+	}
+}
+
+func TestSafeStickerPreviewContentType(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		input string
+		want  string
+	}{
+		{input: "image/webp; charset=binary", want: "image/webp"},
+		{input: "video/webm", want: "video/webm"},
+		{input: "text/html", want: "application/octet-stream"},
+		{input: "image/svg+xml", want: "application/octet-stream"},
+	} {
+		if got := safeStickerPreviewContentType(test.input); got != test.want {
+			t.Fatalf("safeStickerPreviewContentType(%q) = %q, want %q", test.input, got, test.want)
+		}
 	}
 }

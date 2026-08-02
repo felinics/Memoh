@@ -107,6 +107,9 @@
     "tool": {
       "catalog_unavailable": "利用可能なツール一覧を読み込めませんでした。もう一度お試しください。"
     },
+    "mcp": {
+      "config_invalid": "MCP 接続設定が無効です。"
+    },
     "sticker": {
       "service_unavailable": "Telegram Sticker サービスに接続できません。もう一度お試しください。",
       "not_found": "この Telegram Sticker は利用できなくなりました。",

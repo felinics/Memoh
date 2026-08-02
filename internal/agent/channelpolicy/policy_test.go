@@ -68,3 +68,29 @@ func TestExplicitEmptyTelegramToolListDisablesAll(t *testing.T) {
 		t.Fatal("explicit empty list must disable all tools")
 	}
 }
+
+func TestFailClosedTelegramPolicyDisablesModelAndBackendTools(t *testing.T) {
+	t.Parallel()
+
+	policy := FailClosed(TelegramPlatform)
+	if policy.AllowsTool("send") || policy.AllowsBackendTool("sticker_send_telegram_sticker") || policy.SkillsAllowed() {
+		t.Fatalf("fail-closed policy exposed tools: %#v", policy)
+	}
+	if got := policy.ToolCacheKey(); got != "off" {
+		t.Fatalf("fail-closed cache key = %q, want off", got)
+	}
+}
+
+func TestTelegramStickerBackendPolicyIsPlatformScoped(t *testing.T) {
+	t.Parallel()
+
+	telegram := Default(TelegramPlatform)
+	if !telegram.AllowsBackendTool("sticker_send_telegram_sticker") ||
+		!telegram.HidesInternalTool("search_telegram_stickers") {
+		t.Fatal("Telegram policy did not recognize internal Sticker tools")
+	}
+	discord := Default("discord")
+	if discord.AllowsBackendTool("send_telegram_sticker") || discord.HidesInternalTool("send_telegram_sticker") {
+		t.Fatal("non-Telegram policy treated a same-named tool as internal")
+	}
+}

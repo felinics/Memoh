@@ -374,12 +374,18 @@ run = [
 [tasks."lint:go"]
 description = "Run Go linter"
 depends = ["//:go-install"]
-run = "golangci-lint run ./..."
+run = [
+  "golangci-lint run ./...",
+  "cd cmd/telegram-sticker-mcp && golangci-lint run ./...",
+]
 
 [tasks."lint:go:fix"]
 description = "Run Go linter with auto-fix"
 depends = ["//:go-install"]
-run = "golangci-lint run --fix ./..."
+run = [
+  "golangci-lint run --fix ./...",
+  "cd cmd/telegram-sticker-mcp && golangci-lint run --fix ./...",
+]
 
 [tasks."lint:clean"]
 description = "Clear linter caches"

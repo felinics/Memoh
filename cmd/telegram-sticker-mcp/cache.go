@@ -170,7 +170,7 @@ func (c *stickerDescriptionCache) GetStickerSet(
 		return telegramStickerSet{}, false, fmt.Errorf("decode Sticker Set metadata cache: %w", err)
 	}
 	if strings.TrimSpace(set.Name) == "" || len(set.Stickers) == 0 {
-		return telegramStickerSet{}, false, errors.New("Sticker Set metadata cache is empty")
+		return telegramStickerSet{}, false, errors.New("sticker set metadata cache is empty")
 	}
 	return set, true, nil
 }

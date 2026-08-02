@@ -5,8 +5,8 @@ on:
     branches: ["main"]
     paths:
       - "**/*.go"
-      - "go.mod"
-      - "go.sum"
+      - "**/go.mod"
+      - "**/go.sum"
       - ".golangci.yml"
       - "db/postgres/queries/**/*.sql"
       - "db/postgres/migrations/**/*.sql"
@@ -17,8 +17,8 @@ on:
     branches: ["main"]
     paths:
       - "**/*.go"
-      - "go.mod"
-      - "go.sum"
+      - "**/go.mod"
+      - "**/go.sum"
       - ".golangci.yml"
       - "db/postgres/queries/**/*.sql"
       - "db/postgres/migrations/**/*.sql"
@@ -47,11 +47,20 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            cmd/telegram-sticker-mcp/go.sum
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.10.1
           only-new-issues: true
+      - name: golangci-lint (Telegram Sticker MCP)
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.10.1
+          only-new-issues: true
+          working-directory: cmd/telegram-sticker-mcp
 
   test:
     name: Test
@@ -63,8 +72,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            cmd/telegram-sticker-mcp/go.sum
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+      - name: Run Telegram Sticker MCP tests
+        working-directory: cmd/telegram-sticker-mcp
+        run: go test -v -race ./...
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:

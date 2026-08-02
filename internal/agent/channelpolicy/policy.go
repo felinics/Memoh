@@ -15,6 +15,9 @@ import (
 const (
 	TelegramPlatform = "telegram"
 
+	TelegramStickerSendToolSuffix   = "send_telegram_sticker"
+	TelegramStickerSearchToolSuffix = "search_telegram_stickers"
+
 	TelegramToolCallsEnabledMetadataKey = "telegram_tool_calls_enabled"
 	TelegramEnabledToolsMetadataKey     = "telegram_enabled_tools"
 	TelegramSkillsEnabledMetadataKey    = "telegram_skills_enabled"
@@ -52,6 +55,21 @@ func Default(platform string) Policy {
 		SkillsEnabled:       true,
 		MessageMetadataMode: mode,
 	}
+}
+
+// FailClosed returns a policy that disables Telegram tool and Skill exposure.
+// It is used when runtime metadata cannot be loaded; non-Telegram channels do
+// not currently have channel-specific tool policy and retain their defaults.
+func FailClosed(platform string) Policy {
+	policy := Default(platform)
+	if policy.Platform != TelegramPlatform {
+		return policy
+	}
+	policy.ToolCallsConfigured = true
+	policy.ToolCallsEnabled = false
+	policy.SkillsConfigured = true
+	policy.SkillsEnabled = false
+	return policy
 }
 
 // Parse decodes the small Telegram policy stored in bots.metadata. Invalid
@@ -139,6 +157,18 @@ func (p Policy) AllowsTool(name string) bool {
 	return false
 }
 
+// AllowsBackendTool reports whether an internal channel backend may be loaded
+// even though it is intentionally hidden from the model-facing allowlist.
+func (p Policy) AllowsBackendTool(name string) bool {
+	return p.Platform == TelegramPlatform && p.ToolCallsAllowed() && IsTelegramStickerSendTool(name)
+}
+
+// HidesInternalTool reports whether a backend-only tool must be omitted from
+// the model-facing tool registry for this channel.
+func (p Policy) HidesInternalTool(name string) bool {
+	return p.Platform == TelegramPlatform && IsTelegramStickerTool(name)
+}
+
 // ToolCacheKey distinguishes explicit allowlists without changing the order in
 // which providers expose their schemas to the model.
 func (p Policy) ToolCacheKey() string {
@@ -177,6 +207,27 @@ func isSkillTool(name string) bool {
 	default:
 		return false
 	}
+}
+
+// IsTelegramStickerSendTool recognizes both an unprefixed MCP tool and the
+// connection-prefixed name emitted by federation.
+func IsTelegramStickerSendTool(name string) bool {
+	return hasToolSuffix(name, TelegramStickerSendToolSuffix)
+}
+
+// IsTelegramStickerSearchTool recognizes the retired model-facing search tool
+// so it can remain hidden while old MCP deployments are drained.
+func IsTelegramStickerSearchTool(name string) bool {
+	return hasToolSuffix(name, TelegramStickerSearchToolSuffix)
+}
+
+func IsTelegramStickerTool(name string) bool {
+	return IsTelegramStickerSendTool(name) || IsTelegramStickerSearchTool(name)
+}
+
+func hasToolSuffix(name, suffix string) bool {
+	name = strings.TrimSpace(name)
+	return name == suffix || strings.HasSuffix(name, "_"+suffix)
 }
 
 type botMetadataQueries interface {

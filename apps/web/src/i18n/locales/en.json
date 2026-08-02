@@ -110,6 +110,9 @@
     "tool": {
       "catalog_unavailable": "The available tool list could not be loaded. Please try again."
     },
+    "mcp": {
+      "config_invalid": "The MCP connection configuration is invalid."
+    },
     "sticker": {
       "service_unavailable": "The Telegram sticker service could not be reached. Please try again.",
       "not_found": "This Telegram sticker is no longer available.",

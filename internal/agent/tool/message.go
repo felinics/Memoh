@@ -37,7 +37,7 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 	if sendRef, ok := available.Ref(ToolSend()); ok {
 		switch session.SessionType {
 		case sessionmode.Discuss:
-			parts = append(parts, "In Discuss, every addressed or forced turn must finish with a successful current-conversation "+sendRef+" call. Put only final audience-facing content in "+sendRef+", set `reply_to` when replying to a specific message ID, and never emit delivery markers such as `[Sent ...]`. Ordinary Assistant text is private, never delivered, and cannot replace "+sendRef+".")
+			parts = append(parts, "In Discuss, every addressed or forced turn must finish with one successful current-conversation "+sendRef+" call. Put all final audience-facing content for the turn in that single call because later sequential sends do not run after current delivery succeeds. Set `reply_to` when replying to a specific message ID, and never emit delivery markers such as `[Sent ...]`. Ordinary Assistant text is private, never delivered, and cannot replace "+sendRef+".")
 		case sessionmode.Schedule, sessionmode.Heartbeat:
 			parts = append(parts, "Use "+sendRef+" only when the background task needs to notify a person or channel; specify `platform` and `target`.")
 		default:

@@ -759,7 +759,10 @@ function setTelegramToolEnabled(name: string, enabled: boolean) {
 
 function setAllTelegramTools(enabled: boolean) {
   telegramEnabledTools.value = enabled ? telegramTools.value.map(tool => tool.name) : []
-  telegramToolPolicyConfigured.value = true
+  // Missing allowlist means "all present and future tools". Persist an
+  // explicit empty list only for "disable all" so an apparent all-on setting
+  // does not silently exclude tools added in a later release.
+  telegramToolPolicyConfigured.value = !enabled
 }
 
 function validateRequired(): boolean {

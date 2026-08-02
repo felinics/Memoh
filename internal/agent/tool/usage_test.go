@@ -273,7 +273,7 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 
 	discussSession := SessionContext{SessionType: sessionmode.Discuss, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), discussSession, availableToolsForTest(ToolSend()))
-	for _, want := range []string{"every addressed or forced turn", "successful current-conversation `send`", "cannot replace `send`", "never emit delivery markers"} {
+	for _, want := range []string{"every addressed or forced turn", "successful current-conversation `send`", "single call", "later sequential sends do not run", "cannot replace `send`", "never emit delivery markers"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Discuss usage should enforce the send delivery boundary containing %q, got:\n%s", want, got)
 		}

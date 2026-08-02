@@ -41,6 +41,7 @@ const (
 	CodeSessionInvocationConflict        Code = "session_runtime.invocation_conflict"
 	CodeSessionHistoryInconsistent       Code = "session_runtime.history_inconsistent"
 	CodeToolCatalogUnavailable           Code = "tool.catalog_unavailable"
+	CodeMCPConfigInvalid                 Code = "mcp.config_invalid"
 	CodeStickerServiceUnavailable        Code = "sticker.service_unavailable"
 	CodeStickerNotFound                  Code = "sticker.not_found"
 	CodeStickerRecognitionFailed         Code = "sticker.recognition_failed"
@@ -187,6 +188,10 @@ var catalog = map[Code]Definition{
 	CodeToolCatalogUnavailable: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The tool catalog could not be loaded. Please retry.",
+	},
+	CodeMCPConfigInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The MCP connection configuration is invalid.",
 	},
 	CodeStickerServiceUnavailable: {
 		HTTPStatus: http.StatusServiceUnavailable,

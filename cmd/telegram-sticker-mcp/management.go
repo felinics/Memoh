@@ -87,9 +87,9 @@ func (s *stickerService) Catalog(ctx context.Context) (stickerCatalogView, error
 	if err != nil {
 		return stickerCatalogView{}, err
 	}
-	for index, sticker := range set.Stickers {
+	for _, sticker := range set.Stickers {
 		entry := stickerCatalogEntry{
-			ID:     candidateID(index),
+			ID:     candidateID(sticker.FileUniqueID),
 			Emoji:  strings.TrimSpace(sticker.Emoji),
 			Status: descriptionStatusPending,
 		}
@@ -118,7 +118,7 @@ func (s *stickerService) Catalog(ctx context.Context) (stickerCatalogView, error
 		view.Stickers = append(view.Stickers, entry)
 	}
 	if view.PendingCount > 0 && s.canWarmDescriptions(ctx) {
-		s.WarmDescriptions()
+		s.WarmDescriptions(ctx)
 	}
 	return view, nil
 }
@@ -285,7 +285,7 @@ func (s *stickerService) Search(ctx context.Context, query string, limit int) ([
 		return nil, err
 	}
 	if len(stickers) == 0 {
-		s.WarmDescriptions()
+		s.WarmDescriptions(ctx)
 		return nil, errors.New("sticker descriptions are not ready yet")
 	}
 	results := make([]stickerSearchResult, 0, len(stickers))
@@ -318,8 +318,8 @@ func (s *stickerService) stickerByID(ctx context.Context, stickerID string) (tel
 	if err != nil {
 		return telegramStickerSet{}, telegramSticker{}, err
 	}
-	for index, sticker := range set.Stickers {
-		if candidateID(index) == stickerID {
+	for _, sticker := range set.Stickers {
+		if candidateID(sticker.FileUniqueID) == stickerID {
 			return set, sticker, nil
 		}
 	}

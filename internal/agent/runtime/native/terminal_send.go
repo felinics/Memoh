@@ -8,6 +8,8 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	tools "github.com/memohai/memoh/internal/agent/tool"
+	"github.com/memohai/memoh/internal/delivery"
 )
 
 const terminalSendResponseID = "memoh-terminal-send"
@@ -39,7 +41,7 @@ func installTerminalSend(cfg RunConfig, sdkTools []sdk.Tool) ([]sdk.Tool, *sdk.M
 	wrapped := append([]sdk.Tool(nil), sdkTools...)
 	found := false
 	for i := range wrapped {
-		if strings.TrimSpace(wrapped[i].Name) != "send" || wrapped[i].Execute == nil {
+		if strings.TrimSpace(wrapped[i].Name) != tools.ToolSend().String() || wrapped[i].Execute == nil {
 			continue
 		}
 		found = true
@@ -66,24 +68,9 @@ func isSuccessfulCurrentSendResult(output any, cfg RunConfig) bool {
 	if !ok {
 		return false
 	}
-	if delivered, present := result["ok"].(bool); present && !delivered {
-		return false
-	}
-	platform, _ := result["platform"].(string)
-	target, _ := result["target"].(string)
-	platform = strings.TrimSpace(platform)
-	target = strings.TrimSpace(target)
-	if platform == "" && target == "" {
-		return true
-	}
-	if platform == "" {
-		platform = strings.TrimSpace(cfg.Identity.CurrentPlatform)
-	}
-	if target == "" {
-		target = strings.TrimSpace(cfg.Identity.ReplyTarget)
-	}
-	return strings.EqualFold(platform, strings.TrimSpace(cfg.Identity.CurrentPlatform)) &&
-		target == strings.TrimSpace(cfg.Identity.ReplyTarget)
+	return delivery.IsSuccessfulCurrentDelivery(
+		result, cfg.Identity.CurrentPlatform, cfg.Identity.ReplyTarget,
+	)
 }
 
 type terminalSendProvider struct {

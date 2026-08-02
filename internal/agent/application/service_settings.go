@@ -22,7 +22,7 @@ func (s *Service) loadBotSettings(ctx context.Context, botID string) (settings.S
 
 func (s *Service) loadBotRuntimeInfo(ctx context.Context, botID, platform string) (native.BotInfo, bool, channelpolicy.Policy) {
 	info := native.BotInfo{ID: strings.TrimSpace(botID)}
-	policy := channelpolicy.Default(platform)
+	policy := channelpolicy.FailClosed(platform)
 	if s.queries == nil {
 		return info, false, policy
 	}
@@ -32,10 +32,13 @@ func (s *Service) loadBotRuntimeInfo(ctx context.Context, botID, platform string
 	}
 	row, err := s.queries.GetBotByID(ctx, botUUID)
 	if err != nil {
-		s.logger.Debug("failed to load bot metadata for loop detection",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
+		if s.logger != nil {
+			s.logger.Warn("failed to load bot runtime metadata; disabling channel tools",
+				slog.String("bot_id", botID),
+				slog.String("platform", strings.TrimSpace(platform)),
+				slog.Any("error", err),
+			)
+		}
 		return info, false, policy
 	}
 	info.Name = strings.TrimSpace(row.Name)

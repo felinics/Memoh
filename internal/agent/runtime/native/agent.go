@@ -837,9 +837,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	}, nil
 }
 
-func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTools []sdk.Tool, prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams) []sdk.GenerateOption {
-	system, messages, tools := models.ApplyPromptCache(
-		cfg.Model, cfg.PromptCacheTTL, cfg.System, cfg.Messages, tools,
+func (a *Agent) buildGenerateOptions(cfg RunConfig, sdkTools []sdk.Tool, approvalTools []sdk.Tool, prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams) []sdk.GenerateOption {
+	system, messages, sdkTools := models.ApplyPromptCache(
+		cfg.Model, cfg.PromptCacheTTL, cfg.System, cfg.Messages, sdkTools,
 	)
 	if cfg.ForkContext != nil {
 		_ = cfg.ForkContext.Store(messages)
@@ -866,14 +866,27 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 		sdk.WithSystem(system),
 		sdk.WithMaxSteps(-1),
 	}
-	if len(tools) > 0 && cfg.SupportsToolCall {
-		opts = append(opts, sdk.WithTools(tools))
+	if len(sdkTools) > 0 && cfg.SupportsToolCall {
+		opts = append(opts, sdk.WithTools(sdkTools))
 		// Some reasoning transports (including DeepSeek's thinking mode) reject
 		// tool_choice=required outright. Do not turn that provider-side 400 into a
 		// retry and a second LLM request: the Discuss prompt still requires send,
 		// and terminalSendProvider stops locally as soon as send succeeds.
-		if cfg.RequireToolCall && !cfg.ReasoningActive && hasSDKTool(tools, "send") {
+		if cfg.RequireToolCall && !cfg.ReasoningActive && hasSDKTool(sdkTools, tools.ToolSend().String()) {
 			opts = append(opts, sdk.WithToolChoice("required"))
+			basePrepare := prepareStep
+			prepareStep = func(p *sdk.GenerateParams) *sdk.GenerateParams {
+				if basePrepare != nil {
+					if override := basePrepare(p); override != nil {
+						p = override
+					}
+				}
+				// PrepareStep runs from the second SDK step onward. Requiring a
+				// tool only for the first step prevents a failed send from forcing
+				// an unbounded sequence of additional tool calls.
+				p.ToolChoice = "auto"
+				return p
+			}
 		}
 	}
 	approvalHandler := cfg.ToolApprovalHandler
@@ -975,8 +988,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		}
 		filtered := make([]sdk.Tool, 0, len(providerTools))
 		for _, tool := range providerTools {
-			if cfg.ChannelPolicy.AllowsTool(tool.Name) ||
-				(cfg.ChannelPolicy.ToolCallsAllowed() && isTelegramStickerBackendTool(tool.Name)) {
+			if cfg.ChannelPolicy.AllowsTool(tool.Name) || cfg.ChannelPolicy.AllowsBackendTool(tool.Name) {
 				filtered = append(filtered, tool)
 			}
 		}

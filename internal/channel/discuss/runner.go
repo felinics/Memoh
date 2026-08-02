@@ -10,6 +10,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/channel"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/memohai/memoh/internal/delivery"
 )
 
 const sessionRuntimeACPAgent = sessionpkg.RuntimeACPAgent
@@ -167,23 +168,7 @@ func isCurrentReplyTool(name string) bool {
 }
 
 func successfulCurrentReplyResult(result map[string]any, command turn.StartTurnCommand) bool {
-	if delivered, present := result["ok"].(bool); present && !delivered {
-		return false
-	}
-	if platform := resultString(result, "platform"); platform != "" &&
-		strings.TrimSpace(command.CurrentChannel) != "" &&
-		!strings.EqualFold(platform, strings.TrimSpace(command.CurrentChannel)) {
-		return false
-	}
-	if target := resultString(result, "target"); target != "" &&
-		strings.TrimSpace(command.ReplyTarget) != "" &&
-		target != strings.TrimSpace(command.ReplyTarget) {
-		return false
-	}
-	return true
-}
-
-func resultString(result map[string]any, key string) string {
-	value, _ := result[key].(string)
-	return strings.TrimSpace(value)
+	return delivery.IsSuccessfulCurrentDelivery(
+		result, command.CurrentChannel, command.ReplyTarget,
+	)
 }

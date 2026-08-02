@@ -187,7 +187,7 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 			continue
 		}
 		for _, tool := range tools {
-			if isInternalTelegramStickerTool(tool.Name) {
+			if policy.HidesInternalTool(tool.Name) {
 				continue
 			}
 			if !policy.AllowsTool(tool.Name) {
@@ -206,14 +206,6 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 	}
 	s.mu.Unlock()
 	return registry, nil
-}
-
-func isInternalTelegramStickerTool(name string) bool {
-	name = strings.TrimSpace(name)
-	return name == "send_telegram_sticker" ||
-		strings.HasSuffix(name, "_send_telegram_sticker") ||
-		name == "search_telegram_stickers" ||
-		strings.HasSuffix(name, "_search_telegram_stickers")
 }
 
 func toolRegistryCacheKey(session ToolSessionContext) string {

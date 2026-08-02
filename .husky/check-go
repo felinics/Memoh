@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 
+set -e
+
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 if ! command -v golangci-lint >/dev/null 2>&1; then
@@ -9,3 +11,4 @@ fi
 
 echo "Check Go lint..."
 golangci-lint run ./...
+(cd cmd/telegram-sticker-mcp && golangci-lint run ./...)

@@ -3,6 +3,7 @@ package discuss
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"unicode/utf16"
@@ -10,6 +11,7 @@ import (
 
 	agentevent "github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/delivery"
 )
 
 type discussSendPreview struct {
@@ -54,8 +56,10 @@ func (p *discussSendPreview) Handle(ctx context.Context, event agentevent.Stream
 		if call == nil || call.disabled || event.Delta == "" {
 			return
 		}
+		// Route fields may arrive after text in streamed JSON. Buffer the input
+		// until ToolCallStart provides the complete arguments; opening a current
+		// chat preview earlier could leak a cross-conversation send.
 		call.raw.WriteString(event.Delta)
-		p.pushAvailableText(ctx, callID, call)
 	case agentevent.ToolCallStart:
 		if strings.TrimSpace(event.ToolName) != "send" || callID == "" {
 			return
@@ -65,24 +69,30 @@ func (p *discussSendPreview) Handle(ctx context.Context, event agentevent.Stream
 			call = &discussSendPreviewCall{}
 			p.calls[callID] = call
 		}
-		args, _ := event.Input.(map[string]any)
+		args, complete := completeSendArguments(event.Input, call.raw.String())
+		if !complete {
+			call.disabled = true
+			return
+		}
 		platform, _ := args["platform"].(string)
 		target, _ := args["target"].(string)
-		if !sameDiscussConversation(p.cfg, platform, target) {
+		if !delivery.IsSameConversation(
+			p.cfg.CurrentPlatform, p.cfg.ReplyTarget, platform, target,
+		) {
 			call.disabled = true
-			if call.opened {
-				p.coordinator.Abort(ctx, p.key(callID))
-			}
 			return
 		}
 		text, _ := args["text"].(string)
+		if text == "" {
+			text, _ = partialTopLevelJSONString(call.raw.String(), "text")
+		}
 		p.pushFinalArgumentTail(ctx, callID, call, text)
 	case agentevent.ToolCallEnd:
 		call := p.calls[callID]
 		if call == nil {
 			return
 		}
-		if strings.TrimSpace(event.Error) != "" && call.opened {
+		if call.opened {
 			p.coordinator.Abort(context.WithoutCancel(ctx), p.key(callID))
 		}
 		delete(p.calls, callID)
@@ -91,20 +101,58 @@ func (p *discussSendPreview) Handle(ctx context.Context, event agentevent.Stream
 	}
 }
 
-func (p *discussSendPreview) pushAvailableText(ctx context.Context, callID string, call *discussSendPreviewCall) {
-	text, found := partialTopLevelJSONString(call.raw.String(), "text")
-	if !found || len(text) <= call.emitted || strings.TrimSpace(text) == "" {
-		return
+func completeSendArguments(input any, raw string) (map[string]any, bool) {
+	inputArgs, _ := input.(map[string]any)
+	args := make(map[string]any, len(inputArgs))
+	for key, value := range inputArgs {
+		args[key] = value
 	}
-	if !call.opened && !p.open(ctx, callID, call) {
-		return
+	if strings.TrimSpace(raw) == "" {
+		return args, true
 	}
-	delta := text[call.emitted:]
-	if err := p.coordinator.PushDelta(ctx, p.key(callID), delta); err != nil {
-		p.fail(ctx, callID, call, "push send argument preview", err)
-		return
+	var streamed map[string]any
+	if json.Unmarshal([]byte(raw), &streamed) != nil {
+		return args, false
 	}
-	call.emitted = len(text)
+	for _, key := range []string{"platform", "target"} {
+		inputValue, inputPresent, inputValid := sendRouteValue(inputArgs, key)
+		streamedValue, streamedPresent, streamedValid := sendRouteValue(streamed, key)
+		if !inputValid || !streamedValid {
+			return args, false
+		}
+		if inputValue != "" && streamedValue != "" {
+			matches := inputValue == streamedValue
+			if key == "platform" {
+				matches = strings.EqualFold(inputValue, streamedValue)
+			}
+			if !matches {
+				return args, false
+			}
+		}
+		// A non-empty route is more restrictive than an omitted/defaulted one.
+		// Preserve it regardless of which event representation carried it.
+		if streamedPresent && streamedValue != "" && (!inputPresent || inputValue == "") {
+			args[key] = streamedValue
+		}
+	}
+	for key, value := range streamed {
+		if _, exists := args[key]; !exists {
+			args[key] = value
+		}
+	}
+	return args, true
+}
+
+func sendRouteValue(args map[string]any, key string) (string, bool, bool) {
+	value, present := args[key]
+	if !present {
+		return "", false, true
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", true, false
+	}
+	return strings.TrimSpace(text), true, true
 }
 
 func (p *discussSendPreview) pushFinalArgumentTail(ctx context.Context, callID string, call *discussSendPreviewCall, text string) {
@@ -180,19 +228,6 @@ func (p *discussSendPreview) fail(ctx context.Context, callID string, call *disc
 		p.logger.Warn("discuss Telegram send preview failed",
 			slog.String("operation", operation), slog.Any("error", err))
 	}
-}
-
-func sameDiscussConversation(cfg DiscussSessionConfig, platform, target string) bool {
-	platform = strings.TrimSpace(platform)
-	target = strings.TrimSpace(target)
-	if platform == "" {
-		platform = strings.TrimSpace(cfg.CurrentPlatform)
-	}
-	if target == "" {
-		target = strings.TrimSpace(cfg.ReplyTarget)
-	}
-	return strings.EqualFold(platform, strings.TrimSpace(cfg.CurrentPlatform)) &&
-		target == strings.TrimSpace(cfg.ReplyTarget)
 }
 
 // partialTopLevelJSONString decodes the currently available prefix of a

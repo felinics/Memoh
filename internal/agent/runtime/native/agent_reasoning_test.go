@@ -102,6 +102,50 @@ func TestBuildGenerateOptionsRequiresToolCallWhenSendIsAvailable(t *testing.T) {
 	}
 }
 
+func TestBuildGenerateOptionsRequiresOnlyFirstSDKStep(t *testing.T) {
+	t.Parallel()
+
+	provider := &recordingPromptCacheProvider{}
+	cfg := RunConfig{
+		Model: &sdk.Model{
+			ID:       "test-model",
+			Provider: provider,
+			Type:     sdk.ModelTypeChat,
+		},
+		SupportsToolCall: true,
+		RequireToolCall:  true,
+	}
+	testTools := []sdk.Tool{
+		{
+			Name: "noop",
+			Execute: func(*sdk.ToolExecContext, any) (any, error) {
+				return map[string]any{"ok": true}, nil
+			},
+		},
+		{
+			Name: "send",
+			Execute: func(*sdk.ToolExecContext, any) (any, error) {
+				return map[string]any{"ok": true}, nil
+			},
+		},
+	}
+
+	opts := (*Agent)(nil).buildGenerateOptions(cfg, testTools, testTools, nil)
+	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
+		t.Fatalf("generate text result: %v", err)
+	}
+	params := provider.snapshotParams()
+	if len(params) != 2 {
+		t.Fatalf("generation calls = %d, want 2", len(params))
+	}
+	if params[0].ToolChoice != "required" {
+		t.Fatalf("first tool choice = %#v, want required", params[0].ToolChoice)
+	}
+	if params[1].ToolChoice != "auto" {
+		t.Fatalf("second tool choice = %#v, want auto", params[1].ToolChoice)
+	}
+}
+
 func TestBuildGenerateOptionsDoesNotRequireToolCallWhileReasoningIsActive(t *testing.T) {
 	t.Parallel()
 

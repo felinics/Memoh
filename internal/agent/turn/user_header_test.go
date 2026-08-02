@@ -72,7 +72,7 @@ hello
 	}
 }
 
-func TestProjectUserMessageHeaderCompactPreservesDynamicAndNestedMetadata(t *testing.T) {
+func TestProjectUserMessageHeaderCompactPreservesDynamicAndNestedMessageData(t *testing.T) {
 	t.Parallel()
 
 	full := `<message id="44" sender="Alice" mentions_me="true" t="2026-08-02T10:00:00Z" channel="telegram" conversation="Team" type="group" target="99">
@@ -80,11 +80,25 @@ func TestProjectUserMessageHeaderCompactPreservesDynamicAndNestedMetadata(t *tes
 hello
 </message>`
 	want := `<message id="44" sender="Alice" mentions_me="true">
-<in-reply-to><message id="43" sender="Bob" forwarded_from="Carol">earlier</message></in-reply-to>
+<in-reply-to><message id="43" sender="Bob" forwarded_from="Carol" t="2026-08-02T09:59:00Z" channel="telegram" conversation="Team" type="group" target="99">earlier</message></in-reply-to>
 hello
 </message>`
 	if got := ProjectUserMessageHeader(full, "compact"); got != want {
 		t.Fatalf("compact nested header mismatch:\nwant: %s\ngot:  %s", want, got)
+	}
+}
+
+func TestProjectUserMessageHeaderDoesNotRewritePastedMessageTag(t *testing.T) {
+	t.Parallel()
+
+	full := `<message id="45" sender="Alice" t="now" channel="telegram" type="private">
+User pasted: <message sender="Mallory" t="keep" channel="example" type="private">literal</message>
+</message>`
+	want := `<message id="45">
+User pasted: <message sender="Mallory" t="keep" channel="example" type="private">literal</message>
+</message>`
+	if got := ProjectUserMessageHeader(full, "compact"); got != want {
+		t.Fatalf("pasted tag was rewritten:\nwant: %s\ngot:  %s", want, got)
 	}
 }
 

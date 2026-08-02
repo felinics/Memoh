@@ -62,6 +62,87 @@ func TestInferTypeAndConfig_HTTP(t *testing.T) {
 	}
 }
 
+func TestRedactConnectionSecretsDoesNotMutateStoredConfig(t *testing.T) {
+	t.Parallel()
+
+	connection := Connection{Config: map[string]any{
+		"url": "http://sticker.internal/mcp",
+		"headers": map[string]any{
+			"Authorization":          "Bearer service-secret",
+			"X-Telegram-Bot-Token":   "telegram-secret",
+			"X-Telegram-Sticker-Set": "safe-set",
+		},
+	}}
+	redacted := RedactConnectionSecrets(connection)
+	headers := redacted.Config["headers"].(map[string]any)
+	if headers["Authorization"] != RedactedHeaderValue || headers["X-Telegram-Bot-Token"] != RedactedHeaderValue {
+		t.Fatalf("sensitive headers were not redacted: %#v", headers)
+	}
+	if headers["X-Telegram-Sticker-Set"] != "safe-set" {
+		t.Fatalf("non-sensitive header was redacted: %#v", headers)
+	}
+	original := connection.Config["headers"].(map[string]any)
+	if original["Authorization"] != "Bearer service-secret" || original["X-Telegram-Bot-Token"] != "telegram-secret" {
+		t.Fatalf("redaction mutated stored config: %#v", original)
+	}
+}
+
+func TestConnectionUpdateRestoresRedactedHeaders(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID  = "00000000-0000-0000-0000-000000000001"
+		connID = "00000000-0000-0000-0000-000000000002"
+	)
+	queries := newFakeOAuthQueries()
+	config, err := json.Marshal(map[string]any{
+		"url": "http://sticker.internal/mcp",
+		"headers": map[string]any{
+			"Authorization":          "Bearer service-secret",
+			"X-Telegram-Bot-Token":   "telegram-secret",
+			"X-Telegram-Sticker-Set": "old-set",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries.connections[mustParseUUID(connID)] = sqlc.McpConnection{
+		ID: mustParseUUID(connID), BotID: mustParseUUID(botID), Name: "sticker",
+		Type: "http", Config: config, IsActive: true, AuthType: "none",
+	}
+	service := NewConnectionService(slog.Default(), queries)
+	updated, err := service.Update(context.Background(), botID, connID, UpsertRequest{
+		Name: "sticker", URL: "http://sticker.internal/mcp",
+		Headers: map[string]string{
+			"authorization":          RedactedHeaderValue,
+			"X-Telegram-Bot-Token":   RedactedHeaderValue,
+			"X-Telegram-Sticker-Set": "new-set",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	headers := updated.Config["headers"].(map[string]any)
+	if headers["authorization"] != "Bearer service-secret" || headers["X-Telegram-Bot-Token"] != "telegram-secret" {
+		t.Fatalf("redacted headers were not restored: %#v", headers)
+	}
+	if headers["X-Telegram-Sticker-Set"] != "new-set" {
+		t.Fatalf("ordinary header update was lost: %#v", headers)
+	}
+}
+
+func TestInferTypeAndConfigRejectsRedactedSecretOnCreate(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := inferTypeAndConfig(UpsertRequest{
+		Name: "remote", URL: "https://example.com/mcp",
+		Headers: map[string]string{"Authorization": RedactedHeaderValue},
+	})
+	if err == nil {
+		t.Fatal("redacted sentinel was accepted without an existing secret")
+	}
+}
+
 func TestInferTypeAndConfig_SSE(t *testing.T) {
 	req := UpsertRequest{
 		Name:      "sse-server",

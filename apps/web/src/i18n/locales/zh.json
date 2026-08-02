@@ -110,6 +110,9 @@
     "tool": {
       "catalog_unavailable": "暂时无法加载可用工具列表，请重试。"
     },
+    "mcp": {
+      "config_invalid": "MCP 连接配置无效。"
+    },
     "sticker": {
       "service_unavailable": "暂时无法连接 Telegram 贴纸服务，请重试。",
       "not_found": "这张 Telegram 贴纸已不可用。",

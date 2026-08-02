@@ -277,12 +277,16 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 		handled, handoffErr := m.sendToolStreams.Finalize(ctx, SendToolStreamKey{
 			BotID: botID, Platform: channelType, Target: target, ToolCallID: toolCallID,
 		}, req.Message)
+		if handled {
+			if handoffErr != nil && m.logger != nil {
+				m.logger.Warn("send preview handoff failed after stream ownership transfer",
+					slog.String("bot_id", botID), slog.Any("error", handoffErr))
+			}
+			return handoffErr
+		}
 		if handoffErr != nil && m.logger != nil {
 			m.logger.Warn("send preview handoff failed; falling back to one-shot delivery",
 				slog.String("bot_id", botID), slog.Any("error", handoffErr))
-		}
-		if handled && handoffErr == nil {
-			return nil
 		}
 	}
 	if m.logger != nil {

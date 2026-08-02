@@ -159,39 +159,27 @@ func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 // model-facing Telegram history while leaving the canonical stored rendering
 // untouched. Compact private messages omit the repeated sender; group messages
 // retain it for speaker attribution. Dynamic flags, edits, forwards, and reply
-// context remain available to the model. Nested quoted messages are projected
-// too, otherwise reply-heavy histories retain most of the repeated metadata.
+// context remain available to the model. Only the canonical root opening tag
+// is projected: quoted or user-authored <message> text in the body is data and
+// must remain byte-for-byte untouched.
 func ProjectUserMessageHeader(content, mode string) string {
 	if strings.ToLower(strings.TrimSpace(mode)) != "compact" || !strings.HasPrefix(strings.TrimSpace(content), "<message") {
 		return content
 	}
-
-	var projected strings.Builder
-	cursor := 0
-	for {
-		startRel := strings.Index(content[cursor:], "<message")
-		if startRel < 0 {
-			projected.WriteString(content[cursor:])
-			break
-		}
-		start := cursor + startRel
-		endRel := strings.Index(content[start:], ">")
-		if endRel < 0 {
-			projected.WriteString(content[cursor:])
-			break
-		}
-		end := start + endRel
-		opening := content[start : end+1]
-		compactOpening, ok := projectMessageOpeningTag(opening)
-		projected.WriteString(content[cursor:start])
-		if ok {
-			projected.WriteString(compactOpening)
-		} else {
-			projected.WriteString(opening)
-		}
-		cursor = end + 1
+	start := strings.Index(content, "<message")
+	if start < 0 {
+		return content
 	}
-	return projected.String()
+	endRel := strings.Index(content[start:], ">")
+	if endRel < 0 {
+		return content
+	}
+	end := start + endRel
+	compactOpening, ok := projectMessageOpeningTag(content[start : end+1])
+	if !ok {
+		return content
+	}
+	return content[:start] + compactOpening + content[end+1:]
 }
 
 func projectMessageOpeningTag(opening string) (string, bool) {

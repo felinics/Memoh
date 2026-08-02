@@ -9,46 +9,40 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/agent/channelpolicy"
 	tools "github.com/memohai/memoh/internal/agent/tool"
+	"github.com/memohai/memoh/internal/delivery"
 )
 
-const telegramStickerSendToolSuffix = "send_telegram_sticker"
-
 const telegramStickerSendGuidance = " For Telegram, normally pair every coherent public message with at least one context-appropriate Sticker by setting `sticker_id` in the same send call; omit it only when the catalog has no suitable Sticker. Choose from the full visual descriptions, not from the original emoji alone, and avoid repetitive duplicates."
-
-func isTelegramStickerBackendTool(name string) bool {
-	name = strings.TrimSpace(name)
-	return name == telegramStickerSendToolSuffix || strings.HasSuffix(name, "_"+telegramStickerSendToolSuffix)
-}
-
-func isLegacyTelegramStickerSearchTool(name string) bool {
-	name = strings.TrimSpace(name)
-	return name == "search_telegram_stickers" || strings.HasSuffix(name, "_search_telegram_stickers")
-}
 
 // mergeTelegramStickerSendTools converts the Sticker MCP into an internal
 // backend for the first-party send tool. The model sees one send call whose
 // sticker_id enum contains the complete, stable catalog; it never sees a
 // search round or a second sticker-send tool.
 func mergeTelegramStickerSendTools(session tools.SessionContext, sdkTools []sdk.Tool) []sdk.Tool {
+	if !strings.EqualFold(strings.TrimSpace(session.CurrentPlatform), channelpolicy.TelegramPlatform) ||
+		strings.TrimSpace(session.ReplyTarget) == "" {
+		return sdkTools
+	}
+
 	visible := make([]sdk.Tool, 0, len(sdkTools))
 	var backend *sdk.Tool
 	for i := range sdkTools {
 		tool := sdkTools[i]
-		if isTelegramStickerBackendTool(tool.Name) {
+		if channelpolicy.IsTelegramStickerSendTool(tool.Name) {
 			if backend == nil && stickerPropertySchema(tool.Parameters) != nil && tool.Execute != nil {
 				copyTool := tool
 				backend = &copyTool
 			}
 			continue
 		}
-		if isLegacyTelegramStickerSearchTool(tool.Name) {
+		if channelpolicy.IsTelegramStickerSearchTool(tool.Name) {
 			continue
 		}
 		visible = append(visible, tool)
 	}
-	if backend == nil || !strings.EqualFold(strings.TrimSpace(session.CurrentPlatform), "telegram") ||
-		strings.TrimSpace(session.ReplyTarget) == "" {
+	if backend == nil {
 		return visible
 	}
 
@@ -65,6 +59,7 @@ func mergeTelegramStickerSendTools(session tools.SessionContext, sdkTools []sdk.
 		if !normalizeStickerEnum(stickerSchema) {
 			continue
 		}
+		stickerIDs := stickerEnumSet(stickerSchema)
 		properties["sticker_id"] = stickerSchema
 		visible[i].Parameters = parameters
 		visible[i].Description = strings.TrimSpace(visible[i].Description) + telegramStickerSendGuidance
@@ -78,9 +73,14 @@ func mergeTelegramStickerSendTools(session tools.SessionContext, sdkTools []sdk.
 			if stickerID == "" {
 				return sendExecute(ctx, input)
 			}
+			if _, ok := stickerIDs[stickerID]; !ok {
+				return nil, fmt.Errorf("sticker_id %q is not in the current catalog", stickerID)
+			}
 			platform, _ := args["platform"].(string)
 			target, _ := args["target"].(string)
-			if !session.IsSameConversation(strings.TrimSpace(platform), strings.TrimSpace(target)) {
+			if !delivery.IsSameConversation(
+				session.CurrentPlatform, session.ReplyTarget, platform, target,
+			) {
 				return nil, errors.New("sticker_id is available only for the current Telegram conversation")
 			}
 
@@ -90,10 +90,18 @@ func mergeTelegramStickerSendTools(session tools.SessionContext, sdkTools []sdk.
 					sendArgs[key] = value
 				}
 			}
+			textDelivered := false
 			if hasNativeSendContent(sendArgs) {
-				if _, err := sendExecute(ctx, sendArgs); err != nil {
+				output, err := sendExecute(ctx, sendArgs)
+				if err != nil {
 					return nil, err
 				}
+				if result, ok := output.(map[string]any); ok {
+					if delivered, present := result["ok"].(bool); present && !delivered {
+						return output, nil
+					}
+				}
+				textDelivered = true
 			}
 
 			output, err := stickerExecute(ctx, map[string]any{
@@ -101,16 +109,56 @@ func mergeTelegramStickerSendTools(session tools.SessionContext, sdkTools []sdk.
 				"sticker_id": stickerID,
 			})
 			if err != nil {
+				if textDelivered {
+					return partialTelegramStickerDelivery(session), nil
+				}
 				return nil, err
 			}
 			if err := telegramStickerBackendError(output); err != nil {
+				if textDelivered {
+					return partialTelegramStickerDelivery(session), nil
+				}
 				return nil, err
 			}
-			return map[string]any{"ok": true}, nil
+			return map[string]any{
+				"ok":                true,
+				"text_delivered":    textDelivered,
+				"sticker_delivered": true,
+				"platform":          channelpolicy.TelegramPlatform,
+				"target":            strings.TrimSpace(session.ReplyTarget),
+			}, nil
 		}
 		break
 	}
 	return visible
+}
+
+func stickerEnumSet(schema map[string]any) map[string]struct{} {
+	result := map[string]struct{}{}
+	switch values := schema["enum"].(type) {
+	case []string:
+		for _, value := range values {
+			result[strings.ToUpper(strings.TrimSpace(value))] = struct{}{}
+		}
+	case []any:
+		for _, raw := range values {
+			value, _ := raw.(string)
+			result[strings.ToUpper(strings.TrimSpace(value))] = struct{}{}
+		}
+	}
+	delete(result, "")
+	return result
+}
+
+func partialTelegramStickerDelivery(session tools.SessionContext) map[string]any {
+	return map[string]any{
+		"ok":                false,
+		"text_delivered":    true,
+		"sticker_delivered": false,
+		"error_code":        "telegram_sticker_delivery_failed",
+		"platform":          channelpolicy.TelegramPlatform,
+		"target":            strings.TrimSpace(session.ReplyTarget),
+	}
 }
 
 func stickerPropertySchema(parameters any) map[string]any {
