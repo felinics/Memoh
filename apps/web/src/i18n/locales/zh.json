@@ -2788,6 +2788,8 @@
       "telegramDiscussTitle": "讨论参与策略",
       "telegramPassiveRate": "被动参与比例",
       "telegramPassiveRateDescription": "群聊消息未提及 Bot 时主动参与的概率，比例越高消耗的模型 Token 越多。",
+      "telegramPassiveMutualExclusion": "被动参与互斥",
+      "telegramPassiveMutualExclusionDescription": "同一 Telegram 群中，所有开启此项的 Bot 对同一条普通消息最多一个参与。概率合计不超过 100% 时，各 Bot 的原概率不变，总参与概率等于概率之和；超过 100% 无法同时保持原概率，将按 100% 封顶。@提及、回复 Bot 和强制关键词不受影响。",
       "telegramForceReplyKeywords": "强制回复关键词",
       "telegramForceReplyKeywordsDescription": "消息包含任一关键词时，即使未命中被动采样，Bot 也必须回复。",
       "telegramForceReplyKeywordsPlaceholder": "添加关键词",

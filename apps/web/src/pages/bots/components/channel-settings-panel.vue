@@ -194,6 +194,17 @@
           </div>
         </SettingsRow>
         <SettingsRow
+          :label="$t('bots.channels.telegramPassiveMutualExclusion')"
+          :description="$t('bots.channels.telegramPassiveMutualExclusionDescription')"
+        >
+          <Switch
+            :model-value="telegramPassiveMutualExclusion"
+            :disabled="!telegramPolicyLoaded || isBusy"
+            :aria-label="$t('bots.channels.telegramPassiveMutualExclusion')"
+            @update:model-value="(enabled) => telegramPassiveMutualExclusion = !!enabled"
+          />
+        </SettingsRow>
+        <SettingsRow
           :label="$t('bots.channels.telegramForceReplyKeywords')"
           :description="$t('bots.channels.telegramForceReplyKeywordsDescription')"
         >
@@ -433,6 +444,7 @@ const isTelegram = computed(() => platformType.value === 'telegram')
 const queryCache = useQueryCache()
 
 const TELEGRAM_PASSIVE_RATE_KEY = 'telegram_discuss_passive_sample_rate'
+const TELEGRAM_PASSIVE_MUTUAL_EXCLUSION_KEY = 'telegram_discuss_passive_mutual_exclusion_enabled'
 const TELEGRAM_FORCE_REPLY_KEYWORDS_KEY = 'telegram_discuss_force_reply_keywords'
 const TELEGRAM_SEND_FALLBACK_ENABLED_KEY = 'telegram_discuss_send_fallback_enabled'
 const TELEGRAM_TOOL_CALLS_ENABLED_KEY = 'telegram_tool_calls_enabled'
@@ -474,8 +486,10 @@ const form = reactive<{ credentials: Record<string, unknown>; disabled: boolean 
 const initialCredentialsString = ref('')
 const isAdvancedExpanded = ref(false)
 const telegramPassiveRate = ref(DEFAULT_TELEGRAM_PASSIVE_RATE)
+const telegramPassiveMutualExclusion = ref(false)
 const telegramForceReplyKeywords = ref<string[]>([])
 const savedTelegramPassiveRate = ref(DEFAULT_TELEGRAM_PASSIVE_RATE)
+const savedTelegramPassiveMutualExclusion = ref(false)
 const savedTelegramForceReplyKeywords = ref<string[]>([])
 const telegramSendFallbackEnabled = ref(false)
 const savedTelegramSendFallbackEnabled = ref(false)
@@ -596,6 +610,7 @@ watch(() => props.channelItem, initForm, { immediate: true })
 const isChannelFormDirty = computed(() => JSON.stringify(form.credentials) !== initialCredentialsString.value)
 const isTelegramPolicyDirty = computed(() => isTelegram.value && telegramPolicyLoaded.value && (
   telegramPassiveRate.value !== savedTelegramPassiveRate.value
+  || telegramPassiveMutualExclusion.value !== savedTelegramPassiveMutualExclusion.value
   || JSON.stringify(telegramForceReplyKeywords.value) !== JSON.stringify(savedTelegramForceReplyKeywords.value)
   || telegramSendFallbackEnabled.value !== savedTelegramSendFallbackEnabled.value
   || telegramMessageMetadataMode.value !== savedTelegramMessageMetadataMode.value
@@ -611,6 +626,7 @@ watch(bot, (value) => {
   if (!isTelegram.value || !value) return
   const metadata = isRecord(value.metadata) ? value.metadata : {}
   const rate = normalizeTelegramPassiveRate(metadata[TELEGRAM_PASSIVE_RATE_KEY])
+  const passiveMutualExclusion = metadata[TELEGRAM_PASSIVE_MUTUAL_EXCLUSION_KEY] === true
   const keywords = normalizeTelegramKeywords(metadata[TELEGRAM_FORCE_REPLY_KEYWORDS_KEY])
   const sendFallbackEnabled = metadata[TELEGRAM_SEND_FALLBACK_ENABLED_KEY] === true
   const metadataMode = normalizeTelegramMessageMetadataMode(metadata[TELEGRAM_MESSAGE_METADATA_MODE_KEY])
@@ -621,6 +637,7 @@ watch(bot, (value) => {
     ? normalizeTelegramToolNames(metadata[TELEGRAM_ENABLED_TOOLS_KEY])
     : telegramTools.value.map(tool => tool.name)
   telegramPassiveRate.value = rate
+  telegramPassiveMutualExclusion.value = passiveMutualExclusion
   telegramForceReplyKeywords.value = keywords
   telegramSendFallbackEnabled.value = sendFallbackEnabled
   telegramMessageMetadataMode.value = metadataMode
@@ -629,6 +646,7 @@ watch(bot, (value) => {
   telegramToolPolicyConfigured.value = hasToolPolicy
   telegramEnabledTools.value = enabledTools
   savedTelegramPassiveRate.value = rate
+  savedTelegramPassiveMutualExclusion.value = passiveMutualExclusion
   savedTelegramForceReplyKeywords.value = [...keywords]
   savedTelegramSendFallbackEnabled.value = sendFallbackEnabled
   savedTelegramMessageMetadataMode.value = metadataMode
@@ -695,6 +713,7 @@ async function saveTelegramPolicy() {
   }
   const metadata = isRecord(bot.value.metadata) ? { ...bot.value.metadata } : {}
   metadata[TELEGRAM_PASSIVE_RATE_KEY] = telegramPassiveRate.value
+  metadata[TELEGRAM_PASSIVE_MUTUAL_EXCLUSION_KEY] = telegramPassiveMutualExclusion.value
   metadata[TELEGRAM_FORCE_REPLY_KEYWORDS_KEY] = [...telegramForceReplyKeywords.value]
   metadata[TELEGRAM_SEND_FALLBACK_ENABLED_KEY] = telegramSendFallbackEnabled.value
   metadata[TELEGRAM_MESSAGE_METADATA_MODE_KEY] = telegramMessageMetadataMode.value
@@ -707,6 +726,7 @@ async function saveTelegramPolicy() {
   metadata[TELEGRAM_SKILLS_ENABLED_KEY] = telegramSkillsEnabled.value
   await putBotsById({ path: { id: botIdRef.value }, body: { metadata }, throwOnError: true })
   savedTelegramPassiveRate.value = telegramPassiveRate.value
+  savedTelegramPassiveMutualExclusion.value = telegramPassiveMutualExclusion.value
   savedTelegramForceReplyKeywords.value = [...telegramForceReplyKeywords.value]
   savedTelegramSendFallbackEnabled.value = telegramSendFallbackEnabled.value
   savedTelegramMessageMetadataMode.value = telegramMessageMetadataMode.value

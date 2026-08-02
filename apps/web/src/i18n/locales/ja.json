@@ -2774,6 +2774,8 @@
       "telegramDiscussTitle": "Discuss 参加ポリシー",
       "telegramPassiveRate": "自発的な参加率",
       "telegramPassiveRateDescription": "メンションのないグループメッセージにBotが参加する確率です。値を上げるほどModel Tokenの消費が増えます。",
+      "telegramPassiveMutualExclusion": "自発的参加を排他化",
+      "telegramPassiveMutualExclusionDescription": "同じ Telegram グループでこの設定を有効にした Bot は、通常メッセージ 1 件につき最大 1 体だけ参加します。確率の合計が 100% 以下なら各 Bot の設定確率を維持し、合計参加確率はその和になります。100% を超える場合は全確率を同時に維持できないため、100% で上限処理します。メンション、Bot への返信、強制返信キーワードには影響しません。",
       "telegramForceReplyKeywords": "強制返信キーワード",
       "telegramForceReplyKeywordsDescription": "メッセージにいずれかのキーワードが含まれる場合、サンプリング対象外でもBotは必ず返信します。",
       "telegramForceReplyKeywordsPlaceholder": "キーワードを追加",

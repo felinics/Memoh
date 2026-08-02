@@ -512,6 +512,7 @@ func (r *botTelegramDiscussPolicyReader) TelegramDiscussPolicy(
 	if ok && value >= 0 && value <= 1 {
 		policy.PassiveSampleRate = value
 	}
+	policy.PassiveMutualExclusion, _ = bot.Metadata[channel.TelegramDiscussPassiveMutualExclusionMetadataKey].(bool)
 	rawKeywords, _ := bot.Metadata[channel.TelegramDiscussForceReplyKeywordsMetadataKey].([]any)
 	for _, raw := range rawKeywords {
 		keyword, _ := raw.(string)

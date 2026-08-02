@@ -134,9 +134,10 @@ type DefaultChatRuntimeReader interface {
 }
 
 type TelegramDiscussPolicy struct {
-	PassiveSampleRate   float64
-	ForceReplyKeywords  []string
-	SendFallbackEnabled bool
+	PassiveSampleRate      float64
+	PassiveMutualExclusion bool
+	ForceReplyKeywords     []string
+	SendFallbackEnabled    bool
 }
 
 type TelegramDiscussPolicyReader interface {
@@ -189,37 +190,38 @@ type NewSessionSpec struct {
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
-	turnSvc               turn.Service
-	routeResolver         RouteResolver
-	message               messagepkg.Writer
-	mediaService          mediaIngestor
-	reactor               channelReactor
-	commandHandler        CommandHandler
-	registry              *channel.Registry
-	logger                *slog.Logger
-	jwtSecret             string
-	tokenTTL              time.Duration
-	identity              *IdentityResolver
-	policy                PolicyService
-	dispatcher            *RouteDispatcher
-	acl                   chatACL
-	observer              channel.StreamObserver
-	speechService         speechSynthesizer
-	speechModelResolver   speechModelResolver
-	transcriber           transcriptionRecognizer
-	sttModelResolver      transcriptionModelResolver
-	sessionEnsurer        SessionEnsurer
-	pipeline              *timeline.Pipeline
-	eventStore            *timeline.EventStore
-	discussDriver         *discuss.DiscussDriver
-	imDisplayOptions      IMDisplayOptionsReader
-	defaultChatRuntime    DefaultChatRuntimeReader
-	telegramDiscussPolicy TelegramDiscussPolicyReader
-	acpAgentSetup         ACPAgentSetupReader
-	acpProfiles           turn.ACPProfileResolver
-	permissionChecker     BotPermissionChecker
-	skillResolver         RequestedSkillResolver
-	discussSample         func() float64
+	turnSvc                 turn.Service
+	routeResolver           RouteResolver
+	message                 messagepkg.Writer
+	mediaService            mediaIngestor
+	reactor                 channelReactor
+	commandHandler          CommandHandler
+	registry                *channel.Registry
+	logger                  *slog.Logger
+	jwtSecret               string
+	tokenTTL                time.Duration
+	identity                *IdentityResolver
+	policy                  PolicyService
+	dispatcher              *RouteDispatcher
+	acl                     chatACL
+	observer                channel.StreamObserver
+	speechService           speechSynthesizer
+	speechModelResolver     speechModelResolver
+	transcriber             transcriptionRecognizer
+	sttModelResolver        transcriptionModelResolver
+	sessionEnsurer          SessionEnsurer
+	pipeline                *timeline.Pipeline
+	eventStore              *timeline.EventStore
+	discussDriver           *discuss.DiscussDriver
+	imDisplayOptions        IMDisplayOptionsReader
+	defaultChatRuntime      DefaultChatRuntimeReader
+	telegramDiscussPolicy   TelegramDiscussPolicyReader
+	acpAgentSetup           ACPAgentSetupReader
+	acpProfiles             turn.ACPProfileResolver
+	permissionChecker       BotPermissionChecker
+	skillResolver           RequestedSkillResolver
+	discussSample           func() float64
+	passiveDiscussExclusion passiveDiscussExclusionSampler
 
 	// activeStreams maps "botID:routeID" to a context.CancelFunc for the
 	// currently running agent stream. Used by /stop to abort generation
@@ -889,7 +891,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Discuss mode: sample passive Telegram traffic before notifying the
 	// discuss driver. Every message has already entered the durable timeline.
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
-		notify, sampleRate, forceReply, sendFallbackEnabled := p.shouldNotifyDiscuss(ctx, identity.BotID, msg, shouldTrigger)
+		notify, sampleRate, forceReply, sendFallbackEnabled := p.shouldNotifyDiscuss(
+			ctx, cfg.TeamID, identity.BotID, msg, shouldTrigger,
+		)
 		if notify {
 			chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 			sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
@@ -1639,6 +1643,7 @@ func shouldTriggerAssistantResponse(msg channel.InboundMessage) bool {
 
 func (p *ChannelInboundProcessor) shouldNotifyDiscuss(
 	ctx context.Context,
+	teamID string,
 	botID string,
 	msg channel.InboundMessage,
 	force bool,
@@ -1649,12 +1654,14 @@ func (p *ChannelInboundProcessor) shouldNotifyDiscuss(
 	}
 	var keywords []string
 	sendFallbackEnabled := false
+	passiveMutualExclusion := false
 	if p != nil && p.telegramDiscussPolicy != nil {
 		policy, err := p.telegramDiscussPolicy.TelegramDiscussPolicy(ctx, strings.TrimSpace(botID))
 		if err == nil {
 			if policy.PassiveSampleRate >= 0 && policy.PassiveSampleRate <= 1 {
 				rate = policy.PassiveSampleRate
 			}
+			passiveMutualExclusion = policy.PassiveMutualExclusion
 			keywords = policy.ForceReplyKeywords
 			sendFallbackEnabled = policy.SendFallbackEnabled
 		} else if p.logger != nil {
@@ -1674,6 +1681,22 @@ func (p *ChannelInboundProcessor) shouldNotifyDiscuss(
 	sample := rand.Float64
 	if p != nil && p.discussSample != nil {
 		sample = p.discussSample
+	}
+	if passiveMutualExclusion && p != nil {
+		key := telegramPassiveExclusionKey(teamID, msg)
+		participant := strings.TrimSpace(botID)
+		if key != "" && participant != "" {
+			notify, saturated := p.passiveDiscussExclusion.sample(key, participant, rate, sample)
+			if saturated && p.logger != nil {
+				p.logger.Warn(
+					"telegram passive mutual-exclusion probability saturated",
+					slog.String("bot_id", participant),
+					slog.String("message_id", strings.TrimSpace(msg.Message.ID)),
+					slog.Float64("sample_rate", rate),
+				)
+			}
+			return notify, rate, false, sendFallbackEnabled
+		}
 	}
 	return sample() < rate, rate, false, sendFallbackEnabled
 }

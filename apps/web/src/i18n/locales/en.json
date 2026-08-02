@@ -2788,6 +2788,8 @@
       "telegramDiscussTitle": "Discuss Participation",
       "telegramPassiveRate": "Passive participation rate",
       "telegramPassiveRateDescription": "Chance that the Bot joins an ordinary group message without a mention. Higher values use more model tokens.",
+      "telegramPassiveMutualExclusion": "Mutually exclusive passive participation",
+      "telegramPassiveMutualExclusionDescription": "Among Bots with this enabled in the same Telegram group, at most one joins each ordinary message. When their rates total at most 100%, every Bot keeps its configured probability and the participation chance equals their sum. Totals above 100% cannot preserve every rate and are capped at 100%. Mentions, replies to a Bot, and force-reply keywords are unaffected.",
       "telegramForceReplyKeywords": "Force-reply keywords",
       "telegramForceReplyKeywordsDescription": "When an incoming message contains one of these keywords, the Bot must reply even if passive sampling would skip it.",
       "telegramForceReplyKeywordsPlaceholder": "Add a keyword",
