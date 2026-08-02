@@ -290,7 +290,7 @@ onBeforeUnmount(() => {
                 :max="100"
                 :step="1"
                 class="min-w-0 flex-1"
-                @update:model-value="(val) => settingsForm.compaction_ratio = val[0]"
+                @update:model-value="(val) => settingsForm.compaction_ratio = val?.[0] ?? settingsForm.compaction_ratio"
               />
               <span class="w-10 text-right text-xs tabular-nums text-muted-foreground">
                 {{ settingsForm.compaction_ratio }}%
@@ -439,6 +439,9 @@ onBeforeUnmount(() => {
                     {{ $t('bots.compaction.duration') }}
                   </th>
                   <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                    {{ $t('bots.compaction.lineage') }}
+                  </th>
+                  <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
                     {{ $t('bots.compaction.error') }}
                   </th>
                 </tr>
@@ -467,6 +470,16 @@ onBeforeUnmount(() => {
                       {{ formatDuration(log.started_at, log.completed_at) }}
                     </td>
                     <td class="px-4 py-3">
+                      <div class="space-y-0.5">
+                        <div class="font-medium text-foreground">
+                          {{ $t('bots.compaction.lineageLevel', { level: log.artifact_level ?? 0 }) }}
+                        </div>
+                        <div class="text-muted-foreground">
+                          {{ $t('bots.compaction.parentCount', { count: log.parent_ids?.length ?? 0 }) }}
+                        </div>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3">
                       <span
                         v-if="log.error_message"
                         class="block max-w-[200px] truncate text-destructive"
@@ -482,7 +495,7 @@ onBeforeUnmount(() => {
                     class="border-t border-border"
                   >
                     <td
-                      colspan="4"
+                      colspan="5"
                       class="px-4 py-4"
                     >
                       <div class="space-y-3">
@@ -501,6 +514,39 @@ onBeforeUnmount(() => {
                           <span class="text-xs font-medium text-muted-foreground">{{ $t('common.usage') }}</span>
                           <div class="whitespace-pre-wrap rounded-md border border-border bg-card p-3 font-mono text-xs text-muted-foreground">
                             {{ JSON.stringify(log.usage, null, 2) }}
+                          </div>
+                        </div>
+                        <div class="space-y-1">
+                          <span class="text-xs font-medium text-muted-foreground">{{ $t('bots.compaction.lineage') }}</span>
+                          <div class="space-y-3 rounded-md border border-border bg-card p-3 font-mono text-xs text-muted-foreground">
+                            <div class="space-y-1">
+                              <div class="font-medium text-foreground">
+                                {{ $t('bots.compaction.artifactId') }}
+                              </div>
+                              <div class="break-all">
+                                {{ log.id }}
+                              </div>
+                            </div>
+                            <div class="space-y-1">
+                              <div class="font-medium text-foreground">
+                                {{ $t('bots.compaction.parentArtifacts') }}
+                              </div>
+                              <ul
+                                v-if="log.parent_ids?.length"
+                                class="space-y-1"
+                              >
+                                <li
+                                  v-for="parentId in log.parent_ids"
+                                  :key="parentId"
+                                  class="break-all"
+                                >
+                                  {{ parentId }}
+                                </li>
+                              </ul>
+                              <div v-else>
+                                {{ $t('bots.compaction.rootArtifact') }}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>

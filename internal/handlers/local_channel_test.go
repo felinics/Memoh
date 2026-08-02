@@ -1228,7 +1228,7 @@ func TestExecuteQuickActionAcceptsSessionIDAsCapabilityContext(t *testing.T) {
 	}
 
 	body := strings.NewReader(`{"action_id":"help","session_id":"` + sessionID + `","invocation_id":"inv-1","composer_scope":"scope-1"}`)
-	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/quick-actions/execute", body)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/bots/"+botID+"/quick-actions/execute", body)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	e := echo.New()
@@ -1329,7 +1329,7 @@ func TestPostMessageRejectsSlashOnLegacyRESTEndpoint(t *testing.T) {
 	}
 
 	body := strings.NewReader(`{"message":{"text":"/help"}}`)
-	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/local/messages", body)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/bots/"+botID+"/local/messages", body)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	e := echo.New()
@@ -1424,7 +1424,7 @@ func TestLocalChannelWSSessionSupportsRequestedSkills(t *testing.T) {
 
 func testEchoContext(userID string) echo.Context {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
 	rec := httptest.NewRecorder()
 	return testAuthContext(e, req, rec, userID)
 }

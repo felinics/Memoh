@@ -47,7 +47,7 @@ func TestToolApprovalHTTPUsesJWTUserIDForPermissionActor(t *testing.T) {
 	e := echo.New()
 	e.Use(auth.JWTMiddleware(secret, func(echo.Context) bool { return false }))
 	handler.Register(e)
-	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tool-approvals/approval-1/approve", strings.NewReader(`{}`))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/bots/bot-1/tool-approvals/approval-1/approve", strings.NewReader(`{}`))
 	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()

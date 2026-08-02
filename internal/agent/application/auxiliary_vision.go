@@ -14,8 +14,6 @@ import (
 
 	visionconfig "github.com/memohai/memoh/internal/agent/vision"
 	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -45,6 +43,8 @@ type AuxiliaryVisionConfig struct {
 type auxiliaryVisionGenerateFunc func(
 	ctx context.Context,
 	userID string,
+	model string,
+	provider string,
 	systemPrompt string,
 	userCaption string,
 	images []sdk.ImagePart,
@@ -125,6 +125,7 @@ func (s *Service) describeImagePartsWithAuxiliaryVision(
 	}
 	images = filterVisionImageParts(images)
 	cfg, generate, wait := s.auxiliaryVisionSnapshot()
+	cfg = s.resolveAuxiliaryVisionConfig(ctx, req.BotID, cfg)
 	if !cfg.enabled() {
 		return ""
 	}
@@ -138,7 +139,7 @@ func (s *Service) describeImagePartsWithAuxiliaryVision(
 	visionCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	description, err := retryAuxiliaryVisionWithWait(visionCtx, cfg.MaxRetries, func(callCtx context.Context) (string, error) {
-		return generate(callCtx, req.UserID, cfg.Prompt, modelQueryText(req), images)
+		return generate(callCtx, req.UserID, cfg.Model, cfg.Provider, cfg.Prompt, modelQueryText(req), images)
 	}, wait)
 	if err != nil {
 		logger := s.logger
@@ -157,6 +158,53 @@ func (s *Service) describeImagePartsWithAuxiliaryVision(
 		return ""
 	}
 	return formatAuxiliaryVisionContext(cfg.Model, description)
+}
+
+func (s *Service) resolveAuxiliaryVisionConfig(ctx context.Context, botID string, inherited AuxiliaryVisionConfig) AuxiliaryVisionConfig {
+	inherited = inherited.normalized()
+	if s == nil || strings.TrimSpace(botID) == "" || s.settingsService == nil {
+		return inherited
+	}
+	botSettings, err := s.loadBotSettings(ctx, botID)
+	if err != nil {
+		logger := s.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("auxiliary vision: failed to load bot overrides; using process defaults",
+			slog.String("bot_id", strings.TrimSpace(botID)),
+			slog.Any("error", err),
+		)
+		return inherited
+	}
+
+	return applyAuxiliaryVisionOverrides(inherited, botSettings)
+}
+
+func applyAuxiliaryVisionOverrides(inherited AuxiliaryVisionConfig, botSettings settings.Settings) AuxiliaryVisionConfig {
+	inherited = inherited.normalized()
+	switch botSettings.AuxiliaryVisionMode {
+	case settings.AuxiliaryVisionDisabled:
+		inherited.Model = ""
+		return inherited
+	case settings.AuxiliaryVisionEnabled:
+		if modelID := strings.TrimSpace(botSettings.AuxiliaryVisionModelID); modelID != "" {
+			inherited.Model = modelID
+			// A persisted model UUID already identifies its provider. Keeping a
+			// global provider filter here could incorrectly hide that model.
+			inherited.Provider = ""
+		}
+		if prompt := strings.TrimSpace(botSettings.AuxiliaryVisionPrompt); prompt != "" {
+			inherited.Prompt = prompt
+		}
+		if botSettings.AuxiliaryVisionMaxRetries >= 0 {
+			inherited.MaxRetries = botSettings.AuxiliaryVisionMaxRetries
+		}
+		if botSettings.AuxiliaryVisionTimeoutSeconds > 0 {
+			inherited.Timeout = time.Duration(botSettings.AuxiliaryVisionTimeoutSeconds) * time.Second
+		}
+	}
+	return inherited.normalized()
 }
 
 func retryAuxiliaryVision(
@@ -253,12 +301,14 @@ func waitAuxiliaryVisionRetry(ctx context.Context, delay time.Duration) error {
 func (s *Service) generateAuxiliaryVisionDescription(
 	ctx context.Context,
 	userID string,
+	modelRef string,
+	providerRef string,
 	systemPrompt string,
 	userCaption string,
 	images []sdk.ImagePart,
 ) (string, error) {
-	cfg := s.auxiliaryVisionConfigSnapshot()
-	if !cfg.enabled() {
+	modelRef = strings.TrimSpace(modelRef)
+	if modelRef == "" {
 		return "", errors.New("auxiliary vision model is not configured")
 	}
 	if s.modelsService == nil || s.queries == nil {
@@ -266,8 +316,8 @@ func (s *Service) generateAuxiliaryVisionDescription(
 	}
 
 	model, provider, err := s.selectChatModel(ctx, ChatRequest{
-		Model:    cfg.Model,
-		Provider: cfg.Provider,
+		Model:    modelRef,
+		Provider: strings.TrimSpace(providerRef),
 	}, settings.Settings{})
 	if err != nil {
 		return "", fmt.Errorf("resolve auxiliary vision model: %w", err)
@@ -276,25 +326,11 @@ func (s *Service) generateAuxiliaryVisionDescription(
 		return "", fmt.Errorf("auxiliary vision model %s does not support image input", model.ModelID)
 	}
 
-	authService := providers.NewService(nil, s.queries, "")
-	authCtx := oauthctx.WithUserID(ctx, userID)
-	creds, err := authService.ResolveModelCredentials(authCtx, provider)
+	resolvedModel, err := s.buildSDKChatModel(ctx, userID, model, provider, nil)
 	if err != nil {
 		return "", fmt.Errorf("resolve auxiliary vision credentials: %w", err)
 	}
-	baseURL := providers.ProviderConfigString(provider, "base_url")
-	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
-		ModelID:        model.ModelID,
-		ClientType:     provider.ClientType,
-		APIKey:         creds.APIKey,
-		CodexAccountID: creds.CodexAccountID,
-		BaseURL:        baseURL,
-		ChatCompletionsCompat: models.ResolveChatCompletionsCompat(
-			baseURL,
-			providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
-		),
-		HTTPClient: s.streamHTTPClient,
-	})
+	sdkModel := resolvedModel.Model
 
 	userPrompt := visionconfig.DefaultUserPrompt
 	if caption := strings.TrimSpace(userCaption); caption != "" {

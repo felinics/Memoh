@@ -31,7 +31,7 @@ func TestHandleWebhookTextMessageAndSuccessDedup(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	err := adapter.HandleWebhook(context.Background(), cfg, handler, signedLineRequest(body), rec)
+	err := adapter.HandleWebhook(context.Background(), cfg, handler, signedLineRequest(t, body), rec)
 	if err != nil {
 		t.Fatalf("HandleWebhook returned error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestHandleWebhookTextMessageAndSuccessDedup(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	err = adapter.HandleWebhook(context.Background(), cfg, handler, signedLineRequest(body), rec)
+	err = adapter.HandleWebhook(context.Background(), cfg, handler, signedLineRequest(t, body), rec)
 	if err != nil {
 		t.Fatalf("dedup HandleWebhook returned error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestHandleWebhookQueueFullReturnsRetryableError(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		rec := httptest.NewRecorder()
-		err := adapter.HandleWebhook(context.Background(), cfg, handler, signedLineRequest(body), rec)
+		err := adapter.HandleWebhook(context.Background(), cfg, handler, signedLineRequest(t, body), rec)
 		var httpErr *echo.HTTPError
 		if !errors.As(err, &httpErr) {
 			t.Fatalf("error on attempt %d = %T, want *echo.HTTPError", i+1, err)
@@ -99,7 +99,7 @@ func TestHandleWebhookMissingSelfIdentityReturnsError(t *testing.T) {
 	cfg := testLineConfig()
 	cfg.SelfIdentity = nil
 
-	err := NewAdapter(nil).HandleWebhook(context.Background(), cfg, nil, signedLineRequest(testLineTextCallback("event-no-self")), httptest.NewRecorder())
+	err := NewAdapter(nil).HandleWebhook(context.Background(), cfg, nil, signedLineRequest(t, testLineTextCallback("event-no-self")), httptest.NewRecorder())
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) {
 		t.Fatalf("error = %T, want *echo.HTTPError", err)
@@ -112,7 +112,7 @@ func TestHandleWebhookMissingSelfIdentityReturnsError(t *testing.T) {
 func TestHandleWebhookRejectsInvalidSignature(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest(http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(testLineTextCallback("event-invalid")))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(testLineTextCallback("event-invalid")))
 	req.Header.Set("x-line-signature", "invalid")
 
 	err := NewAdapter(nil).HandleWebhook(context.Background(), testLineConfig(), nil, req, httptest.NewRecorder())
@@ -128,7 +128,7 @@ func TestHandleWebhookRejectsInvalidSignature(t *testing.T) {
 func TestHandleWebhookNilBodyFollowsSignatureValidation(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest(http.MethodPost, "/channels/line/webhook/cfg", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/channels/line/webhook/cfg", nil)
 	req.Body = nil
 
 	err := NewAdapter(nil).HandleWebhook(context.Background(), testLineConfig(), nil, req, httptest.NewRecorder())
@@ -156,8 +156,9 @@ func testLineConfig() channel.ChannelConfig {
 	}
 }
 
-func signedLineRequest(body string) *http.Request {
-	req := httptest.NewRequest(http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(body))
+func signedLineRequest(t *testing.T, body string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(body))
 	req.Header.Set("x-line-signature", lineSignature(testLineSecret, body))
 	return req
 }

@@ -12,7 +12,7 @@ func TestPluginsHandlerRegisterDoesNotExposeManifestInstallRoute(t *testing.T) {
 	e := echo.New()
 	(&PluginsHandler{}).Register(e)
 
-	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/plugins", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/bots/bot-1/plugins", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 

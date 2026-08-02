@@ -232,7 +232,7 @@ func TestDiscussUsesAuxiliaryVisionWhenPrimaryHasNoVision(t *testing.T) {
 		Prompt:     "describe in detail",
 		MaxRetries: 3,
 	})
-	service.auxiliaryVisionGen = func(_ context.Context, _ string, _ string, caption string, images []sdk.ImagePart) (string, error) {
+	service.auxiliaryVisionGen = func(_ context.Context, _ string, _ string, _ string, _ string, caption string, images []sdk.ImagePart) (string, error) {
 		if !strings.Contains(caption, "photo") || len(images) != 1 {
 			t.Fatalf("caption = %q, images = %#v", caption, images)
 		}

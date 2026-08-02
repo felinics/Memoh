@@ -28,7 +28,7 @@ func TestRemovedMessageSSERoutesStayRemoved(t *testing.T) {
 		"/bots/bot-1/messages/events",
 		"/bots/bot-1/sessions/session-1/messages/events",
 	} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)
 
@@ -48,7 +48,7 @@ func TestListMessagesRequiresSessionID(t *testing.T) {
 	h := &MessageHandler{}
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/bot-1/messages", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/bots/bot-1/messages", nil)
 	req.Header.Set(echo.HeaderAuthorization, "Bearer test")
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")

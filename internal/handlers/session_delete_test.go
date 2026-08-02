@@ -170,7 +170,7 @@ func callDeleteSession(handler *SessionHandler, botID, sessionID string) (*httpt
 
 func callDeleteSessionAs(handler *SessionHandler, botID, sessionID, userID string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/bots/"+botID+"/sessions/"+sessionID, nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/bots/"+botID+"/sessions/"+sessionID, nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, userID)
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id")

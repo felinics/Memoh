@@ -137,7 +137,7 @@ func TestMemoryItemRoutesDecodeEscapedMemoryID(t *testing.T) {
 			})
 			handler.Register(e)
 
-			req := httptest.NewRequest(tt.method, "/bots/"+botID+"/memory/"+tt.escapedMemoryID, bytes.NewBufferString(tt.body))
+			req := httptest.NewRequestWithContext(t.Context(), tt.method, "/bots/"+botID+"/memory/"+tt.escapedMemoryID, bytes.NewBufferString(tt.body))
 			if tt.decodedPath {
 				req.URL.Path = "/bots/" + botID + "/memory/" + tt.memoryID
 				req.URL.RawPath = ""

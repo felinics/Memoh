@@ -321,7 +321,7 @@ func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
 
 func callCreateSession(handler *SessionHandler, botID string, body string) error {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")

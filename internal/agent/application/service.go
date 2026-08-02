@@ -41,8 +41,6 @@ import (
 	"github.com/memohai/memoh/internal/hooks"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/workspace"
 )
@@ -661,35 +659,17 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 
-	authService := providers.NewService(nil, s.queries, "")
-	authCtx := oauthctx.WithUserID(ctx, p.UserID)
-	creds, err := authService.ResolveModelCredentials(authCtx, provider)
-	if err != nil {
-		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("resolve provider credentials: %w", err)
-	}
-
-	baseURL := providers.ProviderConfigString(provider, "base_url")
-	chatCompletionsCompat := models.ResolveChatCompletionsCompat(
-		baseURL,
-		providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
-	)
-
 	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, provider.ClientType)
 	reasoningEffort := ""
 	if reasoningConfig != nil && reasoningConfig.Active {
 		reasoningEffort = reasoningConfig.Effort
 	}
-
-	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
-		ModelID:               chatModel.ModelID,
-		ClientType:            provider.ClientType,
-		APIKey:                creds.APIKey,
-		CodexAccountID:        creds.CodexAccountID,
-		BaseURL:               baseURL,
-		ChatCompletionsCompat: chatCompletionsCompat,
-		HTTPClient:            s.streamHTTPClient,
-		ReasoningConfig:       reasoningConfig,
-	})
+	resolvedModel, err := s.buildSDKChatModel(ctx, p.UserID, chatModel, provider, reasoningConfig)
+	if err != nil {
+		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("resolve provider credentials: %w", err)
+	}
+	sdkModel := resolvedModel.Model
+	chatCompletionsCompat := resolvedModel.ChatCompletionsCompat
 
 	var agentSkills []native.SkillEntry
 	if s.skillLoader != nil {
@@ -719,7 +699,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ReasoningAdaptive:     reasoningConfig != nil && reasoningConfig.Adaptive,
 		ReasoningOffEffort:    offEffortOrEmpty(reasoningConfig),
 		ChatCompletionsCompat: chatCompletionsCompat,
-		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
+		PromptCacheTTL:        resolvedModel.PromptCacheTTL,
 		SessionType:           p.SessionType,
 		SupportsImageInput:    supportsImageInputForModel(chatModel),
 		SupportsToolCall:      chatModel.HasCompatibility(models.CompatToolCall),

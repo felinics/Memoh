@@ -528,10 +528,17 @@ func TestLoadAppExampleTemplateKeepsRootKeysOutsideAgentSection(t *testing.T) {
 	}
 	rendered := strings.Replace(string(raw), `timezone = "UTC"`, `timezone = "Asia/Tokyo"`, 1)
 	rendered = strings.Replace(rendered, `instance_id = ""`, `instance_id = "instance-example"`, 1)
-	configPath := filepath.Join(t.TempDir(), "app.example.toml")
-	if err := os.WriteFile(configPath, []byte(rendered), 0o600); err != nil {
+	tempDir := t.TempDir()
+	tempRoot, err := os.OpenRoot(tempDir)
+	if err != nil {
+		t.Fatalf("open temporary config root: %v", err)
+	}
+	defer func() { _ = tempRoot.Close() }()
+	const configName = "app.example.toml"
+	if err := tempRoot.WriteFile(configName, []byte(rendered), 0o600); err != nil {
 		t.Fatalf("write rendered app.example.toml: %v", err)
 	}
+	configPath := filepath.Join(tempDir, configName)
 
 	cfg, err := Load(configPath)
 	if err != nil {

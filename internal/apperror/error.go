@@ -27,6 +27,7 @@ const (
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed              Code = "profile.update_failed"
+	CodeSettingsAuxiliaryVisionInvalid   Code = "settings.auxiliary_vision_invalid"
 	CodeACPRuntimeNotFound               Code = "acp.runtime_not_found"
 	CodeACPTurnReplacementUnsupported    Code = "acp.turn_replacement_unsupported"
 	CodeACPModelSelectionUnsupported     Code = "acp.model_selection_unsupported"
@@ -119,6 +120,11 @@ var catalog = map[Code]Definition{
 	CodeProfileUpdateFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The profile could not be updated.",
+	},
+	CodeSettingsAuxiliaryVisionInvalid: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "The auxiliary vision settings are invalid.",
+		AllowedArgs: []string{"field"},
 	},
 	CodeACPRuntimeNotFound: {
 		HTTPStatus: http.StatusNotFound,

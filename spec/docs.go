@@ -359,6 +359,12 @@ const docTemplate = `{
                         "name": "name",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot ID to exclude from the name check",
+                        "name": "exclude_bot_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -16306,6 +16312,9 @@ const docTemplate = `{
         "compaction.Log": {
             "type": "object",
             "properties": {
+                "artifact_level": {
+                    "type": "integer"
+                },
                 "bot_id": {
                     "type": "string"
                 },
@@ -16323,6 +16332,12 @@ const docTemplate = `{
                 },
                 "model_id": {
                     "type": "string"
+                },
+                "parent_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "session_id": {
                     "type": "string"
@@ -20773,6 +20788,21 @@ const docTemplate = `{
                 "acl_default_effect": {
                     "type": "string"
                 },
+                "auxiliary_vision_max_retries": {
+                    "type": "integer"
+                },
+                "auxiliary_vision_mode": {
+                    "type": "string"
+                },
+                "auxiliary_vision_model_id": {
+                    "type": "string"
+                },
+                "auxiliary_vision_prompt": {
+                    "type": "string"
+                },
+                "auxiliary_vision_timeout_seconds": {
+                    "type": "integer"
+                },
                 "chat_acp_agent_id": {
                     "type": "string"
                 },
@@ -20953,6 +20983,21 @@ const docTemplate = `{
             "properties": {
                 "acl_default_effect": {
                     "type": "string"
+                },
+                "auxiliary_vision_max_retries": {
+                    "type": "integer"
+                },
+                "auxiliary_vision_mode": {
+                    "type": "string"
+                },
+                "auxiliary_vision_model_id": {
+                    "type": "string"
+                },
+                "auxiliary_vision_prompt": {
+                    "type": "string"
+                },
+                "auxiliary_vision_timeout_seconds": {
+                    "type": "integer"
                 },
                 "chat_acp_agent_id": {
                     "type": "string"

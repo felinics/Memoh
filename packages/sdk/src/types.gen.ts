@@ -1007,12 +1007,14 @@ export type CompactionListLogsResponse = {
 };
 
 export type CompactionLog = {
+    artifact_level?: number;
     bot_id?: string;
     completed_at?: string;
     error_message?: string;
     id?: string;
     message_count?: number;
     model_id?: string;
+    parent_ids?: Array<string>;
     session_id?: string;
     started_at?: string;
     status?: string;
@@ -2769,6 +2771,11 @@ export type SessionSession = {
 
 export type SettingsSettings = {
     acl_default_effect?: string;
+    auxiliary_vision_max_retries?: number;
+    auxiliary_vision_mode?: string;
+    auxiliary_vision_model_id?: string;
+    auxiliary_vision_prompt?: string;
+    auxiliary_vision_timeout_seconds?: number;
     chat_acp_agent_id?: string;
     chat_acp_project_mode?: string;
     chat_acp_project_path?: string;
@@ -2830,6 +2837,11 @@ export type SettingsToolApprovalMode = 'allow' | 'ask' | 'deny';
 
 export type SettingsUpsertRequest = {
     acl_default_effect?: string;
+    auxiliary_vision_max_retries?: number;
+    auxiliary_vision_mode?: string;
+    auxiliary_vision_model_id?: string;
+    auxiliary_vision_prompt?: string;
+    auxiliary_vision_timeout_seconds?: number;
     chat_acp_agent_id?: string;
     chat_acp_project_mode?: string;
     chat_acp_project_path?: string;
@@ -3292,6 +3304,10 @@ export type GetBotsNameAvailabilityData = {
          * Candidate bot name
          */
         name: string;
+        /**
+         * Bot ID to exclude from the name check
+         */
+        exclude_bot_id?: string;
     };
     url: '/bots/name-availability';
 };

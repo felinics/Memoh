@@ -250,6 +250,11 @@ CREATE TABLE IF NOT EXISTS bots (
   compaction_ratio INTEGER NOT NULL DEFAULT 80,
   compaction_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   image_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  auxiliary_vision_mode TEXT NOT NULL DEFAULT 'inherit',
+  auxiliary_vision_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  auxiliary_vision_prompt TEXT NOT NULL DEFAULT '',
+  auxiliary_vision_max_retries INTEGER,
+  auxiliary_vision_timeout_seconds INTEGER,
   discuss_probe_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   transcription_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -268,6 +273,9 @@ CREATE TABLE IF NOT EXISTS bots (
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
+  CONSTRAINT bots_auxiliary_vision_mode_check CHECK (auxiliary_vision_mode IN ('inherit', 'enabled', 'disabled')),
+  CONSTRAINT bots_auxiliary_vision_max_retries_check CHECK (auxiliary_vision_max_retries IS NULL OR auxiliary_vision_max_retries BETWEEN 0 AND 10),
+  CONSTRAINT bots_auxiliary_vision_timeout_seconds_check CHECK (auxiliary_vision_timeout_seconds IS NULL OR auxiliary_vision_timeout_seconds BETWEEN 1 AND 86400),
   -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0093).
   CONSTRAINT bots_name_format_check CHECK (name ~ '^[a-z0-9][a-z0-9-]{1,62}$')
 );

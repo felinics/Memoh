@@ -766,32 +766,44 @@ func cleanWorkspaceACPSecretsViaGRPC(ctx context.Context, client *bridge.Client)
 }
 
 func cleanWorkspaceACPSecretsInDir(root string) error {
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rootFS.Close() }()
+
 	for _, prefix := range workspaceACPSecretDirPrefixes {
-		base := filepath.Join(root, filepath.FromSlash(strings.TrimSuffix(prefix, "/")))
-		if _, err := os.Stat(base); err != nil {
+		base := filepath.FromSlash(strings.TrimSuffix(prefix, "/"))
+		if _, err := rootFS.Stat(base); err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return err
 		}
-		if err := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+		if err := fs.WalkDir(rootFS.FS(), filepath.ToSlash(base), func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
+			shouldRemove := shouldSkipWorkspaceArchivePath(path, d.IsDir())
+			if d.Type()&fs.ModeSymlink != 0 {
+				// A malicious workspace may replace a protected directory or
+				// file with a symlink. Match both path shapes, then remove only
+				// the link through os.Root without following its target.
+				shouldRemove = shouldRemove ||
+					shouldSkipWorkspaceArchivePath(path, true) ||
+					shouldSkipWorkspaceArchivePath(path, false)
 			}
-			if !shouldSkipWorkspaceArchivePath(rel, d.IsDir()) {
+			if !shouldRemove {
 				return nil
 			}
+			rootPath := filepath.FromSlash(path)
 			if d.IsDir() {
-				if err := os.RemoveAll(path); err != nil {
+				if err := rootFS.RemoveAll(rootPath); err != nil {
 					return err
 				}
 				return filepath.SkipDir
 			}
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			if err := rootFS.Remove(rootPath); err != nil && !os.IsNotExist(err) {
 				return err
 			}
 			return nil

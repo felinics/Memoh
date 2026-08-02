@@ -5,8 +5,13 @@ packages:
 allowBuilds:
   electron-winstaller: true
   esbuild: true
+  protobufjs: false
   sharp: true
   vue-demi: true
+
+peerDependencyRules:
+  ignoreMissing:
+    - '@algolia/client-search'
 
 onlyBuiltDependencies:
   - electron

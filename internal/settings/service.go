@@ -15,9 +15,11 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/models"
 	netctl "github.com/memohai/memoh/internal/network"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
@@ -122,6 +124,11 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		current.ChatACPAgentID = existingSettings.ChatACPAgentID
 		current.ChatACPProjectPath = existingSettings.ChatACPProjectPath
 		current.ChatACPProjectMode = existingSettings.ChatACPProjectMode
+		current.AuxiliaryVisionMode = existingSettings.AuxiliaryVisionMode
+		current.AuxiliaryVisionModelID = existingSettings.AuxiliaryVisionModelID
+		current.AuxiliaryVisionPrompt = existingSettings.AuxiliaryVisionPrompt
+		current.AuxiliaryVisionMaxRetries = existingSettings.AuxiliaryVisionMaxRetries
+		current.AuxiliaryVisionTimeoutSeconds = existingSettings.AuxiliaryVisionTimeoutSeconds
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
 		current.DisplayEnabled = settingsRow.DisplayEnabled
 		current.CommandUILanguage = settingsRow.CommandUiLanguage
@@ -158,6 +165,31 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if req.CompactionRatio != nil && *req.CompactionRatio >= 1 && *req.CompactionRatio <= 100 {
 		current.CompactionRatio = *req.CompactionRatio
+	}
+	if req.AuxiliaryVisionMode != nil {
+		mode := normalizeAuxiliaryVisionMode(*req.AuxiliaryVisionMode)
+		if mode == "" {
+			return Settings{}, invalidAuxiliaryVisionSetting("auxiliary_vision_mode")
+		}
+		current.AuxiliaryVisionMode = mode
+	}
+	if req.AuxiliaryVisionModelID != nil {
+		current.AuxiliaryVisionModelID = strings.TrimSpace(*req.AuxiliaryVisionModelID)
+	}
+	if req.AuxiliaryVisionPrompt != nil {
+		current.AuxiliaryVisionPrompt = strings.TrimSpace(*req.AuxiliaryVisionPrompt)
+	}
+	if req.AuxiliaryVisionMaxRetries != nil {
+		if *req.AuxiliaryVisionMaxRetries < InheritVisionMaxRetries || *req.AuxiliaryVisionMaxRetries > 10 {
+			return Settings{}, invalidAuxiliaryVisionSetting("auxiliary_vision_max_retries")
+		}
+		current.AuxiliaryVisionMaxRetries = *req.AuxiliaryVisionMaxRetries
+	}
+	if req.AuxiliaryVisionTimeoutSeconds != nil {
+		if *req.AuxiliaryVisionTimeoutSeconds < 0 || *req.AuxiliaryVisionTimeoutSeconds > MaxVisionTimeoutSeconds {
+			return Settings{}, invalidAuxiliaryVisionSetting("auxiliary_vision_timeout_seconds")
+		}
+		current.AuxiliaryVisionTimeoutSeconds = *req.AuxiliaryVisionTimeoutSeconds
 	}
 	if req.PersistFullToolResults != nil {
 		current.PersistFullToolResults = *req.PersistFullToolResults
@@ -249,6 +281,21 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			compactionModelUUID = modelID
 		}
 	}
+	auxiliaryVisionModelUUID := pgtype.UUID{}
+	if value := strings.TrimSpace(current.AuxiliaryVisionModelID); value != "" {
+		if req.AuxiliaryVisionModelID == nil {
+			auxiliaryVisionModelUUID, err = db.ParseUUID(value)
+		} else {
+			auxiliaryVisionModelUUID, err = s.resolveModelUUID(ctx, value)
+			if err == nil {
+				err = s.validateAuxiliaryVisionModel(ctx, auxiliaryVisionModelUUID)
+			}
+		}
+		if err != nil {
+			return Settings{}, invalidAuxiliaryVisionSetting("auxiliary_vision_model_id")
+		}
+		current.AuxiliaryVisionModelID = uuid.UUID(auxiliaryVisionModelUUID.Bytes).String()
+	}
 	imageModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ImageModelID); value != "" {
 		modelID, err := s.resolveModelUUID(ctx, value)
@@ -316,6 +363,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
+	auxiliaryVisionMaxRetries := pgtype.Int4{}
+	if current.AuxiliaryVisionMaxRetries >= 0 {
+		auxiliaryVisionMaxRetries = pgtype.Int4{Int32: int32(current.AuxiliaryVisionMaxRetries), Valid: true} //nolint:gosec // validated 0-10 above
+	}
+	auxiliaryVisionTimeoutSeconds := pgtype.Int4{}
+	if current.AuxiliaryVisionTimeoutSeconds > 0 {
+		auxiliaryVisionTimeoutSeconds = pgtype.Int4{Int32: int32(current.AuxiliaryVisionTimeoutSeconds), Valid: true} //nolint:gosec // validated against MaxVisionTimeoutSeconds above
+	}
 
 	normalizedNetwork, err := s.normalizeOverlayConfig(current)
 	if err != nil {
@@ -345,40 +400,45 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		return Settings{}, rollbackNetworkChange(fmt.Errorf("marshal network config: %w", err))
 	}
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
-		ID:                     pgID,
-		Timezone:               timezoneValue,
-		Language:               current.Language,
-		CommandUiLanguage:      current.CommandUILanguage,
-		ReasoningEnabled:       current.ReasoningEnabled,
-		ReasoningEffort:        current.ReasoningEffort,
-		HeartbeatEnabled:       current.HeartbeatEnabled,
-		HeartbeatInterval:      int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
-		HeartbeatPrompt:        "",
-		CompactionEnabled:      current.CompactionEnabled,
-		CompactionThreshold:    int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
-		CompactionRatio:        int32(current.CompactionRatio),     //nolint:gosec // bounded 1-100 above
-		ChatModelID:            chatModelUUID,
-		ChatRuntime:            current.ChatRuntime,
-		ChatAcpAgentID:         nullableText(current.ChatACPAgentID),
-		ChatAcpProjectPath:     current.ChatACPProjectPath,
-		ChatAcpProjectMode:     current.ChatACPProjectMode,
-		HeartbeatModelID:       heartbeatModelUUID,
-		CompactionModelID:      compactionModelUUID,
-		ImageModelID:           imageModelUUID,
-		SearchProviderID:       searchProviderUUID,
-		FetchProviderIDSet:     fetchProviderIDSet,
-		FetchProviderID:        fetchProviderUUID,
-		MemoryProviderID:       memoryProviderUUID,
-		TtsModelID:             ttsModelUUID,
-		TranscriptionModelID:   transcriptionModelUUID,
-		VideoModelID:           videoModelUUID,
-		PersistFullToolResults: current.PersistFullToolResults,
-		ShowToolCallsInIm:      current.ShowToolCallsInIM,
-		ToolApprovalConfig:     toolApprovalConfig,
-		DisplayEnabled:         current.DisplayEnabled,
-		OverlayProvider:        normalizedNetwork.OverlayProvider,
-		OverlayEnabled:         normalizedNetwork.OverlayEnabled,
-		OverlayConfig:          overlayConfigJSON,
+		ID:                            pgID,
+		Timezone:                      timezoneValue,
+		Language:                      current.Language,
+		CommandUiLanguage:             current.CommandUILanguage,
+		ReasoningEnabled:              current.ReasoningEnabled,
+		ReasoningEffort:               current.ReasoningEffort,
+		HeartbeatEnabled:              current.HeartbeatEnabled,
+		HeartbeatInterval:             int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
+		HeartbeatPrompt:               "",
+		CompactionEnabled:             current.CompactionEnabled,
+		CompactionThreshold:           int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
+		CompactionRatio:               int32(current.CompactionRatio),     //nolint:gosec // bounded 1-100 above
+		ChatModelID:                   chatModelUUID,
+		ChatRuntime:                   current.ChatRuntime,
+		ChatAcpAgentID:                nullableText(current.ChatACPAgentID),
+		ChatAcpProjectPath:            current.ChatACPProjectPath,
+		ChatAcpProjectMode:            current.ChatACPProjectMode,
+		HeartbeatModelID:              heartbeatModelUUID,
+		CompactionModelID:             compactionModelUUID,
+		AuxiliaryVisionMode:           normalizeAuxiliaryVisionModeValue(current.AuxiliaryVisionMode),
+		AuxiliaryVisionModelID:        auxiliaryVisionModelUUID,
+		AuxiliaryVisionPrompt:         strings.TrimSpace(current.AuxiliaryVisionPrompt),
+		AuxiliaryVisionMaxRetries:     auxiliaryVisionMaxRetries,
+		AuxiliaryVisionTimeoutSeconds: auxiliaryVisionTimeoutSeconds,
+		ImageModelID:                  imageModelUUID,
+		SearchProviderID:              searchProviderUUID,
+		FetchProviderIDSet:            fetchProviderIDSet,
+		FetchProviderID:               fetchProviderUUID,
+		MemoryProviderID:              memoryProviderUUID,
+		TtsModelID:                    ttsModelUUID,
+		TranscriptionModelID:          transcriptionModelUUID,
+		VideoModelID:                  videoModelUUID,
+		PersistFullToolResults:        current.PersistFullToolResults,
+		ShowToolCallsInIm:             current.ShowToolCallsInIM,
+		ToolApprovalConfig:            toolApprovalConfig,
+		DisplayEnabled:                current.DisplayEnabled,
+		OverlayProvider:               normalizedNetwork.OverlayProvider,
+		OverlayEnabled:                normalizedNetwork.OverlayEnabled,
+		OverlayConfig:                 overlayConfigJSON,
 	})
 	if err != nil {
 		return Settings{}, rollbackNetworkChange(err)
@@ -412,20 +472,22 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 
 func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32, compactionRatio int32) Settings {
 	settings := Settings{
-		Language:            strings.TrimSpace(language),
-		CommandUILanguage:   strings.TrimSpace(commandUILanguage),
-		AclDefaultEffect:    strings.TrimSpace(aclDefaultEffect),
-		ReasoningEnabled:    reasoningEnabled,
-		ReasoningEffort:     strings.TrimSpace(reasoningEffort),
-		HeartbeatEnabled:    heartbeatEnabled,
-		HeartbeatInterval:   int(heartbeatInterval),
-		CompactionEnabled:   compactionEnabled,
-		CompactionThreshold: int(compactionThreshold),
-		CompactionRatio:     int(compactionRatio),
-		ToolApprovalConfig:  DefaultToolApprovalConfig(),
-		ChatRuntime:         ChatRuntimeModel,
-		ChatACPProjectPath:  DefaultACPProjectPath,
-		ChatACPProjectMode:  DefaultACPProjectMode,
+		Language:                  strings.TrimSpace(language),
+		CommandUILanguage:         strings.TrimSpace(commandUILanguage),
+		AclDefaultEffect:          strings.TrimSpace(aclDefaultEffect),
+		ReasoningEnabled:          reasoningEnabled,
+		ReasoningEffort:           strings.TrimSpace(reasoningEffort),
+		HeartbeatEnabled:          heartbeatEnabled,
+		HeartbeatInterval:         int(heartbeatInterval),
+		CompactionEnabled:         compactionEnabled,
+		CompactionThreshold:       int(compactionThreshold),
+		CompactionRatio:           int(compactionRatio),
+		ToolApprovalConfig:        DefaultToolApprovalConfig(),
+		ChatRuntime:               ChatRuntimeModel,
+		ChatACPProjectPath:        DefaultACPProjectPath,
+		ChatACPProjectMode:        DefaultACPProjectMode,
+		AuxiliaryVisionMode:       AuxiliaryVisionInherit,
+		AuxiliaryVisionMaxRetries: InheritVisionMaxRetries,
 	}
 	if settings.Language == "" {
 		settings.Language = DefaultLanguage
@@ -461,7 +523,7 @@ func isValidReasoningEffort(effort string) bool {
 }
 
 func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
-	return normalizeBotSettingsFields(
+	settings := normalizeBotSettingsFields(
 		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEnabled,
@@ -494,10 +556,19 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.OverlayEnabled,
 		row.OverlayConfig,
 	)
+	applyAuxiliaryVisionSettings(
+		&settings,
+		row.AuxiliaryVisionMode,
+		row.AuxiliaryVisionModelID,
+		row.AuxiliaryVisionPrompt,
+		row.AuxiliaryVisionMaxRetries,
+		row.AuxiliaryVisionTimeoutSeconds,
+	)
+	return settings
 }
 
 func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
-	return normalizeBotSettingsFields(
+	settings := normalizeBotSettingsFields(
 		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEnabled,
@@ -530,6 +601,15 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.OverlayEnabled,
 		row.OverlayConfig,
 	)
+	applyAuxiliaryVisionSettings(
+		&settings,
+		row.AuxiliaryVisionMode,
+		row.AuxiliaryVisionModelID,
+		row.AuxiliaryVisionPrompt,
+		row.AuxiliaryVisionMaxRetries,
+		row.AuxiliaryVisionTimeoutSeconds,
+	)
+	return settings
 }
 
 func normalizeBotSettingsFields(
@@ -662,6 +742,80 @@ func normalizeChatRuntimeValue(raw string) string {
 		return normalized
 	}
 	return ChatRuntimeModel
+}
+
+func normalizeAuxiliaryVisionMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case AuxiliaryVisionInherit, AuxiliaryVisionEnabled, AuxiliaryVisionDisabled:
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
+}
+
+func normalizeAuxiliaryVisionModeValue(raw string) string {
+	if mode := normalizeAuxiliaryVisionMode(raw); mode != "" {
+		return mode
+	}
+	return AuxiliaryVisionInherit
+}
+
+func applyAuxiliaryVisionSettings(
+	settings *Settings,
+	mode string,
+	modelID pgtype.UUID,
+	prompt string,
+	maxRetries pgtype.Int4,
+	timeoutSeconds pgtype.Int4,
+) {
+	if settings == nil {
+		return
+	}
+	settings.AuxiliaryVisionMode = normalizeAuxiliaryVisionModeValue(mode)
+	settings.AuxiliaryVisionModelID = ""
+	if modelID.Valid {
+		settings.AuxiliaryVisionModelID = uuid.UUID(modelID.Bytes).String()
+	}
+	settings.AuxiliaryVisionPrompt = strings.TrimSpace(prompt)
+	settings.AuxiliaryVisionMaxRetries = InheritVisionMaxRetries
+	if maxRetries.Valid {
+		settings.AuxiliaryVisionMaxRetries = int(maxRetries.Int32)
+	}
+	settings.AuxiliaryVisionTimeoutSeconds = 0
+	if timeoutSeconds.Valid {
+		settings.AuxiliaryVisionTimeoutSeconds = int(timeoutSeconds.Int32)
+	}
+}
+
+func invalidAuxiliaryVisionSetting(field string) error {
+	return apperror.New(apperror.CodeSettingsAuxiliaryVisionInvalid, map[string]string{"field": field})
+}
+
+func (s *Service) validateAuxiliaryVisionModel(ctx context.Context, modelID pgtype.UUID) error {
+	model, err := s.queries.GetModelByID(ctx, modelID)
+	if err != nil {
+		return err
+	}
+	if model.Type != string(models.ModelTypeChat) || !model.Enable {
+		return invalidAuxiliaryVisionSetting("auxiliary_vision_model_id")
+	}
+	provider, err := s.queries.GetProviderByID(ctx, model.ProviderID)
+	if err != nil {
+		return err
+	}
+	if !provider.Enable {
+		return invalidAuxiliaryVisionSetting("auxiliary_vision_model_id")
+	}
+	var config models.ModelConfig
+	if err := json.Unmarshal(model.Config, &config); err != nil {
+		return err
+	}
+	for _, compatibility := range config.Compatibilities {
+		if compatibility == models.CompatVision {
+			return nil
+		}
+	}
+	return invalidAuxiliaryVisionSetting("auxiliary_vision_model_id")
 }
 
 func normalizeACPProjectMode(raw string) string {

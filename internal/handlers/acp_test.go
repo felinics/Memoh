@@ -14,7 +14,7 @@ import (
 
 func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/acp/profiles", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/acp/profiles", nil)
 	rec := httptest.NewRecorder()
 
 	if err := NewACPHandler().ListProfiles(e.NewContext(req, rec)); err != nil {

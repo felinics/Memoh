@@ -112,7 +112,7 @@ func TestJWTMiddlewareRejectsInactiveAccountSession(t *testing.T) {
 	}))
 	e.GET("/protected", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 
-	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/protected", nil)
 	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -138,7 +138,7 @@ func TestJWTMiddlewareDoesNotValidateChatRouteTokenAsAccount(t *testing.T) {
 	}))
 	e.GET("/chat-route", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 
-	req := httptest.NewRequest(http.MethodGet, "/chat-route", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/chat-route", nil)
 	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)

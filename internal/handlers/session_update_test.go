@@ -772,7 +772,7 @@ func callUpdateSession(handler *SessionHandler, botID, sessionID, body string) (
 
 func callUpdateSessionAs(handler *SessionHandler, botID, sessionID, userID, body string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPatch, "/bots/"+botID+"/sessions/"+sessionID, bytes.NewBufferString(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPatch, "/bots/"+botID+"/sessions/"+sessionID, bytes.NewBufferString(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, userID)
@@ -784,7 +784,7 @@ func callUpdateSessionAs(handler *SessionHandler, botID, sessionID, userID, body
 
 func callGetSession(handler *SessionHandler, botID, sessionID, userID string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/sessions/"+sessionID, nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/sessions/"+sessionID, nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, userID)
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id")

@@ -169,27 +169,3 @@ func TestRollingSummaryTargetTokens(t *testing.T) {
 		t.Fatalf("small positive target = %d, want floor 1", got)
 	}
 }
-
-func TestSyncCompactionTargetTokens(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name   string
-		budget int
-		ratio  int
-		want   int
-	}{
-		{name: "default ratio keeps 20% of budget", budget: 200000, ratio: 80, want: 40000},
-		{name: "light ratio keeps most of budget", budget: 10000, ratio: 20, want: 8000},
-		{name: "full ratio keeps nothing", budget: 200000, ratio: 100, want: 0},
-		{name: "unknown budget disables target", budget: 0, ratio: 80, want: 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := syncCompactionTargetTokens(tc.budget, tc.ratio); got != tc.want {
-				t.Fatalf("syncCompactionTargetTokens(%d, %d) = %d, want %d", tc.budget, tc.ratio, got, tc.want)
-			}
-		})
-	}
-}

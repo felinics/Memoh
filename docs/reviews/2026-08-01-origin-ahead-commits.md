@@ -311,16 +311,18 @@ P4-1 → P4-2 → P4-3        (P4-2 依赖 P0-1,P4-3 依赖 P1-3)
 | 超大模型窗口（问题 #7） | [Ollama 官方模型页](https://ollama.com/library/deepseek-v4-flash%3Acloud)可核实该 cloud 模型确实存在，因此未删除现有 100 万 context window 元数据；同时给 discuss 上下文增加 256K tokens 的硬上限，避免端点能力与声明不一致时继续放大请求。 |
 | 低风险正确性问题 | 统一 `NO_REPLY` 识别，允许大小写差异及句首、句尾标点；fallback 发送增加 30 s 超时；token 估算统一为保守的 2 bytes/token；workspace 备份清理失败改为告警而不是启动失败；memory provider 替换改为原子更新；幂等的关键词添加会明确报告“未变更”。 |
 | Web 配置 | Telegram channel 设置页已支持被动采样率和强制回复关键词，复用现有 bot metadata API，不增加数据库字段；中、英、日文案已补齐。Compaction ratio 文案也已改为当前的“摘要目标比例”语义。 |
+| Lint 清理 | 删除没有调用方的旧同步 compaction 路径；测试 HTTP 请求全部使用显式 context；Mailgun webhook 增加 32 MiB 请求上限；workspace secret 清理改用 `os.Root`，并覆盖符号链接场景。 |
+| Auxiliary vision 配置 | 模型凭证与 SDK 构造已收敛到共享 helper。新增 per-bot 的继承、启用、关闭模式，以及模型、提示词、重试和超时覆盖项；保存后下一次图片处理立即读取新值，不需要重启。TOML 配置继续作为服务端默认值。 |
+| Compaction 谱系 | 日志 API 已返回 `artifact_level` 和 `parent_ids`，Web 日志页展示层级、父产物数量和完整 ID，滚动摘要的父子关系可以直接排查。 |
+| 旧工具 | `telegram-discuss-rate` 不再直连数据库，只保留弃用提示并引导到 Web。未纳入 Git 的本地 `botprompt` 源码和可执行文件已从运行路径移走，另存为可恢复备份。 |
 
 ### 验证结果
 
 - `go test ./...`：仓库跟踪的 Go 源码全量测试通过。
 - `go test -race ./internal/agent/application ./internal/agent/runtime/session ./internal/channel/discuss ./internal/memory/adapters`：并发重点包通过 race detector。
-- `golangci-lint run --new-from-rev=HEAD`：本次涉及的 Go 包无新增 lint 问题。
-- Web 生产构建通过；改动的 Vue 文件通过 ESLint，UI contract 检查通过。
+- `mise run lint`：全仓库通过，包含 golangci-lint、ESLint 和 UI contract。
+- Web 生产构建通过。
 - `git diff --check` 通过，未发现空白符错误。
-
-全仓库 `golangci-lint run ./...` 仍会报告历史遗留问题，本轮只保证没有为改动范围引入新的 lint 错误。
 
 ### 部署结果
 
@@ -341,7 +343,6 @@ P4-1 → P4-2 → P4-3        (P4-2 依赖 P0-1,P4-3 依赖 P1-3)
 
 - discuss fallback 仍可进一步接入统一 messaging executor，避免 inline tag 处理逻辑分叉。
 - Telegram discuss 策略仍散落在通用 channel/discuss 代码中，可收敛为 per-platform policy。
-- 旧的分段 compaction 路径仍保留，可在确认不再需要回退后删除。
-- Auxiliary vision 的 provider/model 构造仍可继续去重；若要支持 Web 热更新，还需要补充全局或 per-bot 配置 API。
-- Compaction artifact lineage 暂未在 Web 日志页展示。
-- `telegram-discuss-rate` CLI 暂时保留；待 Web 配置稳定后可标记弃用或移除。
+- Compaction 谱系目前按日志逐条展示；如果后续需要跨多轮摘要追踪，可再增加按 session 筛选和树形视图。
+- Auxiliary vision 的服务端默认值仍由 TOML 管理；目前 Web 只提供 per-bot 覆盖，不提供全局配置页。
+- UI contract 仍有 3 条非阻断 warning，其中两条位于 `packages/ui` 子模块，适合随 UI 组件库单独处理。

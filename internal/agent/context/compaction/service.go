@@ -358,15 +358,17 @@ func (s *Service) DeleteLogs(ctx context.Context, botID string) error {
 
 func toLog(r sqlc.BotHistoryMessageCompact) Log {
 	l := Log{
-		ID:           formatUUID(r.ID),
-		BotID:        formatUUID(r.BotID),
-		SessionID:    formatUUID(r.SessionID),
-		Status:       r.Status,
-		Summary:      r.Summary,
-		MessageCount: int(r.MessageCount),
-		ErrorMessage: r.ErrorMessage,
-		ModelID:      formatUUID(r.ModelID),
-		StartedAt:    r.StartedAt.Time,
+		ID:            formatUUID(r.ID),
+		BotID:         formatUUID(r.BotID),
+		SessionID:     formatUUID(r.SessionID),
+		Status:        r.Status,
+		Summary:       r.Summary,
+		MessageCount:  int(r.MessageCount),
+		ErrorMessage:  r.ErrorMessage,
+		ModelID:       formatUUID(r.ModelID),
+		ArtifactLevel: int(r.ArtifactLevel),
+		ParentIDs:     formatUUIDs(r.ParentIds),
+		StartedAt:     r.StartedAt.Time,
 	}
 	if r.CompletedAt.Valid {
 		t := r.CompletedAt.Time
@@ -386,4 +388,14 @@ func formatUUID(id pgtype.UUID) string {
 		return ""
 	}
 	return uuid.UUID(id.Bytes).String()
+}
+
+func formatUUIDs(ids []pgtype.UUID) []string {
+	formatted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if value := formatUUID(id); value != "" {
+			formatted = append(formatted, value)
+		}
+	}
+	return formatted
 }

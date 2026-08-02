@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,8 +21,10 @@ import (
 )
 
 const (
-	InboundModeWebhook = "webhook"
-	InboundModePoll    = "poll"
+	InboundModeWebhook      = "webhook"
+	InboundModePoll         = "poll"
+	maxWebhookBodyBytes     = 32 << 20
+	multipartFormMemorySize = 10 << 20
 )
 
 const ProviderName email.ProviderName = "mailgun"
@@ -141,10 +144,8 @@ func (a *Adapter) StartReceiving(ctx context.Context, config map[string]any, han
 func (*Adapter) HandleWebhook(_ context.Context, config map[string]any, r *http.Request) (*email.InboundEmail, error) {
 	signingKey, _ := config["webhook_signing_key"].(string)
 
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		if err2 := r.ParseForm(); err2 != nil {
-			return nil, fmt.Errorf("parse form: %w", err2)
-		}
+	if err := parseWebhookForm(r, maxWebhookBodyBytes); err != nil {
+		return nil, err
 	}
 
 	timestamp := r.FormValue("timestamp")
@@ -173,6 +174,22 @@ func (*Adapter) HandleWebhook(_ context.Context, config map[string]any, r *http.
 		BodyHTML:   r.FormValue("body-html"),
 		ReceivedAt: time.Now(),
 	}, nil
+}
+
+func parseWebhookForm(r *http.Request, maxBodyBytes int64) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, maxBodyBytes)
+	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mediaType == "multipart/form-data" {
+		// #nosec G120 -- MaxBytesReader caps the request body before form parsing.
+		if err := r.ParseMultipartForm(multipartFormMemorySize); err != nil {
+			return fmt.Errorf("parse multipart form: %w", err)
+		}
+		return nil
+	}
+	if err := r.ParseForm(); err != nil {
+		return fmt.Errorf("parse form: %w", err)
+	}
+	return nil
 }
 
 // ---- Poll connection ----

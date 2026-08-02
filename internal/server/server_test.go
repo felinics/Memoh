@@ -104,7 +104,7 @@ func TestServerRendersAppErrorAsProblemWithRequestID(t *testing.T) {
 		errorTestHandler{err: apperror.Wrap(apperror.CodeWorkspaceUnreachable, cause, nil)},
 	)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	server.echo.ServeHTTP(rec, req)
 
@@ -143,7 +143,7 @@ func TestServerLogsFinalProblemStatus(t *testing.T) {
 		errorTestHandler{err: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("private cause"), nil)},
 	)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	server.echo.ServeHTTP(rec, req)
 
@@ -163,7 +163,7 @@ func TestServerKeepsLegacyHTTPErrorBehavior(t *testing.T) {
 		errorTestHandler{err: echo.NewHTTPError(http.StatusBadRequest, "legacy message")},
 	)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	server.echo.ServeHTTP(rec, req)
 

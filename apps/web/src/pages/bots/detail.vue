@@ -426,7 +426,7 @@ const searchIndex = computed(() => {
     { tab: 'general', key: 'bots.settings.blocks.global', keywords: ['name', 'avatar', 'description', 'timezone'] },
     { tab: 'general', key: 'bots.settings.blocks.interaction', keywords: ['language', 'chat model', 'reasoning', 'model', 'llm', '模型', '换模型', '更换模型', 'モデル'] },
     { tab: 'general', key: 'bots.settings.blocks.context', keywords: ['browser', 'search', 'provider'] },
-    { tab: 'general', key: 'bots.settings.blocks.multimedia', keywords: ['image', 'tts', 'transcription'] },
+    { tab: 'general', key: 'bots.settings.blocks.multimedia', keywords: ['image', 'vision', 'auxiliary vision', 'tts', 'transcription', '辅助视觉', '補助 vision'] },
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
     { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
     { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },

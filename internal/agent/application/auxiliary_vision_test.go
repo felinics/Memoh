@@ -10,6 +10,8 @@ import (
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/settings"
 )
 
 func TestDescribeImagesWithAuxiliaryVisionRetriesThreeTimes(t *testing.T) {
@@ -26,10 +28,10 @@ func TestDescribeImagesWithAuxiliaryVisionRetriesThreeTimes(t *testing.T) {
 		},
 		auxiliaryVisionWait: func(context.Context, time.Duration) error { return nil },
 	}
-	service.auxiliaryVisionGen = func(_ context.Context, _ string, prompt string, caption string, images []sdk.ImagePart) (string, error) {
+	service.auxiliaryVisionGen = func(_ context.Context, _ string, model string, provider string, prompt string, caption string, images []sdk.ImagePart) (string, error) {
 		calls++
-		if prompt != "describe in detail" || caption != "这是什么？" || len(images) != 1 {
-			t.Fatalf("unexpected generator input: prompt=%q caption=%q images=%#v", prompt, caption, images)
+		if model != "gpt-5.6-luna" || provider != "openai-codex" || prompt != "describe in detail" || caption != "这是什么？" || len(images) != 1 {
+			t.Fatalf("unexpected generator input: model=%q provider=%q prompt=%q caption=%q images=%#v", model, provider, prompt, caption, images)
 		}
 		if calls <= 3 {
 			return "", errors.New("api error 503: temporary failure")
@@ -55,6 +57,50 @@ func TestDescribeImagesWithAuxiliaryVisionRetriesThreeTimes(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("vision context missing %q: %s", want, got)
 		}
+	}
+}
+
+func TestApplyAuxiliaryVisionOverrides(t *testing.T) {
+	t.Parallel()
+
+	inherited := AuxiliaryVisionConfig{
+		Model:      "global-model",
+		Provider:   "global-provider",
+		Prompt:     "global prompt",
+		MaxRetries: 3,
+		Timeout:    30 * time.Second,
+	}
+
+	disabled := applyAuxiliaryVisionOverrides(inherited, settings.Settings{
+		AuxiliaryVisionMode: settings.AuxiliaryVisionDisabled,
+	})
+	if disabled.enabled() {
+		t.Fatalf("disabled override kept model %q", disabled.Model)
+	}
+
+	enabled := applyAuxiliaryVisionOverrides(inherited, settings.Settings{
+		AuxiliaryVisionMode:           settings.AuxiliaryVisionEnabled,
+		AuxiliaryVisionModelID:        "11111111-1111-1111-1111-111111111111",
+		AuxiliaryVisionPrompt:         "bot prompt",
+		AuxiliaryVisionMaxRetries:     0,
+		AuxiliaryVisionTimeoutSeconds: 5,
+	})
+	if enabled.Model != "11111111-1111-1111-1111-111111111111" || enabled.Provider != "" {
+		t.Fatalf("enabled model/provider = %q/%q", enabled.Model, enabled.Provider)
+	}
+	if enabled.Prompt != "bot prompt" || enabled.MaxRetries != 0 || enabled.Timeout != 5*time.Second {
+		t.Fatalf("enabled overrides = %#v", enabled)
+	}
+
+	inheritedMode := applyAuxiliaryVisionOverrides(inherited, settings.Settings{
+		AuxiliaryVisionMode:           settings.AuxiliaryVisionInherit,
+		AuxiliaryVisionModelID:        "ignored-model",
+		AuxiliaryVisionPrompt:         "ignored prompt",
+		AuxiliaryVisionMaxRetries:     1,
+		AuxiliaryVisionTimeoutSeconds: 1,
+	})
+	if !reflect.DeepEqual(inheritedMode, inherited.normalized()) {
+		t.Fatalf("inherit mode = %#v, want %#v", inheritedMode, inherited.normalized())
 	}
 }
 
@@ -110,7 +156,7 @@ func TestAuxiliaryVisionHasIndependentTimeout(t *testing.T) {
 			Model:   "vision-model",
 			Timeout: 20 * time.Millisecond,
 		},
-		auxiliaryVisionGen: func(ctx context.Context, _ string, _ string, _ string, _ []sdk.ImagePart) (string, error) {
+		auxiliaryVisionGen: func(ctx context.Context, _ string, _ string, _ string, _ string, _ string, _ []sdk.ImagePart) (string, error) {
 			if _, ok := ctx.Deadline(); !ok {
 				t.Fatal("auxiliary vision call has no deadline")
 			}
@@ -138,7 +184,7 @@ func TestDescribeImagesWithAuxiliaryVisionSkipsVisionCapablePrimary(t *testing.T
 
 	service := &Service{
 		auxiliaryVision: AuxiliaryVisionConfig{Model: "gpt-5.6-luna", MaxRetries: 3},
-		auxiliaryVisionGen: func(context.Context, string, string, string, []sdk.ImagePart) (string, error) {
+		auxiliaryVisionGen: func(context.Context, string, string, string, string, string, []sdk.ImagePart) (string, error) {
 			t.Fatal("auxiliary model must not run when the primary model supports vision")
 			return "", nil
 		},
@@ -163,7 +209,7 @@ func TestDescribeImagesWithAuxiliaryVisionSkipsImageTypedVideo(t *testing.T) {
 
 	service := &Service{
 		auxiliaryVision: AuxiliaryVisionConfig{Model: "gpt-5.6-luna", MaxRetries: 3},
-		auxiliaryVisionGen: func(context.Context, string, string, string, []sdk.ImagePart) (string, error) {
+		auxiliaryVisionGen: func(context.Context, string, string, string, string, string, []sdk.ImagePart) (string, error) {
 			t.Fatal("auxiliary model must not receive video/webm as image input")
 			return "", nil
 		},

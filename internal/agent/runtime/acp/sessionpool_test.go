@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1046,15 +1047,7 @@ func readOptionalFile(t *testing.T, path string) string {
 }
 
 func equalStrings(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(left, right)
 }
 
 func TestSessionPoolRuntimeStatusReportsActiveDuringColdStart(t *testing.T) {

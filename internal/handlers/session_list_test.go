@@ -94,7 +94,7 @@ func callListSessions(handler *SessionHandler, botID, rawQuery string) (*httptes
 	if rawQuery != "" {
 		target += "?" + rawQuery
 	}
-	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 	ctx.SetPath("/bots/:bot_id/sessions")

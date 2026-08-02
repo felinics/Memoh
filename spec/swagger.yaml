@@ -1725,6 +1725,8 @@ definitions:
     type: object
   compaction.Log:
     properties:
+      artifact_level:
+        type: integer
       bot_id:
         type: string
       completed_at:
@@ -1737,6 +1739,10 @@ definitions:
         type: integer
       model_id:
         type: string
+      parent_ids:
+        items:
+          type: string
+        type: array
       session_id:
         type: string
       started_at:
@@ -4678,6 +4684,16 @@ definitions:
     properties:
       acl_default_effect:
         type: string
+      auxiliary_vision_max_retries:
+        type: integer
+      auxiliary_vision_mode:
+        type: string
+      auxiliary_vision_model_id:
+        type: string
+      auxiliary_vision_prompt:
+        type: string
+      auxiliary_vision_timeout_seconds:
+        type: integer
       chat_acp_agent_id:
         type: string
       chat_acp_project_mode:
@@ -4799,6 +4815,16 @@ definitions:
     properties:
       acl_default_effect:
         type: string
+      auxiliary_vision_max_retries:
+        type: integer
+      auxiliary_vision_mode:
+        type: string
+      auxiliary_vision_model_id:
+        type: string
+      auxiliary_vision_prompt:
+        type: string
+      auxiliary_vision_timeout_seconds:
+        type: integer
       chat_acp_agent_id:
         type: string
       chat_acp_project_mode:
@@ -11325,6 +11351,10 @@ paths:
         in: query
         name: name
         required: true
+        type: string
+      - description: Bot ID to exclude from the name check
+        in: query
+        name: exclude_bot_id
         type: string
       responses:
         "200":

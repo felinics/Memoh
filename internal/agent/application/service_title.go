@@ -17,8 +17,6 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
 )
 
 const (
@@ -173,28 +171,17 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 		"Return ONLY the title text, nothing else.\n\n" +
 		"User: " + userSnippet
 
-	authService := providers.NewService(nil, s.queries, "")
-	authCtx := oauthctx.WithUserID(ctx, userID)
-	creds, err := authService.ResolveModelCredentials(authCtx, provider)
+	resolvedModel, err := s.buildSDKChatModel(ctx, userID, model, provider, nil)
 	if err != nil {
 		s.logger.Warn("title gen: failed to resolve provider credentials", slog.Any("error", err))
 		return ""
 	}
-
-	modelCfg := models.SDKModelConfig{
-		ModelID:               model.ModelID,
-		ClientType:            provider.ClientType,
-		APIKey:                creds.APIKey,
-		CodexAccountID:        creds.CodexAccountID,
-		BaseURL:               providers.ProviderConfigString(provider, "base_url"),
-		ChatCompletionsCompat: providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
-	}
-	sdkModel := models.NewSDKChatModel(modelCfg)
+	sdkModel := resolvedModel.Model
 
 	genCtx, cancel := context.WithTimeout(ctx, titleGenerateTimeout)
 	defer cancel()
 
-	cacheTTL := providers.ProviderConfigString(provider, "prompt_cache_ttl")
+	cacheTTL := resolvedModel.PromptCacheTTL
 	system, messages, _ := models.ApplyPromptCache(
 		sdkModel, cacheTTL, "", []sdk.Message{sdk.UserMessage(prompt)}, nil,
 	)

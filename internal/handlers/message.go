@@ -459,11 +459,12 @@ func mergeToolApprovals(turns []chatview.UITurn, approvals []toolapproval.Reques
 		}
 	}
 	for turnIdx := range turns {
-		if turns[turnIdx].Role != "assistant" {
+		turn := &turns[turnIdx]
+		if turn.Role != "assistant" {
 			continue
 		}
-		for msgIdx := range turns[turnIdx].Messages {
-			msg := &turns[turnIdx].Messages[msgIdx]
+		for msgIdx := range turn.Messages {
+			msg := &turn.Messages[msgIdx]
 			if msg.Type != chatview.UIMessageTool {
 				continue
 			}

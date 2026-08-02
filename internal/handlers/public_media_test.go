@@ -27,7 +27,7 @@ func TestPublicMediaHandlerServesOriginalImage(t *testing.T) {
 	t.Parallel()
 
 	e, asset := newPublicMediaTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, signedPublicMediaPath(publicmedia.OriginalPath("line", "bot-1", asset.ContentHash, "image.png")), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, signedPublicMediaPath(publicmedia.OriginalPath("line", "bot-1", asset.ContentHash, "image.png")), nil)
 	rec := httptest.NewRecorder()
 
 	e.ServeHTTP(rec, req)
@@ -47,7 +47,7 @@ func TestPublicMediaHandlerServesPreviewImage(t *testing.T) {
 	t.Parallel()
 
 	e, asset := newPublicMediaTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, signedPublicMediaPath(publicmedia.PreviewPath("line", "bot-1", asset.ContentHash)), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, signedPublicMediaPath(publicmedia.PreviewPath("line", "bot-1", asset.ContentHash)), nil)
 	rec := httptest.NewRecorder()
 
 	e.ServeHTTP(rec, req)
@@ -70,7 +70,7 @@ func TestPublicMediaHandlerServesOtherChannelSignedPath(t *testing.T) {
 	t.Parallel()
 
 	e, asset := newPublicMediaTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, signedPublicMediaPath(publicmedia.PreviewPath("telegram", "bot-1", asset.ContentHash)), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, signedPublicMediaPath(publicmedia.PreviewPath("telegram", "bot-1", asset.ContentHash)), nil)
 	rec := httptest.NewRecorder()
 
 	e.ServeHTTP(rec, req)
@@ -97,7 +97,7 @@ func TestPublicMediaHandlerRejectsOversizedOriginalImage(t *testing.T) {
 	e := echo.New()
 	NewPublicMediaHandler(slog.Default(), service, testPublicMediaSecret).Register(e)
 
-	req := httptest.NewRequest(http.MethodGet, signedPublicMediaPath(publicmedia.OriginalPath("line", "bot-1", asset.ContentHash, "image.png")), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, signedPublicMediaPath(publicmedia.OriginalPath("line", "bot-1", asset.ContentHash, "image.png")), nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -127,7 +127,7 @@ func TestPublicMediaHandlerRejectsOversizedPreviewDimensions(t *testing.T) {
 	e := echo.New()
 	NewPublicMediaHandler(slog.Default(), service, testPublicMediaSecret).Register(e)
 
-	req := httptest.NewRequest(http.MethodGet, signedPublicMediaPath(publicmedia.PreviewPath("line", "bot-1", asset.ContentHash)), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, signedPublicMediaPath(publicmedia.PreviewPath("line", "bot-1", asset.ContentHash)), nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -140,7 +140,7 @@ func TestPublicMediaHandlerRejectsUnsignedURL(t *testing.T) {
 	t.Parallel()
 
 	e, asset := newPublicMediaTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, publicmedia.PreviewPath("line", "bot-1", asset.ContentHash), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, publicmedia.PreviewPath("line", "bot-1", asset.ContentHash), nil)
 	rec := httptest.NewRecorder()
 
 	e.ServeHTTP(rec, req)
@@ -159,7 +159,7 @@ func TestPublicMediaHandlerRejectsExpiredURL(t *testing.T) {
 	if !ok {
 		t.Fatal("failed to sign public media path")
 	}
-	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 
 	e.ServeHTTP(rec, req)
@@ -176,7 +176,7 @@ func TestConfiguredPublicMediaHandlerOnlyRegistersWithPublicBase(t *testing.T) {
 	e := echo.New()
 	NewConfiguredPublicMediaHandler(slog.Default(), config.Config{}, service).Register(e)
 
-	req := httptest.NewRequest(http.MethodGet, "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {

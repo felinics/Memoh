@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/settings"
@@ -100,6 +101,9 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 	}
 	resp, err := h.service.UpsertBot(c.Request().Context(), botID, req)
 	if err != nil {
+		if _, ok := apperror.As(err); ok {
+			return err
+		}
 		if feedbackErr := acpFeedbackHTTPError(err); feedbackErr != nil {
 			return feedbackErr
 		}

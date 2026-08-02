@@ -22,17 +22,19 @@ type Result struct {
 
 // Log represents a compaction log entry.
 type Log struct {
-	ID           string     `json:"id"`
-	BotID        string     `json:"bot_id"`
-	SessionID    string     `json:"session_id,omitempty"`
-	Status       string     `json:"status"`
-	Summary      string     `json:"summary"`
-	MessageCount int        `json:"message_count"`
-	ErrorMessage string     `json:"error_message"`
-	Usage        any        `json:"usage,omitempty"`
-	ModelID      string     `json:"model_id,omitempty"`
-	StartedAt    time.Time  `json:"started_at"`
-	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	ID            string     `json:"id"`
+	BotID         string     `json:"bot_id"`
+	SessionID     string     `json:"session_id,omitempty"`
+	Status        string     `json:"status"`
+	Summary       string     `json:"summary"`
+	MessageCount  int        `json:"message_count"`
+	ErrorMessage  string     `json:"error_message"`
+	Usage         any        `json:"usage,omitempty"`
+	ModelID       string     `json:"model_id,omitempty"`
+	ArtifactLevel int        `json:"artifact_level"`
+	ParentIDs     []string   `json:"parent_ids"`
+	StartedAt     time.Time  `json:"started_at"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 } // @name compaction.Log
 
 // ListLogsResponse is the API response for listing compaction logs.

@@ -11,7 +11,7 @@ import (
 
 func TestI18nHTTPErrorPreservesLocalizedPayload(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 	rec := httptest.NewRecorder()
 	ctx := e.NewContext(req, rec)
 

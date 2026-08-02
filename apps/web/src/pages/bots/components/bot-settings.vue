@@ -95,6 +95,7 @@
         :transcription-models="transcriptionModels"
         :transcription-providers="transcriptionProviders"
         :image-capable-models="imageCapableModels"
+        :vision-capable-models="visionCapableModels"
         :providers="providers"
         :video-models="videoModels"
         :video-providers="videoProviders"
@@ -409,6 +410,16 @@ const botMetadata = computed(() => bot.value?.metadata as Record<string, unknown
 const imageCapableModels = computed(() =>
   models.value.filter((m) => m.config?.compatibilities?.includes('image-output')),
 )
+const enabledProviderIds = computed(() => new Set(
+  providers.value.filter((provider) => provider.enable !== false).map((provider) => provider.id),
+))
+const visionCapableModels = computed(() =>
+  models.value.filter((model) =>
+    model.enable !== false
+    && enabledProviderIds.value.has(model.provider_id)
+    && model.config?.compatibilities?.includes('vision'),
+  ),
+)
 const searchProviders = computed(() => (searchProviderData.value ?? []).filter((p) => p.enable !== false))
 const fetchProviders = computed(() => (fetchProviderData.value ?? []).filter((p) => p.enable !== false || p.provider === 'native' || p.id === form.fetch_provider_id))
 const memoryProviders = computed(() => memoryProviderData.value ?? [])
@@ -448,6 +459,11 @@ const form = reactive<SettingsForm>({
   tts_model_id: '',
   transcription_model_id: '',
   video_model_id: '',
+  auxiliary_vision_mode: 'inherit',
+  auxiliary_vision_model_id: '',
+  auxiliary_vision_prompt: '',
+  auxiliary_vision_max_retries: -1,
+  auxiliary_vision_timeout_seconds: 0,
   timezone: '',
   language: '',
   reasoning_enabled: false,
@@ -499,6 +515,11 @@ watch(settings, (val) => {
     form.tts_model_id = val.tts_model_id ?? ''
     form.transcription_model_id = val.transcription_model_id ?? ''
     form.video_model_id = val.video_model_id ?? ''
+    form.auxiliary_vision_mode = val.auxiliary_vision_mode || 'inherit'
+    form.auxiliary_vision_model_id = val.auxiliary_vision_model_id ?? ''
+    form.auxiliary_vision_prompt = val.auxiliary_vision_prompt ?? ''
+    form.auxiliary_vision_max_retries = val.auxiliary_vision_max_retries ?? -1
+    form.auxiliary_vision_timeout_seconds = val.auxiliary_vision_timeout_seconds ?? 0
     form.language = val.language ?? ''
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
@@ -526,6 +547,11 @@ const hasSettingsChanges = computed(() => {
     || form.tts_model_id !== (s.tts_model_id ?? '')
     || form.transcription_model_id !== (s.transcription_model_id ?? '')
     || form.video_model_id !== (s.video_model_id ?? '')
+    || form.auxiliary_vision_mode !== (s.auxiliary_vision_mode || 'inherit')
+    || form.auxiliary_vision_model_id !== (s.auxiliary_vision_model_id ?? '')
+    || form.auxiliary_vision_prompt !== (s.auxiliary_vision_prompt ?? '')
+    || form.auxiliary_vision_max_retries !== (s.auxiliary_vision_max_retries ?? -1)
+    || form.auxiliary_vision_timeout_seconds !== (s.auxiliary_vision_timeout_seconds ?? 0)
     || form.language !== (s.language ?? '')
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')

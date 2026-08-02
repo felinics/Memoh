@@ -1,14 +1,34 @@
 package settings
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/models"
 )
+
+type auxiliaryVisionSettingsQueries struct {
+	dbstore.Queries
+	model    sqlc.Model
+	provider sqlc.Provider
+}
+
+func (q *auxiliaryVisionSettingsQueries) GetModelByID(context.Context, pgtype.UUID) (sqlc.Model, error) {
+	return q.model, nil
+}
+
+func (q *auxiliaryVisionSettingsQueries) GetProviderByID(context.Context, pgtype.UUID) (sqlc.Provider, error) {
+	return q.provider, nil
+}
 
 func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMDefault(t *testing.T) {
 	t.Parallel()
@@ -43,6 +63,92 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMPropagates(t *testing.T) {
 	got := normalizeBotSettingsReadRow(row)
 	if !got.ShowToolCallsInIM {
 		t.Fatalf("expected ShowToolCallsInIM=true to propagate from row")
+	}
+}
+
+func TestNormalizeBotSettingsReadRow_AuxiliaryVision(t *testing.T) {
+	t.Parallel()
+
+	defaults := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
+		Language:          "en",
+		ReasoningEffort:   "medium",
+		HeartbeatInterval: 60,
+		CompactionRatio:   80,
+	})
+	if defaults.AuxiliaryVisionMode != AuxiliaryVisionInherit {
+		t.Fatalf("default auxiliary vision mode = %q, want %q", defaults.AuxiliaryVisionMode, AuxiliaryVisionInherit)
+	}
+	if defaults.AuxiliaryVisionMaxRetries != InheritVisionMaxRetries {
+		t.Fatalf("default auxiliary vision retries = %d, want %d", defaults.AuxiliaryVisionMaxRetries, InheritVisionMaxRetries)
+	}
+	if defaults.AuxiliaryVisionTimeoutSeconds != 0 {
+		t.Fatalf("default auxiliary vision timeout = %d, want 0", defaults.AuxiliaryVisionTimeoutSeconds)
+	}
+
+	modelID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	got := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
+		Language:                      "en",
+		ReasoningEffort:               "medium",
+		HeartbeatInterval:             60,
+		CompactionRatio:               80,
+		AuxiliaryVisionMode:           " ENABLED ",
+		AuxiliaryVisionModelID:        pgtype.UUID{Bytes: modelID, Valid: true},
+		AuxiliaryVisionPrompt:         " describe this image ",
+		AuxiliaryVisionMaxRetries:     pgtype.Int4{Int32: 3, Valid: true},
+		AuxiliaryVisionTimeoutSeconds: pgtype.Int4{Int32: 45, Valid: true},
+	})
+	if got.AuxiliaryVisionMode != AuxiliaryVisionEnabled {
+		t.Fatalf("auxiliary vision mode = %q, want %q", got.AuxiliaryVisionMode, AuxiliaryVisionEnabled)
+	}
+	if got.AuxiliaryVisionModelID != modelID.String() {
+		t.Fatalf("auxiliary vision model = %q, want %q", got.AuxiliaryVisionModelID, modelID)
+	}
+	if got.AuxiliaryVisionPrompt != "describe this image" {
+		t.Fatalf("auxiliary vision prompt = %q", got.AuxiliaryVisionPrompt)
+	}
+	if got.AuxiliaryVisionMaxRetries != 3 || got.AuxiliaryVisionTimeoutSeconds != 45 {
+		t.Fatalf("auxiliary vision limits = retries %d, timeout %d", got.AuxiliaryVisionMaxRetries, got.AuxiliaryVisionTimeoutSeconds)
+	}
+}
+
+func TestInvalidAuxiliaryVisionSettingUsesStableErrorCode(t *testing.T) {
+	t.Parallel()
+
+	err := invalidAuxiliaryVisionSetting("auxiliary_vision_timeout_seconds")
+	if got := apperror.CodeOf(err); got != apperror.CodeSettingsAuxiliaryVisionInvalid {
+		t.Fatalf("error code = %q, want %q", got, apperror.CodeSettingsAuxiliaryVisionInvalid)
+	}
+	if got := apperror.ArgsOf(err)["field"]; got != "auxiliary_vision_timeout_seconds" {
+		t.Fatalf("error field = %q", got)
+	}
+}
+
+func TestValidateAuxiliaryVisionModel(t *testing.T) {
+	t.Parallel()
+
+	providerID := pgtype.UUID{Bytes: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Valid: true}
+	config, err := json.Marshal(models.ModelConfig{Compatibilities: []string{models.CompatVision}})
+	if err != nil {
+		t.Fatalf("marshal model config: %v", err)
+	}
+	queries := &auxiliaryVisionSettingsQueries{
+		model: sqlc.Model{
+			ProviderID: providerID,
+			Type:       string(models.ModelTypeChat),
+			Enable:     true,
+			Config:     config,
+		},
+		provider: sqlc.Provider{Enable: true},
+	}
+	service := &Service{queries: queries}
+	if err := service.validateAuxiliaryVisionModel(t.Context(), pgtype.UUID{}); err != nil {
+		t.Fatalf("validate enabled vision model: %v", err)
+	}
+
+	queries.provider.Enable = false
+	err = service.validateAuxiliaryVisionModel(t.Context(), pgtype.UUID{})
+	if got := apperror.CodeOf(err); got != apperror.CodeSettingsAuxiliaryVisionInvalid {
+		t.Fatalf("disabled provider error code = %q, want %q", got, apperror.CodeSettingsAuxiliaryVisionInvalid)
 	}
 }
 

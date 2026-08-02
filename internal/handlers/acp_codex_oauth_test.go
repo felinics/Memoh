@@ -737,7 +737,7 @@ func (e *acpCodexDeviceHTTPTestEnv) postJSON(t *testing.T, method, target string
 			t.Fatal(err)
 		}
 	}
-	req := httptest.NewRequest(method, target, bytes.NewReader(reqBody))
+	req := httptest.NewRequestWithContext(t.Context(), method, target, bytes.NewReader(reqBody))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	e.echo.ServeHTTP(rec, req)
