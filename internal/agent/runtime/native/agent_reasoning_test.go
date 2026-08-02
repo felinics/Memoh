@@ -102,6 +102,41 @@ func TestBuildGenerateOptionsRequiresToolCallWhenSendIsAvailable(t *testing.T) {
 	}
 }
 
+func TestBuildGenerateOptionsDoesNotRequireToolCallWhileReasoningIsActive(t *testing.T) {
+	t.Parallel()
+
+	provider := &recordingReasoningProvider{}
+	cfg := RunConfig{
+		Model: &sdk.Model{
+			ID:       "deepseek-v4-flash",
+			Provider: provider,
+			Type:     sdk.ModelTypeChat,
+		},
+		SupportsToolCall:      true,
+		RequireToolCall:       true,
+		ReasoningActive:       true,
+		ReasoningEffort:       "medium",
+		ChatCompletionsCompat: models.ChatCompletionsCompatDeepSeek,
+	}
+	tools := []sdk.Tool{{
+		Name: "send",
+		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+			return map[string]any{"ok": true}, nil
+		},
+	}}
+
+	opts := (*Agent)(nil).buildGenerateOptions(cfg, tools, tools, nil)
+	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
+		t.Fatalf("generate text result: %v", err)
+	}
+	if provider.params.ToolChoice != nil {
+		t.Fatalf("tool choice = %#v, want nil while reasoning is active", provider.params.ToolChoice)
+	}
+	if provider.params.ReasoningEffort == nil || *provider.params.ReasoningEffort != "medium" {
+		t.Fatalf("reasoning effort = %#v, want medium", provider.params.ReasoningEffort)
+	}
+}
+
 func TestBuildGenerateOptionsDoesNotRequireMissingSendTool(t *testing.T) {
 	t.Parallel()
 

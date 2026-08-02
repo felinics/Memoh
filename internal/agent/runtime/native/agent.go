@@ -868,7 +868,11 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 	}
 	if len(tools) > 0 && cfg.SupportsToolCall {
 		opts = append(opts, sdk.WithTools(tools))
-		if cfg.RequireToolCall && hasSDKTool(tools, "send") {
+		// Some reasoning transports (including DeepSeek's thinking mode) reject
+		// tool_choice=required outright. Do not turn that provider-side 400 into a
+		// retry and a second LLM request: the Discuss prompt still requires send,
+		// and terminalSendProvider stops locally as soon as send succeeds.
+		if cfg.RequireToolCall && !cfg.ReasoningActive && hasSDKTool(tools, "send") {
 			opts = append(opts, sdk.WithToolChoice("required"))
 		}
 	}
