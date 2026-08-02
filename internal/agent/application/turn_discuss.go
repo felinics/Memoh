@@ -162,8 +162,17 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		messageTokenBudget = discussMessageTokenBudget(resolved.ContextTokenBudget)
 	}
 	contextMessages := trimDiscussMessagesToTokenBudget(s.logger, cmd.DiscussMessages, messageTokenBudget)
+	projectedHistory := projectDiscussToolHistory(discussMessagesToSDK(contextMessages))
+	// Discuss context is assembled outside the ordinary chat resolver, so it
+	// must repair interrupted or partially compacted tool turns here as well.
+	// Otherwise one dangling assistant tool call makes every later request fail
+	// provider validation before the bot gets a chance to respond.
+	projectedHistory = modelMessagesToSDKMessages(repairToolCallClosures(
+		sdkMessagesToModelMessages(projectedHistory),
+		syntheticToolClosureError,
+	))
 	runConfig.Messages = projectSDKMessageHeaders(
-		projectDiscussToolHistory(discussMessagesToSDK(contextMessages)),
+		projectedHistory,
 		runConfig.ChannelPolicy.MessageMetadataMode,
 	)
 	runConfig.SessionType = sessionpkg.TypeDiscuss

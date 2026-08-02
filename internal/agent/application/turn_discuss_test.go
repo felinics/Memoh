@@ -704,6 +704,47 @@ func TestDiscussRefreshesContextFragWithoutLateBindingMessage(t *testing.T) {
 	}
 }
 
+func TestDiscussRepairsDanglingToolCallBeforeStreaming(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: native.RunConfig{System: "base system"},
+			ModelID:   "model-1",
+		},
+	}
+	service := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	callRaw := json.RawMessage(`[{"type":"tool-call","toolCallId":"call-interrupted","toolName":"send","input":{"text":"hello"}}]`)
+	cmd := discussCommand()
+	cmd.DiscussMessages = []turn.DiscussMessage{
+		{Role: "user", Content: `<message id="1">hello</message>`},
+		{Role: "assistant", RawContent: callRaw},
+		{Role: "user", Content: `<message id="2">continue</message>`},
+	}
+
+	handle, err := service.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, handle)
+
+	if agent.lastConfig == nil {
+		t.Fatal("expected native agent to run")
+	}
+	if len(agent.lastConfig.Messages) != 4 {
+		t.Fatalf("messages = %d, want user/call/synthetic-result/user", len(agent.lastConfig.Messages))
+	}
+	if agent.lastConfig.Messages[2].Role != sdk.MessageRoleTool {
+		t.Fatalf("repaired message role = %q, want tool", agent.lastConfig.Messages[2].Role)
+	}
+	result, ok := sdkToolResultPart(agent.lastConfig.Messages[2].Content[0])
+	if !ok {
+		t.Fatalf("repaired content = %#v, want tool result", agent.lastConfig.Messages[2].Content)
+	}
+	if result.ToolCallID != "call-interrupted" || !result.IsError {
+		t.Fatalf("repaired result = %#v, want synthetic error for dangling call", result)
+	}
+}
+
 func TestInjectImagePartsIntoLastUserMessage(t *testing.T) {
 	msgs := []sdk.Message{
 		sdk.UserMessage("hello"),
