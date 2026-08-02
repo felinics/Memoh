@@ -108,6 +108,27 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 	}
 }
 
+func TestGenerateSystemPromptRequiresSendForDiscuss(t *testing.T) {
+	t.Parallel()
+
+	prompt := GenerateSystemPrompt(SystemPromptParams{
+		SessionType: sessionmode.Discuss,
+		Timezone:    "UTC",
+	})
+	for _, want := range []string{
+		"normal text output is private and is not shown",
+		"only through an available messaging capability",
+		"use the available messaging capability for a concise, relevant reply",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("discuss prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "normal text output is the visible reply") || strings.Contains(prompt, "`send`") {
+		t.Fatalf("discuss prompt permits ordinary text delivery:\n%s", prompt)
+	}
+}
+
 func TestGenerateSystemPromptIncludesServiceOwnedBotInfo(t *testing.T) {
 	t.Parallel()
 
@@ -232,6 +253,27 @@ func TestGenerateSystemPromptOmitsToolSpecificMemorySearchGuidance(t *testing.T)
 				t.Fatalf("system prompt for %s leaked memorySearchSection placeholder, got:\n%s", sessionType, prompt)
 			}
 		})
+	}
+}
+
+func TestGenerateSystemPromptGatesMemoryInstructions(t *testing.T) {
+	t.Parallel()
+
+	withoutMemory := GenerateSystemPrompt(SystemPromptParams{
+		SessionType: sessionmode.Chat,
+		Timezone:    "UTC",
+	})
+	if strings.Contains(withoutMemory, "### Memory Write Rules") {
+		t.Fatalf("disabled memory leaked memory instructions:\n%s", withoutMemory)
+	}
+
+	withMemory := GenerateSystemPrompt(SystemPromptParams{
+		SessionType:        sessionmode.Chat,
+		Timezone:           "UTC",
+		MemoryInstructions: true,
+	})
+	if !strings.Contains(withMemory, "### Memory Write Rules") {
+		t.Fatalf("enabled memory omitted memory instructions:\n%s", withMemory)
 	}
 }
 

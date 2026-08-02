@@ -9,6 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	"github.com/memohai/memoh/internal/agent/channelpolicy"
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/event"
 	tools "github.com/memohai/memoh/internal/agent/tool"
@@ -70,6 +71,9 @@ type LoopDetectionConfig struct {
 type InjectMessage struct {
 	Text            string
 	HeaderifiedText string
+	// PersistedHeaderifiedText retains the canonical full-metadata rendering
+	// when HeaderifiedText is a compact model-only projection.
+	PersistedHeaderifiedText string
 	// ImageParts carries inline images (data URL or public URL) to attach
 	// alongside the injected text when the model supports vision input.
 	ImageParts []sdk.ImagePart
@@ -103,6 +107,8 @@ type RunConfig struct {
 	CanRequestUserInput         bool
 	SupportsImageInput          bool
 	SupportsToolCall            bool
+	ChannelPolicy               channelpolicy.Policy
+	MemoryInstructions          bool
 	InlineImages                []sdk.ImagePart
 	Identity                    SessionContext
 	Bot                         BotInfo

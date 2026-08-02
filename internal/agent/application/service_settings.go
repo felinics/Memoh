@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/memohai/memoh/internal/agent/channelpolicy"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/settings"
@@ -19,14 +20,15 @@ func (s *Service) loadBotSettings(ctx context.Context, botID string) (settings.S
 	return s.settingsService.GetBot(ctx, botID)
 }
 
-func (s *Service) loadBotRuntimeInfo(ctx context.Context, botID string) (native.BotInfo, bool) {
+func (s *Service) loadBotRuntimeInfo(ctx context.Context, botID, platform string) (native.BotInfo, bool, channelpolicy.Policy) {
 	info := native.BotInfo{ID: strings.TrimSpace(botID)}
+	policy := channelpolicy.Default(platform)
 	if s.queries == nil {
-		return info, false
+		return info, false, policy
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		return info, false
+		return info, false, policy
 	}
 	row, err := s.queries.GetBotByID(ctx, botUUID)
 	if err != nil {
@@ -34,7 +36,7 @@ func (s *Service) loadBotRuntimeInfo(ctx context.Context, botID string) (native.
 			slog.String("bot_id", botID),
 			slog.Any("error", err),
 		)
-		return info, false
+		return info, false, policy
 	}
 	info.Name = strings.TrimSpace(row.Name)
 	if row.DisplayName.Valid {
@@ -43,7 +45,7 @@ func (s *Service) loadBotRuntimeInfo(ctx context.Context, botID string) (native.
 	if row.Timezone.Valid {
 		info.Timezone = strings.TrimSpace(row.Timezone.String)
 	}
-	return info, parseLoopDetectionEnabledFromMetadata(row.Metadata)
+	return info, parseLoopDetectionEnabledFromMetadata(row.Metadata), channelpolicy.Parse(platform, row.Metadata)
 }
 
 func parseLoopDetectionEnabledFromMetadata(payload []byte) bool {

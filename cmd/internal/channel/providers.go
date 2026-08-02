@@ -92,12 +92,13 @@ func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.Even
 	return timeline.NewEventStore(log, queries)
 }
 
-func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, queries dbstore.Queries) *discuss.DiscussDriver {
+func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, queries dbstore.Queries, sendToolStreams *channel.SendToolStreamCoordinator) *discuss.DiscussDriver {
 	return discuss.NewDiscussDriver(discuss.DiscussDriverDeps{
-		MessageService: msgService,
-		CursorStore:    eventStore,
-		Artifacts:      compaction.NewTimelineArtifactSource(queries),
-		Logger:         log,
+		MessageService:  msgService,
+		CursorStore:     eventStore,
+		Artifacts:       compaction.NewTimelineArtifactSource(queries),
+		SendToolStreams: sendToolStreams,
+		Logger:          log,
 	})
 }
 
@@ -298,7 +299,7 @@ func provideCommandHandler(
 	return cmdHandler
 }
 
-func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor, mediaService *media.Service) *channel.Manager {
+func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor, mediaService *media.Service, sendToolStreams *channel.SendToolStreamCoordinator) *channel.Manager {
 	if adapter, ok := registry.Get(matrix.Type); ok {
 		if matrixAdapter, ok := adapter.(*matrix.MatrixAdapter); ok {
 			matrixAdapter.SetSyncStateSaver(channelStore.SaveMatrixSyncSinceToken)
@@ -306,6 +307,7 @@ func provideChannelManager(log *slog.Logger, registry *channel.Registry, channel
 	}
 	mgr := channel.NewManager(log, registry, channelStore, channelRouter)
 	mgr.SetAttachmentStore(mediaService)
+	mgr.SetSendToolStreamCoordinator(sendToolStreams)
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
 		mgr.Use(mw)
 	}
@@ -518,6 +520,7 @@ func (r *botTelegramDiscussPolicyReader) TelegramDiscussPolicy(
 			policy.ForceReplyKeywords = append(policy.ForceReplyKeywords, keyword)
 		}
 	}
+	policy.SendFallbackEnabled, _ = bot.Metadata[channel.TelegramDiscussSendFallbackMetadataKey].(bool)
 	return policy, nil
 }
 

@@ -100,7 +100,7 @@ func TestShouldNotifyDiscussSamplesOnlyPassiveTelegramMessages(t *testing.T) {
 				discussSample: func() float64 { return tt.sample },
 			}
 			force := shouldTriggerAssistantResponse(tt.msg)
-			got, _, _ := processor.shouldNotifyDiscuss(context.Background(), "bot-1", tt.msg, force)
+			got, _, _, _ := processor.shouldNotifyDiscuss(context.Background(), "bot-1", tt.msg, force)
 			if got != tt.want {
 				t.Fatalf("shouldNotifyDiscuss() = %v, want %v", got, tt.want)
 			}
@@ -162,7 +162,7 @@ func TestShouldNotifyDiscussUsesBotSampleRate(t *testing.T) {
 				telegramDiscussPolicy: tt.reader,
 				discussSample:         func() float64 { return tt.sample },
 			}
-			got, rate, _ := processor.shouldNotifyDiscuss(context.Background(), "bot-1", msg, false)
+			got, rate, _, _ := processor.shouldNotifyDiscuss(context.Background(), "bot-1", msg, false)
 			if got != tt.want {
 				t.Fatalf("shouldNotifyDiscuss() = %v, want %v", got, tt.want)
 			}
@@ -188,7 +188,7 @@ func TestShouldNotifyDiscussKeywordForcesReply(t *testing.T) {
 			Message:      channel.Message{Text: text},
 			Conversation: channel.Conversation{Type: channel.ConversationTypeGroup},
 		}
-		notify, rate, forceReply := processor.shouldNotifyDiscuss(context.Background(), "bot-1", msg, false)
+		notify, rate, forceReply, _ := processor.shouldNotifyDiscuss(context.Background(), "bot-1", msg, false)
 		if !notify || !forceReply {
 			t.Fatalf("message %q notify/forceReply = %v/%v, want true/true", text, notify, forceReply)
 		}
@@ -202,7 +202,7 @@ func TestShouldNotifyDiscussKeywordForcesReply(t *testing.T) {
 		Message:      channel.Message{Text: "ordinary chatter"},
 		Conversation: channel.Conversation{Type: channel.ConversationTypeGroup},
 	}
-	notify, _, forceReply := processor.shouldNotifyDiscuss(context.Background(), "bot-1", msg, false)
+	notify, _, forceReply, _ := processor.shouldNotifyDiscuss(context.Background(), "bot-1", msg, false)
 	if notify || forceReply {
 		t.Fatalf("non-matching message notify/forceReply = %v/%v, want false/false", notify, forceReply)
 	}
@@ -228,10 +228,30 @@ func TestShouldNotifyDiscussDirectedTelegramForcesReply(t *testing.T) {
 	}
 	for _, msg := range tests {
 		directed := shouldTriggerAssistantResponse(msg)
-		notify, _, forceReply := processor.shouldNotifyDiscuss(context.Background(), "bot-1", msg, directed)
+		notify, _, forceReply, _ := processor.shouldNotifyDiscuss(context.Background(), "bot-1", msg, directed)
 		if !notify || !forceReply {
 			t.Fatalf("directed message notify/forceReply = %v/%v, want true/true", notify, forceReply)
 		}
+	}
+}
+
+func TestShouldNotifyDiscussDirectedTelegramStillLoadsFallbackPolicy(t *testing.T) {
+	processor := &ChannelInboundProcessor{
+		telegramDiscussPolicy: fakeTelegramDiscussPolicyReader{policy: TelegramDiscussPolicy{
+			PassiveSampleRate:   0,
+			SendFallbackEnabled: true,
+		}},
+	}
+	msg := channel.InboundMessage{
+		Channel:      channel.ChannelTypeTelegram,
+		Conversation: channel.Conversation{Type: channel.ConversationTypeGroup},
+		Metadata:     map[string]any{"is_mentioned": true},
+	}
+	notify, _, forceReply, fallback := processor.shouldNotifyDiscuss(
+		context.Background(), "bot-1", msg, shouldTriggerAssistantResponse(msg),
+	)
+	if !notify || !forceReply || !fallback {
+		t.Fatalf("directed policy = notify %v, force %v, fallback %v", notify, forceReply, fallback)
 	}
 }
 

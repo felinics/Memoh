@@ -17,7 +17,10 @@ import (
 	"github.com/memohai/memoh/internal/textutil"
 )
 
-const discussForceReplyInstruction = "Operator directive: channel policy requires a reply to the latest addressed incoming message. You must send a concise, relevant reply through the available messaging capability. Do not stay silent or respond only in private text."
+const (
+	discussForceReplyInstruction = "Operator directive: channel policy requires a reply to the latest addressed incoming message. You must send a concise, relevant reply through the available messaging capability. Do not stay silent or respond only in private text."
+	discussForceReplySignal      = `<operator-directive force_reply="true"/>`
+)
 
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
 // Production leaves them nil and calls the Service's own orchestration methods
@@ -159,12 +162,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		messageTokenBudget = discussMessageTokenBudget(resolved.ContextTokenBudget)
 	}
 	contextMessages := trimDiscussMessagesToTokenBudget(s.logger, cmd.DiscussMessages, messageTokenBudget)
-	runConfig.Messages = discussMessagesToSDK(contextMessages)
+	runConfig.Messages = projectSDKMessageHeaders(
+		projectDiscussToolHistory(discussMessagesToSDK(contextMessages)),
+		runConfig.ChannelPolicy.MessageMetadataMode,
+	)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
-	if cmd.DiscussForceReply {
-		runConfig.System = strings.TrimSpace(runConfig.System + "\n\n" + discussForceReplyInstruction)
-	}
 
 	// Resolve image attachments from new RC segments on first encounter. A
 	// vision-capable primary model receives them directly; otherwise the global
@@ -188,6 +191,13 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			runConfig.Messages = appendAuxiliaryVisionToLastUserMessage(runConfig.Messages, visionContext)
 		}
 	}
+	if cmd.DiscussForceReply {
+		// Keep the stable system/tools prefix identical for forced and sampled
+		// turns. The static discuss contract defines this service-only signal;
+		// appending it after media enrichment keeps images attached to the real
+		// incoming message. The signal is removed before persistence below.
+		runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(discussForceReplySignal))
+	}
 	runConfig = runConfig.RefreshContextFrag()
 
 	eventCh := s.streamDiscussAgent(ctx, runConfig)
@@ -209,6 +219,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if len(finalMessages) > 0 {
 		var sdkMsgs []sdk.Message
 		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
+			sdkMsgs = removeDiscussForceReplySignal(sdkMsgs)
 			if storeErr := s.storeDiscussRound(ctx,
 				cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
 				sdkMsgs, resolved.ModelID,
@@ -219,6 +230,27 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	}
 
 	s.triggerDiscussCompaction(ctx, cmd, resolved.ContextTokenBudget)
+}
+
+func removeDiscussForceReplySignal(messages []sdk.Message) []sdk.Message {
+	for i := range messages {
+		if !isDiscussForceReplySignal(messages[i]) {
+			continue
+		}
+		out := make([]sdk.Message, 0, len(messages)-1)
+		out = append(out, messages[:i]...)
+		out = append(out, messages[i+1:]...)
+		return out
+	}
+	return messages
+}
+
+func isDiscussForceReplySignal(message sdk.Message) bool {
+	if message.Role != sdk.MessageRoleUser || len(message.Content) != 1 {
+		return false
+	}
+	text, ok := message.Content[0].(sdk.TextPart)
+	return ok && strings.TrimSpace(text.Text) == discussForceReplySignal
 }
 
 // triggerDiscussCompaction computes pressure and snapshots the visible

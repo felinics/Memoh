@@ -3200,6 +3200,63 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.TelegramStickerCatalog:
+    properties:
+      failed_count:
+        type: integer
+      name:
+        type: string
+      pending_count:
+        type: integer
+      prompt_version:
+        type: string
+      ready_count:
+        type: integer
+      recognition_model_id:
+        type: string
+      recognition_model_inherited:
+        type: boolean
+      sets:
+        items:
+          $ref: '#/definitions/handlers.TelegramStickerSetCatalog'
+        type: array
+      stickers:
+        items:
+          $ref: '#/definitions/handlers.TelegramStickerCatalogEntry'
+        type: array
+      total_count:
+        type: integer
+    type: object
+  handlers.TelegramStickerCatalogEntry:
+    properties:
+      attempts:
+        type: integer
+      description:
+        type: string
+      emoji:
+        type: string
+      id:
+        type: string
+      status:
+        type: string
+    type: object
+  handlers.TelegramStickerSetCatalog:
+    properties:
+      failed_count:
+        type: integer
+      name:
+        type: string
+      pending_count:
+        type: integer
+      ready_count:
+        type: integer
+      stickers:
+        items:
+          $ref: '#/definitions/handlers.TelegramStickerCatalogEntry'
+        type: array
+      total_count:
+        type: integer
+    type: object
   handlers.TokenUsageRecord:
     properties:
       cache_read_tokens:
@@ -3270,6 +3327,20 @@ definitions:
       reason:
         type: string
     type: object
+  handlers.ToolCatalogItem:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+  handlers.ToolCatalogResponse:
+    properties:
+      tools:
+        items:
+          $ref: '#/definitions/handlers.ToolCatalogItem'
+        type: array
+    type: object
   handlers.TriggerCompactResponse:
     properties:
       message_count:
@@ -3317,6 +3388,13 @@ definitions:
         type: integer
       storage_bytes:
         type: integer
+    type: object
+  handlers.UpdateTelegramStickerSetsRequest:
+    properties:
+      names:
+        items:
+          type: string
+        type: array
     type: object
   handlers.acpRuntimeCreateRequest:
     properties:
@@ -4749,6 +4827,8 @@ definitions:
         type: string
       show_tool_calls_in_im:
         type: boolean
+      telegram_sticker_vision_model_id:
+        type: string
       timezone:
         type: string
       tool_approval_config:
@@ -4880,6 +4960,8 @@ definitions:
         type: string
       show_tool_calls_in_im:
         type: boolean
+      telegram_sticker_vision_model_id:
+        type: string
       timezone:
         type: string
       tool_approval_config:
@@ -10026,6 +10108,149 @@ paths:
       summary: Install skill from supermarket to bot workspace
       tags:
       - supermarket
+  /bots/{bot_id}/telegram/stickers:
+    get:
+      description: List the configured Telegram Sticker Set with visual descriptions
+        and recognition status
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TelegramStickerCatalog'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List Telegram stickers
+      tags:
+      - telegram-stickers
+  /bots/{bot_id}/telegram/stickers/{sticker_id}/preview:
+    get:
+      description: Return a static preview for one configured Telegram sticker
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Sticker ID
+        in: path
+        name: sticker_id
+        required: true
+        type: string
+      produces:
+      - image/webp
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Preview a Telegram sticker
+      tags:
+      - telegram-stickers
+  /bots/{bot_id}/telegram/stickers/{sticker_id}/retry:
+    post:
+      description: Clear a failed visual-description cache entry and recognize the
+        sticker again
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Sticker ID
+        in: path
+        name: sticker_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TelegramStickerCatalogEntry'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Retry Telegram sticker recognition
+      tags:
+      - telegram-stickers
+  /bots/{bot_id}/telegram/stickers/refresh:
+    post:
+      description: Explicitly replace the permanent Sticker Set metadata cache from
+        Telegram
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TelegramStickerCatalog'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Refresh Telegram Sticker Set metadata
+      tags:
+      - telegram-stickers
+  /bots/{bot_id}/telegram/stickers/sets:
+    put:
+      description: Replace the configured Sticker Set list. Sets are merged into one
+        stable model-visible catalog.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Sticker Set names
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.UpdateTelegramStickerSetsRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TelegramStickerCatalog'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Update Telegram Sticker Sets
+      tags:
+      - telegram-stickers
   /bots/{bot_id}/token-usage:
     get:
       description: Get daily aggregated token usage for a bot, split by chat, discuss,
@@ -10249,6 +10474,33 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Unified MCP tools gateway
+      tags:
+      - containerd
+  /bots/{bot_id}/tools/catalog:
+    get:
+      description: Lists the tools the bot can currently expose before applying its
+        manual channel allowlist.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - default: telegram
+        description: Channel platform
+        in: query
+        name: platform
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ToolCatalogResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List tools available for channel configuration
       tags:
       - containerd
   /bots/{bot_id}/tts/synthesize:

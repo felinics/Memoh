@@ -52,6 +52,7 @@ type Settings struct {
 	AuxiliaryVisionPrompt         string             `json:"auxiliary_vision_prompt,omitempty"`
 	AuxiliaryVisionMaxRetries     int                `json:"auxiliary_vision_max_retries"`
 	AuxiliaryVisionTimeoutSeconds int                `json:"auxiliary_vision_timeout_seconds"`
+	TelegramStickerVisionModelID  string             `json:"telegram_sticker_vision_model_id,omitempty"`
 	DiscussProbeModelID           string             `json:"discuss_probe_model_id,omitempty"`
 	PersistFullToolResults        bool               `json:"persist_full_tool_results"`
 	ShowToolCallsInIM             bool               `json:"show_tool_calls_in_im"`
@@ -71,7 +72,7 @@ type UpsertRequest struct {
 	ImageModelID                  string              `json:"image_model_id,omitempty"`
 	SearchProviderID              string              `json:"search_provider_id,omitempty"`
 	FetchProviderID               *string             `json:"fetch_provider_id,omitempty"`
-	MemoryProviderID              string              `json:"memory_provider_id,omitempty"`
+	MemoryProviderID              *string             `json:"memory_provider_id,omitempty"`
 	TtsModelID                    string              `json:"tts_model_id,omitempty"`
 	TranscriptionModelID          string              `json:"transcription_model_id,omitempty"`
 	VideoModelID                  string              `json:"video_model_id,omitempty"`
@@ -93,6 +94,7 @@ type UpsertRequest struct {
 	AuxiliaryVisionPrompt         *string             `json:"auxiliary_vision_prompt,omitempty"`
 	AuxiliaryVisionMaxRetries     *int                `json:"auxiliary_vision_max_retries,omitempty"`
 	AuxiliaryVisionTimeoutSeconds *int                `json:"auxiliary_vision_timeout_seconds,omitempty"`
+	TelegramStickerVisionModelID  *string             `json:"telegram_sticker_vision_model_id,omitempty"`
 	DiscussProbeModelID           string              `json:"discuss_probe_model_id,omitempty"`
 	PersistFullToolResults        *bool               `json:"persist_full_tool_results,omitempty"`
 	ShowToolCallsInIM             *bool               `json:"show_tool_calls_in_im,omitempty"`

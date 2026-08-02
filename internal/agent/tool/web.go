@@ -47,8 +47,27 @@ func NewWebProvider(log *slog.Logger, settingsSvc *settings.Service, searchSvc *
 	}
 }
 
-func (p *WebProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *WebProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
 	if p.settings == nil || p.searchProviders == nil {
+		return nil, nil
+	}
+	botID := strings.TrimSpace(session.BotID)
+	if botID == "" {
+		return nil, nil
+	}
+	botSettings, err := p.settings.GetBot(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	providerID := strings.TrimSpace(botSettings.SearchProviderID)
+	if providerID == "" {
+		return nil, nil
+	}
+	provider, err := p.searchProviders.GetRawByID(ctx, providerID)
+	if err != nil {
+		return nil, err
+	}
+	if !provider.Enable {
 		return nil, nil
 	}
 	sess := session

@@ -214,6 +214,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if toolLoopGuard != nil {
 		sdkTools = wrapToolsWithLoopGuard(sdkTools, toolLoopGuard, toolLoopAbortCallIDs)
 	}
+	sdkTools, cfg.Model = installTerminalSend(cfg, sdkTools)
 
 	var prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams
 	if readMediaState != nil {
@@ -252,7 +253,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 						}
 						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
 						if cfg.InjectedRecorder != nil {
-							cfg.InjectedRecorder(text, insertAfter)
+							persistedText := strings.TrimSpace(injected.PersistedHeaderifiedText)
+							if persistedText == "" {
+								persistedText = text
+							}
+							cfg.InjectedRecorder(persistedText, insertAfter)
 						}
 						a.logger.Info("injected user message into agent stream",
 							slog.String("bot_id", cfg.Identity.BotID),
@@ -281,6 +286,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
 	modelStepIndex := 0
 	opts = append(opts, sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
+		if isTerminalSendStep(step) {
+			return nil
+		}
 		a.runAfterModelCallHook(streamCtx, cfg, step, modelStepIndex)
 		modelStepIndex++
 		return nil
@@ -414,6 +422,23 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if !sendEvent(ctx, ch, StreamEvent{
 				Type:       EventToolCallInputStart,
 				ToolName:   p.ToolName,
+				ToolCallID: p.ID,
+			}) {
+				aborted = true
+			}
+
+		case *sdk.ToolInputDeltaPart:
+			if !sendEvent(ctx, ch, StreamEvent{
+				Type:       EventToolCallInputDelta,
+				ToolCallID: p.ID,
+				Delta:      p.Delta,
+			}) {
+				aborted = true
+			}
+
+		case *sdk.ToolInputEndPart:
+			if !sendEvent(ctx, ch, StreamEvent{
+				Type:       EventToolCallInputEnd,
 				ToolCallID: p.ID,
 			}) {
 				aborted = true
@@ -723,6 +748,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	if toolLoopGuard != nil {
 		sdkTools = wrapToolsWithLoopGuard(sdkTools, toolLoopGuard, toolLoopAbortCallIDs)
 	}
+	sdkTools, cfg.Model = installTerminalSend(cfg, sdkTools)
 
 	var prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams
 	if readMediaState != nil {
@@ -739,6 +765,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	modelStepIndex := 0
 	opts = append(opts,
 		sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
+			if isTerminalSendStep(step) {
+				return nil
+			}
 			a.runAfterModelCallHook(genCtx, cfg, step, modelStepIndex)
 			modelStepIndex++
 			if cfg.LoopDetection.Enabled {
@@ -928,6 +957,14 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		if session.IsSubagent {
 			providerTools = tools.FilterSubagentTools(providerTools)
 		}
+		filtered := make([]sdk.Tool, 0, len(providerTools))
+		for _, tool := range providerTools {
+			if cfg.ChannelPolicy.AllowsTool(tool.Name) ||
+				(cfg.ChannelPolicy.ToolCallsAllowed() && isTelegramStickerBackendTool(tool.Name)) {
+				filtered = append(filtered, tool)
+			}
+		}
+		providerTools = filtered
 		if len(providerTools) == 0 {
 			continue
 		}
@@ -939,6 +976,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 			usageRegistrations = append(usageRegistrations, usageRegistration{provider: usageProvider})
 		}
 	}
+	allTools = mergeTelegramStickerSendTools(session, allTools)
 	if cfg.ToolApprovalHandler != nil || a.hookService != nil {
 		allTools = markApprovalTools(allTools)
 	}
@@ -1367,6 +1405,21 @@ func (a *Agent) runMidStreamRetry(
 				if !sendEvent(sendCtx, ch, StreamEvent{
 					Type:       EventToolCallInputStart,
 					ToolName:   rp.ToolName,
+					ToolCallID: rp.ID,
+				}) {
+					aborted = true
+				}
+			case *sdk.ToolInputDeltaPart:
+				if !sendEvent(sendCtx, ch, StreamEvent{
+					Type:       EventToolCallInputDelta,
+					ToolCallID: rp.ID,
+					Delta:      rp.Delta,
+				}) {
+					aborted = true
+				}
+			case *sdk.ToolInputEndPart:
+				if !sendEvent(sendCtx, ch, StreamEvent{
+					Type:       EventToolCallInputEnd,
 					ToolCallID: rp.ID,
 				}) {
 					aborted = true

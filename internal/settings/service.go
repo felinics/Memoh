@@ -129,6 +129,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		current.AuxiliaryVisionPrompt = existingSettings.AuxiliaryVisionPrompt
 		current.AuxiliaryVisionMaxRetries = existingSettings.AuxiliaryVisionMaxRetries
 		current.AuxiliaryVisionTimeoutSeconds = existingSettings.AuxiliaryVisionTimeoutSeconds
+		current.TelegramStickerVisionModelID = existingSettings.TelegramStickerVisionModelID
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
 		current.DisplayEnabled = settingsRow.DisplayEnabled
 		current.CommandUILanguage = settingsRow.CommandUiLanguage
@@ -190,6 +191,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			return Settings{}, invalidAuxiliaryVisionSetting("auxiliary_vision_timeout_seconds")
 		}
 		current.AuxiliaryVisionTimeoutSeconds = *req.AuxiliaryVisionTimeoutSeconds
+	}
+	if req.TelegramStickerVisionModelID != nil {
+		current.TelegramStickerVisionModelID = strings.TrimSpace(*req.TelegramStickerVisionModelID)
 	}
 	if req.PersistFullToolResults != nil {
 		current.PersistFullToolResults = *req.PersistFullToolResults
@@ -296,6 +300,21 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		current.AuxiliaryVisionModelID = uuid.UUID(auxiliaryVisionModelUUID.Bytes).String()
 	}
+	telegramStickerVisionModelUUID := pgtype.UUID{}
+	if value := strings.TrimSpace(current.TelegramStickerVisionModelID); value != "" {
+		if req.TelegramStickerVisionModelID == nil {
+			telegramStickerVisionModelUUID, err = db.ParseUUID(value)
+		} else {
+			telegramStickerVisionModelUUID, err = s.resolveModelUUID(ctx, value)
+			if err == nil {
+				err = s.validateAuxiliaryVisionModel(ctx, telegramStickerVisionModelUUID)
+			}
+		}
+		if err != nil {
+			return Settings{}, invalidAuxiliaryVisionSetting("telegram_sticker_vision_model_id")
+		}
+		current.TelegramStickerVisionModelID = uuid.UUID(telegramStickerVisionModelUUID.Bytes).String()
+	}
 	imageModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ImageModelID); value != "" {
 		modelID, err := s.resolveModelUUID(ctx, value)
@@ -324,12 +343,15 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 	}
 	memoryProviderUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.MemoryProviderID); value != "" {
-		providerID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	memoryProviderIDSet := req.MemoryProviderID != nil
+	if req.MemoryProviderID != nil {
+		if value := strings.TrimSpace(*req.MemoryProviderID); value != "" {
+			providerID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			memoryProviderUUID = providerID
 		}
-		memoryProviderUUID = providerID
 	}
 	ttsModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.TtsModelID); value != "" {
@@ -424,10 +446,12 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		AuxiliaryVisionPrompt:         strings.TrimSpace(current.AuxiliaryVisionPrompt),
 		AuxiliaryVisionMaxRetries:     auxiliaryVisionMaxRetries,
 		AuxiliaryVisionTimeoutSeconds: auxiliaryVisionTimeoutSeconds,
+		TelegramStickerVisionModelID:  telegramStickerVisionModelUUID,
 		ImageModelID:                  imageModelUUID,
 		SearchProviderID:              searchProviderUUID,
 		FetchProviderIDSet:            fetchProviderIDSet,
 		FetchProviderID:               fetchProviderUUID,
+		MemoryProviderIDSet:           memoryProviderIDSet,
 		MemoryProviderID:              memoryProviderUUID,
 		TtsModelID:                    ttsModelUUID,
 		TranscriptionModelID:          transcriptionModelUUID,
@@ -564,6 +588,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.AuxiliaryVisionMaxRetries,
 		row.AuxiliaryVisionTimeoutSeconds,
 	)
+	settings.TelegramStickerVisionModelID = uuidString(row.TelegramStickerVisionModelID)
 	return settings
 }
 
@@ -609,7 +634,15 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.AuxiliaryVisionMaxRetries,
 		row.AuxiliaryVisionTimeoutSeconds,
 	)
+	settings.TelegramStickerVisionModelID = uuidString(row.TelegramStickerVisionModelID)
 	return settings
+}
+
+func uuidString(value pgtype.UUID) string {
+	if !value.Valid {
+		return ""
+	}
+	return uuid.UUID(value.Bytes).String()
 }
 
 func normalizeBotSettingsFields(

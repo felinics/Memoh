@@ -68,6 +68,7 @@ type sendMode struct {
 	allowLocalShortcut     bool
 	requireTarget          bool
 	promoteDataAttachments bool
+	toolCallID             string
 }
 
 type sendPlan struct {
@@ -91,10 +92,17 @@ func (e *Executor) Send(ctx context.Context, session SessionContext, args map[st
 // SendDirect sends a message via the channel adapter without the same-conversation
 // local shortcut. Used by discuss mode where there is no active stream emitter.
 func (e *Executor) SendDirect(ctx context.Context, session SessionContext, target string, args map[string]any) (*SendResult, error) {
+	return e.SendDirectForTool(ctx, session, target, "", args)
+}
+
+// SendDirectForTool sends through the channel adapter and carries the trusted
+// tool call ID used to hand an in-flight Telegram preview to final delivery.
+func (e *Executor) SendDirectForTool(ctx context.Context, session SessionContext, target, toolCallID string, args map[string]any) (*SendResult, error) {
 	return e.sendWithMode(ctx, session, target, args, sendMode{
 		name:                   "send direct",
 		requireTarget:          true,
 		promoteDataAttachments: true,
+		toolCallID:             strings.TrimSpace(toolCallID),
 	})
 }
 
@@ -133,8 +141,9 @@ func (e *Executor) sendWithMode(
 	}
 
 	if err := e.Sender.Send(ctx, plan.botID, plan.channelType, SendRequest{
-		Target:  plan.target,
-		Message: plan.message,
+		Target:     plan.target,
+		Message:    plan.message,
+		ToolCallID: mode.toolCallID,
 	}); err != nil {
 		if e.Logger != nil {
 			e.Logger.Warn("outbound send failed",

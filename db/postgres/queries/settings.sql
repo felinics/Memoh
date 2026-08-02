@@ -23,6 +23,7 @@ SELECT
   bots.auxiliary_vision_prompt,
   bots.auxiliary_vision_max_retries,
   bots.auxiliary_vision_timeout_seconds,
+  telegram_sticker_vision_models.id AS telegram_sticker_vision_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -43,6 +44,7 @@ LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id AND chat_
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS auxiliary_vision_models ON auxiliary_vision_models.id = bots.auxiliary_vision_model_id AND auxiliary_vision_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS telegram_sticker_vision_models ON telegram_sticker_vision_models.id = bots.telegram_sticker_vision_model_id AND telegram_sticker_vision_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
 LEFT JOIN fetch_providers ON fetch_providers.id = bots.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
@@ -77,12 +79,16 @@ WITH updated AS (
       auxiliary_vision_prompt = sqlc.arg(auxiliary_vision_prompt),
       auxiliary_vision_max_retries = sqlc.narg(auxiliary_vision_max_retries)::integer,
       auxiliary_vision_timeout_seconds = sqlc.narg(auxiliary_vision_timeout_seconds)::integer,
+      telegram_sticker_vision_model_id = sqlc.narg(telegram_sticker_vision_model_id)::uuid,
       search_provider_id = COALESCE(sqlc.narg(search_provider_id)::uuid, bots.search_provider_id),
       fetch_provider_id = CASE
         WHEN sqlc.arg(fetch_provider_id_set)::boolean THEN sqlc.narg(fetch_provider_id)::uuid
         ELSE bots.fetch_provider_id
       END,
-      memory_provider_id = COALESCE(sqlc.narg(memory_provider_id)::uuid, bots.memory_provider_id),
+      memory_provider_id = CASE
+        WHEN sqlc.arg(memory_provider_id_set)::boolean THEN sqlc.narg(memory_provider_id)::uuid
+        ELSE bots.memory_provider_id
+      END,
       image_model_id = COALESCE(sqlc.narg(image_model_id)::uuid, bots.image_model_id),
       tts_model_id = COALESCE(sqlc.narg(tts_model_id)::uuid, bots.tts_model_id),
       transcription_model_id = COALESCE(sqlc.narg(transcription_model_id)::uuid, bots.transcription_model_id),
@@ -97,7 +103,7 @@ WITH updated AS (
       command_ui_language = sqlc.arg(command_ui_language),
       updated_at = now()
   WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.auxiliary_vision_mode, bots.auxiliary_vision_model_id, bots.auxiliary_vision_prompt, bots.auxiliary_vision_max_retries, bots.auxiliary_vision_timeout_seconds, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.auxiliary_vision_mode, bots.auxiliary_vision_model_id, bots.auxiliary_vision_prompt, bots.auxiliary_vision_max_retries, bots.auxiliary_vision_timeout_seconds, bots.telegram_sticker_vision_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -123,6 +129,7 @@ SELECT
   updated.auxiliary_vision_prompt,
   updated.auxiliary_vision_max_retries,
   updated.auxiliary_vision_timeout_seconds,
+  telegram_sticker_vision_models.id AS telegram_sticker_vision_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -143,6 +150,7 @@ LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id AND ch
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS auxiliary_vision_models ON auxiliary_vision_models.id = updated.auxiliary_vision_model_id AND auxiliary_vision_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS telegram_sticker_vision_models ON telegram_sticker_vision_models.id = updated.telegram_sticker_vision_model_id AND telegram_sticker_vision_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
 LEFT JOIN fetch_providers ON fetch_providers.id = updated.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
@@ -175,6 +183,7 @@ SET language = 'auto',
     auxiliary_vision_prompt = '',
     auxiliary_vision_max_retries = NULL,
     auxiliary_vision_timeout_seconds = NULL,
+    telegram_sticker_vision_model_id = NULL,
     image_model_id = NULL,
     search_provider_id = NULL,
     fetch_provider_id = NULL,

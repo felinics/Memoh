@@ -4,6 +4,7 @@ package channelmessaging
 
 import (
 	"context"
+	"strings"
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/messaging"
@@ -29,10 +30,19 @@ func New(runtime runtime, resolver resolver, assets channel.OutboundAttachmentSt
 }
 
 func (a *Adapter) Send(ctx context.Context, botID string, platform messaging.Platform, req messaging.SendRequest) error {
+	message := toChannelMessage(req.Message)
+	if toolCallID := strings.TrimSpace(req.ToolCallID); toolCallID != "" {
+		metadata := make(map[string]any, len(message.Metadata)+1)
+		for key, value := range message.Metadata {
+			metadata[key] = value
+		}
+		metadata[channel.InternalSendToolCallIDMetadataKey] = toolCallID
+		message.Metadata = metadata
+	}
 	return a.runtime.Send(ctx, botID, channel.ChannelType(platform), channel.SendRequest{
 		Target:            req.Target,
 		ChannelIdentityID: req.ChannelIdentityID,
-		Message:           toChannelMessage(req.Message),
+		Message:           message,
 	})
 }
 

@@ -50,11 +50,7 @@ func (f *FSClient) ReadTextSafe(ctx context.Context, path string) string {
 // LoadSystemFiles loads the standard set of system files from the bot container.
 func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
 	home := "/data"
-	filenames := []string{
-		"AGENTS.md",
-		"MEMORY.md",
-		"PROFILES.md",
-	}
+	filenames := systemFileLoadOrder()
 
 	files := make([]SystemFile, len(filenames))
 	for i, name := range filenames {
@@ -65,4 +61,11 @@ func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
 		}
 	}
 	return files
+}
+
+// systemFileLoadOrder keeps the frequently changing memory summary at the
+// tail of the system prompt. Stable instruction/profile content therefore
+// remains in the reusable prefix when MEMORY.md changes between turns.
+func systemFileLoadOrder() []string {
+	return []string{"AGENTS.md", "PROFILES.md", "MEMORY.md"}
 }

@@ -116,7 +116,7 @@ func commonOptions() fx.Option {
 			provideServerHandler(handlers.NewEmailBindingsHandler),
 			provideServerHandler(handlers.NewEmailOutboxHandler),
 			provideServerHandler(provideEmailOAuthHandler),
-			provideServerHandler(handlers.NewMCPHandler),
+			provideServerHandler(provideMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideServerHandler(handlers.NewPluginsHandler),
 			provideServerHandler(handlers.NewBotBackupHandler),

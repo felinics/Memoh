@@ -32,29 +32,32 @@ func TestBuildPlatformIdentitiesXML(t *testing.T) {
 	got := buildPlatformIdentitiesXML(configs)
 	want := strings.Join([]string{
 		`<identity channel="discord" name="Memoh &amp; Co" username="@memoh" external_identity="98765"/>`,
-		`<identity channel="telegram" user_id="12345" username="@memoh_bot" external_identity="12345"/>`,
+		`<identity channel="telegram" user_id="12345" username="@memoh_bot"/>`,
 	}, "\n")
 	if got != want {
 		t.Fatalf("unexpected XML:\nwant:\n%s\n\ngot:\n%s", want, got)
 	}
 }
 
-func TestBuildPlatformIdentityLineNormalizesAttrs(t *testing.T) {
+func TestBuildPlatformIdentityLineAllowsOnlyModelSafeAttrs(t *testing.T) {
 	t.Parallel()
 
 	got := buildPlatformIdentityLine(PlatformIdentity{
 		Platform: "telegram",
 		SelfIdentity: map[string]any{
-			"123id":        7,
 			"display name": `Memoh <Bot>`,
 			"username":     "memoh",
-			"xml_name":     "reserved",
+			"avatar_url":   "https://api.telegram.org/file/bot123:secret/avatar.jpg",
+			"bot_token":    "123:secret",
 		},
 	})
 
-	want := `<identity channel="telegram" attr_123id="7" display_name="Memoh &lt;Bot&gt;" username="@memoh" attr_xml_name="reserved"/>`
+	want := `<identity channel="telegram" display_name="Memoh &lt;Bot&gt;" username="@memoh"/>`
 	if got != want {
 		t.Fatalf("unexpected identity line:\nwant: %s\ngot:  %s", want, got)
+	}
+	if strings.Contains(got, "secret") || strings.Contains(got, "avatar_url") {
+		t.Fatalf("secret-bearing identity data reached prompt: %s", got)
 	}
 }
 

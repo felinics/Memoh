@@ -5,10 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/memohai/memoh/internal/agent/channelpolicy"
 )
 
 const (
@@ -27,6 +30,7 @@ type ToolGatewayService struct {
 	sources  []ToolSource
 	cacheTTL time.Duration
 	limit    ToolOutputLimit
+	policy   *channelpolicy.Resolver
 
 	mu    sync.Mutex
 	cache map[string]cachedToolRegistry
@@ -37,6 +41,12 @@ type ToolGatewayOption func(*ToolGatewayService)
 func WithToolOutputLimit(limit ToolOutputLimit) ToolGatewayOption {
 	return func(s *ToolGatewayService) {
 		s.limit = limit
+	}
+}
+
+func WithChannelPolicyResolver(resolver *channelpolicy.Resolver) ToolGatewayOption {
+	return func(s *ToolGatewayService) {
+		s.policy = resolver
 	}
 }
 
@@ -150,7 +160,15 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 	if botID == "" {
 		return nil, errors.New("bot id is required")
 	}
-	cacheKey := toolRegistryCacheKey(session)
+	policy := channelpolicy.Default(session.CurrentPlatform)
+	if s.policy != nil && !session.IgnoreToolPolicy {
+		resolved, err := s.policy.Resolve(ctx, session.BotID, session.CurrentPlatform)
+		if err != nil {
+			return nil, fmt.Errorf("resolve channel tool policy: %w", err)
+		}
+		policy = resolved
+	}
+	cacheKey := toolRegistryCacheKeyForPolicy(session, policy.ToolCacheKey())
 	if !force {
 		s.mu.Lock()
 		cached, ok := s.cache[cacheKey]
@@ -169,6 +187,12 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 			continue
 		}
 		for _, tool := range tools {
+			if isInternalTelegramStickerTool(tool.Name) {
+				continue
+			}
+			if !policy.AllowsTool(tool.Name) {
+				continue
+			}
 			if err := registry.Register(source, tool); err != nil {
 				s.logger.Warn("skip duplicated/invalid tool", slog.String("tool", tool.Name), slog.Any("error", err))
 			}
@@ -184,7 +208,19 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 	return registry, nil
 }
 
+func isInternalTelegramStickerTool(name string) bool {
+	name = strings.TrimSpace(name)
+	return name == "send_telegram_sticker" ||
+		strings.HasSuffix(name, "_send_telegram_sticker") ||
+		name == "search_telegram_stickers" ||
+		strings.HasSuffix(name, "_search_telegram_stickers")
+}
+
 func toolRegistryCacheKey(session ToolSessionContext) string {
+	return toolRegistryCacheKeyForPolicy(session, "")
+}
+
+func toolRegistryCacheKeyForPolicy(session ToolSessionContext, policyKey string) string {
 	parts := []string{
 		strings.TrimSpace(session.BotID),
 		strings.TrimSpace(session.ChatID),
@@ -220,6 +256,12 @@ func toolRegistryCacheKey(session ToolSessionContext) string {
 	} else {
 		parts = append(parts, "no-list-user-input")
 	}
+	if session.IgnoreToolPolicy {
+		parts = append(parts, "ignore-tool-policy")
+	} else {
+		parts = append(parts, "apply-tool-policy")
+	}
+	parts = append(parts, policyKey)
 	return strings.Join(parts, "\x00")
 }
 

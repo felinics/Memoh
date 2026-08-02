@@ -16,6 +16,8 @@ const (
 	ReasoningDelta      StreamEventType = "reasoning_delta"
 	ReasoningEnd        StreamEventType = "reasoning_end"
 	ToolCallInputStart  StreamEventType = "tool_call_input_start"
+	ToolCallInputDelta  StreamEventType = "tool_call_input_delta"
+	ToolCallInputEnd    StreamEventType = "tool_call_input_end"
 	ToolCallStart       StreamEventType = "tool_call_start"
 	ToolCallMetadata    StreamEventType = "tool_call_metadata"
 	ToolCallProgress    StreamEventType = "tool_call_progress"

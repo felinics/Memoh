@@ -12,35 +12,44 @@ import (
 
 const discussReplyFallbackTimeout = 30 * time.Second
 
-func (*DiscussDriver) sendReplyFallback(
+// reportMissingForcedReply records a contract violation without publishing
+// ordinary assistant text. In discuss mode, only a successful send tool call
+// authorizes content to leave the agent boundary.
+func (*DiscussDriver) handleMissingForcedReply(
 	ctx context.Context,
 	cfg DiscussSessionConfig,
 	outcome discussRunOutcome,
 	log *slog.Logger,
 ) {
-	if !cfg.ForceReply ||
-		!strings.EqualFold(strings.TrimSpace(cfg.CurrentPlatform), string(channel.ChannelTypeTelegram)) ||
-		!outcome.completed || outcome.failed || outcome.currentReplySent {
+	if !cfg.ForceReply || !outcome.completed || outcome.failed || outcome.currentReplySent {
 		return
 	}
-	if cfg.ReplySender == nil || strings.TrimSpace(cfg.ReplyTarget) == "" {
-		log.Warn("discuss reply fallback unavailable")
+	if cfg.SendFallbackEnabled &&
+		strings.EqualFold(strings.TrimSpace(cfg.CurrentPlatform), string(channel.ChannelTypeTelegram)) {
+		if cfg.ReplySender == nil || strings.TrimSpace(cfg.ReplyTarget) == "" {
+			log.Warn("discuss reply fallback unavailable")
+			return
+		}
+		message := latestReplyMessage(outcome.finalMessages, cfg.CurrentPlatform)
+		if message.IsEmpty() {
+			return
+		}
+		sendCtx, cancel := context.WithTimeout(ctx, discussReplyFallbackTimeout)
+		defer cancel()
+		if err := cfg.ReplySender.Send(sendCtx, channel.OutboundMessage{
+			Target:  strings.TrimSpace(cfg.ReplyTarget),
+			Message: message,
+		}); err != nil {
+			log.Error("discuss reply fallback failed", slog.Any("error", err))
+			return
+		}
+		log.Info("sent discuss reply fallback")
 		return
 	}
-	message := latestReplyMessage(outcome.finalMessages, cfg.CurrentPlatform)
-	if message.IsEmpty() {
-		return
-	}
-	sendCtx, cancel := context.WithTimeout(ctx, discussReplyFallbackTimeout)
-	defer cancel()
-	if err := cfg.ReplySender.Send(sendCtx, channel.OutboundMessage{
-		Target:  strings.TrimSpace(cfg.ReplyTarget),
-		Message: message,
-	}); err != nil {
-		log.Error("discuss reply fallback failed", slog.Any("error", err))
-		return
-	}
-	log.Info("sent discuss reply fallback")
+	log.Warn("discuss force-reply completed without a successful current-conversation send",
+		slog.String("bot_id", cfg.BotID),
+		slog.String("thread_id", cfg.ThreadID),
+		slog.String("platform", cfg.CurrentPlatform))
 }
 
 func latestReplyMessage(messages []turn.ModelMessage, platform string) channel.Message {
@@ -51,9 +60,8 @@ func latestReplyMessage(messages []turn.ModelMessage, platform string) channel.M
 		}
 	}
 	// Some providers put visible text and a tool call in the same assistant
-	// message. ExtractAssistantOutputs intentionally skips those for ordinary
-	// reply rendering, but the text remains the best deterministic fallback
-	// when a discuss turn never called the messaging tool.
+	// message. If the explicitly enabled recovery path is needed, that text is
+	// the last deterministic candidate available after a missing send call.
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role != "assistant" {
 			continue

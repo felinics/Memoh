@@ -1894,6 +1894,36 @@ export type HandlersSupermarketTagsResponse = {
     tags?: Array<string>;
 };
 
+export type HandlersTelegramStickerCatalog = {
+    failed_count?: number;
+    name?: string;
+    pending_count?: number;
+    prompt_version?: string;
+    ready_count?: number;
+    recognition_model_id?: string;
+    recognition_model_inherited?: boolean;
+    sets?: Array<HandlersTelegramStickerSetCatalog>;
+    stickers?: Array<HandlersTelegramStickerCatalogEntry>;
+    total_count?: number;
+};
+
+export type HandlersTelegramStickerCatalogEntry = {
+    attempts?: number;
+    description?: string;
+    emoji?: string;
+    id?: string;
+    status?: string;
+};
+
+export type HandlersTelegramStickerSetCatalog = {
+    failed_count?: number;
+    name?: string;
+    pending_count?: number;
+    ready_count?: number;
+    stickers?: Array<HandlersTelegramStickerCatalogEntry>;
+    total_count?: number;
+};
+
 export type HandlersTokenUsageRecord = {
     cache_read_tokens?: number;
     created_at?: string;
@@ -1928,6 +1958,15 @@ export type HandlersToolApprovalDecisionRequest = {
     reason?: string;
 };
 
+export type HandlersToolCatalogItem = {
+    description?: string;
+    name?: string;
+};
+
+export type HandlersToolCatalogResponse = {
+    tools?: Array<HandlersToolCatalogItem>;
+};
+
 export type HandlersTriggerCompactResponse = {
     message_count?: number;
     status?: string;
@@ -1952,6 +1991,10 @@ export type HandlersUpdateContainerResourceLimitsRequest = {
     cpu_millicores?: number;
     memory_bytes?: number;
     storage_bytes?: number;
+};
+
+export type HandlersUpdateTelegramStickerSetsRequest = {
+    names?: Array<string>;
 };
 
 export type HandlersAcpRuntimeCreateRequest = {
@@ -2805,6 +2848,7 @@ export type SettingsSettings = {
     reasoning_enabled?: boolean;
     search_provider_id?: string;
     show_tool_calls_in_im?: boolean;
+    telegram_sticker_vision_model_id?: string;
     timezone?: string;
     tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
@@ -2871,6 +2915,7 @@ export type SettingsUpsertRequest = {
     reasoning_enabled?: boolean;
     search_provider_id?: string;
     show_tool_calls_in_im?: boolean;
+    telegram_sticker_vision_model_id?: string;
     timezone?: string;
     tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
@@ -9139,6 +9184,181 @@ export type PostBotsByBotIdSupermarketInstallSkillResponses = {
 
 export type PostBotsByBotIdSupermarketInstallSkillResponse = PostBotsByBotIdSupermarketInstallSkillResponses[keyof PostBotsByBotIdSupermarketInstallSkillResponses];
 
+export type GetBotsByBotIdTelegramStickersData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/telegram/stickers';
+};
+
+export type GetBotsByBotIdTelegramStickersErrors = {
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdTelegramStickersError = GetBotsByBotIdTelegramStickersErrors[keyof GetBotsByBotIdTelegramStickersErrors];
+
+export type GetBotsByBotIdTelegramStickersResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTelegramStickerCatalog;
+};
+
+export type GetBotsByBotIdTelegramStickersResponse = GetBotsByBotIdTelegramStickersResponses[keyof GetBotsByBotIdTelegramStickersResponses];
+
+export type PostBotsByBotIdTelegramStickersRefreshData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/telegram/stickers/refresh';
+};
+
+export type PostBotsByBotIdTelegramStickersRefreshErrors = {
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdTelegramStickersRefreshError = PostBotsByBotIdTelegramStickersRefreshErrors[keyof PostBotsByBotIdTelegramStickersRefreshErrors];
+
+export type PostBotsByBotIdTelegramStickersRefreshResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTelegramStickerCatalog;
+};
+
+export type PostBotsByBotIdTelegramStickersRefreshResponse = PostBotsByBotIdTelegramStickersRefreshResponses[keyof PostBotsByBotIdTelegramStickersRefreshResponses];
+
+export type PutBotsByBotIdTelegramStickersSetsData = {
+    /**
+     * Sticker Set names
+     */
+    body: HandlersUpdateTelegramStickerSetsRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/telegram/stickers/sets';
+};
+
+export type PutBotsByBotIdTelegramStickersSetsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PutBotsByBotIdTelegramStickersSetsError = PutBotsByBotIdTelegramStickersSetsErrors[keyof PutBotsByBotIdTelegramStickersSetsErrors];
+
+export type PutBotsByBotIdTelegramStickersSetsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTelegramStickerCatalog;
+};
+
+export type PutBotsByBotIdTelegramStickersSetsResponse = PutBotsByBotIdTelegramStickersSetsResponses[keyof PutBotsByBotIdTelegramStickersSetsResponses];
+
+export type GetBotsByBotIdTelegramStickersByStickerIdPreviewData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Sticker ID
+         */
+        sticker_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/telegram/stickers/{sticker_id}/preview';
+};
+
+export type GetBotsByBotIdTelegramStickersByStickerIdPreviewErrors = {
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdTelegramStickersByStickerIdPreviewError = GetBotsByBotIdTelegramStickersByStickerIdPreviewErrors[keyof GetBotsByBotIdTelegramStickersByStickerIdPreviewErrors];
+
+export type GetBotsByBotIdTelegramStickersByStickerIdPreviewResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};
+
+export type PostBotsByBotIdTelegramStickersByStickerIdRetryData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Sticker ID
+         */
+        sticker_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/telegram/stickers/{sticker_id}/retry';
+};
+
+export type PostBotsByBotIdTelegramStickersByStickerIdRetryErrors = {
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdTelegramStickersByStickerIdRetryError = PostBotsByBotIdTelegramStickersByStickerIdRetryErrors[keyof PostBotsByBotIdTelegramStickersByStickerIdRetryErrors];
+
+export type PostBotsByBotIdTelegramStickersByStickerIdRetryResponses = {
+    /**
+     * OK
+     */
+    200: HandlersTelegramStickerCatalogEntry;
+};
+
+export type PostBotsByBotIdTelegramStickersByStickerIdRetryResponse = PostBotsByBotIdTelegramStickersByStickerIdRetryResponses[keyof PostBotsByBotIdTelegramStickersByStickerIdRetryResponses];
+
 export type GetBotsByBotIdTokenUsageData = {
     body?: never;
     path: {
@@ -9395,6 +9615,41 @@ export type PostBotsByBotIdToolsResponses = {
 };
 
 export type PostBotsByBotIdToolsResponse = PostBotsByBotIdToolsResponses[keyof PostBotsByBotIdToolsResponses];
+
+export type GetBotsByBotIdToolsCatalogData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Channel platform
+         */
+        platform?: string;
+    };
+    url: '/bots/{bot_id}/tools/catalog';
+};
+
+export type GetBotsByBotIdToolsCatalogErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdToolsCatalogError = GetBotsByBotIdToolsCatalogErrors[keyof GetBotsByBotIdToolsCatalogErrors];
+
+export type GetBotsByBotIdToolsCatalogResponses = {
+    /**
+     * OK
+     */
+    200: HandlersToolCatalogResponse;
+};
+
+export type GetBotsByBotIdToolsCatalogResponse = GetBotsByBotIdToolsCatalogResponses[keyof GetBotsByBotIdToolsCatalogResponses];
 
 export type PostBotsByBotIdTtsSynthesizeData = {
     /**

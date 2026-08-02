@@ -411,6 +411,17 @@ func TestEditStreamMessageFinal_NoMessageNoOp(t *testing.T) {
 
 // --- Draft mode (sendMessageDraft) tests ---
 
+func TestTelegramDraftIDIsStablePerToolCall(t *testing.T) {
+	t.Parallel()
+	first := telegramDraftID("tool-call-1")
+	if first == 0 || first != telegramDraftID("tool-call-1") {
+		t.Fatalf("draft ID is not stable and nonzero: %d", first)
+	}
+	if first == telegramDraftID("tool-call-2") {
+		t.Fatal("different tool calls unexpectedly share a draft ID")
+	}
+}
+
 func TestSendDraft_ThrottleSkip(t *testing.T) {
 	t.Parallel()
 
@@ -800,13 +811,13 @@ func TestDraftMode_ToolCallStartSendsPermanentMessage(t *testing.T) {
 func TestDraftMode_FinalEmptyBufferSkipsDuplicate(t *testing.T) {
 	adapter := NewTelegramAdapter(nil)
 	s := &telegramOutboundStream{
-		adapter:            adapter,
-		cfg:                channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
-		target:             "123",
-		isPrivateChat:      true,
-		draftID:            1,
-		streamChatID:       123,
-		draftPermanentSent: true,
+		adapter:       adapter,
+		cfg:           channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:        "123",
+		isPrivateChat: true,
+		draftID:       1,
+		streamChatID:  123,
+		permanentSent: true,
 	}
 	ctx := context.Background()
 
@@ -876,8 +887,65 @@ func TestDraftMode_FinalOnlyPayloadSendsPermanentMessage(t *testing.T) {
 	if sentText != "final answer" {
 		t.Fatalf("expected final-only payload to be sent permanently, got %q", sentText)
 	}
-	if !s.draftPermanentSent {
-		t.Fatal("draftPermanentSent should be marked after final-only permanent send")
+	if !s.permanentSent {
+		t.Fatal("permanentSent should be marked after final-only permanent send")
+	}
+}
+
+func TestGroupOpenStreamDefersTextUntilOneFinalSend(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	stream, err := adapter.OpenStream(context.Background(), channel.ChannelConfig{
+		ID:          "test",
+		Credentials: map[string]any{"bot_token": "fake"},
+	}, "-100123", channel.StreamOptions{Metadata: map[string]any{"conversation_type": "group"}})
+	if err != nil {
+		t.Fatalf("open group stream: %v", err)
+	}
+	s := stream.(*telegramOutboundStream)
+	if !s.finalOnly {
+		t.Fatal("group stream must defer real messages until final content")
+	}
+
+	origGetBot := getOrCreateBotForTest
+	origSendText := sendTextForTest
+	origEdit := testEditFunc
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
+	}
+	var sent []string
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
+		sent = append(sent, text)
+		return -100123, len(sent), nil
+	}
+	edits := 0
+	testEditFunc = func(*tele.Bot, int64, int, string, string) error {
+		edits++
+		return nil
+	}
+	defer func() {
+		getOrCreateBotForTest = origGetBot
+		sendTextForTest = origSendText
+		testEditFunc = origEdit
+	}()
+
+	ctx := context.Background()
+	if err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "partial"})); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	if err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText})); err != nil {
+		t.Fatalf("push phase end: %v", err)
+	}
+	if len(sent) != 0 || edits != 0 {
+		t.Fatalf("partial group text escaped before final: sent=%v edits=%d", sent, edits)
+	}
+	if err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
+		Type:  channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "complete"}},
+	})); err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+	if len(sent) != 1 || sent[0] != "complete" || edits != 0 {
+		t.Fatalf("group final delivery = sent %v, edits %d", sent, edits)
 	}
 }
 

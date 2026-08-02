@@ -66,6 +66,7 @@ type Manager struct {
 	refreshInterval time.Duration
 	logger          *slog.Logger
 	middlewares     []Middleware
+	sendToolStreams *SendToolStreamCoordinator
 
 	inboundQueue   chan inboundTask
 	inboundWorkers int
@@ -151,6 +152,10 @@ func (m *Manager) Use(mw ...Middleware) {
 // prepared outbound layer.
 func (m *Manager) SetAttachmentStore(store OutboundAttachmentStore) {
 	m.attachmentStore = store
+}
+
+func (m *Manager) SetSendToolStreamCoordinator(coordinator *SendToolStreamCoordinator) {
+	m.sendToolStreams = coordinator
 }
 
 // RegisterAdapter adds an adapter to the registry and logs the registration.
@@ -266,6 +271,19 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	}
 	if req.Message.IsEmpty() {
 		return errors.New("message is required")
+	}
+	toolCallID := takeInternalSendToolCallID(&req.Message)
+	if toolCallID != "" && channelType == ChannelTypeTelegram && m.sendToolStreams != nil {
+		handled, handoffErr := m.sendToolStreams.Finalize(ctx, SendToolStreamKey{
+			BotID: botID, Platform: channelType, Target: target, ToolCallID: toolCallID,
+		}, req.Message)
+		if handoffErr != nil && m.logger != nil {
+			m.logger.Warn("send preview handoff failed; falling back to one-shot delivery",
+				slog.String("bot_id", botID), slog.Any("error", handoffErr))
+		}
+		if handled && handoffErr == nil {
+			return nil
+		}
 	}
 	if m.logger != nil {
 		m.logger.Info("send outbound", slog.String("channel", channelType.String()), slog.String("bot_id", botID))

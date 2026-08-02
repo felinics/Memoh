@@ -128,7 +128,7 @@ func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 	}
 }
 
-func TestHandleReplyWithTurn_TelegramFallsBackToAssistantText(t *testing.T) {
+func TestHandleReplyWithTurn_TelegramNeverPublishesAssistantText(t *testing.T) {
 	messages, err := json.Marshal([]turn.ModelMessage{{
 		Role:    "assistant",
 		Content: turn.NewTextContent("I am here **now**."),
@@ -150,6 +150,42 @@ func TestHandleReplyWithTurn_TelegramFallsBackToAssistantText(t *testing.T) {
 		ReplyTarget:     "chat-1",
 		ForceReply:      true,
 		ReplySender:     replySender,
+	}}
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">bot keyword</message>`}},
+	}}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if len(replySender.sent) != 0 {
+		t.Fatalf("assistant text was published without send: %#v", replySender.sent)
+	}
+}
+
+func TestHandleReplyWithTurn_TelegramFallbackCanBeExplicitlyEnabled(t *testing.T) {
+	messages, err := json.Marshal([]turn.ModelMessage{{
+		Role:    "assistant",
+		Content: turn.NewTextContent("I am here **now**."),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replySender := &fakeDiscussReplySender{}
+	svc := &fakeTurnService{streamEvents: []agentevent.StreamEvent{{
+		Type:     agentevent.AgentEnd,
+		Messages: messages,
+	}}}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{
+		TeamID:              "team-1",
+		BotID:               "bot-1",
+		ThreadID:            "sess-1",
+		CurrentPlatform:     "telegram",
+		ReplyTarget:         "chat-1",
+		ForceReply:          true,
+		SendFallbackEnabled: true,
+		ReplySender:         replySender,
 	}}
 	rc := timeline.RenderedContext{{
 		ReceivedAtMs: 200,
@@ -210,6 +246,46 @@ func TestHandleReplyWithTurn_TelegramDoesNotDuplicateSuccessfulSend(t *testing.T
 
 	if len(replySender.sent) != 0 {
 		t.Fatalf("fallback sends = %d, want 0 after successful send tool", len(replySender.sent))
+	}
+}
+
+func TestHandleReplyWithTurn_TelegramDoesNotStreamOrdinaryText(t *testing.T) {
+	messages, err := json.Marshal([]turn.ModelMessage{{
+		Role:    "assistant",
+		Content: turn.NewTextContent("Hello **group**"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replySender := &fakeDiscussReplySender{}
+	svc := &fakeTurnService{streamEvents: []agentevent.StreamEvent{
+		{Type: agentevent.AgentStart},
+		{Type: agentevent.TextStart},
+		{Type: agentevent.TextDelta, Delta: "Hello "},
+		{Type: agentevent.TextDelta, Delta: "**group**"},
+		{Type: agentevent.TextEnd},
+		{Type: agentevent.AgentEnd, Messages: messages},
+	}}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{
+		TeamID:          "team-1",
+		BotID:           "bot-1",
+		ThreadID:        "sess-1",
+		CurrentPlatform: "telegram",
+		ReplyTarget:     "chat-1",
+		SourceMessageID: "message-1",
+		ForceReply:      true,
+		ReplySender:     replySender,
+	}}
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">bot keyword</message>`}},
+	}}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if len(replySender.sent) != 0 || len(replySender.streamEvents) != 0 {
+		t.Fatalf("ordinary text crossed public boundary: sent=%#v stream=%#v", replySender.sent, replySender.streamEvents)
 	}
 }
 
@@ -328,20 +404,6 @@ func TestHandleReplyWithTurn_NonTelegramDoesNotFallback(t *testing.T) {
 
 	if len(replySender.sent) != 0 {
 		t.Fatalf("fallback sends = %d, want 0 for non-Telegram discuss", len(replySender.sent))
-	}
-}
-
-func TestLatestReplyMessage_SuppressesNoReplyAndReasoning(t *testing.T) {
-	reasoning, err := json.Marshal([]turn.ContentPart{{Type: "reasoning", Text: "private reasoning"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	message := latestReplyMessage([]turn.ModelMessage{
-		{Role: "assistant", Content: reasoning},
-		{Role: "assistant", Content: turn.NewTextContent("NO_REPLY.")},
-	}, "telegram")
-	if !message.IsEmpty() {
-		t.Fatalf("message = %#v, want empty", message)
 	}
 }
 
@@ -872,8 +934,9 @@ func (*fakeRunHandle) AddOutboundAssets([]turn.OutboundAssetRef)        {}
 func (*fakeRunHandle) Cancel()                                          {}
 
 type fakeDiscussReplySender struct {
-	sent []channel.OutboundMessage
-	err  error
+	sent         []channel.OutboundMessage
+	streamEvents []channel.StreamEvent
+	err          error
 }
 
 func (s *fakeDiscussReplySender) Send(_ context.Context, msg channel.OutboundMessage) error {
@@ -883,6 +946,38 @@ func (s *fakeDiscussReplySender) Send(_ context.Context, msg channel.OutboundMes
 	s.sent = append(s.sent, msg)
 	return nil
 }
+
+func (s *fakeDiscussReplySender) OpenStream(
+	_ context.Context,
+	target string,
+	_ channel.StreamOptions,
+) (channel.OutboundStream, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &fakeDiscussOutboundStream{sender: s, target: target}, nil
+}
+
+type fakeDiscussOutboundStream struct {
+	sender *fakeDiscussReplySender
+	target string
+}
+
+func (s *fakeDiscussOutboundStream) Push(_ context.Context, event channel.StreamEvent) error {
+	if s.sender.err != nil {
+		return s.sender.err
+	}
+	s.sender.streamEvents = append(s.sender.streamEvents, event)
+	if event.Type == channel.StreamEventFinal && event.Final != nil {
+		s.sender.sent = append(s.sender.sent, channel.OutboundMessage{
+			Target:  s.target,
+			Message: event.Final.Message,
+		})
+	}
+	return nil
+}
+
+func (*fakeDiscussOutboundStream) Close(context.Context) error { return nil }
 
 type fakeDiscussCursorStore struct {
 	position       timeline.DiscussCursorPosition

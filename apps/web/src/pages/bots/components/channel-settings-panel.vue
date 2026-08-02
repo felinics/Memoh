@@ -215,7 +215,138 @@
             <TagsInputInput :placeholder="$t('bots.channels.telegramForceReplyKeywordsPlaceholder')" />
           </TagsInput>
         </SettingsRow>
+        <SettingsRow
+          :label="$t('bots.channels.telegramSendFallbackEnabled')"
+          :description="$t('bots.channels.telegramSendFallbackEnabledDescription')"
+        >
+          <Switch
+            :model-value="telegramSendFallbackEnabled"
+            :disabled="!telegramPolicyLoaded || isBusy"
+            :aria-label="$t('bots.channels.telegramSendFallbackEnabled')"
+            @update:model-value="(enabled) => telegramSendFallbackEnabled = !!enabled"
+          />
+        </SettingsRow>
       </SettingsSection>
+
+      <SettingsSection
+        v-if="isTelegram"
+        :title="$t('bots.channels.telegramContextTitle')"
+      >
+        <SettingsRow
+          :label="$t('bots.channels.telegramMessageMetadata')"
+          :description="$t('bots.channels.telegramMessageMetadataDescription')"
+        >
+          <Select
+            :model-value="telegramMessageMetadataMode"
+            :disabled="!telegramPolicyLoaded || isBusy"
+            @update:model-value="(value) => telegramMessageMetadataMode = normalizeTelegramMessageMetadataMode(value)"
+          >
+            <SelectTrigger class="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="compact">
+                {{ $t('bots.channels.telegramMessageMetadataCompact') }}
+              </SelectItem>
+              <SelectItem value="full">
+                {{ $t('bots.channels.telegramMessageMetadataFull') }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection
+        v-if="isTelegram"
+        :title="$t('bots.channels.telegramToolsTitle')"
+      >
+        <SettingsRow
+          :label="$t('bots.channels.telegramToolCallsEnabled')"
+          :description="$t('bots.channels.telegramToolCallsEnabledDescription')"
+        >
+          <Switch
+            :model-value="telegramToolCallsEnabled"
+            :disabled="!telegramPolicyLoaded || isBusy"
+            :aria-label="$t('bots.channels.telegramToolCallsEnabled')"
+            @update:model-value="(enabled) => telegramToolCallsEnabled = !!enabled"
+          />
+        </SettingsRow>
+        <SettingsRow
+          :label="$t('bots.channels.telegramSkillsEnabled')"
+          :description="$t('bots.channels.telegramSkillsEnabledDescription')"
+        >
+          <Switch
+            :model-value="telegramSkillsEnabled"
+            :disabled="!telegramPolicyLoaded || isBusy || !telegramToolCallsEnabled"
+            :aria-label="$t('bots.channels.telegramSkillsEnabled')"
+            @update:model-value="(enabled) => telegramSkillsEnabled = !!enabled"
+          />
+        </SettingsRow>
+        <SettingsRow
+          :label="$t('bots.channels.telegramToolsBulk')"
+          :description="$t('bots.channels.telegramToolsDescription')"
+        >
+          <div class="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="telegramToolCatalogLoading || isBusy || !telegramToolCallsEnabled || telegramTools.length === 0"
+              @click="setAllTelegramTools(true)"
+            >
+              {{ $t('bots.channels.telegramToolsEnableAll') }}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="telegramToolCatalogLoading || isBusy || !telegramToolCallsEnabled || telegramTools.length === 0"
+              @click="setAllTelegramTools(false)"
+            >
+              {{ $t('bots.channels.telegramToolsDisableAll') }}
+            </Button>
+          </div>
+        </SettingsRow>
+        <InlineLoadingRow
+          v-if="telegramToolCatalogLoading"
+          surface="card-row"
+        >
+          {{ $t('common.loading') }}
+        </InlineLoadingRow>
+        <SettingsRow
+          v-else-if="telegramToolCatalogError"
+          :label="$t('errors.tool.catalog_unavailable')"
+        />
+        <SettingsRow
+          v-else-if="telegramTools.length === 0"
+          :label="$t('bots.channels.telegramToolsEmpty')"
+          :description="$t('bots.channels.telegramToolsEmptyDescription')"
+        />
+        <template v-else>
+          <SettingsRow
+            v-for="tool in telegramTools"
+            :key="tool.name"
+            :label="tool.name"
+            :description="tool.description"
+          >
+            <Switch
+              :model-value="isTelegramToolEnabled(tool.name)"
+              :disabled="!telegramPolicyLoaded || isBusy || !telegramToolCallsEnabled"
+              :aria-label="tool.name"
+              @update:model-value="(enabled) => setTelegramToolEnabled(tool.name, !!enabled)"
+            />
+          </SettingsRow>
+        </template>
+        <p
+          v-if="telegramPolicyLoaded && telegramToolCallsEnabled && !isTelegramToolEnabled('send')"
+          class="mx-4 py-2 text-xs text-warning"
+        >
+          {{ $t('bots.channels.telegramSendDisabledWarning') }}
+        </p>
+      </SettingsSection>
+
+      <TelegramStickerCatalog
+        v-if="isTelegram"
+        :bot-id="botId"
+      />
     </template>
 
     <!-- Removing a connection is irreversible, so it sits in its own card -->
@@ -254,7 +385,8 @@
 
 <script setup lang="ts">
 import {
-  ActionCard, Button, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, Slider,
+  ActionCard, Button, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, InlineLoadingRow, Input,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Slider, Switch,
   TagsInput, TagsInputInput, TagsInputItem, TagsInputItemDelete, TagsInputItemText,
 } from '@felinic/ui'
 import { SlidersHorizontal } from 'lucide-vue-next'
@@ -262,14 +394,15 @@ import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus, postBotsByIdChannelByPlatformWebhookEndpoint } from '@memohai/sdk'
-import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
+import { getBotsByBotIdToolsCatalog, getBotsById, putBotsById, putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus, postBotsByIdChannelByPlatformWebhookEndpoint } from '@memohai/sdk'
+import type { HandlersChannelMeta, HandlersToolCatalogItem, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import ChannelField from './channel-field.vue'
+import TelegramStickerCatalog from './telegram-sticker-catalog.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -301,13 +434,32 @@ const queryCache = useQueryCache()
 
 const TELEGRAM_PASSIVE_RATE_KEY = 'telegram_discuss_passive_sample_rate'
 const TELEGRAM_FORCE_REPLY_KEYWORDS_KEY = 'telegram_discuss_force_reply_keywords'
+const TELEGRAM_SEND_FALLBACK_ENABLED_KEY = 'telegram_discuss_send_fallback_enabled'
+const TELEGRAM_TOOL_CALLS_ENABLED_KEY = 'telegram_tool_calls_enabled'
+const TELEGRAM_ENABLED_TOOLS_KEY = 'telegram_enabled_tools'
+const TELEGRAM_SKILLS_ENABLED_KEY = 'telegram_skills_enabled'
+const TELEGRAM_MESSAGE_METADATA_MODE_KEY = 'telegram_message_metadata_mode'
 const DEFAULT_TELEGRAM_PASSIVE_RATE = 0.25
+const DEFAULT_TELEGRAM_MESSAGE_METADATA_MODE = 'compact'
 const EMPTY_CHANNEL_FIELD: ChannelFieldSchema = {}
 
 const { data: bot } = useQuery({
   key: () => ['bot', botIdRef.value],
   query: async () => {
     const { data } = await getBotsById({ path: { id: botIdRef.value }, throwOnError: true })
+    return data
+  },
+  enabled: () => isTelegram.value && !!botIdRef.value,
+})
+
+const { data: telegramToolCatalog, error: telegramToolCatalogError, isLoading: telegramToolCatalogLoading } = useQuery({
+  key: () => ['bot-tool-catalog', botIdRef.value, 'telegram'],
+  query: async () => {
+    const { data } = await getBotsByBotIdToolsCatalog({
+      path: { bot_id: botIdRef.value },
+      query: { platform: 'telegram' },
+      throwOnError: true,
+    })
     return data
   },
   enabled: () => isTelegram.value && !!botIdRef.value,
@@ -325,7 +477,31 @@ const telegramPassiveRate = ref(DEFAULT_TELEGRAM_PASSIVE_RATE)
 const telegramForceReplyKeywords = ref<string[]>([])
 const savedTelegramPassiveRate = ref(DEFAULT_TELEGRAM_PASSIVE_RATE)
 const savedTelegramForceReplyKeywords = ref<string[]>([])
+const telegramSendFallbackEnabled = ref(false)
+const savedTelegramSendFallbackEnabled = ref(false)
+const telegramEnabledTools = ref<string[]>([])
+const savedTelegramEnabledTools = ref<string[]>([])
+const telegramToolCallsEnabled = ref(true)
+const savedTelegramToolCallsEnabled = ref(true)
+const telegramSkillsEnabled = ref(true)
+const savedTelegramSkillsEnabled = ref(true)
+const telegramToolPolicyConfigured = ref(false)
+const savedTelegramToolPolicyConfigured = ref(false)
+const telegramMessageMetadataMode = ref(DEFAULT_TELEGRAM_MESSAGE_METADATA_MODE)
+const savedTelegramMessageMetadataMode = ref(DEFAULT_TELEGRAM_MESSAGE_METADATA_MODE)
 const telegramPolicyLoaded = ref(false)
+
+const telegramTools = computed<Array<Required<Pick<HandlersToolCatalogItem, 'name'>> & HandlersToolCatalogItem>>(() => {
+  const seen = new Set<string>()
+  const tools: Array<Required<Pick<HandlersToolCatalogItem, 'name'>> & HandlersToolCatalogItem> = []
+  for (const item of telegramToolCatalog.value?.tools ?? []) {
+    const name = String(item.name || '').trim()
+    if (!name || name === 'list_skills' || name === 'use_skill' || seen.has(name)) continue
+    seen.add(name)
+    tools.push({ ...item, name })
+  }
+  return tools
+})
 
 const { mutateAsync: upsertChannel } = useMutation({
   mutation: async ({ platform, data }: { platform: string; data: ChannelUpsertConfigRequest }) => {
@@ -421,6 +597,12 @@ const isChannelFormDirty = computed(() => JSON.stringify(form.credentials) !== i
 const isTelegramPolicyDirty = computed(() => isTelegram.value && telegramPolicyLoaded.value && (
   telegramPassiveRate.value !== savedTelegramPassiveRate.value
   || JSON.stringify(telegramForceReplyKeywords.value) !== JSON.stringify(savedTelegramForceReplyKeywords.value)
+  || telegramSendFallbackEnabled.value !== savedTelegramSendFallbackEnabled.value
+  || telegramMessageMetadataMode.value !== savedTelegramMessageMetadataMode.value
+  || telegramToolCallsEnabled.value !== savedTelegramToolCallsEnabled.value
+  || telegramSkillsEnabled.value !== savedTelegramSkillsEnabled.value
+  || telegramToolPolicyConfigured.value !== savedTelegramToolPolicyConfigured.value
+  || JSON.stringify(telegramEnabledTools.value) !== JSON.stringify(savedTelegramEnabledTools.value)
 ))
 const isFormDirty = computed(() => isChannelFormDirty.value || isTelegramPolicyDirty.value)
 watch(isFormDirty, (val) => emit('update:dirty', val), { immediate: true })
@@ -430,11 +612,38 @@ watch(bot, (value) => {
   const metadata = isRecord(value.metadata) ? value.metadata : {}
   const rate = normalizeTelegramPassiveRate(metadata[TELEGRAM_PASSIVE_RATE_KEY])
   const keywords = normalizeTelegramKeywords(metadata[TELEGRAM_FORCE_REPLY_KEYWORDS_KEY])
+  const sendFallbackEnabled = metadata[TELEGRAM_SEND_FALLBACK_ENABLED_KEY] === true
+  const metadataMode = normalizeTelegramMessageMetadataMode(metadata[TELEGRAM_MESSAGE_METADATA_MODE_KEY])
+  const toolCallsEnabled = metadata[TELEGRAM_TOOL_CALLS_ENABLED_KEY] !== false
+  const skillsEnabled = metadata[TELEGRAM_SKILLS_ENABLED_KEY] !== false
+  const hasToolPolicy = Array.isArray(metadata[TELEGRAM_ENABLED_TOOLS_KEY])
+  const enabledTools = hasToolPolicy
+    ? normalizeTelegramToolNames(metadata[TELEGRAM_ENABLED_TOOLS_KEY])
+    : telegramTools.value.map(tool => tool.name)
   telegramPassiveRate.value = rate
   telegramForceReplyKeywords.value = keywords
+  telegramSendFallbackEnabled.value = sendFallbackEnabled
+  telegramMessageMetadataMode.value = metadataMode
+  telegramToolCallsEnabled.value = toolCallsEnabled
+  telegramSkillsEnabled.value = skillsEnabled
+  telegramToolPolicyConfigured.value = hasToolPolicy
+  telegramEnabledTools.value = enabledTools
   savedTelegramPassiveRate.value = rate
   savedTelegramForceReplyKeywords.value = [...keywords]
+  savedTelegramSendFallbackEnabled.value = sendFallbackEnabled
+  savedTelegramMessageMetadataMode.value = metadataMode
+  savedTelegramToolCallsEnabled.value = toolCallsEnabled
+  savedTelegramSkillsEnabled.value = skillsEnabled
+  savedTelegramToolPolicyConfigured.value = hasToolPolicy
+  savedTelegramEnabledTools.value = [...enabledTools]
   telegramPolicyLoaded.value = true
+}, { immediate: true })
+
+watch(telegramTools, (tools) => {
+  if (!telegramPolicyLoaded.value || telegramToolPolicyConfigured.value) return
+  const names = tools.map(tool => tool.name)
+  telegramEnabledTools.value = names
+  savedTelegramEnabledTools.value = [...names]
 }, { immediate: true })
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -462,6 +671,23 @@ function normalizeTelegramKeywords(value: unknown): string[] {
   return keywords
 }
 
+function normalizeTelegramToolNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const item of value) {
+    const name = typeof item === 'string' ? item.trim() : ''
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    names.push(name)
+  }
+  return names
+}
+
+function normalizeTelegramMessageMetadataMode(value: unknown): 'compact' | 'full' {
+  return value === 'full' ? 'full' : DEFAULT_TELEGRAM_MESSAGE_METADATA_MODE
+}
+
 async function saveTelegramPolicy() {
   if (!isTelegramPolicyDirty.value) return
   if (!bot.value || !telegramPolicyLoaded.value) {
@@ -470,15 +696,50 @@ async function saveTelegramPolicy() {
   const metadata = isRecord(bot.value.metadata) ? { ...bot.value.metadata } : {}
   metadata[TELEGRAM_PASSIVE_RATE_KEY] = telegramPassiveRate.value
   metadata[TELEGRAM_FORCE_REPLY_KEYWORDS_KEY] = [...telegramForceReplyKeywords.value]
+  metadata[TELEGRAM_SEND_FALLBACK_ENABLED_KEY] = telegramSendFallbackEnabled.value
+  metadata[TELEGRAM_MESSAGE_METADATA_MODE_KEY] = telegramMessageMetadataMode.value
+  metadata[TELEGRAM_TOOL_CALLS_ENABLED_KEY] = telegramToolCallsEnabled.value
+  if (telegramToolPolicyConfigured.value) {
+    metadata[TELEGRAM_ENABLED_TOOLS_KEY] = [...telegramEnabledTools.value]
+  } else {
+    delete metadata[TELEGRAM_ENABLED_TOOLS_KEY]
+  }
+  metadata[TELEGRAM_SKILLS_ENABLED_KEY] = telegramSkillsEnabled.value
   await putBotsById({ path: { id: botIdRef.value }, body: { metadata }, throwOnError: true })
   savedTelegramPassiveRate.value = telegramPassiveRate.value
   savedTelegramForceReplyKeywords.value = [...telegramForceReplyKeywords.value]
+  savedTelegramSendFallbackEnabled.value = telegramSendFallbackEnabled.value
+  savedTelegramMessageMetadataMode.value = telegramMessageMetadataMode.value
+  savedTelegramToolCallsEnabled.value = telegramToolCallsEnabled.value
+  savedTelegramSkillsEnabled.value = telegramSkillsEnabled.value
+  savedTelegramToolPolicyConfigured.value = telegramToolPolicyConfigured.value
+  savedTelegramEnabledTools.value = [...telegramEnabledTools.value]
   void queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
   void queryCache.invalidateQueries({ key: ['bot'] })
 }
 
 function updateTelegramPassiveRate(value: number[] | undefined) {
   telegramPassiveRate.value = value?.[0] ?? telegramPassiveRate.value
+}
+
+function isTelegramToolEnabled(name: string): boolean {
+  return telegramEnabledTools.value.includes(name)
+}
+
+function setTelegramToolEnabled(name: string, enabled: boolean) {
+  const current = new Set(telegramEnabledTools.value)
+  if (enabled) current.add(name)
+  else current.delete(name)
+  const catalogOrder = telegramTools.value.map(tool => tool.name)
+  const known = catalogOrder.filter(toolName => current.has(toolName))
+  const unknown = telegramEnabledTools.value.filter(toolName => !catalogOrder.includes(toolName) && current.has(toolName))
+  telegramEnabledTools.value = [...known, ...unknown]
+  telegramToolPolicyConfigured.value = true
+}
+
+function setAllTelegramTools(enabled: boolean) {
+  telegramEnabledTools.value = enabled ? telegramTools.value.map(tool => tool.name) : []
+  telegramToolPolicyConfigured.value = true
 }
 
 function validateRequired(): boolean {

@@ -933,6 +933,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	overlayProvider := eff.OverlayProvider
 	reasoningEnabled := eff.ReasoningEnabled
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
+	memoryProviderID := modelID(eff.MemoryProviderID, deps.memoryProviders)
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
 		ChatModelID:            modelID(eff.ChatModelID, deps.models),
 		ChatRuntime:            ptrStringAllowEmpty(eff.ChatRuntime),
@@ -942,7 +943,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		ImageModelID:           modelID(eff.ImageModelID, deps.models),
 		SearchProviderID:       modelID(eff.SearchProviderID, deps.searchProviders),
 		FetchProviderID:        &fetchProviderID,
-		MemoryProviderID:       modelID(eff.MemoryProviderID, deps.memoryProviders),
+		MemoryProviderID:       &memoryProviderID,
 		TtsModelID:             modelID(eff.TtsModelID, deps.models),
 		TranscriptionModelID:   modelID(eff.TranscriptionModelID, deps.models),
 		Language:               eff.Language,

@@ -125,7 +125,7 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 		"botInfoSection":            botInfoSection,
 		"skillsSection":             skillsSection,
 		"platformIdentitiesSection": strings.TrimSpace(params.PlatformIdentitiesSection),
-		"mainAgentSections":         buildMainAgentSections(strings.TrimSpace(params.PlatformIdentitiesSection), skillsSection, fileSections),
+		"mainAgentSections":         buildMainAgentSections(params.MemoryInstructions, strings.TrimSpace(params.PlatformIdentitiesSection), skillsSection, fileSections),
 		"subagentSections":          buildSubagentSections(strings.TrimSpace(params.PlatformIdentitiesSection)),
 		"fileSections":              fileSections,
 	})
@@ -140,6 +140,7 @@ type SystemPromptParams struct {
 	MaxFilesBytes             int
 	Timezone                  string
 	PlatformIdentitiesSection string
+	MemoryInstructions        bool
 }
 
 func buildBotInfoSection(bot BotInfo) string {
@@ -301,12 +302,16 @@ func splitHeadTail(maxBytes int) (int, int) {
 	return headBytes, tailBytes
 }
 
-func buildMainAgentSections(platformIdentitiesSection string, skillsSection, fileSections string) string {
+func buildMainAgentSections(memoryInstructions bool, platformIdentitiesSection string, skillsSection, fileSections string) string {
 	identitiesSection := render(includes["_identities"], map[string]string{
 		"platformIdentitiesSection": platformIdentitiesSection,
 	})
+	memorySection := ""
+	if memoryInstructions {
+		memorySection = includes["_memory"]
+	}
 	sections := []string{
-		includes["_memory"],
+		memorySection,
 		identitiesSection,
 		skillsSection,
 		fileSections,

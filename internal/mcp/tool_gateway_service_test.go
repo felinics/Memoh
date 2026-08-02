@@ -6,6 +6,11 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/agent/channelpolicy"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
 type gatewayTestProvider struct {
@@ -46,14 +51,28 @@ func (*countingGatewayTestProvider) CallTool(context.Context, ToolSessionContext
 
 type mutableGatewayTestProvider struct {
 	tools []ToolDescriptor
+	calls int
 }
 
 func (p *mutableGatewayTestProvider) ListTools(_ context.Context, _ ToolSessionContext) ([]ToolDescriptor, error) {
+	p.calls++
 	return append([]ToolDescriptor(nil), p.tools...), nil
 }
 
 func (*mutableGatewayTestProvider) CallTool(context.Context, ToolSessionContext, string, map[string]any) (map[string]any, error) {
 	return nil, ErrToolNotFound
+}
+
+type mutableToolPolicyQueries struct {
+	metadata []byte
+	err      error
+}
+
+func (q *mutableToolPolicyQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
+	if q.err != nil {
+		return sqlc.GetBotByIDRow{}, q.err
+	}
+	return sqlc.GetBotByIDRow{Metadata: append([]byte(nil), q.metadata...)}, nil
 }
 
 func (p *gatewayTestProvider) CallTool(_ context.Context, _ ToolSessionContext, toolName string, _ map[string]any) (map[string]any, error) {
@@ -267,6 +286,83 @@ func TestToolGatewayServiceListTools(t *testing.T) {
 	}
 	if len(tools) != 3 {
 		t.Fatalf("expected 3 tools after dedupe, got %d", len(tools))
+	}
+}
+
+func TestToolGatewayServiceAppliesChangedTelegramPolicyBeforeCacheLookup(t *testing.T) {
+	provider := &mutableGatewayTestProvider{tools: []ToolDescriptor{
+		{Name: "tool_a", InputSchema: map[string]any{"type": "object"}},
+		{Name: "tool_b", InputSchema: map[string]any{"type": "object"}},
+	}}
+	queries := &mutableToolPolicyQueries{metadata: []byte(`{"telegram_enabled_tools":["tool_a"]}`)}
+	service := NewToolGatewayService(
+		slog.Default(),
+		[]ToolSource{provider},
+		WithChannelPolicyResolver(channelpolicy.NewResolver(queries)),
+	)
+	session := ToolSessionContext{
+		BotID:           "00000000-0000-0000-0000-000000000001",
+		CurrentPlatform: "telegram",
+	}
+
+	tools, err := service.ListTools(context.Background(), session)
+	if err != nil {
+		t.Fatalf("first list tools failed: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "tool_a" {
+		t.Fatalf("first policy tools = %#v", tools)
+	}
+
+	queries.metadata = []byte(`{"telegram_enabled_tools":["tool_b"]}`)
+	tools, err = service.ListTools(context.Background(), session)
+	if err != nil {
+		t.Fatalf("second list tools failed: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "tool_b" {
+		t.Fatalf("changed policy tools = %#v", tools)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider list calls = %d, want cache separated by policy", provider.calls)
+	}
+}
+
+func TestToolGatewayServiceToolCatalogIgnoresManualPolicy(t *testing.T) {
+	provider := &mutableGatewayTestProvider{tools: []ToolDescriptor{
+		{Name: "tool_a", InputSchema: map[string]any{"type": "object"}},
+		{Name: "tool_b", InputSchema: map[string]any{"type": "object"}},
+	}}
+	queries := &mutableToolPolicyQueries{metadata: []byte(`{"telegram_enabled_tools":[]}`)}
+	service := NewToolGatewayService(
+		slog.Default(),
+		[]ToolSource{provider},
+		WithChannelPolicyResolver(channelpolicy.NewResolver(queries)),
+	)
+	tools, err := service.ListTools(context.Background(), ToolSessionContext{
+		BotID:            "00000000-0000-0000-0000-000000000001",
+		CurrentPlatform:  "telegram",
+		IgnoreToolPolicy: true,
+	})
+	if err != nil {
+		t.Fatalf("list catalog tools failed: %v", err)
+	}
+	if len(tools) != 2 {
+		t.Fatalf("catalog tools = %#v, want all available tools", tools)
+	}
+}
+
+func TestToolGatewayServiceFailsClosedWhenPolicyCannotLoad(t *testing.T) {
+	queries := &mutableToolPolicyQueries{err: errors.New("database unavailable")}
+	service := NewToolGatewayService(
+		slog.Default(),
+		[]ToolSource{&gatewayTestProvider{tools: []ToolDescriptor{{Name: "dangerous_tool"}}}},
+		WithChannelPolicyResolver(channelpolicy.NewResolver(queries)),
+	)
+	_, err := service.ListTools(context.Background(), ToolSessionContext{
+		BotID:           "00000000-0000-0000-0000-000000000001",
+		CurrentPlatform: "telegram",
+	})
+	if err == nil || !strings.Contains(err.Error(), "resolve channel tool policy") {
+		t.Fatalf("expected policy resolution error, got %v", err)
 	}
 }
 

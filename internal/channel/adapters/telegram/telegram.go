@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1323,8 +1324,9 @@ func (a *TelegramAdapter) Unsend(_ context.Context, cfg channel.ChannelConfig, t
 // OpenStream opens a Telegram streaming session.
 // For private chats, uses sendMessageDraft to stream partial content with smooth
 // animation, then sends a final permanent message via sendMessage.
-// For group/channel chats, sends one message then edits it in place as deltas
-// arrive (editMessageText), avoiding one message per delta and rate limits.
+// Group and channel chats have no Telegram draft API, so their deltas remain
+// internal and the final content is sent once. This avoids a send-then-edit
+// approximation that would expose incomplete text as a real message.
 func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.PreparedOutboundStream, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -1342,12 +1344,16 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 	}
 	isPrivateChat := false
 	var chatID int64
+	draftID := 1
 	if opts.Metadata != nil {
 		if ct, ok := opts.Metadata["conversation_type"].(string); ok && ct == "private" {
 			if parsed, err := strconv.ParseInt(target, 10, 64); err == nil {
 				isPrivateChat = true
 				chatID = parsed
 			}
+		}
+		if toolCallID, _ := opts.Metadata["tool_call_id"].(string); strings.TrimSpace(toolCallID) != "" {
+			draftID = telegramDraftID(toolCallID)
 		}
 	}
 	return &telegramOutboundStream{
@@ -1357,9 +1363,20 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 		reply:         opts.Reply,
 		parseMode:     "",
 		isPrivateChat: isPrivateChat,
+		finalOnly:     !isPrivateChat,
 		streamChatID:  chatID,
-		draftID:       1,
+		draftID:       draftID,
 	}, nil
+}
+
+func telegramDraftID(toolCallID string) int {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(strings.TrimSpace(toolCallID)))
+	value := int(hash.Sum32() & 0x7fffffff)
+	if value == 0 {
+		return 1
+	}
+	return value
 }
 
 func resolveTelegramSender(msg *tele.Message) (string, string, map[string]string) {
@@ -2254,10 +2271,6 @@ func (a *TelegramAdapter) DiscoverSelf(_ context.Context, credentials map[string
 	name := strings.TrimSpace(bot.Me.FirstName + " " + bot.Me.LastName)
 	if name != "" {
 		identity["name"] = name
-	}
-	avatarURL := a.resolveUserAvatarURL(bot, bot.Me.ID)
-	if avatarURL != "" {
-		identity["avatar_url"] = avatarURL
 	}
 	return identity, strconv.FormatInt(bot.Me.ID, 10), nil
 }

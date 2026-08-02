@@ -19,24 +19,30 @@ import (
 )
 
 type fakeAgentStreamer struct {
-	lastConfig *native.RunConfig
+	lastConfig    *native.RunConfig
+	finalMessages json.RawMessage
 }
 
 func (f *fakeAgentStreamer) Stream(_ context.Context, cfg native.RunConfig) <-chan native.StreamEvent {
 	f.lastConfig = &cfg
 	ch := make(chan native.StreamEvent, 1)
+	finalMessages := f.finalMessages
+	if len(finalMessages) == 0 {
+		finalMessages = json.RawMessage(`[{"role":"assistant","content":"done"}]`)
+	}
 	ch <- native.StreamEvent{
 		Type:     native.EventAgentEnd,
-		Messages: json.RawMessage(`[{"role":"assistant","content":"done"}]`),
+		Messages: finalMessages,
 	}
 	close(ch)
 	return ch
 }
 
 type fakeDiscussService struct {
-	resolveResult ResolveRunConfigResult
-	inlineFn      func(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart
-	storeCalls    int
+	resolveResult  ResolveRunConfigResult
+	inlineFn       func(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart
+	storeCalls     int
+	storedMessages []sdk.Message
 }
 
 func (f *fakeDiscussService) ResolveRunConfig(_ context.Context, _, _, _, _, _, _, _ string) (ResolveRunConfigResult, error) {
@@ -50,8 +56,9 @@ func (f *fakeDiscussService) InlineImageAttachments(ctx context.Context, botID s
 	return nil
 }
 
-func (f *fakeDiscussService) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
+func (f *fakeDiscussService) StoreRound(_ context.Context, _, _, _, _ string, messages []sdk.Message, _ string) error {
 	f.storeCalls++
+	f.storedMessages = append([]sdk.Message(nil), messages...)
 	return nil
 }
 
@@ -99,8 +106,11 @@ func discussCommand() turn.StartTurnCommand {
 	}
 }
 
-func TestDiscussForceReplyAddsNativeInstruction(t *testing.T) {
-	agent := &fakeAgentStreamer{}
+func TestDiscussForceReplyUsesEphemeralTailSignal(t *testing.T) {
+	agent := &fakeAgentStreamer{finalMessages: json.RawMessage(`[
+		{"role":"user","content":"<operator-directive force_reply=\"true\"/>"},
+		{"role":"assistant","content":"done"}
+	]`)}
 	resolver := &fakeDiscussService{
 		resolveResult: ResolveRunConfigResult{
 			RunConfig: native.RunConfig{System: "base system"},
@@ -120,8 +130,56 @@ func TestDiscussForceReplyAddsNativeInstruction(t *testing.T) {
 	if agent.lastConfig == nil {
 		t.Fatal("expected native agent to run")
 	}
-	if !strings.Contains(agent.lastConfig.System, discussForceReplyInstruction) {
-		t.Fatalf("system prompt = %q, want force-reply instruction", agent.lastConfig.System)
+	if agent.lastConfig.System != "base system" {
+		t.Fatalf("force reply changed stable system prompt: %q", agent.lastConfig.System)
+	}
+	if len(agent.lastConfig.Messages) == 0 || !isDiscussForceReplySignal(agent.lastConfig.Messages[len(agent.lastConfig.Messages)-1]) {
+		t.Fatalf("messages do not end with force-reply signal: %#v", agent.lastConfig.Messages)
+	}
+	for _, message := range resolver.storedMessages {
+		if isDiscussForceReplySignal(message) {
+			t.Fatalf("ephemeral force-reply signal was persisted: %#v", resolver.storedMessages)
+		}
+	}
+}
+
+func TestDiscussForceReplySignalFollowsImageEnrichment(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: native.RunConfig{SupportsImageInput: true},
+			ModelID:   "model-1",
+		},
+		inlineFn: func(_ context.Context, _ string, _ []timeline.ImageAttachmentRef) []sdk.ImagePart {
+			return []sdk.ImagePart{{Image: "data:image/jpeg;base64,FAKE", MediaType: "image/jpeg"}}
+		},
+	}
+	service := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	cmd := discussCommand()
+	cmd.DiscussForceReply = true
+	cmd.DiscussImageRefs = []turn.DiscussImageRef{{ContentHash: "img-hash", Mime: "image/jpeg"}}
+
+	handle, err := service.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, handle)
+
+	if agent.lastConfig == nil || len(agent.lastConfig.Messages) < 2 {
+		t.Fatalf("expected enriched message plus tail signal: %#v", agent.lastConfig)
+	}
+	last := len(agent.lastConfig.Messages) - 1
+	if !isDiscussForceReplySignal(agent.lastConfig.Messages[last]) {
+		t.Fatalf("last message is not force-reply signal: %#v", agent.lastConfig.Messages)
+	}
+	hasImage := false
+	for _, part := range agent.lastConfig.Messages[last-1].Content {
+		if _, ok := part.(sdk.ImagePart); ok {
+			hasImage = true
+		}
+	}
+	if !hasImage {
+		t.Fatalf("image was not attached before force-reply signal: %#v", agent.lastConfig.Messages)
 	}
 }
 

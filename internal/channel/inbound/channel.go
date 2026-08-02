@@ -134,8 +134,9 @@ type DefaultChatRuntimeReader interface {
 }
 
 type TelegramDiscussPolicy struct {
-	PassiveSampleRate  float64
-	ForceReplyKeywords []string
+	PassiveSampleRate   float64
+	ForceReplyKeywords  []string
+	SendFallbackEnabled bool
 }
 
 type TelegramDiscussPolicyReader interface {
@@ -888,26 +889,28 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Discuss mode: sample passive Telegram traffic before notifying the
 	// discuss driver. Every message has already entered the durable timeline.
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
-		notify, sampleRate, forceReply := p.shouldNotifyDiscuss(ctx, identity.BotID, msg, shouldTrigger)
+		notify, sampleRate, forceReply, sendFallbackEnabled := p.shouldNotifyDiscuss(ctx, identity.BotID, msg, shouldTrigger)
 		if notify {
 			chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 			sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
 			p.discussDriver.NotifyRC(ctx, sessionID, latestRC, discuss.DiscussSessionConfig{
-				TeamID:            cfg.TeamID,
-				BotID:             identity.BotID,
-				ThreadID:          sessionID,
-				RouteID:           resolved.RouteID,
-				UserID:            strings.TrimSpace(identity.UserID),
-				ChannelIdentityID: identity.ChannelIdentityID,
-				ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
-				CurrentPlatform:   msg.Channel.String(),
-				ConversationType:  strings.TrimSpace(msg.Conversation.Type),
-				ConversationName:  strings.TrimSpace(msg.Conversation.Name),
-				SessionToken:      sessionToken,
-				ChatToken:         chatToken,
-				ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
-				ForceReply:        forceReply,
-				ReplySender:       sender,
+				TeamID:              cfg.TeamID,
+				BotID:               identity.BotID,
+				ThreadID:            sessionID,
+				RouteID:             resolved.RouteID,
+				UserID:              strings.TrimSpace(identity.UserID),
+				ChannelIdentityID:   identity.ChannelIdentityID,
+				ReplyTarget:         strings.TrimSpace(msg.ReplyTarget),
+				SourceMessageID:     strings.TrimSpace(msg.Message.ID),
+				CurrentPlatform:     msg.Channel.String(),
+				ConversationType:    strings.TrimSpace(msg.Conversation.Type),
+				ConversationName:    strings.TrimSpace(msg.Conversation.Name),
+				SessionToken:        sessionToken,
+				ChatToken:           chatToken,
+				ToolHTTPURL:         acpMCPToolsURLFromEnv(identity.BotID),
+				ForceReply:          forceReply,
+				SendFallbackEnabled: sendFallbackEnabled,
+				ReplySender:         sender,
 			})
 		} else if p.logger != nil {
 			p.logger.Debug(
@@ -1639,15 +1642,13 @@ func (p *ChannelInboundProcessor) shouldNotifyDiscuss(
 	botID string,
 	msg channel.InboundMessage,
 	force bool,
-) (bool, float64, bool) {
+) (bool, float64, bool, bool) {
 	rate := channel.DefaultTelegramDiscussPassiveSampleRate
 	if msg.Channel != channel.ChannelTypeTelegram {
-		return true, rate, force
-	}
-	if force {
-		return true, rate, true
+		return true, rate, force, false
 	}
 	var keywords []string
+	sendFallbackEnabled := false
 	if p != nil && p.telegramDiscussPolicy != nil {
 		policy, err := p.telegramDiscussPolicy.TelegramDiscussPolicy(ctx, strings.TrimSpace(botID))
 		if err == nil {
@@ -1655,6 +1656,7 @@ func (p *ChannelInboundProcessor) shouldNotifyDiscuss(
 				rate = policy.PassiveSampleRate
 			}
 			keywords = policy.ForceReplyKeywords
+			sendFallbackEnabled = policy.SendFallbackEnabled
 		} else if p.logger != nil {
 			p.logger.Warn(
 				"failed to load telegram discuss policy; using default",
@@ -1663,14 +1665,17 @@ func (p *ChannelInboundProcessor) shouldNotifyDiscuss(
 			)
 		}
 	}
+	if force {
+		return true, rate, true, sendFallbackEnabled
+	}
 	if messageMatchesKeyword(msg.Message.Text, keywords) {
-		return true, rate, true
+		return true, rate, true, sendFallbackEnabled
 	}
 	sample := rand.Float64
 	if p != nil && p.discussSample != nil {
 		sample = p.discussSample
 	}
-	return sample() < rate, rate, false
+	return sample() < rate, rate, false, sendFallbackEnabled
 }
 
 func messageMatchesKeyword(message string, keywords []string) bool {

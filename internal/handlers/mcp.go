@@ -22,6 +22,15 @@ type MCPHandler struct {
 	accountService *accounts.Service
 	fedGateway     *MCPFederationGateway
 	logger         *slog.Logger
+	stickerVision  TelegramStickerVisionRecognizer
+}
+
+// TelegramStickerVisionRecognizer keeps the HTTP handler independent from the
+// Agent application package while allowing first-party Sticker recognition to
+// reuse Memoh's model and credential resolver.
+type TelegramStickerVisionRecognizer interface {
+	TelegramStickerVisionConfig(context.Context, string) (model, promptVersion string, inherited bool, err error)
+	RecognizeTelegramSticker(context.Context, string, string, string, []byte) (description, model, promptVersion string, err error)
 }
 
 func NewMCPHandler(log *slog.Logger, service *mcp.ConnectionService, botService *bots.Service, accountService *accounts.Service, fedGateway *MCPFederationGateway) *MCPHandler {
@@ -31,6 +40,12 @@ func NewMCPHandler(log *slog.Logger, service *mcp.ConnectionService, botService 
 		accountService: accountService,
 		fedGateway:     fedGateway,
 		logger:         log.With(slog.String("handler", "mcp")),
+	}
+}
+
+func (h *MCPHandler) SetTelegramStickerVisionRecognizer(recognizer TelegramStickerVisionRecognizer) {
+	if h != nil {
+		h.stickerVision = recognizer
 	}
 }
 
@@ -47,6 +62,13 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 	ops.PUT("/import", h.Import)
 	ops.GET("/export", h.Export)
 	ops.POST("/batch-delete", h.BatchDelete)
+
+	stickers := e.Group("/bots/:bot_id/telegram/stickers")
+	stickers.GET("", h.ListTelegramStickers)
+	stickers.PUT("/sets", h.UpdateTelegramStickerSets)
+	stickers.POST("/refresh", h.RefreshTelegramStickerSet)
+	stickers.GET("/:sticker_id/preview", h.PreviewTelegramSticker)
+	stickers.POST("/:sticker_id/retry", h.RetryTelegramStickerRecognition)
 }
 
 // List godoc

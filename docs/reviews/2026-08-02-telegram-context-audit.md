@@ -2,6 +2,8 @@
 
 日期：2026-08-02
 
+> 状态说明：本文记录本轮修改前的只读基线，因此下文中的“当前行为”指审查时快照。已实施的工具白名单、元数据投影、Memory=None、缓存稳定性调整和真实群聊验证，请以 [Telegram 上下文、工具与缓存优化实施报告](./2026-08-02-telegram-optimization-implementation.md) 为准。
+
 ## 范围
 
 这份审查以 Telegram Channel 和原生 Model Runtime 为主，沿着以下调用链检查每轮请求送进模型的内容：

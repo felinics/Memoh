@@ -20,6 +20,7 @@ func FoundationModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
 			identities.NewService,
+			channel.NewSendToolStreamCoordinator,
 			emailpkg.NewDBOAuthTokenStore,
 			provideEmailRegistry,
 			emailpkg.NewService,

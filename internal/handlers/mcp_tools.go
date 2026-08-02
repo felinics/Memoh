@@ -7,9 +7,20 @@ import (
 	"github.com/labstack/echo/v4"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/memohai/memoh/internal/agent/sessionmode"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/auth"
 	mcpgw "github.com/memohai/memoh/internal/mcp"
 )
+
+type ToolCatalogItem struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type ToolCatalogResponse struct {
+	Tools []ToolCatalogItem `json:"tools"`
+}
 
 const (
 	headerBotID             = mcpgw.ToolHeaderBotID
@@ -64,6 +75,50 @@ func (h *ContainerdHandler) HandleMCPTools(c echo.Context) error {
 		return err
 	}
 	return h.handleMCPToolsWithBotID(c, botID)
+}
+
+// ListToolCatalog godoc
+// @Summary List tools available for channel configuration
+// @Description Lists the tools the bot can currently expose before applying its manual channel allowlist.
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param platform query string false "Channel platform" default(telegram)
+// @Success 200 {object} ToolCatalogResponse
+// @Failure 500 {object} apperror.Problem
+// @Router /bots/{bot_id}/tools/catalog [get].
+func (h *ContainerdHandler) ListToolCatalog(c echo.Context) error {
+	if h.toolGateway == nil {
+		return apperror.New(apperror.CodeToolCatalogUnavailable, nil)
+	}
+	botID, err := h.requireBotAccessWithGuest(c)
+	if err != nil {
+		return err
+	}
+	platform := strings.ToLower(strings.TrimSpace(c.QueryParam("platform")))
+	if platform == "" {
+		platform = "telegram"
+	}
+	descriptors, err := h.toolGateway.ListTools(c.Request().Context(), mcpgw.ToolSessionContext{
+		BotID:               botID,
+		ChatID:              botID,
+		SessionType:         sessionmode.Chat,
+		CurrentPlatform:     platform,
+		ConversationType:    "group",
+		CanRequestUserInput: true,
+		CanListUserInput:    true,
+		IgnoreToolPolicy:    true,
+	})
+	if err != nil {
+		return apperror.Wrap(apperror.CodeToolCatalogUnavailable, err, nil)
+	}
+	items := make([]ToolCatalogItem, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		items = append(items, ToolCatalogItem{
+			Name:        descriptor.Name,
+			Description: descriptor.Description,
+		})
+	}
+	return c.JSON(http.StatusOK, ToolCatalogResponse{Tools: items})
 }
 
 func (h *ContainerdHandler) handleMCPToolsWithBotID(c echo.Context, botID string) error {

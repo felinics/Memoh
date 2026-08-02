@@ -32,50 +32,55 @@ type DiscussStreamBroadcaster interface {
 // session for deterministic reply fallback delivery.
 type DiscussReplySender interface {
 	Send(ctx context.Context, msg channel.OutboundMessage) error
+	OpenStream(ctx context.Context, target string, opts channel.StreamOptions) (channel.OutboundStream, error)
 }
 
 // DiscussDriverDeps holds dependencies injected into the DiscussDriver.
 type DiscussDriverDeps struct {
-	Turn           turn.Service
-	MessageService messagepkg.Service
-	CursorStore    DiscussCursorStore
-	Artifacts      DiscussArtifactProvider
-	Broadcaster    DiscussStreamBroadcaster
-	Logger         *slog.Logger
+	Turn            turn.Service
+	MessageService  messagepkg.Service
+	CursorStore     DiscussCursorStore
+	Artifacts       DiscussArtifactProvider
+	Broadcaster     DiscussStreamBroadcaster
+	SendToolStreams *channel.SendToolStreamCoordinator
+	Logger          *slog.Logger
 }
 
 // DiscussSessionConfig holds per-thread configuration for discuss mode.
 type DiscussSessionConfig struct {
-	TeamID            string
-	BotID             string
-	ThreadID          string
-	RouteID           string
-	UserID            string
-	ChannelIdentityID string
-	ReplyTarget       string
-	CurrentPlatform   string
-	ConversationType  string
-	ConversationName  string
-	SessionToken      string //nolint:gosec // session credential material
-	ChatToken         string //nolint:gosec // scoped chat routing token
-	ToolHTTPURL       string
-	ForceReply        bool
-	ReplySender       DiscussReplySender
+	TeamID              string
+	BotID               string
+	ThreadID            string
+	RouteID             string
+	UserID              string
+	ChannelIdentityID   string
+	ReplyTarget         string
+	SourceMessageID     string
+	CurrentPlatform     string
+	ConversationType    string
+	ConversationName    string
+	SessionToken        string //nolint:gosec // session credential material
+	ChatToken           string //nolint:gosec // scoped chat routing token
+	ToolHTTPURL         string
+	ForceReply          bool
+	SendFallbackEnabled bool
+	ReplySender         DiscussReplySender
 }
 
 // DiscussDriver owns worker lifecycle only. Trigger construction, history,
 // cursor persistence, turn execution, and stream projection live in dedicated
 // collaborators.
 type DiscussDriver struct {
-	mu        sync.Mutex
-	turn      turn.Service
-	sessions  map[string]*discussSession
-	history   discussHistoryReader
-	cursor    discussCursorTracker
-	trigger   discussTriggerBuilder
-	runner    discussTurnRunner
-	artifacts DiscussArtifactProvider
-	logger    *slog.Logger
+	mu              sync.Mutex
+	turn            turn.Service
+	sessions        map[string]*discussSession
+	history         discussHistoryReader
+	cursor          discussCursorTracker
+	trigger         discussTriggerBuilder
+	runner          discussTurnRunner
+	artifacts       DiscussArtifactProvider
+	sendToolStreams *channel.SendToolStreamCoordinator
+	logger          *slog.Logger
 }
 
 type discussSession struct {
@@ -106,13 +111,14 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 	logger = logger.With(slog.String("service", "channel/discuss"))
 	projector := newDiscussEventProjector(deps.Broadcaster)
 	return &DiscussDriver{
-		turn:      deps.Turn,
-		sessions:  make(map[string]*discussSession),
-		history:   discussHistoryReader{messages: deps.MessageService, logger: logger},
-		cursor:    discussCursorTracker{store: deps.CursorStore},
-		runner:    discussTurnRunner{projector: projector},
-		artifacts: deps.Artifacts,
-		logger:    logger,
+		turn:            deps.Turn,
+		sessions:        make(map[string]*discussSession),
+		history:         discussHistoryReader{messages: deps.MessageService, logger: logger},
+		cursor:          discussCursorTracker{store: deps.CursorStore},
+		runner:          discussTurnRunner{projector: projector, sendToolStreams: deps.SendToolStreams},
+		artifacts:       deps.Artifacts,
+		sendToolStreams: deps.SendToolStreams,
+		logger:          logger,
 	}
 }
 

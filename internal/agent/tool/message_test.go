@@ -172,7 +172,7 @@ func TestExecSendDiscussTextUsesChannelAdapter(t *testing.T) {
 		t.Fatalf("unexpected send request: %+v", sender.req)
 	}
 	resp, ok := result.(map[string]any)
-	if !ok || resp["ok"] != true || resp["delivered"] != "current_conversation" {
+	if !ok || resp["ok"] != true || len(resp) != 1 {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 }

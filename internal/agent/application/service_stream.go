@@ -35,6 +35,8 @@ func hasVisibleAgentStreamOutput(event native.StreamEvent) bool {
 		native.EventReasoningDelta:
 		return strings.TrimSpace(event.Delta) != ""
 	case native.EventToolCallInputStart,
+		native.EventToolCallInputDelta,
+		native.EventToolCallInputEnd,
 		native.EventToolCallStart,
 		native.EventToolCallProgress,
 		native.EventToolCallEnd,

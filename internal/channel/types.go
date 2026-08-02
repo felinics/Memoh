@@ -48,6 +48,7 @@ const (
 const (
 	TelegramDiscussPassiveSampleRateMetadataKey  = "telegram_discuss_passive_sample_rate"
 	TelegramDiscussForceReplyKeywordsMetadataKey = "telegram_discuss_force_reply_keywords"
+	TelegramDiscussSendFallbackMetadataKey       = "telegram_discuss_send_fallback_enabled"
 	DefaultTelegramDiscussPassiveSampleRate      = 0.25
 )
 

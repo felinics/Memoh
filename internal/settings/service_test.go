@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/google/uuid"
@@ -20,6 +21,48 @@ type auxiliaryVisionSettingsQueries struct {
 	dbstore.Queries
 	model    sqlc.Model
 	provider sqlc.Provider
+}
+
+type memoryClearSettingsQueries struct {
+	dbstore.Queries
+	upsert sqlc.UpsertBotSettingsParams
+}
+
+func (*memoryClearSettingsQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
+	return sqlc.GetBotByIDRow{
+		Language:          "en",
+		ReasoningEffort:   "medium",
+		HeartbeatInterval: 60,
+		CompactionRatio:   80,
+	}, nil
+}
+
+func (*memoryClearSettingsQueries) GetBotOverlayConfig(context.Context, pgtype.UUID) (sqlc.GetBotOverlayConfigRow, error) {
+	return sqlc.GetBotOverlayConfigRow{}, nil
+}
+
+func (*memoryClearSettingsQueries) GetSettingsByBotID(context.Context, pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
+	return sqlc.GetSettingsByBotIDRow{
+		Language:          "en",
+		ReasoningEffort:   "medium",
+		HeartbeatInterval: 60,
+		CompactionRatio:   80,
+		MemoryProviderID: pgtype.UUID{
+			Bytes: uuid.MustParse("22222222-2222-2222-2222-222222222222"),
+			Valid: true,
+		},
+	}, nil
+}
+
+func (q *memoryClearSettingsQueries) UpsertBotSettings(_ context.Context, params sqlc.UpsertBotSettingsParams) (sqlc.UpsertBotSettingsRow, error) {
+	q.upsert = params
+	return sqlc.UpsertBotSettingsRow{
+		Language:          params.Language,
+		ReasoningEffort:   params.ReasoningEffort,
+		HeartbeatInterval: params.HeartbeatInterval,
+		CompactionRatio:   params.CompactionRatio,
+		MemoryProviderID:  params.MemoryProviderID,
+	}, nil
 }
 
 func (q *auxiliaryVisionSettingsQueries) GetModelByID(context.Context, pgtype.UUID) (sqlc.Model, error) {
@@ -47,6 +90,25 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMDefault(t *testing.T) {
 	got := normalizeBotSettingsReadRow(row)
 	if got.ShowToolCallsInIM {
 		t.Fatalf("expected default ShowToolCallsInIM=false, got true")
+	}
+}
+
+func TestUpsertBotEmptyMemoryProviderExplicitlyClearsSelection(t *testing.T) {
+	t.Parallel()
+
+	queries := &memoryClearSettingsQueries{}
+	service := NewService(slog.Default(), queries, nil, nil)
+	empty := ""
+	if _, err := service.UpsertBot(t.Context(), "11111111-1111-1111-1111-111111111111", UpsertRequest{
+		MemoryProviderID: &empty,
+	}); err != nil {
+		t.Fatalf("clear memory provider: %v", err)
+	}
+	if !queries.upsert.MemoryProviderIDSet {
+		t.Fatal("empty memory_provider_id was treated as an omitted field")
+	}
+	if queries.upsert.MemoryProviderID.Valid {
+		t.Fatalf("clear memory provider resolved to a valid UUID: %#v", queries.upsert.MemoryProviderID)
 	}
 }
 

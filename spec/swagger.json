@@ -7499,6 +7499,216 @@
                 }
             }
         },
+        "/bots/{bot_id}/telegram/stickers": {
+            "get": {
+                "description": "List the configured Telegram Sticker Set with visual descriptions and recognition status",
+                "tags": [
+                    "telegram-stickers"
+                ],
+                "summary": "List Telegram stickers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TelegramStickerCatalog"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/telegram/stickers/refresh": {
+            "post": {
+                "description": "Explicitly replace the permanent Sticker Set metadata cache from Telegram",
+                "tags": [
+                    "telegram-stickers"
+                ],
+                "summary": "Refresh Telegram Sticker Set metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TelegramStickerCatalog"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/telegram/stickers/sets": {
+            "put": {
+                "description": "Replace the configured Sticker Set list. Sets are merged into one stable model-visible catalog.",
+                "tags": [
+                    "telegram-stickers"
+                ],
+                "summary": "Update Telegram Sticker Sets",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Sticker Set names",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.UpdateTelegramStickerSetsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TelegramStickerCatalog"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/telegram/stickers/{sticker_id}/preview": {
+            "get": {
+                "description": "Return a static preview for one configured Telegram sticker",
+                "produces": [
+                    "image/webp"
+                ],
+                "tags": [
+                    "telegram-stickers"
+                ],
+                "summary": "Preview a Telegram sticker",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sticker ID",
+                        "name": "sticker_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/telegram/stickers/{sticker_id}/retry": {
+            "post": {
+                "description": "Clear a failed visual-description cache entry and recognize the sticker again",
+                "tags": [
+                    "telegram-stickers"
+                ],
+                "summary": "Retry Telegram sticker recognition",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sticker ID",
+                        "name": "sticker_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TelegramStickerCatalogEntry"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/token-usage": {
             "get": {
                 "description": "Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
@@ -7825,6 +8035,45 @@
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/tools/catalog": {
+            "get": {
+                "description": "Lists the tools the bot can currently expose before applying its manual channel allowlist.",
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "List tools available for channel configuration",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "telegram",
+                        "description": "Channel platform",
+                        "name": "platform",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ToolCatalogResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -18550,6 +18799,93 @@
                 }
             }
         },
+        "handlers.TelegramStickerCatalog": {
+            "type": "object",
+            "properties": {
+                "failed_count": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pending_count": {
+                    "type": "integer"
+                },
+                "prompt_version": {
+                    "type": "string"
+                },
+                "ready_count": {
+                    "type": "integer"
+                },
+                "recognition_model_id": {
+                    "type": "string"
+                },
+                "recognition_model_inherited": {
+                    "type": "boolean"
+                },
+                "sets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.TelegramStickerSetCatalog"
+                    }
+                },
+                "stickers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.TelegramStickerCatalogEntry"
+                    }
+                },
+                "total_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.TelegramStickerCatalogEntry": {
+            "type": "object",
+            "properties": {
+                "attempts": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "emoji": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.TelegramStickerSetCatalog": {
+            "type": "object",
+            "properties": {
+                "failed_count": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pending_count": {
+                    "type": "integer"
+                },
+                "ready_count": {
+                    "type": "integer"
+                },
+                "stickers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.TelegramStickerCatalogEntry"
+                    }
+                },
+                "total_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.TokenUsageRecord": {
             "type": "object",
             "properties": {
@@ -18657,6 +18993,28 @@
                 }
             }
         },
+        "handlers.ToolCatalogItem": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ToolCatalogResponse": {
+            "type": "object",
+            "properties": {
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ToolCatalogItem"
+                    }
+                }
+            }
+        },
         "handlers.TriggerCompactResponse": {
             "type": "object",
             "properties": {
@@ -18727,6 +19085,17 @@
                 },
                 "storage_bytes": {
                     "type": "integer"
+                }
+            }
+        },
+        "handlers.UpdateTelegramStickerSetsRequest": {
+            "type": "object",
+            "properties": {
+                "names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -20876,6 +21245,9 @@
                 "show_tool_calls_in_im": {
                     "type": "boolean"
                 },
+                "telegram_sticker_vision_model_id": {
+                    "type": "string"
+                },
                 "timezone": {
                     "type": "string"
                 },
@@ -21071,6 +21443,9 @@
                 },
                 "show_tool_calls_in_im": {
                     "type": "boolean"
+                },
+                "telegram_sticker_vision_model_id": {
+                    "type": "string"
                 },
                 "timezone": {
                     "type": "string"

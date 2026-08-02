@@ -8,13 +8,15 @@ import (
 
 	agentevent "github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/channel"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 )
 
 const sessionRuntimeACPAgent = sessionpkg.RuntimeACPAgent
 
 type discussTurnRunner struct {
-	projector *discussEventProjector
+	projector       *discussEventProjector
+	sendToolStreams *channel.SendToolStreamCoordinator
 }
 
 type discussRunOutcome struct {
@@ -31,7 +33,13 @@ type discussRunOutcome struct {
 
 // Run starts one Agent turn and reduces its ordered event stream to the
 // cursor-commit facts needed by the worker.
-func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, command turn.StartTurnCommand, log *slog.Logger) (discussRunOutcome, bool) {
+func (r discussTurnRunner) Run(
+	ctx context.Context,
+	service turn.Service,
+	command turn.StartTurnCommand,
+	config DiscussSessionConfig,
+	log *slog.Logger,
+) (discussRunOutcome, bool) {
 	handle, err := service.StartTurn(ctx, command)
 	if err != nil {
 		log.Error("discuss: start turn failed", slog.Any("error", err))
@@ -39,6 +47,7 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 	}
 
 	var outcome discussRunOutcome
+	preview := newDiscussSendPreview(config, r.sendToolStreams, log)
 	events, errsCh := handle.Events(), handle.Errs()
 	for events != nil || errsCh != nil {
 		select {
@@ -70,6 +79,9 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 				if successfulCurrentReply(streamEvent, command) {
 					outcome.currentReplySent = true
 				}
+				if outcome.runtimeType != sessionRuntimeACPAgent {
+					preview.Handle(ctx, streamEvent)
+				}
 				if streamEvent.Type == agentevent.AgentEnd || streamEvent.Type == agentevent.AgentAbort {
 					outcome.terminal = true
 					outcome.completed = streamEvent.Type == agentevent.AgentEnd
@@ -99,6 +111,7 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 		case <-ctx.Done():
 			log.Warn("discuss turn cancelled", slog.Any("error", ctx.Err()))
 			outcome.cancelled = true
+			preview.Abort(context.WithoutCancel(ctx))
 			return outcome, true
 		}
 	}
@@ -110,7 +123,7 @@ func successfulCurrentReply(event agentevent.StreamEvent, command turn.StartTurn
 		return false
 	}
 	toolName := strings.TrimSpace(event.ToolName)
-	if toolName != "send" && toolName != "send_message" {
+	if !isCurrentReplyTool(toolName) {
 		return false
 	}
 	result, ok := event.Result.(map[string]any)
@@ -137,7 +150,7 @@ func successfulCurrentReplyInMessages(messages []turn.ModelMessage, command turn
 			continue
 		}
 		for _, part := range parts {
-			if part.Type != "tool-result" || (part.ToolName != "send" && part.ToolName != "send_message") {
+			if part.Type != "tool-result" || !isCurrentReplyTool(part.ToolName) {
 				continue
 			}
 			if successfulCurrentReplyResult(part.Result, command) {
@@ -146,6 +159,11 @@ func successfulCurrentReplyInMessages(messages []turn.ModelMessage, command turn
 		}
 	}
 	return false
+}
+
+func isCurrentReplyTool(name string) bool {
+	name = strings.TrimSpace(name)
+	return name == "send" || name == "send_message"
 }
 
 func successfulCurrentReplyResult(result map[string]any, command turn.StartTurnCommand) bool {

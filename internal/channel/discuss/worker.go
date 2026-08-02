@@ -114,11 +114,11 @@ func (d *DiscussDriver) handleReplyWithTurnForce(ctx context.Context, sess *disc
 		log.Error("discuss driver: turn service not configured")
 		return
 	}
-	outcome, started := d.runner.Run(ctx, turnSvc, plan.command, log)
+	outcome, started := d.runner.Run(ctx, turnSvc, plan.command, cfg, log)
 	if !started || outcome.cancelled || outcome.runtimeType == "" {
 		return
 	}
-	d.sendReplyFallback(ctx, cfg, outcome, log)
+	d.handleMissingForcedReply(ctx, cfg, outcome, log)
 	if outcome.runtimeType == sessionRuntimeACPAgent {
 		if outcome.skipped || (outcome.streamed && outcome.terminal && !outcome.failed) {
 			d.cursor.Advance(ctx, sess, cfg, plan.consumed, log)

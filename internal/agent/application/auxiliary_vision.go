@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,6 +21,8 @@ import (
 const (
 	auxiliaryVisionRetryBaseDelay = 500 * time.Millisecond
 	auxiliaryVisionRetryMaxDelay  = 8 * time.Second
+	telegramStickerPromptVersion  = "memoh-sticker-zh-v1"
+	telegramStickerSystemPrompt   = "你是 Telegram 贴纸视觉标注器。只依据画面，用不超过50个中文字符客观描述主体、动作、表情、情绪或语气以及显著文字。描述用于另一个模型区分并选择贴纸。不要推测身份，不要评价画风，不要输出分析、编号、Markdown 或额外说明。"
 )
 
 var (
@@ -51,6 +54,82 @@ type auxiliaryVisionGenerateFunc func(
 ) (string, error)
 
 type auxiliaryVisionWaitFunc func(context.Context, time.Duration) error
+
+// TelegramStickerVisionConfig resolves the model used for manual Sticker
+// recognition. An explicit Sticker model wins; otherwise the Bot's effective
+// auxiliary-vision model (including the process default) is inherited.
+func (s *Service) TelegramStickerVisionConfig(ctx context.Context, botID string) (model, promptVersion string, inherited bool, err error) {
+	cfg, promptVersion, inherited, err := s.telegramStickerVisionConfig(ctx, botID)
+	return strings.TrimSpace(cfg.Model), promptVersion, inherited, err
+}
+
+func (s *Service) telegramStickerVisionConfig(
+	ctx context.Context,
+	botID string,
+) (cfg AuxiliaryVisionConfig, promptVersion string, inherited bool, err error) {
+	if s == nil {
+		return AuxiliaryVisionConfig{}, telegramStickerPromptVersion, true, errors.New("agent service is not configured")
+	}
+	cfg = s.resolveAuxiliaryVisionConfig(ctx, botID, s.auxiliaryVisionConfigSnapshot())
+	inherited = true
+	if strings.TrimSpace(botID) != "" && s.settingsService != nil {
+		botSettings, settingsErr := s.loadBotSettings(ctx, botID)
+		if settingsErr != nil {
+			return AuxiliaryVisionConfig{}, telegramStickerPromptVersion, true, settingsErr
+		}
+		if override := strings.TrimSpace(botSettings.TelegramStickerVisionModelID); override != "" {
+			cfg.Model = override
+			// A Web-selected value is the model UUID. It uniquely identifies the
+			// provider, so an inherited provider filter must not constrain it.
+			cfg.Provider = ""
+			inherited = false
+		}
+	}
+	return cfg.normalized(), telegramStickerPromptVersion, inherited, nil
+}
+
+// RecognizeTelegramSticker performs one explicitly requested recognition using
+// Memoh's existing model/provider credential resolution. Provider credentials
+// never leave the server or enter the Sticker service.
+func (s *Service) RecognizeTelegramSticker(
+	ctx context.Context,
+	botID, userID, mediaType string,
+	data []byte,
+) (description, model, promptVersion string, err error) {
+	cfg, promptVersion, _, err := s.telegramStickerVisionConfig(ctx, botID)
+	if err != nil {
+		return "", "", promptVersion, err
+	}
+	model = strings.TrimSpace(cfg.Model)
+	if model == "" {
+		return "", "", promptVersion, errors.New("telegram Sticker vision model is not configured")
+	}
+	mediaType = strings.TrimSpace(strings.Split(mediaType, ";")[0])
+	if !strings.HasPrefix(mediaType, "image/") || len(data) == 0 {
+		return "", model, promptVersion, errors.New("telegram Sticker preview must be a non-empty image")
+	}
+	cfg.Prompt = telegramStickerSystemPrompt
+	cfg = cfg.normalized()
+	image := sdk.ImagePart{
+		Image:     "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data),
+		MediaType: mediaType,
+	}
+	generate := s.generateAuxiliaryVisionDescription
+	_, injectedGenerate, wait := s.auxiliaryVisionSnapshot()
+	if injectedGenerate != nil {
+		generate = injectedGenerate
+	}
+	visionCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+	description, err = retryAuxiliaryVisionWithWait(visionCtx, cfg.MaxRetries, func(callCtx context.Context) (string, error) {
+		return generate(callCtx, userID, cfg.Model, cfg.Provider, cfg.Prompt, "", []sdk.ImagePart{image})
+	}, wait)
+	if err != nil {
+		return "", model, promptVersion, err
+	}
+	description = strings.TrimSpace(description)
+	return description, model, promptVersion, nil
+}
 
 func (c AuxiliaryVisionConfig) normalized() AuxiliaryVisionConfig {
 	c.Model = strings.TrimSpace(c.Model)

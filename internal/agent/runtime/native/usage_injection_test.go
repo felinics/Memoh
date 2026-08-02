@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/agent/channelpolicy"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	tools "github.com/memohai/memoh/internal/agent/tool"
 )
@@ -48,6 +49,20 @@ type plainTestProvider struct{}
 
 func (plainTestProvider) Tools(_ context.Context, _ tools.SessionContext) ([]sdk.Tool, error) {
 	return []sdk.Tool{{Name: tools.ToolRead().String(), Description: "plain"}}, nil
+}
+
+type policyTestProvider struct {
+	tools []sdk.Tool
+	usage string
+}
+
+func (p *policyTestProvider) Tools(context.Context, tools.SessionContext) ([]sdk.Tool, error) {
+	// Returning the same backing slice on purpose catches in-place filtering.
+	return p.tools, nil
+}
+
+func (p *policyTestProvider) Usage(context.Context, tools.SessionContext, tools.AvailableTools) string {
+	return p.usage
 }
 
 func newTestAgent(providers ...tools.ToolProvider) *Agent {
@@ -414,5 +429,99 @@ func TestAssembleToolsPassesCompleteAvailableToolSetToUsage(t *testing.T) {
 	}
 	if strings.Contains(usage, markerMissing) {
 		t.Fatalf("expected complete available tool set, got missing marker in %q", usage)
+	}
+}
+
+func TestAssembleToolsFiltersBeforeUsageWithoutMutatingProviderOrder(t *testing.T) {
+	t.Parallel()
+	provider := &policyTestProvider{
+		tools: []sdk.Tool{
+			{Name: "tool_a", Description: "a"},
+			{Name: "tool_b", Description: "b"},
+		},
+		usage: usageMarker,
+	}
+	a := newTestAgent(provider)
+
+	filtered, usage, err := a.assembleTools(context.Background(), RunConfig{
+		ChannelPolicy: channelpolicy.Policy{
+			Platform:               channelpolicy.TelegramPlatform,
+			EnabledToolsConfigured: true,
+			EnabledTools:           []string{"tool_b"},
+		},
+	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	if err != nil {
+		t.Fatalf("assemble filtered tools: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Name != "tool_b" {
+		t.Fatalf("filtered tools = %#v", filtered)
+	}
+	if !strings.Contains(usage, usageMarker) {
+		t.Fatalf("usage for surviving provider missing: %q", usage)
+	}
+
+	unfiltered, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	if err != nil {
+		t.Fatalf("assemble unfiltered tools: %v", err)
+	}
+	if len(unfiltered) != 2 || unfiltered[0].Name != "tool_a" || unfiltered[1].Name != "tool_b" {
+		t.Fatalf("provider order was mutated by prior filtering: %#v", unfiltered)
+	}
+}
+
+func TestAssembleToolsOmitsUsageWhenPolicyDisablesProvider(t *testing.T) {
+	t.Parallel()
+	a := newTestAgent(&usageTestProvider{emitTool: true, usage: usageMarker})
+	gotTools, usage, err := a.assembleTools(context.Background(), RunConfig{
+		ChannelPolicy: channelpolicy.Policy{
+			Platform:               channelpolicy.TelegramPlatform,
+			EnabledToolsConfigured: true,
+			EnabledTools:           []string{},
+		},
+	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	if err != nil {
+		t.Fatalf("assemble tools: %v", err)
+	}
+	if len(gotTools) != 0 || usage != "" {
+		t.Fatalf("disabled provider leaked tools or usage: tools=%#v usage=%q", gotTools, usage)
+	}
+}
+
+func TestAssembleToolsHonorsTelegramMasterSwitchWithoutAllowlist(t *testing.T) {
+	t.Parallel()
+	a := newTestAgent(&usageTestProvider{emitTool: true, usage: usageMarker})
+	gotTools, usage, err := a.assembleTools(context.Background(), RunConfig{
+		ChannelPolicy: channelpolicy.Policy{
+			Platform:            channelpolicy.TelegramPlatform,
+			ToolCallsConfigured: true,
+			ToolCallsEnabled:    false,
+		},
+	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	if err != nil {
+		t.Fatalf("assemble tools: %v", err)
+	}
+	if len(gotTools) != 0 || usage != "" {
+		t.Fatalf("master switch leaked tools or usage: tools=%#v usage=%q", gotTools, usage)
+	}
+}
+
+func TestAssembleToolsHonorsTelegramSkillsSwitchWithoutAllowlist(t *testing.T) {
+	t.Parallel()
+	a := newTestAgent(&policyTestProvider{tools: []sdk.Tool{
+		{Name: "use_skill", Description: "skill"},
+		{Name: "ordinary_tool", Description: "ordinary"},
+	}})
+	gotTools, _, err := a.assembleTools(context.Background(), RunConfig{
+		ChannelPolicy: channelpolicy.Policy{
+			Platform:         channelpolicy.TelegramPlatform,
+			SkillsConfigured: true,
+			SkillsEnabled:    false,
+		},
+	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	if err != nil {
+		t.Fatalf("assemble tools: %v", err)
+	}
+	if len(gotTools) != 1 || gotTools[0].Name != "ordinary_tool" {
+		t.Fatalf("skills switch filtered the wrong tools: %#v", gotTools)
 	}
 }

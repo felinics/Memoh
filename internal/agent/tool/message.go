@@ -37,7 +37,7 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 	if sendRef, ok := available.Ref(ToolSend()); ok {
 		switch session.SessionType {
 		case sessionmode.Discuss:
-			parts = append(parts, "Use "+sendRef+" to speak in the observed conversation; if you do not call it, you stay silent.")
+			parts = append(parts, "Call "+sendRef+" for every public reply in the observed conversation. Ordinary Assistant text is private working output and is not delivered; if you do not call "+sendRef+", you stay silent.")
 		case sessionmode.Schedule, sessionmode.Heartbeat:
 			parts = append(parts, "Use "+sendRef+" only when the background task needs to notify a person or channel; specify `platform` and `target`.")
 		default:
@@ -274,12 +274,12 @@ func messagingSessionSupportsMarkdownMath(session SessionContext) bool {
 func sendToolPromptMetadata(session SessionContext) (description string, platformDescription string, targetDescription string, required []string) {
 	if session.SessionType == sessionmode.Discuss {
 		if session.CanOmitMessagingTarget() {
-			return "Send a message into the observed conversation. When target is omitted, sends to the observed conversation. When target is specified, sends to that channel/person.",
+			return "Publish a reply into the observed conversation. Call this for every reply that people should see; ordinary Assistant text is not delivered. When target is omitted, sends to the observed conversation. When target is specified, sends to that channel/person.",
 				"Channel platform name. Defaults to current session platform.",
 				"Channel target (chat/group/thread ID). Optional — omit to send in the observed conversation.",
 				[]string{}
 		}
-		return "Send a message into the observed conversation or another channel/person. Specify platform and target in this session.",
+		return "Publish a reply into the observed conversation or another channel/person. Call this for every reply that people should see; ordinary Assistant text is not delivered. Specify platform and target in this session.",
 			"Channel platform name. Required in this session.",
 			"Channel target (chat/group/thread ID). Required in this session.",
 			[]string{"platform", "target"}
@@ -311,16 +311,15 @@ func reactToolPromptMetadata(session SessionContext) (description string, platfo
 
 func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, toolCallID string, args map[string]any) (any, error) {
 	if session.SessionType == sessionmode.Discuss {
-		sendResult, err := p.exec.SendDirect(ctx, toMessagingSession(session), "", args)
+		sendResult, err := p.exec.SendDirectForTool(ctx, toMessagingSession(session), "", toolCallID, args)
 		if err != nil {
 			return nil, err
 		}
-		resp := map[string]any{
-			"ok": true, "bot_id": sendResult.BotID, "platform": sendResult.Platform, "target": sendResult.Target,
-			"delivered": messageDeliveryLabel(session, sendResult.Platform, sendResult.Target),
-		}
-		if sendResult.MessageID != "" {
-			resp["message_id"] = sendResult.MessageID
+		resp := map[string]any{"ok": true}
+		if !session.IsSameConversation(sendResult.Platform, sendResult.Target) {
+			resp["platform"] = sendResult.Platform
+			resp["target"] = sendResult.Target
+			resp["delivered"] = "target"
 		}
 		return resp, nil
 	}

@@ -1,6 +1,9 @@
 package turn
 
 import (
+	"encoding/xml"
+	"errors"
+	"io"
 	"strings"
 	"time"
 )
@@ -150,6 +153,94 @@ func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 	sb.WriteString(query)
 	sb.WriteString("\n</message>")
 	return sb.String()
+}
+
+// ProjectUserMessageHeader removes stable per-session attributes from the
+// model-facing Telegram history while leaving the canonical stored rendering
+// untouched. Compact private messages omit the repeated sender; group messages
+// retain it for speaker attribution. Dynamic flags, edits, forwards, and reply
+// context remain available to the model. Nested quoted messages are projected
+// too, otherwise reply-heavy histories retain most of the repeated metadata.
+func ProjectUserMessageHeader(content, mode string) string {
+	if strings.ToLower(strings.TrimSpace(mode)) != "compact" || !strings.HasPrefix(strings.TrimSpace(content), "<message") {
+		return content
+	}
+
+	var projected strings.Builder
+	cursor := 0
+	for {
+		startRel := strings.Index(content[cursor:], "<message")
+		if startRel < 0 {
+			projected.WriteString(content[cursor:])
+			break
+		}
+		start := cursor + startRel
+		endRel := strings.Index(content[start:], ">")
+		if endRel < 0 {
+			projected.WriteString(content[cursor:])
+			break
+		}
+		end := start + endRel
+		opening := content[start : end+1]
+		compactOpening, ok := projectMessageOpeningTag(opening)
+		projected.WriteString(content[cursor:start])
+		if ok {
+			projected.WriteString(compactOpening)
+		} else {
+			projected.WriteString(opening)
+		}
+		cursor = end + 1
+	}
+	return projected.String()
+}
+
+func projectMessageOpeningTag(opening string) (string, bool) {
+	tagBody := strings.TrimSuffix(strings.TrimSpace(opening), ">")
+	selfClosing := strings.HasSuffix(tagBody, "/")
+	tagBody = strings.TrimSuffix(tagBody, "/")
+	decoder := xml.NewDecoder(strings.NewReader(tagBody + "/>"))
+	var attrs []xml.Attr
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", false
+		}
+		if element, ok := token.(xml.StartElement); ok && element.Name.Local == "message" {
+			attrs = element.Attr
+			break
+		}
+	}
+	if attrs == nil {
+		return "", false
+	}
+	conversationType := ""
+	for _, attr := range attrs {
+		if attr.Name.Local == "type" {
+			conversationType = strings.ToLower(strings.TrimSpace(attr.Value))
+			break
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString("<message")
+	for _, attr := range attrs {
+		name := attr.Name.Local
+		keep := name != "t" && name != "channel" && name != "conversation" && name != "type" && name != "target"
+		if conversationType == "private" && name == "sender" {
+			keep = false
+		}
+		if keep {
+			writeXMLAttr(&sb, name, attr.Value)
+		}
+	}
+	if selfClosing {
+		sb.WriteString("/>")
+	} else {
+		sb.WriteString(">")
+	}
+	return sb.String(), true
 }
 
 // escapeXMLAttr escapes a string for use inside an XML attribute value.

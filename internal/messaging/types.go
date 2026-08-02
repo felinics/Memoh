@@ -146,6 +146,9 @@ type SendRequest struct {
 	Target            string  `json:"target,omitempty"`
 	ChannelIdentityID string  `json:"channel_identity_id,omitempty"`
 	Message           Message `json:"message"`
+	// ToolCallID is internal delivery coordination metadata. It is never
+	// accepted from model input or serialized to public channel APIs.
+	ToolCallID string `json:"-"`
 }
 
 type ReactRequest struct {

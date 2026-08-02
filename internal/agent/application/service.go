@@ -469,12 +469,12 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	forkMessages := nonNilModelMessages(messages)
 	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
-	runCfg.Messages = modelMessagesToSDKMessages(forkMessages)
+	runCfg.Messages = modelMessagesToSDKMessages(projectModelMessageHeaders(forkMessages, runCfg.ChannelPolicy.MessageMetadataMode))
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
 	if !usePipeline && !req.ReusePersistedUserMessage {
-		runCfg.Query = headerifiedModelQuery
+		runCfg.Query = turnpkg.ProjectUserMessageHeader(headerifiedModelQuery, runCfg.ChannelPolicy.MessageMetadataMode)
 	} else if usePipeline {
 		runCfg.Messages = appendAuxiliaryVisionToLastUserMessage(runCfg.Messages, auxiliaryVisionContext)
 	}
@@ -488,8 +488,9 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		go func() {
 			for msg := range req.InjectCh {
 				agentMsg := native.InjectMessage{
-					Text:            msg.Text,
-					HeaderifiedText: msg.HeaderifiedText,
+					Text:                     msg.Text,
+					HeaderifiedText:          turnpkg.ProjectUserMessageHeader(msg.HeaderifiedText, runCfg.ChannelPolicy.MessageMetadataMode),
+					PersistedHeaderifiedText: msg.HeaderifiedText,
 				}
 				// Inline any image attachments from the injected message so the
 				// model receives them as vision input alongside the text.
@@ -644,7 +645,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 	if err != nil {
 		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
-	botInfo, loopDetectionEnabled := s.loadBotRuntimeInfo(ctx, p.BotID)
+	botInfo, loopDetectionEnabled, channelPolicy := s.loadBotRuntimeInfo(ctx, p.BotID, p.CurrentPlatform)
 	userTimezoneName, userClockLocation := s.resolveTimezone(ctx, p.BotID, p.UserID)
 
 	chatID := p.ChatID
@@ -672,7 +673,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 	chatCompletionsCompat := resolvedModel.ChatCompletionsCompat
 
 	var agentSkills []native.SkillEntry
-	if s.skillLoader != nil {
+	if channelPolicy.SkillsAllowed() && s.skillLoader != nil {
 		entries, skillErr := s.skillLoader.LoadSkills(ctx, p.BotID)
 		if skillErr != nil {
 			s.logger.Warn("failed to load skills", slog.String("bot_id", p.BotID), slog.Any("error", skillErr))
@@ -703,6 +704,8 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		SessionType:           p.SessionType,
 		SupportsImageInput:    supportsImageInputForModel(chatModel),
 		SupportsToolCall:      chatModel.HasCompatibility(models.CompatToolCall),
+		ChannelPolicy:         channelPolicy,
+		MemoryInstructions:    strings.TrimSpace(botSettings.MemoryProviderID) != "",
 		Identity: native.SessionContext{
 			BotID:             p.BotID,
 			ChatID:            chatID,
@@ -1238,6 +1241,15 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 				slog.Any("error", err),
 			)
 		} else {
+			if platform := strings.TrimSpace(cfg.Identity.CurrentPlatform); platform != "" {
+				filtered := identities[:0]
+				for _, identity := range identities {
+					if strings.EqualFold(strings.TrimSpace(identity.Platform), platform) {
+						filtered = append(filtered, identity)
+					}
+				}
+				identities = filtered
+			}
 			platformIdentitiesSection = buildPlatformIdentitiesSection(identities)
 		}
 	}
@@ -1249,6 +1261,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		MaxFilesBytes:             limits.SystemFilesMaxBytes,
 		Timezone:                  cfg.Identity.Timezone,
 		PlatformIdentitiesSection: platformIdentitiesSection,
+		MemoryInstructions:        cfg.MemoryInstructions,
 	})
 	if beforePromptContext != "" {
 		cfg.System += "\n\n" + formatServiceHookContext(hooks.EventBeforePromptBuild, beforePromptContext)

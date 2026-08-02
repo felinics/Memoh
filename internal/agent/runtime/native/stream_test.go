@@ -60,6 +60,8 @@ func (*agentToolPlaceholderProvider) DoStream(_ context.Context, _ sdk.GenerateP
 		ch <- &sdk.StartPart{}
 		ch <- &sdk.StartStepPart{}
 		ch <- &sdk.ToolInputStartPart{ID: "call-1", ToolName: "write"}
+		ch <- &sdk.ToolInputDeltaPart{ID: "call-1", Delta: `{"path":"/tmp/long.txt"}`}
+		ch <- &sdk.ToolInputEndPart{ID: "call-1"}
 		ch <- &sdk.StreamToolCallPart{
 			ToolCallID: "call-1",
 			ToolName:   "write",
@@ -96,8 +98,8 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 		events = append(events, event)
 	}
 
-	if len(events) != 4 {
-		t.Fatalf("expected 4 events, got %d: %#v", len(events), events)
+	if len(events) != 6 {
+		t.Fatalf("expected 6 events, got %d: %#v", len(events), events)
 	}
 	if events[0].Type != EventAgentStart {
 		t.Fatalf("expected first event %q, got %#v", EventAgentStart, events[0])
@@ -108,15 +110,21 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 	if events[1].Input != nil {
 		t.Fatalf("expected tool call input start to carry no input, got %#v", events[1].Input)
 	}
-	if events[2].Type != EventToolCallStart || events[2].ToolCallID != "call-1" || events[2].ToolName != "write" {
-		t.Fatalf("unexpected tool call start event: %#v", events[2])
+	if events[2].Type != EventToolCallInputDelta || events[2].ToolCallID != "call-1" || events[2].Delta == "" {
+		t.Fatalf("unexpected tool call input delta event: %#v", events[2])
+	}
+	if events[3].Type != EventToolCallInputEnd || events[3].ToolCallID != "call-1" {
+		t.Fatalf("unexpected tool call input end event: %#v", events[3])
+	}
+	if events[4].Type != EventToolCallStart || events[4].ToolCallID != "call-1" || events[4].ToolName != "write" {
+		t.Fatalf("unexpected tool call start event: %#v", events[4])
 	}
 	expectedInput := map[string]any{"path": "/tmp/long.txt"}
-	if !reflect.DeepEqual(events[2].Input, expectedInput) {
-		t.Fatalf("expected tool call start input %#v, got %#v", expectedInput, events[2].Input)
+	if !reflect.DeepEqual(events[4].Input, expectedInput) {
+		t.Fatalf("expected tool call start input %#v, got %#v", expectedInput, events[4].Input)
 	}
-	if events[3].Type != EventAgentEnd {
-		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[3])
+	if events[5].Type != EventAgentEnd {
+		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[5])
 	}
 }
 

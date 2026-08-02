@@ -21,6 +21,8 @@ const (
 	EventReasoningDelta      = event.ReasoningDelta
 	EventReasoningEnd        = event.ReasoningEnd
 	EventToolCallInputStart  = event.ToolCallInputStart
+	EventToolCallInputDelta  = event.ToolCallInputDelta
+	EventToolCallInputEnd    = event.ToolCallInputEnd
 	EventToolCallStart       = event.ToolCallStart
 	EventToolCallMetadata    = event.ToolCallMetadata
 	EventToolCallProgress    = event.ToolCallProgress

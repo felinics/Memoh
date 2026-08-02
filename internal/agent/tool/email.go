@@ -27,9 +27,29 @@ func NewEmailProvider(log *slog.Logger, service *email.Service, manager email.Ru
 	}
 }
 
-func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *EmailProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+	if p == nil || p.service == nil || p.manager == nil {
+		return nil, nil
+	}
+	botID := strings.TrimSpace(session.BotID)
+	if botID == "" {
+		return nil, nil
+	}
+	bindings, err := p.service.ListBindings(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	hasRead := false
+	hasWrite := false
+	for _, binding := range bindings {
+		hasRead = hasRead || binding.CanRead
+		hasWrite = hasWrite || binding.CanWrite
+	}
 	sess := session
-	return []sdk.Tool{
+	result := []sdk.Tool{
 		{
 			Name: ToolListEmailAccounts().String(), Description: "List the email accounts (provider bindings) configured for this bot, including provider IDs, email addresses, and permissions.",
 			Parameters: emptyObjectSchema(),
@@ -37,7 +57,9 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 				return p.execListAccounts(ctx.Context, sess)
 			},
 		},
-		{
+	}
+	if hasWrite {
+		result = append(result, sdk.Tool{
 			Name: ToolSendEmail().String(), Description: "Send an email via the bot's configured email provider. Requires write permission.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -53,8 +75,10 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execSendEmail(ctx.Context, sess, inputAsMap(input))
 			},
-		},
-		{
+		})
+	}
+	if hasRead {
+		result = append(result, sdk.Tool{
 			Name: ToolListEmail().String(), Description: "List emails from the mailbox (newest first). Supports pagination. Requires read permission.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -67,8 +91,7 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execListEmails(ctx.Context, sess, inputAsMap(input))
 			},
-		},
-		{
+		}, sdk.Tool{
 			Name: ToolReadEmail().String(), Description: "Read the full content of an email by its UID. Requires read permission.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -81,8 +104,9 @@ func (p *EmailProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execReadEmail(ctx.Context, sess, inputAsMap(input))
 			},
-		},
-	}, nil
+		})
+	}
+	return result, nil
 }
 
 func (p *EmailProvider) getBindings(ctx context.Context, botID string) ([]email.BindingResponse, error) {

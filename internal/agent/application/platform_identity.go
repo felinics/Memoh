@@ -12,6 +12,13 @@ import (
 
 const platformIdentitiesIntro = "## Platform Identities\n\nThese XML tags describe your own known account identities across connected platforms.\n"
 
+var modelSafeIdentityAttrs = map[string]struct{}{
+	"display_name": {},
+	"name":         {},
+	"user_id":      {},
+	"username":     {},
+}
+
 type identityAttr struct {
 	Name  string
 	Value string
@@ -78,6 +85,9 @@ func buildPlatformIdentityLine(cfg PlatformIdentity) string {
 		if !ok {
 			continue
 		}
+		if _, safe := modelSafeIdentityAttrs[name]; !safe {
+			continue
+		}
 		if _, exists := seen[name]; exists {
 			continue
 		}
@@ -96,7 +106,14 @@ func buildPlatformIdentityLine(cfg PlatformIdentity) string {
 	}
 
 	if externalIdentity := strings.TrimSpace(cfg.ExternalIdentity); externalIdentity != "" {
-		if _, exists := seen["external_identity"]; !exists {
+		duplicate := false
+		for _, attr := range attrs {
+			if attr.Name != "channel" && strings.EqualFold(strings.TrimSpace(attr.Value), externalIdentity) {
+				duplicate = true
+				break
+			}
+		}
+		if _, exists := seen["external_identity"]; !exists && !duplicate {
 			attrs = append(attrs, identityAttr{Name: "external_identity", Value: externalIdentity})
 		}
 	}

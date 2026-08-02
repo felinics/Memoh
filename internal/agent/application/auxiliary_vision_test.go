@@ -14,6 +14,36 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
+func TestRecognizeTelegramStickerUsesOneExplicitVisionCall(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	service := &Service{
+		auxiliaryVision: AuxiliaryVisionConfig{
+			Model: "vision-model", Provider: "vision-provider", MaxRetries: 0, Timeout: time.Second,
+		},
+		auxiliaryVisionGen: func(_ context.Context, userID, model, provider, prompt, caption string, images []sdk.ImagePart) (string, error) {
+			calls++
+			if userID != "user-1" || model != "vision-model" || provider != "vision-provider" || caption != "" {
+				t.Fatalf("unexpected recognition routing: user=%q model=%q provider=%q caption=%q", userID, model, provider, caption)
+			}
+			if prompt != telegramStickerSystemPrompt || len(images) != 1 || !strings.HasPrefix(images[0].Image, "data:image/webp;base64,") {
+				t.Fatalf("unexpected recognition input: prompt=%q images=%#v", prompt, images)
+			}
+			return "角色笑着挥手打招呼", nil
+		},
+	}
+	description, model, promptVersion, err := service.RecognizeTelegramSticker(
+		context.Background(), "bot-1", "user-1", "image/webp", []byte("image"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || description != "角色笑着挥手打招呼" || model != "vision-model" || promptVersion != telegramStickerPromptVersion {
+		t.Fatalf("result = %q %q %q calls=%d", description, model, promptVersion, calls)
+	}
+}
+
 func TestDescribeImagesWithAuxiliaryVisionRetriesThreeTimes(t *testing.T) {
 	t.Parallel()
 

@@ -35,7 +35,8 @@ func (s *Service) prepareContinuationRunConfig(
 	// keeps the fragments faithful to history while the outgoing messages stay
 	// provider-valid. Applies to every continuation path that resumes after a
 	// deferred tool call.
-	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
+	repaired := repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError)
+	base.Messages = modelMessagesToSDKMessages(projectModelMessageHeaders(repaired, base.ChannelPolicy.MessageMetadataMode))
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)

@@ -35,6 +35,7 @@ SET language = 'auto',
     auxiliary_vision_prompt = '',
     auxiliary_vision_max_retries = NULL,
     auxiliary_vision_timeout_seconds = NULL,
+    telegram_sticker_vision_model_id = NULL,
     image_model_id = NULL,
     search_provider_id = NULL,
     fetch_provider_id = NULL,
@@ -83,6 +84,7 @@ SELECT
   bots.auxiliary_vision_prompt,
   bots.auxiliary_vision_max_retries,
   bots.auxiliary_vision_timeout_seconds,
+  telegram_sticker_vision_models.id AS telegram_sticker_vision_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -103,6 +105,7 @@ LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id AND chat_
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS auxiliary_vision_models ON auxiliary_vision_models.id = bots.auxiliary_vision_model_id AND auxiliary_vision_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS telegram_sticker_vision_models ON telegram_sticker_vision_models.id = bots.telegram_sticker_vision_model_id AND telegram_sticker_vision_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
 LEFT JOIN fetch_providers ON fetch_providers.id = bots.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
@@ -137,6 +140,7 @@ type GetSettingsByBotIDRow struct {
 	AuxiliaryVisionPrompt         string      `json:"auxiliary_vision_prompt"`
 	AuxiliaryVisionMaxRetries     pgtype.Int4 `json:"auxiliary_vision_max_retries"`
 	AuxiliaryVisionTimeoutSeconds pgtype.Int4 `json:"auxiliary_vision_timeout_seconds"`
+	TelegramStickerVisionModelID  pgtype.UUID `json:"telegram_sticker_vision_model_id"`
 	SearchProviderID              pgtype.UUID `json:"search_provider_id"`
 	FetchProviderID               pgtype.UUID `json:"fetch_provider_id"`
 	MemoryProviderID              pgtype.UUID `json:"memory_provider_id"`
@@ -181,6 +185,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.AuxiliaryVisionPrompt,
 		&i.AuxiliaryVisionMaxRetries,
 		&i.AuxiliaryVisionTimeoutSeconds,
+		&i.TelegramStickerVisionModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,
 		&i.MemoryProviderID,
@@ -225,27 +230,31 @@ WITH updated AS (
       auxiliary_vision_prompt = $20,
       auxiliary_vision_max_retries = $21::integer,
       auxiliary_vision_timeout_seconds = $22::integer,
-      search_provider_id = COALESCE($23::uuid, bots.search_provider_id),
+      telegram_sticker_vision_model_id = $23::uuid,
+      search_provider_id = COALESCE($24::uuid, bots.search_provider_id),
       fetch_provider_id = CASE
-        WHEN $24::boolean THEN $25::uuid
+        WHEN $25::boolean THEN $26::uuid
         ELSE bots.fetch_provider_id
       END,
-      memory_provider_id = COALESCE($26::uuid, bots.memory_provider_id),
-      image_model_id = COALESCE($27::uuid, bots.image_model_id),
-      tts_model_id = COALESCE($28::uuid, bots.tts_model_id),
-      transcription_model_id = COALESCE($29::uuid, bots.transcription_model_id),
-      video_model_id = COALESCE($30::uuid, bots.video_model_id),
-      persist_full_tool_results = $31,
-      show_tool_calls_in_im = $32,
-      tool_approval_config = $33,
-      display_enabled = $34,
-      overlay_provider = $35,
-      overlay_enabled = $36,
-      overlay_config = $37,
-      command_ui_language = $38,
+      memory_provider_id = CASE
+        WHEN $27::boolean THEN $28::uuid
+        ELSE bots.memory_provider_id
+      END,
+      image_model_id = COALESCE($29::uuid, bots.image_model_id),
+      tts_model_id = COALESCE($30::uuid, bots.tts_model_id),
+      transcription_model_id = COALESCE($31::uuid, bots.transcription_model_id),
+      video_model_id = COALESCE($32::uuid, bots.video_model_id),
+      persist_full_tool_results = $33,
+      show_tool_calls_in_im = $34,
+      tool_approval_config = $35,
+      display_enabled = $36,
+      overlay_provider = $37,
+      overlay_enabled = $38,
+      overlay_config = $39,
+      command_ui_language = $40,
       updated_at = now()
-  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $39
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.auxiliary_vision_mode, bots.auxiliary_vision_model_id, bots.auxiliary_vision_prompt, bots.auxiliary_vision_max_retries, bots.auxiliary_vision_timeout_seconds, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $41
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.auxiliary_vision_mode, bots.auxiliary_vision_model_id, bots.auxiliary_vision_prompt, bots.auxiliary_vision_max_retries, bots.auxiliary_vision_timeout_seconds, bots.telegram_sticker_vision_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -271,6 +280,7 @@ SELECT
   updated.auxiliary_vision_prompt,
   updated.auxiliary_vision_max_retries,
   updated.auxiliary_vision_timeout_seconds,
+  telegram_sticker_vision_models.id AS telegram_sticker_vision_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -291,6 +301,7 @@ LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id AND ch
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS auxiliary_vision_models ON auxiliary_vision_models.id = updated.auxiliary_vision_model_id AND auxiliary_vision_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS telegram_sticker_vision_models ON telegram_sticker_vision_models.id = updated.telegram_sticker_vision_model_id AND telegram_sticker_vision_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
 LEFT JOIN fetch_providers ON fetch_providers.id = updated.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
@@ -323,9 +334,11 @@ type UpsertBotSettingsParams struct {
 	AuxiliaryVisionPrompt         string      `json:"auxiliary_vision_prompt"`
 	AuxiliaryVisionMaxRetries     pgtype.Int4 `json:"auxiliary_vision_max_retries"`
 	AuxiliaryVisionTimeoutSeconds pgtype.Int4 `json:"auxiliary_vision_timeout_seconds"`
+	TelegramStickerVisionModelID  pgtype.UUID `json:"telegram_sticker_vision_model_id"`
 	SearchProviderID              pgtype.UUID `json:"search_provider_id"`
 	FetchProviderIDSet            bool        `json:"fetch_provider_id_set"`
 	FetchProviderID               pgtype.UUID `json:"fetch_provider_id"`
+	MemoryProviderIDSet           bool        `json:"memory_provider_id_set"`
 	MemoryProviderID              pgtype.UUID `json:"memory_provider_id"`
 	ImageModelID                  pgtype.UUID `json:"image_model_id"`
 	TtsModelID                    pgtype.UUID `json:"tts_model_id"`
@@ -366,6 +379,7 @@ type UpsertBotSettingsRow struct {
 	AuxiliaryVisionPrompt         string      `json:"auxiliary_vision_prompt"`
 	AuxiliaryVisionMaxRetries     pgtype.Int4 `json:"auxiliary_vision_max_retries"`
 	AuxiliaryVisionTimeoutSeconds pgtype.Int4 `json:"auxiliary_vision_timeout_seconds"`
+	TelegramStickerVisionModelID  pgtype.UUID `json:"telegram_sticker_vision_model_id"`
 	SearchProviderID              pgtype.UUID `json:"search_provider_id"`
 	FetchProviderID               pgtype.UUID `json:"fetch_provider_id"`
 	MemoryProviderID              pgtype.UUID `json:"memory_provider_id"`
@@ -407,9 +421,11 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.AuxiliaryVisionPrompt,
 		arg.AuxiliaryVisionMaxRetries,
 		arg.AuxiliaryVisionTimeoutSeconds,
+		arg.TelegramStickerVisionModelID,
 		arg.SearchProviderID,
 		arg.FetchProviderIDSet,
 		arg.FetchProviderID,
+		arg.MemoryProviderIDSet,
 		arg.MemoryProviderID,
 		arg.ImageModelID,
 		arg.TtsModelID,
@@ -450,6 +466,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.AuxiliaryVisionPrompt,
 		&i.AuxiliaryVisionMaxRetries,
 		&i.AuxiliaryVisionTimeoutSeconds,
+		&i.TelegramStickerVisionModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,
 		&i.MemoryProviderID,

@@ -40,6 +40,11 @@ const (
 	CodeSessionBusy                      Code = "session_runtime.session_busy"
 	CodeSessionInvocationConflict        Code = "session_runtime.invocation_conflict"
 	CodeSessionHistoryInconsistent       Code = "session_runtime.history_inconsistent"
+	CodeToolCatalogUnavailable           Code = "tool.catalog_unavailable"
+	CodeStickerServiceUnavailable        Code = "sticker.service_unavailable"
+	CodeStickerNotFound                  Code = "sticker.not_found"
+	CodeStickerRecognitionFailed         Code = "sticker.recognition_failed"
+	CodeStickerSetsInvalid               Code = "sticker.sets_invalid"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -178,6 +183,26 @@ var catalog = map[Code]Definition{
 	CodeSessionHistoryInconsistent: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The conversation history could not be reconciled. Refresh and try again.",
+	},
+	CodeToolCatalogUnavailable: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The tool catalog could not be loaded. Please retry.",
+	},
+	CodeStickerServiceUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The Telegram sticker service could not be reached.",
+	},
+	CodeStickerNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The Telegram sticker was not found.",
+	},
+	CodeStickerRecognitionFailed: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "Sticker visual recognition failed. Please retry.",
+	},
+	CodeStickerSetsInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "Enter one to eight valid Telegram Sticker Set names.",
 	},
 }
 

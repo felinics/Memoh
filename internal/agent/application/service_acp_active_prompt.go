@@ -263,6 +263,8 @@ func (o acpActivePromptForwardOptions) skip(ev native.StreamEvent) bool {
 		}
 		return sameNonEmpty(ev.ToolCallID, o.SkipToolCallID)
 	case native.EventToolCallInputStart,
+		native.EventToolCallInputDelta,
+		native.EventToolCallInputEnd,
 		native.EventToolCallStart,
 		native.EventToolCallMetadata,
 		native.EventToolCallProgress,

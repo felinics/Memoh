@@ -43,6 +43,7 @@ type Bot struct {
 	AuxiliaryVisionPrompt         string             `json:"auxiliary_vision_prompt"`
 	AuxiliaryVisionMaxRetries     pgtype.Int4        `json:"auxiliary_vision_max_retries"`
 	AuxiliaryVisionTimeoutSeconds pgtype.Int4        `json:"auxiliary_vision_timeout_seconds"`
+	TelegramStickerVisionModelID  pgtype.UUID        `json:"telegram_sticker_vision_model_id"`
 	DiscussProbeModelID           pgtype.UUID        `json:"discuss_probe_model_id"`
 	TtsModelID                    pgtype.UUID        `json:"tts_model_id"`
 	TranscriptionModelID          pgtype.UUID        `json:"transcription_model_id"`
