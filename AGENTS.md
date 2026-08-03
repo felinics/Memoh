@@ -292,6 +292,17 @@ docker compose up -d        # Start all services
 Production deploy services are `postgres`, `pgvector`, `migrate`, `server`, `channel`, and `web`.
 Optional profile: `webhook-tunnel` (cloudflared for channels behind NAT). Desktop connects to Memoh Cloud or this hosted server instead of running its own server.
 
+### Pull Request QA Status
+
+Most PR descriptions in this repository are written by AI agents, and an agent must never silently stand in for human verification. Every PR body must disclose its QA state:
+
+- **Opening a PR** — if no human has verified the change yet (nobody has walked the happy path), end the description with this exact line:
+
+  > ⚠️ **No human QA** — this PR has not been verified by a human yet. Remove this line once a human confirms the happy path.
+
+- **After human confirmation** — when a human explicitly confirms QA (in chat, review, or a PR comment), remove the line from the description (e.g. via `gh pr edit`). Green CI, passing tests, typechecks, and the agent's own runs or screenshots never count as human QA; only an explicit human confirmation clears the line.
+- **Updating the description later** — keep the line until a human confirms. If commits land after confirmation, judge whether they could break the verified happy path (typos, rebases, and comment/docs touch-ups cannot); if they could, restore the line until a human verifies the new head. The goal is disclosing the current QA state, not re-QA of every commit.
+
 ## Key Development Rules
 
 ### Database, sqlc & Migrations
