@@ -33,6 +33,7 @@ type ToolSessionContext struct {
 	IsSubagent          bool
 	RuntimeActive       bool
 	SupportsImageInput  bool
+	SupportsFileInput   bool
 	RuntimeFence        runtimefence.Fence          `json:"-"`
 	RunContext          context.Context             `json:"-"`
 	RuntimeGuard        func(context.Context) error `json:"-"`

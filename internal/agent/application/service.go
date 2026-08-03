@@ -720,6 +720,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
 		SessionType:           p.SessionType,
 		SupportsImageInput:    supportsImageInputForModel(chatModel),
+		SupportsFileInput:     supportsFileInputForModel(chatModel),
 		SupportsToolCall:      chatModel.HasCompatibility(models.CompatToolCall),
 		Identity: native.SessionContext{
 			BotID:             p.BotID,
@@ -774,6 +775,10 @@ func (s *Service) canDeliverUserInputWS(eventCh chan<- WSStreamEvent) bool {
 
 func supportsImageInputForModel(m models.GetResponse) bool {
 	return m.HasCompatibility(models.CompatVision)
+}
+
+func supportsFileInputForModel(m models.GetResponse) bool {
+	return m.HasCompatibility(models.CompatFileInput)
 }
 
 const (

@@ -313,6 +313,7 @@ type SessionContext struct {
 	CanRequestUserInput  bool
 	CanListUserInput     bool
 	SupportsImageInput   bool
+	SupportsFileInput    bool
 	IsSubagent           bool
 	CurrentModelUUID     string
 	CurrentModelID       string

@@ -674,6 +674,14 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	if probeErr != nil && probeErr != io.EOF {
 		return nil, fmt.Errorf("read probe: %w", probeErr)
 	}
+	// PDF before the generic binary probe: a PDF may carry no NUL byte in its
+	// first 8KB and would otherwise be read out as garbled text.
+	if bytes.HasPrefix(probe[:probeN], []byte("%PDF-")) || strings.HasSuffix(strings.ToLower(filePath), ".pdf") {
+		if !session.SupportsFileInput {
+			return nil, errors.New("file is a PDF document and the current model has no native PDF input (file-input capability). Ask the user to switch to a PDF-capable model; do not attempt to install PDF readers")
+		}
+		return ReadImageFromContainer(opCtx, client, filePath, defaultReadMediaMaxBytes), nil
+	}
 	if bytes.IndexByte(probe[:probeN], 0) >= 0 {
 		if !session.SupportsImageInput {
 			return nil, errors.New("file appears to be binary. Read tool only supports text files (image reading not available for this model)")

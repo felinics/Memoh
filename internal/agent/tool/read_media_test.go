@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"net"
@@ -113,7 +114,7 @@ func TestReadImageFromContainerRejectsUnsupportedMime(t *testing.T) {
 	if result.Public.OK {
 		t.Fatalf("expected error result, got %+v", result.Public)
 	}
-	if !strings.Contains(result.Public.Error, "PNG, JPEG, GIF, or WebP") {
+	if !strings.Contains(result.Public.Error, "PNG, JPEG, GIF, WebP") {
 		t.Fatalf("unexpected error: %q", result.Public.Error)
 	}
 	if result.ImageBase64 != "" {
@@ -133,7 +134,7 @@ func TestReadImageFromContainerRejectsCorruptedBytes(t *testing.T) {
 	if result.Public.OK {
 		t.Fatalf("expected error result, got %+v", result.Public)
 	}
-	if !strings.Contains(result.Public.Error, "PNG, JPEG, GIF, or WebP") {
+	if !strings.Contains(result.Public.Error, "PNG, JPEG, GIF, WebP") {
 		t.Fatalf("unexpected error: %q", result.Public.Error)
 	}
 	if result.ImageBase64 != "" {
@@ -153,5 +154,39 @@ func TestReadImageFromContainerNotFound(t *testing.T) {
 	}
 	if result.ImageBase64 != "" {
 		t.Fatalf("expected no injected image for error result, got %q", result.ImageBase64)
+	}
+}
+
+func TestReadImageFromContainerPDFBecomesFilePayload(t *testing.T) {
+	t.Parallel()
+
+	pdfBytes := []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n")
+	client := newReadMediaTestClient(t, map[string][]byte{
+		"/workspace/uploads/report.pdf": pdfBytes,
+	})
+
+	result := ReadImageFromContainer(context.Background(), client, "/workspace/uploads/report.pdf", 0)
+
+	if !result.Public.OK {
+		t.Fatalf("expected success, got %+v", result.Public)
+	}
+	if result.Public.Mime != "application/pdf" {
+		t.Fatalf("expected application/pdf, got %q", result.Public.Mime)
+	}
+	if result.FileBase64 == "" {
+		t.Fatal("expected FileBase64 to be populated for PDF")
+	}
+	if result.ImageBase64 != "" {
+		t.Fatalf("PDF must not ride the image lane, got ImageBase64 %q", result.ImageBase64)
+	}
+	if result.Filename != "report.pdf" {
+		t.Fatalf("expected filename report.pdf, got %q", result.Filename)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(result.FileBase64)
+	if err != nil {
+		t.Fatalf("decode FileBase64: %v", err)
+	}
+	if !bytes.Equal(decoded, pdfBytes) {
+		t.Fatal("FileBase64 does not round-trip the PDF bytes")
 	}
 }

@@ -85,6 +85,7 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 		PromptCacheTTL:           cfg.PromptCacheTTL,
 		ChatCompletionsCompat:    cfg.ChatCompletionsCompat,
 		SupportsImageInput:       cfg.SupportsImageInput,
+		SupportsFileInput:        cfg.SupportsFileInput,
 		SupportsToolCall:         cfg.SupportsToolCall,
 		Identity:                 identity,
 		Skills:                   skills,

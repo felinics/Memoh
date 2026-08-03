@@ -902,6 +902,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		ConversationType:     cfg.Identity.ConversationType,
 		CanRequestUserInput:  cfg.CanRequestUserInput,
 		SupportsImageInput:   cfg.SupportsImageInput,
+		SupportsFileInput:    cfg.SupportsFileInput,
 		IsSubagent:           cfg.Identity.IsSubagent,
 		CurrentModelUUID:     cfg.CurrentModelUUID,
 		CurrentModelID:       cfg.CurrentModelID,

@@ -430,6 +430,7 @@ func sessionFromMCP(session mcp.ToolSessionContext) SessionContext {
 		CanRequestUserInput: session.CanRequestUserInput,
 		CanListUserInput:    session.CanListUserInput,
 		SupportsImageInput:  session.SupportsImageInput,
+		SupportsFileInput:   session.SupportsFileInput,
 		IsSubagent:          session.IsSubagent,
 	}
 }

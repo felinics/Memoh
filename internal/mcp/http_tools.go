@@ -29,6 +29,7 @@ const (
 	ToolHeaderConversationType   = "X-Memoh-Conversation-Type"
 	ToolHeaderIsSubagent         = "X-Memoh-Is-Subagent"
 	ToolHeaderSupportsImageInput = "X-Memoh-Supports-Image-Input"
+	ToolHeaderSupportsFileInput  = "X-Memoh-Supports-File-Input"
 )
 
 func ToolSessionContextFromHTTP(req *http.Request, fallbackBotID string) ToolSessionContext {
@@ -56,6 +57,7 @@ func ToolSessionContextFromHTTP(req *http.Request, fallbackBotID string) ToolSes
 		ConversationType:   strings.TrimSpace(req.Header.Get(ToolHeaderConversationType)),
 		IsSubagent:         strings.EqualFold(strings.TrimSpace(req.Header.Get(ToolHeaderIsSubagent)), "true"),
 		SupportsImageInput: strings.EqualFold(strings.TrimSpace(req.Header.Get(ToolHeaderSupportsImageInput)), "true"),
+		SupportsFileInput:  strings.EqualFold(strings.TrimSpace(req.Header.Get(ToolHeaderSupportsFileInput)), "true"),
 	}
 }
 

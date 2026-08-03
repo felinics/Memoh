@@ -102,6 +102,7 @@ type RunConfig struct {
 	LiveToolStream              bool
 	CanRequestUserInput         bool
 	SupportsImageInput          bool
+	SupportsFileInput           bool
 	SupportsToolCall            bool
 	InlineImages                []sdk.ImagePart
 	// InlineAttachments carries non-image native attachment parts (documents
