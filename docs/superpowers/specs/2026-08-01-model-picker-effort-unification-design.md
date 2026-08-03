@@ -51,7 +51,7 @@ Memoh 目前有两套并行的模型选择器实现，能力互补但互不相�
 （`0001_init.up.sql:271` 有注释），可直接存 `'disable'`；写入侧
 `internal/settings/service.go` 的 `isValidReasoningEffort` 只判非空，不拦。
 
-新增迁移 `0127_drop_reasoning_enabled`：
+新增迁移 `0128_drop_reasoning_enabled`：
 
 ```sql
 -- up

@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS bots (
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
   -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0093).
-  -- It is also the single on/off source: 'disable' means no reasoning (see 0126).
+  -- It is also the single on/off source: 'disable' means no reasoning (see 0128).
   CONSTRAINT bots_name_format_check CHECK (name ~ '^[a-z0-9][a-z0-9-]{1,62}$')
 );
 

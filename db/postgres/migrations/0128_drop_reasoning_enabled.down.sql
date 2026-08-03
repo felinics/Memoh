@@ -1,4 +1,4 @@
--- 0127_drop_reasoning_enabled (down)
+-- 0128_drop_reasoning_enabled (down)
 -- Restore the boolean flag from the effort value, then fold 'disable' back into
 -- the pre-migration representation (flag off + a concrete tier), since the older
 -- schema cannot store 'disable'.
