@@ -48,6 +48,37 @@ func TestAdaptAttachments_ContentHash(t *testing.T) {
 	}
 }
 
+func TestAdaptInbound_TelegramReplyImageAvailableToVision(t *testing.T) {
+	msg := channel.InboundMessage{
+		Channel: channel.ChannelTypeTelegram,
+		Message: channel.Message{
+			ID:   "m-reply",
+			Text: "看一下这张图",
+			Reply: &channel.ReplyRef{
+				MessageID: "m-image",
+				Attachments: []channel.Attachment{{
+					Type:        channel.AttachmentImage,
+					Mime:        "image/jpeg",
+					ContentHash: "reply-image-hash",
+					Path:        "/data/media/reply-image.jpg",
+				}},
+			},
+		},
+		ReceivedAt: time.Unix(1700000000, 0).UTC(),
+	}
+
+	me := AdaptInbound(msg, "sess", "ci-user", "Alice").(timeline.MessageEvent)
+	if len(me.Attachments) != 1 || me.Attachments[0].ContentHash != "reply-image-hash" {
+		t.Fatalf("reply image was not promoted into canonical attachments: %+v", me.Attachments)
+	}
+
+	ic := timeline.Reduce(timeline.NewEmptyIC("sess"), me)
+	rc := timeline.Render(ic, timeline.RenderParams{})
+	if len(rc) != 1 || len(rc[0].ImageRefs) != 1 || rc[0].ImageRefs[0].ContentHash != "reply-image-hash" {
+		t.Fatalf("reply image was not exposed to discuss vision: %+v", rc)
+	}
+}
+
 func TestAdaptInbound_PreservesMention_FromParts(t *testing.T) {
 	msg := channel.InboundMessage{
 		Channel: channel.ChannelTypeTelegram,

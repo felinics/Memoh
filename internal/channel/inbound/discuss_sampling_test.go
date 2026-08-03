@@ -256,6 +256,12 @@ func TestShouldNotifyDiscussDirectedTelegramStillLoadsFallbackPolicy(t *testing.
 }
 
 func TestTelegramDiscussSamplingMissThenHitIncludesAccumulatedContext(t *testing.T) {
+	notifier := &fakeProcessingStatusNotifier{}
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeProcessingStatusAdapter{
+		notifier: notifier,
+		typ:      channel.ChannelTypeTelegram,
+	})
 	channelIdentitySvc := &fakeChannelIdentityService{
 		channelIdentity: identities.ChannelIdentity{ID: "channel-identity-1"},
 	}
@@ -273,7 +279,7 @@ func TestTelegramDiscussSamplingMissThenHitIncludesAccumulatedContext(t *testing
 
 	processor := NewChannelInboundProcessor(
 		slog.Default(),
-		nil,
+		registry,
 		chatSvc,
 		chatSvc,
 		gateway,
@@ -324,6 +330,9 @@ func TestTelegramDiscussSamplingMissThenHitIncludesAccumulatedContext(t *testing
 	if driver.HasSession("session-1") {
 		t.Fatal("sampling miss unexpectedly notified discuss driver")
 	}
+	if len(notifier.events) != 0 {
+		t.Fatalf("sampling miss processing events = %v, want none", notifier.events)
+	}
 	select {
 	case cmd := <-turns:
 		t.Fatalf("sampling miss unexpectedly started turn: %+v", cmd)
@@ -339,6 +348,12 @@ func TestTelegramDiscussSamplingMissThenHitIncludesAccumulatedContext(t *testing
 	case cmd = <-turns:
 	case <-time.After(time.Second):
 		t.Fatal("sampling hit did not start discuss turn")
+	}
+	if len(notifier.events) != 1 || notifier.events[0] != "started" {
+		t.Fatalf("sampling hit processing events = %v, want [started]", notifier.events)
+	}
+	if len(notifier.info) != 1 || notifier.info[0].ReplyTarget != "telegram-group-1" || notifier.info[0].SourceMessageID != "msg-2" {
+		t.Fatalf("sampling hit processing info = %+v", notifier.info)
 	}
 
 	if sampleCalls != 2 {

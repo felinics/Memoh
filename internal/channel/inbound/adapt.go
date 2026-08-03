@@ -42,6 +42,13 @@ func adaptMessage(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 
 	content := adaptBody(msg.Message)
 	attachments := adaptAttachments(msg.Message.Attachments)
+	// Telegram exposes media from the replied-to message on Reply rather than
+	// on the new message itself. Promote those resolved attachments into the
+	// new canonical segment so a discuss turn such as "看一下这张图" can pass
+	// the quoted image through the auxiliary-vision path.
+	if msg.Channel == channel.ChannelTypeTelegram && msg.Message.Reply != nil {
+		attachments = append(attachments, adaptAttachments(msg.Message.Reply.Attachments)...)
+	}
 	forwardInfo := adaptForward(msg.Message.Forward)
 
 	var replyToMessageID, replyToSender, replyToPreview string

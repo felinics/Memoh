@@ -888,6 +888,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		eventID, latestRC = persistAndProjectEvent(ctx, store, p.pipeline, p.logger, identity.BotID, sessionID, event)
 	}
 
+	// Bot-centric history container:
+	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
+	activeChatID := strings.TrimSpace(identity.BotID)
+	if activeChatID == "" {
+		activeChatID = strings.TrimSpace(resolved.BotID)
+	}
+
 	// Discuss mode: sample passive Telegram traffic before notifying the
 	// discuss driver. Every message has already entered the durable timeline.
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
@@ -897,6 +904,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		if notify {
 			chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 			sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
+			p.notifyTelegramDiscussProcessingStarted(ctx, cfg, msg, identity, text, activeChatID, resolved.RouteID)
 			p.discussDriver.NotifyRC(ctx, sessionID, latestRC, discuss.DiscussSessionConfig{
 				TeamID:              cfg.TeamID,
 				BotID:               identity.BotID,
@@ -926,13 +934,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		return nil
-	}
-
-	// Bot-centric history container:
-	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
-	activeChatID := strings.TrimSpace(identity.BotID)
-	if activeChatID == "" {
-		activeChatID = strings.TrimSpace(resolved.BotID)
 	}
 
 	if sessionType == sessionpkg.TypeDiscuss || shouldTrigger {
@@ -2721,6 +2722,41 @@ func (p *ChannelInboundProcessor) resolveProcessingStatusNotifier(channelType ch
 		return nil
 	}
 	return notifier
+}
+
+// notifyTelegramDiscussProcessingStarted mirrors the normal chat processing
+// signal for discuss turns. Discuss work is handed to a background driver and
+// returns before the regular processing lifecycle below, so Telegram would
+// otherwise never receive its typing action.
+func (p *ChannelInboundProcessor) notifyTelegramDiscussProcessingStarted(
+	ctx context.Context,
+	cfg channel.ChannelConfig,
+	msg channel.InboundMessage,
+	identity InboundIdentity,
+	query string,
+	chatID string,
+	routeID string,
+) {
+	if msg.Channel != channel.ChannelTypeTelegram {
+		return
+	}
+	notifier := p.resolveProcessingStatusNotifier(msg.Channel)
+	if notifier == nil {
+		return
+	}
+	info := channel.ProcessingStatusInfo{
+		BotID:             identity.BotID,
+		ChatID:            chatID,
+		RouteID:           routeID,
+		ChannelIdentityID: identity.ChannelIdentityID,
+		UserID:            identity.UserID,
+		Query:             query,
+		ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
+		SourceMessageID:   strings.TrimSpace(msg.Message.ID),
+	}
+	if _, err := p.notifyProcessingStarted(ctx, notifier, cfg, msg, info); err != nil {
+		p.logProcessingStatusError("processing_started", msg, identity, err)
+	}
 }
 
 func (*ChannelInboundProcessor) notifyProcessingStarted(

@@ -254,15 +254,20 @@ func (n *fakeProcessingStatusNotifier) ProcessingFailed(_ context.Context, _ cha
 
 type fakeProcessingStatusAdapter struct {
 	notifier *fakeProcessingStatusNotifier
+	typ      channel.ChannelType
 }
 
-func (*fakeProcessingStatusAdapter) Type() channel.ChannelType {
+func (a *fakeProcessingStatusAdapter) Type() channel.ChannelType {
+	if a.typ != "" {
+		return a.typ
+	}
 	return channel.ChannelType("feishu")
 }
 
-func (*fakeProcessingStatusAdapter) Descriptor() channel.Descriptor {
+func (a *fakeProcessingStatusAdapter) Descriptor() channel.Descriptor {
+	typ := a.Type()
 	return channel.Descriptor{
-		Type: channel.ChannelType("feishu"),
+		Type: typ,
 		Capabilities: channel.ChannelCapabilities{
 			Text:  true,
 			Reply: true,
