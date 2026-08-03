@@ -560,6 +560,10 @@ func (s *stickerService) CachedDescribedSet(ctx context.Context) (describedStick
 			return describedStickerSet{}, err
 		}
 		description := ""
+		status := descriptionStatusPending
+		if found {
+			status = strings.ToLower(strings.TrimSpace(entry.Status))
+		}
 		if found && entry.Status == descriptionStatusReady {
 			description = strings.TrimSpace(entry.Description)
 		}
@@ -569,6 +573,7 @@ func (s *stickerService) CachedDescribedSet(ctx context.Context) (describedStick
 			FileUniqueID: sticker.FileUniqueID,
 			Emoji:        strings.TrimSpace(sticker.Emoji),
 			Description:  description,
+			Status:       status,
 		})
 	}
 	return describedStickerSet{

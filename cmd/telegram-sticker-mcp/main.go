@@ -30,6 +30,7 @@ const (
 	stickerGuideBase         = "在当前会话是 Telegram 时，通常每条对外信息都应至少配一张贴合语境的贴纸，并在同一次 `send` 调用中同时设置文本与 `sticker_id`；只有完整目录里确实没有合适候选时才省略。请根据视觉描述选择，不要只看原始 emoji，也不要重复发送含义相同的贴纸。用户明确要求 Unicode emoji 时不要用贴纸代替。"
 	telegramBotHeader        = "X-Telegram-Bot-Token"
 	telegramStickerSetHeader = "X-Telegram-Sticker-Set"
+	stickerCatalogSchemaKey  = "x-memoh-sticker-catalog"
 )
 
 type config struct {
@@ -152,13 +153,37 @@ func stickerSendInputSchema(output describedStickerSet, catalogError string) map
 				"description": "Server-injected Telegram target.",
 			},
 			"sticker_id": map[string]any{
-				"type":        "string",
-				"enum":        ids,
-				"description": guide,
+				"type":                  "string",
+				"enum":                  ids,
+				"description":           guide,
+				stickerCatalogSchemaKey: structuredStickerCatalog(stickers),
 			},
 		},
 		"required": []string{"chat_id", "sticker_id"},
 	}
+}
+
+func structuredStickerCatalog(stickers []describedSticker) []any {
+	entries := make([]any, 0, len(stickers))
+	for _, sticker := range stickers {
+		description := strings.TrimSpace(sticker.Description)
+		status := strings.ToLower(strings.TrimSpace(sticker.Status))
+		if description != "" {
+			status = descriptionStatusReady
+		}
+		switch status {
+		case descriptionStatusReady, descriptionStatusFailed:
+		default:
+			status = descriptionStatusPending
+		}
+		entries = append(entries, map[string]any{
+			"id":          strings.ToUpper(strings.TrimSpace(sticker.ID)),
+			"description": description,
+			"emoji":       strings.TrimSpace(sticker.Emoji),
+			"status":      status,
+		})
+	}
+	return entries
 }
 
 func stickerGuide(ctx context.Context, service *stickerService) (string, error) {

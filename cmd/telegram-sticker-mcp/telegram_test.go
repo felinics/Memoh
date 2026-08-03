@@ -699,6 +699,15 @@ func TestStickerGuideAndMCPExposeStableCompactTools(t *testing.T) {
 	if !strings.Contains(description, stickerID+"：角色微笑挥手打招呼") {
 		t.Fatalf("sticker catalog missing from schema: %#v", stickerSchema)
 	}
+	structured, _ := stickerSchema[stickerCatalogSchemaKey].([]any)
+	if len(structured) != 1 {
+		t.Fatalf("structured Sticker catalog = %#v", stickerSchema[stickerCatalogSchemaKey])
+	}
+	entry, _ := structured[0].(map[string]any)
+	if entry["id"] != stickerID || entry["description"] != "角色微笑挥手打招呼" ||
+		entry["emoji"] != "👋" || entry["status"] != descriptionStatusReady {
+		t.Fatalf("structured Sticker entry = %#v", entry)
+	}
 }
 
 func TestCachedStickerGuideDoesNotWaitForBackgroundParsing(t *testing.T) {

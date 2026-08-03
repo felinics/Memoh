@@ -12,6 +12,7 @@ import (
 	agentevent "github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/delivery"
+	"github.com/memohai/memoh/internal/messaging"
 )
 
 type discussSendPreview struct {
@@ -82,8 +83,8 @@ func (p *discussSendPreview) Handle(ctx context.Context, event agentevent.Stream
 			call.disabled = true
 			return
 		}
-		replyTo, validReply := sendReplyMessageID(args)
-		if !validReply {
+		replyTo, replyErr := messaging.ReplyMessageIDFromArgs(args)
+		if replyErr != nil {
 			// The actual send path will return the schema/validation error. Do not
 			// open a preview whose Telegram reply relationship could be wrong.
 			call.disabled = true
@@ -160,51 +161,6 @@ func sendRouteValue(args map[string]any, key string) (string, bool, bool) {
 		return "", true, false
 	}
 	return strings.TrimSpace(text), true, true
-}
-
-// sendReplyMessageID mirrors the two reply inputs accepted by the send
-// executor. A reply is opt-in: the triggering source message is deliberately
-// not used as a fallback.
-func sendReplyMessageID(args map[string]any) (string, bool) {
-	if raw, present := args["reply_to"]; present && raw != nil {
-		value, ok := raw.(string)
-		if !ok {
-			return "", false
-		}
-		if messageID := strings.TrimSpace(value); messageID != "" {
-			return messageID, true
-		}
-	}
-
-	rawMessage, present := args["message"]
-	if !present || rawMessage == nil {
-		return "", true
-	}
-	message, ok := rawMessage.(map[string]any)
-	if !ok {
-		// A plain string is a valid message input and cannot contain a reply.
-		if _, isText := rawMessage.(string); isText {
-			return "", true
-		}
-		return "", false
-	}
-	rawReply, present := message["reply"]
-	if !present || rawReply == nil {
-		return "", true
-	}
-	reply, ok := rawReply.(map[string]any)
-	if !ok {
-		return "", false
-	}
-	rawMessageID, present := reply["message_id"]
-	if !present || rawMessageID == nil {
-		return "", false
-	}
-	messageID, ok := rawMessageID.(string)
-	if !ok || strings.TrimSpace(messageID) == "" {
-		return "", false
-	}
-	return strings.TrimSpace(messageID), true
 }
 
 func (p *discussSendPreview) pushFinalArgumentTail(

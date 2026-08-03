@@ -93,7 +93,7 @@ func (s *Service) telegramStickerVisionConfig(
 // never leave the server or enter the Sticker service.
 func (s *Service) RecognizeTelegramSticker(
 	ctx context.Context,
-	botID, userID, mediaType string,
+	botID, channelIdentityID, mediaType string,
 	data []byte,
 ) (description, model, promptVersion string, err error) {
 	cfg, promptVersion, _, err := s.telegramStickerVisionConfig(ctx, botID)
@@ -122,7 +122,7 @@ func (s *Service) RecognizeTelegramSticker(
 	visionCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	description, err = retryAuxiliaryVisionWithWait(visionCtx, cfg.MaxRetries, func(callCtx context.Context) (string, error) {
-		return generate(callCtx, userID, cfg.Model, cfg.Provider, cfg.Prompt, "", []sdk.ImagePart{image})
+		return generate(callCtx, channelIdentityID, cfg.Model, cfg.Provider, cfg.Prompt, "", []sdk.ImagePart{image})
 	}, wait)
 	if err != nil {
 		return "", model, promptVersion, err

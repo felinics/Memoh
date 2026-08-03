@@ -18,6 +18,7 @@ type describedSticker struct {
 	FileUniqueID string
 	Emoji        string
 	Description  string
+	Status       string
 }
 
 type stickerCatalog struct {
@@ -146,6 +147,7 @@ func (c *stickerCatalog) DescribeSet(
 			FileUniqueID: sticker.FileUniqueID,
 			Emoji:        strings.TrimSpace(sticker.Emoji),
 			Description:  description,
+			Status:       descriptionStatusReady,
 		})
 	}
 	if len(result) == 0 {
@@ -183,6 +185,7 @@ func (c *stickerCatalog) CachedSet(
 			FileUniqueID: sticker.FileUniqueID,
 			Emoji:        strings.TrimSpace(sticker.Emoji),
 			Description:  entry.Description,
+			Status:       descriptionStatusReady,
 		})
 	}
 	return result, nil

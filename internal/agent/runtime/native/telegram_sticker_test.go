@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -37,6 +38,10 @@ func TestMergeTelegramStickerIntoSingleFirstPartySend(t *testing.T) {
 				"sticker_id": map[string]any{
 					"type": "string", "enum": []any{"s002", "S001", "S001"},
 					"description": "目录说明和状态。\n\nSticker Set：`demo`（2 张）\n- S001：角色微笑挥手（原始 emoji：👋，仅供参考）\n- S002：待识别（原始 emoji：😴，仅供参考）",
+					telegramStickerCatalogSchemaKey: []any{
+						map[string]any{"id": "S002", "description": "", "emoji": "😴", "status": "pending"},
+						map[string]any{"id": "S001", "description": "角色微笑挥手", "emoji": "👋", "status": "ready"},
+					},
 				},
 			}},
 			Execute: func(_ *sdk.ToolExecContext, input any) (any, error) {
@@ -53,6 +58,9 @@ func TestMergeTelegramStickerIntoSingleFirstPartySend(t *testing.T) {
 		t.Fatalf("stable Sticker enum = %#v", got)
 	}
 	compactDescription, _ := stickerSchema["description"].(string)
+	if _, leaked := stickerSchema[telegramStickerCatalogSchemaKey]; leaked {
+		t.Fatalf("structured backend catalog leaked into model schema: %#v", stickerSchema)
+	}
 	for _, want := range []string{"Stable Sticker catalog", "- S001：角色微笑挥手", "- S002：待识别（emoji：😴）"} {
 		if !strings.Contains(compactDescription, want) {
 			t.Fatalf("compact Sticker description missing %q: %s", want, compactDescription)
@@ -79,6 +87,49 @@ func TestMergeTelegramStickerIntoSingleFirstPartySend(t *testing.T) {
 	}
 	if len(stickerInputs) != 1 || stickerInputs[0]["chat_id"] != "chat-1" || stickerInputs[0]["sticker_id"] != "S002" {
 		t.Fatalf("Sticker backend inputs = %#v", stickerInputs)
+	}
+}
+
+func TestMergedTelegramStickerSchemaIgnoresNonVisibleStatusChanges(t *testing.T) {
+	t.Parallel()
+
+	mergedSchema := func(status string) []byte {
+		t.Helper()
+		merged := mergeTelegramStickerSendTools(agenttools.SessionContext{
+			CurrentPlatform: "telegram", ReplyTarget: "chat-1",
+		}, []sdk.Tool{
+			{
+				Name:       "send",
+				Parameters: map[string]any{"properties": map[string]any{}},
+				Execute:    func(*sdk.ToolExecContext, any) (any, error) { return nil, nil },
+			},
+			{
+				Name: "send_telegram_sticker",
+				Parameters: map[string]any{"properties": map[string]any{
+					"sticker_id": map[string]any{
+						"type": "string", "enum": []any{"S001"}, "description": "legacy fallback",
+						telegramStickerCatalogSchemaKey: []any{
+							map[string]any{"id": "S001", "description": "", "emoji": "👋", "status": status},
+						},
+					},
+				}},
+				Execute: func(*sdk.ToolExecContext, any) (any, error) { return nil, nil },
+			},
+		})
+		if len(merged) != 1 {
+			t.Fatalf("merged tools = %#v", merged)
+		}
+		payload, err := json.Marshal(merged[0].Parameters)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+
+	pending := mergedSchema("pending")
+	failed := mergedSchema("failed")
+	if string(pending) != string(failed) {
+		t.Fatalf("non-visible status change altered model schema and would cause a cache miss:\npending=%s\nfailed=%s", pending, failed)
 	}
 }
 

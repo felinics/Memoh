@@ -260,14 +260,8 @@ func validateSendArguments(args map[string]any) error {
 			return fmt.Errorf("unknown send field %q", key)
 		}
 	}
-	if raw, ok := args["reply_to"]; ok && raw != nil {
-		replyTo, ok := raw.(string)
-		if !ok {
-			return errors.New("reply_to must be string")
-		}
-		args["reply_to"] = strings.TrimSpace(replyTo)
-	}
-	return nil
+	_, err := ReplyMessageIDFromArgs(args)
+	return err
 }
 
 // localShortcutCanRepresent reports whether the message can be delivered by
@@ -329,7 +323,11 @@ func (e *Executor) buildOutboundMessage(
 	if outboundMessage.IsEmpty() {
 		return Message{}, errors.New("message or attachments required")
 	}
-	if replyTo := firstStringArg(args, "reply_to"); replyTo != "" {
+	replyTo, err := ReplyMessageIDFromArgs(args)
+	if err != nil {
+		return Message{}, err
+	}
+	if replyTo != "" {
 		outboundMessage.Reply = &ReplyRef{MessageID: replyTo}
 	}
 	if outboundMessage.Format == "" && ContainsMarkdown(outboundMessage.Text) {
@@ -811,23 +809,11 @@ func validateOutboundMessageFormat(raw any) (MessageFormat, error) {
 }
 
 func validateOutboundMessageReply(raw any) error {
-	reply, ok := raw.(map[string]any)
-	if !ok {
-		return errors.New("message reply must be object")
+	messageID, err := replyMessageIDFromValue(raw)
+	if err != nil {
+		return err
 	}
-	allowed := map[string]struct{}{
-		"message_id": {},
-	}
-	for key := range reply {
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("unknown message reply field %q", key)
-		}
-	}
-	messageID, _ := reply["message_id"].(string)
-	messageID = strings.TrimSpace(messageID)
-	if messageID == "" {
-		return errors.New("message reply message_id is required")
-	}
+	reply := raw.(map[string]any)
 	reply["message_id"] = messageID
 	return nil
 }

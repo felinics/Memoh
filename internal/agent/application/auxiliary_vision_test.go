@@ -22,10 +22,10 @@ func TestRecognizeTelegramStickerUsesOneExplicitVisionCall(t *testing.T) {
 		auxiliaryVision: AuxiliaryVisionConfig{
 			Model: "vision-model", Provider: "vision-provider", MaxRetries: 0, Timeout: time.Second,
 		},
-		auxiliaryVisionGen: func(_ context.Context, userID, model, provider, prompt, caption string, images []sdk.ImagePart) (string, error) {
+		auxiliaryVisionGen: func(_ context.Context, channelIdentityID, model, provider, prompt, caption string, images []sdk.ImagePart) (string, error) {
 			calls++
-			if userID != "user-1" || model != "vision-model" || provider != "vision-provider" || caption != "" {
-				t.Fatalf("unexpected recognition routing: user=%q model=%q provider=%q caption=%q", userID, model, provider, caption)
+			if channelIdentityID != "identity-1" || model != "vision-model" || provider != "vision-provider" || caption != "" {
+				t.Fatalf("unexpected recognition routing: channel_identity=%q model=%q provider=%q caption=%q", channelIdentityID, model, provider, caption)
 			}
 			if prompt != telegramStickerSystemPrompt || len(images) != 1 || !strings.HasPrefix(images[0].Image, "data:image/webp;base64,") {
 				t.Fatalf("unexpected recognition input: prompt=%q images=%#v", prompt, images)
@@ -34,7 +34,7 @@ func TestRecognizeTelegramStickerUsesOneExplicitVisionCall(t *testing.T) {
 		},
 	}
 	description, model, promptVersion, err := service.RecognizeTelegramSticker(
-		context.Background(), "bot-1", "user-1", "image/webp", []byte("image"),
+		context.Background(), "bot-1", "identity-1", "image/webp", []byte("image"),
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -29,7 +29,10 @@ const (
 
 const telegramStickerSetHeader = "X-Telegram-Sticker-Set"
 
-var telegramStickerSetNamePattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+var (
+	telegramStickerSetNamePattern       = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+	errTelegramStickerConnectionMissing = errors.New("telegram sticker connection is unavailable")
+)
 
 var telegramStickerHTTPClient = &http.Client{
 	Timeout: 5 * time.Minute,
@@ -128,6 +131,9 @@ func (h *MCPHandler) ListTelegramStickers(c echo.Context) error {
 	result.RecognitionModelID = model
 	result.RecognitionModelInherited = inherited
 	result.PromptVersion = promptVersion
+	// This GET intentionally acts as a lazy scheduler for pending recognition.
+	// Enqueue is deduplicated, bounded, and non-blocking; the model-facing tool
+	// schema is refreshed only after a visual description actually changes it.
 	h.enqueueTelegramStickerRecognition(result, botID, channelIdentityID, model, promptVersion)
 	return c.JSON(http.StatusOK, result)
 }
@@ -416,7 +422,7 @@ func (h *MCPHandler) RetryTelegramStickerRecognition(c echo.Context) error {
 	if err != nil {
 		return h.stickerRecognitionError(err)
 	}
-	result, err := h.recognizeTelegramSticker(ctx, telegramStickerRecognitionTask{
+	result, _, err := h.recognizeTelegramSticker(ctx, telegramStickerRecognitionTask{
 		BotID: botID, ChannelIdentityID: channelIdentityID, StickerID: stickerID,
 		Model: model, PromptVersion: promptVersion,
 	})
@@ -429,24 +435,38 @@ func (h *MCPHandler) RetryTelegramStickerRecognition(c echo.Context) error {
 func (h *MCPHandler) recognizeTelegramSticker(
 	ctx context.Context,
 	task telegramStickerRecognitionTask,
-) (TelegramStickerCatalogEntry, error) {
-	conn, previewEndpoint, err := h.telegramStickerEndpoint(
-		ctx, task.BotID, "/api/stickers/"+url.PathEscape(task.StickerID)+"/preview",
-	)
-	if err != nil {
-		return TelegramStickerCatalogEntry{}, err
-	}
-	failed := func(cause error, model, promptVersion string) (TelegramStickerCatalogEntry, error) {
+) (TelegramStickerCatalogEntry, bool, error) {
+	attempts := max(task.Attempts+1, 1)
+	storeFailure := func(conn mcp.Connection, model, promptVersion string) {
 		if storeErr := h.storeTelegramStickerRecognitionFailure(
-			ctx, conn, task.StickerID, model, promptVersion,
+			ctx, conn, task.StickerID, model, promptVersion, attempts,
 		); storeErr != nil && h.logger != nil {
 			h.logger.Warn("Telegram sticker recognition failure status could not be stored",
 				slog.String("bot_id", task.BotID),
 				slog.String("sticker_id", task.StickerID),
+				slog.Int("attempt", attempts),
 				slog.Any("error", storeErr),
 			)
 		}
-		return TelegramStickerCatalogEntry{}, h.stickerRecognitionError(cause)
+	}
+
+	conn, previewEndpoint, err := h.telegramStickerEndpoint(
+		ctx, task.BotID, "/api/stickers/"+url.PathEscape(task.StickerID)+"/preview",
+	)
+	if err != nil {
+		// telegramStickerEndpoint returns the identified connection even when
+		// its URL cannot be parsed. Try to persist the failure, then rely on the
+		// queue's bounded backoff if that same broken endpoint prevents storage.
+		if isTelegramStickerConnection(conn) {
+			storeFailure(conn, task.Model, task.PromptVersion)
+		}
+		return TelegramStickerCatalogEntry{}, false, err
+	}
+	failed := func(cause error, model, promptVersion string) (TelegramStickerCatalogEntry, bool, error) {
+		storeFailure(conn, model, promptVersion)
+		// A failed entry intentionally renders exactly like a pending entry in
+		// the model-visible catalog, so it must not force a prompt-cache miss.
+		return TelegramStickerCatalogEntry{}, false, h.stickerRecognitionError(cause)
 	}
 
 	preview, err := h.doTelegramStickerRequest(ctx, conn, http.MethodGet, previewEndpoint)
@@ -455,7 +475,7 @@ func (h *MCPHandler) recognizeTelegramSticker(
 	}
 	defer func() { _ = preview.Body.Close() }()
 	if preview.StatusCode == http.StatusNotFound {
-		return TelegramStickerCatalogEntry{}, apperror.New(apperror.CodeStickerNotFound, nil)
+		return TelegramStickerCatalogEntry{}, false, apperror.New(apperror.CodeStickerNotFound, nil)
 	}
 	if preview.StatusCode < http.StatusOK || preview.StatusCode >= http.StatusMultipleChoices {
 		return failed(fmt.Errorf("preview status %d", preview.StatusCode), task.Model, task.PromptVersion)
@@ -485,7 +505,7 @@ func (h *MCPHandler) recognizeTelegramSticker(
 	}
 	payload, err := json.Marshal(telegramStickerRecognitionResult{
 		Model: model, PromptVersion: promptVersion, Description: description,
-		Status: "ready", Attempts: 1,
+		Status: "ready", Attempts: attempts,
 	})
 	if err != nil {
 		return failed(err, model, promptVersion)
@@ -502,16 +522,19 @@ func (h *MCPHandler) recognizeTelegramSticker(
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
-		return TelegramStickerCatalogEntry{}, apperror.New(apperror.CodeStickerNotFound, nil)
+		return TelegramStickerCatalogEntry{}, false, apperror.New(apperror.CodeStickerNotFound, nil)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return failed(fmt.Errorf("store status %d", resp.StatusCode), model, promptVersion)
 	}
 	var result TelegramStickerCatalogEntry
 	if err := decodeBoundedJSON(resp.Body, maxStickerCatalogBytes, &result); err != nil {
-		return failed(err, model, promptVersion)
+		// The successful status proves the description was stored even if its
+		// response body was malformed. Refresh the schema without overwriting
+		// the ready entry with a synthetic failure.
+		return TelegramStickerCatalogEntry{}, true, h.stickerRecognitionError(err)
 	}
-	return result, nil
+	return result, true, nil
 }
 
 func (h *MCPHandler) authorizeTelegramStickerRequest(c echo.Context) (string, error) {
@@ -575,6 +598,7 @@ func (h *MCPHandler) storeTelegramStickerRecognitionFailure(
 	ctx context.Context,
 	conn mcp.Connection,
 	stickerID, model, promptVersion string,
+	attempts int,
 ) error {
 	model = strings.TrimSpace(model)
 	promptVersion = strings.TrimSpace(promptVersion)
@@ -588,7 +612,7 @@ func (h *MCPHandler) storeTelegramStickerRecognitionFailure(
 		return err
 	}
 	payload, err := json.Marshal(telegramStickerRecognitionResult{
-		Model: model, PromptVersion: promptVersion, Status: "failed", Attempts: 1,
+		Model: model, PromptVersion: promptVersion, Status: "failed", Attempts: max(attempts, 1),
 	})
 	if err != nil {
 		return err
@@ -648,6 +672,22 @@ func (h *MCPHandler) telegramStickerEndpoint(ctx context.Context, botID, apiPath
 	if err != nil {
 		return mcp.Connection{}, "", h.stickerServiceError("list connections", err)
 	}
+	conn, endpoint, err := telegramStickerEndpointFromConnections(connections, apiPath)
+	if err == nil {
+		return conn, endpoint, nil
+	}
+	if errors.Is(err, errTelegramStickerConnectionMissing) {
+		return mcp.Connection{}, "", apperror.New(apperror.CodeStickerServiceUnavailable, nil)
+	}
+	return conn, "", h.stickerServiceError("resolve endpoint", err)
+}
+
+func telegramStickerEndpointFromConnections(
+	connections []mcp.Connection,
+	apiPath string,
+) (mcp.Connection, string, error) {
+	var invalidConnection *mcp.Connection
+	var invalidEndpointError error
 	for _, conn := range connections {
 		if conn.Type != "http" || !isTelegramStickerConnection(conn) {
 			continue
@@ -655,11 +695,19 @@ func (h *MCPHandler) telegramStickerEndpoint(ctx context.Context, botID, apiPath
 		rawURL, _ := conn.Config["url"].(string)
 		endpoint, endpointErr := deriveStickerAPIEndpoint(rawURL, apiPath)
 		if endpointErr != nil {
+			if invalidConnection == nil {
+				candidate := conn
+				invalidConnection = &candidate
+				invalidEndpointError = endpointErr
+			}
 			continue
 		}
 		return conn, endpoint, nil
 	}
-	return mcp.Connection{}, "", apperror.New(apperror.CodeStickerServiceUnavailable, nil)
+	if invalidConnection != nil {
+		return *invalidConnection, "", invalidEndpointError
+	}
+	return mcp.Connection{}, "", errTelegramStickerConnectionMissing
 }
 
 func isTelegramStickerConnection(conn mcp.Connection) bool {

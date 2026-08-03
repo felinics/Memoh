@@ -296,6 +296,12 @@ Optional profile: `webhook-tunnel` (cloudflared for channels behind NAT). Deskto
 
 ## Key Development Rules
 
+### Cache Stability Review
+
+- **Before implementing any design, explicitly assess whether it could unintentionally increase the cache-miss rate.** This applies especially to LLM prompt prefixes, tool schemas, provider request shapes, cache keys, and other data reused across turns or requests.
+- Keep cacheable structures deterministic and stable. Do not inject per-request, per-session, per-user, or other frequently changing values into prompts, tool definitions, schemas, or cache keys when the same constraint can be enforced at execution time.
+- When a cache-affecting change is unavoidable, document the tradeoff and add a test or measurement that protects the intended cache-key or request-shape stability.
+
 ### Database, sqlc & Migrations
 
 1. **PostgreSQL SQL queries** are defined in `db/postgres/queries/*.sql`.

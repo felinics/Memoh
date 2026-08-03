@@ -14,7 +14,17 @@ import (
 	"github.com/memohai/memoh/internal/delivery"
 )
 
-const telegramStickerSendGuidance = " For Telegram, normally pair every coherent public message with at least one context-appropriate Sticker by setting `sticker_id` in the same send call; omit it only when the catalog has no suitable Sticker. Choose from the full visual descriptions, not from the original emoji alone, and avoid repetitive duplicates."
+const (
+	telegramStickerSendGuidance     = " For Telegram, normally pair every coherent public message with at least one context-appropriate Sticker by setting `sticker_id` in the same send call; omit it only when the catalog has no suitable Sticker. Choose from the full visual descriptions, not from the original emoji alone, and avoid repetitive duplicates."
+	telegramStickerCatalogSchemaKey = "x-memoh-sticker-catalog"
+)
+
+type telegramStickerSchemaEntry struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Emoji       string `json:"emoji"`
+	Status      string `json:"status"`
+}
 
 // mergeTelegramStickerSendTools converts the Sticker MCP into an internal
 // backend for the first-party send tool. The model sees one send call whose
@@ -59,8 +69,8 @@ func mergeTelegramStickerSendTools(session tools.SessionContext, sdkTools []sdk.
 		if !normalizeStickerEnum(stickerSchema) {
 			continue
 		}
-		compactTelegramStickerDescription(stickerSchema)
 		stickerIDs := stickerEnumSet(stickerSchema)
+		compactTelegramStickerDescription(stickerSchema, stickerIDs)
 		properties["sticker_id"] = stickerSchema
 		visible[i].Parameters = parameters
 		visible[i].Description = strings.TrimSpace(visible[i].Description) + telegramStickerSendGuidance
@@ -134,48 +144,73 @@ func mergeTelegramStickerSendTools(session tools.SessionContext, sdkTools []sdk.
 	return visible
 }
 
-// compactTelegramStickerDescription keeps the stable ID-to-visual-description
-// catalog in the single send schema while removing repeated set/count/status
-// prose and redundant original-emoji hints. This preserves one-read selection
-// without paying for management metadata on every model turn.
-func compactTelegramStickerDescription(schema map[string]any) {
-	description, _ := schema["description"].(string)
-	if strings.TrimSpace(description) == "" {
+// compactTelegramStickerDescription renders the backend's structured catalog
+// into the single model-visible send schema. The extension is always removed
+// before provider dispatch. Older cached schemas without the extension retain
+// their original safe description until the next explicit schema refresh.
+func compactTelegramStickerDescription(schema map[string]any, stickerIDs map[string]struct{}) {
+	rawCatalog, structured := schema[telegramStickerCatalogSchemaKey]
+	delete(schema, telegramStickerCatalogSchemaKey)
+	if !structured {
 		return
 	}
-	entries := make([]string, 0)
-	for _, rawLine := range strings.Split(description, "\n") {
-		line := strings.TrimSpace(rawLine)
-		if !strings.HasPrefix(line, "- ") {
+	catalog, ok := parseTelegramStickerSchemaCatalog(rawCatalog)
+	if !ok {
+		return
+	}
+	ids := make([]string, 0, len(stickerIDs))
+	for id := range stickerIDs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if len(ids) == 0 {
+		return
+	}
+	entries := make([]string, 0, len(ids))
+	for _, id := range ids {
+		entry := catalog[id]
+		description := strings.TrimSpace(entry.Description)
+		status := strings.ToLower(strings.TrimSpace(entry.Status))
+		if status == "ready" && description != "" {
+			entries = append(entries, "- "+id+"："+description)
 			continue
 		}
-		entries = append(entries, compactTelegramStickerEntry(line))
+		fallback := "- " + id + "：待识别"
+		if emoji := strings.TrimSpace(entry.Emoji); emoji != "" {
+			fallback += "（emoji：" + emoji + "）"
+		}
+		// Pending and failed deliberately share one fallback so a failed status
+		// write does not change the model prompt and cause a cache miss.
+		entries = append(entries, fallback)
 	}
-	if len(entries) == 0 {
-		return
-	}
-	sort.Strings(entries)
 	schema["description"] = "Stable Sticker catalog; choose by visual description and use an ID exactly as listed:\n" +
 		strings.Join(entries, "\n")
 }
 
-func compactTelegramStickerEntry(line string) string {
-	const emojiMarker = "（原始 emoji："
-	marker := strings.Index(line, emojiMarker)
-	if marker < 0 {
-		return line
+func parseTelegramStickerSchemaCatalog(raw any) (map[string]telegramStickerSchemaEntry, bool) {
+	payload, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
 	}
-	prefix := strings.TrimSpace(line[:marker])
-	if !strings.Contains(prefix, "：待识别") {
-		return prefix
+	var entries []telegramStickerSchemaEntry
+	if err := json.Unmarshal(payload, &entries); err != nil {
+		return nil, false
 	}
-	emoji := strings.TrimPrefix(line[marker:], emojiMarker)
-	emoji = strings.TrimSuffix(emoji, "，仅供参考）")
-	emoji = strings.TrimSpace(emoji)
-	if emoji == "" {
-		return prefix
+	catalog := make(map[string]telegramStickerSchemaEntry, len(entries))
+	for _, entry := range entries {
+		entry.ID = strings.ToUpper(strings.TrimSpace(entry.ID))
+		if entry.ID == "" {
+			continue
+		}
+		if _, duplicate := catalog[entry.ID]; duplicate {
+			return nil, false
+		}
+		entry.Description = strings.TrimSpace(entry.Description)
+		entry.Emoji = strings.TrimSpace(entry.Emoji)
+		entry.Status = strings.ToLower(strings.TrimSpace(entry.Status))
+		catalog[entry.ID] = entry
 	}
-	return prefix + "（emoji：" + emoji + "）"
+	return catalog, true
 }
 
 func stickerEnumSet(schema map[string]any) map[string]struct{} {

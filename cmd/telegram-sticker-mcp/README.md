@@ -7,6 +7,13 @@ into one complete, deterministically sorted catalog in the first-party
 therefore selects and sends text plus a Sticker in one tool call; there is no
 model-visible search round.
 
+The backend schema carries the catalog in the internal
+`x-memoh-sticker-catalog` extension as structured `id`, `description`, `emoji`,
+and `status` fields. Memoh removes that extension and deterministically renders
+the compact model-visible description. Pending and failed entries intentionally
+render identically, so persistence of a failure does not create a prompt-cache
+miss when no usable visual description changed.
+
 Descriptions are cached in SQLite by Telegram `file_unique_id`, vision model,
 and prompt version. A sticker is sent to the vision model only once for that
 combination. Failed attempts are cached too, preventing an unavailable or

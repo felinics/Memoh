@@ -32,7 +32,7 @@ type MCPHandler struct {
 // reuse Memoh's model and credential resolver.
 type TelegramStickerVisionRecognizer interface {
 	TelegramStickerVisionConfig(context.Context, string) (model, promptVersion string, inherited bool, err error)
-	RecognizeTelegramSticker(context.Context, string, string, string, []byte) (description, model, promptVersion string, err error)
+	RecognizeTelegramSticker(ctx context.Context, botID, channelIdentityID, mediaType string, data []byte) (description, model, promptVersion string, err error)
 }
 
 func NewMCPHandler(log *slog.Logger, service *mcp.ConnectionService, botService *bots.Service, accountService *accounts.Service, fedGateway *MCPFederationGateway) *MCPHandler {
@@ -46,9 +46,9 @@ func NewMCPHandler(log *slog.Logger, service *mcp.ConnectionService, botService 
 	handler.stickerRecognition = newTelegramStickerRecognitionQueue(
 		handler.logger,
 		telegramStickerRecognitionWorkerCount,
-		func(ctx context.Context, task telegramStickerRecognitionTask) error {
-			_, err := handler.recognizeTelegramSticker(ctx, task)
-			return err
+		func(ctx context.Context, task telegramStickerRecognitionTask) (bool, error) {
+			_, schemaChanged, err := handler.recognizeTelegramSticker(ctx, task)
+			return schemaChanged, err
 		},
 		handler.refreshTelegramStickerToolSchema,
 	)
