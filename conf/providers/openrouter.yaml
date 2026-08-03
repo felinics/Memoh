@@ -421,12 +421,16 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "deepseek/deepseek-v4-pro"
     name: "DeepSeek: DeepSeek V4 Pro"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "essentialai/rnj-1-instruct"
     name: "EssentialAI: Rnj 1 Instruct"
     type: chat
