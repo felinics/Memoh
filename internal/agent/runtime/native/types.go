@@ -99,14 +99,18 @@ type RunConfig struct {
 	ContextFrags                []contextfrag.ContextFrag
 	ContextManifest             contextfrag.Manifest
 	ContextScope                contextfrag.Scope
-	ContextQueryMaterialized    bool
-	ContextToolUsage            string
-	ContextDynamicMutators      []contextfrag.DynamicMutator
-	SessionType                 string
-	LiveToolStream              bool
-	CanRequestUserInput         bool
-	SupportsImageInput          bool
-	SupportsToolCall            bool
+	// ReplyableMessageIDs contains external channel message IDs that are
+	// actually present in the model-facing context. It is intentionally kept
+	// separate from database message IDs used by ForkContext.
+	ReplyableMessageIDs      []string
+	ContextQueryMaterialized bool
+	ContextToolUsage         string
+	ContextDynamicMutators   []contextfrag.DynamicMutator
+	SessionType              string
+	LiveToolStream           bool
+	CanRequestUserInput      bool
+	SupportsImageInput       bool
+	SupportsToolCall         bool
 	// RequireToolCall asks the provider to return at least one tool call instead
 	// of finishing with ordinary Assistant text. It is used for addressed
 	// Discuss turns where a first-party send tool is available.

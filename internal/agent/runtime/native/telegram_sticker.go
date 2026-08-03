@@ -59,6 +59,7 @@ func mergeTelegramStickerSendTools(session tools.SessionContext, sdkTools []sdk.
 		if !normalizeStickerEnum(stickerSchema) {
 			continue
 		}
+		compactTelegramStickerDescription(stickerSchema)
 		stickerIDs := stickerEnumSet(stickerSchema)
 		properties["sticker_id"] = stickerSchema
 		visible[i].Parameters = parameters
@@ -131,6 +132,50 @@ func mergeTelegramStickerSendTools(session tools.SessionContext, sdkTools []sdk.
 		break
 	}
 	return visible
+}
+
+// compactTelegramStickerDescription keeps the stable ID-to-visual-description
+// catalog in the single send schema while removing repeated set/count/status
+// prose and redundant original-emoji hints. This preserves one-read selection
+// without paying for management metadata on every model turn.
+func compactTelegramStickerDescription(schema map[string]any) {
+	description, _ := schema["description"].(string)
+	if strings.TrimSpace(description) == "" {
+		return
+	}
+	entries := make([]string, 0)
+	for _, rawLine := range strings.Split(description, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		entries = append(entries, compactTelegramStickerEntry(line))
+	}
+	if len(entries) == 0 {
+		return
+	}
+	sort.Strings(entries)
+	schema["description"] = "Stable Sticker catalog; choose by visual description and use an ID exactly as listed:\n" +
+		strings.Join(entries, "\n")
+}
+
+func compactTelegramStickerEntry(line string) string {
+	const emojiMarker = "（原始 emoji："
+	marker := strings.Index(line, emojiMarker)
+	if marker < 0 {
+		return line
+	}
+	prefix := strings.TrimSpace(line[:marker])
+	if !strings.Contains(prefix, "：待识别") {
+		return prefix
+	}
+	emoji := strings.TrimPrefix(line[marker:], emojiMarker)
+	emoji = strings.TrimSuffix(emoji, "，仅供参考）")
+	emoji = strings.TrimSpace(emoji)
+	if emoji == "" {
+		return prefix
+	}
+	return prefix + "（emoji：" + emoji + "）"
 }
 
 func stickerEnumSet(schema map[string]any) map[string]struct{} {

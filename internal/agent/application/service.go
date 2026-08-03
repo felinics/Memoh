@@ -469,6 +469,8 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	forkMessages := nonNilModelMessages(messages)
 	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
+	runCfg.ReplyableMessageIDs = replyableExternalMessageIDsForMessages(forkMessages, historyRecords, runCfg.Identity.CurrentPlatform)
+	runCfg.ReplyableMessageIDs = appendUniqueMessageID(runCfg.ReplyableMessageIDs, req.ExternalMessageID)
 	runCfg.Messages = modelMessagesToSDKMessages(projectModelMessageHeaders(forkMessages, runCfg.ChannelPolicy.MessageMetadataMode))
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept

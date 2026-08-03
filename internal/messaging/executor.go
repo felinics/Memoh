@@ -20,6 +20,10 @@ type SessionContext struct {
 	AllowLocalShortcut bool
 	CurrentPlatform    string
 	ReplyTarget        string
+	// AllowedReplyMessageIDs is nil when reply validation is disabled. A
+	// non-nil map (including an empty one) restricts quotes to the current
+	// conversation and to external message IDs visible in the model turn.
+	AllowedReplyMessageIDs map[string]struct{}
 }
 
 // AssetMeta holds resolved metadata for a media asset.
@@ -79,7 +83,12 @@ type sendPlan struct {
 	message     Message
 }
 
-var errOutboundMessageRequired = errors.New("message is required")
+var (
+	errOutboundMessageRequired = errors.New("message is required")
+	// ErrReplyMessageNotVisible is safe to expose to the model as a stable
+	// validation outcome. It deliberately omits private routing diagnostics.
+	ErrReplyMessageNotVisible = errors.New("reply_to must reference a message ID visible in the current turn")
+)
 
 // Send executes a send-message action. args are the tool call arguments.
 func (e *Executor) Send(ctx context.Context, session SessionContext, args map[string]any) (*SendResult, error) {
@@ -204,6 +213,33 @@ func (e *Executor) prepareSendPlan(
 	msg, err := e.buildOutboundMessage(ctx, botID, session, channelType, target, args, allowSameConversationShortcut)
 	if err != nil {
 		return nil, err
+	}
+	if session.AllowedReplyMessageIDs != nil && msg.Reply != nil {
+		replyMessageID := strings.TrimSpace(msg.Reply.MessageID)
+		_, visible := session.AllowedReplyMessageIDs[replyMessageID]
+		if !sameConv || !visible {
+			if e.Logger != nil {
+				e.Logger.Info("outbound reply rejected",
+					slog.String("mode", mode.name),
+					slog.String("bot_id", botID),
+					slog.String("platform", channelType.String()),
+					slog.String("reply_to", replyMessageID),
+					slog.Int("allowed_reply_count", len(session.AllowedReplyMessageIDs)),
+				)
+			}
+			return nil, ErrReplyMessageNotVisible
+		}
+	}
+	if e.Logger != nil {
+		e.Logger.Debug("outbound send prepared",
+			slog.String("mode", mode.name),
+			slog.String("bot_id", botID),
+			slog.String("platform", channelType.String()),
+			slog.Bool("same_conversation", sameConv),
+			slog.Bool("quoted", msg.Reply != nil),
+			slog.Bool("has_text", strings.TrimSpace(msg.Text) != "" || len(msg.Parts) > 0),
+			slog.Int("attachment_count", len(msg.Attachments)),
+		)
 	}
 
 	return &sendPlan{

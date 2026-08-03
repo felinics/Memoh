@@ -53,6 +53,21 @@ func TestBuildUserPromptOrdersPriorContextChronologically(t *testing.T) {
 	}
 }
 
+func TestCompactionPromptsDoNotTeachHistoricalToolSyntax(t *testing.T) {
+	t.Parallel()
+
+	for name, prompt := range map[string]string{
+		"segment": systemPrompt,
+		"rolling": rollingSystemPrompt(1000),
+	} {
+		for _, required := range []string{"semantic outcomes", "never reproduce raw arguments", "field names", "invocation syntax"} {
+			if !strings.Contains(prompt, required) {
+				t.Fatalf("%s compaction prompt missing %q:\n%s", name, required, prompt)
+			}
+		}
+	}
+}
+
 func TestCapEntriesToBudgetHoldsTheTotalAcrossManyEntries(t *testing.T) {
 	t.Parallel()
 

@@ -82,11 +82,18 @@ func (p *discussSendPreview) Handle(ctx context.Context, event agentevent.Stream
 			call.disabled = true
 			return
 		}
+		replyTo, validReply := sendReplyMessageID(args)
+		if !validReply {
+			// The actual send path will return the schema/validation error. Do not
+			// open a preview whose Telegram reply relationship could be wrong.
+			call.disabled = true
+			return
+		}
 		text, _ := args["text"].(string)
 		if text == "" {
 			text, _ = partialTopLevelJSONString(call.raw.String(), "text")
 		}
-		p.pushFinalArgumentTail(ctx, callID, call, text)
+		p.pushFinalArgumentTail(ctx, callID, call, text, replyTo)
 	case agentevent.ToolCallEnd:
 		call := p.calls[callID]
 		if call == nil {
@@ -155,11 +162,62 @@ func sendRouteValue(args map[string]any, key string) (string, bool, bool) {
 	return strings.TrimSpace(text), true, true
 }
 
-func (p *discussSendPreview) pushFinalArgumentTail(ctx context.Context, callID string, call *discussSendPreviewCall, text string) {
+// sendReplyMessageID mirrors the two reply inputs accepted by the send
+// executor. A reply is opt-in: the triggering source message is deliberately
+// not used as a fallback.
+func sendReplyMessageID(args map[string]any) (string, bool) {
+	if raw, present := args["reply_to"]; present && raw != nil {
+		value, ok := raw.(string)
+		if !ok {
+			return "", false
+		}
+		if messageID := strings.TrimSpace(value); messageID != "" {
+			return messageID, true
+		}
+	}
+
+	rawMessage, present := args["message"]
+	if !present || rawMessage == nil {
+		return "", true
+	}
+	message, ok := rawMessage.(map[string]any)
+	if !ok {
+		// A plain string is a valid message input and cannot contain a reply.
+		if _, isText := rawMessage.(string); isText {
+			return "", true
+		}
+		return "", false
+	}
+	rawReply, present := message["reply"]
+	if !present || rawReply == nil {
+		return "", true
+	}
+	reply, ok := rawReply.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	rawMessageID, present := reply["message_id"]
+	if !present || rawMessageID == nil {
+		return "", false
+	}
+	messageID, ok := rawMessageID.(string)
+	if !ok || strings.TrimSpace(messageID) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(messageID), true
+}
+
+func (p *discussSendPreview) pushFinalArgumentTail(
+	ctx context.Context,
+	callID string,
+	call *discussSendPreviewCall,
+	text string,
+	replyTo string,
+) {
 	if call.disabled || len(text) <= call.emitted || strings.TrimSpace(text) == "" {
 		return
 	}
-	if !call.opened && !p.open(ctx, callID, call) {
+	if !call.opened && !p.open(ctx, callID, call, replyTo) {
 		return
 	}
 	if err := p.coordinator.PushDelta(ctx, p.key(callID), text[call.emitted:]); err != nil {
@@ -169,13 +227,21 @@ func (p *discussSendPreview) pushFinalArgumentTail(ctx context.Context, callID s
 	call.emitted = len(text)
 }
 
-func (p *discussSendPreview) open(ctx context.Context, callID string, call *discussSendPreviewCall) bool {
+func (p *discussSendPreview) open(
+	ctx context.Context,
+	callID string,
+	call *discussSendPreviewCall,
+	replyTo string,
+) bool {
 	target := strings.TrimSpace(p.cfg.ReplyTarget)
-	messageID := strings.TrimSpace(p.cfg.SourceMessageID)
-	reply := &channel.ReplyRef{Target: target, MessageID: messageID}
+	sourceMessageID := strings.TrimSpace(p.cfg.SourceMessageID)
+	var reply *channel.ReplyRef
+	if replyMessageID := strings.TrimSpace(replyTo); replyMessageID != "" {
+		reply = &channel.ReplyRef{Target: target, MessageID: replyMessageID}
+	}
 	stream, err := p.cfg.ReplySender.OpenStream(ctx, target, channel.StreamOptions{
 		Reply:           reply,
-		SourceMessageID: messageID,
+		SourceMessageID: sourceMessageID,
 		Metadata: map[string]any{
 			"route_id":          strings.TrimSpace(p.cfg.RouteID),
 			"conversation_type": strings.TrimSpace(p.cfg.ConversationType),

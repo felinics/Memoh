@@ -59,11 +59,74 @@ func historySourceMessageIDsForMessages(messages []ModelMessage, records []histo
 	if len(messages) == 0 || len(records) == 0 {
 		return sourceIDs
 	}
-	positions := make(map[string][]int, len(records))
-	for i, record := range records {
-		if strings.TrimSpace(record.DBMessageID) == "" {
+	matched := historyRecordIndexesForMessages(messages, records)
+	for messageIndex, recordIndex := range matched {
+		if recordIndex >= 0 {
+			sourceIDs[messageIndex] = strings.TrimSpace(records[recordIndex].DBMessageID)
+		}
+	}
+	return sourceIDs
+}
+
+// replyableExternalMessageIDsForMessages returns only external channel IDs
+// belonging to user messages that survived history filtering/compaction and
+// are therefore visible to the model. Summary coverage and database row IDs
+// are deliberately excluded: neither can be used as a platform reply target.
+func replyableExternalMessageIDsForMessages(messages []ModelMessage, records []historyfrag.HistoryRecord, platform string) []string {
+	if len(messages) == 0 || len(records) == 0 {
+		return nil
+	}
+	platform = strings.TrimSpace(platform)
+	matched := historyRecordIndexesForMessages(messages, records)
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(messages))
+	for _, recordIndex := range matched {
+		if recordIndex < 0 {
 			continue
 		}
+		record := records[recordIndex]
+		if !strings.EqualFold(strings.TrimSpace(record.ModelMessage.Role), "user") {
+			continue
+		}
+		if platform != "" && !strings.EqualFold(strings.TrimSpace(record.Platform), platform) {
+			continue
+		}
+		messageID := strings.TrimSpace(record.ExternalMessageID)
+		if messageID == "" {
+			continue
+		}
+		if _, duplicate := seen[messageID]; duplicate {
+			continue
+		}
+		seen[messageID] = struct{}{}
+		result = append(result, messageID)
+	}
+	return result
+}
+
+func appendUniqueMessageID(ids []string, raw string) []string {
+	messageID := strings.TrimSpace(raw)
+	if messageID == "" {
+		return ids
+	}
+	for _, existing := range ids {
+		if strings.TrimSpace(existing) == messageID {
+			return ids
+		}
+	}
+	return append(ids, messageID)
+}
+
+// historyRecordIndexesForMessages aligns the post-filter model messages with
+// their retained history records without confusing repeated equal content.
+// A missing match is represented by -1.
+func historyRecordIndexesForMessages(messages []ModelMessage, records []historyfrag.HistoryRecord) []int {
+	matched := make([]int, len(messages))
+	for i := range matched {
+		matched[i] = -1
+	}
+	positions := make(map[string][]int, len(records))
+	for i, record := range records {
 		key := modelMessageSourceKey(record.ModelMessage)
 		positions[key] = append(positions[key], i)
 	}
@@ -83,9 +146,9 @@ func historySourceMessageIDsForMessages(messages []ModelMessage, records []histo
 		recordIndex := candidates[cursor]
 		cursors[key] = cursor + 1
 		lastMatched = recordIndex
-		sourceIDs[i] = strings.TrimSpace(records[recordIndex].DBMessageID)
+		matched[i] = recordIndex
 	}
-	return sourceIDs
+	return matched
 }
 
 func modelMessageSourceKey(message ModelMessage) string {

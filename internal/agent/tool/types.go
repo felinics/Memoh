@@ -318,6 +318,9 @@ type SessionContext struct {
 	CurrentModelID       string
 	CurrentModelProvider string
 	ForkContext          *MessageSnapshot
+	// ReplyableMessageIDs are external platform message IDs visible in this
+	// model turn. Telegram Discuss uses this list to validate explicit quotes.
+	ReplyableMessageIDs []string
 	// WorkspaceTargetID is the request-scoped default for file and command
 	// tools. An explicit tool target_id still takes precedence.
 	WorkspaceTargetID   string

@@ -13,6 +13,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	tools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/hooks"
@@ -965,6 +966,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		CurrentModelID:       cfg.CurrentModelID,
 		CurrentModelProvider: cfg.CurrentModelProvider,
 		ForkContext:          cfg.ForkContext,
+		ReplyableMessageIDs:  replyableMessageIDsForRun(cfg),
 		Skills:               skillsMap,
 		TimezoneLocation:     cfg.Identity.TimezoneLocation,
 		Emitter:              emitter,
@@ -1019,6 +1021,33 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		usage = "## Tool usage\n\n" + strings.Join(usageSections, "\n\n")
 	}
 	return allTools, usage, nil
+}
+
+func replyableMessageIDsForRun(cfg RunConfig) []string {
+	seen := make(map[string]struct{}, len(cfg.ReplyableMessageIDs)+1)
+	result := make([]string, 0, len(cfg.ReplyableMessageIDs)+1)
+	add := func(raw string) {
+		messageID := strings.TrimSpace(raw)
+		if messageID == "" {
+			return
+		}
+		if _, duplicate := seen[messageID]; duplicate {
+			return
+		}
+		seen[messageID] = struct{}{}
+		result = append(result, messageID)
+	}
+	for _, messageID := range cfg.ReplyableMessageIDs {
+		add(messageID)
+	}
+	add(cfg.ContextScope.CurrentMessageID)
+	for _, frag := range cfg.ContextFrags {
+		switch frag.Kind {
+		case contextfrag.KindConversationEvent, contextfrag.KindCurrentUserMessage:
+			add(frag.Scope.CurrentMessageID)
+		}
+	}
+	return result
 }
 
 func appendToolUsageToSystem(system, toolUsage string) string {

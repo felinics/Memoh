@@ -13,6 +13,7 @@ const systemPrompt = `You are a conversation summarizer. Given a conversation hi
 - Important context needed for continuing the conversation
 - Names, dates, numbers, and specific details
 - Tool usage outcomes and their results
+- Tool actions only as semantic outcomes; never reproduce raw arguments, JSON, field names, or invocation syntax
 
 If <prior_context> is provided, it contains summaries of earlier conversation segments. Use them ONLY to understand the conversation flow and maintain continuity. Do NOT include, repeat, or rephrase any content from <prior_context> in your output.
 
@@ -26,6 +27,7 @@ func rollingSystemPrompt(targetTokens int) string {
 - User preferences, requests, constraints, and corrections
 - Names, dates, numbers, credentials references, paths, IDs, and other specific details needed to continue
 - Important tool actions and their outcomes
+- Tool actions only as semantic outcomes; never reproduce raw arguments, JSON, field names, or invocation syntax
 
 <prior_context>, when present, is the existing rolling summary. Fold all of its still-relevant information into the replacement summary together with the new history. Remove duplication, but never omit prior facts merely because they appeared in <prior_context>.
 

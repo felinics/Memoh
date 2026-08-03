@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -466,6 +467,100 @@ func TestSendDirectInvalidReplyToReturnsError(t *testing.T) {
 	}
 	if sender.called != 0 {
 		t.Fatalf("expected sender not called, got %d", sender.called)
+	}
+}
+
+func TestSendDirectRestrictsSameConversationReplyToVisibleIDs(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		replyTo   string
+		wantError bool
+	}{
+		{name: "visible ID", replyTo: "message-42"},
+		{name: "unrelated ID", replyTo: "message-99", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := &testSender{}
+			exec := &Executor{Sender: sender, Resolver: testResolver{}}
+			_, err := exec.SendDirect(context.Background(), SessionContext{
+				BotID:                  "bot_1",
+				CurrentPlatform:        "telegram",
+				ReplyTarget:            "chat-1",
+				AllowedReplyMessageIDs: map[string]struct{}{"message-42": {}},
+			}, "chat-1", map[string]any{
+				"text":     "reply",
+				"reply_to": tc.replyTo,
+			})
+			if tc.wantError {
+				if !errors.Is(err, ErrReplyMessageNotVisible) {
+					t.Fatalf("SendDirect error = %v, want ErrReplyMessageNotVisible", err)
+				}
+				if sender.called != 0 {
+					t.Fatalf("rejected reply sent %d messages", sender.called)
+				}
+				return
+			}
+			if err != nil || sender.called != 1 {
+				t.Fatalf("visible reply err=%v sends=%d", err, sender.called)
+			}
+		})
+	}
+}
+
+func TestSendDirectRejectsCurrentConversationReplyIDForAnotherTarget(t *testing.T) {
+	t.Parallel()
+
+	sender := &testSender{}
+	exec := &Executor{Sender: sender, Resolver: testResolver{}}
+	_, err := exec.SendDirect(context.Background(), SessionContext{
+		BotID:                  "bot_1",
+		CurrentPlatform:        "telegram",
+		ReplyTarget:            "chat-1",
+		AllowedReplyMessageIDs: map[string]struct{}{"message-42": {}},
+	}, "", map[string]any{
+		"target":   "chat-2",
+		"text":     "cross target",
+		"reply_to": "message-42",
+	})
+	if !errors.Is(err, ErrReplyMessageNotVisible) || sender.called != 0 {
+		t.Fatalf("cross-target reply err=%v sends=%d", err, sender.called)
+	}
+}
+
+func TestSendDirectKeepsLegacyNestedReplyCompatibilityBehindValidation(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		messageID string
+		wantError bool
+	}{
+		{messageID: "message-42"},
+		{messageID: "message-99", wantError: true},
+	} {
+		sender := &testSender{}
+		exec := &Executor{Sender: sender, Resolver: testResolver{}}
+		_, err := exec.SendDirect(context.Background(), SessionContext{
+			BotID:                  "bot_1",
+			CurrentPlatform:        "telegram",
+			ReplyTarget:            "chat-1",
+			AllowedReplyMessageIDs: map[string]struct{}{"message-42": {}},
+		}, "chat-1", map[string]any{
+			"message": map[string]any{
+				"text":  "legacy payload",
+				"reply": map[string]any{"message_id": tc.messageID},
+			},
+		})
+		if tc.wantError {
+			if !errors.Is(err, ErrReplyMessageNotVisible) || sender.called != 0 {
+				t.Fatalf("legacy rejected reply err=%v sends=%d", err, sender.called)
+			}
+			continue
+		}
+		if err != nil || sender.called != 1 || sender.req.Message.Reply == nil || sender.req.Message.Reply.MessageID != tc.messageID {
+			t.Fatalf("legacy visible reply err=%v sends=%d request=%#v", err, sender.called, sender.req)
+		}
 	}
 }
 

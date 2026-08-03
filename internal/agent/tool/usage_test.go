@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -288,11 +289,58 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 			t.Fatalf("Discuss send description should enforce delivery boundary containing %q, got:\n%s", want, discussSend.Description)
 		}
 	}
+	if requiredContainsForTest(requiredToolFieldsForTest(t, discussSend), "reply_to") {
+		t.Fatalf("Discuss send must keep reply_to optional, required=%v", requiredToolFieldsForTest(t, discussSend))
+	}
+	params, ok := discussSend.Parameters.(map[string]any)
+	if !ok {
+		t.Fatalf("Discuss send parameters = %T, want map[string]any", discussSend.Parameters)
+	}
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("Discuss send properties = %T, want map[string]any", params["properties"])
+	}
+	replyTo, ok := props["reply_to"].(map[string]any)
+	if !ok {
+		t.Fatalf("Discuss send reply_to schema = %T, want map[string]any", props["reply_to"])
+	}
+	replyDescription, _ := replyTo["description"].(string)
+	for _, want := range []string{"Optional", "Omit", "never inferred", "Only IDs visible"} {
+		if !strings.Contains(replyDescription, want) {
+			t.Fatalf("reply_to description should contain %q, got %q", want, replyDescription)
+		}
+	}
+	if _, dynamicEnum := replyTo["enum"]; dynamicEnum {
+		t.Fatalf("reply_to schema must remain cache-stable; visibility is enforced at execution time: %#v", replyTo["enum"])
+	}
 
 	backgroundSession := SessionContext{SessionType: sessionmode.Heartbeat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), backgroundSession, availableToolsForTest(ToolReact()))
 	if strings.Contains(got, "Omit `target`") || strings.Contains(got, "unless the current conversation target is explicit") || !strings.Contains(got, "Specify `platform` and `target`") {
 		t.Fatalf("Usage for background reactions should require explicit target, got:\n%s", got)
+	}
+}
+
+func TestMessageSendSchemaIsCacheStableAcrossVisibleReplyIDs(t *testing.T) {
+	t.Parallel()
+
+	provider := NewMessageProvider(nil, usageTestSender{}, usageTestReactor{}, usageTestResolver{}, nil)
+	toolFor := func(ids ...string) sdk.Tool {
+		tools, err := provider.Tools(context.Background(), SessionContext{
+			SessionType:         sessionmode.Discuss,
+			CurrentPlatform:     "telegram",
+			ReplyTarget:         "chat-1",
+			ReplyableMessageIDs: ids,
+		})
+		if err != nil {
+			t.Fatalf("Tools: %v", err)
+		}
+		return toolByNameForTest(t, tools, ToolSend())
+	}
+	first := toolFor("message-1")
+	second := toolFor("message-2", "message-3")
+	if !reflect.DeepEqual(first.Parameters, second.Parameters) || first.Description != second.Description {
+		t.Fatal("model-visible send schema changed with execution-only reply allowlist")
 	}
 }
 
@@ -436,23 +484,8 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 	if _, ok := actionItems["anyOf"]; ok {
 		t.Fatalf("message action schema should not expose value/url anyOf, got %#v", actionItems["anyOf"])
 	}
-	reply, ok := messageProps["reply"].(map[string]any)
-	if !ok {
-		t.Fatalf("message.reply schema missing in %#v", messageProps)
-	}
-	if reply["additionalProperties"] != false {
-		t.Fatalf("message reply schema should be strict, got %#v", reply["additionalProperties"])
-	}
-	replyRequired, ok := reply["required"].([]string)
-	if !ok || !requiredContainsForTest(replyRequired, "message_id") {
-		t.Fatalf("message reply schema should require message_id, required=%#v", reply["required"])
-	}
-	replyProps, ok := reply["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("message reply properties missing in %#v", reply)
-	}
-	if _, ok := replyProps["message_id"]; !ok {
-		t.Fatalf("message reply schema missing message_id in %#v", replyProps)
+	if _, exposed := messageProps["reply"]; exposed {
+		t.Fatalf("message.reply must stay executor-only for compatibility; model schema should expose only top-level reply_to: %#v", messageProps["reply"])
 	}
 
 	topLevelAttachments, ok := props["attachments"].(map[string]any)

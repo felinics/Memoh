@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -37,7 +38,7 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 	if sendRef, ok := available.Ref(ToolSend()); ok {
 		switch session.SessionType {
 		case sessionmode.Discuss:
-			parts = append(parts, "In Discuss, every addressed or forced turn must finish with one successful current-conversation "+sendRef+" call. Put all final audience-facing content for the turn in that single call because later sequential sends do not run after current delivery succeeds. Set `reply_to` when replying to a specific message ID, and never emit delivery markers such as `[Sent ...]`. Ordinary Assistant text is private, never delivered, and cannot replace "+sendRef+".")
+			parts = append(parts, "In Discuss, every addressed or forced turn must finish with one successful current-conversation "+sendRef+" call. Put all final audience-facing content for the turn in that single call because later sequential sends do not run after current delivery succeeds. `reply_to` is optional and controls only the platform's visible quote. Omit it whenever the audience can understand which message you mean without a quote; use it only when the quote is necessary to disambiguate a specific message, and only with a message ID visible in this turn; never emit delivery markers such as `[Sent ...]`. Ordinary Assistant text is private, never delivered, and cannot replace "+sendRef+".")
 		case sessionmode.Schedule, sessionmode.Heartbeat:
 			parts = append(parts, "Use "+sendRef+" only when the background task needs to notify a person or channel; specify `platform` and `target`.")
 		default:
@@ -81,7 +82,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 					"platform": map[string]any{"type": "string", "description": sendPlatformDescription},
 					"target":   map[string]any{"type": "string", "description": sendTargetDescription},
 					"text":     map[string]any{"type": "string", "description": "Message text shortcut when message object is omitted"},
-					"reply_to": map[string]any{"type": "string", "description": "Message ID to reply to. The reply will reference this message on the platform."},
+					"reply_to": sendReplyToSchema(),
 					"attachments": map[string]any{
 						"type":        "array",
 						"description": "File paths, URLs, data URLs, or attachment objects to attach.",
@@ -161,16 +162,14 @@ func sendMessageObjectSchema() map[string]any {
 					},
 				},
 			},
-			"reply": map[string]any{
-				"type":                 "object",
-				"description":          "Reply reference; normally use the top-level reply_to shortcut instead.",
-				"additionalProperties": false,
-				"required":             []string{"message_id"},
-				"properties": map[string]any{
-					"message_id": map[string]any{"type": "string"},
-				},
-			},
 		},
+	}
+}
+
+func sendReplyToSchema() map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"description": "Optional message ID for a visible platform quote. Omit this field whenever the audience can understand the reference without a quote; it is never inferred from the triggering message. Only IDs visible in the current turn are accepted.",
 	}
 }
 
@@ -274,12 +273,12 @@ func messagingSessionSupportsMarkdownMath(session SessionContext) bool {
 func sendToolPromptMetadata(session SessionContext) (description string, platformDescription string, targetDescription string, required []string) {
 	if session.SessionType == sessionmode.Discuss {
 		if session.CanOmitMessagingTarget() {
-			return "Publish an audience-visible reply. Every addressed or forced Discuss turn must call this tool successfully before ending; ordinary Assistant text is private and never delivered. Omit target for the observed conversation; specify target only for another channel/person.",
+			return "Publish an audience-visible message. Every addressed or forced Discuss turn must call this tool successfully before ending; ordinary Assistant text is private and never delivered. Omit target for the observed conversation; specify target only for another channel/person. The optional reply_to field adds a visible quote: omit it whenever the audience can identify the intended message without that quote.",
 				"Channel platform name. Defaults to current session platform.",
 				"Channel target (chat/group/thread ID). Optional — omit to send in the observed conversation.",
 				[]string{}
 		}
-		return "Publish an audience-visible reply. Every addressed or forced Discuss turn must call this tool successfully before ending; ordinary Assistant text is private and never delivered. Specify platform and target in this session.",
+		return "Publish an audience-visible message. Every addressed or forced Discuss turn must call this tool successfully before ending; ordinary Assistant text is private and never delivered. Specify platform and target in this session. The optional reply_to field adds a visible quote: omit it whenever the audience can identify the intended message without that quote.",
 			"Channel platform name. Required in this session.",
 			"Channel target (chat/group/thread ID). Required in this session.",
 			[]string{"platform", "target"}
@@ -313,7 +312,7 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 	if session.SessionType == sessionmode.Discuss {
 		sendResult, err := p.exec.SendDirectForTool(ctx, toMessagingSession(session), "", toolCallID, args)
 		if err != nil {
-			return nil, err
+			return messageSendErrorResult(err)
 		}
 		resp := map[string]any{"ok": true}
 		if !session.IsSameConversation(sendResult.Platform, sendResult.Target) {
@@ -325,7 +324,7 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 	}
 	result, err := p.exec.Send(ctx, toMessagingSession(session), args)
 	if err != nil {
-		return nil, err
+		return messageSendErrorResult(err)
 	}
 	if result.Local && session.Emitter != nil {
 		atts := channelAttachmentsToToolAttachments(result.LocalAttachments)
@@ -353,7 +352,7 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 	if result.Local {
 		sendResult, err := p.exec.SendDirect(ctx, toMessagingSession(session), result.Target, args)
 		if err != nil {
-			return nil, err
+			return messageSendErrorResult(err)
 		}
 		resp := map[string]any{
 			"ok":        true,
@@ -378,6 +377,20 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 		resp["message_id"] = result.MessageID
 	}
 	return resp, nil
+}
+
+const messageReplyNotVisibleCode = "messaging.reply_not_visible"
+
+func messageSendErrorResult(err error) (any, error) {
+	if !errors.Is(err, messaging.ErrReplyMessageNotVisible) {
+		return nil, err
+	}
+	return map[string]any{
+		"ok":         false,
+		"error_code": messageReplyNotVisibleCode,
+		"retryable":  true,
+		"guidance":   "Omit reply_to for an unquoted message, or retry with a message ID listed as visible in this turn.",
+	}, nil
 }
 
 func messageDeliveryLabel(session SessionContext, platform, target string) string {
@@ -420,7 +433,7 @@ func (p *MessageProvider) execReact(ctx context.Context, session SessionContext,
 }
 
 func toMessagingSession(s SessionContext) messaging.SessionContext {
-	return messaging.SessionContext{
+	session := messaging.SessionContext{
 		BotID:              s.BotID,
 		ChatID:             s.ChatID,
 		CanOmitTarget:      s.CanOmitMessagingTarget() || s.SessionType == sessionmode.Discuss,
@@ -428,4 +441,13 @@ func toMessagingSession(s SessionContext) messaging.SessionContext {
 		CurrentPlatform:    s.CurrentPlatform,
 		ReplyTarget:        s.ReplyTarget,
 	}
+	if s.SessionType == sessionmode.Discuss && strings.EqualFold(strings.TrimSpace(s.CurrentPlatform), "telegram") {
+		session.AllowedReplyMessageIDs = make(map[string]struct{}, len(s.ReplyableMessageIDs))
+		for _, raw := range s.ReplyableMessageIDs {
+			if messageID := strings.TrimSpace(raw); messageID != "" {
+				session.AllowedReplyMessageIDs[messageID] = struct{}{}
+			}
+		}
+	}
+	return session
 }

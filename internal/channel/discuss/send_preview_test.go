@@ -118,3 +118,73 @@ func TestDiscussSendPreviewOpensAfterRouteValidationAndAbortsSilently(t *testing
 		}
 	}
 }
+
+func TestDiscussSendPreviewReplyIsOptIn(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		raw       string
+		input     map[string]any
+		wantReply string
+	}{
+		{
+			name:  "omitted reply",
+			raw:   `{"text":"ordinary message"}`,
+			input: map[string]any{"text": "ordinary message"},
+		},
+		{
+			name:      "top-level reply_to",
+			raw:       `{"text":"quoted message","reply_to":"message-42"}`,
+			input:     map[string]any{"text": "quoted message", "reply_to": "message-42"},
+			wantReply: "message-42",
+		},
+		{
+			name: "structured message reply",
+			raw:  `{"text":"quoted message","message":{"text":"quoted message","reply":{"message_id":"message-84"}}}`,
+			input: map[string]any{
+				"text": "quoted message",
+				"message": map[string]any{
+					"text":  "quoted message",
+					"reply": map[string]any{"message_id": "message-84"},
+				},
+			},
+			wantReply: "message-84",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sender := &fakeDiscussReplySender{}
+			preview := newDiscussSendPreview(DiscussSessionConfig{
+				BotID: "bot-1", CurrentPlatform: "telegram", ReplyTarget: "chat-1",
+				SourceMessageID: "trigger-message", ReplySender: sender,
+			}, channel.NewSendToolStreamCoordinator(), nil)
+			ctx := context.Background()
+			preview.Handle(ctx, agentevent.StreamEvent{
+				Type: agentevent.ToolCallInputStart, ToolName: "send", ToolCallID: "call-1",
+			})
+			preview.Handle(ctx, agentevent.StreamEvent{
+				Type: agentevent.ToolCallInputDelta, ToolCallID: "call-1", Delta: test.raw,
+			})
+			preview.Handle(ctx, agentevent.StreamEvent{
+				Type: agentevent.ToolCallStart, ToolName: "send", ToolCallID: "call-1", Input: test.input,
+			})
+
+			if len(sender.streamOptions) != 1 {
+				t.Fatalf("opened streams = %d, want 1", len(sender.streamOptions))
+			}
+			options := sender.streamOptions[0]
+			if options.SourceMessageID != "trigger-message" {
+				t.Fatalf("SourceMessageID = %q, want internal trigger ID", options.SourceMessageID)
+			}
+			if test.wantReply == "" {
+				if options.Reply != nil {
+					t.Fatalf("omitted reply_to produced Telegram reply %#v", options.Reply)
+				}
+				return
+			}
+			if options.Reply == nil || options.Reply.MessageID != test.wantReply || options.Reply.Target != "chat-1" {
+				t.Fatalf("Telegram reply = %#v, want target chat-1 message %s", options.Reply, test.wantReply)
+			}
+		})
+	}
+}

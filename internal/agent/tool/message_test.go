@@ -171,9 +171,62 @@ func TestExecSendDiscussTextUsesChannelAdapter(t *testing.T) {
 	if sender.req.Target != "chat-1" || sender.req.Message.Text != "observed reply" {
 		t.Fatalf("unexpected send request: %+v", sender.req)
 	}
+	if sender.req.Message.Reply != nil {
+		t.Fatalf("omitted reply_to produced reply reference: %#v", sender.req.Message.Reply)
+	}
 	resp, ok := result.(map[string]any)
 	if !ok || resp["ok"] != true || len(resp) != 1 {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestExecSendDiscussUsesOnlyExplicitReplyTo(t *testing.T) {
+	t.Parallel()
+
+	sender := &recordingSender{}
+	provider := NewMessageProvider(nil, sender, usageTestReactor{}, usageTestResolver{}, messageTestAssetResolver{})
+	_, err := provider.execSend(context.Background(), SessionContext{
+		BotID:               "bot_1",
+		SessionType:         sessionmode.Discuss,
+		CurrentPlatform:     "telegram",
+		ReplyTarget:         "chat-1",
+		ReplyableMessageIDs: []string{"message-42"},
+	}, "call-test", map[string]any{
+		"text":     "quoted reply",
+		"reply_to": "message-42",
+	})
+	if err != nil {
+		t.Fatalf("execSend returned error: %v", err)
+	}
+	if sender.req.Message.Reply == nil || sender.req.Message.Reply.MessageID != "message-42" {
+		t.Fatalf("explicit reply_to was not preserved: %#v", sender.req.Message.Reply)
+	}
+}
+
+func TestExecSendDiscussReturnsStableResultForUnrelatedReply(t *testing.T) {
+	t.Parallel()
+
+	sender := &recordingSender{}
+	provider := NewMessageProvider(nil, sender, usageTestReactor{}, usageTestResolver{}, messageTestAssetResolver{})
+	result, err := provider.execSend(context.Background(), SessionContext{
+		BotID:               "bot_1",
+		SessionType:         sessionmode.Discuss,
+		CurrentPlatform:     "telegram",
+		ReplyTarget:         "chat-1",
+		ReplyableMessageIDs: []string{"message-42"},
+	}, "call-test", map[string]any{
+		"text":     "must not be misquoted",
+		"reply_to": "message-99",
+	})
+	if err != nil {
+		t.Fatalf("execSend should return a model-retryable result, got error: %v", err)
+	}
+	if sender.called != 0 {
+		t.Fatalf("rejected reply sent %d messages", sender.called)
+	}
+	resp, ok := result.(map[string]any)
+	if !ok || resp["ok"] != false || resp["error_code"] != messageReplyNotVisibleCode || resp["retryable"] != true {
+		t.Fatalf("unexpected validation result: %#v", result)
 	}
 }
 

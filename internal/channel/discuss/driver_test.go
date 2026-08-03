@@ -946,9 +946,10 @@ func (*fakeRunHandle) AddOutboundAssets([]turn.OutboundAssetRef)        {}
 func (*fakeRunHandle) Cancel()                                          {}
 
 type fakeDiscussReplySender struct {
-	sent         []channel.OutboundMessage
-	streamEvents []channel.StreamEvent
-	err          error
+	sent          []channel.OutboundMessage
+	streamEvents  []channel.StreamEvent
+	streamOptions []channel.StreamOptions
+	err           error
 }
 
 func (s *fakeDiscussReplySender) Send(_ context.Context, msg channel.OutboundMessage) error {
@@ -962,11 +963,12 @@ func (s *fakeDiscussReplySender) Send(_ context.Context, msg channel.OutboundMes
 func (s *fakeDiscussReplySender) OpenStream(
 	_ context.Context,
 	target string,
-	_ channel.StreamOptions,
+	options channel.StreamOptions,
 ) (channel.OutboundStream, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
+	s.streamOptions = append(s.streamOptions, options)
 	return &fakeDiscussOutboundStream{sender: s, target: target}, nil
 }
 
