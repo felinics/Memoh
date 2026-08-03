@@ -297,7 +297,10 @@ describe('chat transcript controller', () => {
     fetchMessages.mockResolvedValueOnce([historyUser, historyAssistant])
     const phases: string[] = []
 
-    await transcript.loadInitialMessages('bot-1', 'session-1', () => {
+    await transcript.loadInitialMessages('bot-1', 'session-1', async (applyHistory) => {
+      expect(transcript.messages).toHaveLength(0)
+      applyHistory()
+      phases.push('history')
       phases.push('runtime')
       transcript.applyRuntimeTranscript({
         runId: 'run-1',
@@ -316,7 +319,7 @@ describe('chat transcript controller', () => {
     })
     phases.push('loaded')
 
-    expect(phases).toEqual(['runtime', 'loaded'])
+    expect(phases).toEqual(['history', 'runtime', 'loaded'])
     expect(transcript.messages).toHaveLength(2)
     expect(transcript.messages.map(turn => turn.id)).toEqual(['server-user', 'server-assistant'])
     expect(transcript.messages[1]).toMatchObject({
@@ -324,6 +327,39 @@ describe('chat transcript controller', () => {
       streaming: true,
       messages: [{ type: 'text', content: 'streaming' }],
     })
+  })
+
+  it('replaces staged database history with an active edit projection', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    fetchMessages.mockResolvedValueOnce([
+      rawUser('server-user', 'original'),
+      rawAssistant('server-assistant', [{ id: 0, type: 'text', content: 'old answer' }]),
+    ])
+
+    await transcript.loadInitialMessages('bot-1', 'session-1', async (applyHistory) => {
+      expect(transcript.messages).toHaveLength(0)
+      applyHistory()
+      transcript.applyRuntimeTranscript({
+        runId: 'run-edit',
+        turnId: 'turn-edit',
+        status: 'running',
+        operation: {
+          kind: 'edit',
+          replace_from_message_id: 'server-user',
+        },
+        streaming: true,
+        turns: [
+          rawUser('runtime-user', 'edited'),
+          rawAssistant('runtime-assistant'),
+        ],
+      })
+    })
+
+    expect(transcript.messages.map(turn => turn.id)).toEqual([
+      'runtime-user',
+      'runtime-assistant',
+    ])
+    expect(transcript.messages[0]).toMatchObject({ role: 'user', text: 'edited' })
   })
 
   it('applies a replacement operation that arrives after the admitting projection', () => {
@@ -394,7 +430,9 @@ describe('chat transcript controller', () => {
       rawAssistant('assistant-1', [], '2026-01-01T00:00:02.000Z'),
     ])
 
-    await transcript.loadInitialMessages('bot-1', 'session-1')
+    await transcript.loadInitialMessages('bot-1', 'session-1', async (applyHistory) => {
+      applyHistory()
+    })
 
     expect(transcript.loadingMessages.value).toBe(false)
     expect(transcript.hasMoreOlder.value).toBe(true)

@@ -81,7 +81,7 @@ export interface RuntimeIntegrationDeps {
   loadInitialMessages: (
     botId: string,
     sessionId: string,
-    afterApply?: () => void,
+    commitInitialHistory: (applyHistory: () => void) => Promise<void>,
   ) => Promise<void>
   reattachTurnToSession: (
     botId: string,
@@ -401,7 +401,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
   async function prepareSessionRuntime(
     botId: string,
     sessionId: string,
-    applyBufferedProjections: () => void,
+    commitInitialHistory: (applyHistory: () => void) => Promise<void>,
   ) {
     const normalizedBotId = botId.trim()
     const normalizedSessionId = sessionId.trim()
@@ -410,7 +410,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       await deps.loadInitialMessages(
         normalizedBotId,
         normalizedSessionId,
-        applyBufferedProjections,
+        commitInitialHistory,
       )
     } finally {
       for (const stream of deps.assistantStreams.assistantStreamsForSession(

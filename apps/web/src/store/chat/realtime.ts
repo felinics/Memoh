@@ -21,6 +21,8 @@ interface RetryingStream {
 interface SessionRuntimeConnection {
   prepared: boolean
   pending: RuntimeProjectionChange[]
+  initialSnapshotReady: Promise<void>
+  resolveInitialSnapshot: (() => void) | null
 }
 
 export interface ChatRealtimeCallbacks {
@@ -28,7 +30,7 @@ export interface ChatRealtimeCallbacks {
   prepareSessionRuntime: (
     botId: string,
     sessionId: string,
-    applyBufferedProjections: () => void,
+    commitInitialHistory: (applyHistory: () => void) => Promise<void>,
   ) => Promise<void>
   onRuntimeProjection: (
     botId: string,
@@ -78,6 +80,10 @@ export function createChatRealtimeController(
       if (!botId || !connection) return
       if (!connection.prepared) {
         connection.pending.push(change)
+        if (change.event.type === 'runtime_snapshot') {
+          connection.resolveInitialSnapshot?.()
+          connection.resolveInitialSnapshot = null
+        }
         return
       }
       callbacks.onRuntimeProjection(botId, sessionId, change)
@@ -160,8 +166,9 @@ export function createChatRealtimeController(
 
   function stopSessionRuntime(botId?: string, sessionId?: string) {
     if (botId === undefined && sessionId === undefined) {
-      for (const key of sessionRuntimeConnections.keys()) {
+      for (const [key, connection] of sessionRuntimeConnections) {
         const [, sid = ''] = key.split('\u0000')
+        connection.resolveInitialSnapshot?.()
         runtimeClient.unsubscribe(sid)
       }
       sessionRuntimeConnections.clear()
@@ -172,7 +179,10 @@ export function createChatRealtimeController(
     const sid = (sessionId ?? '').trim()
     if (!bid || !sid) return
     const key = sessionRuntimeKey(bid, sid)
-    if (!sessionRuntimeConnections.delete(key)) return
+    const connection = sessionRuntimeConnections.get(key)
+    if (!connection) return
+    sessionRuntimeConnections.delete(key)
+    connection.resolveInitialSnapshot?.()
     runtimeClient.unsubscribe(sid)
   }
 
@@ -182,9 +192,15 @@ export function createChatRealtimeController(
     if (!bid || !sid) return
     const key = sessionRuntimeKey(bid, sid)
     if (sessionRuntimeConnections.has(key)) return
+    let resolveInitialSnapshot!: () => void
+    const initialSnapshotReady = new Promise<void>((resolve) => {
+      resolveInitialSnapshot = resolve
+    })
     const connection: SessionRuntimeConnection = {
       prepared: false,
       pending: [],
+      initialSnapshotReady,
+      resolveInitialSnapshot,
     }
     sessionRuntimeConnections.set(key, connection)
     runtimeClient.subscribe(sid)
@@ -195,7 +211,16 @@ export function createChatRealtimeController(
         callbacks.onRuntimeProjection(bid, sid, change)
       }
     }
-    void callbacks.prepareSessionRuntime(bid, sid, applyBufferedProjections)
+    const commitInitialHistory = async (applyHistory: () => void) => {
+      await connection.initialSnapshotReady
+      if (sessionRuntimeConnections.get(key) !== connection) return
+      // The database can still expose the pre-edit tail while Runtime already
+      // owns its replacement. Commit both projections without yielding so Vue
+      // never renders the database-only intermediate state.
+      applyHistory()
+      applyBufferedProjections()
+    }
+    void callbacks.prepareSessionRuntime(bid, sid, commitInitialHistory)
       .catch(error => console.error('Failed to load session messages:', error))
       .finally(() => {
         if (sessionRuntimeConnections.get(key) !== connection) return

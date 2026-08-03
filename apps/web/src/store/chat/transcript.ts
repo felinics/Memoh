@@ -33,7 +33,7 @@ export interface TranscriptDeps {
 }
 
 type RefreshAppliedHook = (targetSessionId: string, latestTimestamp?: string) => void
-type AfterHistoryApply = () => void
+type CommitInitialHistory = (applyHistory: () => void) => Promise<void>
 
 export interface LocateMessageResult {
   items: UITurn[]
@@ -62,7 +62,6 @@ export function createTranscriptController({
   let refreshPromise: {
     key: string
     promise: Promise<void>
-    afterApply: AfterHistoryApply[]
   } | null = null
   let historyGeneration = 0
   let loadingMessagesVersion = 0
@@ -138,10 +137,22 @@ export function createTranscriptController({
     loadingOlder.value = false
   }
 
+  function applyFetchedHistory(botId: string, targetSessionId: string, generation: number, turns: UITurn[]) {
+    if (!isCurrentHistoryContext(botId, targetSessionId, generation)) return
+    if (hasLoadedOlder.value) {
+      mergeMessages(turns, targetSessionId)
+    } else {
+      replaceMessages(turns, targetSessionId)
+      // The API pages raw DB rows but returns merged UI turns, so a short
+      // page is not proof that history ended. Only pagination can settle it.
+      hasMoreOlder.value = true
+    }
+    onRefreshApplied(targetSessionId, messages[messages.length - 1]?.timestamp)
+  }
+
   async function refreshCurrentSession(
     targetBotId?: string,
     targetSessionId?: string,
-    afterApply?: AfterHistoryApply,
   ) {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
@@ -151,46 +162,39 @@ export function createTranscriptController({
 
     if (refreshPromise) {
       if (refreshPromise.key === key) {
-        if (afterApply) refreshPromise.afterApply.push(afterApply)
         await refreshPromise.promise
         return
       }
       await refreshPromise.promise
     }
 
-    const afterApplyCallbacks = afterApply ? [afterApply] : []
     const promise = (async () => {
       const turns = await fetchMessages(bid, sid, { limit: PAGE_SIZE })
-      if (!isCurrentHistoryContext(bid, sid, generation)) return
-      if (hasLoadedOlder.value) {
-        mergeMessages(turns, sid)
-      } else {
-        replaceMessages(turns, sid)
-        // The API pages raw DB rows but returns merged UI turns, so a short
-        // page is not proof that history ended. Only pagination can settle it.
-        hasMoreOlder.value = true
-      }
-      for (const callback of afterApplyCallbacks.splice(0)) callback()
-      onRefreshApplied(sid, messages[messages.length - 1]?.timestamp)
+      applyFetchedHistory(bid, sid, generation, turns)
     })().finally(() => {
       if (refreshPromise?.promise === promise) refreshPromise = null
     })
-    refreshPromise = { key, promise, afterApply: afterApplyCallbacks }
+    refreshPromise = { key, promise }
     await promise
   }
 
   async function loadInitialMessages(
     botId: string,
     targetSessionId: string,
-    afterApply?: AfterHistoryApply,
+    commitInitialHistory: CommitInitialHistory,
   ) {
     const bid = botId.trim()
     const sid = targetSessionId.trim()
     if (!bid || !sid) return
     loadingMessages.value = true
     const version = ++loadingMessagesVersion
+    const generation = historyGeneration
     try {
-      await refreshCurrentSession(bid, sid, afterApply)
+      const turns = await fetchMessages(bid, sid, { limit: PAGE_SIZE })
+      if (!isCurrentHistoryContext(bid, sid, generation)) return
+      await commitInitialHistory(() => {
+        applyFetchedHistory(bid, sid, generation, turns)
+      })
     } finally {
       if (version === loadingMessagesVersion) loadingMessages.value = false
     }

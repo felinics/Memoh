@@ -140,14 +140,14 @@ export function createChatViews(deps: ChatViewsDeps) {
   async function loadInitialMessages(
     botId: string,
     sessionId: string,
-    afterApply?: () => void,
+    commitInitialHistory: (applyHistory: () => void) => Promise<void>,
   ) {
     const view = chatViews.getOrCreate({
       botId,
       sessionId,
       viewId: focusedViewId.value,
     })
-    await view.transcript.loadInitialMessages(botId, sessionId, afterApply)
+    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory)
     view.initialized = true
   }
   const fetchSessionWindow = (botId: string, sessionId: string) =>
