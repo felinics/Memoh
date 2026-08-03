@@ -84,6 +84,7 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 	a := New(Deps{})
 
 	var events []StreamEvent
+	commits := 0
 	for event := range a.Stream(context.Background(), RunConfig{
 		Model: &sdk.Model{
 			ID:       "mock-model",
@@ -92,6 +93,10 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 		Messages:         []sdk.Message{sdk.UserMessage("write a long file")},
 		SupportsToolCall: false,
 		Identity:         SessionContext{BotID: "bot-1"},
+		OnStepCommitted: func(context.Context, int, *sdk.StepResult) error {
+			commits++
+			return nil
+		},
 	}) {
 		events = append(events, event)
 	}
@@ -117,6 +122,9 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 	}
 	if events[3].Type != EventAgentEnd {
 		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[3])
+	}
+	if commits != 1 {
+		t.Fatalf("committed steps = %d, want 1", commits)
 	}
 }
 

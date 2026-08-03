@@ -65,8 +65,10 @@ func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput
 		return sessionruntime.Admission{RunID: runID, Replay: true}, nil
 	}
 	return sessionruntime.Admission{
-		RunID:   runID,
-		Started: true,
+		RunID:        runID,
+		TurnID:       "turn-" + strconv.Itoa(len(a.inputs)),
+		TurnPosition: int64(len(a.inputs) - 1),
+		Started:      true,
 		Handle: sessionruntime.RunHandle{
 			BotID:        in.BotID,
 			SessionID:    in.SessionID,
@@ -297,6 +299,8 @@ func TestCommandFieldTranslation(t *testing.T) {
 		"BotID":                     {got.BotID, "bot"},
 		"ChatID":                    {got.ChatID, "chat"},
 		"ThreadID":                  {got.ThreadID, "sess"},
+		"RunID":                     {got.RunID, "run-1"},
+		"TurnID":                    {got.TurnID, "turn-1"},
 		"RouteID":                   {got.RouteID, "route"},
 		"Token":                     {got.Token, "tok"},
 		"ChatToken":                 {got.ChatToken, "ctok"},
@@ -334,6 +338,9 @@ func TestCommandFieldTranslation(t *testing.T) {
 	}
 	if got.ForwardDate != 42 {
 		t.Errorf("ForwardDate = %d", got.ForwardDate)
+	}
+	if got.TurnPosition == nil || *got.TurnPosition != 0 {
+		t.Errorf("TurnPosition = %v, want 0", got.TurnPosition)
 	}
 	if len(got.Attachments) != 1 || got.Attachments[0].ContentHash != "ch1" || got.Attachments[0].Name != "a.png" {
 		t.Errorf("Attachments = %+v", got.Attachments)

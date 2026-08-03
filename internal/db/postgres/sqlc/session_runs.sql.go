@@ -187,6 +187,32 @@ func (q *Queries) ClaimSessionRun(ctx context.Context, arg ClaimSessionRunParams
 	return i, err
 }
 
+const createAgentStepCommit = `-- name: CreateAgentStepCommit :one
+INSERT INTO agent_step_commits (run_id, step_index, message_count)
+VALUES ($1, $2, $3)
+ON CONFLICT (team_id, run_id, step_index) DO NOTHING
+RETURNING team_id, run_id, step_index, message_count, created_at
+`
+
+type CreateAgentStepCommitParams struct {
+	RunID        pgtype.UUID `json:"run_id"`
+	StepIndex    int64       `json:"step_index"`
+	MessageCount int32       `json:"message_count"`
+}
+
+func (q *Queries) CreateAgentStepCommit(ctx context.Context, arg CreateAgentStepCommitParams) (AgentStepCommit, error) {
+	row := q.db.QueryRow(ctx, createAgentStepCommit, arg.RunID, arg.StepIndex, arg.MessageCount)
+	var i AgentStepCommit
+	err := row.Scan(
+		&i.TeamID,
+		&i.RunID,
+		&i.StepIndex,
+		&i.MessageCount,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const finalizeSessionRun = `-- name: FinalizeSessionRun :one
 UPDATE session_runs
 SET state = CASE
@@ -284,6 +310,32 @@ func (q *Queries) GetActiveSessionRun(ctx context.Context, sessionID pgtype.UUID
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAgentStepCommit = `-- name: GetAgentStepCommit :one
+SELECT team_id, run_id, step_index, message_count, created_at
+FROM agent_step_commits
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND step_index = $2
+`
+
+type GetAgentStepCommitParams struct {
+	RunID     pgtype.UUID `json:"run_id"`
+	StepIndex int64       `json:"step_index"`
+}
+
+func (q *Queries) GetAgentStepCommit(ctx context.Context, arg GetAgentStepCommitParams) (AgentStepCommit, error) {
+	row := q.db.QueryRow(ctx, getAgentStepCommit, arg.RunID, arg.StepIndex)
+	var i AgentStepCommit
+	err := row.Scan(
+		&i.TeamID,
+		&i.RunID,
+		&i.StepIndex,
+		&i.MessageCount,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -533,6 +585,41 @@ func (q *Queries) ListStaleGenerationSessionRuns(ctx context.Context, arg ListSt
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockSessionRunForAgentStepCommit = `-- name: LockSessionRunForAgentStepCommit :one
+SELECT run_id
+FROM session_runs
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND bot_id = $2
+  AND session_id = $3
+  AND fencing_token = $4
+  AND state IN ('running', 'waiting_decision')
+  AND abort_requested_at IS NULL
+FOR UPDATE
+`
+
+type LockSessionRunForAgentStepCommitParams struct {
+	RunID        pgtype.UUID `json:"run_id"`
+	BotID        pgtype.UUID `json:"bot_id"`
+	SessionID    pgtype.UUID `json:"session_id"`
+	FencingToken int64       `json:"fencing_token"`
+}
+
+// Linearize a complete-step commit against abort and terminal transitions.
+// RequestSessionRunAbort updates the same row, so either the step locks first
+// and commits, or the abort becomes visible here and the step is refused.
+func (q *Queries) LockSessionRunForAgentStepCommit(ctx context.Context, arg LockSessionRunForAgentStepCommitParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockSessionRunForAgentStepCommit,
+		arg.RunID,
+		arg.BotID,
+		arg.SessionID,
+		arg.FencingToken,
+	)
+	var run_id pgtype.UUID
+	err := row.Scan(&run_id)
+	return run_id, err
 }
 
 const nextSessionRunFencingToken = `-- name: NextSessionRunFencingToken :one

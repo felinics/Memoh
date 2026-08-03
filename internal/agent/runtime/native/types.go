@@ -128,6 +128,11 @@ type RunConfig struct {
 	// to interleave injected messages at the correct position in storeRound.
 	InjectedRecorder func(headerifiedText string, insertAfter int)
 
+	// OnStepCommitted is a synchronous durability barrier. The callback sees
+	// the complete step plus any user/read-media messages prepared immediately
+	// before it, with persistence-only tool metadata already attached.
+	OnStepCommitted func(ctx context.Context, stepIndex int, step *sdk.StepResult) error
+
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step
 	// boundaries while tools handle waiting and result inspection.

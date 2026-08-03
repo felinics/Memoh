@@ -10,6 +10,7 @@ import (
 
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 var _ turn.Service = (*Service)(nil)
@@ -58,6 +59,9 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 		cancel()
 		return nil, err
 	}
+	runCtx = runtimefence.WithContext(runCtx, runtimefence.Fence{
+		BotID: cmd.BotID, SessionID: cmd.ThreadID, Token: admission.Handle.FencingToken,
+	})
 
 	var (
 		assetMu sync.Mutex
@@ -66,6 +70,8 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 
 	req := chatRequestFromCommand(cmd)
 	req.RunID = admission.RunID
+	req.TurnID = admission.TurnID
+	req.TurnPosition = &admission.TurnPosition
 	req.InjectCh = injectCh
 	req.OutboundAssetCollector = func() []turn.OutboundAssetRef {
 		assetMu.Lock()

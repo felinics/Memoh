@@ -265,6 +265,7 @@ func TestAgentGenerateReadMediaInjectsImageIntoNextStep(t *testing.T) {
 		agenttools.NewContainerProvider(nil, bp, nil, "/data"),
 	})
 
+	var committed []*sdk.StepResult
 	result, err := a.Generate(context.Background(), RunConfig{
 		Model:              &sdk.Model{ID: "mock-model", Provider: modelProvider},
 		Messages:           []sdk.Message{sdk.UserMessage("look at the image")},
@@ -272,6 +273,10 @@ func TestAgentGenerateReadMediaInjectsImageIntoNextStep(t *testing.T) {
 		SupportsToolCall:   true,
 		Identity: SessionContext{
 			BotID: "bot-1",
+		},
+		OnStepCommitted: func(_ context.Context, _ int, step *sdk.StepResult) error {
+			committed = append(committed, step)
+			return nil
 		},
 	})
 	if err != nil {
@@ -284,6 +289,10 @@ func TestAgentGenerateReadMediaInjectsImageIntoNextStep(t *testing.T) {
 		t.Fatalf("expected persisted step + injected history, got %d messages", len(result.Messages))
 	}
 	assertInjectedReadMediaMessage(t, result.Messages[2], expectedDataURL, "image/png")
+	if len(committed) != 2 || len(committed[1].Messages) != 2 {
+		t.Fatalf("committed steps = %#v, want injected message plus final assistant", committed)
+	}
+	assertInjectedReadMediaMessage(t, committed[1].Messages[0], expectedDataURL, "image/png")
 	if result.Messages[3].Role != sdk.MessageRoleAssistant {
 		t.Fatalf("expected final persisted message to be assistant, got %s", result.Messages[3].Role)
 	}

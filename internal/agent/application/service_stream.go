@@ -153,6 +153,10 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		cfg := rc.runConfig
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = s.canDeliverUserInputStream()
+		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
+		if stepCommitter != nil {
+			cfg.OnStepCommitted = stepCommitter.commit
+		}
 		cfg = s.prepareRunConfig(streamCtx, cfg)
 
 		// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
@@ -196,7 +200,13 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					snap.visibleOutput = hasVisibleOutput
 					lastSnapshot = snap
 					hasSnapshot = true
-					if !stored && !runOwnershipLost(streamCtx) {
+					if !stored && !runOwnershipLost(streamCtx) && stepCommitter != nil {
+						if storeErr := stepCommitter.finish(streamCtx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+							s.logger.Error("stream step finalization failed", slog.Any("error", storeErr))
+						} else {
+							stored = true
+						}
+					} else if !stored && !runOwnershipLost(streamCtx) {
 						// Use WithoutCancel so persistence still succeeds even
 						// when the parent ctx has already been cancelled by a
 						// client disconnect or idle timeout.
@@ -226,7 +236,11 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		// partial assistant/tool state. Failed sends without a terminal
 		// snapshot are treated as unsent so the Web UI can restore the draft
 		// without polluting history.
-		if !stored {
+		if !stored && stepCommitter != nil && !runOwnershipLost(streamCtx) {
+			if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens); storeErr != nil {
+				s.logger.Error("stream step finalization failed", slog.Any("error", storeErr))
+			}
+		} else if !stored {
 			switch {
 			case runOwnershipLost(streamCtx):
 				s.logger.Warn("skip persisting stream after run ownership loss",
@@ -241,6 +255,9 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					slog.String("chat_id", streamReq.ChatID),
 				)
 			}
+		}
+		if commitErr := stepCommitter.err(); commitErr != nil && streamCtx.Err() == nil {
+			errCh <- commitErr
 		}
 
 		if idleCancel.DidFire() {
@@ -374,6 +391,10 @@ func (s *Service) streamChatWSResultWithHooks(
 	cfg := rc.runConfig
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
+	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
+	if stepCommitter != nil {
+		cfg.OnStepCommitted = stepCommitter.commit
+	}
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 
 	// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
@@ -421,7 +442,14 @@ func (s *Service) streamChatWSResultWithHooks(
 				snap.visibleOutput = hasVisibleOutput
 				lastSnapshot = snap
 				hasSnapshot = true
-				if !stored && !runOwnershipLost(ctx) {
+				if !stored && !runOwnershipLost(ctx) && stepCommitter != nil {
+					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+						s.logger.Error("ws step finalization failed", slog.Any("error", storeErr))
+					} else {
+						persistedMessages = stepCommitter.persistedMessages()
+						stored = true
+					}
+				} else if !stored && !runOwnershipLost(ctx) {
 					persisted, storeErr := s.persistTerminalSnapshotResult(context.WithoutCancel(ctx), req, rc, snap)
 					if storeErr != nil {
 						s.logger.Error("ws persist failed", slog.Any("error", storeErr))
@@ -450,7 +478,13 @@ func (s *Service) streamChatWSResultWithHooks(
 	}
 
 	// Intermediate persistence on abort/error
-	if !stored {
+	if !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
+		if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+			s.logger.Error("ws step finalization failed", slog.Any("error", storeErr))
+		} else {
+			persistedMessages = stepCommitter.persistedMessages()
+		}
+	} else if !stored {
 		switch {
 		case runOwnershipLost(ctx):
 			s.logger.Warn("skip persisting ws stream after run ownership loss",
@@ -493,6 +527,9 @@ func (s *Service) streamChatWSResultWithHooks(
 		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 			return persistedMessages, err
 		}
+	}
+	if commitErr := stepCommitter.err(); commitErr != nil && ctx.Err() == nil {
+		return persistedMessages, commitErr
 	}
 
 	return persistedMessages, nil

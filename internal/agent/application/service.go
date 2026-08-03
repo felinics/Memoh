@@ -587,27 +587,43 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	cfg := rc.runConfig
+	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
+	if stepCommitter != nil {
+		cfg.OnStepCommitted = stepCommitter.commit
+	}
 	cfg = s.prepareRunConfig(ctx, cfg)
 
 	result, err := s.agent.Generate(ctx, cfg)
 	if err != nil {
+		if stepCommitter != nil {
+			_ = stepCommitter.finish(ctx, rc.estimatedTokens)
+		}
 		return ChatResponse{}, err
 	}
 
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
 	storeReq := req
-	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
-	if err := s.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
-		SkipMemory: storeReq.SkipMemoryExtraction,
-	}); err != nil {
-		return ChatResponse{}, err
-	}
-	if err := s.persistSessionWorkspaceTarget(ctx, storeReq); err != nil {
-		return ChatResponse{}, err
-	}
-
-	if result.Usage != nil {
-		go s.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
+	if stepCommitter != nil {
+		inputTokens := 0
+		if result.Usage != nil {
+			inputTokens = result.Usage.InputTokens
+		}
+		if err := stepCommitter.finish(ctx, inputTokens); err != nil {
+			return ChatResponse{}, err
+		}
+	} else {
+		roundMessages := prependTurnUserMessage(storeReq, outputMessages)
+		if err := s.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
+			SkipMemory: storeReq.SkipMemoryExtraction,
+		}); err != nil {
+			return ChatResponse{}, err
+		}
+		if err := s.persistSessionWorkspaceTarget(ctx, storeReq); err != nil {
+			return ChatResponse{}, err
+		}
+		if result.Usage != nil {
+			go s.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
+		}
 	}
 
 	return ChatResponse{

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -116,7 +117,28 @@ func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages [
 	if strings.TrimSpace(req.BotID) == "" {
 		return nil
 	}
+	persistInputs, err := s.buildPersistInputs(ctx, req, messages, modelID, opts)
+	if err != nil {
+		s.logger.Warn("prepare messages for persistence failed", slog.Any("error", err))
+		return nil
+	}
+	if batcher, ok := s.messageService.(messagepkg.ToolTailRoundPersister); ok {
+		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
+			if err != nil {
+				s.logger.Warn("persist tool tail round failed", slog.Any("error", err))
+				return nil
+			}
+			return persisted
+		}
+	}
+	turnRequestMessageID := ""
+	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
+		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
+	}
+	return s.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+}
 
+func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.PersistInput, error) {
 	// Check bot setting for full tool result persistence.
 	pruneToolResults := true
 	if botSettings, err := s.loadBotSettings(ctx, req.BotID); err == nil {
@@ -160,8 +182,7 @@ func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages [
 
 		content, err := json.Marshal(msg)
 		if err != nil {
-			s.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))
-			continue
+			return nil, fmt.Errorf("marshal message %d: %w", i, err)
 		}
 		messageSenderChannelIdentityID := ""
 		messageSenderUserID := ""
@@ -259,16 +280,7 @@ func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages [
 			TurnPosition: turnPosition,
 		})
 	}
-	if batcher, ok := s.messageService.(messagepkg.ToolTailRoundPersister); ok {
-		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
-			if err != nil {
-				s.logger.Warn("persist tool tail round failed", slog.Any("error", err))
-				return nil
-			}
-			return persisted
-		}
-	}
-	return s.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+	return persistInputs, nil
 }
 
 func workspaceTargetMetadata(target *WorkspaceTarget) map[string]any {
