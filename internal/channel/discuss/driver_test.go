@@ -97,6 +97,35 @@ func TestHandleReplyUsesBatchedForceReplyInsteadOfLatestSessionConfig(t *testing
 	}
 }
 
+func TestHandleReplyProcessingStatusCoversEntireTurn(t *testing.T) {
+	var processingStarted, processingStopped bool
+	svc := &fakeTurnService{onStart: func(turn.StartTurnCommand) {
+		if !processingStarted || processingStopped {
+			t.Fatalf("processing status was not active when the turn started: started=%v stopped=%v", processingStarted, processingStopped)
+		}
+	}}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{
+		BotID:            "bot-1",
+		ThreadID:         "sess-1",
+		ConversationType: "group",
+		StartProcessingStatus: func(context.Context) func() {
+			processingStarted = true
+			return func() { processingStopped = true }
+		},
+	}}
+	rc := timeline.RenderedContext{{
+		ReceivedAtMs: 200,
+		Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">hello</message>`}},
+	}}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if !processingStarted || !processingStopped {
+		t.Fatalf("processing lifecycle = started:%v stopped:%v, want true/true", processingStarted, processingStopped)
+	}
+}
+
 func TestHandleReplyWithTurn_PassesContextAndImageRefs(t *testing.T) {
 	rc := timeline.RenderedContext{
 		{

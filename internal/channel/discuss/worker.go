@@ -114,6 +114,13 @@ func (d *DiscussDriver) handleReplyWithTurnForce(ctx context.Context, sess *disc
 		log.Error("discuss driver: turn service not configured")
 		return
 	}
+	stopProcessing := func() {}
+	if cfg.StartProcessingStatus != nil {
+		if stop := cfg.StartProcessingStatus(ctx); stop != nil {
+			stopProcessing = stop
+		}
+	}
+	defer stopProcessing()
 	outcome, started := d.runner.Run(ctx, turnSvc, plan.command, cfg, log)
 	if !started || outcome.cancelled || outcome.runtimeType == "" {
 		return

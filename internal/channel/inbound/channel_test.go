@@ -253,7 +253,7 @@ func (n *fakeProcessingStatusNotifier) ProcessingFailed(_ context.Context, _ cha
 }
 
 type fakeProcessingStatusAdapter struct {
-	notifier *fakeProcessingStatusNotifier
+	notifier channel.ProcessingStatusNotifier
 	typ      channel.ChannelType
 }
 

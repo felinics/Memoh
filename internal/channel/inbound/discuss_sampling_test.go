@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,28 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
 )
+
+type countingProcessingStatusNotifier struct {
+	started atomic.Int32
+	calls   chan struct{}
+}
+
+func (n *countingProcessingStatusNotifier) ProcessingStarted(context.Context, channel.ChannelConfig, channel.InboundMessage, channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+	n.started.Add(1)
+	select {
+	case n.calls <- struct{}{}:
+	default:
+	}
+	return channel.ProcessingStatusHandle{}, nil
+}
+
+func (*countingProcessingStatusNotifier) ProcessingCompleted(context.Context, channel.ChannelConfig, channel.InboundMessage, channel.ProcessingStatusInfo, channel.ProcessingStatusHandle) error {
+	return nil
+}
+
+func (*countingProcessingStatusNotifier) ProcessingFailed(context.Context, channel.ChannelConfig, channel.InboundMessage, channel.ProcessingStatusInfo, channel.ProcessingStatusHandle, error) error {
+	return nil
+}
 
 type fakeTelegramDiscussPolicyReader struct {
 	policy TelegramDiscussPolicy
@@ -252,6 +275,42 @@ func TestShouldNotifyDiscussDirectedTelegramStillLoadsFallbackPolicy(t *testing.
 	)
 	if !notify || !forceReply || !fallback {
 		t.Fatalf("directed policy = notify %v, force %v, fallback %v", notify, forceReply, fallback)
+	}
+}
+
+func TestTelegramDiscussProcessingStarterRefreshesUntilStopped(t *testing.T) {
+	notifier := &countingProcessingStatusNotifier{calls: make(chan struct{}, 8)}
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeProcessingStatusAdapter{
+		notifier: notifier,
+		typ:      channel.ChannelTypeTelegram,
+	})
+	processor := &ChannelInboundProcessor{registry: registry, logger: slog.Default()}
+	msg := channel.InboundMessage{
+		Channel:     channel.ChannelTypeTelegram,
+		ReplyTarget: "group-1",
+		Message:     channel.Message{ID: "message-1", Text: "hello"},
+	}
+	starter := processor.telegramDiscussProcessingStarter(
+		channel.ChannelConfig{}, msg, InboundIdentity{BotID: "bot-1"},
+		"hello", "bot-1", "route-1", 5*time.Millisecond,
+	)
+	if starter == nil {
+		t.Fatal("Telegram processing starter is nil")
+	}
+	stop := starter(context.Background())
+	for range 2 {
+		select {
+		case <-notifier.calls:
+		case <-time.After(time.Second):
+			t.Fatal("typing action was not refreshed")
+		}
+	}
+	stop()
+	countAfterStop := notifier.started.Load()
+	time.Sleep(20 * time.Millisecond)
+	if got := notifier.started.Load(); got != countAfterStop {
+		t.Fatalf("typing actions continued after stop: before=%d after=%d", countAfterStop, got)
 	}
 }
 

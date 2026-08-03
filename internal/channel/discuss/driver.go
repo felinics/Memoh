@@ -65,6 +65,9 @@ type DiscussSessionConfig struct {
 	ForceReply          bool
 	SendFallbackEnabled bool
 	ReplySender         DiscussReplySender
+	// StartProcessingStatus begins a channel-native processing indicator for
+	// the actual model turn and returns a function that stops refreshing it.
+	StartProcessingStatus func(context.Context) func()
 }
 
 // DiscussDriver owns worker lifecycle only. Trigger construction, history,

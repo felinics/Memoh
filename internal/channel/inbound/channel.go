@@ -44,6 +44,7 @@ var base64Std = base64.StdEncoding
 const (
 	minDuplicateTextLength  = 10
 	processingStatusTimeout = 60 * time.Second
+	telegramTypingRefresh   = 4 * time.Second
 )
 
 var whitespacePattern = regexp.MustCompile(`\s+`)
@@ -904,7 +905,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		if notify {
 			chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 			sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
-			p.notifyTelegramDiscussProcessingStarted(ctx, cfg, msg, identity, text, activeChatID, resolved.RouteID)
 			p.discussDriver.NotifyRC(ctx, sessionID, latestRC, discuss.DiscussSessionConfig{
 				TeamID:              cfg.TeamID,
 				BotID:               identity.BotID,
@@ -923,6 +923,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				ForceReply:          forceReply,
 				SendFallbackEnabled: sendFallbackEnabled,
 				ReplySender:         sender,
+				StartProcessingStatus: p.telegramDiscussProcessingStarter(
+					cfg, msg, identity, text, activeChatID, resolved.RouteID, telegramTypingRefresh,
+				),
 			})
 		} else if p.logger != nil {
 			p.logger.Debug(
@@ -2724,25 +2727,28 @@ func (p *ChannelInboundProcessor) resolveProcessingStatusNotifier(channelType ch
 	return notifier
 }
 
-// notifyTelegramDiscussProcessingStarted mirrors the normal chat processing
-// signal for discuss turns. Discuss work is handed to a background driver and
-// returns before the regular processing lifecycle below, so Telegram would
-// otherwise never receive its typing action.
-func (p *ChannelInboundProcessor) notifyTelegramDiscussProcessingStarted(
-	ctx context.Context,
+// telegramDiscussProcessingStarter keeps Telegram's short-lived typing action
+// alive for the full discuss model turn. The driver starts it immediately
+// before Run and stops it when the model sends, stays silent, fails, or is
+// cancelled.
+func (p *ChannelInboundProcessor) telegramDiscussProcessingStarter(
 	cfg channel.ChannelConfig,
 	msg channel.InboundMessage,
 	identity InboundIdentity,
 	query string,
 	chatID string,
 	routeID string,
-) {
+	refreshInterval time.Duration,
+) func(context.Context) func() {
 	if msg.Channel != channel.ChannelTypeTelegram {
-		return
+		return nil
 	}
 	notifier := p.resolveProcessingStatusNotifier(msg.Channel)
 	if notifier == nil {
-		return
+		return nil
+	}
+	if refreshInterval <= 0 {
+		refreshInterval = telegramTypingRefresh
 	}
 	info := channel.ProcessingStatusInfo{
 		BotID:             identity.BotID,
@@ -2754,8 +2760,27 @@ func (p *ChannelInboundProcessor) notifyTelegramDiscussProcessingStarted(
 		ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
 		SourceMessageID:   strings.TrimSpace(msg.Message.ID),
 	}
-	if _, err := p.notifyProcessingStarted(ctx, notifier, cfg, msg, info); err != nil {
-		p.logProcessingStatusError("processing_started", msg, identity, err)
+	return func(ctx context.Context) func() {
+		processingCtx, cancel := context.WithCancel(ctx)
+		notify := func() {
+			if _, err := p.notifyProcessingStarted(processingCtx, notifier, cfg, msg, info); err != nil && processingCtx.Err() == nil {
+				p.logProcessingStatusError("processing_started", msg, identity, err)
+			}
+		}
+		notify()
+		go func() {
+			ticker := time.NewTicker(refreshInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-processingCtx.Done():
+					return
+				case <-ticker.C:
+					notify()
+				}
+			}
+		}()
+		return cancel
 	}
 }
 
