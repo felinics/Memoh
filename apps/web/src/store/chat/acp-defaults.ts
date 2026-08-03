@@ -24,6 +24,7 @@ export function createACPDefaults(deps: {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
   explicitSessionSelection: Ref<boolean>
+  userScopeGeneration: () => number
   currentSelectRequest: () => number
   rememberDefault: (botId: string, input: ACPAgentSessionInput | null) => void
   cachedDefault: (botId: string) => {
@@ -55,8 +56,10 @@ export function createACPDefaults(deps: {
   async function inputFromSettings(botId: string): Promise<ACPAgentSessionInput | null> {
     const bid = botId.trim()
     if (!bid) return null
+    const generation = deps.userScopeGeneration()
     try {
       const settings = await fetchACPSettings(bid)
+      if (generation !== deps.userScopeGeneration()) return null
       if (settings?.chat_runtime !== 'acp_agent') {
         deps.rememberDefault(bid, null)
         return null

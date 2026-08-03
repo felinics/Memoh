@@ -12,6 +12,7 @@ export interface ChatBootstrapDeps {
   currentSelectSessionRequest: () => number
   prepareForInitialization: () => void
   resetRefreshCoordinator: () => void
+  resetSessionActivity: () => void
   stopStreams: () => void
   stopWebSocket: () => void
   ensureBot: () => Promise<string | null>
@@ -75,6 +76,7 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
           initializingBotId = (deps.currentBotId.value ?? '').trim() || null
           deps.prepareForInitialization()
           deps.resetRefreshCoordinator()
+          deps.resetSessionActivity()
           deps.stopStreams()
           deps.stopWebSocket()
 
@@ -205,6 +207,10 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
     deps.abortAllAssistantStreams()
     deps.clearPendingACPSession()
     deps.clearFsForBotSwitch()
+    deps.resetSessionActivity()
+    deps.replaceSessions([])
+    deps.sessionsCursor.value = null
+    deps.hasMoreSessions.value = false
     deps.currentBotId.value = targetBotId
     deps.sessionId.value = null
     deps.clearRememberedSessions()

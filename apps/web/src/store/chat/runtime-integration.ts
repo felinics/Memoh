@@ -77,6 +77,11 @@ export interface RuntimeIntegrationDeps {
     error: Error,
   ) => void
   refreshCurrentSession: (botId: string, sessionId: string) => Promise<void>
+  resyncRuntimeTranscript: (
+    botId: string,
+    sessionId: string,
+    transcript: RuntimeProjectionChange['current']['transcript'],
+  ) => Promise<void>
   releaseHiddenSessionView: (botId: string, sessionId: string) => void
   loadInitialMessages: (
     botId: string,
@@ -305,11 +310,11 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     const needsHistoryResync = Boolean(
       view && !view.transcript.applyRuntimeTranscript(change.current.transcript),
     )
-    const resyncTranscript = () => deps.refreshCurrentSession(botId, sessionId)
-      .then(() => {
-        deps.chatViews.getSession(botId, sessionId)
-          ?.transcript.applyRuntimeTranscript(change.current.transcript)
-      })
+    const resyncTranscript = () => deps.resyncRuntimeTranscript(
+      botId,
+      sessionId,
+      change.current.transcript,
+    )
 
     if (needsHistoryResync && currentRun && isRuntimeRunActive(currentRun.status)) {
       void resyncTranscript()

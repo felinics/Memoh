@@ -1,4 +1,4 @@
-import { reactive, ref, type Ref } from 'vue'
+import { computed, reactive, ref, type Ref } from 'vue'
 import type {
   ChatAttachment,
   FetchMessagesOptions,
@@ -21,6 +21,7 @@ import type {
 import type { RuntimeTranscriptSlice } from './runtime-projection'
 import { createTranscriptHistory } from './transcript-history'
 import { createTranscriptDecisions } from './transcript-decisions'
+import { createTranscriptQueries } from './transcript-queries'
 
 export interface TranscriptDeps {
   currentBotId: Ref<string | null>
@@ -34,6 +35,7 @@ export interface TranscriptDeps {
 
 type RefreshAppliedHook = (targetSessionId: string, latestTimestamp?: string) => void
 type CommitInitialHistory = (applyHistory: () => void) => Promise<void>
+type AfterHistoryCommit = () => void
 
 export interface LocateMessageResult {
   items: UITurn[]
@@ -55,6 +57,10 @@ export function createTranscriptController({
 }: TranscriptDeps) {
   const messages = reactive<ChatMessage[]>([])
   const loadingMessages = ref(false)
+  // Cached Session views retain raw turns so optimistic/runtime object
+  // identity survives a round trip. Mask that cache while fresh database and
+  // Runtime projections are being committed.
+  const visibleMessages = computed(() => loadingMessages.value ? [] : messages)
   const loadingOlder = ref(false)
   const hasMoreOlder = ref(true)
   const hasLoadedOlder = ref(false)
@@ -62,6 +68,7 @@ export function createTranscriptController({
   let refreshPromise: {
     key: string
     promise: Promise<void>
+    afterHistory: Set<AfterHistoryCommit>
   } | null = null
   let historyGeneration = 0
   let loadingMessagesVersion = 0
@@ -93,6 +100,7 @@ export function createTranscriptController({
     markToolApprovalDecision,
     markUserInputDecision,
   } = createTranscriptDecisions(messages)
+  const transcriptQueries = createTranscriptQueries(messages)
 
   const PAGE_SIZE = 30
 
@@ -153,6 +161,7 @@ export function createTranscriptController({
   async function refreshCurrentSession(
     targetBotId?: string,
     targetSessionId?: string,
+    afterHistory?: AfterHistoryCommit,
   ) {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
@@ -162,19 +171,26 @@ export function createTranscriptController({
 
     if (refreshPromise) {
       if (refreshPromise.key === key) {
+        if (afterHistory) refreshPromise.afterHistory.add(afterHistory)
         await refreshPromise.promise
         return
       }
       await refreshPromise.promise
     }
 
+    const afterHistoryCallbacks = new Set<AfterHistoryCommit>()
+    if (afterHistory) afterHistoryCallbacks.add(afterHistory)
     const promise = (async () => {
       const turns = await fetchMessages(bid, sid, { limit: PAGE_SIZE })
+      if (!isCurrentHistoryContext(bid, sid, generation)) return
       applyFetchedHistory(bid, sid, generation, turns)
+      // Keep a replacement Runtime projection in the same synchronous commit
+      // as the refreshed anchor so Vue cannot paint the database-only state.
+      for (const apply of afterHistoryCallbacks) apply()
     })().finally(() => {
       if (refreshPromise?.promise === promise) refreshPromise = null
     })
-    refreshPromise = { key, promise }
+    refreshPromise = { key, promise, afterHistory: afterHistoryCallbacks }
     await promise
   }
 
@@ -561,57 +577,13 @@ export function createTranscriptController({
     }
   }
 
-  function latestOptimisticUserText(): string {
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i]
-      if (message?.role === 'user') return message.text.trim()
-    }
-    return ''
-  }
-
-  function hasTurn(turn: ChatMessage): boolean {
-    return messages.includes(turn)
-  }
-
-  function findTurnByServerId(messageId: string): ChatMessage | null {
-    const id = messageId.trim()
-    if (!id) return null
-    return messages.find(turn => serverMessageId(turn) === id) ?? null
-  }
-
-  function latestVisibleTurn(role: 'user'): ChatUserTurn | null
-  function latestVisibleTurn(role: 'assistant'): ChatAssistantTurn | null
-  function latestVisibleTurn(role: ChatMessage['role']): ChatUserTurn | ChatAssistantTurn | null {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const turn = messages[index]
-      if (
-        turn
-        && turn.role !== 'system'
-        && turn.role === role
-        && !turn.__optimistic
-      ) return turn
-    }
-    return null
-  }
-
-  function isLatestVisibleUserTurn(turn: ChatMessage): turn is ChatUserTurn {
-    if (turn.role !== 'user') return false
-    const latest = latestVisibleTurn('user')
-    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
-  }
-
-  function isLatestVisibleAssistantTurn(turn: ChatMessage): turn is ChatAssistantTurn {
-    if (turn.role !== 'assistant') return false
-    const latest = latestVisibleTurn('assistant')
-    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
-  }
-
   function resetUserScope() {
     clearHistoryView({ hasMoreOlder: true })
   }
 
   return {
     messages,
+    visibleMessages,
     loadingMessages,
     loadingOlder,
     hasMoreOlder,
@@ -656,11 +628,7 @@ export function createTranscriptController({
     restoreUserInputStates,
     finalizeStreamFailure,
     removeRuntimeTurn,
-    latestOptimisticUserText,
-    hasTurn,
-    findTurnByServerId,
-    isLatestVisibleUserTurn,
-    isLatestVisibleAssistantTurn,
+    ...transcriptQueries,
     markToolApprovalDecision,
     markUserInputDecision,
     resetUserScope,

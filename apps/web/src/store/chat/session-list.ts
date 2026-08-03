@@ -71,6 +71,10 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     return sessionLookupRevision.value
   }
 
+  function currentSessionListRevision() {
+    return sessionLookupRevision.value
+  }
+
   // --- Fork-anchor tracking -------------------------------------------------
   // The anchor is stored as metadata.forked_from.fork_message_id on the
   // SessionSummary; there is no dedicated state beyond the session records.
@@ -334,16 +338,22 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     const sid = targetSessionId.trim()
     if (!bid || !sid) return
     const deletedIds = deletedSessionIdsByBot.get(bid) ?? new Set<string>()
+    if (deletedIds.has(sid)) return
     deletedIds.add(sid)
     deletedSessionIdsByBot.set(bid, deletedIds)
+    markSessionLookupChanged()
   }
 
   function clearDeletedSessionIds() {
+    if (deletedSessionIdsByBot.size === 0) return
     deletedSessionIdsByBot.clear()
+    markSessionLookupChanged()
   }
 
   function clearRememberedSessions() {
+    if (Object.keys(rememberedSessions.value).length === 0) return
     rememberedSessions.value = {}
+    markSessionLookupChanged()
   }
 
   return {
@@ -357,6 +367,7 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     knownSessions,
     activeChatReadOnly,
     activeChatCanFork,
+    currentSessionListRevision,
     updateForkAnchorForReplacedMessage,
     // mutations
     replaceSessions,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ref, toRaw } from 'vue'
+import { nextTick, ref, toRaw, watch } from 'vue'
 import type { UIMessage, UITurn } from '@/composables/api/useChat.types'
 import { createBackgroundTaskTracker } from './background-tasks'
 import { createTranscriptController } from './transcript'
@@ -329,6 +329,27 @@ describe('chat transcript controller', () => {
     })
   })
 
+  it('masks a cached transcript until rehydration commits', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.replaceMessages([rawUser('cached-user', 'stale')], 'session-1')
+    const pending = deferred<UITurn[]>()
+    fetchMessages.mockReturnValueOnce(pending.promise)
+
+    const hydration = transcript.loadInitialMessages(
+      'bot-1',
+      'session-1',
+      async applyHistory => applyHistory(),
+    )
+
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['cached-user'])
+    expect(transcript.visibleMessages.value).toEqual([])
+
+    pending.resolve([rawUser('fresh-user', 'fresh')])
+    await hydration
+
+    expect(transcript.visibleMessages.value.map(turn => turn.id)).toEqual(['fresh-user'])
+  })
+
   it('replaces staged database history with an active edit projection', async () => {
     const { transcript, fetchMessages } = makeTranscript()
     fetchMessages.mockResolvedValueOnce([
@@ -419,6 +440,41 @@ describe('chat transcript controller', () => {
 
     expect(applied).toBe(false)
     expect(transcript.messages.map(turn => turn.id)).toEqual(['user-old'])
+  })
+
+  it('commits resynced history and its replacement projection in one render', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.replaceMessages([rawUser('cached-user', 'stale')], 'session-1')
+    fetchMessages.mockResolvedValueOnce([
+      rawUser('server-user', 'original'),
+      rawAssistant('server-assistant', [{ id: 0, type: 'text', content: 'old' }]),
+    ])
+    const renders: string[] = []
+    const stop = watch(
+      () => transcript.messages.map(turn => turn.id).join(','),
+      value => renders.push(value),
+    )
+
+    await transcript.refreshCurrentSession('bot-1', 'session-1', () => {
+      transcript.applyRuntimeTranscript({
+        runId: 'run-edit',
+        turnId: 'turn-edit',
+        status: 'running',
+        operation: {
+          kind: 'edit',
+          replace_from_message_id: 'server-user',
+        },
+        streaming: true,
+        turns: [
+          rawUser('runtime-user', 'edited'),
+          rawAssistant('runtime-assistant'),
+        ],
+      })
+    })
+    await nextTick()
+    stop()
+
+    expect(renders).toEqual(['runtime-user,runtime-assistant'])
   })
 
   it('owns refresh state and reports the latest applied timestamp', async () => {

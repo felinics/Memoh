@@ -89,6 +89,7 @@ export function createACPController(deps: {
     currentBotId: deps.currentBotId,
     sessionId: deps.sessionId,
     explicitSessionSelection: deps.explicitSessionSelection,
+    userScopeGeneration: deps.userScopeGeneration,
     currentSelectRequest: deps.currentSelectSessionRequest,
     rememberDefault: staging.rememberDefaultACPInput,
     cachedDefault: staging.cachedDefaultACPInput,
@@ -200,6 +201,7 @@ export function createACPController(deps: {
 
   function reset() {
     staging.clearPendingACPSession()
+    staging.clearDefaultACPInputs()
     orchestration.reset()
     runtimeRegistry.resetACPRuntimeRegistry()
     draftViewRequested.value = null

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createPinia, setActivePinia } from 'pinia'
+import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia'
 import type {
   BotSessionActivityEvent,
   RuntimeCurrentRunView,
@@ -8,6 +8,7 @@ import type {
   UIMessage,
   UIStreamEvent,
   UIStreamEventHandler,
+  UITurn,
   UIUserTurn,
 } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
@@ -48,15 +49,17 @@ const sdk = vi.hoisted(() => ({
 }))
 
 vi.hoisted(() => {
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: () => null,
-      setItem: () => {},
-      removeItem: () => {},
-      clear: () => {},
-    },
-  })
+  for (const name of ['localStorage', 'sessionStorage']) {
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      value: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+        clear: () => {},
+      },
+    })
+  }
 })
 
 vi.mock('@/composables/api/useChat', () => api)
@@ -124,6 +127,8 @@ const h = {
     publishedRunId: string
   }>(),
 }
+
+let pinia: Pinia
 
 function testRuntime(sessionId: string) {
   let runtime = h.runtimeBySession.get(sessionId)
@@ -247,7 +252,8 @@ function wsRunId(index = 0): string {
 }
 
 beforeEach(() => {
-    setActivePinia(createPinia())
+    pinia = createPinia()
+    setActivePinia(pinia)
     h.streamHandler = null
     h.sessionsActivityHandler = null
     h.lastRunId = ''
@@ -557,6 +563,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  disposePinia(pinia)
   vi.unstubAllGlobals()
 })
 
@@ -1988,6 +1995,43 @@ describe('chat-list store', () => {
 
       expect(store.knownSessionSummary('session-subagent')?.title).toBe('Updated subagent title')
       expect(store.knownSessions.find(session => session.id === 'session-subagent')?.title).toBe('Updated subagent title')
+    })
+
+  it('does not let an older REST snapshot overwrite a newer SSE title', async () => {
+      api.fetchSessions.mockResolvedValueOnce({ items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'Original', type: 'chat' },
+      ], nextCursor: null })
+      const staleRefresh = deferred<{
+        items: Array<{ id: string, bot_id: string, title: string, type: string }>
+        nextCursor: null
+      }>()
+      const store = useChatStore()
+      await store.selectBot('bot-1')
+      api.fetchSessions
+        .mockReturnValueOnce(staleRefresh.promise)
+        .mockResolvedValueOnce({ items: [
+          { id: 'session-1', bot_id: 'bot-1', title: 'New title', type: 'chat' },
+        ], nextCursor: null })
+
+      h.sessionsActivityHandler?.({
+        type: 'session_created',
+        session_id: 'unknown-session',
+        session_type: 'chat',
+      })
+      await flushPromises()
+      h.sessionsActivityHandler?.({
+        type: 'session_title_changed',
+        session_id: 'session-1',
+        title: 'New title',
+      })
+      staleRefresh.resolve({ items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'Original', type: 'chat' },
+      ], nextCursor: null })
+      await flushPromises()
+      await flushPromises()
+
+      expect(api.fetchSessions).toHaveBeenCalledTimes(3)
+      expect(store.sessions[0]?.title).toBe('New title')
     })
 
   it('keeps remembered hidden session title updates after the visible session list refreshes', async () => {
@@ -3976,6 +4020,39 @@ describe('chat-list store', () => {
       expect(store.messages).toHaveLength(0)
     })
 
+  it('clears the previous bot sessions before the next bot snapshot arrives', async () => {
+      api.fetchBots.mockResolvedValue([
+        { id: 'bot-1', status: 'active', name: 'Bot 1' },
+        { id: 'bot-2', status: 'active', name: 'Bot 2' },
+      ])
+      const botTwoSessions = deferred<{
+        items: Array<{ id: string, bot_id: string, title: string, type: string }>
+        nextCursor: null
+      }>()
+      api.fetchSessions
+        .mockResolvedValueOnce({
+          items: [{ id: 'session-old', bot_id: 'bot-1', title: 'Old', type: 'chat' }],
+          nextCursor: null,
+        })
+        .mockReturnValueOnce(botTwoSessions.promise)
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const switching = store.selectBot('bot-2')
+
+      expect(store.currentBotId).toBe('bot-2')
+      expect(store.loadingChats).toBe(true)
+      expect(store.sessions).toEqual([])
+
+      botTwoSessions.resolve({
+        items: [{ id: 'session-new', bot_id: 'bot-2', title: 'New', type: 'chat' }],
+        nextCursor: null,
+      })
+      await switching
+
+      expect(store.sessions.map(session => session.id)).toEqual(['session-new'])
+    })
+
   it('reattaches an active stream even when return hydration fails', async () => {
       h.sendUpdates = []
       api.fetchSessions.mockResolvedValueOnce({ items: [
@@ -4009,6 +4086,52 @@ describe('chat-list store', () => {
       returningToSessionA = false
       emitRuntime(runtime.completed, 'session-a', runId)
       await sending
+    })
+
+  it('does not expose a cached Session transcript while it rehydrates', async () => {
+      api.fetchSessions.mockResolvedValueOnce({ items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ], nextCursor: null })
+      const freshSessionA = deferred<UITurn[]>()
+      api.fetchMessagesUI
+        .mockResolvedValueOnce([{
+          id: 'cached-a',
+          turn_id: 'cached-a',
+          role: 'user',
+          text: 'cached',
+          attachments: [],
+          timestamp: '2026-01-01T00:00:00.000Z',
+        }])
+        .mockResolvedValueOnce([])
+        .mockReturnValueOnce(freshSessionA.promise)
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      await flushPromises()
+      await store.selectSession('session-b')
+      await flushPromises()
+      await store.selectSession('session-a')
+
+      expect(store.chatView({
+        botId: 'bot-1',
+        sessionId: 'session-a',
+        viewId: 'chat',
+      }).transcript.messages.map(turn => turn.id)).toEqual(['cached-a'])
+      expect(store.loadingMessages).toBe(true)
+      expect(store.messages).toEqual([])
+
+      freshSessionA.resolve([{
+        id: 'fresh-a',
+        turn_id: 'fresh-a',
+        role: 'user',
+        text: 'fresh',
+        attachments: [],
+        timestamp: '2026-01-02T00:00:00.000Z',
+      }])
+      await flushPromises()
+
+      expect(store.messages.map(turn => turn.id)).toEqual(['fresh-a'])
     })
 
   it('hydrates hidden subagent session summaries after selecting them', async () => {
@@ -4161,6 +4284,48 @@ describe('chat-list store', () => {
       // Further load attempts are a no-op once the cursor is exhausted.
       await store.loadMoreSessions()
       expect(api.fetchSessions).toHaveBeenCalledTimes(2)
+    })
+
+  it('drops a pagination page when a newer full refresh replaces its cursor', async () => {
+      const oldPage = deferred<{
+        items: Array<{ id: string, bot_id: string, title: string, type: string }>
+        nextCursor: null
+      }>()
+      api.fetchSessions
+        .mockResolvedValueOnce({
+          items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+          nextCursor: 'cursor-old',
+        })
+        .mockReturnValueOnce(oldPage.promise)
+        .mockResolvedValueOnce({
+          items: [{ id: 'session-new', bot_id: 'bot-1', title: 'New', type: 'chat' }],
+          nextCursor: 'cursor-new',
+        })
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const loadingPage = store.loadMoreSessions()
+      await flushPromises()
+
+      h.sessionsActivityHandler?.({
+        type: 'session_created',
+        session_id: 'session-new',
+        session_type: 'chat',
+        title: 'New',
+      })
+      await flushPromises()
+      expect(store.sessions.map(session => session.id)).toEqual(['session-new'])
+      expect(store.sessionsCursor).toBe('cursor-new')
+
+      oldPage.resolve({
+        items: [{ id: 'session-stale-page', bot_id: 'bot-1', title: 'Stale', type: 'chat' }],
+        nextCursor: null,
+      })
+      await loadingPage
+
+      expect(store.sessions.map(session => session.id)).toEqual(['session-new'])
+      expect(store.sessionsCursor).toBe('cursor-new')
+      expect(store.hasMoreSessions).toBe(true)
     })
 
   it('resets hasLoadedOlder on initialize so a fresh bot does not inherit the previous scroll-back flag', async () => {
@@ -4532,6 +4697,13 @@ describe('chat-list store', () => {
       api.fetchSessions.mockImplementationOnce(() => new Promise((resolve) => {
         resolveRefresh = resolve
       }))
+      api.fetchSessions.mockResolvedValueOnce({
+        items: [
+          { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+          { id: 'session-3', bot_id: 'bot-1', title: 'C', type: 'chat' },
+        ],
+        nextCursor: null,
+      })
       h.sessionsActivityHandler?.({
         type: 'session_created',
         session_id: 'session-3',

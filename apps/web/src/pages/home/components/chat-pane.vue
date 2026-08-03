@@ -829,7 +829,7 @@ const paneTarget = computed(() => ({
 }))
 provideChatViewTarget(paneTarget)
 const paneView = computed(() => chatStore.chatView(paneTarget.value))
-const messages = computed(() => paneView.value.transcript.messages)
+const messages = computed(() => paneView.value.transcript.visibleMessages.value)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
 const loadingOlder = computed(() => paneView.value.transcript.loadingOlder.value)
 const hasMoreOlder = computed(() => paneView.value.transcript.hasMoreOlder.value)

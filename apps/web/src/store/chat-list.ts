@@ -1,5 +1,5 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { toast } from '@felinic/ui'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
@@ -98,7 +98,7 @@ export const useChatStore = defineStore('chat', () => {
     chatView, transcriptForTarget, sessionTranscript, transcriptForTurn,
     messages, loadingMessages, loadingOlder, hasMoreOlder, hasLoadedOlder,
     clearHistoryView, prepareForInitialization, markHistoryEmpty,
-    refreshCurrentSession, loadInitialMessages, fetchSessionWindow,
+    refreshCurrentSession, resyncRuntimeTranscript, loadInitialMessages, fetchSessionWindow,
     loadOlderMessages, findMessageIdByExternalId, locateMessageByExternalId,
     isSessionStreaming, streamingSessionId, streaming, isChatViewStreaming,
     workspaceTargetSelectionFor, setWorkspaceTargetSelection,
@@ -132,6 +132,7 @@ export const useChatStore = defineStore('chat', () => {
   const {
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,
     activeSession, knownSessions, activeChatReadOnly, activeChatCanFork,
+    currentSessionListRevision,
     updateForkAnchorForReplacedMessage,
     replaceSessions, appendSessions, upsertSession, rememberSession,
     knownSessionSummary, hasListedSession, patchSessionInList,
@@ -142,6 +143,7 @@ export const useChatStore = defineStore('chat', () => {
   const refreshCoordinator = createChatRefreshCoordinator({
     currentBotId,
     fetchSessions,
+    currentSessionListRevision,
     applySessionsSnapshot: (response) => {
       replaceSessions(response.items)
       sessionsCursor.value = response.nextCursor
@@ -157,6 +159,7 @@ export const useChatStore = defineStore('chat', () => {
     currentBotId,
     sessionId,
     userScopeGeneration: () => userScopeGeneration,
+    currentSessionListRevision,
     currentSelectRequest: () => selectSessionRequestId,
     knownSession: knownSessionSummary,
     rememberSession,
@@ -238,6 +241,7 @@ export const useChatStore = defineStore('chat', () => {
     hasVisibleAssistantBlocks,
     finalizeStreamFailure,
     refreshCurrentSession,
+    resyncRuntimeTranscript,
     releaseHiddenSessionView: (botId, targetSessionId) => {
       releaseHiddenSessionView(chatViews.getSession(botId, targetSessionId) ?? null)
     },
@@ -415,6 +419,7 @@ export const useChatStore = defineStore('chat', () => {
     currentSelectSessionRequest: () => selectSessionRequestId,
     prepareForInitialization,
     resetRefreshCoordinator,
+    resetSessionActivity,
     stopStreams,
     stopWebSocket,
     ensureBot,
@@ -492,7 +497,14 @@ export const useChatStore = defineStore('chat', () => {
     else resetUserScopedState()
   }, { immediate: true })
 
-  onAuthSessionCleared(() => resetUserScopedState({ clearSelection: true }))
+  const stopAuthSessionListener = onAuthSessionCleared(() => {
+    resetUserScopedState({ clearSelection: true })
+  })
+  onScopeDispose(() => {
+    stopAuthSessionListener()
+    stopStreams()
+    stopWebSocket()
+  })
 
   const {
     handleWebNewCommand,
