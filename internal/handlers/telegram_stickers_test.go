@@ -3,10 +3,12 @@ package handlers
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/memohai/memoh/internal/mcp"
 )
@@ -124,5 +126,91 @@ func TestDecodeBoundedJSONRejectsOversizedPayload(t *testing.T) {
 	err := decodeBoundedJSON(io.NopCloser(strings.NewReader(`{"value":"too long"}`)), 8, &output)
 	if err == nil || !strings.Contains(err.Error(), "size limit") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPendingTelegramStickerRecognitionTasksDeduplicatesMergedCatalog(t *testing.T) {
+	t.Parallel()
+
+	catalog := TelegramStickerCatalog{
+		PendingCount: 2,
+		Stickers: []TelegramStickerCatalogEntry{
+			{ID: "set-a:S001", Status: "pending"},
+			{ID: "set-a:S002", Status: "ready"},
+		},
+		Sets: []TelegramStickerSetCatalog{{
+			Name: "set-a",
+			Stickers: []TelegramStickerCatalogEntry{
+				{ID: "set-a:S001", Status: "pending"},
+				{ID: "set-a:S003", Status: ""},
+				{ID: "set-a:S004", Status: "failed"},
+			},
+		}},
+	}
+	tasks := pendingTelegramStickerRecognitionTasks(
+		catalog, "bot-1", "identity-1", "vision-1", "prompt-1",
+	)
+	if len(tasks) != 2 || tasks[0].StickerID != "set-a:S001" || tasks[1].StickerID != "set-a:S003" {
+		t.Fatalf("pending tasks = %#v", tasks)
+	}
+	if tasks[0].BotID != "bot-1" || tasks[0].ChannelIdentityID != "identity-1" || tasks[0].Model != "vision-1" {
+		t.Fatalf("task routing = %#v", tasks[0])
+	}
+	if withoutModel := pendingTelegramStickerRecognitionTasks(catalog, "bot-1", "identity-1", "", "prompt-1"); withoutModel != nil {
+		t.Fatalf("tasks without a recognition model = %#v", withoutModel)
+	}
+}
+
+func TestTelegramStickerRecognitionQueueDeduplicatesAndRefreshesAfterBatch(t *testing.T) {
+	recognized := make(chan string, 2)
+	refreshed := make(chan string, 1)
+	queue := newTelegramStickerRecognitionQueue(
+		slog.New(slog.DiscardHandler),
+		1,
+		func(_ context.Context, task telegramStickerRecognitionTask) error {
+			recognized <- task.StickerID
+			return nil
+		},
+		func(_ context.Context, botID string) error {
+			refreshed <- botID
+			return nil
+		},
+	)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := queue.Close(ctx); err != nil {
+			t.Errorf("close queue: %v", err)
+		}
+	})
+
+	tasks := []telegramStickerRecognitionTask{
+		{BotID: "bot-1", ChannelIdentityID: "identity-1", StickerID: "S001", Model: "vision", PromptVersion: "v1"},
+		{BotID: "bot-1", ChannelIdentityID: "identity-1", StickerID: "S001", Model: "vision", PromptVersion: "v1"},
+		{BotID: "bot-1", ChannelIdentityID: "identity-1", StickerID: "S002", Model: "vision", PromptVersion: "v1"},
+	}
+	if count := queue.Enqueue(tasks); count != 2 {
+		t.Fatalf("enqueued = %d, want 2", count)
+	}
+
+	seen := map[string]bool{}
+	for range 2 {
+		select {
+		case stickerID := <-recognized:
+			seen[stickerID] = true
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for recognition")
+		}
+	}
+	if !seen["S001"] || !seen["S002"] || len(seen) != 2 {
+		t.Fatalf("recognized = %#v", seen)
+	}
+	select {
+	case botID := <-refreshed:
+		if botID != "bot-1" {
+			t.Fatalf("refreshed bot = %q", botID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for schema refresh")
 	}
 }

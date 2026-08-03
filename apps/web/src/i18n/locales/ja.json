@@ -2774,6 +2774,22 @@
       "feishuWebhookSecretRequired": "セキュリティのため、暗号化キーまたは検証Tokenの少なくとも 1 つを構成します。",
       "noAvailableTypes": "すべてのプラットフォーム タイプが設定されました",
       "platformKey": "プラットフォームID: {key}",
+      "fields": {
+        "telegram": {
+          "botToken": {
+            "title": "Bot Token",
+            "description": "@BotFather がこの Bot に発行した Token です。"
+          },
+          "apiBaseURL": {
+            "title": "API Base URL",
+            "description": "Telegram Bot API のリバースプロキシ URL です。通常の環境では既定値のまま使用してください。"
+          },
+          "httpProxyUrl": {
+            "title": "HTTP Proxy URL",
+            "description": "Telegram API リクエストに使う任意の送信 HTTP Proxy です。例：http://user:pass@host:port"
+          }
+        }
+      },
       "telegramDiscussTitle": "Discuss 参加ポリシー",
       "telegramPassiveRate": "自発的な参加率",
       "telegramPassiveRateDescription": "メンションのないグループメッセージにBotが参加する確率です。値を上げるほどModel Tokenの消費が増えます。",
@@ -2796,27 +2812,28 @@
       "telegramSkillsEnabledDescription": "Skill の検索・有効化ツールを公開し、利用可能な Skill 一覧を system prompt に含めます。",
       "telegramToolsBulk": "利用可能なツール",
       "telegramToolsDescription": "有効なツールだけが Telegram でモデルに公開されます。未設定のツールは自動的に除外されます。",
+      "telegramToolItemDescription": "Telegram 会話でモデルが「{tool}」ツールを使えるようにします。",
       "telegramToolsEnableAll": "すべて有効",
       "telegramToolsDisableAll": "すべて無効",
       "telegramToolsEmpty": "現在利用できるツールはありません",
       "telegramToolsEmptyDescription": "対応するサービスまたは機能を設定すると、ツールがここに表示されます。",
       "telegramSendDisabledWarning": "send は無効です。Discuss モードでモデルは実行されますが、通常出力や思考は Telegram に公開されません。",
       "telegramStickersTitle": "Telegram Sticker",
-      "telegramStickersDescription": "各 Sticker Set のメタデータは永続キャッシュされます。Set 自体が変わった場合だけ手動更新してください。モデルには設定済み Set を統合した 1 つの完全なカタログが表示されます。",
+      "telegramStickersDescription": "Sticker Set のメタデータは継続してキャッシュされます。追加・変更された Sticker はバックグラウンドで自動認識され、モデルには設定済み Set を統合したカタログが表示されます。",
       "telegramStickerSets": "Sticker Set リスト",
       "telegramStickerSetsDescription": "1～8 個の Sticker Set を設定できます。名前の並び替えではモデルカタログの安定 ID は変わりません。",
       "telegramStickerSetsPlaceholder": "Sticker Set 名を入力",
       "telegramStickerSetsSave": "リストを保存",
-      "telegramStickerSetsSaved": "Sticker Set リストを保存し、モデルのツールカタログを更新しました。",
+      "telegramStickerSetsSaved": "Sticker Set リストを保存しました。認識モデルが利用可能になると、未準備の Sticker はバックグラウンドで処理されます。",
       "telegramStickerSetsSaveFailed": "Sticker Set リストを保存できませんでした。",
       "telegramStickerSetsCount": "Sticker Set {count} 件",
       "telegramStickersUnknownSet": "Sticker Set",
       "telegramStickersReady": "{count} 件準備完了",
       "telegramStickersFailed": "{count} 件失敗",
-      "telegramStickersPending": "{count} 件処理中",
+      "telegramStickersPending": "{count} 件認識中",
       "telegramStickersLoadFailed": "Telegram Sticker Set を読み込めませんでした。",
       "telegramStickersEmpty": "設定された Set に利用可能な Sticker がありません。",
-      "telegramStickersNoDescription": "画像説明を待っています。",
+      "telegramStickersNoDescription": "バックグラウンドで認識しています。",
       "telegramStickersRetryRecognition": "認識を再試行",
       "telegramStickersRetrySuccess": "Sticker の画像認識が完了しました。",
       "telegramStickersRetryFailed": "Sticker の画像認識に失敗しました。",
@@ -2825,14 +2842,14 @@
       "telegramStickersRefreshFailed": "Sticker Set リストを更新できませんでした。",
       "telegramStickersStatusReady": "準備完了",
       "telegramStickersStatusFailed": "失敗",
-      "telegramStickersStatusPending": "処理中",
+      "telegramStickersStatusPending": "認識中",
       "telegramStickersVisionModel": "Sticker 認識モデル",
-      "telegramStickersVisionModelDescription": "既定では Bot の補助ビジョンモデルを継承し、別の有効なビジョンモデルも選択できます。切り替えても一括認識やモデル呼び出しは自動実行されません。",
+      "telegramStickersVisionModelDescription": "既定では Bot の補助ビジョンモデルを継承し、別の有効なビジョンモデルも選択できます。別のモデルを保存すると、Sticker はバックグラウンドで再認識されます。",
       "telegramStickersVisionModelInherit": "補助ビジョンモデルを継承",
       "telegramStickersVisionModelUnavailable": "利用可能なモデルが未設定です",
       "telegramStickersActiveVisionModel": "実際のモデル：{model}、Prompt バージョン：{prompt}",
       "telegramStickersSaveVisionModel": "モデルを保存",
-      "telegramStickersVisionModelSaved": "Sticker 認識モデルを保存しました。未準備の Sticker は手動で再試行できます。",
+      "telegramStickersVisionModelSaved": "Sticker 認識モデルを保存しました。モデルが利用可能になると、未準備の Sticker はバックグラウンドで処理されます。",
       "telegramStickersVisionModelSaveFailed": "Sticker 認識モデルを保存できませんでした。",
       "weixinQr": {
         "title": "QRコードログイン",

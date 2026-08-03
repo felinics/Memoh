@@ -207,7 +207,7 @@
                   {{ item.description || $t('bots.channels.telegramStickersNoDescription') }}
                 </p>
                 <Button
-                  v-if="item.status !== 'ready'"
+                  v-if="item.status === 'failed'"
                   variant="outline"
                   size="sm"
                   :loading="retryingIds.has(item.id)"
@@ -226,7 +226,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
@@ -261,6 +261,9 @@ const configuredSetNames = ref<string[]>([])
 const savedSetNames = ref<string[]>([])
 const retryingIds = reactive(new Set<string>())
 const queryCache = useQueryCache()
+const STICKER_STATUS_POLL_MS = 3000
+let recognitionPollTimer: ReturnType<typeof setInterval> | null = null
+let recognitionPollInFlight = false
 
 const { data: settings } = useQuery({
   key: () => ['bot-settings', props.botId],
@@ -357,6 +360,18 @@ watch(catalog, (value) => {
   if (!wasDirty) configuredSetNames.value = [...names]
 }, { immediate: true })
 
+watch(
+  [open, () => catalog.value?.pending_count ?? 0],
+  ([isOpen, pendingCount]) => {
+    stopRecognitionPolling()
+    if (!isOpen || pendingCount <= 0) return
+    recognitionPollTimer = setInterval(() => void pollRecognitionStatus(), STICKER_STATUS_POLL_MS)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(stopRecognitionPolling)
+
 function normalizeSetNames(values: string[]): string[] {
   const unique = new Map<string, string>()
   for (const value of values) {
@@ -376,6 +391,24 @@ function statusLabel(status?: string): string {
   if (status === 'ready') return t('bots.channels.telegramStickersStatusReady')
   if (status === 'failed') return t('bots.channels.telegramStickersStatusFailed')
   return t('bots.channels.telegramStickersStatusPending')
+}
+
+function stopRecognitionPolling() {
+  if (recognitionPollTimer === null) return
+  clearInterval(recognitionPollTimer)
+  recognitionPollTimer = null
+}
+
+async function pollRecognitionStatus() {
+  if (recognitionPollInFlight || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return
+  recognitionPollInFlight = true
+  try {
+    await refetch()
+  } catch {
+    // The query owns its error state; background polling stays silent.
+  } finally {
+    recognitionPollInFlight = false
+  }
 }
 
 async function retryRecognition(stickerId: string) {

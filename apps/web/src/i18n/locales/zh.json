@@ -2788,6 +2788,22 @@
       "advancedTitle": "高级设置",
       "expandAll": "展开全部",
       "collapse": "收起",
+      "fields": {
+        "telegram": {
+          "botToken": {
+            "title": "Bot Token",
+            "description": "由 @BotFather 为这个 Bot 签发的 Token。"
+          },
+          "apiBaseURL": {
+            "title": "API 基础地址",
+            "description": "Telegram Bot API 的反向代理地址。所在地区可正常访问 Telegram 时请保留默认值。"
+          },
+          "httpProxyUrl": {
+            "title": "HTTP 代理地址",
+            "description": "Telegram API 请求使用的可选出站 HTTP 代理，例如 http://user:pass@host:port。"
+          }
+        }
+      },
       "telegramDiscussTitle": "讨论参与策略",
       "telegramPassiveRate": "被动参与比例",
       "telegramPassiveRateDescription": "群聊消息未提及 Bot 时主动参与的概率，比例越高消耗的模型 Token 越多。",
@@ -2810,18 +2826,19 @@
       "telegramSkillsEnabledDescription": "暴露技能查询与启用工具，并在 system prompt 中写入可用技能索引。",
       "telegramToolsBulk": "可用工具",
       "telegramToolsDescription": "只有已开启的工具会在 Telegram 会话中暴露给模型；尚未配置的工具会自动隐藏。",
+      "telegramToolItemDescription": "允许模型在 Telegram 会话中使用“{tool}”工具。",
       "telegramToolsEnableAll": "全部开启",
       "telegramToolsDisableAll": "全部关闭",
       "telegramToolsEmpty": "当前没有可用工具",
       "telegramToolsEmptyDescription": "配置相应服务或能力后，其工具会自动出现在这里。",
       "telegramSendDisabledWarning": "当前已关闭 send。Discuss 模式仍会运行模型，但不会把普通输出或思考发送到 Telegram。",
       "telegramStickersTitle": "Telegram 贴纸",
-      "telegramStickersDescription": "每个贴纸包的元数据都会永久缓存；仅在贴纸包本身发生变化后手动刷新。模型看到的是所有已配置贴纸包合并后的一个完整目录。",
+      "telegramStickersDescription": "贴纸包元数据会持续缓存。新增或发生变化的贴纸会在后台自动识别，模型看到的是所有已配置贴纸包合并后的一个目录。",
       "telegramStickerSets": "贴纸包列表",
       "telegramStickerSetsDescription": "可配置 1 至 8 个 Sticker Set。名称排序不会改变模型目录中的稳定 ID。",
       "telegramStickerSetsPlaceholder": "输入 Sticker Set 名称后回车",
       "telegramStickerSetsSave": "保存列表",
-      "telegramStickerSetsSaved": "贴纸包列表已保存，模型工具目录已刷新。",
+      "telegramStickerSetsSaved": "贴纸包列表已保存。识别模型可用后，后台会自动处理未就绪贴纸。",
       "telegramStickerSetsSaveFailed": "保存贴纸包列表失败。",
       "telegramStickerSetsCount": "{count} 个贴纸包",
       "telegramStickersUnknownSet": "贴纸包",
@@ -2830,7 +2847,7 @@
       "telegramStickersPending": "{count} 张处理中",
       "telegramStickersLoadFailed": "无法加载 Telegram 贴纸包。",
       "telegramStickersEmpty": "已配置的贴纸包中没有可用贴纸。",
-      "telegramStickersNoDescription": "正在等待视觉描述。",
+      "telegramStickersNoDescription": "后台识别正在进行。",
       "telegramStickersRetryRecognition": "重试识别",
       "telegramStickersRetrySuccess": "贴纸视觉识别已完成。",
       "telegramStickersRetryFailed": "贴纸视觉识别失败。",
@@ -2841,12 +2858,12 @@
       "telegramStickersStatusFailed": "失败",
       "telegramStickersStatusPending": "处理中",
       "telegramStickersVisionModel": "贴纸识别模型",
-      "telegramStickersVisionModelDescription": "默认继承 Bot 的辅助视觉模型；也可以单独选择一个已启用的视觉模型。切换不会自动批量识别或产生模型调用。",
+      "telegramStickersVisionModelDescription": "默认继承 Bot 的辅助视觉模型；也可以单独选择一个已启用的视觉模型。保存不同模型后，贴纸会在后台重新识别。",
       "telegramStickersVisionModelInherit": "继承辅助视觉模型",
       "telegramStickersVisionModelUnavailable": "未配置可用模型",
       "telegramStickersActiveVisionModel": "当前实际模型：{model}；Prompt 版本：{prompt}",
       "telegramStickersSaveVisionModel": "保存模型",
-      "telegramStickersVisionModelSaved": "贴纸识别模型已保存。未就绪的贴纸可手动重试识别。",
+      "telegramStickersVisionModelSaved": "贴纸识别模型已保存。模型可用后，后台会自动处理未就绪贴纸。",
       "telegramStickersVisionModelSaveFailed": "保存贴纸识别模型失败。",
       "dangerZone": "危险操作",
       "deleteTitle": "删除平台",

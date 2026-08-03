@@ -8,13 +8,13 @@
         :for="fieldId"
         class="text-sm font-medium text-foreground"
       >
-        {{ field.title || fieldKey }}
+        {{ displayTitle }}
       </Label>
       <p
-        v-if="field.description"
+        v-if="displayDescription"
         class="mt-0.5 text-xs text-muted-foreground"
       >
-        {{ field.description }}
+        {{ displayDescription }}
       </p>
     </template>
 
@@ -33,8 +33,8 @@
             size="icon-xs"
             variant="quiet"
             :aria-label="revealed
-              ? t('bots.channels.hideSecretField', { field: field.title || fieldKey })
-              : t('bots.channels.showSecretField', { field: field.title || fieldKey })"
+              ? t('bots.channels.hideSecretField', { field: displayTitle })
+              : t('bots.channels.showSecretField', { field: displayTitle })"
             @click="revealed = !revealed"
           >
             <component :is="revealed ? EyeOff : Eye" />
@@ -55,13 +55,13 @@
       <Select
         v-else-if="field.type === 'enum' && field.enum"
         :model-value="String(modelValue ?? '')"
-        @update:model-value="(v: string) => emit('update:modelValue', v)"
+        @update:model-value="onEnum"
       >
         <SelectTrigger
           size="sm"
           class="w-full"
         >
-          <SelectValue :placeholder="field.title || fieldKey" />
+          <SelectValue :placeholder="displayTitle" />
         </SelectTrigger>
         <SelectContent class="w-[--reka-select-trigger-width]">
           <SelectItem
@@ -91,7 +91,7 @@
         type="text"
         :placeholder="placeholder"
         class="w-full"
-        @update:model-value="(v: string) => emit('update:modelValue', v)"
+        @update:model-value="onText"
       />
     </div>
   </SettingsRow>
@@ -113,6 +113,8 @@ const props = defineProps<{
   field: ChannelFieldSchema
   fieldKey: string
   modelValue: unknown
+  title?: string
+  description?: string
 }>()
 
 const emit = defineEmits<{
@@ -123,6 +125,8 @@ const { t } = useI18n()
 const revealed = ref(false)
 
 const fieldId = computed(() => `channel-field-${props.fieldKey}`)
+const displayTitle = computed(() => props.title?.trim() || props.field.title?.trim() || props.fieldKey)
+const displayDescription = computed(() => props.description?.trim() || props.field.description?.trim() || '')
 const placeholder = computed(() => (props.field.example != null ? String(props.field.example) : ''))
 const stringValue = computed(() => {
   const v = props.modelValue
@@ -137,5 +141,13 @@ function onNumber(v: string | number) {
   }
   const n = typeof v === 'number' ? v : Number(v)
   emit('update:modelValue', Number.isNaN(n) ? '' : n)
+}
+
+function onEnum(value: unknown) {
+  emit('update:modelValue', typeof value === 'string' ? value : String(value ?? ''))
+}
+
+function onText(value: string | number) {
+  emit('update:modelValue', String(value))
 }
 </script>

@@ -103,6 +103,7 @@ func provideProviderOAuthHandler(providersService *providers.Service, acpCodexOA
 }
 
 func provideMCPHandler(
+	lc fx.Lifecycle,
 	log *slog.Logger,
 	service *mcp.ConnectionService,
 	botService *bots.Service,
@@ -112,6 +113,7 @@ func provideMCPHandler(
 ) *handlers.MCPHandler {
 	handler := handlers.NewMCPHandler(log, service, botService, accountService, fedGateway)
 	handler.SetTelegramStickerVisionRecognizer(agentService)
+	lc.Append(fx.Hook{OnStop: handler.Close})
 	return handler
 }
 

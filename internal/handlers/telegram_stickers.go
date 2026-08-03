@@ -80,6 +80,8 @@ type telegramStickerRecognitionResult struct {
 	Model         string `json:"model"`
 	PromptVersion string `json:"prompt_version"`
 	Description   string `json:"description"`
+	Status        string `json:"status,omitempty"`
+	Attempts      int    `json:"attempts,omitempty"`
 }
 
 // ListTelegramStickers godoc
@@ -91,7 +93,7 @@ type telegramStickerRecognitionResult struct {
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/telegram/stickers [get].
 func (h *MCPHandler) ListTelegramStickers(c echo.Context) error {
-	botID, err := h.authorizeTelegramStickerRequest(c)
+	botID, channelIdentityID, err := h.authorizeTelegramStickerRequestIdentity(c)
 	if err != nil {
 		return err
 	}
@@ -103,6 +105,9 @@ func (h *MCPHandler) ListTelegramStickers(c echo.Context) error {
 	conn, endpoint, err := h.telegramStickerEndpoint(ctx, botID, "/api/catalog")
 	if err != nil {
 		return err
+	}
+	if err := h.configureTelegramStickerVisionProfile(ctx, conn, model, promptVersion); err != nil {
+		return h.stickerServiceError("configure recognition profile", err)
 	}
 	resp, err := h.doTelegramStickerRequest(ctx, conn, http.MethodGet, endpoint)
 	if err != nil {
@@ -123,6 +128,7 @@ func (h *MCPHandler) ListTelegramStickers(c echo.Context) error {
 	result.RecognitionModelID = model
 	result.RecognitionModelInherited = inherited
 	result.PromptVersion = promptVersion
+	h.enqueueTelegramStickerRecognition(result, botID, channelIdentityID, model, promptVersion)
 	return c.JSON(http.StatusOK, result)
 }
 
@@ -137,7 +143,7 @@ func (h *MCPHandler) ListTelegramStickers(c echo.Context) error {
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/telegram/stickers/sets [put].
 func (h *MCPHandler) UpdateTelegramStickerSets(c echo.Context) error {
-	botID, err := h.authorizeTelegramStickerRequest(c)
+	botID, channelIdentityID, err := h.authorizeTelegramStickerRequestIdentity(c)
 	if err != nil {
 		return err
 	}
@@ -160,23 +166,8 @@ func (h *MCPHandler) UpdateTelegramStickerSets(c echo.Context) error {
 	if profileErr != nil {
 		return h.stickerRecognitionError(profileErr)
 	}
-	if model != "" {
-		profileEndpoint, endpointErr := deriveStickerAPIEndpoint(rawURL, "/api/profile")
-		if endpointErr != nil {
-			return h.stickerServiceError("configure Sticker Sets", endpointErr)
-		}
-		payload, marshalErr := json.Marshal(map[string]string{"model": model, "prompt_version": promptVersion})
-		if marshalErr != nil {
-			return h.stickerServiceError("configure Sticker Sets", marshalErr)
-		}
-		profileResp, requestErr := h.doTelegramStickerJSONRequest(ctx, candidate, http.MethodPost, profileEndpoint, payload)
-		if requestErr != nil {
-			return h.stickerServiceError("configure Sticker Sets", requestErr)
-		}
-		_ = profileResp.Body.Close()
-		if profileResp.StatusCode < http.StatusOK || profileResp.StatusCode >= http.StatusMultipleChoices {
-			return h.stickerServiceError("configure Sticker Sets", fmt.Errorf("profile status %d", profileResp.StatusCode))
-		}
+	if err := h.configureTelegramStickerVisionProfile(ctx, candidate, model, promptVersion); err != nil {
+		return h.stickerServiceError("configure Sticker Sets", err)
 	}
 
 	// Validate and load every Set before replacing the persisted connection.
@@ -214,6 +205,7 @@ func (h *MCPHandler) UpdateTelegramStickerSets(c echo.Context) error {
 	result.RecognitionModelInherited = inherited
 	result.PromptVersion = promptVersion
 	normalizeTelegramStickerCatalog(&result)
+	h.enqueueTelegramStickerRecognition(result, botID, channelIdentityID, model, promptVersion)
 	return c.JSON(http.StatusOK, result)
 }
 
@@ -301,19 +293,27 @@ func normalizeTelegramStickerCatalog(result *TelegramStickerCatalog) {
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/telegram/stickers/refresh [post].
 func (h *MCPHandler) RefreshTelegramStickerSet(c echo.Context) error {
-	botID, err := h.authorizeTelegramStickerRequest(c)
+	botID, channelIdentityID, err := h.authorizeTelegramStickerRequestIdentity(c)
 	if err != nil {
 		return err
 	}
+	ctx := c.Request().Context()
+	model, promptVersion, inherited, err := h.telegramStickerVisionProfile(ctx, botID)
+	if err != nil {
+		return h.stickerRecognitionError(err)
+	}
 	conn, endpoint, err := h.telegramStickerEndpoint(
-		c.Request().Context(),
+		ctx,
 		botID,
 		"/api/catalog/refresh",
 	)
 	if err != nil {
 		return err
 	}
-	resp, err := h.doTelegramStickerRequest(c.Request().Context(), conn, http.MethodPost, endpoint)
+	if err := h.configureTelegramStickerVisionProfile(ctx, conn, model, promptVersion); err != nil {
+		return h.stickerServiceError("configure recognition profile", err)
+	}
+	resp, err := h.doTelegramStickerRequest(ctx, conn, http.MethodPost, endpoint)
 	if err != nil {
 		return h.stickerServiceError("refresh", err)
 	}
@@ -329,6 +329,10 @@ func (h *MCPHandler) RefreshTelegramStickerSet(c echo.Context) error {
 		result.Stickers = []TelegramStickerCatalogEntry{}
 	}
 	normalizeTelegramStickerCatalog(&result)
+	result.RecognitionModelID = model
+	result.RecognitionModelInherited = inherited
+	result.PromptVersion = promptVersion
+	h.enqueueTelegramStickerRecognition(result, botID, channelIdentityID, model, promptVersion)
 	return c.JSON(http.StatusOK, result)
 }
 
@@ -399,7 +403,7 @@ func (h *MCPHandler) PreviewTelegramSticker(c echo.Context) error {
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/telegram/stickers/{sticker_id}/retry [post].
 func (h *MCPHandler) RetryTelegramStickerRecognition(c echo.Context) error {
-	botID, userID, err := h.authorizeTelegramStickerRequestIdentity(c)
+	botID, channelIdentityID, err := h.authorizeTelegramStickerRequestIdentity(c)
 	if err != nil {
 		return err
 	}
@@ -408,70 +412,106 @@ func (h *MCPHandler) RetryTelegramStickerRecognition(c echo.Context) error {
 		return apperror.New(apperror.CodeStickerNotFound, nil)
 	}
 	ctx := c.Request().Context()
-	conn, previewEndpoint, err := h.telegramStickerEndpoint(
-		ctx,
-		botID,
-		"/api/stickers/"+url.PathEscape(stickerID)+"/preview",
-	)
-	if err != nil {
-		return err
-	}
-	preview, err := h.doTelegramStickerRequest(ctx, conn, http.MethodGet, previewEndpoint)
+	model, promptVersion, _, err := h.telegramStickerVisionProfile(ctx, botID)
 	if err != nil {
 		return h.stickerRecognitionError(err)
 	}
+	result, err := h.recognizeTelegramSticker(ctx, telegramStickerRecognitionTask{
+		BotID: botID, ChannelIdentityID: channelIdentityID, StickerID: stickerID,
+		Model: model, PromptVersion: promptVersion,
+	})
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func (h *MCPHandler) recognizeTelegramSticker(
+	ctx context.Context,
+	task telegramStickerRecognitionTask,
+) (TelegramStickerCatalogEntry, error) {
+	conn, previewEndpoint, err := h.telegramStickerEndpoint(
+		ctx, task.BotID, "/api/stickers/"+url.PathEscape(task.StickerID)+"/preview",
+	)
+	if err != nil {
+		return TelegramStickerCatalogEntry{}, err
+	}
+	failed := func(cause error, model, promptVersion string) (TelegramStickerCatalogEntry, error) {
+		if storeErr := h.storeTelegramStickerRecognitionFailure(
+			ctx, conn, task.StickerID, model, promptVersion,
+		); storeErr != nil && h.logger != nil {
+			h.logger.Warn("Telegram sticker recognition failure status could not be stored",
+				slog.String("bot_id", task.BotID),
+				slog.String("sticker_id", task.StickerID),
+				slog.Any("error", storeErr),
+			)
+		}
+		return TelegramStickerCatalogEntry{}, h.stickerRecognitionError(cause)
+	}
+
+	preview, err := h.doTelegramStickerRequest(ctx, conn, http.MethodGet, previewEndpoint)
+	if err != nil {
+		return failed(err, task.Model, task.PromptVersion)
+	}
 	defer func() { _ = preview.Body.Close() }()
 	if preview.StatusCode == http.StatusNotFound {
-		return apperror.New(apperror.CodeStickerNotFound, nil)
+		return TelegramStickerCatalogEntry{}, apperror.New(apperror.CodeStickerNotFound, nil)
 	}
 	if preview.StatusCode < http.StatusOK || preview.StatusCode >= http.StatusMultipleChoices {
-		return h.stickerRecognitionError(fmt.Errorf("preview status %d", preview.StatusCode))
+		return failed(fmt.Errorf("preview status %d", preview.StatusCode), task.Model, task.PromptVersion)
 	}
 	data, err := io.ReadAll(io.LimitReader(preview.Body, maxStickerPreviewBytes+1))
 	if err != nil || len(data) == 0 || len(data) > maxStickerPreviewBytes {
-		return h.stickerRecognitionError(errors.New("invalid Sticker preview"))
+		return failed(errors.New("invalid Sticker preview"), task.Model, task.PromptVersion)
 	}
 	mediaType := strings.TrimSpace(strings.Split(preview.Header.Get("Content-Type"), ";")[0])
 	if mediaType == "" || mediaType == "application/octet-stream" {
 		mediaType = http.DetectContentType(data)
 	}
 	if h.stickerVision == nil {
-		return h.stickerRecognitionError(errors.New("sticker vision recognizer is unavailable"))
+		return failed(errors.New("sticker vision recognizer is unavailable"), task.Model, task.PromptVersion)
 	}
 	description, model, promptVersion, err := h.stickerVision.RecognizeTelegramSticker(
-		ctx, botID, userID, mediaType, data,
+		ctx, task.BotID, task.ChannelIdentityID, mediaType, data,
 	)
 	if err != nil {
-		return h.stickerRecognitionError(err)
+		if strings.TrimSpace(model) == "" {
+			model = task.Model
+		}
+		if strings.TrimSpace(promptVersion) == "" {
+			promptVersion = task.PromptVersion
+		}
+		return failed(err, model, promptVersion)
 	}
 	payload, err := json.Marshal(telegramStickerRecognitionResult{
 		Model: model, PromptVersion: promptVersion, Description: description,
+		Status: "ready", Attempts: 1,
 	})
 	if err != nil {
-		return h.stickerRecognitionError(err)
+		return failed(err, model, promptVersion)
 	}
-	_, recognitionEndpoint, err := h.telegramStickerEndpoint(
-		ctx, botID, "/api/stickers/"+url.PathEscape(stickerID)+"/recognition",
+	recognitionEndpoint, err := telegramStickerAPIEndpoint(
+		conn, "/api/stickers/"+url.PathEscape(task.StickerID)+"/recognition",
 	)
 	if err != nil {
-		return err
+		return failed(err, model, promptVersion)
 	}
 	resp, err := h.doTelegramStickerJSONRequest(ctx, conn, http.MethodPost, recognitionEndpoint, payload)
 	if err != nil {
-		return h.stickerRecognitionError(err)
+		return failed(err, model, promptVersion)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
-		return apperror.New(apperror.CodeStickerNotFound, nil)
+		return TelegramStickerCatalogEntry{}, apperror.New(apperror.CodeStickerNotFound, nil)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return h.stickerRecognitionError(fmt.Errorf("store status %d", resp.StatusCode))
+		return failed(fmt.Errorf("store status %d", resp.StatusCode), model, promptVersion)
 	}
 	var result TelegramStickerCatalogEntry
 	if err := decodeBoundedJSON(resp.Body, maxStickerCatalogBytes, &result); err != nil {
-		return h.stickerRecognitionError(err)
+		return failed(err, model, promptVersion)
 	}
-	return c.JSON(http.StatusOK, result)
+	return result, nil
 }
 
 func (h *MCPHandler) authorizeTelegramStickerRequest(c echo.Context) (string, error) {
@@ -499,6 +539,108 @@ func (h *MCPHandler) telegramStickerVisionProfile(ctx context.Context, botID str
 		return "", "", true, nil
 	}
 	return h.stickerVision.TelegramStickerVisionConfig(ctx, botID)
+}
+
+func (h *MCPHandler) configureTelegramStickerVisionProfile(
+	ctx context.Context,
+	conn mcp.Connection,
+	model, promptVersion string,
+) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil
+	}
+	endpoint, err := telegramStickerAPIEndpoint(conn, "/api/profile")
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]string{
+		"model": model, "prompt_version": strings.TrimSpace(promptVersion),
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := h.doTelegramStickerJSONRequest(ctx, conn, http.MethodPost, endpoint, payload)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("profile status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (h *MCPHandler) storeTelegramStickerRecognitionFailure(
+	ctx context.Context,
+	conn mcp.Connection,
+	stickerID, model, promptVersion string,
+) error {
+	model = strings.TrimSpace(model)
+	promptVersion = strings.TrimSpace(promptVersion)
+	if model == "" || promptVersion == "" {
+		return nil
+	}
+	endpoint, err := telegramStickerAPIEndpoint(
+		conn, "/api/stickers/"+url.PathEscape(stickerID)+"/recognition",
+	)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(telegramStickerRecognitionResult{
+		Model: model, PromptVersion: promptVersion, Status: "failed", Attempts: 1,
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := h.doTelegramStickerJSONRequest(ctx, conn, http.MethodPost, endpoint, payload)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("store failure status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (h *MCPHandler) enqueueTelegramStickerRecognition(
+	catalog TelegramStickerCatalog,
+	botID, channelIdentityID, model, promptVersion string,
+) {
+	if h == nil || h.stickerRecognition == nil {
+		return
+	}
+	tasks := pendingTelegramStickerRecognitionTasks(
+		catalog, botID, channelIdentityID, model, promptVersion,
+	)
+	if count := h.stickerRecognition.Enqueue(tasks); count > 0 && h.logger != nil {
+		h.logger.Info("Telegram sticker background recognition queued",
+			slog.String("bot_id", botID),
+			slog.Int("sticker_count", count),
+		)
+	}
+}
+
+func (h *MCPHandler) refreshTelegramStickerToolSchema(ctx context.Context, botID string) error {
+	if h == nil || h.fedGateway == nil || h.service == nil {
+		return nil
+	}
+	conn, _, err := h.telegramStickerEndpoint(ctx, botID, "/api/catalog")
+	if err != nil {
+		return err
+	}
+	tools, err := h.fedGateway.ListHTTPConnectionTools(ctx, conn)
+	if err != nil {
+		_ = h.service.UpdateProbeResult(ctx, botID, conn.ID, "error", []mcp.ToolDescriptor{}, err.Error())
+		return err
+	}
+	return h.service.UpdateProbeResult(ctx, botID, conn.ID, "connected", tools, "")
+}
+
+func telegramStickerAPIEndpoint(conn mcp.Connection, apiPath string) (string, error) {
+	rawURL, _ := conn.Config["url"].(string)
+	return deriveStickerAPIEndpoint(rawURL, apiPath)
 }
 
 func (h *MCPHandler) telegramStickerEndpoint(ctx context.Context, botID, apiPath string) (mcp.Connection, string, error) {
@@ -594,7 +736,7 @@ func (h *MCPHandler) stickerServiceError(operation string, cause error) error {
 
 func (h *MCPHandler) stickerRecognitionError(cause error) error {
 	if h.logger != nil {
-		h.logger.Warn("Telegram sticker recognition retry failed", slog.Any("error", cause))
+		h.logger.Warn("Telegram sticker recognition failed", slog.Any("error", cause))
 	}
 	return apperror.Wrap(apperror.CodeStickerRecognitionFailed, cause, nil)
 }

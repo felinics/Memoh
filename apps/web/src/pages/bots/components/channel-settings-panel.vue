@@ -136,6 +136,8 @@
           v-model="form.credentials[key]"
           :field="getOrderedField(key)"
           :field-key="key"
+          :title="localizedFieldTitle(key)"
+          :description="localizedFieldDescription(key)"
         />
       </SettingsSection>
 
@@ -165,6 +167,8 @@
               v-model="form.credentials[key]"
               :field="getOrderedField(key)"
               :field-key="key"
+              :title="localizedFieldTitle(key)"
+              :description="localizedFieldDescription(key)"
             />
           </DialogBody>
         </DialogPanel>
@@ -335,13 +339,13 @@
           <SettingsRow
             v-for="tool in telegramTools"
             :key="tool.name"
-            :label="tool.name"
-            :description="tool.description"
+            :label="telegramToolLabel(tool.name)"
+            :description="telegramToolDescription(tool.name)"
           >
             <Switch
               :model-value="isTelegramToolEnabled(tool.name)"
               :disabled="!telegramPolicyLoaded || isBusy || !telegramToolCallsEnabled"
-              :aria-label="tool.name"
+              :aria-label="telegramToolLabel(tool.name)"
               @update:model-value="(enabled) => setTelegramToolEnabled(tool.name, !!enabled)"
             />
           </SettingsRow>
@@ -436,7 +440,7 @@ const emit = defineEmits<{
   'update:dirty': [isDirty: boolean]
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const botIdRef = computed(() => props.botId)
 const platformType = computed(() => String(props.channelItem.meta.type || '').trim())
 const channelTitle = computed(() => channelTypeDisplayName(t, props.channelItem.meta.type, props.channelItem.meta.display_name))
@@ -454,6 +458,9 @@ const TELEGRAM_MESSAGE_METADATA_MODE_KEY = 'telegram_message_metadata_mode'
 const DEFAULT_TELEGRAM_PASSIVE_RATE = 0.25
 const DEFAULT_TELEGRAM_MESSAGE_METADATA_MODE = 'compact'
 const EMPTY_CHANNEL_FIELD: ChannelFieldSchema = {}
+const PARAMETERIZED_TELEGRAM_TOOL_LABELS = new Set([
+  'browser_action', 'browser_observe', 'browser_remote_session', 'computer_action', 'computer_observe',
+])
 
 const { data: bot } = useQuery({
   key: () => ['bot', botIdRef.value],
@@ -517,6 +524,15 @@ const telegramTools = computed<Array<Required<Pick<HandlersToolCatalogItem, 'nam
   return tools
 })
 
+function telegramToolLabel(name: string): string {
+  const translationKey = `chat.tools.${name}`
+  return te(translationKey) && !PARAMETERIZED_TELEGRAM_TOOL_LABELS.has(name) ? t(translationKey) : name
+}
+
+function telegramToolDescription(name: string): string {
+  return t('bots.channels.telegramToolItemDescription', { tool: telegramToolLabel(name) })
+}
+
 const { mutateAsync: upsertChannel } = useMutation({
   mutation: async ({ platform, data }: { platform: string; data: ChannelUpsertConfigRequest }) => {
     const { data: result } = await putBotsByIdChannelByPlatform({ path: { id: botIdRef.value, platform }, body: data, throwOnError: true })
@@ -554,6 +570,21 @@ const optionalFieldsKeys = computed(() => Object.keys(orderedFields.value).filte
 
 function getOrderedField(key: string): ChannelFieldSchema {
   return orderedFields.value[key] ?? EMPTY_CHANNEL_FIELD
+}
+
+function localizedFieldText(key: string, part: 'title' | 'description'): string {
+  const translationKey = `bots.channels.fields.${platformType.value}.${key}.${part}`
+  if (te(translationKey)) return t(translationKey)
+  const field = getOrderedField(key)
+  return part === 'title' ? field.title?.trim() || key : field.description?.trim() || ''
+}
+
+function localizedFieldTitle(key: string): string {
+  return localizedFieldText(key, 'title')
+}
+
+function localizedFieldDescription(key: string): string {
+  return localizedFieldText(key, 'description')
 }
 
 const currentInboundMode = computed(() => String(form.credentials.inboundMode ?? form.credentials.inbound_mode ?? '').trim().toLowerCase())
@@ -769,7 +800,7 @@ function validateRequired(): boolean {
   for (const key of requiredFieldsKeys.value) {
     const val = form.credentials[key]
     if (!val || (typeof val === 'string' && val.trim() === '')) {
-      toast.error(t('bots.channels.requiredField', { field: orderedFields.value[key]?.title || key }))
+      toast.error(t('bots.channels.requiredField', { field: localizedFieldTitle(key) }))
       return false
     }
   }

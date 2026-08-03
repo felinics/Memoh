@@ -356,6 +356,42 @@ func TestExternalDescriptionProfileSwitchesCacheWithoutAutomaticRecognition(t *t
 	}
 }
 
+func TestExternalRecognitionFailureIsStoredForManualRetry(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeTelegramAPI{
+		set: telegramStickerSet{Name: "set", Stickers: []telegramSticker{{
+			FileID: "f1", FileUniqueID: "u1", Emoji: "👋",
+		}}},
+		media: map[string][]byte{"u1": []byte("image")},
+	}
+	describer := &fakeStickerDescriber{}
+	catalog, cache := newTestCatalog(t, filepath.Join(t.TempDir(), "cache.sqlite"), describer)
+	defer func() { _ = cache.Close() }()
+	service, err := newStickerService(api, "set", catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stickerID := candidateID("u1")
+	entry, err := service.StoreRecognition(
+		context.Background(), stickerID, "web-model", "web-prompt-v1",
+		descriptionStatusFailed, "private provider error", 3,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Status != descriptionStatusFailed || entry.Description != "" || entry.Attempts != 3 {
+		t.Fatalf("stored failure = %#v", entry)
+	}
+	view, err := service.Catalog(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.FailedCount != 1 || view.PendingCount != 0 || view.Stickers[0].Status != descriptionStatusFailed {
+		t.Fatalf("failure catalog = %#v", view)
+	}
+}
+
 func TestStickerSetMetadataCacheIsPermanentAcrossServiceRestarts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.sqlite")
 	firstAPI := &fakeTelegramAPI{set: telegramStickerSet{

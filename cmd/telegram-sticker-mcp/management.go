@@ -141,12 +141,24 @@ func (s *stickerService) StoreDescription(
 	ctx context.Context,
 	stickerID, model, promptVersion, description string,
 ) (stickerCatalogEntry, error) {
+	return s.StoreRecognition(
+		ctx, stickerID, model, promptVersion, descriptionStatusReady, description, 1,
+	)
+}
+
+func (s *stickerService) StoreRecognition(
+	ctx context.Context,
+	stickerID, model, promptVersion, status, description string,
+	attempts int,
+) (stickerCatalogEntry, error) {
 	if len(s.sets) > 0 {
 		set, localID, err := s.collectionSticker(stickerID)
 		if err != nil {
 			return stickerCatalogEntry{}, err
 		}
-		entry, err := set.StoreDescription(ctx, localID, model, promptVersion, description)
+		entry, err := set.StoreRecognition(
+			ctx, localID, model, promptVersion, status, description, attempts,
+		)
 		entry.ID = collectionStickerID(set.setName, entry.ID)
 		return entry, err
 	}
@@ -156,14 +168,24 @@ func (s *stickerService) StoreDescription(
 	}
 	model = strings.TrimSpace(model)
 	promptVersion = strings.TrimSpace(promptVersion)
+	status = strings.ToLower(strings.TrimSpace(status))
 	description = normalizeStickerDescription(description)
-	if model == "" || promptVersion == "" || description == "" {
-		return stickerCatalogEntry{}, errors.New("model, prompt_version and description are required")
+	if model == "" || promptVersion == "" {
+		return stickerCatalogEntry{}, errors.New("model and prompt_version are required")
+	}
+	if status != descriptionStatusReady && status != descriptionStatusFailed {
+		return stickerCatalogEntry{}, errors.New("recognition status must be ready or failed")
+	}
+	if status == descriptionStatusReady && description == "" {
+		return stickerCatalogEntry{}, errors.New("description is required for ready recognition")
+	}
+	if status == descriptionStatusFailed {
+		description = ""
 	}
 	if err := s.catalog.cache.Put(ctx, sticker.FileUniqueID, model, promptVersion, cachedStickerDescription{
 		Description: description,
-		Status:      descriptionStatusReady,
-		Attempts:    1,
+		Status:      status,
+		Attempts:    max(attempts, 1),
 	}); err != nil {
 		return stickerCatalogEntry{}, err
 	}
@@ -172,7 +194,7 @@ func (s *stickerService) StoreDescription(
 	}
 	return stickerCatalogEntry{
 		ID: normalizeStickerID(stickerID), Emoji: strings.TrimSpace(sticker.Emoji),
-		Description: description, Status: descriptionStatusReady, Attempts: 1,
+		Description: description, Status: status, Attempts: max(attempts, 1),
 	}, nil
 }
 

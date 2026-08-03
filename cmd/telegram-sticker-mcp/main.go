@@ -415,13 +415,20 @@ func stickerManagementHandler(provider *stickerServiceProvider) http.Handler {
 				Model         string `json:"model"`
 				PromptVersion string `json:"prompt_version"`
 				Description   string `json:"description"`
+				Status        string `json:"status"`
+				Attempts      int    `json:"attempts"`
 			}
 			if decodeErr := decodeManagementJSON(req, &input); decodeErr != nil {
 				http.Error(w, "invalid Sticker recognition result", http.StatusBadRequest)
 				return
 			}
-			entry, storeErr := service.StoreDescription(
-				req.Context(), stickerID, input.Model, input.PromptVersion, input.Description,
+			status := strings.TrimSpace(input.Status)
+			if status == "" {
+				status = descriptionStatusReady
+			}
+			entry, storeErr := service.StoreRecognition(
+				req.Context(), stickerID, input.Model, input.PromptVersion,
+				status, input.Description, input.Attempts,
 			)
 			if storeErr != nil {
 				http.Error(w, "sticker recognition result could not be stored", http.StatusBadRequest)

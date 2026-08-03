@@ -18,12 +18,13 @@ import (
 )
 
 type MCPHandler struct {
-	service        *mcp.ConnectionService
-	botService     *bots.Service
-	accountService *accounts.Service
-	fedGateway     *MCPFederationGateway
-	logger         *slog.Logger
-	stickerVision  TelegramStickerVisionRecognizer
+	service            *mcp.ConnectionService
+	botService         *bots.Service
+	accountService     *accounts.Service
+	fedGateway         *MCPFederationGateway
+	logger             *slog.Logger
+	stickerVision      TelegramStickerVisionRecognizer
+	stickerRecognition *telegramStickerRecognitionQueue
 }
 
 // TelegramStickerVisionRecognizer keeps the HTTP handler independent from the
@@ -35,19 +36,37 @@ type TelegramStickerVisionRecognizer interface {
 }
 
 func NewMCPHandler(log *slog.Logger, service *mcp.ConnectionService, botService *bots.Service, accountService *accounts.Service, fedGateway *MCPFederationGateway) *MCPHandler {
-	return &MCPHandler{
+	handler := &MCPHandler{
 		service:        service,
 		botService:     botService,
 		accountService: accountService,
 		fedGateway:     fedGateway,
 		logger:         log.With(slog.String("handler", "mcp")),
 	}
+	handler.stickerRecognition = newTelegramStickerRecognitionQueue(
+		handler.logger,
+		telegramStickerRecognitionWorkerCount,
+		func(ctx context.Context, task telegramStickerRecognitionTask) error {
+			_, err := handler.recognizeTelegramSticker(ctx, task)
+			return err
+		},
+		handler.refreshTelegramStickerToolSchema,
+	)
+	return handler
 }
 
 func (h *MCPHandler) SetTelegramStickerVisionRecognizer(recognizer TelegramStickerVisionRecognizer) {
 	if h != nil {
 		h.stickerVision = recognizer
 	}
+}
+
+// Close stops background Sticker recognition workers.
+func (h *MCPHandler) Close(ctx context.Context) error {
+	if h == nil || h.stickerRecognition == nil {
+		return nil
+	}
+	return h.stickerRecognition.Close(ctx)
 }
 
 func (h *MCPHandler) Register(e *echo.Echo) {
