@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,16 +14,16 @@ import (
 
 type recordingStepPersister struct {
 	*recordingMessageService
-	steps []messagepkg.AgentStepCommit
+	steps []messagepkg.AgentStep
 }
 
-func (s *recordingStepPersister) PersistAgentStep(_ context.Context, step messagepkg.AgentStepCommit) ([]messagepkg.Message, bool, error) {
+func (s *recordingStepPersister) PersistAgentStep(_ context.Context, step messagepkg.AgentStep) ([]messagepkg.Message, error) {
 	s.steps = append(s.steps, step)
 	result := make([]messagepkg.Message, len(step.Messages))
 	for i, input := range step.Messages {
-		result[i] = messagepkg.Message{ID: fmt.Sprintf("step-%d-%d", step.StepIndex, i), Role: input.Role}
+		result[i] = messagepkg.Message{ID: "committed", Role: input.Role}
 	}
-	return result, true, nil
+	return result, nil
 }
 
 func TestAgentStepCommitterPersistsOnlyStepDelta(t *testing.T) {
@@ -46,7 +45,7 @@ func TestAgentStepCommitterPersistsOnlyStepDelta(t *testing.T) {
 	if len(store.steps) != 2 || len(store.steps[0].Messages) != 2 || len(store.steps[1].Messages) != 1 {
 		t.Fatalf("step message counts = %#v, want [user+assistant, assistant]", store.steps)
 	}
-	if got := store.steps[1].Messages[0].TurnRequestMessageID; got != "step-0-0" {
+	if got := store.steps[1].Messages[0].TurnRequestMessageID; got != "committed" {
 		t.Fatalf("second step request message = %q, want first committed user", got)
 	}
 }

@@ -179,7 +179,7 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	}
 }
 
-func TestPostgresAgentStepCommitIsIdempotentAndStopsAfterAbort(t *testing.T) {
+func TestPostgresAgentStepCommitStopsAfterAbort(t *testing.T) {
 	ctx := context.Background()
 	pool := openRuntimeFencePostgresPool(t, ctx)
 	botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
@@ -195,29 +195,25 @@ func TestPostgresAgentStepCommitIsIdempotentAndStopsAfterAbort(t *testing.T) {
 		t.Fatalf("create running session run: %v", err)
 	}
 	position := int64(0)
-	step := AgentStepCommit{RunID: runID.String(), StepIndex: 0, Messages: []PersistInput{
+	step := AgentStep{RunID: runID.String(), Messages: []PersistInput{
 		{BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), TurnID: turnID.String(), TurnPosition: &position, Role: "user", Content: []byte(`{"role":"user","content":"hello"}`)},
 		{BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), Role: "assistant", Content: []byte(`{"role":"assistant","content":"done"}`)},
 	}}
 	service := NewService(nil, postgresstore.NewQueriesWithPool(pool, queries))
 	owner := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: botID.String(), SessionID: sessionID.String(), Token: token})
-	persisted, committed, err := service.PersistAgentStep(owner, step)
-	if err != nil || !committed || len(persisted) != 2 {
-		t.Fatalf("first step commit = (%d, %v, %v), want (2, true, nil)", len(persisted), committed, err)
-	}
-	if duplicate, committed, err := service.PersistAgentStep(owner, step); err != nil || committed || len(duplicate) != 0 {
-		t.Fatalf("duplicate step commit = (%d, %v, %v), want (0, false, nil)", len(duplicate), committed, err)
+	persisted, err := service.PersistAgentStep(owner, step)
+	if err != nil || len(persisted) != 2 {
+		t.Fatalf("first step commit = (%d, %v), want (2, nil)", len(persisted), err)
 	}
 	pgRunID, _ := dbpkg.ParseUUID(runID.String())
 	if _, err := queries.RequestSessionRunAbort(ctx, pgRunID); err != nil {
 		t.Fatalf("request abort: %v", err)
 	}
-	step.StepIndex = 1
 	step.Messages = []PersistInput{{
 		BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), Role: "assistant",
 		Content: []byte(`{"role":"assistant","content":"too late"}`), TurnRequestMessageID: persisted[0].ID,
 	}}
-	if _, _, err := service.PersistAgentStep(owner, step); !errors.Is(err, ErrAgentStepNotWritable) {
+	if _, err := service.PersistAgentStep(owner, step); !errors.Is(err, ErrAgentStepNotWritable) {
 		t.Fatalf("post-abort step error = %v, want ErrAgentStepNotWritable", err)
 	}
 }

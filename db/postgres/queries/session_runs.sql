@@ -204,19 +204,6 @@ WHERE team_id = public.memoh_current_team_id()
   AND abort_requested_at IS NULL
 FOR UPDATE;
 
--- name: CreateAgentStepCommit :one
-INSERT INTO agent_step_commits (run_id, step_index, message_count)
-VALUES (sqlc.arg(run_id), sqlc.arg(step_index), sqlc.arg(message_count))
-ON CONFLICT (team_id, run_id, step_index) DO NOTHING
-RETURNING *;
-
--- name: GetAgentStepCommit :one
-SELECT *
-FROM agent_step_commits
-WHERE team_id = public.memoh_current_team_id()
-  AND run_id = sqlc.arg(run_id)
-  AND step_index = sqlc.arg(step_index);
-
 -- name: ListStaleGenerationSessionRuns :many
 -- Fail-closed recovery sweep. Matching on "not the current generation" rather
 -- than one specific old value means a backend lost twice in quick succession

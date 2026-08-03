@@ -8,14 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type AgentStepCommit struct {
-	TeamID       pgtype.UUID        `json:"team_id"`
-	RunID        pgtype.UUID        `json:"run_id"`
-	StepIndex    int64              `json:"step_index"`
-	MessageCount int32              `json:"message_count"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-}
-
 type Bot struct {
 	ID                      pgtype.UUID        `json:"id"`
 	OwnerUserID             pgtype.UUID        `json:"owner_user_id"`

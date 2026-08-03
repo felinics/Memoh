@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -25,6 +26,7 @@ type agentStepCommitter struct {
 	turnRequestMessageID string
 	persisted            []messagepkg.Message
 	messages             []ModelMessage
+	nextStep             int // In-process ordering guard, not a durable replay cursor.
 	commitErr            error
 	finalized            bool
 }
@@ -62,15 +64,21 @@ func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, step *sd
 		return errors.New("complete agent step is missing")
 	}
 	messages := sdkMessagesToModelMessages(step.Messages)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if stepIndex != c.nextStep {
+		err := fmt.Errorf("unexpected agent step %d, want %d", stepIndex, c.nextStep)
+		c.commitErr = err
+		return err
+	}
 	if !hasPersistableAssistantOutput(messages) {
+		c.nextStep++
 		return nil
 	}
 	if stepIndex == 0 && !c.req.UserMessagePersisted {
 		messages = prependTurnUserMessage(c.req, messages)
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	storeReq := c.req
 	// Outbound assets are linked once after the stream closes; including the
 	// collector in every step would attach the same accumulated assets again.
@@ -85,16 +93,14 @@ func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, step *sd
 	for i := range inputs {
 		inputs[i].TurnRequestMessageID = c.turnRequestMessageID
 	}
-	persisted, committed, err := c.persister.PersistAgentStep(context.WithoutCancel(ctx), messagepkg.AgentStepCommit{
-		RunID: c.req.RunID, StepIndex: stepIndex, Messages: inputs,
+	persisted, err := c.persister.PersistAgentStep(context.WithoutCancel(ctx), messagepkg.AgentStep{
+		RunID: c.req.RunID, Messages: inputs,
 	})
 	if err != nil {
 		c.commitErr = err
 		return err
 	}
-	if !committed {
-		return err
-	}
+	c.nextStep++
 	for _, message := range persisted {
 		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
 			c.turnRequestMessageID = message.ID

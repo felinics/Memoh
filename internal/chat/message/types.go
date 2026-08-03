@@ -144,17 +144,14 @@ type AtomicRoundPersister interface {
 	PersistRound(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions) ([]Message, bool, error)
 }
 
-// AgentStepCommit is one complete native-agent step. Implementations commit
-// the marker and Messages atomically; Committed=false means the same step was
-// already accepted by an earlier callback.
-type AgentStepCommit struct {
-	RunID     string
-	StepIndex int
-	Messages  []PersistInput
+// AgentStep is one complete native-agent step persisted atomically.
+type AgentStep struct {
+	RunID    string
+	Messages []PersistInput
 }
 
 type AgentStepPersister interface {
-	PersistAgentStep(ctx context.Context, step AgentStepCommit) (messages []Message, committed bool, err error)
+	PersistAgentStep(ctx context.Context, step AgentStep) ([]Message, error)
 }
 
 // Service defines message read/write behavior.
