@@ -183,6 +183,51 @@ func TestMergedTelegramSendDeliveryMatrix(t *testing.T) {
 	}
 }
 
+func TestMergedTelegramSendDoesNotHideInvalidStringMessageBehindSticker(t *testing.T) {
+	t.Parallel()
+	nativeCalls := 0
+	stickerCalls := 0
+	tools := mergeTelegramStickerSendTools(agenttools.SessionContext{
+		CurrentPlatform: "telegram", ReplyTarget: "chat-1",
+	}, []sdk.Tool{
+		{
+			Name: "send", Parameters: map[string]any{"properties": map[string]any{}},
+			Execute: func(*sdk.ToolExecContext, any) (any, error) {
+				nativeCalls++
+				return map[string]any{
+					"ok":         false,
+					"error_code": "message_send_failed",
+				}, nil
+			},
+		},
+		{
+			Name: "send_telegram_sticker",
+			Parameters: map[string]any{"properties": map[string]any{
+				"sticker_id": map[string]any{"type": "string", "enum": []any{"S001"}},
+			}},
+			Execute: func(*sdk.ToolExecContext, any) (any, error) {
+				stickerCalls++
+				return map[string]any{"ok": true}, nil
+			},
+		},
+	})
+
+	output, err := tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
+		"message":    `{"format":"markdown", text:"hello"}`,
+		"sticker_id": "S001",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nativeCalls != 1 || stickerCalls != 0 {
+		t.Fatalf("native=%d Sticker=%d, want native=1 Sticker=0", nativeCalls, stickerCalls)
+	}
+	result, ok := output.(map[string]any)
+	if !ok || result["ok"] != false {
+		t.Fatalf("invalid message result = %#v, want retryable failure", output)
+	}
+}
+
 func TestMergedStickerSendReportsCommittedTextWithoutRetryingIt(t *testing.T) {
 	t.Parallel()
 	nativeCalls := 0

@@ -280,7 +280,14 @@ func hasNativeSendContent(args map[string]any) bool {
 	if raw, present := args["attachments"]; present && nonEmptyToolValue(raw) {
 		return true
 	}
-	if message, ok := args["message"].(map[string]any); ok {
+	if rawMessage, present := args["message"]; present {
+		message, ok := rawMessage.(map[string]any)
+		if !ok {
+			// The native send path accepts plain strings and rejects malformed or
+			// otherwise invalid values with a retryable tool result. Do not mistake
+			// those inputs for an intentional Sticker-only send.
+			return nonEmptyToolValue(rawMessage)
+		}
 		for _, key := range []string{"text", "parts", "attachments", "actions"} {
 			if nonEmptyToolValue(message[key]) {
 				return true
