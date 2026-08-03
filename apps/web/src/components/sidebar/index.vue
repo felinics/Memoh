@@ -9,6 +9,7 @@
     class="workspace-divider-r relative flex shrink-0 flex-col bg-sidebar"
     data-native-sidebar-surface
     data-native-sidebar-tint
+    data-native-sidebar-seam
     :style="asideStyle"
     :inert="!workbenchOpen || undefined"
   >

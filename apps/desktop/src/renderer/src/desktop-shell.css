@@ -14,10 +14,13 @@ html {
 
 html[data-native-sidebar-material] {
   /* Keep the sidebar calmer than raw vibrancy while preserving enough of the
-   * macOS material to read as translucent. */
+   * macOS material to read as translucent. A vibrancy material's rendered
+   * color is hostage to whatever sits behind the window (clean over the
+   * default wallpaper, muddy over a dark window) — 70% theme color bounds
+   * that swing to the remaining 30%. */
   --desktop-native-sidebar-tint: color-mix(
     in oklab,
-    var(--sidebar) 46%,
+    var(--sidebar) 70%,
     transparent
   );
 }
@@ -46,6 +49,16 @@ html[data-native-sidebar-material] [data-native-sidebar-tint] {
 /* Opaque sidebar fades would paint over the native material at the footer. */
 html[data-native-sidebar-material] [data-native-sidebar-fade] {
   background-image: none;
+}
+
+/* Sidebar ↔ chat seam: the stroke derives from the family divider color (an
+ * invented or translucent line reads foreign over the glass); the seam's
+ * extra weight comes from a soft shadow spilling left onto the sidebar, so
+ * the chat plane reads as floating above the glass layer. */
+html[data-native-sidebar-material] [data-native-sidebar-seam] {
+  border-right-width: 1px;
+  border-right-color: var(--native-sidebar-seam);
+  box-shadow: inset -10px 0 10px -10px var(--native-sidebar-seam-shadow);
 }
 
 /* Settings stays mounted above the persistent chat workspace. Clear the exact
