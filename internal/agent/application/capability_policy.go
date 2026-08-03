@@ -37,15 +37,33 @@ type capabilityRouteResult struct {
 	Fallback []gatewayAttachment
 }
 
+const (
+	// nativeAttachmentMaxBinaryBytes caps a single natively-routed attachment.
+	// nativeRequestMediaBudgetBytes caps the binary total per request: base64
+	// inflates by 4/3, so 14MB binary ≈ 18.7MB on the wire — inside Gemini's
+	// ~20MB inline request ceiling and well inside Anthropic's 32MB.
+	nativeAttachmentMaxBinaryBytes = 12 * 1024 * 1024
+	nativeRequestMediaBudgetBytes  = 14 * 1024 * 1024
+	// inlineTextAttachmentMaxBytes bounds the plain-text inline channel. Text
+	// is every model's native tongue, so it needs no capability bit — but big
+	// text belongs in the workspace where tools read it selectively.
+	inlineTextAttachmentMaxBytes = 64 * 1024
+)
+
 // routeAttachmentsByCapability splits attachments based on model compatibilities.
-// Only images are routed natively when the model has CompatVision; everything
-// else goes through fallback.
+// Images route natively with CompatVision, PDFs with CompatFileInput, and small
+// plain-text files unconditionally; everything else goes through fallback. The
+// native set is then trimmed to the per-request media budget, demoting the
+// largest attachments first so one oversized file cannot sink the whole turn.
 func routeAttachmentsByCapability(compatibilities []string, attachments []gatewayAttachment) capabilityRouteResult {
 	hasVision := false
+	hasFileInput := false
 	for _, c := range compatibilities {
-		if c == models.CompatVision {
+		switch c {
+		case models.CompatVision:
 			hasVision = true
-			break
+		case models.CompatFileInput:
+			hasFileInput = true
 		}
 	}
 
@@ -56,20 +74,96 @@ func routeAttachmentsByCapability(compatibilities []string, attachments []gatewa
 	for _, att := range attachments {
 		att.Type = strings.ToLower(strings.TrimSpace(att.Type))
 		att.Transport = strings.ToLower(strings.TrimSpace(att.Transport))
-		if att.Type == "image" && hasVision && isGatewayNativeAttachment(att) {
+
+		native := false
+		switch {
+		case att.Type == "image" && hasVision:
+			native = isGatewayNativeAttachment(att)
+		case att.Type == "file" && isNativeDocumentMime(att.Mime) && hasFileInput:
+			native = isGatewayNativeAttachment(att)
+		case att.Type == "file" && isInlineTextMime(att.Mime) &&
+			attachmentBinarySize(att) <= inlineTextAttachmentMaxBytes:
+			native = isGatewayNativeAttachment(att)
+		}
+		if native && attachmentBinarySize(att) > nativeAttachmentMaxBinaryBytes {
+			native = false
+		}
+		if native {
 			result.Native = append(result.Native, att)
 		} else {
 			result.Fallback = append(result.Fallback, att)
 		}
 	}
+
+	// Enforce the per-request budget: demote the largest native attachments
+	// until the remaining set fits.
+	for totalNativeBinarySize(result.Native) > nativeRequestMediaBudgetBytes && len(result.Native) > 0 {
+		largest := 0
+		for i := 1; i < len(result.Native); i++ {
+			if attachmentBinarySize(result.Native[i]) > attachmentBinarySize(result.Native[largest]) {
+				largest = i
+			}
+		}
+		result.Fallback = append(result.Fallback, result.Native[largest])
+		result.Native = append(result.Native[:largest], result.Native[largest+1:]...)
+	}
 	return result
 }
 
+func totalNativeBinarySize(atts []gatewayAttachment) int64 {
+	var total int64
+	for _, att := range atts {
+		total += attachmentBinarySize(att)
+	}
+	return total
+}
+
+// attachmentBinarySize estimates the attachment's decoded size: the declared
+// Size when present, else 3/4 of the base64 payload length.
+func attachmentBinarySize(att gatewayAttachment) int64 {
+	if att.Size > 0 {
+		return att.Size
+	}
+	payload := strings.TrimSpace(att.Payload)
+	if idx := strings.Index(payload, ","); idx >= 0 && strings.HasPrefix(strings.ToLower(payload), "data:") {
+		payload = payload[idx+1:]
+	}
+	return int64(len(payload)) * 3 / 4
+}
+
+// isNativeDocumentMime reports whether the mime is a provider-native document
+// format. PDF only for now; docx/pptx join once the pipeline supports them.
+func isNativeDocumentMime(mime string) bool {
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	if idx := strings.Index(mime, ";"); idx >= 0 {
+		mime = strings.TrimSpace(mime[:idx])
+	}
+	return mime == "application/pdf"
+}
+
+// isInlineTextMime reports whether the attachment is plain text that can be
+// inlined directly as a message text part.
+func isInlineTextMime(mime string) bool {
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	if idx := strings.Index(mime, ";"); idx >= 0 {
+		mime = strings.TrimSpace(mime[:idx])
+	}
+	return strings.HasPrefix(mime, "text/") || mime == "application/json"
+}
+
 func isGatewayNativeAttachment(att gatewayAttachment) bool {
+	transport := strings.ToLower(strings.TrimSpace(att.Transport))
 	switch att.Type {
 	case "image":
-		transport := strings.ToLower(strings.TrimSpace(att.Transport))
 		if transport != gatewayTransportInlineDataURL && transport != gatewayTransportPublicURL {
+			return false
+		}
+		return strings.TrimSpace(att.Payload) != ""
+	case "file":
+		// Files travel inline only: a presigned/public URL re-signs on every
+		// generation, which both breaks prompt-cache prefixes and may expire
+		// out from under history replay.
+		if transport != gatewayTransportInlineDataURL {
 			return false
 		}
 		return strings.TrimSpace(att.Payload) != ""

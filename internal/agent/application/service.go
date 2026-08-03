@@ -495,6 +495,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		runCfg.Query = headerifiedModelQuery
 	}
 	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)
+	runCfg.InlineAttachments = extractNativeAttachmentParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
 
@@ -1273,19 +1274,21 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 				extra = append(extra, img)
 			}
 		}
+		extra = append(extra, cfg.InlineAttachments...)
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query, extra...))
 		cfg.ForkContextSourceMessageIDs = append(cfg.ForkContextSourceMessageIDs, "")
 		cfg.ContextQueryMaterialized = true
-	} else if len(cfg.InlineImages) > 0 {
+	} else if len(cfg.InlineImages) > 0 || len(cfg.InlineAttachments) > 0 {
 		// Pipeline path: the user query is already embedded in the RC messages,
-		// but image parts are not rendered by the pipeline renderer. Inject the
-		// inline images into the last user message so the model receives them.
-		imageParts := make([]sdk.MessagePart, 0, len(cfg.InlineImages))
+		// but media parts are not rendered by the pipeline renderer. Inject the
+		// inline media into the last user message so the model receives them.
+		imageParts := make([]sdk.MessagePart, 0, len(cfg.InlineImages)+len(cfg.InlineAttachments))
 		for _, img := range cfg.InlineImages {
 			if strings.TrimSpace(img.Image) != "" {
 				imageParts = append(imageParts, img)
 			}
 		}
+		imageParts = append(imageParts, cfg.InlineAttachments...)
 		if len(imageParts) > 0 {
 			injected := false
 			for i := len(cfg.Messages) - 1; i >= 0; i-- {

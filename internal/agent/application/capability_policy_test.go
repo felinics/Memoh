@@ -75,3 +75,79 @@ func TestAttachmentsToAny(t *testing.T) {
 	result := attachmentsToAny(atts)
 	assert.Len(t, result, 2)
 }
+
+func TestRouteAttachmentsByCapability_PDFWithFileInput(t *testing.T) {
+	compatibilities := []string{"vision", "file-input"}
+	attachments := []gatewayAttachment{
+		{Type: "file", Mime: "application/pdf", Size: 2 << 20, Transport: gatewayTransportInlineDataURL, Payload: "data:application/pdf;base64,JVBERi0xLjQ="},
+	}
+	result := routeAttachmentsByCapability(compatibilities, attachments)
+	assert.Len(t, result.Native, 1)
+	assert.Empty(t, result.Fallback)
+}
+
+func TestRouteAttachmentsByCapability_PDFWithoutFileInputFallsBack(t *testing.T) {
+	compatibilities := []string{"vision"}
+	attachments := []gatewayAttachment{
+		{Type: "file", Mime: "application/pdf", Size: 2 << 20, Transport: gatewayTransportInlineDataURL, Payload: "data:application/pdf;base64,JVBERi0xLjQ="},
+	}
+	result := routeAttachmentsByCapability(compatibilities, attachments)
+	assert.Empty(t, result.Native)
+	assert.Len(t, result.Fallback, 1)
+}
+
+func TestRouteAttachmentsByCapability_PDFPublicURLFallsBack(t *testing.T) {
+	// Files travel inline only: presigned URLs re-sign per generation, which
+	// breaks prompt-cache prefixes and can expire under history replay.
+	compatibilities := []string{"file-input"}
+	attachments := []gatewayAttachment{
+		{Type: "file", Mime: "application/pdf", Size: 1 << 20, Transport: gatewayTransportPublicURL, Payload: "https://example.com/report.pdf"},
+	}
+	result := routeAttachmentsByCapability(compatibilities, attachments)
+	assert.Empty(t, result.Native)
+	assert.Len(t, result.Fallback, 1)
+}
+
+func TestRouteAttachmentsByCapability_SmallTextInlinesWithoutCapability(t *testing.T) {
+	compatibilities := []string{}
+	attachments := []gatewayAttachment{
+		{Type: "file", Mime: "text/plain", Size: 1024, Transport: gatewayTransportInlineDataURL, Payload: "data:text/plain;base64,aGVsbG8="},
+	}
+	result := routeAttachmentsByCapability(compatibilities, attachments)
+	assert.Len(t, result.Native, 1)
+	assert.Empty(t, result.Fallback)
+}
+
+func TestRouteAttachmentsByCapability_LargeTextFallsBack(t *testing.T) {
+	compatibilities := []string{"vision", "file-input"}
+	attachments := []gatewayAttachment{
+		{Type: "file", Mime: "text/plain", Size: inlineTextAttachmentMaxBytes + 1, Transport: gatewayTransportInlineDataURL, Payload: "data:text/plain;base64,aGVsbG8="},
+	}
+	result := routeAttachmentsByCapability(compatibilities, attachments)
+	assert.Empty(t, result.Native)
+	assert.Len(t, result.Fallback, 1)
+}
+
+func TestRouteAttachmentsByCapability_OversizedSingleAttachmentFallsBack(t *testing.T) {
+	compatibilities := []string{"file-input"}
+	attachments := []gatewayAttachment{
+		{Type: "file", Mime: "application/pdf", Size: nativeAttachmentMaxBinaryBytes + 1, Transport: gatewayTransportInlineDataURL, Payload: "data:application/pdf;base64,JVBERi0xLjQ="},
+	}
+	result := routeAttachmentsByCapability(compatibilities, attachments)
+	assert.Empty(t, result.Native)
+	assert.Len(t, result.Fallback, 1)
+}
+
+func TestRouteAttachmentsByCapability_BudgetDemotesLargestFirst(t *testing.T) {
+	compatibilities := []string{"vision", "file-input"}
+	attachments := []gatewayAttachment{
+		{Type: "file", Name: "small.pdf", Mime: "application/pdf", Size: 4 << 20, Transport: gatewayTransportInlineDataURL, Payload: "data:application/pdf;base64,JVBERi0xLjQ="},
+		{Type: "file", Name: "big.pdf", Mime: "application/pdf", Size: 11 << 20, Transport: gatewayTransportInlineDataURL, Payload: "data:application/pdf;base64,JVBERi0xLjQ="},
+	}
+	result := routeAttachmentsByCapability(compatibilities, attachments)
+	// 4MB + 11MB > 14MB budget: the largest is demoted, the small one stays.
+	assert.Len(t, result.Native, 1)
+	assert.Equal(t, "small.pdf", result.Native[0].Name)
+	assert.Len(t, result.Fallback, 1)
+	assert.Equal(t, "big.pdf", result.Fallback[0].Name)
+}

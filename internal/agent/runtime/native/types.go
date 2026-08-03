@@ -104,11 +104,17 @@ type RunConfig struct {
 	SupportsImageInput          bool
 	SupportsToolCall            bool
 	InlineImages                []sdk.ImagePart
-	Identity                    SessionContext
-	Bot                         BotInfo
-	Skills                      []SkillEntry
-	LoopDetection               LoopDetectionConfig
-	Retry                       RetryConfig
+	// InlineAttachments carries non-image native attachment parts (documents
+	// as sdk.FilePart, small text files as wrapped sdk.TextPart) appended to
+	// the current user message. Images stay in InlineImages, which also feeds
+	// the context-frag view; these parts are materialized by prepareRunConfig
+	// only.
+	InlineAttachments []sdk.MessagePart
+	Identity          SessionContext
+	Bot               BotInfo
+	Skills            []SkillEntry
+	LoopDetection     LoopDetectionConfig
+	Retry             RetryConfig
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier

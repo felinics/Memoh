@@ -8,7 +8,7 @@ models:
     name: Claude Opus 4.6
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1000000
       thinking_mode: adaptive
       reasoning_efforts: [low, medium, high, max]
@@ -17,7 +17,7 @@ models:
     name: Claude Sonnet 4.6
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1000000
       thinking_mode: adaptive
       reasoning_efforts: [low, medium, high, max]
@@ -26,7 +26,7 @@ models:
     name: Claude Opus 4.5
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -35,7 +35,7 @@ models:
     name: Claude Sonnet 4.5
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -44,7 +44,7 @@ models:
     name: Claude Haiku 4.5
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -53,7 +53,7 @@ models:
     name: Claude Opus 4.1
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -62,7 +62,7 @@ models:
     name: Claude Opus 4
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -71,7 +71,7 @@ models:
     name: Claude Sonnet 4
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -80,5 +80,5 @@ models:
     name: Claude 3 Haiku
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 200000
