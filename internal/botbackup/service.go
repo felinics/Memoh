@@ -69,6 +69,7 @@ type Service struct {
 	memoryProviders *memprovider.Service
 	workspace       WorkspaceData
 	acpRuntimes     ACPRuntimeCloser
+	projects        dbstore.BotProjectStore
 }
 
 const acpManagedSecretsWarning = "ACP managed secrets were excluded from bot/profile.json; re-enter API keys after import" // #nosec G101 -- user-facing warning text, not a credential.
@@ -91,6 +92,7 @@ type Params struct {
 	MemoryProviders *memprovider.Service
 	Workspace       WorkspaceData
 	ACPRuntimes     ACPRuntimeCloser
+	Projects        dbstore.BotProjectStore
 }
 
 func New(params Params) *Service {
@@ -116,6 +118,7 @@ func New(params Params) *Service {
 		memoryProviders: params.MemoryProviders,
 		workspace:       params.Workspace,
 		acpRuntimes:     params.ACPRuntimes,
+		projects:        params.Projects,
 	}
 }
 
@@ -164,6 +167,13 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 	}
 	if opts.wants(SectionSettings) || opts.wants(SectionWorkspace) {
 		if err := writer.writeJSON("bot/workspace_resource_limits.json", "bot_workspace_resource_limits", data.WorkspaceResourceLimits, opts); err != nil {
+			return err
+		}
+	}
+	// Projects ride with workspace data, but history sessions reference them
+	// too, so either section brings them along.
+	if opts.wants(SectionWorkspace) || opts.wants(SectionHistory) {
+		if err := writer.writeJSON("bot/projects.json", "bot_projects", data.Projects, opts); err != nil {
 			return err
 		}
 	}
@@ -296,6 +306,14 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 	} else {
 		warnings = append(warnings, "workspace resource limits export failed: "+err.Error())
 	}
+	if projects, skippedRemote, err := s.collectProjects(ctx, botID); err == nil {
+		data.Projects = projects
+		if skippedRemote > 0 {
+			warnings = append(warnings, fmt.Sprintf("%d remote computer project(s) were not exported: they reference machines outside this backup", skippedRemote))
+		}
+	} else {
+		warnings = append(warnings, "project export failed: "+err.Error())
+	}
 
 	if s.acl != nil {
 		if rows, err := s.acl.ListRules(ctx, botID); err == nil {
@@ -351,6 +369,34 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 		Checksums:     map[string]string{},
 	}
 	return data, manifest, nil
+}
+
+// collectProjects exports the bot's native-workspace projects. Remote
+// projects are counted and skipped: they pin a specific person's computer,
+// which a backup restored elsewhere cannot reach.
+func (s *Service) collectProjects(ctx context.Context, botID string) ([]backupProject, int, error) {
+	if s.projects == nil {
+		return nil, 0, nil
+	}
+	records, err := s.projects.ListProjects(ctx, botID, true)
+	if err != nil {
+		return nil, 0, err
+	}
+	projects := make([]backupProject, 0, len(records))
+	skippedRemote := 0
+	for _, record := range records {
+		if record.RemoteBindingID != "" {
+			skippedRemote++
+			continue
+		}
+		projects = append(projects, backupProject{
+			ID:       record.ID,
+			Name:     record.Name,
+			Path:     record.Path,
+			Archived: !record.ArchivedAt.IsZero(),
+		})
+	}
+	return projects, skippedRemote, nil
 }
 
 func (s *Service) collectWorkspaceResourceLimits(ctx context.Context, botID string) (backupWorkspaceResourceLimits, error) {

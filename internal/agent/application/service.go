@@ -116,6 +116,7 @@ type Service struct {
 	platformIdentities PlatformIdentitySource
 	botPermissions     botPermissionChecker
 	workspaceTargets   workspaceTargetResolver
+	projects           sessionProjectResolver
 	pipeline           *timeline.Pipeline
 	streamHTTPClient   *http.Client
 	bgManager          *background.Manager
@@ -766,6 +767,14 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 	}
 	if s.toolApproval != nil || s.userInput != nil {
 		cfg.ToolApprovalHandler = s.buildToolApprovalHandler(p)
+	}
+	if boundProject, hasProject, projectErr := s.resolveSessionProjectBinding(ctx, p.BotID, p.SessionID); projectErr != nil {
+		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, projectErr
+	} else if hasProject {
+		cfg.Identity.ProjectWorkDir = boundProject.WorkDir
+		// Pin the project's target so the resolution below runs against it —
+		// including its error path when the target is unreachable.
+		ctx = workspace.WithWorkspaceTarget(ctx, boundProject.TargetID)
 	}
 	if s.workspaceTargets != nil {
 		if target, targetErr := s.workspaceTargets.ResolveWorkspaceTarget(ctx, p.BotID, ""); targetErr == nil {

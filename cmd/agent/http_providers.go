@@ -41,6 +41,7 @@ import (
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthclients"
+	"github.com/memohai/memoh/internal/project"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/server"
 	"github.com/memohai/memoh/internal/settings"
@@ -76,9 +77,10 @@ func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sess
 	return h
 }
 
-func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService) *handlers.SessionHandler {
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, projectService *project.Service) *handlers.SessionHandler {
 	handler := handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
 	handler.SetThreadEnricher(routeService)
+	handler.SetProjectService(projectService)
 	return handler
 }
 

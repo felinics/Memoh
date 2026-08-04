@@ -1,37 +1,25 @@
 <template>
   <div class="flex flex-col h-full min-w-0">
-    <!-- Mode switcher where the old type filter used to live. A <TextButton>
-         (ghost + text size = "clickable text with a hover chip") drives a
-         DropdownMenu to pivot the list between human conversations (Recent) and
-         system run streams (Schedule / Agent), restoring visibility of those
-         runs without a separate history entry elsewhere. The button is
-         naturally content-sized — only the text + chevron are the hit area. -->
+    <!-- Unified Recents: one timeline for chats, ACP chats, and schedule
+         runs (each row carries its own type mark — see session-item.vue).
+         The header folds the section, mirroring the Projects header above. -->
     <div class="shrink-0 px-2 pb-0.5 pt-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger as-child>
-          <TextButton class="text-xs font-[550] tracking-[-0.02em] pl-[11px] select-none">
-            {{ t(activeMode.labelKey) }}
-            <ChevronDown class="size-2.5" />
-          </TextButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem
-            v-for="m in MODES"
-            :key="m.id"
-            class="justify-between gap-4"
-            @select="mode = m.id"
-          >
-            <span>{{ t(m.labelKey) }}</span>
-            <Check
-              class="size-3.5 shrink-0"
-              :class="mode === m.id ? 'opacity-100' : 'opacity-0'"
-            />
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <TextButton
+        :class="sectionHeaderClass"
+        @click="toggleSectionCollapsed"
+      >
+        {{ t('chat.recents') }}
+        <ChevronDown
+          class="size-2.5 transition-transform"
+          :class="sectionCollapsed ? '-rotate-90' : ''"
+        />
+      </TextButton>
     </div>
 
-    <div class="flex-1 relative min-h-0">
+    <div
+      v-show="!sectionCollapsed"
+      class="flex-1 relative min-h-0"
+    >
       <!-- Native overflow scroll (not Reka ScrollArea) so the virtualizer can
            own the real scroll element. A bot's session list is unbounded — IM
            channels mint one session per chat/group — so rendering every row
@@ -65,8 +53,8 @@
                 :streaming="chatStore.isSessionStreaming(currentBotId, vRow.session.id)"
                 @select="handleSelect"
                 @open-new-tab="handleOpenNewTab"
-                @rename="openRenameSessionDialog"
-                @delete="confirmDeleteSession"
+                @rename="sessionDialogs?.openRename($event)"
+                @delete="sessionDialogs?.openDelete($event, { fallbackMode: 'recent' })"
               />
             </div>
           </div>
@@ -110,97 +98,38 @@
       </div>
     </div>
 
-    <ConfirmDeleteDialog
-      v-model:open="deleteSessionDialogOpen"
-      :title="t('chat.deleteSession')"
-      :description="t('chat.deleteSessionConfirm')"
-      :cancel-label="t('common.cancel')"
-      :confirm-label="t('common.confirm')"
-      :loading="deleteSessionLoading"
-      @confirm="handleDeleteSession"
-    />
-
-    <Dialog v-model:open="renameSessionDialogOpen">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{ t('chat.renameSession') }}</DialogTitle>
-          <DialogDescription>{{ t('chat.renameSessionDescription') }}</DialogDescription>
-        </DialogHeader>
-        <form
-          class="space-y-4"
-          @submit.prevent="handleRenameSession"
-        >
-          <Input
-            v-model="renameSessionTitle"
-            :placeholder="t('chat.renameSessionPlaceholder')"
-            :disabled="renameSessionLoading"
-            autofocus
-          />
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              :disabled="renameSessionLoading"
-              @click="renameSessionDialogOpen = false"
-            >
-              {{ t('common.cancel') }}
-            </Button>
-            <Button
-              type="submit"
-              :disabled="!renameSessionTitle.trim()"
-              :loading="renameSessionLoading"
-            >
-              {{ t('common.confirm') }}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <SessionDialogs ref="sessionDialogs" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { Check, ChevronDown } from 'lucide-vue-next'
+import { ChevronDown } from 'lucide-vue-next'
 import { useElementSize, useLocalStorage } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntersectionObserver } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { ConfirmDeleteDialog, toast } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
+import { useProjectsStore } from '@/store/projects'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { isSessionVisibleInSidebarMode, sortByRecency, type SidebarSessionMode } from '@/store/chat-list.utils'
+import { normalizedSessionMode, sortByRecency } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   didLoadMoreMakeProgress,
   shouldPrefetchToFillViewport,
   shouldShowLoadMoreSentinel,
 } from './recents-scroll'
-import {
-  Button,
-  TextButton,
-  Spinner,
-  Input,
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@felinic/ui'
+import { TextButton, Spinner } from '@felinic/ui'
 import SessionItem from './session-item.vue'
+import SessionDialogs from './session-dialogs.vue'
 // The narrow native scrollbar for sidebar scroll panes — shared with
 // panel-schedule.vue, so it must not live in this file's scoped style.
 import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
+const projectsStore = useProjectsStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const {
   sessions,
@@ -212,22 +141,49 @@ const {
   sessionsCursor,
 } = storeToRefs(chatStore)
 
-// The list pivots between human conversations (Recent) and system run streams
-// (Schedule / Agent) via the header button. Recent keeps the user's real
-// chat/discuss timeline; Schedule and Agent surface the previously-hidden
-// system runs so a user can re-open a run to see whether it broke — no
-// separate history entry needed elsewhere.
-type RecentMode = SidebarSessionMode
-const MODES: { id: RecentMode, labelKey: string }[] = [
-  { id: 'recent', labelKey: 'chat.recents' },
-  { id: 'schedule', labelKey: 'chat.activityBar.schedule' },
-  { id: 'agent', labelKey: 'chat.sessionTypeACPAgent' },
-]
-const mode = useLocalStorage<RecentMode>('workspace-sidebar-recents-mode', 'recent')
-const activeMode = computed(() => MODES.find(m => m.id === mode.value) ?? MODES[0]!)
+const sessionDialogs = ref<InstanceType<typeof SessionDialogs> | null>(null)
+
+// One unified timeline: chats, discuss threads, ACP chats, and schedule runs
+// all live here (each row carries its own type mark in session-item.vue).
+// Subagent runs stay reachable through their parent session only.
+const SIDEBAR_SESSION_MODES = new Set(['chat', 'discuss', 'schedule'])
+
+// Same header type as the Projects section above so the two sibling section
+// titles read identically; the 11px inset aligns the sidebar's 19px
+// icon/label column (see panel-header.vue).
+const sectionHeaderClass = 'text-xs font-[550] tracking-[-0.02em] pl-[11px] select-none' /* ui-allow-px: aligns the sidebar 19px label column (see panel-header.vue) */ /* ui-allow-style */
+
+// Fold state per bot, persisted like the Projects section's.
+const sectionCollapsedByBot = useLocalStorage<Record<string, boolean>>(
+  'workspace-sidebar-recents-collapsed',
+  {},
+)
+const sectionCollapsed = computed(() => sectionCollapsedByBot.value[currentBotId.value ?? ''] === true)
+function toggleSectionCollapsed() {
+  const botId = (currentBotId.value ?? '').trim()
+  if (!botId) return
+  sectionCollapsedByBot.value = {
+    ...sectionCollapsedByBot.value,
+    [botId]: !sectionCollapsed.value,
+  }
+}
+
+// Sessions bound to a live project live in the Projects section — a SIBLING
+// of this list (projects-section.vue) — so Recents excludes them here.
+// Sessions of an archived or vanished project degrade back into this list.
+watch(currentBotId, (botId) => {
+  if (botId) void projectsStore.ensureProjects(botId)
+}, { immediate: true })
+const liveProjectIds = computed(() => new Set(
+  projectsStore.projectsFor(currentBotId.value)
+    .filter(project => !project.archived && !!project.id)
+    .map(project => project.id ?? ''),
+))
 
 const visibleSessions = computed(() => {
-  return sortByRecency(sessions.value.filter(s => isSessionVisibleInSidebarMode(s, activeMode.value.id)))
+  const inScope = sessions.value.filter(s => SIDEBAR_SESSION_MODES.has(normalizedSessionMode(s)))
+  const unbound = inScope.filter(s => !liveProjectIds.value.has((s.project_id ?? '').trim()))
+  return sortByRecency(unbound)
 })
 
 // ---- virtualized session list ----
@@ -343,53 +299,5 @@ function handleOpenNewTab(session: SessionSummary) {
     sessionId: session.id,
     title: (session.title ?? '').trim() || t('chat.untitledSession'),
   })
-}
-
-const deleteSessionDialogOpen = ref(false)
-const deleteSessionLoading = ref(false)
-const sessionPendingDelete = ref<SessionSummary | null>(null)
-const renameSessionDialogOpen = ref(false)
-const renameSessionLoading = ref(false)
-const sessionPendingRename = ref<SessionSummary | null>(null)
-const renameSessionTitle = ref('')
-
-function confirmDeleteSession(session: SessionSummary) {
-  sessionPendingDelete.value = session
-  deleteSessionDialogOpen.value = true
-}
-
-function openRenameSessionDialog(session: SessionSummary) {
-  sessionPendingRename.value = session
-  renameSessionTitle.value = session.title?.trim() || ''
-  renameSessionDialogOpen.value = true
-}
-
-async function handleRenameSession() {
-  const target = sessionPendingRename.value
-  const title = renameSessionTitle.value.trim()
-  if (!target || !title || renameSessionLoading.value) return
-  renameSessionLoading.value = true
-  try {
-    await chatStore.renameSession(target.id, title)
-    renameSessionDialogOpen.value = false
-    sessionPendingRename.value = null
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('chat.renameSessionFailed')))
-  } finally {
-    renameSessionLoading.value = false
-  }
-}
-
-async function handleDeleteSession() {
-  const target = sessionPendingDelete.value
-  if (!target || deleteSessionLoading.value) return
-  deleteSessionLoading.value = true
-  try {
-    await chatStore.removeSession(target.id, { fallbackMode: activeMode.value.id })
-    deleteSessionDialogOpen.value = false
-    sessionPendingDelete.value = null
-  } finally {
-    deleteSessionLoading.value = false
-  }
 }
 </script>

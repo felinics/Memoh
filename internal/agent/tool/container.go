@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	pathpkg "path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -91,6 +92,9 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 		text := "File and command tools default to the " + targetDescription + " for this turn"
 		parts = append(parts, text+". An explicit `target_id` still takes precedence.")
 	}
+	if workDir := strings.TrimSpace(session.ProjectWorkDir); workDir != "" {
+		parts = append(parts, "This chat is bound to a project whose working directory is "+strconv.Quote(workDir)+". Relative file paths resolve inside it, and commands run there by default.")
+	}
 	if ref, ok := available.Ref(ToolRead()); ok {
 		text := ref + ": read file content"
 		if session.SupportsImageInput {
@@ -135,7 +139,12 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 
 func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
 	workspace := p.resolveToolWorkspace(ctx, session)
+	// Tool descriptions tell the model where relative paths land; with a
+	// project bound, that is the project directory.
 	wd := workspace.defaultWorkDir
+	if workspace.projectWorkDir != "" {
+		wd = workspace.projectWorkDir
+	}
 	sess := session
 	targetParameter := p.workspaceTargetParameter()
 
@@ -335,7 +344,13 @@ Delete a file:
 }
 
 type toolWorkspace struct {
-	defaultWorkDir          string
+	defaultWorkDir string
+	// projectWorkDir is the session's project directory. It changes where
+	// relative tool paths land and what cwd exec defaults to; it never
+	// replaces defaultWorkDir, which stays the workspace root that
+	// normalizePath strips (the bridge server re-joins its own root, so
+	// moving the strip prefix would silently relocate files).
+	projectWorkDir          string
 	locationDescription     string
 	absolutePathDescription string
 	shellDescription        string
@@ -354,7 +369,13 @@ type resolvedToolTarget struct {
 }
 
 func (t resolvedToolTarget) hookWorkspaceInfo(fallbackWorkDir string) hooks.WorkspaceInfo {
-	return hookWorkspaceInfoFromBridge(t.info, fallbackWorkDir)
+	info := hookWorkspaceInfoFromBridge(t.info, fallbackWorkDir)
+	// Hooks observe the directory tools actually work in, which the
+	// session's project overrides.
+	if t.workspace.projectWorkDir != "" {
+		info.CWD = t.workspace.projectWorkDir
+	}
+	return info
 }
 
 func (t resolvedToolTarget) backgroundOutputDir() string {
@@ -383,7 +404,7 @@ type listExecutionLocationsResult struct {
 }
 
 func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session SessionContext) toolWorkspace {
-	return toolWorkspaceFromInfo(p.resolveToolWorkspaceInfo(ctx, session), p.execWorkDir)
+	return toolWorkspaceFromInfo(p.resolveToolWorkspaceInfo(ctx, session), p.execWorkDir, session.ProjectWorkDir)
 }
 
 func (p *ContainerProvider) resolveToolWorkspaceInfo(ctx context.Context, session SessionContext) bridge.WorkspaceInfo {
@@ -400,13 +421,14 @@ func (p *ContainerProvider) resolveToolWorkspaceInfo(ctx context.Context, sessio
 	return info
 }
 
-func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir string) toolWorkspace {
+func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir, projectWorkDir string) toolWorkspace {
 	wd := strings.TrimSpace(info.DefaultWorkDir)
 	if wd == "" {
 		wd = fallbackWorkDir
 	}
 	workspace := toolWorkspace{
 		defaultWorkDir:          wd,
+		projectWorkDir:          strings.TrimSpace(projectWorkDir),
 		locationDescription:     "inside the bot workspace",
 		absolutePathDescription: "inside the workspace",
 		shellDescription:        "shell",
@@ -499,7 +521,7 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 			id:        resolved.TargetID,
 			client:    resolved.Client,
 			info:      resolved.Info,
-			workspace: toolWorkspaceFromInfo(resolved.Info, p.execWorkDir),
+			workspace: toolWorkspaceFromInfo(resolved.Info, p.execWorkDir, session.ProjectWorkDir),
 		}, nil
 	}
 	if targetID != "" {
@@ -513,7 +535,7 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 	return resolvedToolTarget{
 		client:    client,
 		info:      info,
-		workspace: toolWorkspaceFromInfo(info, p.execWorkDir),
+		workspace: toolWorkspaceFromInfo(info, p.execWorkDir, session.ProjectWorkDir),
 	}, nil
 }
 
@@ -577,6 +599,37 @@ func (p *ContainerProvider) logWorkspaceToolHookError(eventName, botID, sessionI
 	)
 }
 
+// resolveToolPath is the tool-facing path resolver: a relative path lands in
+// the session's project directory (when one is bound) before the usual
+// workspace-root prefix stripping. normalizePath itself must stay untouched —
+// it strips the root the bridge server re-joins, and pointing it at the
+// project directory would silently relocate files outside the project.
+func (w toolWorkspace) resolveToolPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || w.projectWorkDir == "" || w.isAbsToolPath(value) {
+		return w.normalizePath(value)
+	}
+	if w.windows {
+		joined := strings.TrimRight(w.projectWorkDir, `\`) + `\` + strings.ReplaceAll(value, "/", `\`)
+		return w.normalizePath(joined)
+	}
+	return w.normalizePath(pathpkg.Join(w.projectWorkDir, value))
+}
+
+// isAbsToolPath reports whether value is absolute for the workspace's OS.
+// Windows treats drive-qualified (C:...) and UNC (\\host\share) paths as
+// absolute; joining either onto a project directory would produce garbage.
+func (w toolWorkspace) isAbsToolPath(value string) bool {
+	if w.windows {
+		normalized := strings.ReplaceAll(value, "/", `\`)
+		if strings.HasPrefix(normalized, `\\`) || strings.HasPrefix(normalized, `\`) {
+			return true
+		}
+		return len(normalized) >= 2 && normalized[1] == ':'
+	}
+	return strings.HasPrefix(value, "/")
+}
+
 func (w toolWorkspace) normalizePath(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -630,7 +683,7 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.normalizePath(StringArg(args, "path"))
+	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
@@ -725,7 +778,7 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.normalizePath(StringArg(args, "path"))
+	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
 	content := StringArg(args, "content")
 	if filePath == "" {
 		return nil, errors.New("path is required")
@@ -771,7 +824,7 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 		return nil, err
 	}
 	client := target.client
-	dirPath := target.workspace.normalizePath(StringArg(args, "path"))
+	dirPath := target.workspace.resolveToolPath(StringArg(args, "path"))
 	if dirPath == "" {
 		dirPath = "."
 	}
@@ -844,7 +897,7 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.normalizePath(StringArg(args, "path"))
+	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
 	oldText := StringArg(args, "old_text")
 	newText := StringArg(args, "new_text")
 	if filePath == "" || oldText == "" {
@@ -909,7 +962,14 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 		return nil, errors.New("command is required")
 	}
 	workDir := strings.TrimSpace(StringArg(args, "work_dir"))
-	if workDir == "" {
+	switch {
+	case workDir != "":
+		// A relative work_dir resolves against the project directory like
+		// every other tool path.
+		workDir = target.workspace.resolveToolPath(workDir)
+	case target.workspace.projectWorkDir != "":
+		workDir = target.workspace.projectWorkDir
+	default:
 		workDir = target.workspace.defaultWorkDir
 	}
 	description := strings.TrimSpace(StringArg(args, "description"))

@@ -2063,6 +2063,12 @@ export type HandlersCreateSessionRequest = {
     metadata?: {
         [key: string]: unknown;
     };
+    /**
+     * ProjectID immutably binds the new session to a bot project. The
+     * project decides the session's workspace target and working directory
+     * for its whole life; there is no way to change or clear it later.
+     */
+    project_id?: string;
     runtime_metadata?: {
         [key: string]: unknown;
     };
@@ -2555,6 +2561,33 @@ export type PluginsSkillResource = {
     path?: string;
 };
 
+export type ProjectCreateRequest = {
+    name: string;
+    path: string;
+    workspace_target_id?: string;
+};
+
+export type ProjectProject = {
+    archived?: boolean;
+    bot_id?: string;
+    created_at?: string;
+    created_by_user_id?: string;
+    id?: string;
+    name?: string;
+    path?: string;
+    target_kind?: string;
+    updated_at?: string;
+    workspace_target_id?: string;
+};
+
+export type ProjectProjectsResponse = {
+    projects?: Array<ProjectProject>;
+};
+
+export type ProjectUpdateRequest = {
+    name: string;
+};
+
 export type ProvidersCountResponse = {
     count?: number;
 };
@@ -2823,6 +2856,7 @@ export type SessionSession = {
         [key: string]: unknown;
     };
     parent_session_id?: string;
+    project_id?: string;
     route_conversation_type?: string;
     route_id?: string;
     route_metadata?: {
@@ -8418,6 +8452,171 @@ export type PostBotsByBotIdPluginsByIdUninstallResponses = {
 
 export type PostBotsByBotIdPluginsByIdUninstallResponse = PostBotsByBotIdPluginsByIdUninstallResponses[keyof PostBotsByBotIdPluginsByIdUninstallResponses];
 
+export type GetBotsByBotIdProjectsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Include archived projects
+         */
+        include_archived?: boolean;
+    };
+    url: '/bots/{bot_id}/projects';
+};
+
+export type GetBotsByBotIdProjectsErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdProjectsError = GetBotsByBotIdProjectsErrors[keyof GetBotsByBotIdProjectsErrors];
+
+export type GetBotsByBotIdProjectsResponses = {
+    /**
+     * OK
+     */
+    200: ProjectProjectsResponse;
+};
+
+export type GetBotsByBotIdProjectsResponse = GetBotsByBotIdProjectsResponses[keyof GetBotsByBotIdProjectsResponses];
+
+export type PostBotsByBotIdProjectsData = {
+    /**
+     * Project
+     */
+    body: ProjectCreateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/projects';
+};
+
+export type PostBotsByBotIdProjectsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdProjectsError = PostBotsByBotIdProjectsErrors[keyof PostBotsByBotIdProjectsErrors];
+
+export type PostBotsByBotIdProjectsResponses = {
+    /**
+     * Created
+     */
+    201: ProjectProject;
+};
+
+export type PostBotsByBotIdProjectsResponse = PostBotsByBotIdProjectsResponses[keyof PostBotsByBotIdProjectsResponses];
+
+export type DeleteBotsByBotIdProjectsByProjectIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/projects/{project_id}';
+};
+
+export type DeleteBotsByBotIdProjectsByProjectIdErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdProjectsByProjectIdError = DeleteBotsByBotIdProjectsByProjectIdErrors[keyof DeleteBotsByBotIdProjectsByProjectIdErrors];
+
+export type DeleteBotsByBotIdProjectsByProjectIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PatchBotsByBotIdProjectsByProjectIdData = {
+    /**
+     * New name
+     */
+    body: ProjectUpdateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/projects/{project_id}';
+};
+
+export type PatchBotsByBotIdProjectsByProjectIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PatchBotsByBotIdProjectsByProjectIdError = PatchBotsByBotIdProjectsByProjectIdErrors[keyof PatchBotsByBotIdProjectsByProjectIdErrors];
+
+export type PatchBotsByBotIdProjectsByProjectIdResponses = {
+    /**
+     * OK
+     */
+    200: ProjectProject;
+};
+
+export type PatchBotsByBotIdProjectsByProjectIdResponse = PatchBotsByBotIdProjectsByProjectIdResponses[keyof PatchBotsByBotIdProjectsByProjectIdResponses];
+
 export type PostBotsByBotIdQuickActionsExecuteData = {
     /**
      * Quick action payload
@@ -8766,6 +8965,10 @@ export type GetBotsByBotIdSessionsData = {
          * Only include child sessions under this parent session.
          */
         parent_session_id?: string;
+        /**
+         * Only include sessions bound to this project. The literal none selects sessions with no project.
+         */
+        project_id?: string;
         /**
          * Page size (1..200). Defaults to 50.
          */

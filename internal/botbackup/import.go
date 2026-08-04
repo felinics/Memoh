@@ -43,7 +43,13 @@ type importState struct {
 	entries  map[string]backupZipEntry
 	manifest Manifest
 	idMap    map[string]string
-	warnings []string
+	// projectMap remaps source project ids onto the projects recreated (or
+	// matched by path) in the target bot, so restored sessions keep their
+	// bindings. Sessions whose project was not restored (remote projects,
+	// or an import without the workspace/history sections) degrade to no
+	// project.
+	projectMap map[string]pgtype.UUID
+	warnings   []string
 	// counts records how many items each section restored, surfaced to the UI.
 	counts map[Section]int
 	// createMode is true for a fresh-bot import. In create mode any restore
@@ -469,11 +475,12 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		return ImportResult{}, fmt.Errorf("unsupported backup schema version: %d", manifest.SchemaVersion)
 	}
 	state := &importState{
-		entries:  entries,
-		manifest: manifest,
-		idMap:    map[string]string{},
-		warnings: append([]string(nil), manifest.Warnings...),
-		counts:   map[Section]int{},
+		entries:    entries,
+		manifest:   manifest,
+		idMap:      map[string]string{},
+		projectMap: map[string]pgtype.UUID{},
+		warnings:   append([]string(nil), manifest.Warnings...),
+		counts:     map[Section]int{},
 	}
 
 	profile, err := readEntry[bots.Bot](state, "bot/profile.json")
@@ -585,6 +592,15 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 	if (opts.wants(SectionSettings) || opts.wants(SectionWorkspace)) && hasEntry(state.entries, "bot/workspace_resource_limits.json") {
 		if err := restore("workspace resource limits import failed", func() error {
 			return s.restoreWorkspaceResourceLimits(ctx, targetBotID, state)
+		}); err != nil {
+			return err
+		}
+	}
+	// Projects must restore before history: restored sessions reference the
+	// recreated project rows through a real foreign key.
+	if (opts.wants(SectionWorkspace) || opts.wants(SectionHistory)) && hasEntry(state.entries, "bot/projects.json") {
+		if err := restore("project import failed", func() error {
+			return s.restoreProjects(ctx, targetBotID, actorUserID, state)
 		}); err != nil {
 			return err
 		}
@@ -985,6 +1001,71 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	return err
 }
 
+// restoreProjects recreates the backup's native-workspace projects and
+// fills state.projectMap for the session remap in restoreHistory. Directory
+// existence is deliberately not validated here: the workspace may not be
+// running yet (or the files section may not be part of this import), and a
+// project pointing at a missing directory fails visibly on the first agent
+// turn, which the user can fix by recreating the directory.
+func (s *Service) restoreProjects(ctx context.Context, botID, actorUserID string, state *importState) error {
+	if s.projects == nil {
+		return errors.New("project store not configured")
+	}
+	projects, err := readEntry[[]backupProject](state, "bot/projects.json")
+	if err != nil {
+		return err
+	}
+	if len(projects) == 0 {
+		return nil
+	}
+	existing, err := s.projects.ListProjects(ctx, botID, true)
+	if err != nil {
+		return fmt.Errorf("list existing projects: %w", err)
+	}
+	nativeByPath := map[string]dbstore.BotProjectRecord{}
+	for _, record := range existing {
+		if record.RemoteBindingID == "" && record.ArchivedAt.IsZero() {
+			nativeByPath[record.Path] = record
+		}
+	}
+	restored := 0
+	for _, item := range projects {
+		if strings.TrimSpace(item.Path) == "" || strings.TrimSpace(item.Name) == "" {
+			state.warnings = append(state.warnings, "project entry with empty name or path skipped")
+			continue
+		}
+		if match, ok := nativeByPath[item.Path]; ok {
+			// Merge mode: the target bot already has a live project for this
+			// directory — bind restored sessions onto it instead of failing
+			// the unique path constraint.
+			state.projectMap[item.ID] = optionalUUID(match.ID)
+			continue
+		}
+		created, err := s.projects.CreateProject(ctx, dbstore.CreateBotProjectInput{
+			BotID:           botID,
+			Name:            item.Name,
+			TargetKind:      "native",
+			Path:            item.Path,
+			CreatedByUserID: strings.TrimSpace(actorUserID),
+		})
+		if err != nil {
+			return fmt.Errorf("project %q: %w", item.Name, err)
+		}
+		if item.Archived {
+			if err := s.projects.ArchiveProject(ctx, botID, created.ID); err != nil {
+				state.warnings = append(state.warnings, "project archive flag restore failed for "+item.Name+": "+err.Error())
+			}
+		}
+		state.projectMap[item.ID] = optionalUUID(created.ID)
+		nativeByPath[item.Path] = created
+		restored++
+	}
+	if restored > 0 {
+		state.counts[SectionWorkspace] += restored
+	}
+	return nil
+}
+
 func (s *Service) restoreWorkspaceResourceLimits(ctx context.Context, botID string, state *importState) error {
 	if s.queries == nil {
 		return errors.New("queries not configured")
@@ -1223,6 +1304,13 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			metadata = rebindRestoredRuntimeOwner(metadata, actorUserID)
 			runtimeMetadata = rebindRestoredRuntimeOwner(runtimeMetadata, actorUserID)
 		}
+		// Remap the source project binding onto the recreated project. A
+		// missing map entry (remote project, or an import without projects)
+		// degrades the session to no project rather than tripping the FK.
+		projectID := pgtype.UUID{}
+		if item.ProjectID.Valid {
+			projectID = state.projectMap[item.ProjectID.String()]
+		}
 		created, err := q.CreateSession(ctx, sqlc.CreateSessionParams{
 			BotID:           pgBotID,
 			ChannelType:     item.ChannelType,
@@ -1234,6 +1322,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			Metadata:        metadata,
 			ParentSessionID: parentSessionID,
 			CreatedByUserID: optionalUUID(actorUserID),
+			ProjectID:       projectID,
 		})
 		if err != nil {
 			return fmt.Errorf("session: %w", err)

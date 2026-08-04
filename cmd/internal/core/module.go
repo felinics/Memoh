@@ -20,6 +20,7 @@ import (
 	"github.com/memohai/memoh/internal/oauthclients"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
+	"github.com/memohai/memoh/internal/project"
 	"github.com/memohai/memoh/internal/providertemplates"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
@@ -70,12 +71,14 @@ func ServerModule() fx.Option {
 			providePGVectorStore,
 			provideUserRuntimeStore,
 			provideBotRemoteRuntimeBindingStore,
+			provideBotProjectStore,
 			provideUserRuntimeHub,
 			userruntime.NewService,
 			workspace.NewRemoteWorkspaceService,
 			provideUserRuntimePipe,
 			provideWikiStore,
 			provideWorkspaceManager,
+			project.NewService,
 			provideBridgeProvider,
 			providePluginBridgeProvider,
 			provideMemoryLLM,

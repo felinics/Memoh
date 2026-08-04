@@ -564,7 +564,7 @@ func normalizeApplyPatchPath(rawPath string, workspace toolWorkspace) (string, e
 	if strings.Contains(value, "\x00") {
 		return "", fmt.Errorf("patch path contains null byte: %q", rawPath)
 	}
-	value = workspace.normalizePath(value)
+	value = workspace.resolveToolPath(value)
 	if workspace.windows {
 		return normalizeWindowsApplyPatchPath(value, rawPath)
 	}

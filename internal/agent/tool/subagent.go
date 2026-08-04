@@ -69,6 +69,7 @@ type SpawnIdentity struct {
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string
+	ProjectWorkDir      string
 	TimezoneLocation    *time.Location
 	IsSubagent          bool
 }
@@ -918,8 +919,10 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			WorkspaceTargetID:   req.parentSession.WorkspaceTargetID,
 			WorkspaceTargetKind: req.parentSession.WorkspaceTargetKind,
 			WorkspaceTargetName: req.parentSession.WorkspaceTargetName,
-			TimezoneLocation:    req.parentSession.TimezoneLocation,
-			IsSubagent:          true,
+			// A subagent works in its parent's project directory.
+			ProjectWorkDir:   req.parentSession.ProjectWorkDir,
+			TimezoneLocation: req.parentSession.TimezoneLocation,
+			IsSubagent:       true,
 		},
 		LoopDetection: SpawnLoopConfig{Enabled: true},
 	}
@@ -985,13 +988,17 @@ func (p *SpawnProvider) runSubagentHook(ctx context.Context, eventName string, r
 	if strings.TrimSpace(result.Text) != "" {
 		extra["text_bytes"] = len(result.Text)
 	}
+	hookCWD := strings.TrimSpace(req.parentSession.ProjectWorkDir)
+	if hookCWD == "" {
+		hookCWD = hooks.DefaultWorkDir
+	}
 	hreq := hooks.Request{
 		Version:   1,
 		Event:     eventName,
 		BotID:     req.parentSession.BotID,
 		SessionID: req.parentSession.SessionID,
 		ChatID:    req.parentSession.ChatID,
-		Workspace: hooks.WorkspaceInfo{CWD: hooks.DefaultWorkDir},
+		Workspace: hooks.WorkspaceInfo{CWD: hookCWD},
 		Extra:     extra,
 	}
 	res, err := p.hookService.Run(ctx, hreq, nil)

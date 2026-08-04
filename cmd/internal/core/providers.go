@@ -79,6 +79,7 @@ import (
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
+	"github.com/memohai/memoh/internal/project"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/providertemplates"
 	"github.com/memohai/memoh/internal/registry"
@@ -204,6 +205,13 @@ func provideUserRuntimeStore(postgresStore *postgresstore.Store) (dbstore.UserRu
 func provideBotRemoteRuntimeBindingStore(postgresStore *postgresstore.Store) (dbstore.BotRemoteRuntimeBindingStore, error) {
 	if postgresStore == nil {
 		return nil, errors.New("postgres bot remote runtime binding store not configured")
+	}
+	return postgresStore, nil
+}
+
+func provideBotProjectStore(postgresStore *postgresstore.Store) (dbstore.BotProjectStore, error) {
+	if postgresStore == nil {
+		return nil, errors.New("postgres bot project store not configured")
 	}
 	return postgresStore, nil
 }
@@ -484,13 +492,14 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager) *application.Service {
+func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, projectService *project.Service) *application.Service {
 	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
 	// Every turn entry point goes through admission, so a service without it can
 	// start nothing: this is the thread's single-run guarantee, not an add-on.
 	service.SetSessionRuntime(sessionRuntime)
 	service.SetWorkspaceTargetResolver(workspaceManager)
+	service.SetProjectResolver(projectService)
 	service.SetHookService(hookService)
 	if sessionService != nil {
 		sessionService.SetHookService(hookService)
@@ -546,7 +555,7 @@ func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg 
 	return h
 }
 
-func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool) *botbackup.Service {
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, projectStore dbstore.BotProjectStore) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
 		DB:              conn,
@@ -565,6 +574,7 @@ func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbsto
 		MemoryProviders: memoryProviderService,
 		Workspace:       manager,
 		ACPRuntimes:     acpPool,
+		Projects:        projectStore,
 	})
 }
 

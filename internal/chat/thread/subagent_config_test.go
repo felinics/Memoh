@@ -23,6 +23,22 @@ type subagentConfigQueries struct {
 	contextCreate bool
 	contextJSON   []byte
 	failConfig    bool
+	// parentProject, when set, is returned as the parent session's
+	// project_id so tests can assert subagent project inheritance.
+	parentProject pgtype.UUID
+}
+
+// GetSessionByID serves the parent-session lookup CreateSubagent performs to
+// inherit the parent's project binding.
+func (q *subagentConfigQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
+	now := pgtype.Timestamptz{Time: time.Unix(1, 0).UTC(), Valid: true}
+	return sqlc.BotSession{
+		ID:        id,
+		Type:      TypeChat,
+		ProjectID: q.parentProject,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
 }
 
 func (q *subagentConfigQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
@@ -50,6 +66,7 @@ func (q *subagentConfigQueries) CreateSession(_ context.Context, arg sqlc.Create
 		Metadata:        arg.Metadata,
 		ParentSessionID: arg.ParentSessionID,
 		CreatedByUserID: arg.CreatedByUserID,
+		ProjectID:       arg.ProjectID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}, nil
@@ -171,5 +188,27 @@ func TestSubagentConfigJSONKeepsSessionID(t *testing.T) {
 	got := string(data)
 	if !strings.Contains(got, `"session_id":"thread-1"`) || strings.Contains(got, "thread_id") {
 		t.Fatalf("JSON = %s, want only legacy session_id", got)
+	}
+}
+
+func TestCreateSubagentInheritsParentProject(t *testing.T) {
+	parentProject := mustSessionUUID("00000000-0000-0000-0000-000000000601")
+	queries := &subagentConfigQueries{parentProject: parentProject}
+	svc := NewService(nil, queries, nil)
+	session, _, err := svc.CreateSubagent(context.Background(), CreateSubagentInput{
+		Thread: CreateInput{
+			BotID:          "00000000-0000-0000-0000-000000000502",
+			ParentThreadID: "00000000-0000-0000-0000-000000000503",
+			Title:          "child",
+		},
+		ModelUUID:    "00000000-0000-0000-0000-000000000505",
+		ModelID:      "worker-model",
+		ProviderName: "provider-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateSubagent: %v", err)
+	}
+	if session.ProjectID != parentProject.String() {
+		t.Fatalf("subagent ProjectID = %q, want parent's %q", session.ProjectID, parentProject.String())
 	}
 }

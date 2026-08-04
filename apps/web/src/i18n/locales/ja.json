@@ -525,6 +525,9 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "welcome": {
+      "project": "{name} で何をしましょうか？"
+    },
     "greeting": "こんにちは！今日はどのようにお手伝いできますか?",
     "emptySubagent": "このサブエージェント タスクにはメッセージが記録されていません",
     "emptySystemSession": "このシステムセッションにはメッセージが記録されていません",
@@ -568,6 +571,11 @@
     "computerLoadFailed": "コンピューターを読み込めませんでした",
     "computerNone": "利用できるコンピューターがありません",
     "computerUnavailable": "利用できないコンピューター",
+    "project": "Project",
+    "projects": "Project",
+    "projectUnavailable": "利用できない Project",
+    "projectDetachDraft": "Project に入れずに開始",
+    "projectNewSession": "{name} で新しいセッション",
     "attachFiles": "ファイルを添付する",
     "send": "送信",
     "sendFailed": "メッセージの送信に失敗しました",
@@ -1968,6 +1976,36 @@
       "access": "アクセス",
       "terminal": "Terminal",
       "settings": "設定"
+    },
+    "projects": {
+      "create": "新しい Project",
+      "createTitle": "新しい Project",
+      "createDescription": "Project の場所を選択してください。ディレクトリはすでに存在している必要があります。",
+      "created": "Project を作成しました",
+      "createFailed": "Project の作成に失敗しました",
+      "rename": "名前を変更",
+      "renameTitle": "Project の名前を変更",
+      "renameFailed": "Project の名前変更に失敗しました",
+      "archive": "アーカイブ",
+      "archiveTitle": "Project をアーカイブ",
+      "archiveDescription": "「{name}」内のセッションは元のディレクトリで動き続けます。新しいセッションは追加できなくなります。",
+      "archiveFailed": "Project のアーカイブに失敗しました",
+      "rowActions": "{name} の操作",
+      "targetNative": "サーバー Workspace",
+      "targetRemote": "接続済みのコンピューター",
+      "form": {
+        "name": "名前",
+        "namePlaceholder": "例：サイトリニューアル",
+        "target": "場所",
+        "directory": "ディレクトリ",
+        "directoryHelp": "セッションは {path} で作業します",
+        "directoryUp": "1 つ上へ",
+        "noSubdirectories": "サブフォルダはありません",
+        "browseFailed": "フォルダを読み込めませんでした",
+        "path": "ディレクトリパス",
+        "remotePathHelp": "そのコンピューター上の絶対パス。すでに存在している必要があります。",
+        "remotePathPlaceholder": "/Users/you/code/project"
+      }
     },
     "remoteRuntime": {
       "title": "コンピューター",

@@ -30,7 +30,10 @@ type SessionContext struct {
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string
-	IsSubagent          bool
+	// ProjectWorkDir is the session's immutable project directory, resolved
+	// once per run from the session's project binding.
+	ProjectWorkDir string
+	IsSubagent     bool
 }
 
 // BotInfo is service-owned bot metadata injected into the system prompt.

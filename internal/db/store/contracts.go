@@ -65,6 +65,43 @@ type BotRemoteRuntimeBindingStore interface {
 	DeleteMount(ctx context.Context, botID, targetID string) error
 }
 
+// BotProjectRecord is a named per-bot project directory: a workspace target
+// (native, or a remote runtime binding) plus an absolute directory path.
+// RemoteBindingID is empty for native projects. ArchivedAt is zero while the
+// project is live.
+type BotProjectRecord struct {
+	ID              string
+	BotID           string
+	Name            string
+	TargetKind      string
+	RemoteBindingID string
+	Path            string
+	CreatedByUserID string
+	ArchivedAt      time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type CreateBotProjectInput struct {
+	BotID           string
+	Name            string
+	TargetKind      string
+	RemoteBindingID string
+	Path            string
+	CreatedByUserID string
+}
+
+type BotProjectStore interface {
+	CreateProject(ctx context.Context, input CreateBotProjectInput) (BotProjectRecord, error)
+	ListProjects(ctx context.Context, botID string, includeArchived bool) ([]BotProjectRecord, error)
+	// GetProject returns archived rows too: sessions bound to an archived
+	// project keep resolving their working directory. Callers that must
+	// refuse archived projects check ArchivedAt themselves.
+	GetProject(ctx context.Context, botID, projectID string) (BotProjectRecord, error)
+	RenameProject(ctx context.Context, botID, projectID, name string) (BotProjectRecord, error)
+	ArchiveProject(ctx context.Context, botID, projectID string) error
+}
+
 type AccountRecord struct {
 	ID                  string
 	Username            string

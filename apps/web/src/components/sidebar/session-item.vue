@@ -12,8 +12,9 @@
         @keydown.enter.prevent="$emit('select', session)"
         @keydown.space.prevent="$emit('select', session)"
       >
-        <!-- Native session rows stay text-only. ACP rows carry only the agent icon
-             because Recent now mixes local model chats with external-agent chats. -->
+        <!-- Native session rows stay text-only. ACP rows carry the agent icon
+             and schedule runs a yellow clock, because the unified Recents list
+             mixes model chats, external-agent chats, and schedule runs. -->
         <span
           v-if="isACPSession"
           class="mr-2 flex size-4 shrink-0 items-center justify-center text-muted-foreground"
@@ -23,6 +24,18 @@
           <component
             :is="acpAgentIcon(acpAgentId, true)"
             class="size-4"
+            aria-hidden="true"
+          />
+        </span>
+        <span
+          v-else-if="isScheduleSession"
+          class="mr-2 flex size-4 shrink-0 items-center justify-center"
+          role="img"
+          :aria-label="t('chat.activityBar.schedule')"
+        >
+          <!-- Status icons stay state-constant on the accent ramp. -->
+          <Clock
+            class="size-4 text-[color:var(--accent-yellow)]"
             aria-hidden="true"
           />
         </span>
@@ -127,7 +140,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { Clock, LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
@@ -143,7 +156,7 @@ import {
 } from '@felinic/ui'
 import { acpAgentDisplayName, acpAgentIcon, normalizeACPAgentID } from '@/utils/acp'
 import { splitScriptRuns } from '@/utils/script-runs'
-import { normalizedRuntimeType } from '@/store/chat-list.utils'
+import { normalizedRuntimeType, normalizedSessionMode } from '@/store/chat-list.utils'
 
 const props = defineProps<{
   session: SessionSummary
@@ -177,6 +190,7 @@ const acpAgentId = computed(() => normalizeACPAgentID(
   props.session.runtime_metadata?.acp_agent_id ?? props.session.metadata?.acp_agent_id,
 ))
 const isACPSession = computed(() => normalizedRuntimeType(props.session) === 'acp_agent')
+const isScheduleSession = computed(() => normalizedSessionMode(props.session) === 'schedule')
 const acpAgentLabel = computed(() => acpAgentDisplayName(acpAgentId.value, t('chat.sessionTypeACPAgent')))
 
 function routeMeta(): Record<string, unknown> {

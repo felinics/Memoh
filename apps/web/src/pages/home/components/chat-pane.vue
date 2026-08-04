@@ -504,6 +504,26 @@
                         />
                       </DropdownMenuItem>
                     </template>
+                    <!-- Project-bound chats pin the workspace target for the
+                       session's whole life, so the computer switcher gives way
+                       to a read-only project entry; a draft can still opt out
+                       before the session exists. -->
+                    <template v-if="composerProjectLocked">
+                      <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuLabel>{{ $t('chat.project') }}</DropdownMenuLabel>
+                      <DropdownMenuItem disabled>
+                        <FolderOpen class="size-4 shrink-0" />
+                        <span class="min-w-0 flex-1 truncate">{{ composerProjectName }}</span>
+                        <Check class="ml-auto" />
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-if="!activeSession"
+                        @select="clearWorkingProject"
+                      >
+                        <X class="size-4 shrink-0" />
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.projectDetachDraft') }}</span>
+                      </DropdownMenuItem>
+                    </template>
                     <template v-if="showComputersMenu">
                       <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
                       <DropdownMenuLabel>{{ $t('chat.computers') }}</DropdownMenuLabel>
@@ -561,7 +581,7 @@
                         />
                       </DropdownMenuItem>
                     </template>
-                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu" />
+                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu || composerProjectLocked" />
                     <DropdownMenuItem
                       :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
                       @select="fileInput?.click()"
@@ -732,6 +752,7 @@ import {
 } from 'lucide-vue-next'
 import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Spinner, menuChromeClass, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
+import { useProjectsStore } from '@/store/projects'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
@@ -876,9 +897,13 @@ function pickWelcomeGreetingIndex() {
   return Math.floor(Math.random() * WELCOME_GREETING_KEYS.length)
 }
 const welcomeGreetingIndex = ref(pickWelcomeGreetingIndex())
-const welcomeGreeting = computed(() =>
-  t(WELCOME_GREETING_KEYS[welcomeGreetingIndex.value] ?? WELCOME_GREETING_KEYS[0]),
-)
+const welcomeGreeting = computed(() => {
+  // A draft under a working project names its destination instead of the
+  // generic rotation — the greeting doubles as the binding's visibility.
+  const projectName = draftWorkingProject.value?.name?.trim()
+  if (projectName) return t('chat.welcome.project', { name: projectName })
+  return t(WELCOME_GREETING_KEYS[welcomeGreetingIndex.value] ?? WELCOME_GREETING_KEYS[0])
+})
 watch([isWelcome, currentBotId, () => activeSession.value?.id], ([welcome]) => {
   if (welcome) welcomeGreetingIndex.value = pickWelcomeGreetingIndex()
 })
@@ -1068,10 +1093,52 @@ const forkSourceDividerAfterIndex = computed<number | null>(() => {
 const activeIsPendingACP = computed(() => activeChatTarget.value.isPendingACP)
 const activeIsACP = computed(() => activeChatTarget.value.isACP)
 const activeUsesACPComposer = computed(() => activeIsPendingACP.value || activeIsACP.value)
+// ---- project binding ----
+// A session bound to a bot project (or a draft under the bot's working
+// project) has its workspace target pinned by the project: the computer
+// switcher is replaced by a read-only project entry, and sends carry no
+// explicit workspace_target_id — the backend derives it from the binding.
+const projectsStore = useProjectsStore()
+watch(() => currentBotId.value, (botId) => {
+  if (botId) void projectsStore.ensureProjects(botId)
+}, { immediate: true })
+const activeSessionProjectId = computed(() => (activeSession.value?.project_id ?? '').trim())
+const draftWorkingProject = computed(() => {
+  if (activeSession.value || !currentBotId.value) return null
+  const project = projectsStore.workingProjectFor(currentBotId.value)
+  if (!project) return null
+  // ACP sessions can only bind native-workspace projects; a remote working
+  // project is skipped at creation, so don't pretend it applies here.
+  if (activeUsesACPComposer.value && project.target_kind === 'remote') return null
+  return project
+})
+const composerProjectLocked = computed(() => (
+  !!activeSessionProjectId.value || !!draftWorkingProject.value
+))
+const composerProjectName = computed(() => {
+  if (activeSessionProjectId.value) {
+    const project = projectsStore.projectById(currentBotId.value, activeSessionProjectId.value)
+    return project?.name?.trim() || t('chat.projectUnavailable')
+  }
+  return draftWorkingProject.value?.name?.trim() || t('chat.projectUnavailable')
+})
+
+function clearWorkingProject() {
+  projectsStore.setWorkingProject(currentBotId.value, null)
+}
+
+// Sends from a project-bound chat carry no explicit workspace_target_id: the
+// binding decides the target, and a lingering earlier selection would be
+// rejected by the backend as a target conflict.
+const sendWorkspaceTargetId = computed(() => (
+  composerProjectLocked.value ? '' : selectedWorkspaceTargetId.value
+))
+
 const showComputersMenu = computed(() => (
   !activeIsACP.value
   && !activeIsPendingACP.value
   && canWorkspaceRead.value
+  && !composerProjectLocked.value
 ))
 const computerSwitchLocked = computed(() => (
   streaming.value
@@ -2335,7 +2402,7 @@ async function handleRetryMessage(messageId: string) {
     target: paneTarget.value,
     modelId: overrideModelId.value,
     reasoningEffort: overrideReasoningEffort.value,
-    workspaceTargetId: selectedWorkspaceTargetId.value,
+    workspaceTargetId: sendWorkspaceTargetId.value,
   })
   await refreshACPComposerConfigAfterSelectionError(result)
   if (!result.ok && result.error) {
@@ -2354,7 +2421,7 @@ async function handleEditMessage(messageId: string, text: string, done?: (starte
       target: paneTarget.value,
       modelId: overrideModelId.value,
       reasoningEffort: overrideReasoningEffort.value,
-      workspaceTargetId: selectedWorkspaceTargetId.value,
+      workspaceTargetId: sendWorkspaceTargetId.value,
     })
     await refreshACPComposerConfigAfterSelectionError(result)
     if (!result.ok && result.error) {
@@ -2411,7 +2478,7 @@ async function handleSend() {
   )
   const sentModelId = overrideModelId.value
   const sentReasoningEffort = overrideReasoningEffort.value
-  const sentWorkspaceTargetId = selectedWorkspaceTargetId.value
+  const sentWorkspaceTargetId = sendWorkspaceTargetId.value
   composerError.value = ''
   inputText.value = ''
   saveInputDraft(sentDraftKey, '')

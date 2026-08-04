@@ -27,6 +27,11 @@ export interface CreateSessionOptions {
   runtimeMetadata?: Record<string, unknown>
   /** Warm pre-session ACP runtime to bind at creation time. */
   acpRuntimeId?: string
+  /**
+   * Bot project to bind the session to. Immutable after creation: the
+   * project pins the session's workspace target and working directory.
+   */
+  projectId?: string
 }
 
 export interface CreateACPRuntimeOptions {
@@ -99,6 +104,7 @@ export async function createSession(botId: string, options?: string | CreateSess
         metadata: options?.metadata,
         runtime_metadata: options?.runtimeMetadata,
         acp_runtime_id: options?.acpRuntimeId?.trim() || undefined,
+        project_id: options?.projectId?.trim() || undefined,
       }
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },

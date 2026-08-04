@@ -243,6 +243,20 @@ type BotPluginResource struct {
 	TeamID         pgtype.UUID        `json:"team_id"`
 }
 
+type BotProject struct {
+	ID              pgtype.UUID        `json:"id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	Name            string             `json:"name"`
+	TargetKind      string             `json:"target_kind"`
+	RemoteBindingID pgtype.UUID        `json:"remote_binding_id"`
+	Path            string             `json:"path"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotRemoteRuntimeBinding struct {
 	ID                 pgtype.UUID        `json:"id"`
 	BotID              pgtype.UUID        `json:"bot_id"`
@@ -274,6 +288,7 @@ type BotSession struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
 	TeamID              pgtype.UUID        `json:"team_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
 }
 
 type BotSessionDiscussCursor struct {

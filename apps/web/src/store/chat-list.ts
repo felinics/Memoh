@@ -2,6 +2,7 @@ import { defineStore, storeToRefs } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { toast } from '@felinic/ui'
 import { useChatSelectionStore } from '@/store/chat-selection'
+import { useProjectsStore } from '@/store/projects'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { createInvocationId } from './chat-list.normalize'
@@ -64,6 +65,7 @@ export type { ChatViewEntry, ChatViewTarget } from './chat/view-registry'
 
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
+  const projectsStore = useProjectsStore()
   const { currentBotId, sessionId, draftIntent, explicitSelection: explicitSessionSelection } = storeToRefs(selectionStore)
   const fsBeacon = createFsChangeBeacon({ currentBotId, sessionId })
   const {
@@ -305,6 +307,7 @@ export const useChatStore = defineStore('chat', () => {
     removeSessionFromList,
     ensureBot,
     knownSession: knownSessionSummary,
+    draftProjectIdFor: (botId, opts) => projectsStore.sessionProjectIdFor(botId, opts),
   })
   const {
     acpRuntimeStatuses, acpRuntimePending, acpRuntimeKey,

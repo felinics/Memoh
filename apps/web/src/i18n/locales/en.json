@@ -529,6 +529,7 @@
   },
   "chat": {
     "welcome": {
+      "project": "What can I do in {name}?",
       "g1": "Where should we begin?",
       "g2": "What's on your mind?",
       "g3": "What can I help with?",
@@ -599,6 +600,11 @@
     "computerLoadFailed": "Couldn’t load computers",
     "computerNone": "No computers available",
     "computerUnavailable": "Unavailable computer",
+    "project": "Project",
+    "projects": "Projects",
+    "projectUnavailable": "Unavailable project",
+    "projectDetachDraft": "Start without project",
+    "projectNewSession": "New session in {name}",
     "attachFiles": "Attach files",
     "send": "Send",
     "sendFailed": "Message failed to send",
@@ -1986,6 +1992,36 @@
       "access": "Access",
       "terminal": "Terminal",
       "settings": "Settings"
+    },
+    "projects": {
+      "create": "New project",
+      "createTitle": "New project",
+      "createDescription": "Pick where this project lives. The directory must already exist.",
+      "created": "Project created",
+      "createFailed": "Failed to create project",
+      "rename": "Rename",
+      "renameTitle": "Rename project",
+      "renameFailed": "Failed to rename project",
+      "archive": "Archive",
+      "archiveTitle": "Archive project",
+      "archiveDescription": "Sessions already in “{name}” keep their directory; new sessions can no longer join it.",
+      "archiveFailed": "Failed to archive project",
+      "rowActions": "Actions for {name}",
+      "targetNative": "Server workspace",
+      "targetRemote": "Connected computer",
+      "form": {
+        "name": "Name",
+        "namePlaceholder": "e.g. Website revamp",
+        "target": "Location",
+        "directory": "Directory",
+        "directoryHelp": "Sessions will work in {path}",
+        "directoryUp": "Up one level",
+        "noSubdirectories": "No subfolders",
+        "browseFailed": "Couldn’t load folders",
+        "path": "Directory path",
+        "remotePathHelp": "Absolute path on that computer. It must already exist.",
+        "remotePathPlaceholder": "/Users/you/code/project"
+      }
     },
     "remoteRuntime": {
       "title": "Computers",

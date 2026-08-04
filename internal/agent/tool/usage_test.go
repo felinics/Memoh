@@ -1075,3 +1075,22 @@ func TestSpawnProviderUsageGatesRegisteredTools(t *testing.T) {
 		t.Fatalf("Usage without spawn_agent/send_message should not suggest run_in_background, got:\n%s", got)
 	}
 }
+
+func TestContainerProviderUsageNamesProjectWorkDir(t *testing.T) {
+	t.Parallel()
+
+	provider := NewContainerProvider(nil, nil, nil, "")
+	got := provider.Usage(context.Background(), SessionContext{
+		ProjectWorkDir: "/data/site",
+	}, availableToolsForTest(ToolRead(), ToolExec()))
+	for _, want := range []string{`"/data/site"`, "working directory", "commands run there by default"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage with a project binding should contain %q, got:\n%s", want, got)
+		}
+	}
+
+	unbound := provider.Usage(context.Background(), SessionContext{}, availableToolsForTest(ToolRead(), ToolExec()))
+	if strings.Contains(unbound, "bound to a project") {
+		t.Fatalf("Usage without a project binding must not mention one, got:\n%s", unbound)
+	}
+}
