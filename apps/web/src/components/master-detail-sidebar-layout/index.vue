@@ -38,10 +38,7 @@
             <!-- Content Group with ScrollArea -->
             <ScrollArea class="flex-1 min-h-0">
               <div class="p-2 flex flex-col gap-1">
-                <slot
-                  name="sidebar-content"
-                  :open-detail="openDetail"
-                />
+                <slot name="sidebar-content" />
               </div>
             </ScrollArea>
 
@@ -63,17 +60,14 @@
       </SidebarInset>
     </template>
 
-    <!-- Below the JS breakpoint the sidebar/detail pair becomes a two-pane stack
-         keyed off component state, NOT routes — the same contract as the settings
-         mobile shell. LIST renders the sidebar slots as a full-screen nav page
-         (a sidebar tap pushes CONTENT via the openDetail slot prop); CONTENT
-         renders the detail slot full-screen under a back bar that pops to LIST.
+    <!-- Below the JS breakpoint the sidebar/detail pair becomes a two-pane
+         stack driven by the `detailOpen` prop — for the bot detail that prop
+         is simply "the ?tab= query is present", so every level is addressable
+         (list = bare path, content = ?tab=x) and the system back button walks
+         the same history as the bar's ←. The old hamburger + left Sheet
+         mobile mode was deleted outright — the stack IS its replacement.
          Both panes stay mounted (v-show, never v-if) so the detail page keeps
-         its DOM and scroll position while the list is on top. The transition
-         names reuse the ui swap-forward/swap-back classes: forward pushes
-         content in from the right, back slides it out to the right.
-         The old hamburger + left Sheet mobile mode was deleted outright — the
-         stack IS its replacement, not an addition beside it. -->
+         its DOM and scroll position while the list is on top. -->
     <div
       v-else
       class="relative h-full w-full overflow-x-clip"
@@ -91,10 +85,7 @@
           </div>
           <ScrollArea class="flex-1 min-h-0">
             <div class="p-2 flex flex-col gap-1">
-              <slot
-                name="sidebar-content"
-                :open-detail="openDetail"
-              />
+              <slot name="sidebar-content" />
             </div>
           </ScrollArea>
           <SidebarFooter
@@ -112,19 +103,15 @@
         >
           <!-- No title here: detail pages render their own PageShell headers,
                matching the settings shell's CONTENT bar. -->
-          <header class="flex h-11 shrink-0 items-center border-b border-border bg-background px-1.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              shape="circle"
-              :class="iconButtonClass"
-              :title="backLabel"
-              :aria-label="backLabel"
-              @click="closeDetail"
-            >
-              <ChevronLeft :stroke-width="1.75" />
-            </Button>
-          </header>
+          <MobileBar class="border-b border-border">
+            <template #left>
+              <MobileBarIconButton
+                :icon="ChevronLeft"
+                :label="t('common.back')"
+                @click="emit('closeDetail')"
+              />
+            </template>
+          </MobileBar>
           <section class="relative min-h-0 flex-1">
             <slot name="detail" />
           </section>
@@ -136,10 +123,9 @@
 
 <script setup lang="ts">
 import { ChevronLeft } from 'lucide-vue-next'
-import { computed, inject, ref, useSlots } from 'vue'
+import { computed, inject, ref, useSlots, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Button,
   SidebarContent,
   SidebarFooter,
   SidebarProvider,
@@ -147,24 +133,29 @@ import {
   SidebarInset,
   ScrollArea
 } from '@felinic/ui'
+import MobileBar from '@/components/mobile-bar/index.vue'
+import MobileBarIconButton from '@/components/mobile-bar/icon-button.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import { useIsMobile } from '@/composables/useIsMobile'
-import { usePreviousRoute } from '@/composables/useBackOr'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   // When true, this layout acts as the primary (only) sidebar: it drops the
   // nested-card chrome and sits flush against the viewport edge. Used by the
   // de-nested bot detail page; left false everywhere it nests under another nav.
   flush?: boolean
+  // Mobile stack state, owned by the caller so it can be derived from the URL
+  // (bot detail: "?tab= present"). Desktop ignores it entirely.
+  detailOpen?: boolean
 }>(), {
   flush: false,
+  detailOpen: false,
 })
+
+const emit = defineEmits<{ closeDetail: [] }>()
 
 defineSlots<{
   'sidebar-header'?: () => unknown
-  // openDetail pushes the mobile stack to CONTENT; a no-op render prop on the
-  // desktop branch (the panes it drives are not mounted there).
-  'sidebar-content'?: (props: { openDetail: () => void }) => unknown
+  'sidebar-content'?: () => unknown
   'sidebar-footer'?: () => unknown
   detail?: () => unknown
 }>()
@@ -173,32 +164,12 @@ const slots = useSlots()
 const desktopShell = inject(DesktopShellKey, false)
 const isMobile = useIsMobile()
 const { t } = useI18n()
-const previousRoute = usePreviousRoute()
 
-// Entry rule, decided ONCE at setup — mirrors the settings mobile shell:
-// arriving from any in-app page opens on the nav LIST; a cold load / refresh /
-// deep link (no tracked predecessor) opens straight on CONTENT so a `?tab=`
-// URL keeps its meaning. installBackHistory's afterEach has already recorded
-// the predecessor by the time setup runs.
-const detailOpen = ref(previousRoute.value == null)
 const direction = ref<'forward' | 'back'>('forward')
 const transitionName = computed(() =>
   direction.value === 'back' ? 'swap-back' : 'swap-forward',
 )
-
-function openDetail(): void {
-  direction.value = 'forward'
-  detailOpen.value = true
-}
-
-function closeDetail(): void {
-  direction.value = 'back'
-  detailOpen.value = false
-}
-
-const backLabel = computed(() => t('chat.topBar.goBack'))
-
-// Same chrome as the settings mobile top bar's icon button (muted at rest →
-// foreground on hover) so the two shells' bars read as one language.
-const iconButtonClass = 'shrink-0 text-muted-foreground hover:text-foreground' /* ui-allow-style */
+watch(() => props.detailOpen, (open) => {
+  direction.value = open ? 'forward' : 'back'
+})
 </script>

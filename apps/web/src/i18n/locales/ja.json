@@ -952,11 +952,11 @@
       "goBack": "戻る",
       "goForward": "進む",
       "openNav": "ナビゲーションを開く",
-      "closePanel": "パネルを閉じる"
+      "closePanel": "閉じる"
     },
     "mobileNav": {
       "title": "ナビゲーション",
-      "description": "Bot、セッション、ファイル、スケジュールを切り替え"
+      "description": "Bot、チャット、ファイル、スケジュール、設定を切り替え"
     },
     "activityBar": {
       "sessions": "チャット",

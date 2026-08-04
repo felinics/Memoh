@@ -39,8 +39,14 @@
       </SidebarHeader>
 
       <SidebarContent>
-        <!-- Core group: no label -->
-        <SidebarGroup class="px-[16px] pt-1 pb-0">
+        <!-- Core group: no label. In fullWidth (mobile list home) the header
+             is hidden, so the group owns the whole gap below the top-bar
+             hairline — 16px, matching its own left inset. On desktop the
+             header's pb-3 already carries the rhythm and pt-1 suffices. -->
+        <SidebarGroup
+          class="px-[16px] pb-0"
+          :class="fullWidth ? 'pt-4' : 'pt-1'"
+        >
           <SidebarGroupContent>
             <SidebarMenu class="gap-1">
               <SidebarMenuItem
@@ -204,8 +210,6 @@ const props = withDefaults(defineProps<{
   fullWidth: false,
 })
 
-const emit = defineEmits<{ back: []; navigate: [name: string] }>()
-
 const desktopShell = inject(DesktopShellKey, false)
 
 // ---- resizable width (web only) ------------------------------------------
@@ -263,10 +267,6 @@ const { userInfo } = storeToRefs(userStore)
 const backToChatRoute = useBackToChatRoute()
 
 function navigate(name: string): void {
-  // Emitted for the mobile list home: re-tapping the item whose route is
-  // already current is a duplicate push the router silently drops, but the
-  // shell must still swap from the list to the content pane.
-  emit('navigate', name)
   router.push({ name } as Parameters<typeof router.push>[0]).catch(() => {})
 }
 

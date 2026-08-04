@@ -984,11 +984,11 @@
       "goBack": "后退",
       "goForward": "前进",
       "openNav": "打开导航",
-      "closePanel": "关闭面板"
+      "closePanel": "关闭"
     },
     "mobileNav": {
       "title": "导航",
-      "description": "切换智能体、会话、文件与计划任务"
+      "description": "切换 Bot、对话、文件、日程和设置"
     },
     "activityBar": {
       "sessions": "对话",

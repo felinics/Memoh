@@ -179,6 +179,7 @@
         :class="isWelcome
           ? 'inset-0 flex flex-col items-center justify-start pt-[38dvh]'
           : 'inset-x-0 bottom-0 pt-2 pb-8'"
+        :style="composerLiftPx > 0 ? { bottom: `${composerLiftPx}px` } : undefined"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
              (its vertical centre). The box is solid and sits above the messages, so
@@ -445,6 +446,10 @@
                   @input="syncMultiline"
                 />
 
+                <!-- max-md size bumps on the composer controls (here, the model
+                     trigger, and the send ring below) grow the tap targets from
+                     36px to the 44px touch floor on phones; desktop keeps the
+                     compact pill. -->
                 <DropdownMenu v-model:open="agentPopoverOpen">
                   <DropdownMenuTrigger as-child>
                     <Button
@@ -452,7 +457,7 @@
                       variant="ghost"
                       :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
                       :title="$t('chat.composerActions')"
-                      class="order-1 size-9 rounded-full text-foreground/85"
+                      class="order-1 size-9 max-md:size-11 rounded-full text-foreground/85"
                       :class="isMultiline ? 'self-end' : 'self-center'"
                       :aria-label="$t('chat.composerActions')"
                     >
@@ -605,7 +610,7 @@
                         type="button"
                         variant="ghost"
                         :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
-                        class="composer-pill-press h-9 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
+                        class="composer-pill-press h-9 max-md:h-11 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
                         :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
                         <Spinner
@@ -620,7 +625,7 @@
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent
-                      class="w-80 overflow-hidden p-0"
+                      class="w-80 max-w-[calc(100vw-2rem)] overflow-hidden p-0"
                       align="end"
                       side="top"
                       :side-offset="4"
@@ -665,12 +670,12 @@
                     >{{ activeACPProjectLabel }}</span>
                   </Button>
 
-                  <div class="relative size-9 shrink-0">
+                  <div class="relative size-9 max-md:size-11 shrink-0">
                     <SessionInfoRing
                       v-if="!activeIsACP"
                       :override-model-id="overrideModelId"
                       :fallback-context-window="activeModel?.config?.context_window ?? null"
-                      class="absolute inset-0 size-9 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                      class="absolute inset-0 size-9 max-md:size-11 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
                       :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
                     />
                     <!-- Send and stop are one brand circle: the surface never
@@ -682,7 +687,7 @@
                       variant="brand"
                       :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel)"
                       :aria-label="streaming ? 'Stop generating response' : 'Send message'"
-                      class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
+                      class="absolute inset-0 size-9 max-md:size-11 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
                       @click="streaming ? chatStore.abort(paneTarget) : handleSend()"
                     >
@@ -784,6 +789,7 @@ import { commandResultQuickActionText, isCommandResultItemSelectable } from './s
 import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
+import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
@@ -2213,7 +2219,18 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
 const dockEl = useTemplateRef<InstanceType<typeof ComposerDock>>('dockEl')
 const { height: dockHeight } = useElementSize(() => dockEl.value?.$el ?? null)
 const dockMaskHeight = computed(() => dockEl.value?.maskHeight ?? `${COMPOSER_MASK_BELOW_PX}px`)
-const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24}px`)
+
+// Virtual-keyboard lift (iOS Safari; Android lifts via the resized layout
+// viewport instead — see useVirtualKeyboard). The whole dock container rises
+// by the keyboard height, and the message column's bottom padding grows by
+// the same amount so follow-mode keeps the last message clear of the lifted
+// composer. While the model picker is open its search field may itself hold
+// focus: lifting then would yank the trigger out from under the popover and
+// fight iOS's own scroll-to-caret, so the lift is suppressed until the picker
+// closes (the plus menu has no focusable input and never hits this).
+const virtualKeyboardHeight = useVirtualKeyboard()
+const composerLiftPx = computed(() => (modelPopoverOpen.value ? 0 : virtualKeyboardHeight.value))
+const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24 + composerLiftPx.value}px`)
 
 // The textarea belongs to the pane, so when the dock hands the input slot
 // back after ask_user is resolved or canceled, it emits and we focus here.

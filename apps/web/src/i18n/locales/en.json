@@ -984,11 +984,11 @@
       "goBack": "Back",
       "goForward": "Forward",
       "openNav": "Open navigation",
-      "closePanel": "Close panel"
+      "closePanel": "Close"
     },
     "mobileNav": {
       "title": "Navigation",
-      "description": "Switch bots, sessions, files, and schedules"
+      "description": "Switch bots, chat, files, schedule, and settings"
     },
     "activityBar": {
       "sessions": "Chat",
