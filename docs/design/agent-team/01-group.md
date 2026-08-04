@@ -1,13 +1,15 @@
 # Phase 1：Group模型
 
 > 前置阅读：[README.md](./README.md)
-> 依赖：无。本阶段是后续三个阶段的地基。
+> 依赖：无。本阶段是Phase 2的地基。Phase 3（Wiki）与本阶段无依赖关系，可并行推进。
 
 ## 1. 目标与定位
 
-引入Group的动机是Bot的访问权限存在差异：有的人能访问某些Bot，有的人不能。Group让有权限的人把Bot编入分组，并以Group为单位组织协作。
+引入Group的动机是Bot的访问权限存在差异：有的人能访问某些Bot，有的人不能。Group让有权限的人把Bot编入分组。
 
-**Group是「谁能找到谁 + 有哪些Wiki」的分组，不是隔离边界。** 隔离边界仍然是Team。这个定位是本阶段全部设计的出发点，它决定了大量复杂度可以不做（见第6节）。
+**Group是「谁能看到哪些Bot、哪些Bot之间可以互相联系」的分组，不是隔离边界。** 隔离边界仍然是Team。这个定位是本阶段全部设计的出发点，它决定了大量复杂度可以不做（见第6节）。
+
+**Group与Wiki解耦**（决策D3）：Wiki是Team全局的，与Group没有任何关系。Group不决定谁能看到哪些知识，只决定谁能看到哪些Bot。
 
 ## 2. Team与Group的关系
 
@@ -57,8 +59,6 @@ group_bot_members(
     bot_id      UUID NOT NULL,
     description TEXT,                          -- 该Bot在本组的职责说明，供list_teammates使用
     allow_inbound_contact BOOLEAN NOT NULL DEFAULT true,  -- 组内其他Bot是否可以contact它
-    wiki_read   BOOLEAN NOT NULL DEFAULT true,
-    wiki_write  BOOLEAN NOT NULL DEFAULT true,
     PRIMARY KEY (team_id, group_id, bot_id),
     FOREIGN KEY (team_id, group_id) REFERENCES public.groups(team_id, id) ON DELETE CASCADE,
     FOREIGN KEY (team_id, bot_id)   REFERENCES public.bots(team_id, id)   ON DELETE CASCADE
@@ -74,11 +74,13 @@ group_bot_members(
 1. 本代码库的外键都是实打实的复合外键。多态表无法同时外键到`users`和`bots`，删除Bot时不会自动清理成员关系。
 2. 人和Bot在组内需要的字段本来就不同：人有治理角色（owner/admin/member），Bot有职责描述与能力开关。
 
-### 3.2 关于三个布尔开关
+### 3.2 关于`allow_inbound_contact`
 
-`allow_inbound_contact`、`wiki_read`、`wiki_write`按D3默认全开，**Phase 1不实现任何基于它们的限制逻辑**。
+该列默认为真，**Phase 1不实现任何基于它的限制逻辑**，由Phase 2在同事发现与授权时消费。
 
-留这三列的理由：将来某个组需要收紧时，有列在是改代码，列不在是一次迁移。这是零成本对冲。
+留这一列的理由：将来某个Bot需要拒绝组内其他Bot的委托时，有列在是改代码，列不在是一次迁移。这是零成本对冲。
+
+Wiki相关的权限列不在这里——Wiki与Group解耦后，「某个Bot是否允许写Wiki」是Bot自身的设置，不是成员关系上的属性。见[03-wiki.md](./03-wiki.md)第4节。
 
 ### 3.3 人格与角色的切分
 
@@ -97,24 +99,19 @@ Bot的人格（system prompt、模型、workspace、记忆）属于Bot自身，�
 
 只校验Group一侧会构成提权路径：任何Group管理员都能把别人的私有Bot拉进自己的组，组内成员随即可以使用该Bot。这条必须在handler层fail-closed地校验。
 
-### 4.2 人类侧不享受并集
+### 4.2 Group约束的是Bot可见性
 
-用户只能访问自己所属Group的资源（决策D4）。G1的成员在API层**必须**看不到G2的Wiki，即使某个Bot同时属于两个组。
+用户只能看到并使用自己所属Group中的Bot（决策D4）。这条要在handler层按用户的Group成员关系严格过滤。
 
-这条要在handler层按用户的Group成员关系严格过滤。不能因为「Bot都能看」就顺手放宽人的检查——下一节的口子正是建立在这个不对称之上，因此人这一侧必须是严的。
+Group**不**约束Wiki内容——Wiki是Team全局的，全部成员可见。
 
-### 4.3 已知且已接受的口子
+### 4.3 关于早期设计中的跨组泄漏
 
-Bot是跨Group的传导路径：
+设计早期版本采用「每个Group一个Wiki＋Bot可访问其所属全部Group的Wiki」，由此产生过一个已知口子：Bot同时属于G1与G2时，会成为G1成员间接读取G2 Wiki的传导路径。
 
-> Bot B同时属于G1与G2，用户Alice只属于G1。Alice与B对话时，B可以读取G2的Wiki并把内容讲给Alice。
+**Wiki与Group解耦后（D3），这个口子不再存在**——只有一份Wiki，不存在「跨」。原本为它准备的授权时刻提示与来源标注两项缓解措施也一并取消。
 
-这与引入Group的初衷（人的访问权限有差异）存在张力。经讨论**决定接受**，理由是同一Team内本就共享信任边界。
-
-要求把它变成有意识的选择而非疏忽，采取两项零成本措施：
-
-1. **把风险挪到授权时刻。** 在把Bot加入Group的UI上明确提示：「B已属于G1，加入G2后G1成员可通过B间接读到G2的Wiki」。这是治理层的答案。
-2. **Wiki检索结果携带group标注。** Bot引用Wiki内容时注明出处。不拦截，但保证可见、可审计。
+保留本节是为了记录这个演进，避免后续有人重新引入per-group Wiki时忽略该风险。
 
 ## 5. 迁移
 
@@ -132,23 +129,31 @@ D3、D5、D6三条决策消去了大量复杂度。以下内容**不要实现**�
 | --- | --- |
 | `bot_sessions`增加`group_id` | Session不携带group上下文（D6）。chat与channel inbound只需要`bot_id`。 |
 | `bot_channel_configs`、heartbeat、schedule配置增加group列 | 同上。 |
-| 长期记忆按Group分区 | D5。Wiki既已放开，单独限制记忆没有意义。 |
+| `wiki_nodes`增加`group_id` | Wiki与Group解耦（D3）。Wiki是Team全局的。 |
+| 长期记忆按Group分区 | D5。Wiki本身就是Team全局的，单独限制记忆没有意义。 |
 | memory provider接口增加scope参数 | 同上。 |
 | A2A工具增加group参数 | 共享任意一个Group即允许contact，无歧义需要消解。见Phase 2。 |
 | 每种Session入口的group来源推导 | D6之后不存在这个问题。 |
 
-**Group不是会话上下文，而是资源地址的一部分。** Wiki节点自带group归属，读取与搜索跨Bot所属全部Group取并集；只有「新建一篇顶层文档」这一个操作需要显式指定group。`list_teammates`同理，返回并集并标注来源组。
+**Group只在两处被消费：**
+
+1. 人类查看Bot列表时按成员关系过滤（第4.2节）
+2. `list_teammates`与`contact_agent`的同事发现与授权（Phase 2）
+
+除此之外，任何地方都不应该出现group维度——不在Session上，不在渠道配置上，不在Wiki上，不在记忆里。
 
 ## 7. 前端影响
 
-Group成为管理单元后，Web侧需要：
+Group成为Bot的管理单元后，Web侧需要：
 
 - Group切换器
-- Bot列表、Wiki、会话列表按当前Group过滤（人类视角，严格过滤）
+- Bot列表按当前Group过滤（人类视角，严格过滤）
 - 跨Group的「我的全部Bot」管理视图
-- Bot加入Group的管理界面，含第4.3节要求的提示文案
+- Bot加入、移出Group的管理界面
 
-这部分工作量不小，没有捷径。详见`apps/web/AGENTS.md`的页面与路由约定。
+**Wiki不在此列**——它是Team全局的，没有Group切换的概念，也不随Group切换器变化。这正是解耦的主要收益：用户不需要在「我现在在哪个组」和「这篇文档属于哪个组」之间建立心智映射。
+
+详见`apps/web/AGENTS.md`的页面与路由约定。
 
 ## 8. 验收要求
 
@@ -165,13 +170,15 @@ Group成为管理单元后，Web侧需要：
 
 ### GRP-003：人类侧过滤
 
-- 用户查询Wiki、Bot列表、Group列表时，返回结果必须只包含其所属Group的资源。
-- 直接以ID访问非所属Group的资源必须返回未找到或无权限，不得泄漏存在性以外的信息。
+- 用户查询Bot列表、Group列表时，返回结果必须只包含其所属Group的资源。
+- 直接以ID访问非所属Group的Bot必须返回未找到或无权限。
+- Wiki**不**受此约束：Team内任意用户访问Wiki必须成功。
 
-### GRP-004：Bot侧并集
+### GRP-004：Group与Wiki无耦合
 
-- Bot属于多个Group时，其Wiki检索必须覆盖全部所属Group。
-- 检索结果必须标注来源Group。
+- Wiki的任何读写路径都不得引用Group表。
+- 用户切换当前Group时，Wiki的可见内容必须不发生变化。
+- 该项需要有测试守卫，防止后续实现悄悄引入group维度。
 
 ### GRP-005：迁移
 

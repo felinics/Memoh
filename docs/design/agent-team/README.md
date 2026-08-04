@@ -10,36 +10,34 @@ Memoh目前允许创建多个Bot，但Bot之间彼此不可见、不能协作。
 | --- | --- | --- |
 | Phase 1 | [01-group.md](./01-group.md) | Group模型：成员关系、权限、迁移 |
 | Phase 2 | [02-agent-to-agent.md](./02-agent-to-agent.md) | Agent之间的一对一通信 |
-| Phase 3 | [03-wiki.md](./03-wiki.md) | Group共享知识库 |
+| Phase 3 | [03-wiki.md](./03-wiki.md) | Team级共享知识库 |
 | Phase 4 | [04-inbox.md](./04-inbox.md) | Inbox投递与事件驱动触发 |
 
 本系列文档描述的是设计决策与验收标准，不是逐步骤的执行计划。文中「必须」表示合入条件，「可以」表示实现自行选择但选择后行为必须可观察、可测试。
 
 ## 2. 阶段依赖
 
-四个阶段不是并列的功能，存在明确的单向依赖：
+四个阶段构成两条彼此独立的链：
 
 ```
-Phase 1  Group模型
-            │  提供成员关系 → 同事发现、Wiki归属
-            ├──────────────┐
-            ▼              ▼
-Phase 2  A2A通信      Phase 3  Wiki
-                           │  提供@提及事件
-                           ▼
-                      Phase 4  Inbox
+Phase 1  Group模型  ──▶  Phase 2  A2A通信
+              提供成员关系 → 同事发现与授权
+
+Phase 3  Wiki      ──▶  Phase 4  Inbox
+              提供@提及事件
 ```
 
-- Phase 2与Phase 3都依赖Phase 1的成员关系，但彼此独立，可以并行。
+- 两条链之间没有依赖，可以完全并行推进。
+- Phase 2依赖Phase 1的`group_bot_members`。
 - Phase 4依赖Phase 3：Inbox在本方案中的唯一事件源是Wiki提及。
-- Phase 1必须先落地，它引入的表结构会被后续三个阶段引用。
+- **Wiki与Group解耦**（决策D3）：Wiki是Team全局的，不按Group划分，因此Phase 3不依赖Phase 1。
 
 ## 3. 术语
 
 | 术语 | 含义 |
 | --- | --- |
 | Team | 租户与隔离边界。承载RLS、计费与数据隔离。开源自部署版本永远只有`internal/team/id.go`里的`DefaultTeamID`一个Team。 |
-| Group | Team之下的协作与授权分组。决定「谁能找到谁」以及「有哪些Wiki」。**不是隔离边界。** |
+| Group | Team之下的协作与授权分组。决定「谁能看到哪些Bot」与「哪些Bot之间可以互相联系」。**与Wiki无关，也不是隔离边界。** |
 | Bot | 平台上的一个AI Agent实体。拥有独立的workspace、模型配置、人格、长期记忆与渠道绑定。 |
 | Subagent | 由某个Bot在自己会话内派生的从属执行体。共享父Bot的workspace与凭据，生命周期绑定父会话。见`internal/agent/tool/subagent.go`。 |
 | Teammate | 同一Group内的另一个Bot。它是独立实体，不是Subagent。 |
@@ -66,8 +64,8 @@ Phase 2  A2A通信      Phase 3  Wiki
 | --- | --- | --- |
 | D1 | Group位于Team之下，不替换Team。Team继续作为RLS与隔离边界。 | Phase 1 |
 | D2 | 一个Bot可以属于多个Group。 | Phase 1 |
-| D3 | Group不是Bot侧的隔离边界。Bot默认可访问其所属**全部**Group的Wiki。 | Phase 1 |
-| D4 | 人类侧**不**享受并集：用户只能访问自己所属Group的资源。 | Phase 1 |
+| D3 | **Wiki与Group解耦**：一个Team全局一份Wiki，不按Group划分。 | Phase 1 / Phase 3 |
+| D4 | Group只约束「谁能看到哪些Bot」与「哪些Bot之间可以互相联系」，不约束Wiki内容。 | Phase 1 |
 | D5 | 长期记忆保持per-bot，不按Group分区。 | Phase 1 |
 | D6 | Session不携带`group_id`。chat、channel inbound、heartbeat、schedule等入口只需要`bot_id`。 | Phase 1 |
 | D7 | A2A的调用方是工具（句柄式，体感与Subagent一致），被调方走**正常Bot的turn路径**，不复用`SpawnProvider`的执行链。 | Phase 2 |
@@ -76,7 +74,7 @@ Phase 2  A2A通信      Phase 3  Wiki
 | D10 | A2A使用独立的session mode与system prompt，与Subagent分开。 | Phase 2 |
 | D11 | Wiki面向人和Agent双方使用，不是仅供Agent读取的内部存储。 | Phase 3 |
 | D12 | Wiki的结构化数据存Postgres，正文与附件blob走storage provider抽象；S3是新增provider，默认仍为localfs。 | Phase 3 |
-| D13 | 每个Group拥有独立Wiki。 | Phase 3 |
+| D13 | Wiki内容在Team内对全部成员（人与Bot）可见，不做访问控制。敏感内容不放Wiki。 | Phase 3 |
 | D14 | Inbox不承载A2A。A2A走工具直连，Inbox只处理事件驱动的投递（Wiki提及、人类通知）。 | Phase 4 |
 | D15 | 保留现有discuss模式（`internal/channel/discuss/`），它是面向渠道群聊的特性，与Agent Team定位不同，不合并、不移除。 | 全局 |
 
@@ -89,7 +87,9 @@ Phase 2  A2A通信      Phase 3  Wiki
 | 共享工作空间（多Bot挂载同一个卷） | 多个Agent并发写同一文件没有锁与冲突检测，会静默损坏；三种容器backend语义不一致；remote runtime下不成立；配额与快照语义无法定义。收益小于复杂度。**连带要求见Phase 3第6节：Wiki必须承担Bot之间的文件交换。** |
 | Agent之间的群聊 | 一对一是默认形态。公共异步空间由Wiki承担。 |
 | Wiki的block级富文本编辑器与实时协同（CRDT） | 工作量以月计，且与Agent协同主线无关。Phase 3收敛到节点＋Markdown正文＋评论＋提及。 |
-| 记忆按Group分区 | 见D3/D5。Wiki既已放开，单独限制记忆只是自欺。 |
+| Wiki按Group划分 | UX上的认知负担大于收益：每建一篇文档都要先选组，跨组引用被禁又造成困惑。改为Team全局单一Wiki（D3）。 |
+| Wiki的节点级访问控制 | 同上。Phase 3只在`wiki_nodes`上预留可空的`visibility_group_id`（默认NULL＝全员可见），**不实现任何基于它的逻辑**。 |
+| 记忆按Group分区 | 见D5。Wiki本身就是Team全局的，单独限制记忆没有意义。 |
 | 为人类新建一套独立收件箱 | 人类已有`user_channel_bindings`。Inbox对人落成Web通知与既有渠道推送。 |
 
 ## 6. 待定决策
