@@ -9,7 +9,7 @@
 
 **Group是「谁能看到哪些Bot、哪些Bot之间可以互相联系」的分组，不是隔离边界。** 隔离边界仍然是Team。这个定位是本阶段全部设计的出发点，它决定了大量复杂度可以不做（见第6节）。
 
-**Group与Wiki解耦**（决策D3）：Wiki是Team全局的，与Group没有任何关系。Group不决定谁能看到哪些知识，只决定谁能看到哪些Bot。
+**Group与Wiki解耦**（决策D3）：Wiki是与Group平行的独立实体，可以有多个，各自带ACL。Group不拥有Wiki，只能作为ACL的一种授予主体（「研发组的人都能写这个Wiki」）。Group不决定谁能看到哪些知识，只决定谁能看到哪些Bot。
 
 ## 2. Team与Group的关系
 
@@ -80,7 +80,7 @@ group_bot_members(
 
 留这一列的理由：将来某个Bot需要拒绝组内其他Bot的委托时，有列在是改代码，列不在是一次迁移。这是零成本对冲。
 
-Wiki相关的权限列不在这里——Wiki与Group解耦后，「某个Bot是否允许写Wiki」是Bot自身的设置，不是成员关系上的属性。见[03-wiki.md](./03-wiki.md)第4节。
+Wiki相关的权限列不在这里，也不在`bots`上——Wiki与Group解耦后，「谁能读写哪个Wiki」完全由Wiki自身的ACL表达。见[03-wiki.md](./03-wiki.md)第4节。
 
 ### 3.3 人格与角色的切分
 
@@ -103,15 +103,17 @@ Bot的人格（system prompt、模型、workspace、记忆）属于Bot自身，�
 
 用户只能看到并使用自己所属Group中的Bot（决策D4）。这条要在handler层按用户的Group成员关系严格过滤。
 
-Group**不**约束Wiki内容——Wiki是Team全局的，全部成员可见。
+Group**不**约束知识的可见性——那由每个Wiki自身的ACL决定。
 
 ### 4.3 关于早期设计中的跨组泄漏
 
 设计早期版本采用「每个Group一个Wiki＋Bot可访问其所属全部Group的Wiki」，由此产生过一个已知口子：Bot同时属于G1与G2时，会成为G1成员间接读取G2 Wiki的传导路径。
 
-**Wiki与Group解耦后（D3），这个口子不再存在**——只有一份Wiki，不存在「跨」。原本为它准备的授权时刻提示与来源标注两项缓解措施也一并取消。
+**Wiki与Group解耦后（D3），这个口子的Group形态不再存在**——Wiki不归属于Group，多组归属不会带来任何额外的知识可见性。
 
-保留本节是为了记录这个演进，避免后续有人重新引入per-group Wiki时忽略该风险。
+但需要说明：该风险的**根因不是Group，而是Bot拥有独立于人的权限**，因此它在多Wiki＋ACL方案下换了个形式继续存在（Bot的Wiki授权集合与对话人的不一致）。处理方式记录在[03-wiki.md](./03-wiki.md)第4.3节，不在本阶段范围内。
+
+保留本节是为了记录这个演进，避免后续有人重新引入per-group Wiki时忽略原始风险。
 
 ## 5. 迁移
 
@@ -129,8 +131,8 @@ D3、D5、D6三条决策消去了大量复杂度。以下内容**不要实现**�
 | --- | --- |
 | `bot_sessions`增加`group_id` | Session不携带group上下文（D6）。chat与channel inbound只需要`bot_id`。 |
 | `bot_channel_configs`、heartbeat、schedule配置增加group列 | 同上。 |
-| `wiki_nodes`增加`group_id` | Wiki与Group解耦（D3）。Wiki是Team全局的。 |
-| 长期记忆按Group分区 | D5。Wiki本身就是Team全局的，单独限制记忆没有意义。 |
+| Wiki或`wiki_nodes`增加`group_id` | Wiki与Group解耦（D3）。Wiki是独立实体，权限由自身ACL决定；Group只能作为ACL主体出现。 |
+| 长期记忆按Group分区 | D5。Group不决定知识可见性，单独按Group限制记忆没有意义。 |
 | memory provider接口增加scope参数 | 同上。 |
 | A2A工具增加group参数 | 共享任意一个Group即允许contact，无歧义需要消解。见Phase 2。 |
 | 每种Session入口的group来源推导 | D6之后不存在这个问题。 |
@@ -151,7 +153,9 @@ Group成为Bot的管理单元后，Web侧需要：
 - 跨Group的「我的全部Bot」管理视图
 - Bot加入、移出Group的管理界面
 
-**Wiki不在此列**——它是Team全局的，没有Group切换的概念，也不随Group切换器变化。这正是解耦的主要收益：用户不需要在「我现在在哪个组」和「这篇文档属于哪个组」之间建立心智映射。
+**Wiki不在此列**——它有自己的列表与授权界面，不随Group切换器变化。这正是解耦的主要收益：用户不需要在「我现在在哪个组」和「这篇文档属于哪个组」之间建立心智映射。
+
+唯一的交叉点是把Group作为ACL主体授予Wiki，以及建Group时可选的「顺手为这个组建一个Wiki」快捷操作——后者只是预填ACL，不建立任何结构关联。
 
 详见`apps/web/AGENTS.md`的页面与路由约定。
 
@@ -172,13 +176,14 @@ Group成为Bot的管理单元后，Web侧需要：
 
 - 用户查询Bot列表、Group列表时，返回结果必须只包含其所属Group的资源。
 - 直接以ID访问非所属Group的Bot必须返回未找到或无权限。
-- Wiki**不**受此约束：Team内任意用户访问Wiki必须成功。
+- Wiki**不**受此约束：访问权限由Wiki自身的ACL决定，与用户属于哪个Group无关。
 
-### GRP-004：Group与Wiki无耦合
+### GRP-004：Group不拥有Wiki
 
-- Wiki的任何读写路径都不得引用Group表。
-- 用户切换当前Group时，Wiki的可见内容必须不发生变化。
-- 该项需要有测试守卫，防止后续实现悄悄引入group维度。
+- Wiki不得有归属Group的字段；删除Group必须只移除对应的ACL条目，不影响任何Wiki或其内容。
+- Wiki的读写路径除ACL解析外不得引用Group表。
+- 用户切换当前Group时，其可访问的Wiki集合必须不发生变化。
+- 该项需要有测试守卫，防止后续实现把Wiki重新挂回Group。
 
 ### GRP-005：迁移
 
