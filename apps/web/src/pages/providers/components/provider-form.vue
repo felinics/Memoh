@@ -353,7 +353,7 @@ import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, DeviceCodePanel, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { useAutosaveQueue, type AutosaveJob } from '@/pages/bots/components/use-autosave-queue'
+import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 
 const { t } = useI18n()
 const { syncProviderModelCatalog } = useProviderModelCatalog()

@@ -25,7 +25,7 @@ import type { SettingsSettings, SettingsUpsertRequest, CompactionLog } from '@me
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
-import { useAutosaveQueue, type AutosaveJob } from './use-autosave-queue'
+import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{

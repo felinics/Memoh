@@ -146,7 +146,7 @@ import {
   type ToolApprovalMode,
   type WorkspaceTargetKind,
 } from './tool-approval-config'
-import { useAutosaveQueue, type AutosaveJob } from './use-autosave-queue'
+import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 
 const props = defineProps<{
   botId: string

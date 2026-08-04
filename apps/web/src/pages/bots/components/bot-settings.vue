@@ -120,7 +120,7 @@ import type { AcpprofilePublicProfile, SettingsSettings, SettingsUpsertRequest }
 import type { Ref } from 'vue'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
-import { useAutosaveQueue, type AutosaveJob } from './use-autosave-queue'
+import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 
 const props = defineProps<{
   botId: string
