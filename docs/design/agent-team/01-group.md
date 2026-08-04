@@ -5,11 +5,11 @@
 
 ## 1. 目标与定位
 
-引入Group的动机是Bot的访问权限存在差异：有的人能访问某些Bot，有的人不能。Group让有权限的人把Bot编入分组。
+引入Group的动机是让一部分人和Bot形成显式的协作关系。Group让有管理权的人把Bot编入分组，让组内成员发现和使用这些Bot，也让组内Bot能够互相联系。
 
-**Group是「谁能看到哪些Bot、哪些Bot之间可以互相联系」的分组，不是隔离边界。** 隔离边界仍然是Team。这个定位是本阶段全部设计的出发点，它决定了大量复杂度可以不做（见第6节）。
+**Group是可选的协作与授权分组，不是Bot的必选归属，也不是隔离边界。** Bot可以不属于任何Group；这时它继续按现有owner与`bot_user_grants`规则工作，只是没有Group带来的成员发现与A2A授权。隔离边界仍然是Team。
 
-**Group与Wiki解耦**（决策D3）：Wiki是与Group平行的独立实体，可以有多个，各自带ACL。Group不拥有Wiki，只能作为ACL的一种授予主体（「研发组的人都能写这个Wiki」）。Group不决定谁能看到哪些知识，只决定谁能看到哪些Bot。
+**Group与Wiki解耦**（决策D3）：Wiki是与Group平行的独立实体，可以有多个，各自带ACL。Group不拥有Wiki，只能作为ACL的一种授予主体（「研发组的人都能写这个Wiki」）。Group不决定谁能看到哪些知识，只为Bot访问与A2A增加一种授权来源。
 
 ## 2. Team与Group的关系
 
@@ -19,8 +19,8 @@ Group位于Team之下（决策D1）。两者的分工：
 | --- | --- | --- |
 | 作用 | 租户、隔离、RLS、计费 | 协作、发现、授权 |
 | 数量（开源版） | 恒为1（`DefaultTeamID`） | 任意多个 |
-| Bot归属 | 恰好1个 | 可以多个（D2） |
-| 用户归属 | 恰好1个 | 可以多个 |
+| Bot成员关系 | 恰好属于1个Team | 可以是0到多个（D2） |
+| 用户成员关系 | 可以加入多个Team | 可以是0到多个 |
 | 是否隔离边界 | 是 | 否 |
 
 现有的`0112_team_core`已经把`team_id`铺到全部业务表并启用RLS，`bots`的主键就是`(team_id, id)`。Group作为新增的一层挂在其下，**不改动任何既有的`team_id`列与RLS策略**。
@@ -81,9 +81,7 @@ group_bot_members(
 
 ### 3.2 关于`allow_inbound_contact`
 
-该列默认为真，**Phase 1不实现任何基于它的限制逻辑**，由Phase 2在同事发现与授权时消费。
-
-留这一列的理由：将来某个Bot需要拒绝组内其他Bot的委托时，有列在是改代码，列不在是一次迁移。这是零成本对冲。
+该列默认为真，与成员关系一起落地。**Phase 1不实现任何基于它的限制逻辑**；Phase 2直接将它作为同事发现与A2A授权的入站开关，不需要后续补迁移。
 
 Wiki相关的权限列不在这里，也不在`bots`上——Wiki与Group解耦后，「谁能读写哪个Wiki」完全由Wiki自身的ACL表达。见[03-wiki.md](./03-wiki.md)第4节。
 
@@ -104,9 +102,16 @@ Bot的人格（system prompt、模型、workspace、记忆）属于Bot自身，�
 
 只校验Group一侧会构成提权路径：任何Group管理员都能把别人的私有Bot拉进自己的组，组内成员随即可以使用该Bot。这条必须在handler层fail-closed地校验。
 
-### 4.2 Group约束的是Bot可见性
+### 4.2 Group提供增量访问，不替换现有权限
 
-用户只能看到并使用自己所属Group中的Bot（决策D4）。这条要在handler层按用户的Group成员关系严格过滤。
+用户对Bot的有效访问是以下两类授权的**并集**：
+
+1. 既有直接授权：Bot owner与`bot_user_grants`。
+2. Group授权：用户与Bot至少共享一个Group时获得`chat`权限。
+
+Group成员关系只增加Bot列表可见性与`chat`权限，不授予`workspace_read`、`workspace_write`、`workspace_exec`或`manage`。这些能力仍只能来自owner或`bot_user_grants`。把Bot加入或移出Group仍需第4.1节的双向授权；Group管理员不能借成员关系修改Bot本身的配置。
+
+Bot可以不属于任何Group。无Group Bot仍对owner和持有直接授权的用户可见并可用，只是不出现在任何Group视图中，也不能使用Phase 2的`list_teammates`或被其他Bot通过Group联系。**不得为了实现Group而创建Default Group、强制新Bot入组，或把未入组Bot从既有owner/直接授权视图中隐藏。**
 
 Group**不**约束知识的可见性——那由每个Wiki自身的ACL决定。
 
@@ -116,17 +121,21 @@ Group**不**约束知识的可见性——那由每个Wiki自身的ACL决定。
 
 **Wiki与Group解耦后（D3），这个口子的Group形态不再存在**——Wiki不归属于Group，多组归属不会带来任何额外的知识可见性。
 
-但需要说明：该风险的**根因不是Group，而是Bot拥有独立于人的权限**，因此它在多Wiki＋ACL方案下换了个形式继续存在（Bot的Wiki授权集合与对话人的不一致）。处理方式记录在[03-wiki.md](./03-wiki.md)第4.3节，不在本阶段范围内。
+但需要说明：该风险的**根因不是Group，而是Bot拥有独立于人的权限**，因此它在多Wiki＋ACL方案下换了个形式继续存在（Bot的Wiki授权集合与对话人的不一致）。处理方式记录在[03-wiki.md](./03-wiki.md)第4.4节，不在本阶段范围内。
 
 保留本节是为了记录这个演进，避免后续有人重新引入per-group Wiki时忽略原始风险。
 
-## 5. 迁移
+## 5. 兼容与迁移
 
-参照`internal/team/id.go`中`DefaultTeamID`的既有做法：
+本阶段只新增Group及成员关系，不为历史数据制造隐式组织结构：
 
-- 定义固定常量`DefaultGroupID`，**不得**按安装随机生成。理由与`DefaultTeamID`一致：迁移、fixture与应用代码需要跨环境引用同一个值。
-- 迁移时幂等地播种该Group，并把现有全部Bot与用户加入其中。
-- 升级后开源单租户安装的行为与升级前完全一致。
+- **不存在`DefaultGroupID`，迁移不得创建Default Group。**
+- 既有用户与Bot迁移后都没有Group成员关系，既有owner与`bot_user_grants`保持原样。
+- 新建Bot默认也不属于任何Group；只有显式的加入操作才创建`group_bot_members`记录。
+- 创建Group时，创建者成为该Group的owner；不会自动把其全部Bot加入Group。
+- 新增或移除Team成员不会自动修改任何Group成员关系。
+
+因此升级兼容不依赖回填：Group是新增的可选能力，未配置Group的安装在升级前后行为完全一致。
 
 ## 6. 本阶段明确不做的事
 
@@ -142,20 +151,21 @@ D3、D5、D6三条决策消去了大量复杂度。以下内容**不要实现**�
 | A2A工具增加group参数 | 共享任意一个Group即允许contact，无歧义需要消解。见Phase 2。 |
 | 每种Session入口的group来源推导 | D6之后不存在这个问题。 |
 
-**Group只在两处被消费：**
+**Group成员关系只在三处被消费：**
 
-1. 人类查看Bot列表时按成员关系过滤（第4.2节）
+1. 人类查看Bot列表时，把Group成员关系作为既有直接授权之外的增量访问来源（第4.2节）
 2. `list_teammates`与`contact_agent`的同事发现与授权（Phase 2）
+3. 解析`wiki_group_acl`时，为该Group的人类成员批量授予Wiki read/write（Phase 3的可后置集成层）
 
-除此之外，任何地方都不应该出现group维度——不在Session上，不在渠道配置上，不在Wiki上，不在记忆里。
+除此之外，任何地方都不应该出现group维度——不在Session上，不在渠道配置上，不作为Wiki归属字段，也不在记忆里。
 
 ## 7. 前端影响
 
-Group成为Bot的管理单元后，Web侧需要：
+Group成为Bot的可选协作单元后，Web侧需要：
 
-- Group切换器
-- Bot列表按当前Group过滤（人类视角，严格过滤）
-- 跨Group的「我的全部Bot」管理视图
+- Group筛选器；它是可选过滤条件，不是必须选择的全局上下文
+- 保留按owner与直接授权得到的「全部可访问Bot」视图，其中包括无Group Bot
+- 按Group查看该组授予的Bot
 - Bot加入、移出Group的管理界面
 
 **Wiki不在此列**——它有自己的列表与授权界面，不随Group切换器变化。这正是解耦的主要收益：用户不需要在「我现在在哪个组」和「这篇文档属于哪个组」之间建立心智映射。
@@ -177,10 +187,12 @@ Group成为Bot的管理单元后，Web侧需要：
 - 缺少Group管理权时同样必须失败。
 - 该校验必须fail-closed：任一侧权限查询出错时拒绝操作。
 
-### GRP-003：人类侧过滤
+### GRP-003：人类侧增量访问
 
-- 用户查询Bot列表、Group列表时，返回结果必须只包含其所属Group的资源。
-- 直接以ID访问非所属Group的Bot必须返回未找到或无权限。
+- 用户查询Bot列表时，结果必须是既有owner/`bot_user_grants`授权与Group授权的并集并正确去重。
+- 用户与Bot共享Group但没有直接授权时，必须可以看到该Bot并获得`chat`权限，但不得因此获得任何workspace或manage权限。
+- 用户与Bot不共享Group、也没有任何直接授权时，直接以ID访问必须返回未找到或无权限。
+- 无Group Bot必须继续对owner和持有直接授权的用户可见并可用。
 - Wiki**不**受此约束：访问权限由Wiki自身的ACL决定，与用户属于哪个Group无关。
 
 ### GRP-004：Group不拥有Wiki
@@ -190,8 +202,10 @@ Group成为Bot的管理单元后，Web侧需要：
 - 用户切换当前Group时，其可访问的Wiki集合必须不发生变化。
 - 该项需要有测试守卫，防止后续实现把Wiki重新挂回Group。
 
-### GRP-005：迁移
+### GRP-005：可选成员关系与迁移
 
-- 在含有既存Bot、用户与会话的数据库上执行迁移后，全部Bot与用户必须位于`DefaultGroupID`。
-- 迁移前后，chat与channel inbound的行为必须完全一致。
+- 在含有既存Bot、用户与会话的数据库上执行迁移后，不得自动创建任何Group或成员关系。
+- 迁移前后，既有Bot列表、chat与channel inbound行为必须完全一致。
+- 新建Bot默认没有Group成员关系，但owner必须仍能看到、管理和使用它。
+- 从最后一个Group移出Bot后，它必须继续按owner与`bot_user_grants`工作。
 - `.down.sql`必须完整反向撤销`.up.sql`。

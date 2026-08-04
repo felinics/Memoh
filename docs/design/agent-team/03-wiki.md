@@ -32,46 +32,53 @@ Wiki**不归属于Group**。两者都是Team之下的独立概念：Group管「�
 
 ## 2. 存储分层
 
-**结构化数据存Postgres，正文与附件blob走storage provider抽象**（决策D12）。
+**结构、Markdown正文与版本存Postgres；只有附件二进制走storage provider抽象**（决策D12）。
 
-不要把结构塞进对象存储的key前缀。文档树、Issue状态、评论、提及、版本、引用关系全是关系数据；放进key前缀后，列目录、改标题、移动子树、按权限过滤、按assignee查Issue都会退化成全桶扫描。
+文档树、Issue状态、评论、提及、正文版本、引用关系都需要事务、并发控制、审计与回滚。把Markdown正文放进对象存储会让一次编辑跨越Postgres与blob store，无法原子提交；正文体量也不值得引入这层复杂度。因此每个版本的Markdown快照直接存Postgres，附件才进入对象存储。
 
 | 层 | 内容 | 落点 |
 | --- | --- | --- |
-| 结构 | 节点树、元数据、评论、提及、版本指针、引用 | Postgres |
-| 内容 | Markdown正文、附件二进制 | storage provider |
+| 关系与文本 | Wiki、ACL、节点树、Issue字段、Markdown版本、评论、提及、引用、附件元数据 | Postgres |
+| 二进制 | 附件内容 | storage provider |
 
-现有`internal/storage/providers/`只有`localfs`、`containerfs`、`fallback`。**S3是新增的provider实现，默认仍为localfs**，不得把S3写死进Wiki的领域模型——自部署用户不一定愿意运行MinIO。
+现有`internal/storage/providers/`只有`localfs`、`containerfs`、`fallback`。**S3是新增的provider实现，默认仍为localfs**，不得把S3写死进Wiki领域模型——自部署用户不一定愿意运行MinIO。
 
-### 2.1 内容寻址的取舍
+### 2.1 附件内容寻址与一致性
 
-`internal/media/`是内容寻址的，跨Wiki会天然去重。这带来两个后果：
+Wiki附件按`team_id + content_hash`寻址，在同一Team的多个Wiki之间去重，但绝不跨Team去重。现有`internal/media/`以`bot_id`作为routing key，不能不加适配就宣称具备跨Wiki去重；Wiki需要独立的Team级namespace或对media service做显式扩展。
 
-- 删除语义变绕：Wiki A删除了某文件，但Wiki B仍在引用同一blob。
-- 构成一个很弱的存在性侧信道。
+对象存储与Postgres无法组成同一事务，写入顺序固定为：
 
-大多数产品接受「blob去重＋元数据层做权限」，本设计也采用该方案。但这必须是有意识的选择，不能是无意中变成这样的。
+1. 流式计算hash并写入临时/最终blob key。
+2. 在Postgres事务中插入附件元数据与节点引用。
+3. 第2步失败时，blob成为可回收孤儿；后台GC按宽限期清理无引用对象。
+
+删除附件只删除Postgres引用。仅当同一Team内没有任何附件元数据引用该hash时，GC才删除blob。下载必须先通过Wiki read授权，再由受控handler流式返回或生成短期签名URL；不得把localfs路径或永久对象URL直接暴露给调用方。
 
 ## 3. 数据模型
 
-范围收敛到六类实体：
+核心表族如下：
 
 | 实体 | 说明 |
 | --- | --- |
-| wiki | 知识库本身。有名字、有ACL，是**唯一的权限边界** |
-| wiki_acl | 授权条目。见第4节 |
-| node | 知识库节点。`type`区分`doc`与`issue`；`issue`额外携带status、assignee等字段 |
+| wiki | 知识库本身；包含`owner_user_id`，是唯一权限边界 |
+| 四类ACL关系 | `wiki_user_acl`、`wiki_bot_acl`、`wiki_group_acl`、`wiki_team_acl`，见第4节 |
+| node | 节点树与当前状态；`type`区分`doc`与`issue` |
+| node_version | 不可变Markdown版本、编辑来源与版本号 |
 | comment | 挂在节点上的评论 |
-| mention | 从正文或评论中解析出的@提及，指向用户或Bot |
-| attachment | 节点的附件，指向blob |
+| mention | 从正文或评论中解析出的@提及，分别指向用户或Bot |
+| reference | 节点间引用，包括跨Wiki引用 |
+| attachment | 节点的附件元数据，指向Team级内容hash |
 
 要点：
 
 - 每个node归属于恰好一个wiki，`wiki_id`不可为空。
-- 节点树用父子引用表达，支持移动子树。**跨wiki移动子树等同于变更归属**，必须重新校验权限。
-- `wiki_nodes`**不携带`group_id`**（决策D3）。权限来自所属wiki的ACL，节点本身不带任何权限字段。
+- 节点树用父子引用表达，支持移动子树。**跨wiki移动子树等同于变更归属**，必须重新校验源Wiki与目标Wiki的write权限。
+- `wiki_nodes`**不携带`group_id`**（决策D3）。权限来自所属Wiki的ACL，节点本身不带任何权限字段。
 - **Issue是节点的一个type**，不是独立子系统。看板视图是对`type=issue`节点按status的投影。
-- 版本：每次修改保留版本记录，用于审计与回滚（第8节）。
+- `wiki_node_versions`以`(wiki_id, node_id, version)`唯一；每次写入插入不可变快照，并在同一Postgres事务中更新node的当前版本指针。
+- 每个版本记录编辑者user或Bot、来源Session与run；回滚通过创建一个内容等于历史版本的新版本完成，不修改历史行。
+- 所有“user或Bot”引用都使用两列真实外键加exactly-one CHECK，例如`editor_user_id`/`editor_bot_id`、`mentioned_user_id`/`mentioned_bot_id`；不得退化成`actor_type + actor_id`多态关联。人类编辑时Session与run可以为空，Bot编辑时必须填写。
 - 全部表遵循README第8.4节的约定，携带`team_id`并启用RLS。
 
 ## 4. 权限
@@ -80,58 +87,51 @@ Wiki**不归属于Group**。两者都是Team之下的独立概念：Group管「�
 
 **不做节点级访问控制。** Wiki本身就是权限边界；需要不同权限就再建一个Wiki。
 
-这是本节最重要的一条约束。节点级ACL是同类系统公认的坑：查询要逐节点判权、树上会出现用户看不见的空洞、面包屑与搜索结果需要特殊处理、用户永远搞不清自己为什么打不开某一页。付出这些代价换来的表达力，用「多建一个Wiki」就能覆盖。
+这是本节最重要的一条约束。节点级ACL会让查询逐节点判权、树上出现空洞，并迫使面包屑与搜索结果增加特殊处理。一次权限判定只发生在Wiki层，判定通过后整棵树一致可访问。
 
-推论：一次权限判定只发生在Wiki层，判定通过后整棵树一致可访问。这让查询保持简单，也让「我能看到什么」对用户是可解释的。
+### 4.2 四类ACL关系与read/write位
 
-### 4.2 ACL主体与级别
+不使用`principal_type + principal_id`多态外键。四类主体分别使用四张关系表，每张表都有`can_read`与`can_write`两个布尔位：
 
-授权条目的主体支持四类：
+| 表 | 主体 | 关键外键 |
+| --- | --- | --- |
+| `wiki_user_acl` | 单个Team成员 | `(team_id, user_id) → team_members` |
+| `wiki_bot_acl` | 单个Bot | `(team_id, bot_id) → bots` |
+| `wiki_group_acl` | Group的全部人类成员 | `(team_id, group_id) → groups` |
+| `wiki_team_acl` | 当前整个Team | `team_id → teams`；每个Wiki至多一行 |
 
-| 主体 | 含义 |
-| --- | --- |
-| user | 单个用户 |
-| bot | 单个Bot |
-| group | 该Group的全部人类成员（批量授权的便利写法） |
-| team | 整个Team，即「公开Wiki」 |
+共同约束：
 
-级别三档：
+- 每个Wiki与主体最多一行。
+- `can_write=true`时`can_read`也必须为true。
+- 两个位都为false的行没有意义，必须删除而不是保留。
+- 有效权限取所有匹配关系的并集；任一关系给write即有write，任一关系给read即有read。首版没有deny规则。
+- `group`只展开该Group的人类成员，不展开Bot；Bot必须通过`wiki_bot_acl`显式授权。
+- 删除Group只级联删除`wiki_group_acl`，不影响Wiki及内容。
 
-| 级别 | 含义 |
-| --- | --- |
-| read | 读取与搜索 |
-| write | 创建、编辑、评论、上传附件 |
-| manage | 修改ACL、重命名、删除Wiki |
+Phase 3核心可以先实现user、bot与team三类关系；`wiki_group_acl`在Phase 1可用后作为薄集成层加入。Wiki的结构和其他查询路径仍不依赖Group。
 
-关于`group`主体需要明确：**它只是授权对象，不构成Wiki对Group的从属关系。** Wiki不因此归属于任何Group，删除Group只删除对应的授权条目，不影响Wiki本身。实现上除ACL解析外，Wiki的任何查询路径都不得引用Group表（见`01-group.md`验收项GRP-004）。
+### 4.3 所有权与管理
 
-`group`主体是否展开到该组的Bot成员，需要显式决定。**建议不展开**：Bot的授权应逐个显式给出，因为下一节的传导风险与Bot强相关，批量授权会让影响范围难以估算。
+read/write ACL不承载管理权限。每个Wiki有一个非空`owner_user_id`，创建者默认成为owner；该字段通过`(team_id, owner_user_id)`引用`team_members`并使用`ON DELETE RESTRICT`，移除owner前必须先转移Wiki。
 
-### 4.3 已知且已接受的传导风险
+只有Wiki owner和Team admin可以修改ACL、转移owner、重命名或删除Wiki。Team admin是恢复入口，因此无需在ACL中增加`manage`级别，也不存在“删除最后一个manager”的状态。
 
-Bot拥有独立于人的权限，因此存在：
+### 4.4 已知且已接受的传导语义
 
-> Wiki W授权给了Bot B，但没有授权给用户Alice。Alice与B对话时，B可以读取W并把内容讲给她。
+Bot拥有独立于人的Wiki权限。Wiki W授权给Bot B、但没有授权给Alice时，Alice与B对话仍可能从B的回答中得到W的内容。**这是Bot作为独立能力主体的既定语义，不取Bot与当前对话人的权限交集。** heartbeat、schedule和A2A也始终按Bot自己的ACL执行。
 
-这与早期per-group方案中记录过的风险是同一类，只是换了个形式：根因不是Group，而是**Bot的授权集合与对话人的授权集合不一致**。
+授予Bot Wiki权限的界面必须明确提示“该Bot可以在其正常工作中使用并转述这些内容”，并展示其可达范围。可枚举的owner、直接授权与Group成员应列出；若Bot的渠道ACL允许任意访客或未绑定渠道身份，必须显示“任意渠道访客”等范围描述，不能伪装成一份完整的人名列表。
 
-理论上的解法是取交集——Bot在某次会话中的有效权限等于「它自己的授权 ∩ 当前人类的授权」。该方案被否决，原因是它在多种会话下算不出来：heartbeat与schedule会话没有人类；A2A会话的对面是另一个Bot；渠道会话中的人类身份可能是未绑定账号的外部用户。
-
-**决定接受**，并采取一项治理层措施：
-
-> 授予Bot访问某个Wiki时，界面上必须列出「当前有哪些人可以与这个Bot对话」。
-
-这比单纯的文字提示有用——它把影响范围直接算给授权者看。
-
-### 4.4 工具注册
+### 4.5 工具注册
 
 Wiki工具的注册条件是「该Bot至少对一个Wiki有read授权」，与Group成员关系无关。Bot不属于任何Group时，只要有Wiki授权，工具**照常注册**。
 
 Bot侧不再需要独立的「是否允许写Wiki」开关——该能力完全由ACL表达，不授权即不能写。
 
-### 4.5 跨Wiki引用
+### 4.6 跨Wiki引用
 
-**允许**跨Wiki的链接与引用，渲染时按读者的权限决定是否可见：无权限时显示为不可访问的引用，不泄漏标题以外的内容。
+**允许**跨Wiki的链接与引用，渲染时按读者的权限决定是否可见：无权限时只显示通用的“不可访问引用”，不得泄漏目标标题、路径、类型或内容。
 
 这一点与早期per-group方案相反——那一版禁止跨组引用，而该禁令正是当时困惑的主要来源。Wiki是显式的、有名字的实体，跨Wiki引用对用户是可理解的。
 
@@ -141,7 +141,7 @@ Bot侧不再需要独立的「是否允许写Wiki」开关——该能力完全�
 
 | 工具 | 说明 |
 | --- | --- |
-| 列出可访问的Wiki | 返回该Bot有授权的Wiki及其级别 |
+| 列出可访问的Wiki | 返回该Bot有授权的Wiki及`can_read`/`can_write` |
 | 搜索 | **跨全部有read授权的Wiki**，结果标注来源Wiki。可复用`internal/memory/`已有的Qdrant与BM25基础设施 |
 | 按路径读取 | 读单个节点 |
 | 局部编辑 | 见第5.2节 |
@@ -158,10 +158,9 @@ Bot需要一个默认Wiki设置，否则「把这个记一下」每次都要先�
 
 ### 5.2 并发写必须有冲突检测
 
-Agent是会并行的。整篇覆写在并发下必然互相踩，因此**必须**具备下列之一：
+Agent是会并行的。所有编辑接口在读取时返回`version`，写入时必须携带`expected_version`。服务端在同一Postgres事务中锁定node、比较版本、插入不可变`wiki_node_versions`行并更新当前版本指针；版本不一致时返回稳定的冲突结果，让Agent重读再改。
 
-- 乐观锁：读取时返回version或etag，写入时校验；冲突则返回给Agent，由它重读再改。
-- Anchor级patch：只提交局部改动与其锚点。
+编辑API可以支持Anchor级patch以减少传输和冲突面，但patch仍必须带`expected_version`，不能绕过乐观锁。
 
 这一点的重要性高于表面观感——它是Wiki能否被多个Agent同时使用的前提。
 
@@ -196,7 +195,7 @@ Agent是会并行的。整篇覆写在并发下必然互相踩，因此**必须*
 
 ## 8. 审计与回滚
 
-Agent修改Wiki必须留痕：谁改的、哪个Session改的、diff是什么。人类必须能回滚到任意历史版本。
+Agent修改Wiki必须留痕：谁改的、哪个Session与run改的、版本前后是什么。`wiki_node_versions`保存不可变Markdown快照；diff在两个版本之间计算，人类回滚时创建一个内容等于目标历史版本的新版本，不覆盖或删除既有审计记录。
 
 这是信任的前提。没有它，人类无法放心让Agent写入共享空间。
 
@@ -209,7 +208,7 @@ Agent修改Wiki必须留痕：谁改的、哪个Session改的、diff是什么。
 | 独立的Issue子系统 | Issue是node的一个type |
 | 按Group划分Wiki | Wiki与Group解耦（D3）。Group只能作为ACL主体出现 |
 | **节点级访问控制** | 第4.1节。权限边界只到Wiki一级，需要不同权限就再建一个Wiki |
-| 有效权限取Bot与对话人的交集 | 第4.3节。多种会话下算不出来 |
+| 有效权限取Bot与对话人的交集 | 第4.4节。Bot是独立能力主体，始终按自己的ACL执行 |
 | 把结构存进对象存储 | 第2节 |
 
 ## 10. 验收要求
@@ -217,16 +216,21 @@ Agent修改Wiki必须留痕：谁改的、哪个Session改的、diff是什么。
 ### WIKI-001：结构与内容分层
 
 - 列目录、移动子树、改标题必须是Postgres上的操作，不得触发对象存储的遍历。
+- Markdown正文及其不可变版本必须存Postgres，并与当前版本指针原子提交。
+- 对象存储只能承载附件二进制，不得承载Wiki结构或Markdown正文。
 - 更换storage provider（localfs↔S3）不得影响结构层行为。
 - 默认配置下不依赖S3。
 
 ### WIKI-002：权限
 
-- 无read授权的用户或Bot访问Wiki内任意节点必须被拒绝，且不泄漏节点存在性以外的信息。
+- 无read授权的用户或Bot访问Wiki内任意节点必须被拒绝，不得泄漏节点标题、路径、类型或内容。
 - 仅有read授权者发起写操作必须被拒绝。
-- 仅有write授权者修改ACL或删除Wiki必须被拒绝。
+- ACL必须分别落在user、bot、group、team四张关系表；不得使用无外键保障的多态`principal_id`。
+- `can_write=true`必须蕴含`can_read=true`，两者都为false的记录必须被拒绝或删除。
+- 仅有write授权者修改ACL、转移owner或删除Wiki必须被拒绝；只有Wiki owner或Team admin可以执行管理操作。
 - 通过`group`主体获得的授权，必须在该用户退出Group后立即失效。
 - 删除Group必须只移除对应的授权条目，Wiki本身及其内容必须不受影响。
+- `group`授权不得隐式扩展到Group中的Bot。
 
 ### WIKI-002a：权限边界只到Wiki一级
 
@@ -237,24 +241,34 @@ Agent修改Wiki必须留痕：谁改的、哪个Session改的、diff是什么。
 ### WIKI-002b：跨Wiki引用
 
 - 跨Wiki链接必须允许创建。
-- 读者对目标Wiki无授权时，引用必须渲染为不可访问状态，且不泄漏标题以外的内容。
+- 读者对目标Wiki无授权时，引用必须渲染为通用不可访问状态，不得泄漏目标标题、路径、类型或内容。
 
 ### WIKI-003：并发写
 
 - 两个Agent基于同一版本并发修改同一节点时，后提交者必须收到冲突而不是静默覆盖。
 - 冲突返回给Agent的信息必须足以让它重读并重试。
+- Anchor patch也必须校验`expected_version`，不得绕过版本冲突检测。
 
 ### WIKI-004：附件交换
 
 - Bot必须能把自己workspace中的文件发布为Wiki附件。
 - 另一个有权限的Bot必须能把该附件拉取进自己的workspace。
+- 下载必须经过Wiki read授权，不得泄漏localfs路径或永久对象URL。
+- 同一Team内相同hash可以去重，不同Team之间必须使用隔离namespace。
 
 ### WIKI-005：审计
 
-- 每次由Agent发起的修改必须记录发起Bot与Session。
-- 必须能查看任意两个版本之间的diff，并回滚到指定版本。
+- 每次由Agent发起的修改必须记录发起Bot、Session与run。
+- 必须能查看任意两个不可变版本之间的diff。
+- 回滚必须创建新版本，不得重写或删除历史版本。
 
 ### WIKI-006：记忆边界
 
 - 记忆抽取流程必须不会写入Wiki。
 - 该项需要有测试守卫，而不仅是约定。
+
+### WIKI-007：附件一致性与回收
+
+- blob写入成功但Postgres事务失败时不得产生可访问附件；孤儿blob必须在宽限期后由GC回收。
+- 删除一个Wiki或附件引用时，不得删除仍被同一Team其他Wiki引用的blob。
+- GC删除前必须在Postgres中再次确认该Team内引用数为零，并可安全重试。

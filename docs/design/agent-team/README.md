@@ -8,7 +8,7 @@ Memoh目前允许创建多个Bot，但Bot之间彼此不可见、不能协作。
 
 | 阶段 | 文档 | 内容 |
 | --- | --- | --- |
-| Phase 1 | [01-group.md](./01-group.md) | Group模型：成员关系、权限、迁移 |
+| Phase 1 | [01-group.md](./01-group.md) | Group模型：可选成员关系、增量权限、兼容迁移 |
 | Phase 2 | [02-agent-to-agent.md](./02-agent-to-agent.md) | Agent之间的一对一通信 |
 | Phase 3 | [03-wiki.md](./03-wiki.md) | 共享知识库：多Wiki＋每Wiki一份ACL |
 | Phase 4 | [04-inbox.md](./04-inbox.md) | Inbox投递与事件驱动触发 |
@@ -37,7 +37,7 @@ Phase 3  Wiki      ──▶  Phase 4  Inbox
 | 术语 | 含义 |
 | --- | --- |
 | Team | 租户与隔离边界。承载RLS、计费与数据隔离。开源自部署版本永远只有`internal/team/id.go`里的`DefaultTeamID`一个Team。 |
-| Group | Team之下的协作与授权分组。决定「谁能看到哪些Bot」与「哪些Bot之间可以互相联系」。**不拥有Wiki，也不是隔离边界。** |
+| Group | Team之下可选的协作与授权分组。为人类增加Bot访问，为Bot增加同事发现与A2A授权。Bot可以不属于任何Group；Group不拥有Wiki，也不是隔离边界。 |
 | Wiki | Team之下的独立一等实体，可以有多个。**它自身就是权限边界**，通过ACL授予user/bot/group/team。与Group平行，互不从属。 |
 | Bot | 平台上的一个AI Agent实体。拥有独立的workspace、模型配置、人格、长期记忆与渠道绑定。 |
 | Subagent | 由某个Bot在自己会话内派生的从属执行体。共享父Bot的workspace与凭据，生命周期绑定父会话。见`internal/agent/tool/subagent.go`。 |
@@ -64,9 +64,9 @@ Phase 3  Wiki      ──▶  Phase 4  Inbox
 | # | 决策 | 出处 |
 | --- | --- | --- |
 | D1 | Group位于Team之下，不替换Team。Team继续作为RLS与隔离边界。 | Phase 1 |
-| D2 | 一个Bot可以属于多个Group。 | Phase 1 |
+| D2 | 一个Bot可以不属于任何Group，也可以属于多个Group；不存在Default Group。 | Phase 1 |
 | D3 | **Wiki与Group解耦**：Wiki是独立的一等实体，一个Team内可以有多个，各自带ACL。Group不拥有Wiki，只能作为ACL的一种授予主体。 | Phase 1 / Phase 3 |
-| D4 | Group只约束「谁能看到哪些Bot」与「哪些Bot之间可以互相联系」，不决定知识的可见性。 | Phase 1 |
+| D4 | Group对人类只增量授予Bot可见性与`chat`，不授予workspace或manage；对Bot提供A2A授权。它不替换直接授权，也不决定知识可见性。 | Phase 1 |
 | D5 | 长期记忆保持per-bot，不按Group分区。 | Phase 1 |
 | D6 | Session不携带`group_id`。chat、channel inbound、heartbeat、schedule等入口只需要`bot_id`。 | Phase 1 |
 | D7 | A2A的调用方是工具（句柄式，体感与Subagent一致），被调方走**正常Bot的turn路径**，不复用`SpawnProvider`的执行链。 | Phase 2 |
@@ -74,13 +74,15 @@ Phase 3  Wiki      ──▶  Phase 4  Inbox
 | D9 | A2A默认异步，同时支持同步等待。 | Phase 2 |
 | D10 | A2A使用独立的session mode与system prompt，与Subagent分开。 | Phase 2 |
 | D11 | Wiki面向人和Agent双方使用，不是仅供Agent读取的内部存储。 | Phase 3 |
-| D12 | Wiki的结构化数据存Postgres，正文与附件blob走storage provider抽象；S3是新增provider，默认仍为localfs。 | Phase 3 |
-| D13 | Wiki的权限边界**只到Wiki一级**，不做节点级ACL。ACL主体为user/bot/group/team，级别为read/write/manage。 | Phase 3 |
+| D12 | Wiki结构、Markdown正文与不可变版本存Postgres；只有附件二进制走storage provider。S3是新增provider，默认仍为localfs。 | Phase 3 |
+| D13 | Wiki权限边界只到Wiki一级。user/bot/group/team分别使用四张ACL关系表，每类只有`can_read`/`can_write`；owner与Team admin负责管理。 | Phase 3 |
 | D14 | Inbox不承载A2A。A2A走工具直连，Inbox只处理事件驱动的投递（Wiki提及、人类通知）。 | Phase 4 |
 | D15 | 保留现有discuss模式（`internal/channel/discuss/`），它是面向渠道群聊的特性，与Agent Team定位不同，不合并、不移除。 | 全局 |
 | D16 | A2A会话中被调Bot调用`ask_user`时，请求**路由回调用方Agent**，由调用方作答。 | Phase 2 |
 | D17 | A2A会话中被调Bot触发工具审批时，由**被调Bot的归属人类**（`bots.owner_user_id`）审批。 | Phase 2 |
-| D18 | 异步A2A的迟到结果在调用方会话已结束时**直接丢弃**，不投递到Inbox。 | Phase 2 / Phase 4 |
+| D18 | 异步A2A的结果在发起它的`caller_run_id`已终止时不再自动投递，也不进入Inbox；委托与被调方执行记录仍保留。 | Phase 2 / Phase 4 |
+| D19 | A2A是明确的能力委托：被调Bot按自己的工具、Wiki与workspace权限执行，不与原始发起人的权限取交集；on-behalf-of只用于来源与审计。 | Phase 2 |
+| D20 | Inbox采用事务Outbox、持久化delivery、至少一次投递与幂等效果；worker通过可过期lease恢复，多次失败进入可查询死信。 | Phase 4 |
 
 ## 5. 明确排除的范围
 
@@ -93,7 +95,7 @@ Phase 3  Wiki      ──▶  Phase 4  Inbox
 | Wiki的block级富文本编辑器与实时协同（CRDT） | 工作量以月计，且与Agent协同主线无关。Phase 3收敛到节点＋Markdown正文＋评论＋提及。 |
 | Wiki按Group划分 | 每建一篇文档都要先选组，跨组引用被禁又造成困惑。改为Wiki自身即权限边界（D3）。 |
 | Wiki的节点级访问控制 | 查询要逐节点判权、树上出现空洞、用户无法解释自己为什么打不开某页。需要不同权限就再建一个Wiki。见`03-wiki.md`第4.1节。 |
-| Wiki有效权限取Bot与对话人的交集 | heartbeat、schedule会话没有人类，A2A会话对面是Bot，交集算不出来。改为治理层措施，见`03-wiki.md`第4.3节。 |
+| Wiki有效权限取Bot与对话人的交集 | Bot是独立能力主体，heartbeat、schedule、A2A与人类对话都按Bot自己的ACL执行。授予界面明确披露可达范围，见`03-wiki.md`第4.4节。 |
 | 记忆按Group分区 | 见D5。Group不决定知识可见性，单独限制记忆没有意义。 |
 | 为人类新建一套独立收件箱 | 人类已有`user_channel_bindings`。Inbox对人落成Web通知与既有渠道推送。 |
 
@@ -105,13 +107,13 @@ Phase 3  Wiki      ──▶  Phase 4  Inbox
 | --- | --- | --- | --- |
 | O1 | 被调Bot调用`ask_user`时路由给谁？ | **回调用方Agent**（D16）。A2A因此是可来回对话的，而不只是单次委托。 | `02-agent-to-agent.md`第8.1节 |
 | O2 | 被调Bot触发工具审批时谁来批？ | **被调Bot的归属人类**（D17）。另两个候选——限制A2A工具集、直接拒绝——都会让被调Bot的能力与它被人类叫醒时不一致，违背D7。 | `02-agent-to-agent.md`第8.2节 |
-| O3 | 迟到的异步结果落在哪？ | **直接丢弃**（D18）。投递到Inbox的方案会让Inbox多出一个事件源，与D14的分工规则冲突。 | `04-inbox.md`第6节 |
+| O3 | 迟到的异步结果落在哪？ | `caller_run_id`终止后不再投递（D18）。持久化委托与被调执行记录保留，但不唤醒新run、不进入Inbox。 | `04-inbox.md`第6节 |
 
-三项均不涉及表结构，但共同决定了`mode_agent.md`的写法。
+三项共同决定`mode_agent.md`与持久化委托状态机；D16、D18要求委托记录关联双端run并保存等待/终态，不能只写在prompt里。
 
 ## 7. 会话生命周期
 
-A2A会话的生命周期管理（实时输出状态、run状态机、断线恢复、abort传播）由**另一条独立工作线**负责，参见`docs/design/session-runtime-requirements.md`。本系列文档不重复定义这部分内容，Phase 2只描述A2A特有的部分，并假定生命周期能力由该工作线提供。
+A2A会话的通用生命周期管理（实时输出状态、run状态机、断线恢复、abort传播）由Session Runtime负责，参见`docs/design/session-runtime-requirements.md`。Phase 2直接依赖其`run_id`、决策持久化与恢复能力，同时自己持久化A2A委托、双端run关联、澄清轮次与最终结果；现有进程内background Manager不能作为权威状态源。
 
 需要注意：调用链的环检测（A→B→A）**不属于**生命周期问题，它是路由安全问题，归Phase 2负责。默认异步已经把这个问题从「死锁」降级为「洪泛」，但深度与调用链限制仍然必须实现。
 
@@ -129,7 +131,7 @@ A2A会话的生命周期管理（实时输出状态、run状态机、断线恢�
 
 遵循项目既有约定：per-tool用法写在`sdk.Tool.Description`，跨工具工作流写在`Usage()`。静态prompt模板**不得**提及任何条件注册的工具——`internal/agent/runtime/native/prompt_test.go`会对此做守卫。
 
-本设计中Wiki工具与`list_teammates`都是条件注册（Bot不属于任何Group时不注册），因此不能出现在静态prompt里。
+本设计中Wiki工具与`list_teammates`都是条件注册：前者取决于Bot是否至少拥有一个Wiki的read权限，后者取决于是否存在共享Group的可联系Bot。因此它们都不能出现在静态prompt里；无Group Bot仍可能正常注册Wiki工具。
 
 ### 8.3 部署边界
 
