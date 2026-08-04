@@ -1064,6 +1064,7 @@
     "compatibilities": "互換性",
     "compatibility": {
       "vision": "ビジョン",
+      "file-input": "ファイル入力(PDF)",
       "tool-call": "ツール呼び出し",
       "image-output": "画像出力",
       "reasoning": "推論"

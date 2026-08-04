@@ -754,8 +754,8 @@
       "generic": "调用工具",
       "approve": "允许",
       "reject": "拒绝",
-    "pendingApproval": "等待审核",
-    "executionLocation": "执行位置",
+      "pendingApproval": "等待审核",
+      "executionLocation": "执行位置",
       "pendingUserInput": "等待输入",
       "userInputSubmitted": "已回答",
       "userInputCanceled": "已取消",
@@ -1112,6 +1112,7 @@
     "compatibilities": "兼容性",
     "compatibility": {
       "vision": "视觉",
+      "file-input": "文件输入(PDF)",
       "tool-call": "工具调用",
       "image-output": "图片生成",
       "reasoning": "推理"

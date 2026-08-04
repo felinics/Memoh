@@ -754,8 +754,8 @@
       "generic": "Tool",
       "approve": "Allow",
       "reject": "Reject",
-    "pendingApproval": "pending approval",
-    "executionLocation": "Execution location",
+      "pendingApproval": "pending approval",
+      "executionLocation": "Execution location",
       "pendingUserInput": "waiting for input",
       "userInputSubmitted": "answered",
       "userInputCanceled": "canceled",
@@ -1112,6 +1112,7 @@
     "compatibilities": "Compatibilities",
     "compatibility": {
       "vision": "Vision",
+      "file-input": "File Input (PDF)",
       "tool-call": "Tool Call",
       "image-output": "Image Output",
       "reasoning": "Reasoning"
