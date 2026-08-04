@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -53,6 +54,15 @@ type SpawnRunConfig struct {
 	SupportsToolCall      bool
 	Skills                map[string]SkillDetail
 	BackgroundManager     *background.Manager
+	// TurnRequestMessageID is the persisted task user message this run's
+	// assistant and tool rows bind to, so incremental step persistence files
+	// them into the same history turn the runtime view names.
+	TurnRequestMessageID string
+	// OnStepPersisted, if set, is called after a complete step of this run has
+	// been durably persisted. The spawn provider uses it to stop retrying an
+	// attempt that has already produced durable output (and possibly real side
+	// effects): replaying the turn from the top would do that work twice.
+	OnStepPersisted func()
 }
 
 // SpawnIdentity mirrors agent.SessionContext fields needed by subagent controls.
@@ -83,6 +93,9 @@ type SpawnResult struct {
 	Messages []sdk.Message
 	Text     string
 	Usage    *sdk.Usage
+	// Persisted reports that incremental step persistence owned this run's
+	// history, so the caller must not persist the result again.
+	Persisted bool
 }
 
 const (
@@ -103,7 +116,7 @@ var ErrWatchdogTimedOut = errors.New("subagent watchdog: no activity within time
 var (
 	err429Pattern    = regexp.MustCompile(`(^|[^0-9])429($|[^0-9])`)
 	errEOFPattern    = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
-	serverErrPattern = regexp.MustCompile(`api error 5\\d{2}`)
+	serverErrPattern = regexp.MustCompile(`api error 5\d{2}`)
 	agentIDPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 	errAgentNotFound = errors.New("agent not found")
 )
@@ -426,6 +439,12 @@ type agentRequest struct {
 	config           sessionpkg.SubagentConfig
 	runtime          resolvedSubagentModel
 	systemPrompt     string
+	// admission is the run identity the durable gate allocated; persistence
+	// files this task's messages under admission.TurnID.
+	admission SubagentAdmission
+	// requestMessageID is the persisted task user message this run's assistant
+	// and tool rows bind to, so the whole task lands in one history turn.
+	requestMessageID string
 }
 
 type agentCoordinator struct {
@@ -739,12 +758,27 @@ func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *ag
 		// that will never exist.
 		return p.completeAgentRequest(ctx, key, req, rejectedAgentRun(req, admitErr))
 	}
-	req.messagePersisted = p.persistUserMessage(context.WithoutCancel(runCtx), req.parentSession.BotID, req.agentSessionID, req.message)
+	requestMessageID, persisted := p.persistUserMessage(context.WithoutCancel(runCtx), req)
+	req.messagePersisted = persisted
+	if persisted {
+		req.requestMessageID = requestMessageID
+	}
 	result := p.runSubagentTask(runCtx, req)
 	if task := p.bgManager.Get(req.taskID); task != nil {
 		if snap := task.Snapshot(); snap.Status == background.TaskKilled {
 			result.Status = string(background.TaskKilled)
 		}
+	}
+	if result.Status != string(background.TaskKilled) &&
+		runCtx.Err() != nil && ctx.Err() == nil &&
+		errors.Is(context.Cause(runCtx), context.Canceled) {
+		// The run context died while the parent task is still alive: the child
+		// run itself was aborted (stop control on the subagent session). That
+		// is a deliberate stop, not a failure, so it is recorded exactly like a
+		// kill — and the wording tells the parent what happened rather than
+		// handing it an opaque cancellation.
+		result.Status = string(background.TaskKilled)
+		result.Error = "stopped by the user"
 	}
 	// Release the thread's slot before the queue promotes the next message, or
 	// the successor's admission finds this run still active and is told the
@@ -905,6 +939,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		Messages:              history,
 		Skills:                req.parentSession.Skills,
 		BackgroundManager:     p.bgManager,
+		TurnRequestMessageID:  req.requestMessageID,
 		Identity: SpawnIdentity{
 			BotID:               req.parentSession.BotID,
 			ChatID:              req.parentSession.ChatID,
@@ -923,6 +958,12 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		},
 		LoopDetection: SpawnLoopConfig{Enabled: true},
 	}
+	// stepPersisted flips once any complete step of this task has durably
+	// committed. From then on the attempt loop stops retrying: a committed step
+	// means the agent already produced durable output and possibly real side
+	// effects, and replaying the turn from the top would do that work twice.
+	var stepPersisted atomic.Bool
+	cfg.OnStepPersisted = func() { stepPersisted.Store(true) }
 
 	var lastErr error
 	for attempt := 0; attempt <= subagentMaxRetries; attempt++ {
@@ -946,14 +987,18 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 
 		if err == nil {
 			res.Text = genResult.Text
-			if p.messageService != nil && req.agentSessionID != "" {
-				p.persistMessages(context.WithoutCancel(ctx), req.parentSession.BotID, req.agentSessionID, req.runtime.UUID, req.message, genResult, !req.messagePersisted)
+			if !genResult.Persisted && p.messageService != nil && req.agentSessionID != "" {
+				p.persistMessages(context.WithoutCancel(ctx), req, genResult, !req.messagePersisted)
 			}
 			return res
 		}
 		lastErr = err
 		if ctx.Err() != nil && !errors.Is(err, ErrWatchdogTimedOut) {
 			res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+			return res
+		}
+		if stepPersisted.Load() {
+			res.Error = fmt.Sprintf("%v (progress up to the last completed step is saved; send a follow-up message to continue)", err)
 			return res
 		}
 		if errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err) {
@@ -1331,12 +1376,15 @@ func isRetryableSubagentError(err error) bool {
 
 func (p *SpawnProvider) persistMessages(
 	ctx context.Context,
-	botID, sessionID, modelID, query string,
+	req *agentRequest,
 	result *SpawnResult,
 	includeUser bool,
 ) {
 	if includeUser {
-		p.persistUserMessage(ctx, botID, sessionID, query)
+		id, ok := p.persistUserMessage(ctx, req)
+		if ok {
+			req.requestMessageID = id
+		}
 	}
 
 	for _, msg := range result.Messages {
@@ -1352,36 +1400,52 @@ func (p *SpawnProvider) persistMessages(
 			usage, _ = json.Marshal(msg.Usage)
 		}
 		if _, err := p.messageService.Persist(ctx, messagepkg.PersistInput{
-			BotID:     botID,
-			SessionID: sessionID,
+			BotID:     req.parentSession.BotID,
+			SessionID: req.agentSessionID,
 			Role:      string(msg.Role),
 			Content:   content,
 			Usage:     usage,
-			ModelID:   modelID,
+			ModelID:   req.runtime.UUID,
+			// Bind to the task's request row so the whole task is one history
+			// turn; the run id is traceability, exactly like the chat path.
+			RunID:                strings.TrimSpace(req.admission.RunID),
+			TurnRequestMessageID: strings.TrimSpace(req.requestMessageID),
 		}); err != nil {
 			p.logger.Warn("persist subagent message failed", slog.Any("error", err))
 		}
 	}
 }
 
-func (p *SpawnProvider) persistUserMessage(ctx context.Context, botID, sessionID, query string) bool {
-	if p.messageService == nil || strings.TrimSpace(sessionID) == "" {
-		return false
+// persistUserMessage files the task message as the admitted turn's request row
+// (SR-TURN-001): history and the live runtime view then agree on which turn
+// this run writes into. It returns the persisted message id so assistant and
+// tool rows can bind to it.
+func (p *SpawnProvider) persistUserMessage(ctx context.Context, req *agentRequest) (string, bool) {
+	if p.messageService == nil || strings.TrimSpace(req.agentSessionID) == "" {
+		return "", false
 	}
 	userContent, _ := json.Marshal(map[string]any{
 		"role":    "user",
-		"content": query,
+		"content": req.message,
 	})
-	if _, err := p.messageService.Persist(ctx, messagepkg.PersistInput{
-		BotID:     botID,
-		SessionID: sessionID,
+	input := messagepkg.PersistInput{
+		BotID:     req.parentSession.BotID,
+		SessionID: req.agentSessionID,
 		Role:      "user",
 		Content:   userContent,
-	}); err != nil {
-		p.logger.Warn("persist subagent user message failed", slog.Any("error", err))
-		return false
+		RunID:     strings.TrimSpace(req.admission.RunID),
 	}
-	return true
+	if turnID := strings.TrimSpace(req.admission.TurnID); turnID != "" {
+		position := req.admission.TurnPosition
+		input.TurnID = turnID
+		input.TurnPosition = &position
+	}
+	persisted, err := p.messageService.Persist(ctx, input)
+	if err != nil {
+		p.logger.Warn("persist subagent user message failed", slog.Any("error", err))
+		return "", false
+	}
+	return persisted.ID, true
 }
 
 func (p *SpawnProvider) listModelCatalog(ctx context.Context) ([]subagentModelCatalogItem, error) {

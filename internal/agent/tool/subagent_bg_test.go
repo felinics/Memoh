@@ -187,6 +187,7 @@ func (s *fakeAgentSessionService) byAgent(parentSessionID, agentID string) (sess
 type fakeAgentMessageService struct {
 	mu       sync.Mutex
 	messages map[string][]messagepkg.Message
+	inputs   []messagepkg.PersistInput
 }
 
 func newFakeAgentMessageService() *fakeAgentMessageService {
@@ -196,6 +197,7 @@ func newFakeAgentMessageService() *fakeAgentMessageService {
 func (s *fakeAgentMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.inputs = append(s.inputs, input)
 	msg := messagepkg.Message{
 		ID:        "msg_" + strconv.Itoa(len(s.messages[input.SessionID])+1),
 		BotID:     input.BotID,
@@ -207,6 +209,12 @@ func (s *fakeAgentMessageService) Persist(_ context.Context, input messagepkg.Pe
 	}
 	s.messages[input.SessionID] = append(s.messages[input.SessionID], msg)
 	return msg, nil
+}
+
+func (s *fakeAgentMessageService) persistInputs() []messagepkg.PersistInput {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]messagepkg.PersistInput(nil), s.inputs...)
 }
 
 func (s *fakeAgentMessageService) ListBySession(_ context.Context, sessionID string) ([]messagepkg.Message, error) {

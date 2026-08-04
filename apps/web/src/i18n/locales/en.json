@@ -542,7 +542,6 @@
       "g11": "Tell me what you need.",
       "g12": "What should we tackle first?"
     },
-    "emptySubagent": "No messages recorded for this subagent task",
     "emptySystemSession": "No messages recorded for this system session",
     "selectBot": "Select a Bot",
     "selectBotHint": "Choose a bot from the sidebar to start chatting",

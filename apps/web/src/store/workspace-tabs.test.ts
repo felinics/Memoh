@@ -1218,6 +1218,43 @@ describe('workspace layout store', () => {
     expect(dock.getPanel(chatPanel.id)?.title).toBe('Fetched subagent task')
   })
 
+  it('opens the first subagent session in a right split and later ones as tabs beside it', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    // Anchor the primary region with the conversation tab.
+    store.openSessionChat({ sessionId: 'parent-1', title: 'Parent' })
+    const parentPanel = dock.panels.find(panel => panel.component === 'chat')!
+    const primaryGroupId = parentPanel.group.id
+
+    store.openSubagentSession({ sessionId: 'subagent-1', title: 'agent-a' })
+    const first = dock.panels.find(panel => panel.params.sessionId === 'subagent-1')!
+    expect(first.group.id).not.toBe(primaryGroupId)
+
+    store.openSubagentSession({ sessionId: 'subagent-2', title: 'agent-b' })
+    const second = dock.panels.find(panel => panel.params.sessionId === 'subagent-2')!
+    // The region already exists: the second subagent joins it as a tab
+    // instead of expanding again.
+    expect(second.group.id).toBe(first.group.id)
+    expect(dock.groups.filter(group => group.id !== primaryGroupId)).toHaveLength(1)
+  })
+
+  it('focuses an already-open subagent tab instead of opening a duplicate', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 'parent-1', title: 'Parent' })
+    store.openSubagentSession({ sessionId: 'subagent-1', title: 'agent-a' })
+    const panelCount = dock.panels.length
+
+    store.openSubagentSession({ sessionId: 'subagent-1', title: 'agent-a' })
+
+    expect(dock.panels.length).toBe(panelCount)
+    expect(dock.activePanel?.params.sessionId).toBe('subagent-1')
+  })
+
   it('does not reconcile remembered hidden subagent chat tabs as deleted', async () => {
     chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) => {
       if (sessionId === 'subagent-1') {

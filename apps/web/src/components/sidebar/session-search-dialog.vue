@@ -120,10 +120,15 @@ function iconOf(session: SessionSummary): Component {
 }
 
 function handleSelect(session: SessionSummary) {
-  workspaceTabs.openSessionChat({
-    sessionId: session.id,
-    title: (session.title ?? '').trim() || t('chat.untitledSession'),
-  })
+  const title = (session.title ?? '').trim() || t('chat.untitledSession')
+  // Subagent sessions live in the region right of the conversation (the same
+  // split the live Desktop uses); everything else opens as a regular chat tab.
+  if (session.type === 'subagent') {
+    workspaceTabs.openSubagentSession({ sessionId: session.id, title })
+  }
+  else {
+    workspaceTabs.openSessionChat({ sessionId: session.id, title })
+  }
   emit('update:open', false)
 }
 

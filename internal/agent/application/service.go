@@ -327,6 +327,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	if err := s.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
 		return resolvedContext{}, err
 	}
+	req = s.applySubagentThreadDefaults(ctx, req)
 
 	runCfg, chatModel, provider, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
 		BotID:             req.BotID,
@@ -350,6 +351,12 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 			slog.Any("error", err),
 		)
 		return resolvedContext{}, err
+	}
+	if strings.EqualFold(strings.TrimSpace(req.SessionType), sessionpkg.TypeSubagent) {
+		// A direct turn on a subagent thread runs as the subagent, not as a
+		// chat turn that happens to share its history: same restricted tool
+		// surface (no nested spawns), same prompt mode.
+		runCfg.Identity.IsSubagent = true
 	}
 	memoryMsg := s.loadMemoryContextMessage(ctx, req)
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
@@ -436,6 +443,11 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 				messages = stripToolMessagesWhenCompactionSummaryIsActive(messages, historyRecords)
 			}
 		}
+	}
+	if forkContext := s.subagentForkContextModelMessages(ctx, req); len(forkContext) > 0 {
+		// The inherited parent snapshot precedes the thread's own transcript,
+		// exactly as parent-driven subagent tasks assemble it.
+		messages = append(forkContext, messages...)
 	}
 	if notice := s.currentWorkspaceContextMessage(ctx, req); notice != nil {
 		messages = append(messages, *notice)

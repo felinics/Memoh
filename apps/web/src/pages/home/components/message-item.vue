@@ -3,7 +3,7 @@
     v-if="shouldRenderMessage"
     ref="messageItem"
     class="flex gap-3 items-start"
-    :class="message.role === 'user' && isSelf && !isSpecialUserMessage && !channelThread ? 'justify-end' : ''"
+    :class="message.role === 'user' && isSelf && !channelThread ? 'justify-end' : ''"
   >
     <!-- Sender avatar. Local chat shows it only for remote users; a synced
          channel thread shows it for every participant (self / bot included). -->
@@ -50,91 +50,6 @@
         <BackgroundTaskBlock :task="message.backgroundTask" />
         <p
           class="text-caption text-muted-foreground/80 mt-1"
-          :title="fullTimestamp"
-        >
-          {{ relativeTimestamp }}
-        </p>
-      </div>
-
-      <!-- Heartbeat trigger (replaces user message) -->
-      <div
-        v-else-if="message.role === 'user' && sessionType === 'heartbeat'"
-        class="space-y-2"
-      >
-        <HeartbeatTriggerBlock
-          v-if="message.text"
-          :content="message.text"
-          :bot-id="botId"
-        />
-        <AttachmentBlock
-          v-if="userAttachmentBlock"
-          :block="userAttachmentBlock"
-          :on-open-media="onOpenMedia"
-        />
-        <p
-          class="text-xs text-muted-foreground/80 mt-1"
-          :title="fullTimestamp"
-        >
-          {{ relativeTimestamp }}
-        </p>
-      </div>
-
-      <!-- Schedule trigger (replaces user message) -->
-      <div
-        v-else-if="message.role === 'user' && sessionType === 'schedule'"
-        class="space-y-2"
-      >
-        <ScheduleTriggerBlock
-          v-if="message.text"
-          :content="message.text"
-          :bot-id="botId"
-        />
-        <AttachmentBlock
-          v-if="userAttachmentBlock"
-          :block="userAttachmentBlock"
-          :on-open-media="onOpenMedia"
-        />
-        <p
-          class="text-xs text-muted-foreground/80 mt-1"
-          :title="fullTimestamp"
-        >
-          {{ relativeTimestamp }}
-        </p>
-      </div>
-
-      <!-- Subagent user message (full-width markdown box) -->
-      <div
-        v-else-if="message.role === 'user' && sessionType === 'subagent'"
-        class="space-y-2"
-      >
-        <div
-          v-if="message.text"
-          class="w-full rounded-lg border border-event-subagent-border bg-event-subagent-soft px-4 py-3"
-        >
-          <div
-            :lang="contentLang(message.text)"
-            class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
-          >
-            <MarkdownRender
-              :content="message.text"
-              :is-dark="isDark"
-              :smooth-streaming="message.streaming"
-              :typewriter="message.streaming"
-              :fade="message.streaming"
-              :show-tooltips="false"
-              :mermaid-props="{ showTooltips: false }"
-              :theme="codeBlockTheme"
-              custom-id="chat-msg"
-            />
-          </div>
-        </div>
-        <AttachmentBlock
-          v-if="userAttachmentBlock"
-          :block="userAttachmentBlock"
-          :on-open-media="onOpenMedia"
-        />
-        <p
-          class="text-xs text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -428,8 +343,6 @@ import AttachmentBlock from './attachment-block.vue'
 import CollapsibleUserText from './collapsible-user-text.vue'
 import MessageActions from './message-actions.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
-import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
-import ScheduleTriggerBlock from './schedule-trigger-block.vue'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 import { useUserStore } from '@/store/user'
 import { useI18n } from 'vue-i18n'
@@ -466,7 +379,6 @@ const emit = defineEmits<{
 
 const props = defineProps<{
   message: ChatMessage
-  sessionType?: string
   botId?: string
   // Group layout for third-party synced threads: every turn left-aligned with
   // an avatar + sender name + channel badge (including the bot's own replies).
@@ -641,7 +553,6 @@ const canEditUserMessage = computed(() =>
   && !props.message.streaming
   && props.message.__optimistic !== true
   && props.canEditLatestUser === true
-  && !isSpecialUserMessage.value
   && props.message.attachments.length === 0
   && cleanCurrentUserText.value.length > 0
   && bubbleSelf.value,
@@ -705,13 +616,7 @@ function contentLang(content?: string): 'zh' | 'en' {
   return content && CJK_RE.test(content) ? 'zh' : 'en'
 }
 
-const isSpecialUserMessage = computed(() =>
-  props.message.role === 'user'
-  && (props.sessionType === 'heartbeat' || props.sessionType === 'schedule' || props.sessionType === 'subagent'),
-)
-
 const contentClass = computed(() => {
-  if (isSpecialUserMessage.value) return 'flex-1 max-w-full'
   // The user bubble caps a little tighter than the assistant column so a long
   // prompt doesn't sprawl most of the width before wrapping. `w-full` makes the
   // wrapper actually OCCUPY that capped column instead of shrinking to the
@@ -760,7 +665,6 @@ const avatarPlatform = computed(() => {
 // Channel threads show an avatar for every participant; the local chat only
 // shows one for remote users (self/bot stay avatar-less to keep it compact).
 const showAvatar = computed(() => {
-  if (isSpecialUserMessage.value) return false
   if (props.channelThread) {
     return props.message.role === 'user' || props.message.role === 'assistant'
   }
@@ -769,7 +673,6 @@ const showAvatar = computed(() => {
 
 const showSenderName = computed(() =>
   Boolean(props.channelThread)
-  && !isSpecialUserMessage.value
   && (props.message.role === 'user' || props.message.role === 'assistant'),
 )
 

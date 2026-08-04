@@ -42,24 +42,24 @@
                 <Spinner class="size-3.5" />
               </div>
 
-              <!-- Read-only sessions (subagent / system / synced channel
-                   threads) can't take new input, so an empty one states why it
-                   has nothing. A fresh, writable chat instead gets the centered
-                   welcome composer below, never a stray line in a blank pane. -->
+              <!-- A session with a live run but no messages yet (a subagent
+                   that has not produced output) reads as starting, not empty. -->
               <div
-                v-if="messages.length === 0 && !loadingChats && !loadingMessages && activeChatReadOnly"
+                v-if="messages.length === 0 && !loadingChats && !loadingMessages && streaming"
                 class="flex items-center justify-center min-h-75"
               >
-                <p
-                  v-if="activeSession?.type === 'subagent'"
-                  class="text-muted-foreground text-xs"
-                >
-                  {{ $t('chat.emptySubagent') }}
-                </p>
-                <p
-                  v-else
-                  class="text-muted-foreground text-xs"
-                >
+                <Spinner class="size-3.5" />
+              </div>
+
+              <!-- Read-only sessions (system / synced channel threads) can't
+                   take new input, so an empty one states why it has nothing.
+                   A fresh, writable chat instead gets the centered welcome
+                   composer below, never a stray line in a blank pane. -->
+              <div
+                v-else-if="messages.length === 0 && !loadingChats && !loadingMessages && activeChatReadOnly"
+                class="flex items-center justify-center min-h-75"
+              >
+                <p class="text-muted-foreground text-xs">
                   {{ $t('chat.emptySystemSession') }}
                 </p>
               </div>
@@ -97,7 +97,6 @@
                   >
                     <MessageItem
                       :message="msg"
-                      :session-type="activeSession?.type"
                       :bot-id="currentBotId"
                       :channel-thread="isChannelThread"
                       :channel-platform="channelPlatform"
@@ -854,8 +853,8 @@ const hasRenderedSession = computed(() =>
 )
 
 // A fresh, writable chat opens with the composer centred and a greeting above
-// it. Read-only sessions (subagent / system / synced channel threads) hide the
-// composer entirely, so they never reach this state.
+// it. Read-only sessions (system / synced channel threads) hide the composer
+// entirely, so they never reach this state.
 const isWelcome = computed(() =>
   !!currentBotId.value
   && !hasRenderedSession.value

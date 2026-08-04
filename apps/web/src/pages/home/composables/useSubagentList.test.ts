@@ -185,13 +185,12 @@ describe('useSubagentList', () => {
       title: 'Child task',
     }]
     const workspaceTabs = useWorkspaceTabsStore()
-    const openSessionChat = vi.spyOn(workspaceTabs, 'openSessionChatFromView').mockImplementation(() => {})
+    const openSubagentSession = vi.spyOn(workspaceTabs, 'openSubagentSession').mockImplementation(() => {})
 
     const { navigateToSession } = useSubagentList()
     navigateToSession('child-1')
 
-    expect(openSessionChat).toHaveBeenCalledWith({
-      viewId: 'chat',
+    expect(openSubagentSession).toHaveBeenCalledWith({
       sessionId: 'child-1',
       title: 'Child task',
     })

@@ -445,7 +445,14 @@ func injectToolProviders(a *native.Agent, msgService *message.DBService, hookSer
 			cp.SetHookService(hookService)
 		}
 		if sp, ok := p.(*agenttools.SpawnProvider); ok {
-			sp.SetAgent(native.NewSpawnAdapter(a))
+			adapter := native.NewSpawnAdapter(a)
+			// Incremental step persistence and live runtime publishing both key
+			// off the admitted run handle AdmitSubagentRun leaves on the run
+			// context; when either is unavailable the adapter degrades to the
+			// terminal-snapshot behavior on its own.
+			adapter.SetStepCommitFactory(agentService.SubagentStepCommit)
+			adapter.SetRunObserverFactory(agentService.SubagentRunObserver)
+			sp.SetAgent(adapter)
 			sp.SetMessageService(msgService)
 			sp.SetSystemPromptFunc(native.SpawnSystemPrompt)
 			sp.SetHookService(hookService)

@@ -542,7 +542,6 @@
       "g11": "说说你的需求。",
       "g12": "先从哪件事开始？"
     },
-    "emptySubagent": "子代理任务暂无记录",
     "emptySystemSession": "系统会话暂无记录",
     "selectBot": "选择一个 Bot",
     "selectBotHint": "从侧边栏选择一个 Bot 开始对话",

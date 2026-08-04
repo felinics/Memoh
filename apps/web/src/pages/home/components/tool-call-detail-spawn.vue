@@ -137,7 +137,8 @@ function statusClass(status?: string) {
 
 function navigateToSession(sessionId: string) {
   if (!sessionId || !chatStore.currentBotId) return
-  // Open (or focus) a chat tab for the spawned session; activation selects it.
-  workspaceTabs.openSessionChat({ sessionId })
+  // Open (or focus) the spawned session in the subagent region to the right of
+  // the conversation; activation selects it.
+  workspaceTabs.openSubagentSession({ sessionId })
 }
 </script>

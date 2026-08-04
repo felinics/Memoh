@@ -1040,6 +1040,52 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  /** Open (or focus) a subagent session in the region right of the primary
+   * conversation — the same geometry the live Desktop uses for GUI tools: the
+   * chat stays on the left, and the first editor region to its right hosts the
+   * spawned agents. The first subagent open splits that region off
+   * horizontally; later opens join it as additional pinned tabs, so several
+   * subagent sessions can sit side by side without expanding again. An
+   * already-open tab for the session is focused wherever it lives. */
+  function openSubagentSession(opts: { sessionId: string, title?: string }) {
+    const dock = api.value
+    if (!dock) return
+    const sid = opts.sessionId.trim()
+    if (!sid) return
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid) return
+    if (isDeletedSessionForCurrentBot(sid)) return
+    const title = opts.title?.trim() || chatTitleFallbackFor(sid)
+
+    const existing = chatPanelForSession(sid)
+    if (existing) {
+      existing.api.setTitle(title)
+      pinPanel(existing.id)
+      focusPanel(existing)
+      return
+    }
+
+    const primaryGroup = dock.groups.find(group => !isTerminalOnlyGroup(group))
+    if (!primaryGroup) {
+      openSessionChatPinned({ sessionId: sid, title })
+      return
+    }
+    const adjacentRight = dock.adjacentGroupInDirection(primaryGroup, 'right')
+    const secondaryGroup = adjacentRight && !isTerminalOnlyGroup(adjacentRight)
+      ? adjacentRight
+      : undefined
+    dock.addPanel({
+      id: nextChatPanelId(bid),
+      component: 'chat',
+      title,
+      params: { sessionId: sid, explicitSelection: true },
+      renderer: 'always',
+      position: secondaryGroup
+        ? { referenceGroup: secondaryGroup.id, direction: 'within' }
+        : { referenceGroup: primaryGroup.id, direction: 'right' },
+    })
+  }
+
   /** Open or focus a draft chat tab (no session yet). An explicit group owns its
    * own draft; callers without a group retain the legacy global-first behavior. */
   function openDraftChat(opts?: { title?: string, groupId?: string, explicitSelection?: boolean }) {
@@ -2267,6 +2313,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     showWorkbench,
     hideWorkbench,
     openSessionChat,
+    openSubagentSession,
     openSessionChatFromView,
     openSessionChatPinned,
     openDraftChat,
