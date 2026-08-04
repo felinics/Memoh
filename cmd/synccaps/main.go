@@ -155,6 +155,14 @@ func enrichFile(path string, resolver *capabilities.Resolver, check bool) (int, 
 				changed++
 			}
 		}
+		// Positive PDF discoveries add the file-input compatibility.
+		// Additive only: registry silence or an explicit false never removes
+		// a hand-maintained token (fill missing, never override).
+		if caps.FileInput != nil && *caps.FileInput {
+			if applyFileInputToModel(model) {
+				changed++
+			}
+		}
 	}
 
 	if changed == 0 || check {
@@ -187,6 +195,38 @@ func applyToModel(model *yaml.Node, mode string, efforts []string) bool {
 		changed = true
 	}
 	return changed
+}
+
+// applyFileInputToModel appends the file-input compatibility when the registry
+// reports native PDF input. Requires an existing compatibilities list that
+// already carries vision — PDF ingestion is vision-dependent provider-side, so
+// a pdf-without-vision registry row is treated as dirty data and skipped. The
+// token lands right after vision to keep the canonical template ordering.
+func applyFileInputToModel(model *yaml.Node) bool {
+	cfg := mapValue(model, "config")
+	if cfg == nil {
+		return false
+	}
+	compat := mapValue(cfg, "compatibilities")
+	if compat == nil || compat.Kind != yaml.SequenceNode {
+		return false
+	}
+	visionIdx := -1
+	for i, item := range compat.Content {
+		switch item.Value {
+		case "file-input":
+			return false
+		case "vision":
+			visionIdx = i
+		}
+	}
+	if visionIdx < 0 {
+		return false
+	}
+	node := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "file-input"}
+	rest := append([]*yaml.Node{node}, compat.Content[visionIdx+1:]...)
+	compat.Content = append(compat.Content[:visionIdx+1], rest...)
+	return true
 }
 
 // applyNoReasonToModel records an explicit no-reasoning discovery only when the

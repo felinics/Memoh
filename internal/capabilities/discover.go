@@ -19,6 +19,7 @@ type litellmEntry struct {
 
 	SupportsVision          *bool `json:"supports_vision"`
 	SupportsFunctionCalling *bool `json:"supports_function_calling"`
+	SupportsPDFInput        *bool `json:"supports_pdf_input"`
 
 	MaxInputTokens *int `json:"max_input_tokens"`
 }
@@ -31,9 +32,12 @@ type Capabilities struct {
 	ThinkingMode string
 	// EffortLevels is the ordered effort tier list, or nil if unknown.
 	EffortLevels []string
-	// Vision / ToolCall are nil when the registry is silent.
+	// Vision / ToolCall / FileInput are nil when the registry is silent.
 	Vision   *bool
 	ToolCall *bool
+	// FileInput mirrors supports_pdf_input: the provider API accepts documents
+	// (PDF) as native input parts.
+	FileInput *bool
 	// ContextWindow is nil when unknown.
 	ContextWindow *int
 }
@@ -56,6 +60,7 @@ func derive(e litellmEntry) Capabilities {
 	caps := Capabilities{
 		Vision:        e.SupportsVision,
 		ToolCall:      e.SupportsFunctionCalling,
+		FileInput:     e.SupportsPDFInput,
 		ContextWindow: e.MaxInputTokens,
 	}
 

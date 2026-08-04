@@ -12,6 +12,8 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: deepseek-v4-pro
     name: DeepSeek V4 Pro
@@ -19,6 +21,8 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: deepseek-chat
     name: DeepSeek V4 Flash (legacy non-thinking)
