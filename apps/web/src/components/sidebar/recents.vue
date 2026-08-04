@@ -291,6 +291,11 @@ function handleSelect(session: SessionSummary) {
     sessionId: session.id,
     title: (session.title ?? '').trim() || t('chat.untitledSession'),
   })
+  // Select-to-dismiss for the mobile nav sheet: picking the ALREADY active
+  // session changes nothing (same sessionId, same active panel, same route),
+  // so the sheet's state-change watchers never fire — close it explicitly.
+  // No-op on desktop, where the sheet is never open.
+  workspaceTabs.closeMobileNav()
 }
 
 // Right-click "Open": a separate pinned tab instead of reusing the preview slot.
@@ -299,5 +304,7 @@ function handleOpenNewTab(session: SessionSummary) {
     sessionId: session.id,
     title: (session.title ?? '').trim() || t('chat.untitledSession'),
   })
+  // Same select-to-dismiss reason as handleSelect above.
+  workspaceTabs.closeMobileNav()
 }
 </script>

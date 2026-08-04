@@ -21,7 +21,10 @@
           v-if="show"
           class="h-full"
         >
-          <MainLayout>
+          <!-- Below the JS breakpoint the two-column workbench gives way to the
+               mobile stack (full-screen nav list <-> full-screen content);
+               the desktop path through MainLayout is untouched. -->
+          <MainLayout v-if="!isMobile">
             <template #sidebar>
               <!-- De-nest: inside a single bot, its own nav (rendered by
                    bots/detail.vue) takes over this column, so the settings nav
@@ -59,6 +62,7 @@
               </SidebarInset>
             </template>
           </MainLayout>
+          <MobileSettingsShell v-else />
         </div>
       </Transition>
     </div>
@@ -71,9 +75,12 @@ import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { SidebarInset } from '@felinic/ui'
 import MainLayout from '@/layout/main-layout/index.vue'
 import SettingsSidebar from '@/components/settings-sidebar/index.vue'
+import MobileSettingsShell from './components/mobile-shell.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useIsMobile } from '@/composables/useIsMobile'
 
 const desktopShell = inject(DesktopShellKey, false)
+const isMobile = useIsMobile()
 
 // macOS desktop only: the settings sidebar now runs to the very top of the window
 // (the old full-width topbar is gone), so its header must clear the traffic lights.

@@ -2,6 +2,7 @@ import { defineStore, storeToRefs } from 'pinia'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
+import { useIsMobile } from '@/composables/useIsMobile'
 import type { DockviewApi, DockviewGroupPanel, SerializedDockview } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
@@ -122,6 +123,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null,
   )
 
+  // Mobile shell (see useIsMobile): below 768px the dock runs as a single
+  // stack — one group, no tab strip, no splits. Every constraint in this store
+  // is keyed off this ONE flag; the desktop path (!isMobile) is untouched.
+  const isMobile = useIsMobile()
+
   // Earlier iterations persisted browser-style tab state under these keys;
   // neither model is compatible with the dockview layout, so drop them.
   if (typeof localStorage !== 'undefined') {
@@ -172,6 +178,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // stored layout.
   let loadedBotId: string | null = null
   let suppressPersist = false
+  // True while the in-memory dock holds a mobile-shaped stack that no DESKTOP
+  // restoreLayout has reconciled with the persisted desktop layout yet — set
+  // on entering mobile and by every mobile restoreLayout, cleared by the next
+  // desktop one. Keeps persistLayout sealed in the post-exit window (see
+  // persistLayout and the isMobile watcher for why the exit path alone is
+  // not enough).
+  let dockHoldsMobileStack = false
   let apiDisposables: Array<{ dispose(): void }> = []
   // Whether the in-flight drag started from a terminal. Non-terminal drags lock
   // the exclusive terminal groups (see beginDrag) so an editor can never merge
@@ -277,7 +290,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function persistLayout() {
-    if (!api.value || suppressPersist || !loadedBotId) return
+    // Mobile never serializes: its single stack is a runtime constraint, not a
+    // user arrangement, and must not overwrite the desktop multi-group layout
+    // stored for this bot (the tab-scoped storage is shared across form
+    // factors, so a mobile write would clobber the desktop's restore seed).
+    // dockHoldsMobileStack extends that seal past the breakpoint exit:
+    // crossing back to desktop only un-hides the tab strips, the dock is still
+    // the merged stack, and the next onDidLayoutChange (tab activation, an
+    // async panel title) would otherwise serialize it over the desktop
+    // snapshot before the next desktop restoreLayout rebuilds from it.
+    if (!api.value || suppressPersist || !loadedBotId || isMobile.value || dockHoldsMobileStack) return
     try {
       const dock = api.value
       const ephemeralIds = Object.keys(ephemeralPanels.value).filter(id => dock.getPanel(id))
@@ -373,7 +395,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     suppressPersist = true
     try {
       const stored = storage.value[botId]?.layout ?? null
-      if (stored) {
+      // Mobile never restores the persisted layout: that tree is the desktop
+      // multi-group arrangement, and deserializing it would resurrect splits
+      // the mobile shell forbids. The empty branch below drives the mobile
+      // cold start instead — draft fallback + chat-selection rebind.
+      if (stored && !isMobile.value) {
         try {
           dock.fromJSON(sanitizeLayout(stored))
         } catch {
@@ -384,6 +410,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         dock.clear()
       }
       loadedBotId = botId
+      // The dock now holds exactly what this restore put in it: the desktop
+      // snapshot (desktop restore) or a fresh mobile stack (mobile restore —
+      // the snapshot branch above is skipped). Only a DESKTOP restore unseals
+      // persistence; a mobile one keeps the seal on for the eventual exit.
+      dockHoldsMobileStack = isMobile.value
       prunePanels()
       // Restore the ephemeral slot from storage, keeping only ids that survived
       // restore + prune. Wholesale replace so the previous bot's flags are dropped.
@@ -457,6 +488,40 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return !dragSourceTerminal
   }
 
+  // ---- mobile single-stack constraint --------------------------------------
+  // Below 768px the dock is ONE group with its tab strip hidden: a stack of
+  // full-screen panels where "open X" pushes onto the stack and the top bar's
+  // back affordance re-activates the chat panel (secondary panels are never
+  // closed, so terminals/WebRTC keep running in the background). All of this
+  // is runtime-only — the persisted desktop layout is neither read
+  // (restoreLayout) nor written (persistLayout) while mobile.
+
+  // Merge every group into the first one. group.api.moveTo(center) moves all
+  // of a source group's panels into the target and dissolves the emptied
+  // source; dockview suppresses its per-panel remove/add events mid-move, so
+  // panel state (dirty flags, ephemeral slots) survives the merge.
+  function mergeGroupsIntoSingle(dock: DockviewApi) {
+    const [first, ...rest] = dock.groups
+    if (!first) return
+    for (const group of rest) {
+      group.api.moveTo({ group: first, position: 'center' })
+    }
+  }
+
+  // Hide the tab strip while mobile, restore it when leaving. The
+  // group.model.header.hidden setter is a pure display toggle (no events, no
+  // measurement), so running this on every layout change is cheap and
+  // self-healing: groups created AFTER entering mobile (cold-start draft, bot
+  // switch) get hidden as they appear, and rebuilt groups (fromJSON) re-hide
+  // even though the flag itself is never persisted.
+  function syncMobileGroupHeaders(dock: DockviewApi) {
+    for (const group of dock.groups) {
+      if (group.model.header.hidden !== isMobile.value) {
+        group.model.header.hidden = isMobile.value
+      }
+    }
+  }
+
   function registerApi(dock: DockviewApi) {
     for (const d of apiDisposables) d.dispose()
     api.value = dock
@@ -491,6 +556,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         // is guarded by a current-value check, so this cannot loop. Sync first
         // so the persisted snapshot already reflects the resolved chrome.
         syncAllTerminalGroupChrome(dock)
+        // Also re-apply the mobile tab-strip visibility: it is runtime-only
+        // state, so groups added or rebuilt by a restore must pick it up here.
+        syncMobileGroupHeaders(dock)
         persistLayout()
       }),
       dock.onDidRemovePanel((panel) => {
@@ -538,11 +606,22 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       // whenever a foreign editor is dragged onto one (header, tab strip or
       // content, any edge). Terminal sessions stay droppable among themselves.
       dock.onWillShowOverlay((event) => {
+        // Mobile runs a single group: veto any drop that would split off a new
+        // group. A 'center' drop merges as a tab inside the group — the only
+        // arrangement the mobile shell allows — so it stays droppable.
+        if (isMobile.value && event.position !== 'center') {
+          event.preventDefault()
+          return
+        }
         if (isTerminalOnlyGroup(event.group) && draggingNonTerminal(event)) {
           event.preventDefault()
         }
       }),
       dock.onWillDrop((event) => {
+        if (isMobile.value && event.position !== 'center') {
+          event.preventDefault()
+          return
+        }
         if (isTerminalOnlyGroup(event.group) && draggingNonTerminal(event)) {
           event.preventDefault()
         }
@@ -666,6 +745,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   const activeId = computed<string | null>(() => activePanelId.value)
 
+  // The mobile top bar picks its left affordance from this: chat active → "≡"
+  // opens the navigation; a secondary panel (terminal/browser/…) active → "←"
+  // runs activateChatPanel. An empty dock (mid bot-switch) counts as chat so
+  // the fallback affordance is the navigation, not a dead back button.
+  const activePanelIsChat = computed(() => {
+    const id = activePanelId.value
+    return !id || panelComponentOf(id) === 'chat'
+  })
+
   function hasCurrentPermission(permission: BotPermission): boolean {
     return hasBotPermission(currentBot.value?.current_user_permissions, permission)
   }
@@ -697,7 +785,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // for the candidate priority (caller → active → last editor → any non-terminal),
   // then returns it as a 'within' target. When no non-terminal group exists but
   // terminal groups do, open ABOVE the first group so the panel gets its own group
-  // instead of joining the terminals. Undefined → empty dock (let dockview create
+  // instead of joining the terminals — except on mobile, where the single-stack
+  // constraint overrides terminal exclusivity and the panel joins the one group
+  // (reachable only via a cross-device session delete closing the last editor
+  // while a terminal stays open). Undefined → empty dock (let dockview create
   // the first group).
   function nonTerminalTarget(
     dock: DockviewApi,
@@ -706,7 +797,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const anchor = nonTerminalAnchorGroup(dock, groupId)
     if (anchor) return { referenceGroup: anchor.id, direction: 'within' }
     const fallback = dock.groups[0]
-    if (fallback) return { referenceGroup: fallback.id, direction: 'above' }
+    if (fallback) {
+      const direction = isMobile.value ? 'within' : 'above'
+      return { referenceGroup: fallback.id, direction }
+    }
     return undefined
   }
 
@@ -849,9 +943,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       title: options.title,
       renderer: 'always' as const,
     }
-    const position = options.groupId
-      ? { referenceGroup: options.groupId, direction: 'within' as const }
-      : options.position
+    // Mobile forbids the bottom split: a terminal joins the single stack as a
+    // tab, anchored through the same editor-group resolution as other opens.
+    const position = isMobile.value
+      ? nonTerminalTarget(dock, options.groupId)
+      : options.groupId
+        ? { referenceGroup: options.groupId, direction: 'within' as const }
+        : options.position
     const panel = dock.addPanel({
       ...panelBase,
       ...(position ? { position } : {}),
@@ -1366,6 +1464,30 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // Mobile top bar "←": re-activate the chat panel for the CURRENT session.
+  // Secondary panels are never closed by going back (renderer 'always' keeps
+  // terminals/WebRTC alive), so back is a pure activation. Falls back to any
+  // open chat tab — focusing it pulls the global selection onto it via the
+  // activation sync — and on an empty dock to the draft respawn guard.
+  function activateChatPanel() {
+    const dock = api.value
+    if (!dock) return
+    const sid = (selection.sessionId ?? '').trim()
+    if (sid && !isDeletedSessionForCurrentBot(sid)) {
+      const current = chatPanelForSession(sid)
+      if (current) {
+        focusPanel(current)
+        return
+      }
+    }
+    const anyChat = dock.panels.find(p => panelComponentOf(p.id) === 'chat')
+    if (anyChat) {
+      focusPanel(anyChat)
+      return
+    }
+    ensureDraftChatPanel()
+  }
+
   function openFile(filePath: string) {
     if (!hasCurrentPermission('workspace_read')) return
     const path = (filePath ?? '').trim()
@@ -1421,6 +1543,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!hasCurrentPermission('workspace_read')) return
     const path = (filePath ?? '').trim()
     if (!path) return
+    // Mobile has no "side": degrade to a pinned tab in the single stack.
+    if (isMobile.value) {
+      openFilePinned(path, groupId)
+      return
+    }
     const dock = api.value
     if (!dock) return
     const id = `file:${path}`
@@ -1484,6 +1611,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const position = prevPreview
       ? { referenceGroup: prevPreview.group.id, direction: 'within' as const }
       : (() => {
+          // Mobile forbids the side-by-side preview: join the stack as a tab.
+          if (isMobile.value) return nonTerminalTarget(dock, groupId)
           const referenceGroup = groupId || dock.activeGroup?.id
           return referenceGroup
             ? { referenceGroup, direction: 'right' as const }
@@ -1528,6 +1657,18 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const state = ensureBotLayout(bid)
     const dock = api.value
     if (!state || !dock) return
+    // Mobile hides the tab strip — the only UI enumerating open panels — and ←
+    // only re-activates chat, so an always-new terminal would strand the
+    // previous one alive but unreachable and unclosable, leaking a shell per
+    // tap. Focus the existing terminal instead (same focus-existing semantics
+    // as Browser/Display); a second terminal requires closing the first.
+    if (isMobile.value) {
+      const existing = dock.panels.find(panel => panel.id.startsWith('terminal:'))
+      if (existing) {
+        focusPanel(existing)
+        return
+      }
+    }
     const next = state.terminalCounter + 1
     patchBotLayout(bid, { terminalCounter: next })
     // The "+" lives per group. Fired from a terminal-only group, the new session
@@ -1635,6 +1776,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!hasCurrentPermission('manage')) return
     const dock = api.value
     if (!dock) return
+    // Mobile has no right-side region: the desktop viewer joins the single
+    // stack as a tab, same as a manual open.
+    if (isMobile.value) {
+      openDisplay()
+      return
+    }
 
     const primaryGroup = dock.groups.find(group => !isTerminalOnlyGroup(group))
     if (!primaryGroup) {
@@ -1717,7 +1864,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const comp = panelComponentOf(source.id)
     if (!comp) return
 
-    const position = { referenceGroup: groupId, direction }
+    // Mobile forbids splits: duplicate into the SAME group as a tab instead.
+    const position = isMobile.value
+      ? { referenceGroup: groupId, direction: 'within' as const }
+      : { referenceGroup: groupId, direction }
     const title = source.title ?? source.api.title ?? ''
     const params = source.params as Record<string, unknown> | undefined
 
@@ -2014,6 +2164,20 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const sidebarWidth = useLocalStorage('workspace-sidebar-width', 256)
   const workbenchOpen = useLocalStorage('workspace-workbench-open', true)
 
+  // Mobile main-navigation sheet. Deliberately NOT persisted and deliberately
+  // NOT one of the four desktop workbench keys above: navigation is a
+  // transient overlay, and the desktop rail preference must stay untouched by
+  // anything the mobile shell does.
+  const mobileNavOpen = ref(false)
+
+  function openMobileNav() {
+    mobileNavOpen.value = true
+  }
+
+  function closeMobileNav() {
+    mobileNavOpen.value = false
+  }
+
 
   // Push/pull model (see main-section + sidebar): the rail is in flow and slides
   // out to the left (margin-left) while the dock, a flex sibling, grows to fill
@@ -2124,6 +2288,34 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       reconcileDeletedChatPanels()
     }
   }, { immediate: true })
+
+  // Crossing the breakpoint either way re-shapes the dock. Entering mobile
+  // collapses any multi-group arrangement (only reachable by narrowing a
+  // desktop window — a phone session is single-group from cold start); live
+  // panels survive the merge, terminals/WebRTC included. Leaving mobile
+  // restores the tab strips but deliberately does NOT rebuild the dock from
+  // the persisted snapshot: a rebuild would go through onDidRemovePanel,
+  // which deletes terminal snapshots — killing live shells just because a
+  // window widened. Instead the merged stack stays up with persistence sealed
+  // (dockHoldsMobileStack, armed on entry), and the desktop arrangement comes
+  // back from the untouched persisted snapshot on the next bot load, not from
+  // memory. The nav sheet is a mobile-only overlay, so its state resets on
+  // exit.
+  watch(isMobile, (mobile) => {
+    if (!mobile) {
+      mobileNavOpen.value = false
+    }
+    const dock = api.value
+    if (!dock) return
+    if (mobile) {
+      // From here the dock diverges from the persisted desktop layout (the
+      // merge now, mobile-only opens later) with no desktop restore to
+      // re-sync it — seal persistence until one happens.
+      dockHoldsMobileStack = true
+      mergeGroupsIntoSingle(dock)
+    }
+    syncMobileGroupHeaders(dock)
+  })
 
   watch(
     () => [currentBotId.value, ...(currentBot.value?.current_user_permissions ?? [])].join('|'),
@@ -2295,6 +2487,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   return {
     api,
     activeId,
+    isMobile,
+    activePanelIsChat,
+    mobileNavOpen,
     panelDragging,
     fileDirty,
     ephemeralPanels,
@@ -2312,6 +2507,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     toggleWorkbench,
     showWorkbench,
     hideWorkbench,
+    openMobileNav,
+    closeMobileNav,
+    activateChatPanel,
     openSessionChat,
     openSubagentSession,
     openSessionChatFromView,

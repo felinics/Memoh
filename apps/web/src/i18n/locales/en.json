@@ -982,7 +982,13 @@
       "hideWorkbench": "Hide sidebar",
       "showWorkbench": "Show sidebar",
       "goBack": "Back",
-      "goForward": "Forward"
+      "goForward": "Forward",
+      "openNav": "Open navigation",
+      "closePanel": "Close panel"
+    },
+    "mobileNav": {
+      "title": "Navigation",
+      "description": "Switch bots, sessions, files, and schedules"
     },
     "activityBar": {
       "sessions": "Chat",

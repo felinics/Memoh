@@ -6,11 +6,11 @@
   <aside
     ref="asideEl"
     class="relative h-full"
-    :style="{ '--sidebar-width': desktopShell ? 'var(--desktop-sidebar-width)' : `${sidebarWidth}px` }"
+    :style="{ '--sidebar-width': fullWidth ? '100%' : desktopShell ? 'var(--desktop-sidebar-width)' : `${sidebarWidth}px` }"
   >
     <Sidebar
       collapsible="none"
-      :class="['workspace-divider-r', desktopShell && 'h-dvh']"
+      :class="[!fullWidth && 'workspace-divider-r', desktopShell && 'h-dvh']"
       data-native-sidebar-surface
       data-native-sidebar-tint
     >
@@ -31,7 +31,7 @@
         :class="macTrafficReserve ? 'pt-0' : 'pt-[18px]'"
       >
         <NavItem
-          @click="router.push(_backToChatRoute).catch(() => {})"
+          @click="router.push(backToChatRoute).catch(() => {})"
         >
           <ChevronLeft class="size-3.5 shrink-0" />
           <span>{{ t('sidebar.settings') }}</span>
@@ -130,11 +130,12 @@
         </SidebarGroup>
       </SidebarContent>
 
-      <!-- Width resize handle (web only). Drag to resize the sidebar; the width
-           is clamped to [MIN_FULL, MAX_WIDTH] so it can't shrink past a readable
-           minimum. Sits on the sidebar's right edge. -->
+      <!-- Width resize handle (web desktop only). Drag to resize the sidebar;
+           the width is clamped to [MIN_FULL, MAX_WIDTH] so it can't shrink past
+           a readable minimum. Sits on the sidebar's right edge. fullWidth (the
+           mobile list home) fills its pane, so there is nothing to resize. -->
       <div
-        v-if="!desktopShell"
+        v-if="!desktopShell && !fullWidth"
         class="group/resize absolute right-0 top-0 z-(--z-sticky) h-full w-1 cursor-col-resize"
         @mousedown="onResizeStart"
       >
@@ -172,8 +173,7 @@ import {
 } from 'lucide-vue-next'
 import AppearanceIcon from './appearance-icon.vue'
 import { NavItem } from '@felinic/ui'
-import { useChatSelectionStore } from '@/store/chat-selection'
-import { useChatStore } from '@/store/chat-list'
+import { useBackToChatRoute } from '@/composables/useBackToChat'
 import { useUserStore } from '@/store/user'
 import {
   Sidebar,
@@ -193,13 +193,18 @@ const props = withDefaults(defineProps<{
   // When true, the sidebar reserves a draggable macOS traffic-light strip above
   // its visible controls.
   macTrafficReserve?: boolean
+  // Mobile list-home mode: fill the host pane instead of the resizable/pinned
+  // desktop width. The right divider and the drag handle are desktop
+  // affordances and drop out with it.
+  fullWidth?: boolean
 }>(), {
   hideHeader: false,
   excludeItems: () => [],
   macTrafficReserve: false,
+  fullWidth: false,
 })
 
-defineEmits<{ back: [] }>()
+const emit = defineEmits<{ back: []; navigate: [name: string] }>()
 
 const desktopShell = inject(DesktopShellKey, false)
 
@@ -252,21 +257,16 @@ onBeforeUnmount(() => {
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
-const selectionStore = useChatSelectionStore()
-const { currentBotId } = storeToRefs(selectionStore)
-const chatStore = useChatStore()
-const { bots } = storeToRefs(chatStore)
 const userStore = useUserStore()
 const { userInfo } = storeToRefs(userStore)
 
-const _backToChatRoute = computed(() => {
-  const botId = (currentBotId.value ?? '').trim()
-  if (!botId) return { name: 'home' as const }
-  const botName = bots.value.find((b) => b.id === botId)?.name ?? botId
-  return { name: 'bot' as const, params: { botName } }
-})
+const backToChatRoute = useBackToChatRoute()
 
 function navigate(name: string): void {
+  // Emitted for the mobile list home: re-tapping the item whose route is
+  // already current is a duplicate push the router silently drops, but the
+  // shell must still swap from the list to the content pane.
+  emit('navigate', name)
   router.push({ name } as Parameters<typeof router.push>[0]).catch(() => {})
 }
 

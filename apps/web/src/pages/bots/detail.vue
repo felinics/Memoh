@@ -171,9 +171,11 @@
             </div>
           </template>
 
-          <template #sidebar-content>
+          <template #sidebar-content="{ openDetail }">
             <!-- Same NavItem rows as the settings sidebar; search narrows the
-               groups in place instead of swapping to a separate result list. -->
+               groups in place instead of swapping to a separate result list.
+               openDetail pushes the mobile stack to the full-screen content
+               pane (a no-op on desktop, where the panes aren't mounted). -->
             <div class="px-2 pb-2">
               <template v-if="displayGroups.length">
                 <div
@@ -189,7 +191,7 @@
                       <NavItem
                         :active="activeTab === tab.value"
                         :aria-current="activeTab === tab.value ? 'page' : undefined"
-                        @click="selectTab(tab.value)"
+                        @click="selectTab(tab.value); openDetail()"
                       >
                         <component
                           :is="tab.icon"

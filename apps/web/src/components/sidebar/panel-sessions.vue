@@ -107,6 +107,10 @@ function handleNewSession() {
   // Opens (or focuses) the single draft tab; its activation resets the view to a
   // fresh draft (selectDraft), so no separate createNewSession is needed.
   workspaceTabs.openDraftChat({ title: t('chat.newSession'), explicitSelection: false })
+  // Select-to-dismiss for the mobile nav sheet: when the draft is ALREADY the
+  // active panel, openDraftChat short-circuits and no session/route/active-id
+  // change fires the sheet's watchers — close it explicitly. No-op on desktop.
+  workspaceTabs.closeMobileNav()
 }
 
 // Navigate to the current bot's settings overview.

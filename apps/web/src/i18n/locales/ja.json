@@ -950,7 +950,13 @@
       "hideWorkbench": "サイドバーを隠す",
       "showWorkbench": "サイドバーを表示",
       "goBack": "戻る",
-      "goForward": "進む"
+      "goForward": "進む",
+      "openNav": "ナビゲーションを開く",
+      "closePanel": "パネルを閉じる"
+    },
+    "mobileNav": {
+      "title": "ナビゲーション",
+      "description": "Bot、セッション、ファイル、スケジュールを切り替え"
     },
     "activityBar": {
       "sessions": "チャット",
@@ -978,10 +984,15 @@
     "sessionInfoTooltipHint": "カーソルを合わせるとセッション情報が表示されます",
     "sessionActions": "セッションアクション",
     "tabBarToolkit": {
+      "openMenu": "新規パネル",
       "newTerminal": "新しいターミナルを開く",
       "openBrowser": "ブラウザーを開く",
+      "openDesktop": "デスクトップ",
       "openDisplay": "デスクトップウィンドウを開く",
+      "splitRight": "右に分割",
+      "splitDown": "下に分割",
       "menu": "タブのアクション",
+      "more": "その他",
       "closeAll": "すべて閉じる"
     },
     "browser": {

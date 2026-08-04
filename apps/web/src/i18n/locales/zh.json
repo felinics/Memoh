@@ -982,7 +982,13 @@
       "hideWorkbench": "隐藏侧边栏",
       "showWorkbench": "显示侧边栏",
       "goBack": "后退",
-      "goForward": "前进"
+      "goForward": "前进",
+      "openNav": "打开导航",
+      "closePanel": "关闭面板"
+    },
+    "mobileNav": {
+      "title": "导航",
+      "description": "切换智能体、会话、文件与计划任务"
     },
     "activityBar": {
       "sessions": "对话",

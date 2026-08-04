@@ -1,4 +1,4 @@
-import { computed, shallowReactive, unref } from 'vue'
+import { computed, shallowReactive, unref, type ComputedRef } from 'vue'
 import { useRouter, type RouteLocationNormalized, type RouteLocationRaw, type Router } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
@@ -73,6 +73,20 @@ function resolveBreadcrumbLabel(
     return String(unref(breadcrumb))
   }
   return ''
+}
+
+/**
+ * Read-only reactive access to the tracked previous route (null when the
+ * current page was reached cold — fresh window, refresh, deep link).
+ *
+ * Shells that must distinguish "entered from another in-app page" from
+ * "deep-linked" read this — e.g. the mobile settings shell opens on its
+ * navigation list only when the user arrived from outside settings. For back
+ * buttons themselves, prefer useBackOr / useBackAffordance above.
+ */
+export function usePreviousRoute(): ComputedRef<RouteLocationNormalized | null> {
+  const router = useRouter()
+  return computed(() => histories.get(router)?.previous ?? null)
 }
 
 /**
