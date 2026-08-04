@@ -591,6 +591,7 @@
     "computerNone": "没有可用的电脑",
     "computerUnavailable": "不可用的电脑",
     "attachFiles": "上传文件",
+    "pdfUnsupportedByModel": "当前模型不支持读取 PDF,文件将以路径形式存入工作区,模型无法直接查看其内容。",
     "send": "发送",
     "sendFailed": "消息发送失败",
     "forkFailed": "分叉会话失败",

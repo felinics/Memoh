@@ -560,6 +560,7 @@
     "computerNone": "利用できるコンピューターがありません",
     "computerUnavailable": "利用できないコンピューター",
     "attachFiles": "ファイルを添付する",
+    "pdfUnsupportedByModel": "現在のモデルは PDF の読み取りに対応していません。ファイルはワークスペースにパスとして保存され、モデルは内容を閲覧できません。",
     "send": "送信",
     "sendFailed": "メッセージの送信に失敗しました",
     "forkFailed": "セッションのフォークに失敗しました",

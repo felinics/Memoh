@@ -1568,6 +1568,23 @@ const activeModel = computed(() => {
   return models.value.find((m) => m.id === id)
 })
 
+// PDFs reach the model natively only when it carries the file-input
+// capability; without it the file lands in the workspace as a path the model
+// cannot open. Warn at attach time so the user is not surprised mid-turn.
+// ACP sessions are exempt — Claude Code / Codex read PDFs themselves.
+const isPdfFile = (file: File) =>
+  file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+
+watch(() => pendingFiles.value.length, (len, prevLen) => {
+  if (len <= (prevLen ?? 0)) return
+  if (activeUsesACPComposer.value) return
+  const model = activeModel.value
+  if (!model || model.config?.compatibilities?.includes('file-input')) return
+  if (pendingFiles.value.slice(prevLen ?? 0).some(isPdfFile)) {
+    toast.warning(t('chat.pdfUnsupportedByModel'))
+  }
+})
+
 type DefaultACPSettings = {
   chat_runtime?: string
   chat_acp_agent_id?: string
