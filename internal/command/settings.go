@@ -41,7 +41,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 				switch args[i] {
 				case "--language":
 					i++
-					req.Language = args[i]
+					req.Language = &args[i]
 				case "--acl_default_effect":
 					i++
 					req.AclDefaultEffect = args[i]
@@ -61,10 +61,10 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 					req.HeartbeatInterval = &val
 				case "--chat_model_id":
 					i++
-					req.ChatModelID = args[i]
+					req.ChatModelID = &args[i]
 				case "--heartbeat_model_id":
 					i++
-					req.HeartbeatModelID = args[i]
+					req.HeartbeatModelID = &args[i]
 				default:
 					return &Result{Text: cc.T("cmd.settings.unknownOption", map[string]any{"option": args[i], "usage": cc.T("cmd.settings.updateUsage")})}, nil
 				}

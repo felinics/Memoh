@@ -651,6 +651,7 @@ func headerSafeError(message string) string {
 // @Description Validate a candidate bot name and report whether it is available
 // @Tags bots
 // @Param name query string true "Candidate bot name"
+// @Param exclude_bot_id query string false "Bot ID to exclude from the conflict check (used when renaming)"
 // @Success 200 {object} bots.NameAvailability
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse

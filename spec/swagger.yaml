@@ -4928,6 +4928,12 @@ definitions:
       chat_acp_project_path:
         type: string
       chat_model_id:
+        description: |-
+          Reference fields below use pointer semantics so autosaving clients can
+          clear a selection: nil = keep current, "" = clear, value = set. The
+          service mirrors each into a `<field>_set` SQL flag (same pattern as
+          FetchProviderID / CompactionModelID); plain strings would make ""
+          indistinguishable from "not sent".
         type: string
       chat_runtime:
         type: string
@@ -4956,6 +4962,9 @@ definitions:
       image_model_id:
         type: string
       language:
+        description: |-
+          Language follows the same pointer rule; "" normalizes to DefaultLanguage
+          ("auto") rather than clearing the column.
         type: string
       memory_provider_id:
         type: string
@@ -11781,6 +11790,10 @@ paths:
         in: query
         name: name
         required: true
+        type: string
+      - description: Bot ID to exclude from the conflict check (used when renaming)
+        in: query
+        name: exclude_bot_id
         type: string
       responses:
         "200":

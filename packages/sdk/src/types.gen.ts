@@ -2907,6 +2907,13 @@ export type SettingsUpsertRequest = {
     chat_acp_agent_id?: string;
     chat_acp_project_mode?: string;
     chat_acp_project_path?: string;
+    /**
+     * Reference fields below use pointer semantics so autosaving clients can
+     * clear a selection: nil = keep current, "" = clear, value = set. The
+     * service mirrors each into a `<field>_set` SQL flag (same pattern as
+     * FetchProviderID / CompactionModelID); plain strings would make ""
+     * indistinguishable from "not sent".
+     */
     chat_model_id?: string;
     chat_runtime?: string;
     command_ui_language?: string;
@@ -2921,6 +2928,10 @@ export type SettingsUpsertRequest = {
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
     image_model_id?: string;
+    /**
+     * Language follows the same pointer rule; "" normalizes to DefaultLanguage
+     * ("auto") rather than clearing the column.
+     */
     language?: string;
     memory_provider_id?: string;
     overlay_config?: {
@@ -3366,6 +3377,10 @@ export type GetBotsNameAvailabilityData = {
          * Candidate bot name
          */
         name: string;
+        /**
+         * Bot ID to exclude from the conflict check (used when renaming)
+         */
+        exclude_bot_id?: string;
     };
     url: '/bots/name-availability';
 };

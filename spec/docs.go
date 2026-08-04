@@ -359,6 +359,12 @@ const docTemplate = `{
                         "name": "name",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot ID to exclude from the conflict check (used when renaming)",
+                        "name": "exclude_bot_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -21679,6 +21685,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "chat_model_id": {
+                    "description": "Reference fields below use pointer semantics so autosaving clients can\nclear a selection: nil = keep current, \"\" = clear, value = set. The\nservice mirrors each into a ` + "`" + `\u003cfield\u003e_set` + "`" + ` SQL flag (same pattern as\nFetchProviderID / CompactionModelID); plain strings would make \"\"\nindistinguishable from \"not sent\".",
                     "type": "string"
                 },
                 "chat_runtime": {
@@ -21721,6 +21728,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "language": {
+                    "description": "Language follows the same pointer rule; \"\" normalizes to DefaultLanguage\n(\"auto\") rather than clearing the column.",
                     "type": "string"
                 },
                 "memory_provider_id": {

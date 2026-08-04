@@ -191,36 +191,60 @@ WITH updated AS (
         ELSE bots.compaction_target_percent
       END,
       timezone = COALESCE($10::text, bots.timezone),
-      chat_model_id = COALESCE($11::uuid, bots.chat_model_id),
-      chat_runtime = $12,
-      chat_acp_agent_id = $13::text,
-      chat_acp_project_path = $14,
-      chat_acp_project_mode = $15,
-      heartbeat_model_id = COALESCE($16::uuid, bots.heartbeat_model_id),
-      compaction_model_id = CASE
+      chat_model_id = CASE
+        WHEN $11::boolean THEN $12::uuid
+        ELSE bots.chat_model_id
+      END,
+      chat_runtime = $13,
+      chat_acp_agent_id = $14::text,
+      chat_acp_project_path = $15,
+      chat_acp_project_mode = $16,
+      heartbeat_model_id = CASE
         WHEN $17::boolean THEN $18::uuid
+        ELSE bots.heartbeat_model_id
+      END,
+      compaction_model_id = CASE
+        WHEN $19::boolean THEN $20::uuid
         ELSE bots.compaction_model_id
       END,
-      search_provider_id = COALESCE($19::uuid, bots.search_provider_id),
+      search_provider_id = CASE
+        WHEN $21::boolean THEN $22::uuid
+        ELSE bots.search_provider_id
+      END,
       fetch_provider_id = CASE
-        WHEN $20::boolean THEN $21::uuid
+        WHEN $23::boolean THEN $24::uuid
         ELSE bots.fetch_provider_id
       END,
-      memory_provider_id = COALESCE($22::uuid, bots.memory_provider_id),
-      image_model_id = COALESCE($23::uuid, bots.image_model_id),
-      tts_model_id = COALESCE($24::uuid, bots.tts_model_id),
-      transcription_model_id = COALESCE($25::uuid, bots.transcription_model_id),
-      video_model_id = COALESCE($26::uuid, bots.video_model_id),
-      persist_full_tool_results = $27,
-      show_tool_calls_in_im = $28,
-      tool_approval_config = $29,
-      display_enabled = $30,
-      overlay_provider = $31,
-      overlay_enabled = $32,
-      overlay_config = $33,
-      command_ui_language = $34,
+      memory_provider_id = CASE
+        WHEN $25::boolean THEN $26::uuid
+        ELSE bots.memory_provider_id
+      END,
+      image_model_id = CASE
+        WHEN $27::boolean THEN $28::uuid
+        ELSE bots.image_model_id
+      END,
+      tts_model_id = CASE
+        WHEN $29::boolean THEN $30::uuid
+        ELSE bots.tts_model_id
+      END,
+      transcription_model_id = CASE
+        WHEN $31::boolean THEN $32::uuid
+        ELSE bots.transcription_model_id
+      END,
+      video_model_id = CASE
+        WHEN $33::boolean THEN $34::uuid
+        ELSE bots.video_model_id
+      END,
+      persist_full_tool_results = $35,
+      show_tool_calls_in_im = $36,
+      tool_approval_config = $37,
+      display_enabled = $38,
+      overlay_provider = $39,
+      overlay_enabled = $40,
+      overlay_config = $41,
+      command_ui_language = $42,
       updated_at = now()
-  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $35
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $43
   RETURNING bots.id, bots.language, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
@@ -280,21 +304,29 @@ type UpsertBotSettingsParams struct {
 	CompactionTargetPercentSet bool        `json:"compaction_target_percent_set"`
 	CompactionTargetPercent    pgtype.Int4 `json:"compaction_target_percent"`
 	Timezone                   pgtype.Text `json:"timezone"`
+	ChatModelIDSet             bool        `json:"chat_model_id_set"`
 	ChatModelID                pgtype.UUID `json:"chat_model_id"`
 	ChatRuntime                string      `json:"chat_runtime"`
 	ChatAcpAgentID             pgtype.Text `json:"chat_acp_agent_id"`
 	ChatAcpProjectPath         string      `json:"chat_acp_project_path"`
 	ChatAcpProjectMode         string      `json:"chat_acp_project_mode"`
+	HeartbeatModelIDSet        bool        `json:"heartbeat_model_id_set"`
 	HeartbeatModelID           pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelIDSet       bool        `json:"compaction_model_id_set"`
 	CompactionModelID          pgtype.UUID `json:"compaction_model_id"`
+	SearchProviderIDSet        bool        `json:"search_provider_id_set"`
 	SearchProviderID           pgtype.UUID `json:"search_provider_id"`
 	FetchProviderIDSet         bool        `json:"fetch_provider_id_set"`
 	FetchProviderID            pgtype.UUID `json:"fetch_provider_id"`
+	MemoryProviderIDSet        bool        `json:"memory_provider_id_set"`
 	MemoryProviderID           pgtype.UUID `json:"memory_provider_id"`
+	ImageModelIDSet            bool        `json:"image_model_id_set"`
 	ImageModelID               pgtype.UUID `json:"image_model_id"`
+	TtsModelIDSet              bool        `json:"tts_model_id_set"`
 	TtsModelID                 pgtype.UUID `json:"tts_model_id"`
+	TranscriptionModelIDSet    bool        `json:"transcription_model_id_set"`
 	TranscriptionModelID       pgtype.UUID `json:"transcription_model_id"`
+	VideoModelIDSet            bool        `json:"video_model_id_set"`
 	VideoModelID               pgtype.UUID `json:"video_model_id"`
 	PersistFullToolResults     bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm          bool        `json:"show_tool_calls_in_im"`
@@ -354,21 +386,29 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.CompactionTargetPercentSet,
 		arg.CompactionTargetPercent,
 		arg.Timezone,
+		arg.ChatModelIDSet,
 		arg.ChatModelID,
 		arg.ChatRuntime,
 		arg.ChatAcpAgentID,
 		arg.ChatAcpProjectPath,
 		arg.ChatAcpProjectMode,
+		arg.HeartbeatModelIDSet,
 		arg.HeartbeatModelID,
 		arg.CompactionModelIDSet,
 		arg.CompactionModelID,
+		arg.SearchProviderIDSet,
 		arg.SearchProviderID,
 		arg.FetchProviderIDSet,
 		arg.FetchProviderID,
+		arg.MemoryProviderIDSet,
 		arg.MemoryProviderID,
+		arg.ImageModelIDSet,
 		arg.ImageModelID,
+		arg.TtsModelIDSet,
 		arg.TtsModelID,
+		arg.TranscriptionModelIDSet,
 		arg.TranscriptionModelID,
+		arg.VideoModelIDSet,
 		arg.VideoModelID,
 		arg.PersistFullToolResults,
 		arg.ShowToolCallsInIm,

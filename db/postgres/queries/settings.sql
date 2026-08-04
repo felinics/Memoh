@@ -61,26 +61,50 @@ WITH updated AS (
         ELSE bots.compaction_target_percent
       END,
       timezone = COALESCE(sqlc.narg(timezone)::text, bots.timezone),
-      chat_model_id = COALESCE(sqlc.narg(chat_model_id)::uuid, bots.chat_model_id),
+      chat_model_id = CASE
+        WHEN sqlc.arg(chat_model_id_set)::boolean THEN sqlc.narg(chat_model_id)::uuid
+        ELSE bots.chat_model_id
+      END,
       chat_runtime = sqlc.arg(chat_runtime),
       chat_acp_agent_id = sqlc.narg(chat_acp_agent_id)::text,
       chat_acp_project_path = sqlc.arg(chat_acp_project_path),
       chat_acp_project_mode = sqlc.arg(chat_acp_project_mode),
-      heartbeat_model_id = COALESCE(sqlc.narg(heartbeat_model_id)::uuid, bots.heartbeat_model_id),
+      heartbeat_model_id = CASE
+        WHEN sqlc.arg(heartbeat_model_id_set)::boolean THEN sqlc.narg(heartbeat_model_id)::uuid
+        ELSE bots.heartbeat_model_id
+      END,
       compaction_model_id = CASE
         WHEN sqlc.arg(compaction_model_id_set)::boolean THEN sqlc.narg(compaction_model_id)::uuid
         ELSE bots.compaction_model_id
       END,
-      search_provider_id = COALESCE(sqlc.narg(search_provider_id)::uuid, bots.search_provider_id),
+      search_provider_id = CASE
+        WHEN sqlc.arg(search_provider_id_set)::boolean THEN sqlc.narg(search_provider_id)::uuid
+        ELSE bots.search_provider_id
+      END,
       fetch_provider_id = CASE
         WHEN sqlc.arg(fetch_provider_id_set)::boolean THEN sqlc.narg(fetch_provider_id)::uuid
         ELSE bots.fetch_provider_id
       END,
-      memory_provider_id = COALESCE(sqlc.narg(memory_provider_id)::uuid, bots.memory_provider_id),
-      image_model_id = COALESCE(sqlc.narg(image_model_id)::uuid, bots.image_model_id),
-      tts_model_id = COALESCE(sqlc.narg(tts_model_id)::uuid, bots.tts_model_id),
-      transcription_model_id = COALESCE(sqlc.narg(transcription_model_id)::uuid, bots.transcription_model_id),
-      video_model_id = COALESCE(sqlc.narg(video_model_id)::uuid, bots.video_model_id),
+      memory_provider_id = CASE
+        WHEN sqlc.arg(memory_provider_id_set)::boolean THEN sqlc.narg(memory_provider_id)::uuid
+        ELSE bots.memory_provider_id
+      END,
+      image_model_id = CASE
+        WHEN sqlc.arg(image_model_id_set)::boolean THEN sqlc.narg(image_model_id)::uuid
+        ELSE bots.image_model_id
+      END,
+      tts_model_id = CASE
+        WHEN sqlc.arg(tts_model_id_set)::boolean THEN sqlc.narg(tts_model_id)::uuid
+        ELSE bots.tts_model_id
+      END,
+      transcription_model_id = CASE
+        WHEN sqlc.arg(transcription_model_id_set)::boolean THEN sqlc.narg(transcription_model_id)::uuid
+        ELSE bots.transcription_model_id
+      END,
+      video_model_id = CASE
+        WHEN sqlc.arg(video_model_id_set)::boolean THEN sqlc.narg(video_model_id)::uuid
+        ELSE bots.video_model_id
+      END,
       persist_full_tool_results = sqlc.arg(persist_full_tool_results),
       show_tool_calls_in_im = sqlc.arg(show_tool_calls_in_im),
       tool_approval_config = sqlc.arg(tool_approval_config),
