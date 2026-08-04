@@ -3,25 +3,6 @@
     variant="tab"
     :title="$t('bots.tabs.settings')"
   >
-    <template #actions>
-      <Transition name="fade">
-        <div
-          v-if="hasChanges"
-          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted-soft border border-border/50"
-        >
-          <div class="size-1 rounded-full bg-muted-foreground/40" />
-          <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">{{ $t('common.unsaved') }}</span>
-        </div>
-      </Transition>
-      <Button
-        :disabled="!hasChanges || !nameValid"
-        :loading="saveLoading"
-        @click="handleSave"
-      >
-        {{ $t('bots.settings.save') }}
-      </Button>
-    </template>
-
     <div class="space-y-8">
       <!-- URL Name -->
       <SettingsSection>
@@ -32,7 +13,7 @@
           <div class="w-52 space-y-1">
             <div class="relative">
               <Input
-                v-model="nameInput"
+                v-model="form.name"
                 type="text"
                 autocapitalize="off"
                 autocomplete="off"
@@ -119,7 +100,6 @@
 
 <script setup lang="ts">
 import {
-  Button,
   Input,
 } from '@felinic/ui'
 import { Check, X, LoaderCircle } from 'lucide-vue-next'
@@ -136,10 +116,11 @@ import SettingsDangerZone from './settings-danger-zone.vue'
 import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { getAcpProfiles, getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability } from '@memohai/sdk'
-import type { AcpprofilePublicProfile, SettingsSettings } from '@memohai/sdk'
+import type { AcpprofilePublicProfile, SettingsSettings, SettingsUpsertRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
+import { useAutosaveQueue, type AutosaveJob } from './use-autosave-queue'
 
 const props = defineProps<{
   botId: string
@@ -294,96 +275,6 @@ const { data: videoModelData } = useQuery({
   },
 })
 
-const { mutateAsync: updateSettings, isLoading } = useMutation({
-  mutation: async (body: Partial<SettingsSettings>) => {
-    const { data } = await putBotsByBotIdSettings({
-      path: { bot_id: botIdRef.value },
-      body,
-      throwOnError: true,
-    })
-    return data
-  },
-  onSettled: () => {
-    queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
-    void chatStore.refreshBots().catch(() => {})
-  },
-})
-
-const { mutateAsync: updateBot, isLoading: isUpdatingBot } = useMutation({
-  mutation: async (body: { timezone?: string, name?: string }) => {
-    const { data } = await putBotsById({
-      path: { id: botIdRef.value },
-      body,
-      throwOnError: true,
-    })
-    return data
-  },
-  onSettled: () => {
-    queryCache.invalidateQueries({ key: ['bot'] })
-    queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
-    queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
-    queryCache.invalidateQueries({ key: ['bots'] })
-    void chatStore.refreshBots().catch(() => {})
-  },
-})
-
-// ---- URL name (slug) editing ----
-type NameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'reserved'
-const nameInput = ref('')
-const nameStatus = ref<NameStatus>('idle')
-
-watch(bot, (val) => {
-  nameInput.value = val?.name ?? ''
-  nameStatus.value = 'idle'
-}, { immediate: true })
-
-const hasNameChange = computed(() => nameInput.value.trim() !== (bot.value?.name ?? ''))
-
-const checkNameAvailability = useDebounceFn(async (candidate: string) => {
-  const normalized = candidate.trim()
-  if (!normalized || !hasNameChange.value) {
-    nameStatus.value = 'idle'
-    return
-  }
-  try {
-    const { data } = await getBotsNameAvailability({
-      query: { name: normalized, exclude_bot_id: botIdRef.value },
-      throwOnError: true,
-    })
-    nameStatus.value = data?.available ? 'available' : ((data?.reason as NameStatus) || 'taken')
-  } catch {
-    nameStatus.value = 'idle'
-  }
-}, 400)
-
-watch(nameInput, (candidate) => {
-  if (!hasNameChange.value) {
-    nameStatus.value = 'idle'
-    return
-  }
-  nameStatus.value = 'checking'
-  void checkNameAvailability(candidate)
-})
-
-const nameStatusMessage = computed(() => {
-  switch (nameStatus.value) {
-    case 'checking':
-      return t('bots.nameStatus.checking')
-    case 'available':
-      return t('bots.nameStatus.available')
-    case 'taken':
-      return t('bots.nameStatus.taken')
-    case 'invalid':
-      return t('bots.nameStatus.invalid')
-    case 'reserved':
-      return t('bots.nameStatus.reserved')
-    default:
-      return ''
-  }
-})
-
-const nameValid = computed(() => !hasNameChange.value || nameStatus.value === 'available')
-
 const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
     await deleteBotsById({ path: { id: botIdRef.value }, throwOnError: true })
@@ -419,12 +310,17 @@ const videoModels = computed(() =>
 )
 
 // ---- Form ----
+// `name` and `timezone` are not settings-endpoint fields — they live on the
+// bot row and persist through PUT /bots/{id}. They ride the same form anyway
+// so the autosave queue gets one uniform diff/rollback model; buildJobs routes
+// by field, not by card (card boundaries ≠ API boundaries).
 type SettingsForm = SettingsSettings & {
   chat_runtime: string
   chat_acp_agent_id: string
   chat_acp_project_path: string
   chat_acp_project_mode: string
   timezone: string
+  name: string
 }
 
 const form = reactive<SettingsForm>({
@@ -444,58 +340,233 @@ const form = reactive<SettingsForm>({
   language: '',
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
+  name: '',
 })
 
+// Fields that persist through PUT /bots/{bot_id}/settings.
+const SETTINGS_FIELD_KEYS = [
+  'chat_model_id',
+  'chat_runtime',
+  'chat_acp_agent_id',
+  'chat_acp_project_path',
+  'chat_acp_project_mode',
+  'image_model_id',
+  'search_provider_id',
+  'fetch_provider_id',
+  'memory_provider_id',
+  'tts_model_id',
+  'transcription_model_id',
+  'video_model_id',
+  'language',
+  'reasoning_effort',
+  'show_tool_calls_in_im',
+] as const satisfies readonly (keyof SettingsForm)[]
+
+// Last-known-server snapshot. The autosave engine diffs `form` against this;
+// it must advance in the SAME synchronous block as any form write that is not
+// a user edit (hydration, rollback), or the diff would misread those writes
+// as edits and re-save them.
+const synced = reactive<SettingsForm>({ ...form })
+
 watch(settings, (val) => {
-  if (val) {
-    form.chat_model_id = val.chat_model_id ?? ''
-    const next = val as SettingsForm
-    form.chat_runtime = next.chat_runtime === 'acp_agent' ? 'acp_agent' : 'model'
-    form.chat_acp_agent_id = next.chat_acp_agent_id ?? ''
-    form.chat_acp_project_path = next.chat_acp_project_path || '/data'
-    form.chat_acp_project_mode = next.chat_acp_project_mode || 'project'
-    form.image_model_id = val.image_model_id ?? ''
-    form.search_provider_id = val.search_provider_id ?? ''
-    form.fetch_provider_id = val.fetch_provider_id ?? ''
-    form.memory_provider_id = val.memory_provider_id ?? ''
-    form.tts_model_id = val.tts_model_id ?? ''
-    form.transcription_model_id = val.transcription_model_id ?? ''
-    form.video_model_id = val.video_model_id ?? ''
-    form.language = val.language ?? ''
-    form.reasoning_effort = val.reasoning_effort || 'medium'
-    form.show_tool_calls_in_im = val.show_tool_calls_in_im ?? false
+  if (!val) return
+  const next = {
+    chat_model_id: val.chat_model_id ?? '',
+    chat_runtime: (val as SettingsForm).chat_runtime === 'acp_agent' ? 'acp_agent' : 'model',
+    chat_acp_agent_id: (val as SettingsForm).chat_acp_agent_id ?? '',
+    chat_acp_project_path: (val as SettingsForm).chat_acp_project_path || '/data',
+    chat_acp_project_mode: (val as SettingsForm).chat_acp_project_mode || 'project',
+    image_model_id: val.image_model_id ?? '',
+    search_provider_id: val.search_provider_id ?? '',
+    fetch_provider_id: val.fetch_provider_id ?? '',
+    memory_provider_id: val.memory_provider_id ?? '',
+    tts_model_id: val.tts_model_id ?? '',
+    transcription_model_id: val.transcription_model_id ?? '',
+    video_model_id: val.video_model_id ?? '',
+    language: val.language ?? '',
+    reasoning_effort: val.reasoning_effort || 'medium',
+    show_tool_calls_in_im: val.show_tool_calls_in_im ?? false,
+  }
+  // Per-field guard: a refetch landing while the user has an unsaved edit
+  // (form diverged from synced, save still in flight) must not clobber the
+  // edit. Advancing `synced` regardless keeps the diff alive so the autosave
+  // queue re-pushes the user's value.
+  for (const key of Object.keys(next) as (keyof typeof next)[]) {
+    if (form[key] === synced[key]) form[key] = next[key] as never
+    synced[key] = next[key] as never
   }
 }, { immediate: true })
 
+// ---- URL name (slug) editing ----
+// The name autosaves only after the debounced availability check passes; the
+// inline status IS the save state (no separate indicator).
+type NameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'reserved'
+const nameStatus = ref<NameStatus>('idle')
+
 watch(bot, (val) => {
-  form.timezone = val?.timezone ?? ''
+  // Same per-field guard as the settings hydration above: a refetch landing
+  // while the user has an unsaved edit must not clobber it — for the name
+  // that means in-progress typing, for the timezone an in-flight save.
+  const serverName = val?.name ?? ''
+  if (form.name.trim() === synced.name) {
+    form.name = serverName
+    nameStatus.value = 'idle'
+  }
+  synced.name = serverName
+  const serverTimezone = val?.timezone ?? ''
+  if (form.timezone === synced.timezone) {
+    form.timezone = serverTimezone
+  }
+  synced.timezone = serverTimezone
 }, { immediate: true })
 
-const hasSettingsChanges = computed(() => {
-  if (!settings.value) return true
-  const s = settings.value
-  return (
-    form.chat_model_id !== (s.chat_model_id ?? '')
-    || form.chat_runtime !== (((s as SettingsForm).chat_runtime === 'acp_agent') ? 'acp_agent' : 'model')
-    || form.chat_acp_agent_id !== ((s as SettingsForm).chat_acp_agent_id ?? '')
-    || form.chat_acp_project_path !== (((s as SettingsForm).chat_acp_project_path || '/data'))
-    || form.chat_acp_project_mode !== (((s as SettingsForm).chat_acp_project_mode || 'project'))
-    || form.image_model_id !== (s.image_model_id ?? '')
-    || form.search_provider_id !== (s.search_provider_id ?? '')
-    || form.fetch_provider_id !== (s.fetch_provider_id ?? '')
-    || form.memory_provider_id !== (s.memory_provider_id ?? '')
-    || form.tts_model_id !== (s.tts_model_id ?? '')
-    || form.transcription_model_id !== (s.transcription_model_id ?? '')
-    || form.video_model_id !== (s.video_model_id ?? '')
-    || form.language !== (s.language ?? '')
-    || form.reasoning_effort !== (s.reasoning_effort || 'medium')
-    || form.show_tool_calls_in_im !== (s.show_tool_calls_in_im ?? false)
-  )
+const hasNameChange = computed(() => form.name.trim() !== synced.name)
+
+const checkNameAvailability = useDebounceFn(async (candidate: string) => {
+  const normalized = candidate.trim()
+  if (!normalized || !hasNameChange.value) {
+    nameStatus.value = 'idle'
+    return
+  }
+  try {
+    const { data } = await getBotsNameAvailability({
+      query: { name: normalized, exclude_bot_id: botIdRef.value },
+      throwOnError: true,
+    })
+    nameStatus.value = data?.available ? 'available' : ((data?.reason as NameStatus) || 'taken')
+    if (nameStatus.value === 'available') scheduleSync()
+  } catch {
+    nameStatus.value = 'idle'
+  }
+}, 400)
+
+watch(() => form.name, (candidate) => {
+  if (!hasNameChange.value) {
+    nameStatus.value = 'idle'
+    return
+  }
+  nameStatus.value = 'checking'
+  void checkNameAvailability(candidate)
 })
 
-const hasTimezoneChanges = computed(() => form.timezone !== (bot.value?.timezone ?? ''))
-const hasChanges = computed(() => hasSettingsChanges.value || hasTimezoneChanges.value || hasNameChange.value)
-const saveLoading = computed(() => isLoading.value || isUpdatingBot.value)
+const nameStatusMessage = computed(() => {
+  switch (nameStatus.value) {
+    case 'checking':
+      return t('bots.nameStatus.checking')
+    case 'available':
+      return t('bots.nameStatus.available')
+    case 'taken':
+      return t('bots.nameStatus.taken')
+    case 'invalid':
+      return t('bots.nameStatus.invalid')
+    case 'reserved':
+      return t('bots.nameStatus.reserved')
+    default:
+      return ''
+  }
+})
+
+// ---- Autosave engine ----
+// This page has no Save button by design (web skill §8: a page of toggles and
+// selects auto-saves; success stays silent, only errors surface). The queue
+// lives in use-autosave-queue.ts (serialized snapshot-diff engine, unit-tested
+// there); this file owns the page-specific partition of changed fields into
+// per-endpoint jobs and the tiered invalidation on drain.
+function buildJobs(changed: (keyof SettingsForm)[]): AutosaveJob<SettingsForm>[] {
+  const keys = new Set(changed)
+  const jobs: AutosaveJob<SettingsForm>[] = []
+
+  const settingsPayload: SettingsUpsertRequest = {}
+  const sentSettings: Partial<SettingsForm> = {}
+  for (const key of SETTINGS_FIELD_KEYS) {
+    if (keys.has(key)) {
+      sentSettings[key] = form[key] as never
+      ;(settingsPayload as Record<string, unknown>)[key] = form[key]
+    }
+  }
+  if (Object.keys(settingsPayload).length > 0) {
+    jobs.push({
+      payload: sentSettings,
+      save: async () => {
+        await putBotsByBotIdSettings({
+          path: { bot_id: botIdRef.value },
+          body: settingsPayload,
+          throwOnError: true,
+        })
+      },
+      onError: (error) => toast.error(resolveApiErrorMessage(error, t('common.saveFailed'))),
+    })
+  }
+
+  if (keys.has('timezone')) {
+    jobs.push({
+      payload: { timezone: form.timezone },
+      save: async () => {
+        await putBotsById({
+          path: { id: botIdRef.value },
+          body: { timezone: form.timezone },
+          throwOnError: true,
+        })
+      },
+      onError: (error) => toast.error(resolveApiErrorMessage(error, t('common.saveFailed'))),
+    })
+  }
+
+  // The name job is gated on the availability check and never rolls back: the
+  // draft must survive a failure so the user can fix it — the inline status
+  // carries the error instead.
+  if (keys.has('name') && hasNameChange.value && nameStatus.value === 'available') {
+    jobs.push({
+      payload: { name: form.name.trim() },
+      rollback: false,
+      save: async () => {
+        await putBotsById({
+          path: { id: botIdRef.value },
+          body: { name: form.name.trim() },
+          throwOnError: true,
+        })
+      },
+      onSaved: () => {
+        if (form.name.trim() === synced.name) nameStatus.value = 'idle'
+      },
+      onError: (error) => {
+        if (isNameConflict(error)) {
+          nameStatus.value = 'taken'
+          toast.error(t('bots.nameStatus.taken'))
+        } else {
+          // Non-conflict failure: an unsaved name must not keep a fake ✓.
+          nameStatus.value = 'idle'
+          toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+        }
+      },
+    })
+  }
+
+  return jobs
+}
+
+function onDrained(savedKeys: Set<keyof SettingsForm>) {
+  const saved = [...savedKeys]
+  if (saved.some((key) => key !== 'name' && key !== 'timezone')) {
+    queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
+  }
+  if (savedKeys.has('name') || savedKeys.has('timezone')) {
+    queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
+  }
+  // The sidebar lists bots by name; nothing else on this page is visible
+  // there, so the expensive full-list refetch only fires for renames.
+  if (savedKeys.has('name')) {
+    queryCache.invalidateQueries({ key: ['bots'] })
+    void chatStore.refreshBots().catch(() => {})
+  }
+}
+
+const { scheduleSync } = useAutosaveQueue<SettingsForm>({
+  form,
+  synced,
+  buildJobs,
+  onDrained,
+})
 
 function isNameConflict(error: unknown): boolean {
   const code = parseMemohError(error)?.code
@@ -504,33 +575,6 @@ function isNameConflict(error: unknown): boolean {
   // Desktop can connect to older hosted servers whose conflict response
   // carries neither a code nor a status field — only the English message.
   return resolveApiErrorMessage(error, '').toLowerCase().includes('already taken')
-}
-
-async function handleSave() {
-  if (!nameValid.value) {
-    toast.error(nameStatusMessage.value || t('bots.nameStatus.invalid'))
-    return
-  }
-  try {
-    if (hasSettingsChanges.value) {
-      const { timezone: _timezone, ...settingsPayload } = form
-      await updateSettings(settingsPayload)
-    }
-    if (hasTimezoneChanges.value || hasNameChange.value) {
-      await updateBot({
-        ...(hasTimezoneChanges.value ? { timezone: form.timezone } : {}),
-        ...(hasNameChange.value ? { name: nameInput.value.trim() } : {}),
-      })
-    }
-    toast.success(t('bots.settings.saveSuccess'))
-  } catch (error) {
-    if (isNameConflict(error)) {
-      nameStatus.value = 'taken'
-      toast.error(t('bots.nameStatus.taken'))
-      return
-    }
-    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
-  }
 }
 
 function handleBackupImported(botId: string) {

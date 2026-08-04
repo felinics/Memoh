@@ -1605,8 +1605,6 @@
     "loadFailed": "Tool の承認設定を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
     "saveFailed": "Tool の承認設定を保存できませんでした",
-    "saveSuccess": "Tool の承認設定を保存しました",
-    "partialSaveFailed": "一部の変更は保存されましたが、{count} 件の場所で失敗しました。失敗した下書きは保持されています。",
     "enabled": "Tool の承認",
     "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
     "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
