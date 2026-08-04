@@ -66,8 +66,9 @@
            the live rows slide to make room (animation) and the source slot shows
            as an empty gap (.bot-row-ghost). The WHOLE row is the drag target (no
            `handle`), so you can grab it anywhere the cursor reads as interactive,
-           not just the avatar; a short move starts a drag, a plain click still
-           selects. The grip that swaps in on hover is a pure affordance (no
+           not just the avatar; a move past the 5px `fallbackTolerance` starts a
+           drag, a plain click (even with slight hand jitter) still selects.
+           The grip that swaps in on hover is a pure affordance (no
            separate cursor, so moving across the row never flickers grab↔pointer).
            While a drag runs we (a) freeze the rendered list off `displayBots` so
            an unrelated query refetch can't re-render mid-drag and yank the row,
@@ -321,6 +322,19 @@ watch(menuOpen, async (open) => {
         forceFallback: true,
         fallbackOnBody: true,
         fallbackClass: 'bot-row-drag',
+        // A drag only arms after the pointer travels 5px from pointerdown
+        // (default 0 = the FIRST pointermove of any distance starts one).
+        // Sortable swallows the next click in capture phase once a drag has
+        // started (its #1184 fix), so with zero tolerance a sub-pixel jitter
+        // during a click — constant on a Magic Mouse — silently eats the
+        // select click: the menu stays open and nothing happens. 5px matches
+        // the native OS drag threshold; the clone tracks the cursor 1:1, so a
+        // real drag still feels instant, and the post-drop click stays
+        // suppressed (drop ≠ select) — aside from a rare pre-existing upstream
+        // race where a >50ms drag whose emulation tick lands on a sibling row
+        // releases the suppression early (sortablejs #1184 handling in
+        // _onDragOver); this tolerance changes nothing about that either way.
+        fallbackTolerance: 5,
         ghostClass: 'bot-row-ghost',
         onStart: () => {
           isDragging = true
