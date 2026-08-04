@@ -179,7 +179,7 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	}
 }
 
-func TestPostgresAgentStepCommitStopsAfterAbort(t *testing.T) {
+func TestPostgresAgentStepCommitFencesCompleteAndInterruptedWrites(t *testing.T) {
 	ctx := context.Background()
 	pool := openRuntimeFencePostgresPool(t, ctx)
 	botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
@@ -201,6 +201,11 @@ func TestPostgresAgentStepCommitStopsAfterAbort(t *testing.T) {
 	}}
 	service := NewService(nil, postgresstore.NewQueriesWithPool(pool, queries))
 	owner := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: botID.String(), SessionID: sessionID.String(), Token: token})
+	step.Interrupted = true
+	if _, err := service.PersistAgentStep(owner, step); !errors.Is(err, ErrAgentStepNotWritable) {
+		t.Fatalf("pre-abort interrupted step error = %v, want ErrAgentStepNotWritable", err)
+	}
+	step.Interrupted = false
 	persisted, err := service.PersistAgentStep(owner, step)
 	if err != nil || len(persisted) != 2 {
 		t.Fatalf("first step commit = (%d, %v), want (2, nil)", len(persisted), err)
@@ -215,6 +220,22 @@ func TestPostgresAgentStepCommitStopsAfterAbort(t *testing.T) {
 	}}
 	if _, err := service.PersistAgentStep(owner, step); !errors.Is(err, ErrAgentStepNotWritable) {
 		t.Fatalf("post-abort step error = %v, want ErrAgentStepNotWritable", err)
+	}
+	step.Interrupted = true
+	step.Messages[0].Metadata = map[string]any{AgentStepInterruptedMetadataKey: true}
+	if interrupted, err := service.PersistAgentStep(owner, step); err != nil || len(interrupted) != 1 {
+		t.Fatalf("interrupted step commit = (%d, %v), want (1, nil)", len(interrupted), err)
+	}
+	history, err := service.ListBySession(ctx, sessionID.String())
+	if err != nil || len(history) != 3 || history[0].Role != "user" || history[1].Role != "assistant" ||
+		history[2].Role != "assistant" || history[2].Metadata[AgentStepInterruptedMetadataKey] != true {
+		t.Fatalf("history after interrupt = %#v, %v", history, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE session_runs SET state = 'aborted' WHERE run_id = $1", runID); err != nil {
+		t.Fatalf("finalize aborted run: %v", err)
+	}
+	if _, err := service.PersistAgentStep(owner, step); !errors.Is(err, ErrAgentStepNotWritable) {
+		t.Fatalf("post-finalize interrupted step error = %v, want ErrAgentStepNotWritable", err)
 	}
 }
 

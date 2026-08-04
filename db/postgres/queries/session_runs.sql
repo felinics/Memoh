@@ -204,6 +204,22 @@ WHERE team_id = public.memoh_current_team_id()
   AND abort_requested_at IS NULL
 FOR UPDATE;
 
+-- name: LockSessionRunForInterruptedAgentStepCommit :one
+-- An interrupted text/reasoning snapshot is writable only after abort intent
+-- is durable and before this owner finalizes the run. It deliberately uses a
+-- separate predicate from complete-step commits so tool steps keep their
+-- existing abort race semantics.
+SELECT run_id
+FROM session_runs
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = sqlc.arg(run_id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND fencing_token = sqlc.arg(fencing_token)
+  AND state IN ('running', 'waiting_decision')
+  AND abort_requested_at IS NOT NULL
+FOR UPDATE;
+
 -- name: ListStaleGenerationSessionRuns :many
 -- Fail-closed recovery sweep. Matching on "not the current generation" rather
 -- than one specific old value means a backend lost twice in quick succession

@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -18,6 +19,8 @@ func (*agentToolPlaceholderProvider) ListModels(context.Context) ([]sdk.Model, e
 }
 
 type agentNonClosingStreamProvider struct{}
+
+type agentInterruptedStreamProvider struct{}
 
 func (*agentNonClosingStreamProvider) Name() string { return "non-closing-stream-mock" }
 
@@ -39,6 +42,35 @@ func (*agentNonClosingStreamProvider) DoGenerate(context.Context, sdk.GeneratePa
 
 func (*agentNonClosingStreamProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
 	return &sdk.StreamResult{Stream: make(chan sdk.StreamPart)}, nil
+}
+
+func (*agentInterruptedStreamProvider) Name() string { return "interrupted-stream-mock" }
+func (*agentInterruptedStreamProvider) ListModels(context.Context) ([]sdk.Model, error) {
+	return nil, nil
+}
+
+func (*agentInterruptedStreamProvider) Test(context.Context) *sdk.ProviderTestResult {
+	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+}
+
+func (*agentInterruptedStreamProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
+	return &sdk.ModelTestResult{Supported: true}, nil
+}
+
+func (*agentInterruptedStreamProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	return &sdk.GenerateResult{}, nil
+}
+
+func (*agentInterruptedStreamProvider) DoStream(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+	ch := make(chan sdk.StreamPart, 4)
+	ch <- &sdk.StartStepPart{}
+	ch <- &sdk.ReasoningDeltaPart{ID: "reasoning", Text: "thinking"}
+	ch <- &sdk.TextDeltaPart{ID: "text", Text: "partial"}
+	go func() {
+		<-ctx.Done()
+		close(ch)
+	}()
+	return &sdk.StreamResult{Stream: ch}, nil
 }
 
 func (*agentToolPlaceholderProvider) Test(context.Context) *sdk.ProviderTestResult {
@@ -165,5 +197,55 @@ func TestAgentStreamCancellationDoesNotWaitForProviderToClose(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("stream did not close after its terminal abort")
+	}
+}
+
+func TestAgentStreamPersistsInterruptedInferenceStep(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var interrupted *sdk.StepResult
+	events := New(Deps{}).Stream(ctx, RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: &agentInterruptedStreamProvider{}},
+		Messages: []sdk.Message{sdk.UserMessage("keep streaming")},
+		Identity: SessionContext{BotID: "bot-1"},
+		OnStepInterrupted: func(callbackCtx context.Context, stepIndex int, step *sdk.StepResult) error {
+			if callbackCtx.Err() != nil || stepIndex != 0 {
+				t.Errorf("callback context/index = %v/%d", callbackCtx.Err(), stepIndex)
+			}
+			interrupted = step
+			return nil
+		},
+	})
+	var terminal StreamEvent
+	for event := range events {
+		if event.Type == EventTextDelta {
+			cancel()
+		}
+		if event.IsTerminal() {
+			terminal = event
+		}
+	}
+	if interrupted == nil || interrupted.Reasoning != "thinking" || interrupted.Text != "partial" {
+		t.Fatalf("interrupted step = %#v", interrupted)
+	}
+	var messages []sdk.Message
+	if terminal.Type != EventAgentAbort || json.Unmarshal(terminal.Messages, &messages) != nil || len(messages) != 1 {
+		t.Fatalf("terminal event/messages = %#v / %#v", terminal, messages)
+	}
+}
+
+func TestInterruptedStepCaptureRejectsToolAndFinishedSteps(t *testing.T) {
+	for _, disqualify := range []sdk.StreamPart{
+		&sdk.ToolInputStartPart{ID: "call", ToolName: "exec"},
+		&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop},
+	} {
+		var capture interruptedStepCapture
+		capture.observe(&sdk.TextDeltaPart{Text: "partial"})
+		capture.observe(disqualify)
+		if step := capture.snapshot(); step != nil {
+			t.Fatalf("snapshot after %T = %#v, want nil", disqualify, step)
+		}
 	}
 }

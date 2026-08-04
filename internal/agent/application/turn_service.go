@@ -244,14 +244,23 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, 
 	}()
 
 	var seq int64
+	clientGone := false
+	ctxDone := h.ctx.Done()
 	for chunkCh != nil || errCh != nil {
 		select {
+		case <-ctxDone:
+			h.failed.Store(true)
+			clientGone = true
+			ctxDone = nil
 		case chunk, ok := <-chunkCh:
 			if !ok {
 				chunkCh = nil
 				continue
 			}
 			seq++
+			if clientGone {
+				continue
+			}
 			select {
 			case h.events <- turn.Event{
 				RunID:    h.id,
@@ -263,7 +272,8 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, 
 			}:
 			case <-h.ctx.Done():
 				h.failed.Store(true)
-				return
+				clientGone = true
+				ctxDone = nil
 			}
 		case err, ok := <-errCh:
 			if !ok {
@@ -275,10 +285,13 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, 
 				if h.streamErr == nil {
 					h.streamErr = err
 				}
-				select {
-				case h.errs <- err:
-				case <-h.ctx.Done():
-					return
+				if !clientGone {
+					select {
+					case h.errs <- err:
+					case <-h.ctx.Done():
+						clientGone = true
+						ctxDone = nil
+					}
 				}
 			}
 		}

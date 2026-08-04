@@ -42,10 +42,20 @@ func TestAgentStepCommitterPersistsOnlyStepDelta(t *testing.T) {
 			t.Fatalf("commit step %d: %v", i, err)
 		}
 	}
-	if len(store.steps) != 2 || len(store.steps[0].Messages) != 2 || len(store.steps[1].Messages) != 1 {
-		t.Fatalf("step message counts = %#v, want [user+assistant, assistant]", store.steps)
+	partial := sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ReasoningPart{Text: "partial reasoning"}}}
+	if err := committer.interrupt(ctx, 2, &sdk.StepResult{Messages: []sdk.Message{partial}}); err != nil {
+		t.Fatalf("persist interrupted step: %v", err)
+	}
+	if len(store.steps) != 3 || len(store.steps[0].Messages) != 2 || len(store.steps[1].Messages) != 1 || !store.steps[2].Interrupted {
+		t.Fatalf("persisted steps = %#v, want two complete plus one interrupted", store.steps)
+	}
+	if store.steps[2].Messages[0].Metadata[messagepkg.AgentStepInterruptedMetadataKey] != true {
+		t.Fatalf("interrupted metadata = %#v", store.steps[2].Messages[0].Metadata)
 	}
 	if got := store.steps[1].Messages[0].TurnRequestMessageID; got != "committed" {
 		t.Fatalf("second step request message = %q, want first committed user", got)
+	}
+	if len(committer.messages) != 3 {
+		t.Fatalf("memory messages = %d, want interrupted output excluded", len(committer.messages))
 	}
 }

@@ -60,8 +60,16 @@ func (s *Service) newAgentStepCommitter(ctx context.Context, req ChatRequest, rc
 }
 
 func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+	return c.persist(ctx, stepIndex, step, false)
+}
+
+func (c *agentStepCommitter) interrupt(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+	return c.persist(ctx, stepIndex, step, true)
+}
+
+func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *sdk.StepResult, interrupted bool) error {
 	if c == nil || step == nil {
-		return errors.New("complete agent step is missing")
+		return errors.New("agent step is missing")
 	}
 	messages := sdkMessagesToModelMessages(step.Messages)
 
@@ -83,9 +91,16 @@ func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, step *sd
 	// Outbound assets are linked once after the stream closes; including the
 	// collector in every step would attach the same accumulated assets again.
 	storeReq.OutboundAssetCollector = nil
-	inputs, err := c.service.buildPersistInputs(context.WithoutCancel(ctx), storeReq, messages, c.rc.model.ID, storeRoundOptions{
-		AllowPendingToolCalls: step.DeferredToolApproval != nil,
-	})
+	opts := storeRoundOptions{AllowPendingToolCalls: step.DeferredToolApproval != nil}
+	if interrupted {
+		opts.MessageMetadataByIndex = make(map[int]map[string]any)
+		for i, message := range messages {
+			if strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
+				opts.MessageMetadataByIndex[i] = map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true}
+			}
+		}
+	}
+	inputs, err := c.service.buildPersistInputs(context.WithoutCancel(ctx), storeReq, messages, c.rc.model.ID, opts)
 	if err != nil {
 		c.commitErr = err
 		return err
@@ -94,7 +109,7 @@ func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, step *sd
 		inputs[i].TurnRequestMessageID = c.turnRequestMessageID
 	}
 	persisted, err := c.persister.PersistAgentStep(context.WithoutCancel(ctx), messagepkg.AgentStep{
-		RunID: c.req.RunID, Messages: inputs,
+		RunID: c.req.RunID, Messages: inputs, Interrupted: interrupted,
 	})
 	if err != nil {
 		c.commitErr = err
@@ -107,7 +122,11 @@ func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, step *sd
 		}
 	}
 	c.persisted = append(c.persisted, persisted...)
-	c.messages = append(c.messages, messages...)
+	if !interrupted {
+		// Unfinished reasoning/text is history context, not a fact source for
+		// asynchronous long-term memory extraction.
+		c.messages = append(c.messages, messages...)
+	}
 	return nil
 }
 

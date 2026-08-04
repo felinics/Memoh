@@ -25,6 +25,12 @@ type testChatStreamer interface {
 	StreamChat(context.Context, ChatRequest) (<-chan StreamChunk, <-chan error)
 }
 
+type testChatStreamerFunc func(context.Context, ChatRequest) (<-chan StreamChunk, <-chan error)
+
+func (f testChatStreamerFunc) StreamChat(ctx context.Context, req ChatRequest) (<-chan StreamChunk, <-chan error) {
+	return f(ctx, req)
+}
+
 // scriptedAdmitter stands in for the session runtime so these tests can exercise
 // what this package owns: the translation of an admission answer into the turn
 // port's vocabulary, and the terminal write a finished run must produce. The
@@ -263,6 +269,40 @@ func TestCancelClosesEvents(t *testing.T) {
 		case <-deadline:
 			t.Fatal("events channel not closed after cancel")
 		}
+	}
+}
+
+func TestCancelWaitsForStreamCleanupBeforeFinalizingRun(t *testing.T) {
+	cancelObserved, release := make(chan struct{}), make(chan struct{})
+	streamer := testChatStreamerFunc(func(ctx context.Context, _ ChatRequest) (<-chan StreamChunk, <-chan error) {
+		chunks, errs := make(chan StreamChunk), make(chan error)
+		go func() {
+			<-ctx.Done()
+			close(cancelObserved)
+			<-release
+			close(chunks)
+			close(errs)
+		}()
+		return chunks, errs
+	})
+	service, admitter := newAdmittedTurnTestService(streamer)
+	h, err := service.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "t", Mode: turn.ModeChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Cancel()
+	<-cancelObserved
+	admitter.mu.Lock()
+	finishedEarly := len(admitter.finishes) != 0
+	admitter.mu.Unlock()
+	if finishedEarly {
+		t.Fatal("run finalized before interrupted-step persistence could finish")
+	}
+	close(release)
+	for range h.Events() {
+	}
+	if got := admitter.awaitFinish(t).status; got != sessionruntime.RunStatusAborted {
+		t.Fatalf("finish status = %q, want aborted", got)
 	}
 }
 

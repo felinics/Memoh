@@ -570,6 +570,42 @@ func (q *Queries) LockSessionRunForAgentStepCommit(ctx context.Context, arg Lock
 	return run_id, err
 }
 
+const lockSessionRunForInterruptedAgentStepCommit = `-- name: LockSessionRunForInterruptedAgentStepCommit :one
+SELECT run_id
+FROM session_runs
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND bot_id = $2
+  AND session_id = $3
+  AND fencing_token = $4
+  AND state IN ('running', 'waiting_decision')
+  AND abort_requested_at IS NOT NULL
+FOR UPDATE
+`
+
+type LockSessionRunForInterruptedAgentStepCommitParams struct {
+	RunID        pgtype.UUID `json:"run_id"`
+	BotID        pgtype.UUID `json:"bot_id"`
+	SessionID    pgtype.UUID `json:"session_id"`
+	FencingToken int64       `json:"fencing_token"`
+}
+
+// An interrupted text/reasoning snapshot is writable only after abort intent
+// is durable and before this owner finalizes the run. It deliberately uses a
+// separate predicate from complete-step commits so tool steps keep their
+// existing abort race semantics.
+func (q *Queries) LockSessionRunForInterruptedAgentStepCommit(ctx context.Context, arg LockSessionRunForInterruptedAgentStepCommitParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockSessionRunForInterruptedAgentStepCommit,
+		arg.RunID,
+		arg.BotID,
+		arg.SessionID,
+		arg.FencingToken,
+	)
+	var run_id pgtype.UUID
+	err := row.Scan(&run_id)
+	return run_id, err
+}
+
 const nextSessionRunFencingToken = `-- name: NextSessionRunFencingToken :one
 SELECT nextval('session_runtime_fencing_token_seq')::bigint AS token
 `

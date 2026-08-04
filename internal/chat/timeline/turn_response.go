@@ -30,7 +30,7 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 	case "tool":
 		rawContent = nativeToolRoleContent(modelMsg)
 	default:
-		rawContent = nativeAssistantContent(modelMsg)
+		rawContent = nativeAssistantContent(modelMsg, msg.Metadata[messagepkg.AgentStepInterruptedMetadataKey] == true)
 	}
 
 	if len(rawContent) == 0 || strings.TrimSpace(string(rawContent)) == "" {
@@ -60,8 +60,9 @@ type turnResponsePart struct {
 	ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
 }
 
-func nativeAssistantContent(msg turn.ModelMessage) json.RawMessage {
+func nativeAssistantContent(msg turn.ModelMessage, includeReasoning bool) json.RawMessage {
 	var out []map[string]any
+	var interruptedReasoning strings.Builder
 	// 1) Plain-string content (legacy format).
 	if len(msg.Content) > 0 {
 		var plain string
@@ -94,9 +95,10 @@ func nativeAssistantContent(msg turn.ModelMessage) json.RawMessage {
 				"text": text,
 			})
 		case "reasoning":
-			// Intentionally omitted: reasoning is model-internal and must not
-			// leak back into subsequent prompts verbatim.
-			continue
+			if !includeReasoning || strings.TrimSpace(p.Text) == "" {
+				continue
+			}
+			interruptedReasoning.WriteString(p.Text)
 		case "tool-call":
 			out = append(out, nativeToolCallPart(p.ToolCallID, p.ToolName, p.Input, p.ProviderMetadata))
 		case "tool-result":
@@ -105,6 +107,20 @@ func nativeAssistantContent(msg turn.ModelMessage) json.RawMessage {
 				payload = p.Result
 			}
 			out = append(out, nativeToolResultPart(p.ToolCallID, p.ToolName, payload))
+		}
+	}
+	if interruptedReasoning.Len() > 0 {
+		checkpoint := messagepkg.AgentStepInterruptedReasoningPrefix + interruptedReasoning.String()
+		merged := false
+		for _, part := range out {
+			if part["type"] == "text" {
+				part["text"] = checkpoint + "\n\n" + part["text"].(string)
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			out = append([]map[string]any{{"type": "text", "text": checkpoint}}, out...)
 		}
 	}
 

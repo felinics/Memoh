@@ -40,7 +40,7 @@ func TestDecodeTurnResponseEntryUsesVisibleText(t *testing.T) {
 	if entry.Content != "任务完成" {
 		t.Fatalf("content = %q, want %q", entry.Content, "任务完成")
 	}
-	// Reasoning must never leak into TRs to avoid re-injection into prompts.
+	// Completed reasoning must not be re-injected into later prompts.
 	if strings.Contains(entry.Content, "thinking") {
 		t.Fatalf("reasoning leaked into TR: %q", entry.Content)
 	}
@@ -241,10 +241,11 @@ func TestDecodeTurnResponseEntryToolRoleLegacyEnvelope(t *testing.T) {
 	}
 }
 
-func TestDecodeTurnResponseEntrySkipsEmpty(t *testing.T) {
+func TestDecodeTurnResponseEntryKeepsOnlyInterruptedReasoning(t *testing.T) {
 	t.Parallel()
 
-	// Only reasoning → nothing to expose to future prompts → skip.
+	// Completed reasoning remains hidden, while an interrupted checkpoint is
+	// continuation state and must survive into the next prompt.
 	content, err := json.Marshal([]map[string]any{
 		{"type": "reasoning", "text": "thinking out loud"},
 	})
@@ -264,6 +265,14 @@ func TestDecodeTurnResponseEntrySkipsEmpty(t *testing.T) {
 	}); ok {
 		t.Fatal("expected reasoning-only message to be skipped")
 	}
+	entry, ok := DecodeTurnResponseEntry(messagepkg.Message{
+		Role: "assistant", Content: modelMessage,
+		Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
+	})
+	if !ok {
+		t.Fatal("expected interrupted reasoning to remain in continuation context")
+	}
+	assertRawPart(t, entry.RawContent, "text", messagepkg.AgentStepInterruptedReasoningPrefix+"thinking out loud", "")
 }
 
 func TestDecodeTurnResponseEntryLegacyToolCallsField(t *testing.T) {
@@ -313,7 +322,7 @@ func assertRawPart(t *testing.T, raw json.RawMessage, partType, nameOrText, call
 			continue
 		}
 		switch partType {
-		case "text":
+		case "text", "reasoning":
 			if part["text"] == nameOrText {
 				return part
 			}

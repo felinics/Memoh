@@ -133,6 +133,11 @@ type RunConfig struct {
 	// before it, with persistence-only tool metadata already attached.
 	OnStepCommitted func(ctx context.Context, stepIndex int, step *sdk.StepResult) error
 
+	// OnStepInterrupted persists text/reasoning emitted by the current model
+	// call when cancellation arrives before finish-step. Tool-call steps never
+	// use this path.
+	OnStepInterrupted func(ctx context.Context, stepIndex int, step *sdk.StepResult) error
+
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step
 	// boundaries while tools handle waiting and result inspection.

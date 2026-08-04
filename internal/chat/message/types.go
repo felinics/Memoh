@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+const (
+	AgentStepInterruptedMetadataKey     = "agent_step_interrupted"
+	AgentStepInterruptedReasoningPrefix = "[Previous assistant response was interrupted during reasoning. Continue from this checkpoint:]\n"
+)
+
 // MessageAsset carries media asset metadata attached to a message.
 // ContentHash is the content-addressed identifier for the media file.
 type MessageAsset struct {
@@ -144,10 +149,12 @@ type AtomicRoundPersister interface {
 	PersistRound(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions) ([]Message, bool, error)
 }
 
-// AgentStep is one complete native-agent step persisted atomically.
+// AgentStep is one native-agent step persisted atomically. Interrupted is set
+// only for a text/reasoning snapshot captured after the run's abort intent.
 type AgentStep struct {
-	RunID    string
-	Messages []PersistInput
+	RunID       string
+	Messages    []PersistInput
+	Interrupted bool
 }
 
 type AgentStepPersister interface {

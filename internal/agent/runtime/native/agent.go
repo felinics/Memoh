@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -286,10 +287,15 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		modelStepIndex++
 		return nil
 	}))
+	var nextDurableStep atomic.Int64
 	var onStepCommitted func(context.Context, int, *sdk.StepResult) error
 	if cfg.OnStepCommitted != nil {
 		onStepCommitted = func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
-			return cfg.OnStepCommitted(ctx, stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata))
+			if err := cfg.OnStepCommitted(ctx, stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)); err != nil {
+				return err
+			}
+			nextDurableStep.Store(int64(stepIndex + 1))
+			return nil
 		}
 		opts = append(opts, sdk.WithOnStepCommitted(onStepCommitted))
 	}
@@ -342,6 +348,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	sendEvent(ctx, ch, StreamEvent{Type: EventAgentStart})
 
 	var allText strings.Builder
+	var interruptedStep interruptedStepCapture
+	var interruptedMessages []sdk.Message
 	stepNumber := 0
 
 	streamClosed := false
@@ -358,6 +366,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			}
 			part = next
 		}
+		interruptedStep.observe(part)
 
 		switch p := part.(type) {
 		case *sdk.StartPart:
@@ -570,6 +579,23 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			break
 		}
 	}
+	if ctx.Err() != nil {
+		aborted = true
+	}
+
+	// Only external cancellation can represent a user/session abort. Provider
+	// errors and loop guards keep their existing failure semantics.
+	if aborted && ctx.Err() != nil && cfg.OnStepInterrupted != nil {
+		if step := interruptedStep.snapshot(); step != nil {
+			stepIndex := int(nextDurableStep.Load())
+			step = committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)
+			if err := cfg.OnStepInterrupted(context.WithoutCancel(streamCtx), stepIndex, step); err != nil {
+				a.logger.Error("persist interrupted model step failed", slog.Any("error", err))
+			} else {
+				interruptedMessages = step.Messages
+			}
+		}
+	}
 
 	if aborted && !streamClosed {
 		// A provider is expected to close its stream when the context is
@@ -608,6 +634,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			totalUsage.OutputTokenDetails.ReasoningTokens += step.Usage.OutputTokenDetails.ReasoningTokens
 		}
 	}
+	finalMessages = append(finalMessages, interruptedMessages...)
 	usageJSON, _ := json.Marshal(totalUsage)
 
 	termEvent := StreamEvent{

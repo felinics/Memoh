@@ -156,6 +156,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
 		if stepCommitter != nil {
 			cfg.OnStepCommitted = stepCommitter.commit
+			cfg.OnStepInterrupted = stepCommitter.interrupt
 		}
 		cfg = s.prepareRunConfig(streamCtx, cfg)
 
@@ -394,6 +395,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
 	if stepCommitter != nil {
 		cfg.OnStepCommitted = stepCommitter.commit
+		cfg.OnStepInterrupted = stepCommitter.interrupt
 	}
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 
