@@ -4,7 +4,7 @@
 
 Memoh目前允许创建多个Bot，但Bot之间彼此不可见、不能协作。本系列文档描述如何把「多个孤立的Bot」变成「一个可以协同工作的Agent团队」。
 
-本文是总览，负责说明范围、术语、已定与待定的决策，以及阶段之间的依赖关系。具体设计在分阶段文档中：
+本文是总览，负责说明范围、术语、已定的决策，以及阶段之间的依赖关系。设计层面已无待定项，具体设计在分阶段文档中：
 
 | 阶段 | 文档 | 内容 |
 | --- | --- | --- |
@@ -78,6 +78,9 @@ Phase 3  Wiki      ──▶  Phase 4  Inbox
 | D13 | Wiki的权限边界**只到Wiki一级**，不做节点级ACL。ACL主体为user/bot/group/team，级别为read/write/manage。 | Phase 3 |
 | D14 | Inbox不承载A2A。A2A走工具直连，Inbox只处理事件驱动的投递（Wiki提及、人类通知）。 | Phase 4 |
 | D15 | 保留现有discuss模式（`internal/channel/discuss/`），它是面向渠道群聊的特性，与Agent Team定位不同，不合并、不移除。 | 全局 |
+| D16 | A2A会话中被调Bot调用`ask_user`时，请求**路由回调用方Agent**，由调用方作答。 | Phase 2 |
+| D17 | A2A会话中被调Bot触发工具审批时，由**被调Bot的归属人类**（`bots.owner_user_id`）审批。 | Phase 2 |
+| D18 | 异步A2A的迟到结果在调用方会话已结束时**直接丢弃**，不投递到Inbox。 | Phase 2 / Phase 4 |
 
 ## 5. 明确排除的范围
 
@@ -94,15 +97,17 @@ Phase 3  Wiki      ──▶  Phase 4  Inbox
 | 记忆按Group分区 | 见D5。Group不决定知识可见性，单独限制记忆没有意义。 |
 | 为人类新建一套独立收件箱 | 人类已有`user_channel_bindings`。Inbox对人落成Web通知与既有渠道推送。 |
 
-## 6. 待定决策
+## 6. 已解决的待定项
 
-以下三项在动工前必须有答案，但都不影响表结构，可以在Phase 2实现阶段收尾时确定。
+设计过程中曾有三项待定，现已全部确定为D16–D18。保留本节记录候选方案与取舍理由，以免实现阶段重新讨论。
 
-| # | 待定项 | 影响 |
-| --- | --- | --- |
-| O1 | A2A会话中被调Bot调用`ask_user`时，是否路由回调用方Agent？ | 决定A2A是「单次委托」还是「可来回对话」。影响`mode_agent.md`措辞与`internal/agent/decision/input/`的路由。 |
-| O2 | A2A会话中被调Bot触发工具审批时，由谁审批？ | 候选：被调Bot的归属人类／限制A2A工具集／直接拒绝。影响`internal/toolapproval/`。 |
-| O3 | 异步A2A的迟到结果，在调用方会话已结束时落在哪？ | 候选：丢弃（符合同步委托语义）／投递到调用方Inbox。这是Phase 2与Phase 4之间唯一需要连接的接缝。 |
+| 原编号 | 问题 | 结论 | 落点 |
+| --- | --- | --- | --- |
+| O1 | 被调Bot调用`ask_user`时路由给谁？ | **回调用方Agent**（D16）。A2A因此是可来回对话的，而不只是单次委托。 | `02-agent-to-agent.md`第8.1节 |
+| O2 | 被调Bot触发工具审批时谁来批？ | **被调Bot的归属人类**（D17）。另两个候选——限制A2A工具集、直接拒绝——都会让被调Bot的能力与它被人类叫醒时不一致，违背D7。 | `02-agent-to-agent.md`第8.2节 |
+| O3 | 迟到的异步结果落在哪？ | **直接丢弃**（D18）。投递到Inbox的方案会让Inbox多出一个事件源，与D14的分工规则冲突。 | `04-inbox.md`第6节 |
+
+三项均不涉及表结构，但共同决定了`mode_agent.md`的写法。
 
 ## 7. 会话生命周期
 
@@ -132,11 +137,23 @@ Agent运行在Server进程内，Channel只做外部渠道适配。A2A与Inbox都
 
 ### 8.4 数据库约定
 
-- 新表遵循现有模式：`(team_id, ...)`复合主键、`REFERENCES public.teams(id)`、启用并`FORCE ROW LEVEL SECURITY`、`team_id`默认值取`public.memoh_current_team_id()`。参照`db/postgres/migrations/0112_team_core`与`0124_connect_it`。
+本方案新增的表不少，务必先读这一节。以下规则由`internal/db/team_schema_guard_integration_test.go`（`-tags=integration`）机械强制，**普通单测与lint都不会报错**。
+
+- 新表模板直接抄`db/postgres/migrations/0121_session_runs.up.sql`：`(team_id, ...)`复合主键、`REFERENCES public.teams(id)`、启用并`FORCE ROW LEVEL SECURITY`、`team_id`默认值取`public.memoh_current_team_id()`。
 - 外键使用复合形式（如`REFERENCES public.bots(team_id, id) ON DELETE CASCADE`），不使用多态关联。
-- 每次schema变更同时更新`db/postgres/migrations/0001_init.up.sql`，并提供配对的`.down.sql`。
+- **用户引用不指向`users(id)`**，而是`FOREIGN KEY (team_id, col) REFERENCES team_members(team_id, user_id)`。若用`ON DELETE SET NULL`必须带列名单（`SET NULL (col)`）——守卫会把任何`confdelsetcols IS NULL`的SET NULL外键判为不安全。
+- **给已启用FORCE RLS的既有表（如`bot_sessions`）ADD CONSTRAINT外键时，增量迁移必须加`NOT VALID`**：校验扫描会评估RLS策略，而迁移角色没有设置`memoh.team_id` GUC，会直接报`memoh.team_id is not set`。迁移中确需读写RLS表时，参照`0120`的`DO`块`set_config('memoh.team_id', ...)`模式。
+- **给既有表加列时，`0001_init.up.sql`的同步不能内联进`CREATE TABLE`**，要以`ALTER`形式追加到文件末尾，否则全新安装与增量升级的物理列序不一致，sqlc的`SELECT *`位置扫描会错位。
+- 每次schema变更同时更新`0001_init.up.sql`，并提供配对的`.down.sql`。
 - 变更后运行`mise run sqlc-generate`。
 - 迁移序号从合入时的下一个可用序号开始（当前最新为`0128`）。
+
+验证：
+
+```bash
+TEST_POSTGRES_DSN="postgres://memoh:memoh123@localhost:15432/memoh?sslmode=disable" \
+  go test -tags=integration ./internal/db/
+```
 
 ### 8.5 成本闸门
 

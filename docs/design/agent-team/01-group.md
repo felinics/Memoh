@@ -47,9 +47,11 @@ group_user_members(
     team_id  UUID NOT NULL DEFAULT public.memoh_current_team_id(),
     group_id UUID NOT NULL,
     user_id  UUID NOT NULL,
-    role     TEXT NOT NULL,        -- owner | admin | member
+    role     TEXT NOT NULL,        -- owner | admin | member（组内角色，与team_members.role无关）
     PRIMARY KEY (team_id, group_id, user_id),
-    FOREIGN KEY (team_id, group_id) REFERENCES public.groups(team_id, id) ON DELETE CASCADE
+    FOREIGN KEY (team_id, group_id) REFERENCES public.groups(team_id, id) ON DELETE CASCADE,
+    -- 注意：指向team_members而不是users，见README第8.4节
+    FOREIGN KEY (team_id, user_id)  REFERENCES public.team_members(team_id, user_id) ON DELETE CASCADE
 )
 
 -- Bot成员
@@ -71,8 +73,11 @@ group_bot_members(
 
 不使用单张多态成员表（`member_type` + `member_id`）的原因：
 
-1. 本代码库的外键都是实打实的复合外键。多态表无法同时外键到`users`和`bots`，删除Bot时不会自动清理成员关系。
+1. 本代码库的外键都是实打实的复合外键。多态表无法同时外键到`team_members`和`bots`，删除用户或Bot时不会自动清理成员关系。
 2. 人和Bot在组内需要的字段本来就不同：人有治理角色（owner/admin/member），Bot有职责描述与能力开关。
+3. 两者的引用目标也不同——人指向`team_members(team_id, user_id)`，Bot指向`bots(team_id, id)`，无法共用一列。
+
+「必须先是Team成员才能成为Group成员」这个约束由第一条外键自然保证，不需要额外校验。
 
 ### 3.2 关于`allow_inbound_contact`
 
