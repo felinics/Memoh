@@ -94,6 +94,10 @@ type workspaceTargetResolver interface {
 	ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (workspace.ResolvedWorkspaceTarget, error)
 }
 
+type compactionRunner interface {
+	RunCompactionSync(context.Context, compaction.TriggerConfig) (compaction.Result, error)
+}
+
 // Service orchestrates chat with the internal agent.
 type Service struct {
 	agent              *native.Agent
@@ -105,7 +109,7 @@ type Service struct {
 	accountService     *accounts.Service
 	sessionService     SessionService
 	acpPool            acpPrompter
-	compactionService  *compaction.Service
+	compactionService  compactionRunner
 	eventPublisher     messageevent.Publisher
 	skillLoader        SkillLoader
 	assetLoader        gatewayAssetLoader
@@ -222,6 +226,10 @@ func (s *Service) SetPlatformIdentitySource(source PlatformIdentitySource) {
 
 // SetCompactionService configures the compaction service for context compaction.
 func (s *Service) SetCompactionService(service *compaction.Service) {
+	if service == nil {
+		s.compactionService = nil
+		return
+	}
 	s.compactionService = service
 }
 
@@ -392,18 +400,11 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		estimatedTokens = prepared.estimatedTokens
 		compactableTokens = prepared.compactableTokens
 		compactableTokensKnown = true
-		// When context reaches the shared budget share, run synchronous
-		// compaction before sending the request. contextTokenBudget is the
-		// authoritative limit for how much context the user wants to send
-		// to the LLM.
-		compactionThreshold := 0
-		if contextTokenBudget > 0 {
-			compactionThreshold = contextTokenBudget * compactionBudgetThresholdPercent / 100
-		}
 		// The trigger only counts raw (compactable) rows: active summaries can
 		// never be compacted away, so including them would make the trigger
 		// self-sustaining once accumulated summaries cross the threshold.
-		if compactionThreshold > 0 && compactableTokens >= compactionThreshold {
+		if syncCompactionShouldRun(compactableTokens, contextTokenBudget) {
+			compactionThreshold := hardCompactionThreshold(contextTokenBudget)
 			s.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
 				slog.Int("estimated_tokens", estimatedTokens),
@@ -587,27 +588,43 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	cfg := rc.runConfig
+	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
+	if stepCommitter != nil {
+		cfg.OnStepCommitted = stepCommitter.commit
+	}
 	cfg = s.prepareRunConfig(ctx, cfg)
 
 	result, err := s.agent.Generate(ctx, cfg)
 	if err != nil {
+		if stepCommitter != nil {
+			_ = stepCommitter.finish(ctx, rc.estimatedTokens)
+		}
 		return ChatResponse{}, err
 	}
 
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
 	storeReq := req
-	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
-	if err := s.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
-		SkipMemory: storeReq.SkipMemoryExtraction,
-	}); err != nil {
-		return ChatResponse{}, err
-	}
-	if err := s.persistSessionWorkspaceTarget(ctx, storeReq); err != nil {
-		return ChatResponse{}, err
-	}
-
-	if result.Usage != nil {
-		go s.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
+	if stepCommitter != nil {
+		inputTokens := 0
+		if result.Usage != nil {
+			inputTokens = result.Usage.InputTokens
+		}
+		if err := stepCommitter.finish(ctx, inputTokens); err != nil {
+			return ChatResponse{}, err
+		}
+	} else {
+		roundMessages := prependTurnUserMessage(storeReq, outputMessages)
+		if err := s.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
+			SkipMemory: storeReq.SkipMemoryExtraction,
+		}); err != nil {
+			return ChatResponse{}, err
+		}
+		if err := s.persistSessionWorkspaceTarget(ctx, storeReq); err != nil {
+			return ChatResponse{}, err
+		}
+		if result.Usage != nil {
+			go s.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
+		}
 	}
 
 	return ChatResponse{
@@ -783,7 +800,7 @@ func supportsFileInputForModel(m models.GetResponse) bool {
 
 const (
 	reasoningEffortAdaptive = "adaptive"
-	reasoningEffortDisable  = "disable"
+	reasoningEffortDisable  = models.ReasoningEffortDisable
 )
 
 // resolveReasoningConfig makes the single reasoning decision for a call, driven
@@ -822,10 +839,11 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
 	case requested != "":
 		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort(requested, botSettings, effortLevels), OffEffort: offEffort}
-	case botSettings.ReasoningEnabled:
-		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
-	default:
+	case reasoningEffortDisabled(botSettings.ReasoningEffort):
+		// The bot's stored effort is the only on/off source; "disable" is off.
 		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
+	default:
+		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
 	}
 }
 
@@ -862,8 +880,10 @@ func pickEffort(requested string, botSettings settings.Settings, effortLevels []
 	if hasEffort(effortLevels, models.ReasoningEffortMedium) {
 		return models.ReasoningEffortMedium
 	}
-	if len(effortLevels) > 0 {
-		return effortLevels[0]
+	// No medium: land on the tier closest to it rather than on effortLevels[0],
+	// which is whatever the registry listed first (usually the weakest tier).
+	if nearest := models.NearestEffortToMedium(effortLevels); nearest != "" {
+		return nearest
 	}
 	return models.ReasoningEffortMedium
 }
@@ -932,7 +952,7 @@ func offEffortFor(effortLevels []string) string {
 }
 
 func reasoningEffortDisabled(effort string) bool {
-	return strings.TrimSpace(effort) == reasoningEffortDisable
+	return models.IsReasoningDisabled(effort)
 }
 
 func offEffortOrEmpty(rc *models.ReasoningConfig) string {

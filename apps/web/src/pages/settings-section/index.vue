@@ -1,9 +1,11 @@
 <template>
-  <!-- Opaque bg-background: this view is rendered into App.vue's transparent
-       fixed overlay, so it must paint its own backdrop to cover the persistent
-       chat behind it. (The overlay wrapper is intentionally transparent so the
-       chat — not a black layer — shows through during this view's slide/fade.) -->
-  <div class="flex h-dvh flex-col overflow-hidden bg-background">
+  <!-- Web keeps an opaque root over the persistent chat. macOS Desktop clears
+       this root in desktop-shell.css: SidebarInset still paints the content pane,
+       while the sidebar exposes the native material behind the renderer. -->
+  <div
+    class="flex h-dvh flex-col overflow-hidden bg-background"
+    data-desktop-window-layer
+  >
     <div class="min-h-0 flex-1">
       <!-- Whole settings view (sidebar + content) slides in from the right on open,
            faster slide-out on leave; navigation is held until the leave plays. -->

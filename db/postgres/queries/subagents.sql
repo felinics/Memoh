@@ -133,6 +133,9 @@ copied_assets AS (
     role,
     ordinal,
     content_hash,
+    mime,
+    size_bytes,
+    storage_key,
     name,
     metadata
   )
@@ -141,6 +144,9 @@ copied_assets AS (
     asset.role,
     asset.ordinal,
     asset.content_hash,
+    asset.mime,
+    asset.size_bytes,
+    asset.storage_key,
     asset.name,
     asset.metadata
   FROM prepared_messages prepared

@@ -144,6 +144,16 @@ type AtomicRoundPersister interface {
 	PersistRound(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions) ([]Message, bool, error)
 }
 
+// AgentStep is one complete native-agent step persisted atomically.
+type AgentStep struct {
+	RunID    string
+	Messages []PersistInput
+}
+
+type AgentStepPersister interface {
+	PersistAgentStep(ctx context.Context, step AgentStep) ([]Message, error)
+}
+
 // Service defines message read/write behavior.
 type Service interface {
 	Writer

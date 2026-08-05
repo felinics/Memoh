@@ -79,12 +79,17 @@ invalidated_session AS (
   RETURNING session.id
 ),
 upserted_asset AS (
-  INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash, name, metadata)
+  INSERT INTO bot_history_message_assets (
+    message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
+  )
   SELECT
     target.id,
     $3,
     $4,
     $2,
+    COALESCE($7::text, ''),
+    $8,
+    COALESCE($9::text, ''),
     $5,
     $6
   FROM target_message target
@@ -92,11 +97,14 @@ upserted_asset AS (
   ON CONFLICT (team_id, message_id, content_hash) DO UPDATE SET
     role = EXCLUDED.role,
     ordinal = EXCLUDED.ordinal,
+    mime = CASE WHEN EXCLUDED.mime <> '' THEN EXCLUDED.mime ELSE bot_history_message_assets.mime END,
+    size_bytes = CASE WHEN EXCLUDED.size_bytes > 0 THEN EXCLUDED.size_bytes ELSE bot_history_message_assets.size_bytes END,
+    storage_key = CASE WHEN EXCLUDED.storage_key <> '' THEN EXCLUDED.storage_key ELSE bot_history_message_assets.storage_key END,
     name = EXCLUDED.name,
     metadata = EXCLUDED.metadata
-  RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at
+  RETURNING id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata, created_at
 )
-SELECT id, message_id, role, ordinal, content_hash, name, metadata, created_at
+SELECT id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata, created_at
 FROM upserted_asset
 `
 
@@ -107,6 +115,9 @@ type CreateMessageAssetParams struct {
 	Ordinal     int32       `json:"ordinal"`
 	Name        string      `json:"name"`
 	Metadata    []byte      `json:"metadata"`
+	Mime        string      `json:"mime"`
+	SizeBytes   int64       `json:"size_bytes"`
+	StorageKey  string      `json:"storage_key"`
 }
 
 type CreateMessageAssetRow struct {
@@ -115,6 +126,9 @@ type CreateMessageAssetRow struct {
 	Role        string             `json:"role"`
 	Ordinal     int32              `json:"ordinal"`
 	ContentHash string             `json:"content_hash"`
+	Mime        string             `json:"mime"`
+	SizeBytes   int64              `json:"size_bytes"`
+	StorageKey  string             `json:"storage_key"`
 	Name        string             `json:"name"`
 	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
@@ -128,6 +142,9 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 		arg.Ordinal,
 		arg.Name,
 		arg.Metadata,
+		arg.Mime,
+		arg.SizeBytes,
+		arg.StorageKey,
 	)
 	var i CreateMessageAssetRow
 	err := row.Scan(
@@ -136,6 +153,9 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 		&i.Role,
 		&i.Ordinal,
 		&i.ContentHash,
+		&i.Mime,
+		&i.SizeBytes,
+		&i.StorageKey,
 		&i.Name,
 		&i.Metadata,
 		&i.CreatedAt,
@@ -237,7 +257,7 @@ func (q *Queries) GetStorageProviderByName(ctx context.Context, name string) (St
 }
 
 const listMessageAssets = `-- name: ListMessageAssets :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
+SELECT id AS rel_id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
 FROM bot_history_message_assets
 WHERE team_id = public.memoh_current_team_id() AND message_id = $1
 ORDER BY ordinal ASC
@@ -249,6 +269,9 @@ type ListMessageAssetsRow struct {
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
 	ContentHash string      `json:"content_hash"`
+	Mime        string      `json:"mime"`
+	SizeBytes   int64       `json:"size_bytes"`
+	StorageKey  string      `json:"storage_key"`
 	Name        string      `json:"name"`
 	Metadata    []byte      `json:"metadata"`
 }
@@ -268,6 +291,9 @@ func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) 
 			&i.Role,
 			&i.Ordinal,
 			&i.ContentHash,
+			&i.Mime,
+			&i.SizeBytes,
+			&i.StorageKey,
 			&i.Name,
 			&i.Metadata,
 		); err != nil {
@@ -282,7 +308,7 @@ func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) 
 }
 
 const listMessageAssetsBatch = `-- name: ListMessageAssetsBatch :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
+SELECT id AS rel_id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
 FROM bot_history_message_assets
 WHERE team_id = public.memoh_current_team_id() AND message_id = ANY($1::uuid[])
 ORDER BY message_id, ordinal ASC
@@ -294,6 +320,9 @@ type ListMessageAssetsBatchRow struct {
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
 	ContentHash string      `json:"content_hash"`
+	Mime        string      `json:"mime"`
+	SizeBytes   int64       `json:"size_bytes"`
+	StorageKey  string      `json:"storage_key"`
 	Name        string      `json:"name"`
 	Metadata    []byte      `json:"metadata"`
 }
@@ -313,6 +342,9 @@ func (q *Queries) ListMessageAssetsBatch(ctx context.Context, messageIds []pgtyp
 			&i.Role,
 			&i.Ordinal,
 			&i.ContentHash,
+			&i.Mime,
+			&i.SizeBytes,
+			&i.StorageKey,
 			&i.Name,
 			&i.Metadata,
 		); err != nil {

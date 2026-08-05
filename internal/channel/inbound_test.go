@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 )
 
 // mockAdapter is used for inbound handleInbound tests.
@@ -102,6 +103,37 @@ func (*fakeInboundStreamProcessor) HandleInbound(ctx context.Context, _ ChannelC
 		return err
 	}
 	return stream.Close(ctx)
+}
+
+type inboundRequestContextKey struct{}
+
+type contextCapturingInboundProcessor struct {
+	contexts chan context.Context
+}
+
+func (p *contextCapturingInboundProcessor) HandleInbound(ctx context.Context, _ ChannelConfig, _ InboundMessage, _ StreamReplySender) error {
+	p.contexts <- ctx
+	return nil
+}
+
+func TestManagerInboundWorkersDoNotInheritFirstRequestContext(t *testing.T) {
+	processor := &contextCapturingInboundProcessor{contexts: make(chan context.Context, 1)}
+	m := NewManager(slog.New(slog.DiscardHandler), NewRegistry(), &fakeConfigStore{}, processor)
+	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
+
+	requestCtx := context.WithValue(context.Background(), inboundRequestContextKey{}, "first-request")
+	if err := m.HandleInbound(requestCtx, ChannelConfig{ID: "cfg-1"}, InboundMessage{}); err != nil {
+		t.Fatalf("HandleInbound: %v", err)
+	}
+
+	select {
+	case workerCtx := <-processor.contexts:
+		if got := workerCtx.Value(inboundRequestContextKey{}); got != nil {
+			t.Fatalf("worker inherited first request context value: %v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for inbound worker")
+	}
 }
 
 func TestManager_handleInbound(t *testing.T) {

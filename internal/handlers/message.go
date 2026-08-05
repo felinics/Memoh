@@ -204,7 +204,6 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	if len(messages) > 0 {
 		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages, limit)
 	}
-	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	items := chatview.ConvertMessagesToUITurns(messages)
 	h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 	return c.JSON(http.StatusOK, UIMessageListResponse{Items: items})
@@ -300,7 +299,6 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	h.fillAssetMimeFromStorage(c.Request().Context(), botID, located.Messages)
 	items := chatview.ConvertMessagesToUITurns(located.Messages)
 	h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 	return c.JSON(http.StatusOK, UILocateMessageResponse{
@@ -520,28 +518,6 @@ func mergeUserInputs(turns []chatview.UITurn, requests []userinput.Request, canR
 				Questions:   req.UIPayload.Questions,
 				CanRespond:  canRespond,
 			}
-		}
-	}
-}
-
-// fillAssetMimeFromStorage fills mime, storage_key, size_bytes from storage (soft link: DB only has content_hash).
-func (h *MessageHandler) fillAssetMimeFromStorage(ctx context.Context, botID string, messages []messagepkg.Message) {
-	if h.mediaService == nil {
-		return
-	}
-	for i := range messages {
-		for j := range messages[i].Assets {
-			a := &messages[i].Assets[j] //nolint:gosec // G602: j is bounded by range loop
-			if strings.TrimSpace(a.ContentHash) == "" {
-				continue
-			}
-			asset, err := h.mediaService.Resolve(ctx, botID, a.ContentHash)
-			if err != nil {
-				continue
-			}
-			a.Mime = asset.Mime
-			a.StorageKey = asset.StorageKey
-			a.SizeBytes = asset.SizeBytes
 		}
 	}
 }

@@ -386,6 +386,37 @@ func TestAssembleToolsGatesUsagePerProvider(t *testing.T) {
 	}
 }
 
+func TestAssembleToolsKeepsFirstDuplicateToolAndItsUsage(t *testing.T) {
+	t.Parallel()
+	const (
+		firstUsage  = "USAGE_FIRST_PROVIDER"
+		secondUsage = "USAGE_DUPLICATE_PROVIDER"
+	)
+	a := newTestAgent(
+		&usageTestProvider{emitTool: true, usage: firstUsage},
+		&usageTestProvider{emitTool: true, usage: secondUsage},
+	)
+
+	gotTools, usage, err := a.assembleTools(
+		context.Background(),
+		RunConfig{},
+		tools.StreamEmitter(func(tools.ToolStreamEvent) {}),
+		true,
+	)
+	if err != nil {
+		t.Fatalf("assembleTools error: %v", err)
+	}
+	if len(gotTools) != 1 || gotTools[0].Name != "fake_tool" {
+		t.Fatalf("expected only the first duplicate tool, got %#v", gotTools)
+	}
+	if !strings.Contains(usage, firstUsage) {
+		t.Fatalf("expected usage from the retained provider, got %q", usage)
+	}
+	if strings.Contains(usage, secondUsage) {
+		t.Fatalf("usage from a provider with no retained tools must be omitted, got %q", usage)
+	}
+}
+
 func TestAssembleToolsPassesCompleteAvailableToolSetToUsage(t *testing.T) {
 	t.Parallel()
 	const (

@@ -328,6 +328,18 @@ func settingsLabels(raw []byte) []string {
 		}
 		return "off"
 	}
+	// Reasoning has two archive shapes: the retired reasoning_enabled flag, and
+	// the current effort field where "disable" is off. Prefer the legacy flag when
+	// present so old archives preview the state they will actually import as.
+	reasoningStr := func() string {
+		if v, ok := m["reasoning_enabled"].(bool); ok && !v {
+			return "off"
+		}
+		if v, ok := m["reasoning_effort"].(string); ok && modelpkg.IsReasoningDisabled(v) {
+			return "off"
+		}
+		return "on"
+	}
 	out := []string{}
 	if v := str("language"); v != "" {
 		out = append(out, "language: "+v)
@@ -338,7 +350,7 @@ func settingsLabels(raw []byte) []string {
 	if v := str("acl_default_effect"); v != "" {
 		out = append(out, "acl default: "+v)
 	}
-	out = append(out, "reasoning: "+boolStr("reasoning_enabled"))
+	out = append(out, "reasoning: "+reasoningStr())
 	out = append(out, "heartbeat: "+boolStr("heartbeat_enabled"))
 	out = append(out, "compaction: "+boolStr("compaction_enabled"))
 	return out
@@ -469,9 +481,13 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		return ImportResult{}, err
 	}
 	profile = scrubImportedProfileACPSecrets(profile, state)
-	cfg, err := readEntry[settings.Settings](state, "bot/settings.json")
+	settingsRaw, err := readRawEntry(state, "bot/settings.json")
 	if err != nil {
 		return ImportResult{}, err
+	}
+	cfg, err := decodeBackupSettings(settingsRaw)
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("read bot/settings.json: %w", err)
 	}
 	// Dependencies (providers/models/...) are global, idempotent resources; they
 	// are created before the bot and are intentionally NOT rolled back, so a
@@ -891,13 +907,12 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.ChatACPAgentID = current.ChatACPAgentID
 				eff.ChatACPProjectPath = current.ChatACPProjectPath
 				eff.ChatACPProjectMode = current.ChatACPProjectMode
-				eff.ReasoningEnabled = current.ReasoningEnabled
 				eff.ReasoningEffort = current.ReasoningEffort
 				eff.HeartbeatEnabled = current.HeartbeatEnabled
 				eff.HeartbeatInterval = current.HeartbeatInterval
 				eff.CompactionEnabled = current.CompactionEnabled
 				eff.CompactionThreshold = current.CompactionThreshold
-				eff.CompactionRatio = current.CompactionRatio
+				eff.CompactionTargetPercent = current.CompactionTargetPercent
 				eff.PersistFullToolResults = current.PersistFullToolResults
 				eff.ShowToolCallsInIM = current.ShowToolCallsInIM
 				eff.ToolApprovalConfig = current.ToolApprovalConfig
@@ -924,47 +939,48 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	heartbeatInterval := eff.HeartbeatInterval
 	compactionEnabled := eff.CompactionEnabled
 	compactionThreshold := eff.CompactionThreshold
-	compactionRatio := eff.CompactionRatio
+	compactionTargetPercent := 0
+	if eff.CompactionTargetPercent != nil {
+		compactionTargetPercent = *eff.CompactionTargetPercent
+	}
 	persistFullToolResults := eff.PersistFullToolResults
 	showToolCalls := eff.ShowToolCallsInIM
 	toolApproval := eff.ToolApprovalConfig
 	displayEnabled := eff.DisplayEnabled
 	overlayEnabled := eff.OverlayEnabled
 	overlayProvider := eff.OverlayProvider
-	reasoningEnabled := eff.ReasoningEnabled
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
-		ChatModelID:            modelID(eff.ChatModelID, deps.models),
-		ChatRuntime:            ptrStringAllowEmpty(eff.ChatRuntime),
-		ChatACPAgentID:         ptrStringAllowEmpty(eff.ChatACPAgentID),
-		ChatACPProjectPath:     ptrStringAllowEmpty(eff.ChatACPProjectPath),
-		ChatACPProjectMode:     ptrStringAllowEmpty(eff.ChatACPProjectMode),
-		ImageModelID:           modelID(eff.ImageModelID, deps.models),
-		SearchProviderID:       modelID(eff.SearchProviderID, deps.searchProviders),
-		FetchProviderID:        &fetchProviderID,
-		MemoryProviderID:       modelID(eff.MemoryProviderID, deps.memoryProviders),
-		TtsModelID:             modelID(eff.TtsModelID, deps.models),
-		TranscriptionModelID:   modelID(eff.TranscriptionModelID, deps.models),
-		Language:               eff.Language,
-		AclDefaultEffect:       eff.AclDefaultEffect,
-		Timezone:               &timezone,
-		ReasoningEnabled:       &reasoningEnabled,
-		ReasoningEffort:        &reasoningEffort,
-		HeartbeatEnabled:       &heartbeatEnabled,
-		HeartbeatInterval:      &heartbeatInterval,
-		HeartbeatModelID:       modelID(eff.HeartbeatModelID, deps.models),
-		CompactionEnabled:      &compactionEnabled,
-		CompactionThreshold:    &compactionThreshold,
-		CompactionRatio:        &compactionRatio,
-		CompactionModelID:      ptrString(modelID(eff.CompactionModelID, deps.models)),
-		DiscussProbeModelID:    modelID(eff.DiscussProbeModelID, deps.models),
-		PersistFullToolResults: &persistFullToolResults,
-		ShowToolCallsInIM:      &showToolCalls,
-		ToolApprovalConfig:     &toolApproval,
-		DisplayEnabled:         &displayEnabled,
-		OverlayEnabled:         &overlayEnabled,
-		OverlayProvider:        &overlayProvider,
-		OverlayConfig:          eff.OverlayConfig,
+		ChatModelID:             ptrStringAllowEmpty(modelID(eff.ChatModelID, deps.models)),
+		ChatRuntime:             ptrStringAllowEmpty(eff.ChatRuntime),
+		ChatACPAgentID:          ptrStringAllowEmpty(eff.ChatACPAgentID),
+		ChatACPProjectPath:      ptrStringAllowEmpty(eff.ChatACPProjectPath),
+		ChatACPProjectMode:      ptrStringAllowEmpty(eff.ChatACPProjectMode),
+		ImageModelID:            ptrStringAllowEmpty(modelID(eff.ImageModelID, deps.models)),
+		SearchProviderID:        ptrStringAllowEmpty(modelID(eff.SearchProviderID, deps.searchProviders)),
+		FetchProviderID:         &fetchProviderID,
+		MemoryProviderID:        ptrStringAllowEmpty(modelID(eff.MemoryProviderID, deps.memoryProviders)),
+		TtsModelID:              ptrStringAllowEmpty(modelID(eff.TtsModelID, deps.models)),
+		TranscriptionModelID:    ptrStringAllowEmpty(modelID(eff.TranscriptionModelID, deps.models)),
+		Language:                ptrStringAllowEmpty(eff.Language),
+		AclDefaultEffect:        eff.AclDefaultEffect,
+		Timezone:                &timezone,
+		ReasoningEffort:         &reasoningEffort,
+		HeartbeatEnabled:        &heartbeatEnabled,
+		HeartbeatInterval:       &heartbeatInterval,
+		HeartbeatModelID:        ptrStringAllowEmpty(modelID(eff.HeartbeatModelID, deps.models)),
+		CompactionEnabled:       &compactionEnabled,
+		CompactionThreshold:     &compactionThreshold,
+		CompactionTargetPercent: &compactionTargetPercent,
+		CompactionModelID:       ptrString(modelID(eff.CompactionModelID, deps.models)),
+		DiscussProbeModelID:     modelID(eff.DiscussProbeModelID, deps.models),
+		PersistFullToolResults:  &persistFullToolResults,
+		ShowToolCallsInIM:       &showToolCalls,
+		ToolApprovalConfig:      &toolApproval,
+		DisplayEnabled:          &displayEnabled,
+		OverlayEnabled:          &overlayEnabled,
+		OverlayProvider:         &overlayProvider,
+		OverlayConfig:           eff.OverlayConfig,
 	})
 	return err
 }
@@ -1375,6 +1391,9 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 				Role:        asset.Role,
 				Ordinal:     asset.Ordinal,
 				ContentHash: asset.ContentHash,
+				Mime:        asset.Mime,
+				SizeBytes:   asset.SizeBytes,
+				StorageKey:  asset.StorageKey,
 				Name:        asset.Name,
 				Metadata:    asset.Metadata,
 			}); err != nil {

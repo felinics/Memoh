@@ -57,6 +57,7 @@ type Queries interface {
 	CreateBotACLRule(ctx context.Context, arg dbsqlc.CreateBotACLRuleParams) (dbsqlc.BotAclRule, error)
 	CreateBotPluginInstallation(ctx context.Context, arg dbsqlc.CreateBotPluginInstallationParams) (dbsqlc.BotPluginInstallation, error)
 	CreateBotUserGrant(ctx context.Context, arg dbsqlc.CreateBotUserGrantParams) (dbsqlc.BotUserGrant, error)
+	CreateConnector(ctx context.Context, arg dbsqlc.CreateConnectorParams) (dbsqlc.Connector, error)
 	DeleteBotUserGrantByID(ctx context.Context, id pgtype.UUID) error
 	UpsertBotChannelAdmin(ctx context.Context, arg dbsqlc.UpsertBotChannelAdminParams) (dbsqlc.BotChannelAdmin, error)
 	DeleteBotChannelAdmin(ctx context.Context, arg dbsqlc.DeleteBotChannelAdminParams) error
@@ -123,6 +124,7 @@ type Queries interface {
 	DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMCPConnection(ctx context.Context, arg dbsqlc.DeleteMCPConnectionParams) error
 	DeleteMCPConnectionsByPlugin(ctx context.Context, arg dbsqlc.DeleteMCPConnectionsByPluginParams) error
+	DeleteConnector(ctx context.Context, arg dbsqlc.DeleteConnectorParams) error
 	DeleteMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID) error
 	DeleteMemoryProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteMessageAssets(ctx context.Context, messageID pgtype.UUID) error
@@ -184,6 +186,7 @@ type Queries interface {
 	GetMessageByIDBySession(ctx context.Context, arg dbsqlc.GetMessageByIDBySessionParams) (dbsqlc.GetMessageByIDBySessionRow, error)
 	GetLatestSessionIDByBot(ctx context.Context, botID pgtype.UUID) (pgtype.UUID, error)
 	GetMCPConnectionByID(ctx context.Context, arg dbsqlc.GetMCPConnectionByIDParams) (dbsqlc.McpConnection, error)
+	GetConnectorByConnectionID(ctx context.Context, arg dbsqlc.GetConnectorByConnectionIDParams) (dbsqlc.Connector, error)
 	GetMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID) (dbsqlc.McpOauthToken, error)
 	GetMCPOAuthTokenByState(ctx context.Context, stateParam string) (dbsqlc.McpOauthToken, error)
 	GetMemoryProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.MemoryProvider, error)
@@ -262,6 +265,7 @@ type Queries interface {
 	ListBotPluginInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotPluginInstallation, error)
 	ListBotPluginResources(ctx context.Context, installationID pgtype.UUID) ([]dbsqlc.BotPluginResource, error)
 	ListMCPConnectionsByBotID(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.McpConnection, error)
+	ListConnectorsByBotID(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.Connector, error)
 	ListMemoryProviders(ctx context.Context) ([]dbsqlc.MemoryProvider, error)
 	ListMessageAssets(ctx context.Context, messageID pgtype.UUID) ([]dbsqlc.ListMessageAssetsRow, error)
 	ListMessageAssetsBatch(ctx context.Context, messageIds []pgtype.UUID) ([]dbsqlc.ListMessageAssetsBatchRow, error)
@@ -391,6 +395,7 @@ type Queries interface {
 	UpdateMCPConnectionAuthType(ctx context.Context, arg dbsqlc.UpdateMCPConnectionAuthTypeParams) error
 	UpdateMCPConnectionProbeResult(ctx context.Context, arg dbsqlc.UpdateMCPConnectionProbeResultParams) error
 	UpdateMCPConnectionsActiveByPlugin(ctx context.Context, arg dbsqlc.UpdateMCPConnectionsActiveByPluginParams) error
+	UpdateConnectorEnabled(ctx context.Context, arg dbsqlc.UpdateConnectorEnabledParams) (int64, error)
 	UpdateMCPOAuthClientSecret(ctx context.Context, arg dbsqlc.UpdateMCPOAuthClientSecretParams) error
 	UpdateMCPOAuthPKCEState(ctx context.Context, arg dbsqlc.UpdateMCPOAuthPKCEStateParams) error
 	UpdateMCPOAuthTokens(ctx context.Context, arg dbsqlc.UpdateMCPOAuthTokensParams) error

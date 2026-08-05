@@ -7,6 +7,9 @@
        while closed so focus can't tab into the parked-off-screen rail. -->
   <aside
     class="workspace-divider-r relative flex shrink-0 flex-col bg-sidebar"
+    data-native-sidebar-surface
+    data-native-sidebar-tint
+    data-native-sidebar-seam
     :style="asideStyle"
     :inert="!workbenchOpen || undefined"
   >
@@ -18,6 +21,7 @@
          full-width (right edge aligns with the search row below). -->
     <header
       class="flex h-11 shrink-0 items-center bg-sidebar pr-2 [-webkit-app-region:drag]"
+      data-native-sidebar-surface
       :class="macTrafficReserve ? 'pl-22' : 'pl-3'"
     >
       <div class="min-w-0 flex-1">
@@ -122,7 +126,10 @@
         v-show="sidebarView === 'schedule'"
         class="h-full"
       />
-      <div class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-sidebar to-transparent" />
+      <div
+        class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-sidebar to-transparent"
+        data-native-sidebar-fade
+      />
     </div>
 
     <!-- Settings, pinned to the bottom. Same action-row owner as New Session /

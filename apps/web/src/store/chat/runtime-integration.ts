@@ -77,11 +77,16 @@ export interface RuntimeIntegrationDeps {
     error: Error,
   ) => void
   refreshCurrentSession: (botId: string, sessionId: string) => Promise<void>
+  resyncRuntimeTranscript: (
+    botId: string,
+    sessionId: string,
+    transcript: RuntimeProjectionChange['current']['transcript'],
+  ) => Promise<void>
   releaseHiddenSessionView: (botId: string, sessionId: string) => void
   loadInitialMessages: (
     botId: string,
     sessionId: string,
-    afterApply?: () => void,
+    commitInitialHistory: (applyHistory: () => void) => Promise<void>,
   ) => Promise<void>
   reattachTurnToSession: (
     botId: string,
@@ -305,11 +310,11 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     const needsHistoryResync = Boolean(
       view && !view.transcript.applyRuntimeTranscript(change.current.transcript),
     )
-    const resyncTranscript = () => deps.refreshCurrentSession(botId, sessionId)
-      .then(() => {
-        deps.chatViews.getSession(botId, sessionId)
-          ?.transcript.applyRuntimeTranscript(change.current.transcript)
-      })
+    const resyncTranscript = () => deps.resyncRuntimeTranscript(
+      botId,
+      sessionId,
+      change.current.transcript,
+    )
 
     if (needsHistoryResync && currentRun && isRuntimeRunActive(currentRun.status)) {
       void resyncTranscript()
@@ -401,7 +406,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
   async function prepareSessionRuntime(
     botId: string,
     sessionId: string,
-    applyBufferedProjections: () => void,
+    commitInitialHistory: (applyHistory: () => void) => Promise<void>,
   ) {
     const normalizedBotId = botId.trim()
     const normalizedSessionId = sessionId.trim()
@@ -410,7 +415,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       await deps.loadInitialMessages(
         normalizedBotId,
         normalizedSessionId,
-        applyBufferedProjections,
+        commitInitialHistory,
       )
     } finally {
       for (const stream of deps.assistantStreams.assistantStreamsForSession(

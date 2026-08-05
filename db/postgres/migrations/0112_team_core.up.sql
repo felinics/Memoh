@@ -344,6 +344,19 @@ BEGIN
          WHERE con.contype = 'p' AND n.nspname = 'public'
            AND c.relname IN (SELECT table_name FROM _team_tables)
     LOOP
+        -- Team-native tables (e.g. connectors) already carry team_id inside
+        -- their primary key: prepending it again would duplicate the column.
+        -- Such a table needs no extra key either — its primary key is already
+        -- team-scoped, and a table without a single-column unique key cannot
+        -- be the target of the single-column FKs this key exists to serve.
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+             WHERE attrelid = rec.conrelid
+               AND attnum = ANY (rec.conkey)
+               AND attname = 'team_id'
+        ) THEN
+            CONTINUE;
+        END IF;
         SELECT 'team_id, ' || string_agg(quote_ident(a.attname), ', ' ORDER BY k.ord)
           INTO cols
           FROM unnest(rec.conkey) WITH ORDINALITY AS k(attnum, ord)

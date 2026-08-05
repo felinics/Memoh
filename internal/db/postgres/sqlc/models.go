@@ -9,51 +9,50 @@ import (
 )
 
 type Bot struct {
-	ID                     pgtype.UUID        `json:"id"`
-	OwnerUserID            pgtype.UUID        `json:"owner_user_id"`
-	Name                   string             `json:"name"`
-	DisplayName            pgtype.Text        `json:"display_name"`
-	AvatarUrl              pgtype.Text        `json:"avatar_url"`
-	Timezone               pgtype.Text        `json:"timezone"`
-	IsActive               bool               `json:"is_active"`
-	Status                 string             `json:"status"`
-	Language               string             `json:"language"`
-	CommandUiLanguage      string             `json:"command_ui_language"`
-	ReasoningEnabled       bool               `json:"reasoning_enabled"`
-	ReasoningEffort        string             `json:"reasoning_effort"`
-	ChatModelID            pgtype.UUID        `json:"chat_model_id"`
-	ChatRuntime            string             `json:"chat_runtime"`
-	ChatAcpAgentID         pgtype.Text        `json:"chat_acp_agent_id"`
-	ChatAcpProjectPath     string             `json:"chat_acp_project_path"`
-	ChatAcpProjectMode     string             `json:"chat_acp_project_mode"`
-	SearchProviderID       pgtype.UUID        `json:"search_provider_id"`
-	FetchProviderID        pgtype.UUID        `json:"fetch_provider_id"`
-	MemoryProviderID       pgtype.UUID        `json:"memory_provider_id"`
-	HeartbeatEnabled       bool               `json:"heartbeat_enabled"`
-	HeartbeatInterval      int32              `json:"heartbeat_interval"`
-	HeartbeatPrompt        string             `json:"heartbeat_prompt"`
-	HeartbeatModelID       pgtype.UUID        `json:"heartbeat_model_id"`
-	CompactionEnabled      bool               `json:"compaction_enabled"`
-	CompactionThreshold    int32              `json:"compaction_threshold"`
-	CompactionRatio        int32              `json:"compaction_ratio"`
-	CompactionModelID      pgtype.UUID        `json:"compaction_model_id"`
-	ImageModelID           pgtype.UUID        `json:"image_model_id"`
-	DiscussProbeModelID    pgtype.UUID        `json:"discuss_probe_model_id"`
-	TtsModelID             pgtype.UUID        `json:"tts_model_id"`
-	TranscriptionModelID   pgtype.UUID        `json:"transcription_model_id"`
-	VideoModelID           pgtype.UUID        `json:"video_model_id"`
-	PersistFullToolResults bool               `json:"persist_full_tool_results"`
-	ShowToolCallsInIm      bool               `json:"show_tool_calls_in_im"`
-	ToolApprovalConfig     []byte             `json:"tool_approval_config"`
-	DisplayEnabled         bool               `json:"display_enabled"`
-	OverlayProvider        string             `json:"overlay_provider"`
-	OverlayEnabled         bool               `json:"overlay_enabled"`
-	OverlayConfig          []byte             `json:"overlay_config"`
-	Metadata               []byte             `json:"metadata"`
-	CreatedAt              pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-	AclDefaultEffect       string             `json:"acl_default_effect"`
-	TeamID                 pgtype.UUID        `json:"team_id"`
+	ID                      pgtype.UUID        `json:"id"`
+	OwnerUserID             pgtype.UUID        `json:"owner_user_id"`
+	Name                    string             `json:"name"`
+	DisplayName             pgtype.Text        `json:"display_name"`
+	AvatarUrl               pgtype.Text        `json:"avatar_url"`
+	Timezone                pgtype.Text        `json:"timezone"`
+	IsActive                bool               `json:"is_active"`
+	Status                  string             `json:"status"`
+	Language                string             `json:"language"`
+	CommandUiLanguage       string             `json:"command_ui_language"`
+	ReasoningEffort         string             `json:"reasoning_effort"`
+	ChatModelID             pgtype.UUID        `json:"chat_model_id"`
+	ChatRuntime             string             `json:"chat_runtime"`
+	ChatAcpAgentID          pgtype.Text        `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath      string             `json:"chat_acp_project_path"`
+	ChatAcpProjectMode      string             `json:"chat_acp_project_mode"`
+	SearchProviderID        pgtype.UUID        `json:"search_provider_id"`
+	FetchProviderID         pgtype.UUID        `json:"fetch_provider_id"`
+	MemoryProviderID        pgtype.UUID        `json:"memory_provider_id"`
+	HeartbeatEnabled        bool               `json:"heartbeat_enabled"`
+	HeartbeatInterval       int32              `json:"heartbeat_interval"`
+	HeartbeatPrompt         string             `json:"heartbeat_prompt"`
+	HeartbeatModelID        pgtype.UUID        `json:"heartbeat_model_id"`
+	CompactionEnabled       bool               `json:"compaction_enabled"`
+	CompactionThreshold     int32              `json:"compaction_threshold"`
+	CompactionTargetPercent pgtype.Int4        `json:"compaction_target_percent"`
+	CompactionModelID       pgtype.UUID        `json:"compaction_model_id"`
+	ImageModelID            pgtype.UUID        `json:"image_model_id"`
+	DiscussProbeModelID     pgtype.UUID        `json:"discuss_probe_model_id"`
+	TtsModelID              pgtype.UUID        `json:"tts_model_id"`
+	TranscriptionModelID    pgtype.UUID        `json:"transcription_model_id"`
+	VideoModelID            pgtype.UUID        `json:"video_model_id"`
+	PersistFullToolResults  bool               `json:"persist_full_tool_results"`
+	ShowToolCallsInIm       bool               `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig      []byte             `json:"tool_approval_config"`
+	DisplayEnabled          bool               `json:"display_enabled"`
+	OverlayProvider         string             `json:"overlay_provider"`
+	OverlayEnabled          bool               `json:"overlay_enabled"`
+	OverlayConfig           []byte             `json:"overlay_config"`
+	Metadata                []byte             `json:"metadata"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	AclDefaultEffect        string             `json:"acl_default_effect"`
+	TeamID                  pgtype.UUID        `json:"team_id"`
 }
 
 type BotAclRule struct {
@@ -182,6 +181,9 @@ type BotHistoryMessageAsset struct {
 	Role        string             `json:"role"`
 	Ordinal     int32              `json:"ordinal"`
 	ContentHash string             `json:"content_hash"`
+	Mime        string             `json:"mime"`
+	SizeBytes   int64              `json:"size_bytes"`
+	StorageKey  string             `json:"storage_key"`
 	Name        string             `json:"name"`
 	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
@@ -376,6 +378,16 @@ type ChannelLinkCode struct {
 	ConsumedChannelIdentityID pgtype.UUID        `json:"consumed_channel_identity_id"`
 	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
 	TeamID                    pgtype.UUID        `json:"team_id"`
+}
+
+type Connector struct {
+	TeamID       pgtype.UUID        `json:"team_id"`
+	BotID        pgtype.UUID        `json:"bot_id"`
+	ConnectionID string             `json:"connection_id"`
+	Alias        string             `json:"alias"`
+	Enabled      bool               `json:"enabled"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Container struct {

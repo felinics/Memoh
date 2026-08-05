@@ -78,12 +78,17 @@ invalidated_session AS (
   RETURNING session.id
 ),
 upserted_asset AS (
-  INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash, name, metadata)
+  INSERT INTO bot_history_message_assets (
+    message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
+  )
   SELECT
     target.id,
     sqlc.arg(role),
     sqlc.arg(ordinal),
     sqlc.arg(content_hash),
+    COALESCE(sqlc.arg(mime)::text, ''),
+    sqlc.arg(size_bytes),
+    COALESCE(sqlc.arg(storage_key)::text, ''),
     sqlc.arg(name),
     sqlc.arg(metadata)
   FROM target_message target
@@ -91,21 +96,24 @@ upserted_asset AS (
   ON CONFLICT (team_id, message_id, content_hash) DO UPDATE SET
     role = EXCLUDED.role,
     ordinal = EXCLUDED.ordinal,
+    mime = CASE WHEN EXCLUDED.mime <> '' THEN EXCLUDED.mime ELSE bot_history_message_assets.mime END,
+    size_bytes = CASE WHEN EXCLUDED.size_bytes > 0 THEN EXCLUDED.size_bytes ELSE bot_history_message_assets.size_bytes END,
+    storage_key = CASE WHEN EXCLUDED.storage_key <> '' THEN EXCLUDED.storage_key ELSE bot_history_message_assets.storage_key END,
     name = EXCLUDED.name,
     metadata = EXCLUDED.metadata
-  RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at
+  RETURNING id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata, created_at
 )
-SELECT id, message_id, role, ordinal, content_hash, name, metadata, created_at
+SELECT id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata, created_at
 FROM upserted_asset;
 
 -- name: ListMessageAssets :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
+SELECT id AS rel_id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
 FROM bot_history_message_assets
 WHERE team_id = public.memoh_current_team_id() AND message_id = sqlc.arg(message_id)
 ORDER BY ordinal ASC;
 
 -- name: ListMessageAssetsBatch :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
+SELECT id AS rel_id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
 FROM bot_history_message_assets
 WHERE team_id = public.memoh_current_team_id() AND message_id = ANY(sqlc.arg(message_ids)::uuid[])
 ORDER BY message_id, ordinal ASC;

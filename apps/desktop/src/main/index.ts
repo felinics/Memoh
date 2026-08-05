@@ -5,6 +5,7 @@ import {
   BrowserWindow,
   ipcMain,
   nativeImage,
+  nativeTheme,
   safeStorage,
   Tray,
   screen,
@@ -21,6 +22,7 @@ import trayIconPng from '../../resources/tray-icon.png?asset'
 import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
+import { macWindowChromeOptions } from './window-chrome'
 import { maybeSelfInstallMacOS } from './self-install'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
 import { isTrustedRendererUrl } from './renderer-trust'
@@ -34,6 +36,7 @@ import {
   type ServerConnectionResult,
 } from '../shared/server-connection'
 import type { DesktopRuntimeConfig } from '../shared/remote-runtime'
+import { normalizeDesktopThemeSource } from '../shared/theme'
 
 const DESKTOP_PRODUCT_NAME = 'Memoh'
 const DEFAULT_BASE_URL = is.dev ? 'http://localhost:18080' : 'http://localhost:8080'
@@ -492,21 +495,10 @@ function createAppTray(): void {
 // output is what wires the IPC bridge into the renderer.
 const PRELOAD_FILE = '../preload/index.mjs'
 
-function macWindowChromeOptions(tabbingIdentifier: string): Partial<Electron.BrowserWindowConstructorOptions> {
-  if (process.platform !== 'darwin') return {}
-  return {
-    titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 14, y: 13 },
-    transparent: true,
-    backgroundColor: '#00000000',
-    tabbingIdentifier,
-  }
-}
-
 function createChatWindow(): BrowserWindow {
   const window = new BrowserWindow({
     ...rememberedWindowOptions('chat', CHAT_DEFAULTS),
-    ...macWindowChromeOptions('memoh-chat'),
+    ...macWindowChromeOptions(process.platform, 'memoh-chat'),
     show: false,
     autoHideMenuBar: true,
     title: DESKTOP_PRODUCT_NAME,
@@ -681,6 +673,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:api-base-url', (event) => {
     assertTrustedRenderer(event)
     return getDesktopApiBaseUrl()
+  })
+  ipcMain.handle('desktop:set-theme-source', (event, themeSource: unknown) => {
+    assertTrustedRenderer(event)
+    nativeTheme.themeSource = normalizeDesktopThemeSource(themeSource)
   })
   ipcMain.handle('desktop:probe-server', (event) => {
     assertTrustedRenderer(event)

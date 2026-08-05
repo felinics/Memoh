@@ -117,7 +117,7 @@ export function createChatViews(deps: ChatViewsDeps) {
       ?.transcript ?? null
   }
 
-  const messages = computed(() => transcriptForTarget().messages)
+  const messages = computed(() => transcriptForTarget().visibleMessages.value)
   const loadingMessages = computed(() => transcriptForTarget().loadingMessages.value)
   const loadingOlder = computed(() => transcriptForTarget().loadingOlder.value)
   const hasMoreOlder = computed(() => transcriptForTarget().hasMoreOlder.value)
@@ -137,17 +137,28 @@ export function createChatViews(deps: ChatViewsDeps) {
     await sessionTranscript(resolvedBotId, resolvedSessionId)
       .refreshCurrentSession(resolvedBotId, resolvedSessionId)
   }
+  async function resyncRuntimeTranscript(
+    botId: string,
+    sessionId: string,
+    runtimeTranscript: Parameters<Transcript['applyRuntimeTranscript']>[0],
+  ) {
+    const view = chatViews.getSession(botId, sessionId)
+    if (!view) return
+    await view.transcript.refreshCurrentSession(botId, sessionId, () => {
+      view.transcript.applyRuntimeTranscript(runtimeTranscript)
+    })
+  }
   async function loadInitialMessages(
     botId: string,
     sessionId: string,
-    afterApply?: () => void,
+    commitInitialHistory: (applyHistory: () => void) => Promise<void>,
   ) {
     const view = chatViews.getOrCreate({
       botId,
       sessionId,
       viewId: focusedViewId.value,
     })
-    await view.transcript.loadInitialMessages(botId, sessionId, afterApply)
+    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory)
     view.initialized = true
   }
   const fetchSessionWindow = (botId: string, sessionId: string) =>
@@ -374,6 +385,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     prepareForInitialization,
     markHistoryEmpty,
     refreshCurrentSession,
+    resyncRuntimeTranscript,
     loadInitialMessages,
     fetchSessionWindow,
     loadOlderMessages,

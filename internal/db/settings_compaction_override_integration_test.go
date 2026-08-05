@@ -60,6 +60,21 @@ ALTER TABLE memory_providers ADD COLUMN team_id UUID NOT NULL DEFAULT public.mem
 	return tx
 }
 
+func settingsTestUpsertParams(botID uuid.UUID) sqlc.UpsertBotSettingsParams {
+	return sqlc.UpsertBotSettingsParams{
+		Language:           "en",
+		ReasoningEffort:    "medium",
+		HeartbeatInterval:  1440,
+		ChatRuntime:        "model",
+		ChatAcpProjectMode: "project",
+		ToolApprovalConfig: []byte(`{}`),
+		OverlayProvider:    "",
+		OverlayConfig:      []byte(`{}`),
+		CommandUiLanguage:  "",
+		ID:                 pgtype.UUID{Bytes: botID, Valid: true},
+	}
+}
+
 // TestUpsertBotSettingsClearsCompactionModelOverride pins the explicit-set
 // semantics of the compaction model override: submitting the field with a
 // NULL value must clear the override back to chat-model inheritance, while
@@ -92,19 +107,7 @@ VALUES ($1, 'override-bot', 'personal', 'ready', '{}', $2) RETURNING id
 	}
 
 	queries := sqlc.New(tx)
-	params := sqlc.UpsertBotSettingsParams{
-		Language:           "en",
-		ReasoningEffort:    "medium",
-		HeartbeatInterval:  1440,
-		CompactionRatio:    80,
-		ChatRuntime:        "model",
-		ChatAcpProjectMode: "project",
-		ToolApprovalConfig: []byte(`{}`),
-		OverlayProvider:    "",
-		OverlayConfig:      []byte(`{}`),
-		CommandUiLanguage:  "",
-		ID:                 pgtype.UUID{Bytes: botID, Valid: true},
-	}
+	params := settingsTestUpsertParams(botID)
 
 	// Omitting the override (set=false) keeps the stored model.
 	if _, err := queries.UpsertBotSettings(ctx, params); err != nil {
@@ -131,6 +134,76 @@ VALUES ($1, 'override-bot', 'personal', 'ready', '{}', $2) RETURNING id
 	}
 }
 
+func TestUpsertBotSettingsCompactionTargetPercentExplicitSet(t *testing.T) {
+	ctx := context.Background()
+	tx := settingsTestTx(t, ctx)
+
+	var userID, botID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+INSERT INTO users (username, is_active, metadata)
+VALUES ('target-percent-owner', true, '{}')
+RETURNING id
+`).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `
+INSERT INTO bots (
+  owner_user_id,
+  name,
+  type,
+  status,
+  metadata,
+  compaction_target_percent
+)
+VALUES ($1, 'target-percent-bot', 'personal', 'ready', '{}', 55)
+RETURNING id
+`, userID).Scan(&botID); err != nil {
+		t.Fatalf("insert bot: %v", err)
+	}
+
+	queries := sqlc.New(tx)
+	params := settingsTestUpsertParams(botID)
+
+	if _, err := queries.UpsertBotSettings(ctx, params); err != nil {
+		t.Fatalf("upsert preserving target: %v", err)
+	}
+	assertCompactionTargetPercent(t, ctx, tx, botID, settingsIntPointer(55))
+
+	params.CompactionTargetPercentSet = true
+	params.CompactionTargetPercent = pgtype.Int4{Int32: 30, Valid: true}
+	if _, err := queries.UpsertBotSettings(ctx, params); err != nil {
+		t.Fatalf("upsert setting target: %v", err)
+	}
+	assertCompactionTargetPercent(t, ctx, tx, botID, settingsIntPointer(30))
+
+	params.CompactionTargetPercent = pgtype.Int4{}
+	if _, err := queries.UpsertBotSettings(ctx, params); err != nil {
+		t.Fatalf("upsert clearing target: %v", err)
+	}
+	assertCompactionTargetPercent(t, ctx, tx, botID, nil)
+}
+
+func assertCompactionTargetPercent(t *testing.T, ctx context.Context, tx pgx.Tx, botID uuid.UUID, want *int) {
+	t.Helper()
+	var got *int
+	if err := tx.QueryRow(ctx, `SELECT compaction_target_percent FROM bots WHERE id = $1`, botID).Scan(&got); err != nil {
+		t.Fatalf("read compaction target: %v", err)
+	}
+	if want == nil {
+		if got != nil {
+			t.Fatalf("compaction target = %d, want NULL", *got)
+		}
+		return
+	}
+	if got == nil || *got != *want {
+		t.Fatalf("compaction target = %v, want %d", got, *want)
+	}
+}
+
+func settingsIntPointer(value int) *int {
+	return &value
+}
+
 // TestNewBotDefaultsToCompactionEnabled pins the zero-config default: a
 // freshly created bot compacts out of the box, and resetting settings
 // returns to that default rather than to the legacy opt-in.
@@ -153,24 +226,25 @@ VALUES ($1, 'default-on-bot', 'personal', 'ready', '{}') RETURNING id
 
 	var enabled bool
 	var threshold int
-	if err := tx.QueryRow(ctx, `SELECT compaction_enabled, compaction_threshold FROM bots WHERE id = $1`, botID).Scan(&enabled, &threshold); err != nil {
+	var target *int
+	if err := tx.QueryRow(ctx, `SELECT compaction_enabled, compaction_threshold, compaction_target_percent FROM bots WHERE id = $1`, botID).Scan(&enabled, &threshold, &target); err != nil {
 		t.Fatalf("read defaults: %v", err)
 	}
-	if !enabled || threshold != 0 {
-		t.Fatalf("new bot defaults = enabled %t threshold %d, want the model-relative policy on by default", enabled, threshold)
+	if !enabled || threshold != 0 || target != nil {
+		t.Fatalf("new bot defaults = enabled %t threshold %d target %v, want automatic 50%% trigger and 40%% target defaults", enabled, threshold, target)
 	}
 
-	if _, err := tx.Exec(ctx, `UPDATE bots SET compaction_enabled = false WHERE id = $1`, botID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE bots SET compaction_enabled = false, compaction_target_percent = 70 WHERE id = $1`, botID); err != nil {
 		t.Fatalf("disable compaction: %v", err)
 	}
 	queries := sqlc.New(tx)
 	if err := queries.DeleteSettingsByBotID(ctx, pgtype.UUID{Bytes: botID, Valid: true}); err != nil {
 		t.Fatalf("reset settings: %v", err)
 	}
-	if err := tx.QueryRow(ctx, `SELECT compaction_enabled, compaction_threshold FROM bots WHERE id = $1`, botID).Scan(&enabled, &threshold); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT compaction_enabled, compaction_threshold, compaction_target_percent FROM bots WHERE id = $1`, botID).Scan(&enabled, &threshold, &target); err != nil {
 		t.Fatalf("read reset values: %v", err)
 	}
-	if !enabled || threshold != 0 {
-		t.Fatalf("reset settings = enabled %t threshold %d, want the same defaults a new bot gets", enabled, threshold)
+	if !enabled || threshold != 0 || target != nil {
+		t.Fatalf("reset settings = enabled %t threshold %d target %v, want the same defaults a new bot gets", enabled, threshold, target)
 	}
 }

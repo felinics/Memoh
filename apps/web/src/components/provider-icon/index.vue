@@ -10,6 +10,8 @@
     :src="icon"
     :width="size"
     :height="size"
+    alt=""
+    class="[color-scheme:light] dark:[color-scheme:dark]"
     v-bind="$attrs"
   >
   <slot v-else />

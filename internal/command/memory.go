@@ -119,7 +119,7 @@ func (h *Handler) buildMemoryGroup() *CommandGroup {
 			for _, item := range items {
 				if strings.EqualFold(item.Name, name) {
 					_, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, settings.UpsertRequest{
-						MemoryProviderID: item.ID,
+						MemoryProviderID: &item.ID,
 					})
 					if err != nil {
 						return "", err

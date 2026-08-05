@@ -231,7 +231,6 @@ CREATE TABLE IF NOT EXISTS bots (
   status TEXT NOT NULL DEFAULT 'ready',
   language TEXT NOT NULL DEFAULT 'auto',
   command_ui_language TEXT NOT NULL DEFAULT 'auto',
-  reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   chat_runtime TEXT NOT NULL DEFAULT 'model' CHECK (chat_runtime IN ('model', 'acp_agent')),
@@ -247,7 +246,7 @@ CREATE TABLE IF NOT EXISTS bots (
   heartbeat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compaction_enabled BOOLEAN NOT NULL DEFAULT true,
   compaction_threshold INTEGER NOT NULL DEFAULT 0,
-  compaction_ratio INTEGER NOT NULL DEFAULT 80,
+  compaction_target_percent INTEGER,
   compaction_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   image_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   discuss_probe_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -257,7 +256,7 @@ CREATE TABLE IF NOT EXISTS bots (
   persist_full_tool_results BOOLEAN NOT NULL DEFAULT false,
   show_tool_calls_in_im BOOLEAN NOT NULL DEFAULT false,
   tool_approval_config JSONB NOT NULL DEFAULT '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'::jsonb,
-  display_enabled BOOLEAN NOT NULL DEFAULT false,
+  display_enabled BOOLEAN NOT NULL DEFAULT true,
   overlay_provider TEXT NOT NULL DEFAULT '',
   overlay_enabled BOOLEAN NOT NULL DEFAULT false,
   overlay_config JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -269,6 +268,7 @@ CREATE TABLE IF NOT EXISTS bots (
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
   -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0093).
+  -- It is also the single on/off source: 'disable' means no reasoning (see 0128).
   CONSTRAINT bots_name_format_check CHECK (name ~ '^[a-z0-9][a-z0-9-]{1,62}$')
 );
 
@@ -936,14 +936,17 @@ CREATE TABLE IF NOT EXISTS bot_storage_bindings (
 
 CREATE INDEX IF NOT EXISTS idx_bot_storage_bindings_bot_id ON bot_storage_bindings(bot_id);
 
--- bot_history_message_assets: soft link (message -> content_hash only).
--- MIME, size, storage_key are derived from storage at read time.
+-- bot_history_message_assets: denormalized attachment metadata for history reads.
+-- File bytes remain content-addressed in storage; rendering history never probes storage.
 CREATE TABLE IF NOT EXISTS bot_history_message_assets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id UUID NOT NULL REFERENCES bot_history_messages(id) ON DELETE CASCADE,
   role TEXT NOT NULL DEFAULT 'attachment',
   ordinal INTEGER NOT NULL DEFAULT 0,
   content_hash TEXT NOT NULL,
+  mime TEXT NOT NULL DEFAULT '',
+  size_bytes BIGINT NOT NULL DEFAULT 0,
+  storage_key TEXT NOT NULL DEFAULT '',
   name TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1564,6 +1567,19 @@ BEGIN
          WHERE con.contype = 'p' AND n.nspname = 'public'
            AND c.relname IN (SELECT table_name FROM _team_tables)
     LOOP
+        -- Team-native tables (e.g. connectors) already carry team_id inside
+        -- their primary key: prepending it again would duplicate the column.
+        -- Such a table needs no extra key either — its primary key is already
+        -- team-scoped, and a table without a single-column unique key cannot
+        -- be the target of the single-column FKs this key exists to serve.
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+             WHERE attrelid = rec.conrelid
+               AND attnum = ANY (rec.conkey)
+               AND attname = 'team_id'
+        ) THEN
+            CONTINUE;
+        END IF;
         SELECT 'team_id, ' || string_agg(quote_ident(a.attname), ', ' ORDER BY k.ord)
           INTO cols
           FROM unnest(rec.conkey) WITH ORDINALITY AS k(attnum, ord)
@@ -2331,3 +2347,42 @@ CREATE INDEX IF NOT EXISTS idx_user_input_run
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_run
     ON public.bot_history_messages (team_id, run_id)
     WHERE run_id IS NOT NULL;
+
+-- Bot-scoped Connect-It bindings. Provider credentials and short-lived MCP
+-- session tokens remain in Connect-It; Memoh stores only the durable
+-- connection reference and whether the bot currently exposes it. A co-hosted
+-- Connect-It deployment owns and migrates its own connect_it schema.
+CREATE TABLE IF NOT EXISTS public.connectors (
+    team_id       UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                              REFERENCES public.teams(id) ON DELETE RESTRICT,
+    bot_id        UUID        NOT NULL,
+    connection_id TEXT        NOT NULL,
+    -- Durable per-bot tool namespace, allocated once at binding time. Tool
+    -- names are derived from it, so it must never be recomputed from the
+    -- current connection set: removing one connection must not rename (and
+    -- silently reroute) another connection's tools.
+    alias         TEXT        NOT NULL,
+    enabled       BOOLEAN     NOT NULL DEFAULT true,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT connectors_pkey PRIMARY KEY (team_id, bot_id, connection_id),
+    CONSTRAINT connectors_team_connection_id_key UNIQUE (team_id, connection_id),
+    CONSTRAINT connectors_team_bot_alias_key UNIQUE (team_id, bot_id, alias),
+    CONSTRAINT connectors_bot_id_fkey
+        FOREIGN KEY (team_id, bot_id)
+        REFERENCES public.bots(team_id, id) ON DELETE CASCADE
+);
+
+ALTER TABLE public.connectors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.connectors FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY connectors_team_select ON public.connectors
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY connectors_team_insert ON public.connectors
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY connectors_team_update ON public.connectors
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY connectors_team_delete ON public.connectors
+    FOR DELETE USING (team_id = public.memoh_current_team_id());

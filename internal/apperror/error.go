@@ -25,6 +25,13 @@ const (
 	CodeProviderNameTaken                Code = "provider.name_taken"
 	CodeProviderTemplateRequestInvalid   Code = "provider_template.request_invalid"
 	CodeSearchProviderTypeConflict       Code = "search_provider.type_conflict"
+	CodeConnectorRequestInvalid          Code = "connector.request_invalid"
+	CodeConnectorNotConfigured           Code = "connector.not_configured"
+	CodeConnectorNotFound                Code = "connector.not_found"
+	CodeConnectorConflict                Code = "connector.conflict"
+	CodeConnectorRequestRejected         Code = "connector.request_rejected"
+	CodeConnectorUpstreamUnavailable     Code = "connector.upstream_unavailable"
+	CodeConnectorOperationFailed         Code = "connector.operation_failed"
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed              Code = "profile.update_failed"
@@ -113,6 +120,34 @@ var catalog = map[Code]Definition{
 	CodeSearchProviderTypeConflict: {
 		HTTPStatus: http.StatusConflict,
 		Detail:     "This web search provider is already configured.",
+	},
+	CodeConnectorRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The connector request is invalid.",
+	},
+	CodeConnectorNotConfigured: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "Connectors are not configured on this server.",
+	},
+	CodeConnectorNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "This connector is no longer available.",
+	},
+	CodeConnectorConflict: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This connector conflicts with an existing connection.",
+	},
+	CodeConnectorRequestRejected: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "Connect-It rejected the connector request.",
+	},
+	CodeConnectorUpstreamUnavailable: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "Connect-It could not complete the request. Please try again shortly.",
+	},
+	CodeConnectorOperationFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The connector operation failed. Please try again.",
 	},
 	CodeProfileTitleModelInvalid: {
 		HTTPStatus: http.StatusBadRequest,

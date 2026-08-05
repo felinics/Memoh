@@ -1,5 +1,5 @@
 <template>
-  <form @submit="editProvider">
+  <form @submit.prevent="submitDraft">
     <SettingsSection
       v-if="!isManagedOAuthProvider"
       :title="$t('provider.configurationTitle')"
@@ -8,142 +8,142 @@
            (no trailing inset hairline) — the footer below owns the only divider,
            and it spans full width. -->
       <div>
-        <FormField
-          v-slot="{ componentField, errorMessage }"
-          name="name"
-        >
-          <SettingsRow :label="$t('common.name')">
-            <FormItem class="w-80">
-              <FormControl>
-                <Input
-                  type="text"
-                  :placeholder="$t('common.namePlaceholder')"
-                  :aria-label="$t('common.name')"
-                  :aria-invalid="!!errorMessage"
-                  v-bind="componentField"
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          </SettingsRow>
-        </FormField>
+        <SettingsRow :label="$t('common.name')">
+          <div class="w-80">
+            <!-- Free-typing draft committed on blur/Enter (appearance-page
+                 idiom): autosave must fire once per edit, not per keystroke. -->
+            <Input
+              type="text"
+              :model-value="nameDraft"
+              :placeholder="$t('common.namePlaceholder')"
+              :aria-label="$t('common.name')"
+              :aria-invalid="!!draftErrors.name"
+              @update:model-value="(value) => nameDraft = String(value ?? '')"
+              @focus="nameFocused = true"
+              @change="commitNameDraft"
+              @blur="nameFocused = false; commitNameDraft()"
+              @keydown.enter="commitNameDraft"
+            />
+            <p
+              v-if="draftErrors.name"
+              class="mt-1 text-body text-destructive"
+            >
+              {{ draftErrors.name }}
+            </p>
+          </div>
+        </SettingsRow>
 
-        <FormField
-          v-slot="{ value, handleChange, errorMessage }"
-          name="client_type"
-        >
-          <SettingsRow :label="$t('provider.clientType')">
-            <FormItem class="w-80">
-              <FormControl>
-                <Select
-                  :model-value="value"
-                  :aria-invalid="!!errorMessage"
-                  @update:model-value="handleChange"
+        <SettingsRow :label="$t('provider.clientType')">
+          <div class="w-80">
+            <Select
+              :model-value="form.client_type"
+              @update:model-value="(value) => updateClientType(String(value ?? ''))"
+            >
+              <SelectTrigger class="w-full">
+                <SelectValue :placeholder="$t('models.clientTypePlaceholder')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="option in clientTypeOptions"
+                  :key="option.value"
+                  :value="option.value"
                 >
-                  <SelectTrigger class="w-full">
-                    <SelectValue :placeholder="$t('models.clientTypePlaceholder')" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in clientTypeOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          </SettingsRow>
-        </FormField>
+                  {{ option.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </SettingsRow>
 
-        <FormField
-          v-if="form.values.client_type !== 'github-copilot'"
-          v-slot="{ componentField, errorMessage }"
-          name="base_url"
+        <SettingsRow
+          v-if="form.client_type !== 'github-copilot'"
+          :label="$t('provider.url')"
         >
-          <SettingsRow :label="$t('provider.url')">
-            <FormItem class="w-80">
-              <FormControl>
-                <Input
-                  type="text"
-                  :placeholder="$t('provider.urlPlaceholder')"
-                  :aria-label="$t('provider.url')"
-                  :aria-invalid="!!errorMessage"
-                  v-bind="componentField"
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          </SettingsRow>
-        </FormField>
+          <div class="w-80">
+            <Input
+              type="text"
+              :model-value="baseUrlDraft"
+              :placeholder="$t('provider.urlPlaceholder')"
+              :aria-label="$t('provider.url')"
+              :aria-invalid="!!draftErrors.base_url"
+              @update:model-value="(value) => baseUrlDraft = String(value ?? '')"
+              @focus="baseUrlFocused = true"
+              @change="commitBaseUrlDraft"
+              @blur="baseUrlFocused = false; commitBaseUrlDraft()"
+              @keydown.enter="commitBaseUrlDraft"
+            />
+            <p
+              v-if="draftErrors.base_url"
+              class="mt-1 text-body text-destructive"
+            >
+              {{ draftErrors.base_url }}
+            </p>
+          </div>
+        </SettingsRow>
 
-        <FormField
-          v-if="!isManagedOAuthClientType(form.values.client_type)"
-          v-slot="{ componentField, errorMessage }"
-          name="api_key"
+        <SettingsRow
+          v-if="!isManagedOAuthClientType(form.client_type)"
+          :label="$t('provider.apiKey')"
         >
-          <SettingsRow :label="$t('provider.apiKey')">
-            <FormItem class="w-80">
-              <FormControl>
-                <Input
-                  type="password"
-                  :placeholder="getStoredSecret(props.provider?.config as Record<string, unknown> | undefined) || $t('provider.apiKeyPlaceholder')"
-                  :aria-label="$t('provider.apiKey')"
-                  :aria-invalid="!!errorMessage"
-                  v-bind="componentField"
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          </SettingsRow>
-        </FormField>
+          <div class="w-80">
+            <!-- The key is write-only: the box starts empty, commits only a
+                 non-empty value, and clears itself once stored. An empty
+                 commit is a no-op so autosave can never wipe a secret. -->
+            <Input
+              type="password"
+              :model-value="apiKeyDraft"
+              :placeholder="getStoredSecret(props.provider?.config as Record<string, unknown> | undefined) || $t('provider.apiKeyPlaceholder')"
+              :aria-label="$t('provider.apiKey')"
+              :aria-invalid="!!draftErrors.api_key"
+              @update:model-value="(value) => apiKeyDraft = String(value ?? '')"
+              @focus="apiKeyFocused = true"
+              @change="commitApiKeyDraft"
+              @blur="apiKeyFocused = false; commitApiKeyDraft()"
+              @keydown.enter="commitApiKeyDraft"
+            />
+            <p
+              v-if="draftErrors.api_key"
+              class="mt-1 text-body text-destructive"
+            >
+              {{ draftErrors.api_key }}
+            </p>
+          </div>
+        </SettingsRow>
 
-        <FormField
-          v-if="supportsPromptCache(form.values.client_type)"
-          v-slot="{ value, handleChange, errorMessage }"
-          name="prompt_cache_ttl"
+        <SettingsRow
+          v-if="supportsPromptCache(form.client_type)"
+          :label="$t('provider.promptCache.label')"
+          :description="cacheDescription"
         >
-          <SettingsRow
-            :label="$t('provider.promptCache.label')"
-            :description="cacheDescription"
+          <Select
+            :model-value="form.prompt_cache_ttl"
+            @update:model-value="(value) => form.prompt_cache_ttl = normalizeCacheTtl(String(value ?? ''))"
           >
-            <FormItem>
-              <FormControl>
-                <Select
-                  :model-value="value || '5m'"
-                  :aria-invalid="!!errorMessage"
-                  @update:model-value="handleChange"
-                >
-                  <SelectTrigger
-                    size="sm"
-                    class="min-w-36"
-                  >
-                    <SelectValue :placeholder="$t('provider.promptCache.label')" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="5m">
-                      {{ $t('provider.promptCache.option5m') }}
-                    </SelectItem>
-                    <SelectItem value="1h">
-                      {{ $t('provider.promptCache.option1h') }}
-                    </SelectItem>
-                    <SelectItem value="off">
-                      {{ $t('provider.promptCache.optionOff') }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          </SettingsRow>
-        </FormField>
+            <SelectTrigger
+              size="sm"
+              class="min-w-36"
+            >
+              <SelectValue :placeholder="$t('provider.promptCache.label')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="5m">
+                {{ $t('provider.promptCache.option5m') }}
+              </SelectItem>
+              <SelectItem value="1h">
+                {{ $t('provider.promptCache.option1h') }}
+              </SelectItem>
+              <SelectItem value="off">
+                {{ $t('provider.promptCache.optionOff') }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
       </div>
 
-      <!-- Actions close the card via the section's footer band (its top hairline
-           spans the card and its inset padding matches the field rows above). -->
+      <!-- Actions close the card via the section's footer band. An existing
+           provider autosaves every field, so only the test button remains;
+           the Save button exists solely to MATERIALIZE a template draft —
+           creating a provider is a deliberate act, not an autosave. -->
       <template #footer>
         <HoverCard :open-delay="120">
           <HoverCardTrigger as-child>
@@ -184,10 +184,10 @@
         </HoverCard>
 
         <LoadingButton
+          v-if="isDraft"
           type="submit"
           size="sm"
           :loading="editLoading"
-          :disabled="(!isDraft && !hasChanges) || !form.meta.value.valid"
         >
           {{ $t('provider.saveChanges') }}
         </LoadingButton>
@@ -198,7 +198,7 @@
          形状的已重构参考):一行账号状态 + 行内动作,等待输码时才在卡片内追加
          居中的验证码块(倒计时 + 复制并打开),轮询在后台静默完成授权。 -->
     <SettingsSection
-      v-if="isManagedOAuthClientType(form.values.client_type)"
+      v-if="isManagedOAuthClientType(form.client_type)"
       :title="$t('provider.oauth.sectionTitle')"
       :class="{ 'mt-6': !isManagedOAuthProvider }"
     >
@@ -296,7 +296,7 @@
               :code="oauthStatus?.device?.user_code ?? ''"
               :verification-uri="oauthStatus?.device?.verification_uri ?? ''"
               :expires-at="oauthStatus?.device?.expires_at ?? ''"
-              :hint="$t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubDeviceHint' : 'provider.oauth.openaiDeviceHint')"
+              :hint="$t(form.client_type === 'github-copilot' ? 'provider.oauth.githubDeviceHint' : 'provider.oauth.openaiDeviceHint')"
               :retry-loading="authorizeLoading"
               :copy-and-open-label="$t('deviceCode.copyAndOpen')"
               :retry-label="$t('deviceCode.retry')"
@@ -317,10 +317,6 @@ import {
   AutoHeight,
   Input,
   Button,
-  FormControl,
-  FormField,
-  FormItem,
-  FormMessage,
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
@@ -339,10 +335,7 @@ import {
   isManagedOAuthClientType,
   MANUAL_LLM_CLIENT_TYPE_LIST,
 } from '@/constants/client-types'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { toTypedSchema } from '@vee-validate/zod'
-import z from 'zod'
-import { useForm } from 'vee-validate'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import {
   deleteProvidersByIdOauthToken,
   getProvidersByIdOauthAuthorize,
@@ -359,6 +352,8 @@ import type {
 import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, DeviceCodePanel, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 
 const { t } = useI18n()
 const { syncProviderModelCatalog } = useProviderModelCatalog()
@@ -389,14 +384,13 @@ const props = defineProps<{
   provider: ProviderWithAuth | undefined
   editLoading: boolean
   ensureProvider: () => Promise<ProvidersGetResponse>
+  // Promise-returning save (the parent's mutation): the autosave queue awaits
+  // it so a failure can roll the field back; fire-and-forget emits can't.
+  saveProvider: (payload: Record<string, unknown>) => Promise<unknown>
 }>()
 
 const isDraft = computed(() => !props.provider?.id && !!props.provider?.provider_template_id)
 const isManagedOAuthProvider = computed(() => isManagedOAuthClientType(props.provider?.client_type))
-
-const emit = defineEmits<{
-  submit: [values: Record<string, unknown>]
-}>()
 
 const testLoading = ref(false)
 const testResult = ref<ProvidersTestResponse | null>(null)
@@ -411,11 +405,12 @@ let oauthStatusLoadGeneration = 0
 const testStatus = computed(() => {
   if (testResult.value?.status === 'ok') return 'ok'
   if (testError.value) return 'error'
-  if (testResult.value && testResult.value.status !== 'ok') return 'error'
+  // Any non-ok probe result is an error state (the ok case returned above).
+  if (testResult.value) return 'error'
   return 'idle'
 })
 const cacheDescription = computed(() =>
-  form.values.prompt_cache_ttl === 'off'
+  form.prompt_cache_ttl === 'off'
     ? t('provider.promptCache.descriptionOff')
     : t('provider.promptCache.description'),
 )
@@ -479,138 +474,223 @@ const clientTypeOptions = computed(() =>
   })),
 )
 
-const providerSchema = toTypedSchema(z.object({
-  enable: z.boolean(),
-  name: z.string().min(1),
-  base_url: z.string().optional(),
-  api_key: z.string().optional(),
-  client_type: z.string().min(1),
-  prompt_cache_ttl: z.enum(['5m', '1h', 'off']).optional(),
-}).superRefine((value, ctx) => {
-  const existingSecret = getStoredSecret(
-    props.provider?.config as Record<string, unknown> | undefined,
-  )
-  if (!isManagedOAuthClientType(value.client_type) && !value.api_key?.trim() && !existingSecret.trim()) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['api_key'],
-      message: 'API key is required',
-    })
-  }
-  if (value.client_type !== 'github-copilot' && !value.base_url?.trim()) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['base_url'],
-      message: 'Base URL is required',
-    })
-  }
-}))
+// ---- Config fields (autosaved for an existing provider) ----
+// Web skill §8: an existing provider's fields auto-save (the backend Update
+// is pointer-partial and shallow-merges config, preserving masked secrets),
+// silently on success, toast + rollback on failure. The one manual Save left
+// is draft materialization — creating the provider at all.
+// A type alias (not interface) so the record satisfies the queue's
+// Record<string, unknown> constraint.
+type ProviderFormRecord = {
+  name: string
+  client_type: string
+  base_url: string
+  // Write-only: never hydrated from the server; synced stays '' so a
+  // committed key diffs exactly once and a rollback returns to ''.
+  api_key: string
+  prompt_cache_ttl: PromptCacheTtl
+}
 
-const form = useForm({
-  validationSchema: providerSchema,
+const form = reactive<ProviderFormRecord>({
+  name: '',
+  client_type: 'openai-completions',
+  base_url: '',
+  api_key: '',
+  prompt_cache_ttl: '5m',
 })
+
+// Last-known-server snapshot; see bot-settings.vue for the full contract.
+const synced = reactive<ProviderFormRecord>({ ...form })
+
+// Switching client type rewrites the base URL default in the same tick, so
+// the pair saves as ONE job — never a codex type with a stale openai URL.
+// Hydration applies the same defaults to `next` before writing form+synced,
+// or this write would read as a user edit and trigger a phantom save.
+function applyClientTypeDefaults(target: ProviderFormRecord) {
+  if (target.client_type === 'openai-codex' && !target.base_url) {
+    target.base_url = 'https://chatgpt.com/backend-api'
+  }
+  if (target.client_type === 'github-copilot') {
+    target.base_url = ''
+  }
+}
+
+function updateClientType(value: string) {
+  form.client_type = value
+  applyClientTypeDefaults(form)
+}
 
 watch(() => props.provider, (newVal) => {
-  if (newVal) {
-    const cfg = newVal.config as Record<string, unknown> | undefined
-    form.setValues({
-      enable: newVal.enable ?? true,
-      name: newVal.name,
-      base_url: (cfg?.base_url as string) ?? '',
-      api_key: '',
-      client_type: newVal.client_type || 'openai-completions',
-      prompt_cache_ttl: normalizeCacheTtl(cfg?.prompt_cache_ttl as string | undefined),
-    })
+  if (!newVal) return
+  const cfg = newVal.config as Record<string, unknown> | undefined
+  const next: ProviderFormRecord = {
+    name: newVal.name ?? '',
+    client_type: newVal.client_type || 'openai-completions',
+    base_url: (cfg?.base_url as string) ?? '',
+    api_key: '',
+    prompt_cache_ttl: normalizeCacheTtl(cfg?.prompt_cache_ttl as string | undefined),
+  }
+  applyClientTypeDefaults(next)
+  // Per-field guard: a refetch landing mid-edit must not clobber it.
+  for (const key of Object.keys(next) as (keyof ProviderFormRecord)[]) {
+    if (form[key] === synced[key]) form[key] = next[key] as never
+    synced[key] = next[key] as never
   }
 }, { immediate: true })
 
-watch(() => form.values.client_type, (clientType) => {
-  if (!isManagedOAuthClientType(clientType)) {
-    oauthStatusLoadGeneration += 1
-    oauthStatusLoading.value = false
-    oauthStatus.value = null
-  }
-  if (clientType === 'openai-codex' && !form.values.base_url) {
-    form.setFieldValue('base_url', 'https://chatgpt.com/backend-api')
-  }
-  if (clientType === 'github-copilot') {
-    form.setFieldValue('base_url', '')
-  }
+// Text drafts commit on blur/Enter; an invalid commit reverts to the last
+// committed value (autosave replaces the old "Save stays disabled" gate).
+const nameDraft = ref(form.name)
+const nameFocused = ref(false)
+const baseUrlDraft = ref(form.base_url)
+const baseUrlFocused = ref(false)
+const apiKeyDraft = ref('')
+const apiKeyFocused = ref(false)
+
+watch(() => form.name, (value) => {
+  if (!nameFocused.value) nameDraft.value = value
+})
+watch(() => form.base_url, (value) => {
+  if (!baseUrlFocused.value) baseUrlDraft.value = value
 })
 
-watch(() => [props.provider?.id, form.values.client_type] as const, async ([id, clientType]) => {
-  if (!id || !isManagedOAuthClientType(clientType)) {
-    oauthStatusLoadGeneration += 1
-    oauthStatusLoading.value = false
-    oauthStatus.value = null
+function commitNameDraft() {
+  const value = nameDraft.value.trim()
+  if (!value) {
+    nameDraft.value = form.name
     return
   }
-  await fetchOAuthStatus()
-}, { immediate: true })
+  form.name = value
+  nameDraft.value = form.name
+}
 
-const hasChanges = computed(() => {
-  const raw = props.provider
-  const cfg = raw?.config as Record<string, unknown> | undefined
-  const baseChanged = JSON.stringify({
-    enable: form.values.enable,
-    name: form.values.name,
-    base_url: form.values.base_url,
-    client_type: form.values.client_type,
-  }) !== JSON.stringify({
-    enable: raw?.enable ?? true,
-    name: raw?.name,
-    base_url: (cfg?.base_url as string) ?? '',
-    client_type: raw?.client_type || 'openai-completions',
-  })
+function commitBaseUrlDraft() {
+  const value = baseUrlDraft.value.trim()
+  if (!value && form.client_type !== 'github-copilot') {
+    baseUrlDraft.value = form.base_url
+    return
+  }
+  form.base_url = value
+  baseUrlDraft.value = form.base_url
+}
 
-  const apiKeyChanged = Boolean(form.values.api_key && form.values.api_key.trim() !== '')
-  const cacheChanged = supportsPromptCache(form.values.client_type)
-    && normalizeCacheTtl(form.values.prompt_cache_ttl)
-      !== normalizeCacheTtl(cfg?.prompt_cache_ttl as string | undefined)
-  return baseChanged || apiKeyChanged || cacheChanged
-})
+function commitApiKeyDraft() {
+  const value = apiKeyDraft.value.trim()
+  if (!value) {
+    apiKeyDraft.value = ''
+    return
+  }
+  form.api_key = value
+  // Committing the key that's already stored produces no diff (no save, no
+  // onSaved) — clear the box here or it would keep showing the typed secret.
+  if (form.api_key === synced.api_key) apiKeyDraft.value = ''
+}
 
-const editProvider = form.handleSubmit(async (value) => {
+// Draft-materialization validation errors (Save exists only in draft mode);
+// they clear as the user edits.
+const draftErrors = reactive({ name: '', base_url: '', api_key: '' })
+watch(nameDraft, () => { draftErrors.name = '' })
+watch(baseUrlDraft, () => { draftErrors.base_url = '' })
+watch(apiKeyDraft, () => { draftErrors.api_key = '' })
+
+function buildProviderPayload(values: ProviderFormRecord, keys: (keyof ProviderFormRecord)[]): Record<string, unknown> {
   const config: Record<string, unknown> = {}
-  if (value.base_url && value.base_url.trim() !== '') {
-    config.base_url = value.base_url
-  }
-  if (value.api_key && value.api_key.trim() !== '') {
-    if (value.client_type !== 'github-copilot') {
-      config.api_key = value.api_key.trim()
+  const payload: Record<string, unknown> = {}
+  for (const key of keys) {
+    if (key === 'name') payload.name = values.name
+    else if (key === 'client_type') payload.client_type = values.client_type
+    else if (key === 'base_url') config.base_url = values.base_url
+    else if (key === 'api_key') {
+      // Never ship an empty key: empty means "keep the stored secret"
+      // (backend shallow-merges config and preserves masked secrets), and
+      // autosave commits are already gated non-empty.
+      if (values.api_key.trim()) config.api_key = values.api_key.trim()
     }
+    else if (key === 'prompt_cache_ttl') config.prompt_cache_ttl = normalizeCacheTtl(values.prompt_cache_ttl)
   }
-  if (supportsPromptCache(value.client_type)) {
-    config.prompt_cache_ttl = normalizeCacheTtl(value.prompt_cache_ttl)
-  }
-  const metadata = {
-    ...((props.provider?.metadata as Record<string, unknown> | undefined) ?? {}),
-  }
-  if (value.client_type === 'github-copilot') {
+  if (Object.keys(config).length > 0) payload.config = config
+  // Switching to github-copilot must scrub the stale managed-OAuth client id
+  // left by a previous codex-type save (whole-replace metadata semantics).
+  if (keys.includes('client_type') && values.client_type === 'github-copilot') {
+    const metadata = {
+      ...((props.provider?.metadata as Record<string, unknown> | undefined) ?? {}),
+    }
     delete metadata.oauth_client_id
-  }
-  const payload: Record<string, unknown> = {
-    enable: value.enable,
-    name: value.name,
-    config,
-    client_type: value.client_type,
-  }
-  if (Object.keys(metadata).length > 0 || value.client_type === 'github-copilot') {
     payload.metadata = metadata
   }
-  emit('submit', payload)
+  return payload
+}
+
+function buildJobs(changed: (keyof ProviderFormRecord)[]): AutosaveJob<ProviderFormRecord>[] {
+  // Drafts (and nothing-selected) never autosave: the only way out of a
+  // template draft is the deliberate Save (materialize) or OAuth connect.
+  if (!props.provider?.id) return []
+  const sent: Partial<ProviderFormRecord> = {}
+  for (const key of changed) sent[key] = form[key] as never
+  const payload = buildProviderPayload(form, changed)
+  const includesApiKey = changed.includes('api_key')
+  return [{
+    payload: sent,
+    save: async () => {
+      await props.saveProvider(payload)
+    },
+    onSaved: () => {
+      // The key now lives server-side; the box returns to its write-only
+      // empty state (placeholder shows the stored secret).
+      if (includesApiKey) apiKeyDraft.value = ''
+    },
+    onError: (error) => toast.error(resolveApiErrorMessage(error, t('common.saveFailed'))),
+  }]
+}
+
+useAutosaveQueue<ProviderFormRecord>({
+  form,
+  synced,
+  buildJobs,
 })
+
+// Manual Save = materialize a template draft. Validation lives here (not in a
+// schema library): name required, base URL required off-copilot, API key
+// required unless the type is managed-OAuth.
+async function submitDraft() {
+  if (!isDraft.value) return
+  commitNameDraft()
+  commitBaseUrlDraft()
+  commitApiKeyDraft()
+  let valid = true
+  if (!form.name.trim()) {
+    draftErrors.name = 'Name is required'
+    valid = false
+  }
+  if (form.client_type !== 'github-copilot' && !form.base_url.trim()) {
+    draftErrors.base_url = 'Base URL is required'
+    valid = false
+  }
+  if (!isManagedOAuthClientType(form.client_type) && !form.api_key.trim()) {
+    draftErrors.api_key = 'API key is required'
+    valid = false
+  }
+  if (!valid) return
+
+  const payload = buildProviderPayload(form, ['name', 'client_type', 'base_url', 'api_key', 'prompt_cache_ttl'])
+  payload.enable = props.provider?.enable ?? true
+  try {
+    await props.saveProvider(payload)
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  }
+}
 
 const oauthExpired = computed(() => Boolean(oauthStatus.value?.has_token && oauthStatus.value?.expired))
 const oauthConnected = computed(() => Boolean(oauthStatus.value?.has_token) && !oauthExpired.value)
 
 // 行标签按账号体系命名(用户的 outcome),而不是"设备授权"这类流程名。
 const accountLabel = computed(() =>
-  t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubAccount' : 'provider.oauth.chatgptAccount'),
+  t(form.client_type === 'github-copilot' ? 'provider.oauth.githubAccount' : 'provider.oauth.chatgptAccount'),
 )
 
 const connectDescription = computed(() =>
-  t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubConnectHint' : 'provider.oauth.openaiConnectHint'),
+  t(form.client_type === 'github-copilot' ? 'provider.oauth.githubConnectHint' : 'provider.oauth.openaiConnectHint'),
 )
 
 // 连接后的身份行:优先邮箱/显示名,附 @login;两者皆空时由模板回退到"已连接"。
@@ -769,4 +849,22 @@ async function handleRevoke() {
     revokeLoading.value = false
   }
 }
+
+watch(() => form.client_type, (clientType) => {
+  if (!isManagedOAuthClientType(clientType)) {
+    oauthStatusLoadGeneration += 1
+    oauthStatusLoading.value = false
+    oauthStatus.value = null
+  }
+})
+
+watch(() => [props.provider?.id, form.client_type] as const, async ([id, clientType]) => {
+  if (!id || !isManagedOAuthClientType(clientType)) {
+    oauthStatusLoadGeneration += 1
+    oauthStatusLoading.value = false
+    oauthStatus.value = null
+    return
+  }
+  await fetchOAuthStatus()
+}, { immediate: true })
 </script>

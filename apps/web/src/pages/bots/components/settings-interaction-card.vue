@@ -63,32 +63,14 @@
       <div class="w-56">
         <ModelSelect
           v-model="form.chat_model_id"
+          v-model:reasoning-effort="form.reasoning_effort"
           :models="models"
           :providers="providers"
           model-type="chat"
           :placeholder="$t('bots.settings.chatModelPlaceholder')"
+          show-reasoning
         />
       </div>
-    </SettingsRow>
-
-    <SettingsRow :label="$t('bots.settings.reasoningEffort')">
-      <Select
-        v-model="reasoningFormValue"
-        :disabled="!chatModelSupportsReasoning"
-      >
-        <SelectTrigger class="w-44">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem
-            v-for="effort in availableReasoningEfforts"
-            :key="effort"
-            :value="effort"
-          >
-            {{ $t(EFFORT_LABELS[effort] ?? effort) }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
     </SettingsRow>
 
     <SettingsRow
@@ -108,7 +90,7 @@ import { computed, watch } from 'vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SettingsRow, SettingsSection, Switch } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import ModelSelect from './model-select.vue'
-import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
+import { REASONING_EFFORT_DISABLE, nearestEffortToMedium, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
 import type { AcpprofilePublicProfile, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 
@@ -218,34 +200,18 @@ const chatModelClientType = computed(() => {
 
 const thinkingMode = computed(() => resolveThinkingMode(chatModelConfig.value))
 
-const chatModelSupportsReasoning = computed(() => thinkingMode.value !== 'none')
-
 const effortLevels = computed(() => resolveEffortLevels(chatModelConfig.value, chatModelClientType.value))
 
-const availableReasoningEfforts = computed(() =>
-  availableEffortsForMode(thinkingMode.value, effortLevels.value),
-)
-
-watch([effortLevels, thinkingMode], ([levels]) => {
+// Switching models can strand the stored tier on a model that does not offer it.
+// "Off" survives any model (it is not a tier), and a model with no thinking at
+// all has nothing to migrate to, so both are left alone.
+watch([effortLevels, thinkingMode], ([levels, mode]) => {
   const current = props.form.reasoning_effort
-  if (props.form.reasoning_enabled && (!current || !levels.includes(current))) {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.form.reasoning_effort = levels.includes('medium') ? 'medium' : levels[0] ?? 'medium'
-  }
+  if (mode === 'none' || current === REASONING_EFFORT_DISABLE) return
+  if (current && levels.includes(current)) return
+  // eslint-disable-next-line vue/no-mutating-props
+  props.form.reasoning_effort = levels.includes('medium')
+    ? 'medium'
+    : nearestEffortToMedium(levels) || 'medium'
 }, { immediate: true })
-
-const reasoningFormValue = computed({
-  get: () => (props.form.reasoning_enabled ? (props.form.reasoning_effort ?? 'medium') : REASONING_EFFORT_DISABLE),
-  set: (v: string) => {
-    if (v === REASONING_EFFORT_DISABLE) {
-      // eslint-disable-next-line vue/no-mutating-props
-      props.form.reasoning_enabled = false
-    } else {
-      // eslint-disable-next-line vue/no-mutating-props
-      props.form.reasoning_enabled = true
-      // eslint-disable-next-line vue/no-mutating-props
-      props.form.reasoning_effort = v
-    }
-  },
-})
 </script>

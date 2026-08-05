@@ -179,6 +179,45 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	}
 }
 
+func TestPostgresAgentStepCommitStopsAfterAbort(t *testing.T) {
+	ctx := context.Background()
+	pool := openRuntimeFencePostgresPool(t, ctx)
+	botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
+	queries := dbsqlc.New(pool)
+	token := acquireRuntimeFenceToken(t, ctx, queries, botID, sessionID)
+	runID, turnID := uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_runs
+		(run_id, bot_id, session_id, invocation_id, turn_id, turn_position, state,
+		 input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation)
+		VALUES ($1, $2, $3, $4, $5, 0, 'running', '{}'::jsonb, 'test', 'test-owner', $6, now(), 'test')`,
+		runID, botID, sessionID, uuid.NewString(), turnID, token); err != nil {
+		t.Fatalf("create running session run: %v", err)
+	}
+	position := int64(0)
+	step := AgentStep{RunID: runID.String(), Messages: []PersistInput{
+		{BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), TurnID: turnID.String(), TurnPosition: &position, Role: "user", Content: []byte(`{"role":"user","content":"hello"}`)},
+		{BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), Role: "assistant", Content: []byte(`{"role":"assistant","content":"done"}`)},
+	}}
+	service := NewService(nil, postgresstore.NewQueriesWithPool(pool, queries))
+	owner := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: botID.String(), SessionID: sessionID.String(), Token: token})
+	persisted, err := service.PersistAgentStep(owner, step)
+	if err != nil || len(persisted) != 2 {
+		t.Fatalf("first step commit = (%d, %v), want (2, nil)", len(persisted), err)
+	}
+	pgRunID, _ := dbpkg.ParseUUID(runID.String())
+	if _, err := queries.RequestSessionRunAbort(ctx, pgRunID); err != nil {
+		t.Fatalf("request abort: %v", err)
+	}
+	step.Messages = []PersistInput{{
+		BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"too late"}`), TurnRequestMessageID: persisted[0].ID,
+	}}
+	if _, err := service.PersistAgentStep(owner, step); !errors.Is(err, ErrAgentStepNotWritable) {
+		t.Fatalf("post-abort step error = %v, want ErrAgentStepNotWritable", err)
+	}
+}
+
 func runtimeFenceReplacement(oldTurn HistoryTurn, oldTurnID, requestMessageID, reason string) *TurnReplacement {
 	position := oldTurn.Position + 1
 	return &TurnReplacement{

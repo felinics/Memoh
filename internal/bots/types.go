@@ -88,6 +88,12 @@ type ContainerLifecycle interface {
 	CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error
 }
 
+// ConnectorLifecycle removes external connector credentials before the local
+// bot row and its bindings are deleted.
+type ConnectorLifecycle interface {
+	CleanupBotConnectors(ctx context.Context, botID string) error
+}
+
 // RuntimeChecker produces runtime check items for a bot.
 type RuntimeChecker interface {
 	// ListChecks evaluates dynamic runtime checks for a bot.

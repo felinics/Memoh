@@ -89,6 +89,17 @@ describe('runtime projection', () => {
     ])
   })
 
+  it('treats a null message list from an idle runtime snapshot as empty', () => {
+    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
+      status: 'completed',
+      messages: null as unknown as RuntimeCurrentRunView['messages'],
+      request_user_turn: undefined,
+    })))
+
+    expect(state.currentRunView?.messages).toEqual([])
+    expect(state.transcript.streaming).toBe(false)
+  })
+
   it('projects an edit replacement as the authoritative user and assistant pair', () => {
     const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
       request_user_turn: undefined,

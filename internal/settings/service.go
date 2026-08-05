@@ -105,7 +105,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionRatio)
+	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
 	// A read error here must abort: falling through would leave `current` at the
 	// model defaults and silently overwrite a saved chat_runtime=acp_agent (and
 	// its agent id) on the next save. ErrNoRows is impossible because the bot
@@ -129,17 +129,17 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	current.OverlayEnabled = overlayBindingRow.OverlayEnabled
 	current.OverlayProvider = strings.TrimSpace(overlayBindingRow.OverlayProvider)
 	current.OverlayConfig = normalizeJSONObject(overlayBindingRow.OverlayConfig)
-	if strings.TrimSpace(req.Language) != "" {
-		current.Language = strings.TrimSpace(req.Language)
+	if req.Language != nil {
+		current.Language = strings.TrimSpace(*req.Language)
+		if current.Language == "" {
+			current.Language = DefaultLanguage
+		}
 	}
 	if strings.TrimSpace(req.CommandUILanguage) != "" {
 		current.CommandUILanguage = strings.TrimSpace(req.CommandUILanguage)
 	}
 	if effect := strings.TrimSpace(req.AclDefaultEffect); effect != "" {
 		current.AclDefaultEffect = effect
-	}
-	if req.ReasoningEnabled != nil {
-		current.ReasoningEnabled = *req.ReasoningEnabled
 	}
 	if req.ReasoningEffort != nil && isValidReasoningEffort(*req.ReasoningEffort) {
 		current.ReasoningEffort = *req.ReasoningEffort
@@ -156,9 +156,11 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.CompactionThreshold != nil && *req.CompactionThreshold >= 0 {
 		current.CompactionThreshold = *req.CompactionThreshold
 	}
-	if req.CompactionRatio != nil && *req.CompactionRatio >= 1 && *req.CompactionRatio <= 100 {
-		current.CompactionRatio = *req.CompactionRatio
-	}
+	compactionTargetPercent, compactionTargetPercentSet := applyCompactionTargetPercentOverride(
+		current.CompactionTargetPercent,
+		req.CompactionTargetPercent,
+	)
+	current.CompactionTargetPercent = compactionTargetPercent
 	if req.PersistFullToolResults != nil {
 		current.PersistFullToolResults = *req.PersistFullToolResults
 	}
@@ -221,23 +223,31 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		current.OverlayConfig = req.OverlayConfig
 	}
 	chatModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.ChatModelID); value != "" {
-		modelID, err := s.resolveModelUUID(ctx, value)
-		if err != nil {
-			return Settings{}, err
-		}
-		chatModelUUID = modelID
-		if modelID.Valid {
-			current.ChatModelID = uuid.UUID(modelID.Bytes).String()
+	chatModelIDSet := req.ChatModelID != nil
+	if req.ChatModelID != nil {
+		if value := strings.TrimSpace(*req.ChatModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, value)
+			if err != nil {
+				return Settings{}, err
+			}
+			chatModelUUID = modelID
+			if modelID.Valid {
+				current.ChatModelID = uuid.UUID(modelID.Bytes).String()
+			}
+		} else {
+			current.ChatModelID = ""
 		}
 	}
 	heartbeatModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.HeartbeatModelID); value != "" {
-		modelID, err := s.resolveModelUUID(ctx, value)
-		if err != nil {
-			return Settings{}, err
+	heartbeatModelIDSet := req.HeartbeatModelID != nil
+	if req.HeartbeatModelID != nil {
+		if value := strings.TrimSpace(*req.HeartbeatModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, value)
+			if err != nil {
+				return Settings{}, err
+			}
+			heartbeatModelUUID = modelID
 		}
-		heartbeatModelUUID = modelID
 	}
 	compactionModelUUID := pgtype.UUID{}
 	compactionModelIDSet := req.CompactionModelID != nil
@@ -251,20 +261,26 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 	}
 	imageModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.ImageModelID); value != "" {
-		modelID, err := s.resolveModelUUID(ctx, value)
-		if err != nil {
-			return Settings{}, err
+	imageModelIDSet := req.ImageModelID != nil
+	if req.ImageModelID != nil {
+		if value := strings.TrimSpace(*req.ImageModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, value)
+			if err != nil {
+				return Settings{}, err
+			}
+			imageModelUUID = modelID
 		}
-		imageModelUUID = modelID
 	}
 	searchProviderUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.SearchProviderID); value != "" {
-		providerID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	searchProviderIDSet := req.SearchProviderID != nil
+	if req.SearchProviderID != nil {
+		if value := strings.TrimSpace(*req.SearchProviderID); value != "" {
+			providerID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			searchProviderUUID = providerID
 		}
-		searchProviderUUID = providerID
 	}
 	fetchProviderUUID := pgtype.UUID{}
 	fetchProviderIDSet := req.FetchProviderID != nil
@@ -278,36 +294,48 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 	}
 	memoryProviderUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.MemoryProviderID); value != "" {
-		providerID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	memoryProviderIDSet := req.MemoryProviderID != nil
+	if req.MemoryProviderID != nil {
+		if value := strings.TrimSpace(*req.MemoryProviderID); value != "" {
+			providerID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			memoryProviderUUID = providerID
 		}
-		memoryProviderUUID = providerID
 	}
 	ttsModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.TtsModelID); value != "" {
-		modelID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	ttsModelIDSet := req.TtsModelID != nil
+	if req.TtsModelID != nil {
+		if value := strings.TrimSpace(*req.TtsModelID); value != "" {
+			modelID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			ttsModelUUID = modelID
 		}
-		ttsModelUUID = modelID
 	}
 	transcriptionModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.TranscriptionModelID); value != "" {
-		modelID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	transcriptionModelIDSet := req.TranscriptionModelID != nil
+	if req.TranscriptionModelID != nil {
+		if value := strings.TrimSpace(*req.TranscriptionModelID); value != "" {
+			modelID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			transcriptionModelUUID = modelID
 		}
-		transcriptionModelUUID = modelID
 	}
 	videoModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.VideoModelID); value != "" {
-		modelID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	videoModelIDSet := req.VideoModelID != nil
+	if req.VideoModelID != nil {
+		if value := strings.TrimSpace(*req.VideoModelID); value != "" {
+			modelID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			videoModelUUID = modelID
 		}
-		videoModelUUID = modelID
 	}
 	current = normalizeChatRuntimeFields(current)
 	if err := validateChatRuntimeSettings(botRow.Metadata, current); err != nil {
@@ -346,41 +374,49 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		return Settings{}, rollbackNetworkChange(fmt.Errorf("marshal network config: %w", err))
 	}
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
-		ID:                     pgID,
-		Timezone:               timezoneValue,
-		Language:               current.Language,
-		CommandUiLanguage:      current.CommandUILanguage,
-		ReasoningEnabled:       current.ReasoningEnabled,
-		ReasoningEffort:        current.ReasoningEffort,
-		HeartbeatEnabled:       current.HeartbeatEnabled,
-		HeartbeatInterval:      int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
-		HeartbeatPrompt:        "",
-		CompactionEnabled:      current.CompactionEnabled,
-		CompactionThreshold:    int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
-		CompactionRatio:        int32(current.CompactionRatio),     //nolint:gosec // bounded 1-100 above
-		ChatModelID:            chatModelUUID,
-		ChatRuntime:            current.ChatRuntime,
-		ChatAcpAgentID:         nullableText(current.ChatACPAgentID),
-		ChatAcpProjectPath:     current.ChatACPProjectPath,
-		ChatAcpProjectMode:     current.ChatACPProjectMode,
-		HeartbeatModelID:       heartbeatModelUUID,
-		CompactionModelIDSet:   compactionModelIDSet,
-		CompactionModelID:      compactionModelUUID,
-		ImageModelID:           imageModelUUID,
-		SearchProviderID:       searchProviderUUID,
-		FetchProviderIDSet:     fetchProviderIDSet,
-		FetchProviderID:        fetchProviderUUID,
-		MemoryProviderID:       memoryProviderUUID,
-		TtsModelID:             ttsModelUUID,
-		TranscriptionModelID:   transcriptionModelUUID,
-		VideoModelID:           videoModelUUID,
-		PersistFullToolResults: current.PersistFullToolResults,
-		ShowToolCallsInIm:      current.ShowToolCallsInIM,
-		ToolApprovalConfig:     toolApprovalConfig,
-		DisplayEnabled:         current.DisplayEnabled,
-		OverlayProvider:        normalizedNetwork.OverlayProvider,
-		OverlayEnabled:         normalizedNetwork.OverlayEnabled,
-		OverlayConfig:          overlayConfigJSON,
+		ID:                         pgID,
+		Timezone:                   timezoneValue,
+		Language:                   current.Language,
+		CommandUiLanguage:          current.CommandUILanguage,
+		ReasoningEffort:            current.ReasoningEffort,
+		HeartbeatEnabled:           current.HeartbeatEnabled,
+		HeartbeatInterval:          int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
+		HeartbeatPrompt:            "",
+		CompactionEnabled:          current.CompactionEnabled,
+		CompactionThreshold:        int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
+		CompactionTargetPercentSet: compactionTargetPercentSet,
+		CompactionTargetPercent:    nullableCompactionTargetPercent(current.CompactionTargetPercent),
+		ChatModelID:                chatModelUUID,
+		ChatModelIDSet:             chatModelIDSet,
+		ChatRuntime:                current.ChatRuntime,
+		ChatAcpAgentID:             nullableText(current.ChatACPAgentID),
+		ChatAcpProjectPath:         current.ChatACPProjectPath,
+		ChatAcpProjectMode:         current.ChatACPProjectMode,
+		HeartbeatModelID:           heartbeatModelUUID,
+		HeartbeatModelIDSet:        heartbeatModelIDSet,
+		CompactionModelIDSet:       compactionModelIDSet,
+		CompactionModelID:          compactionModelUUID,
+		ImageModelID:               imageModelUUID,
+		ImageModelIDSet:            imageModelIDSet,
+		SearchProviderID:           searchProviderUUID,
+		SearchProviderIDSet:        searchProviderIDSet,
+		FetchProviderIDSet:         fetchProviderIDSet,
+		FetchProviderID:            fetchProviderUUID,
+		MemoryProviderID:           memoryProviderUUID,
+		MemoryProviderIDSet:        memoryProviderIDSet,
+		TtsModelID:                 ttsModelUUID,
+		TtsModelIDSet:              ttsModelIDSet,
+		TranscriptionModelID:       transcriptionModelUUID,
+		TranscriptionModelIDSet:    transcriptionModelIDSet,
+		VideoModelID:               videoModelUUID,
+		VideoModelIDSet:            videoModelIDSet,
+		PersistFullToolResults:     current.PersistFullToolResults,
+		ShowToolCallsInIm:          current.ShowToolCallsInIM,
+		ToolApprovalConfig:         toolApprovalConfig,
+		DisplayEnabled:             current.DisplayEnabled,
+		OverlayProvider:            normalizedNetwork.OverlayProvider,
+		OverlayEnabled:             normalizedNetwork.OverlayEnabled,
+		OverlayConfig:              overlayConfigJSON,
 	})
 	if err != nil {
 		return Settings{}, rollbackNetworkChange(err)
@@ -412,22 +448,21 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return nil
 }
 
-func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEnabled bool, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32, compactionRatio int32) Settings {
+func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
 	settings := Settings{
-		Language:            strings.TrimSpace(language),
-		CommandUILanguage:   strings.TrimSpace(commandUILanguage),
-		AclDefaultEffect:    strings.TrimSpace(aclDefaultEffect),
-		ReasoningEnabled:    reasoningEnabled,
-		ReasoningEffort:     strings.TrimSpace(reasoningEffort),
-		HeartbeatEnabled:    heartbeatEnabled,
-		HeartbeatInterval:   int(heartbeatInterval),
-		CompactionEnabled:   compactionEnabled,
-		CompactionThreshold: int(compactionThreshold),
-		CompactionRatio:     int(compactionRatio),
-		ToolApprovalConfig:  DefaultToolApprovalConfig(),
-		ChatRuntime:         ChatRuntimeModel,
-		ChatACPProjectPath:  DefaultACPProjectPath,
-		ChatACPProjectMode:  DefaultACPProjectMode,
+		Language:                strings.TrimSpace(language),
+		CommandUILanguage:       strings.TrimSpace(commandUILanguage),
+		AclDefaultEffect:        strings.TrimSpace(aclDefaultEffect),
+		ReasoningEffort:         strings.TrimSpace(reasoningEffort),
+		HeartbeatEnabled:        heartbeatEnabled,
+		HeartbeatInterval:       int(heartbeatInterval),
+		CompactionEnabled:       compactionEnabled,
+		CompactionThreshold:     int(compactionThreshold),
+		CompactionTargetPercent: normalizeCompactionTargetPercent(compactionTargetPercent),
+		ToolApprovalConfig:      DefaultToolApprovalConfig(),
+		ChatRuntime:             ChatRuntimeModel,
+		ChatACPProjectPath:      DefaultACPProjectPath,
+		ChatACPProjectMode:      DefaultACPProjectMode,
 	}
 	if settings.Language == "" {
 		settings.Language = DefaultLanguage
@@ -447,11 +482,36 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 	if settings.CompactionThreshold < 0 {
 		settings.CompactionThreshold = 0
 	}
-	if settings.CompactionRatio < 1 || settings.CompactionRatio > 100 {
-		settings.CompactionRatio = 80
-	}
 	settings.OverlayConfig = map[string]any{}
 	return settings
+}
+
+func normalizeCompactionTargetPercent(value pgtype.Int4) *int {
+	if !value.Valid {
+		return nil
+	}
+	return normalizeCompactionTargetPercentValue(int(value.Int32))
+}
+
+func normalizeCompactionTargetPercentValue(value int) *int {
+	if value < 1 || value > 99 {
+		return nil
+	}
+	return &value
+}
+
+func applyCompactionTargetPercentOverride(current, requested *int) (*int, bool) {
+	if requested == nil {
+		return current, false
+	}
+	return normalizeCompactionTargetPercentValue(*requested), true
+}
+
+func nullableCompactionTargetPercent(value *int) pgtype.Int4 {
+	if value == nil {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: int32(*value), Valid: true} //nolint:gosec // normalized to 1-99
 }
 
 // isValidReasoningEffort accepts the full effort tier range. Effort is now a
@@ -466,13 +526,12 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 	return normalizeBotSettingsFields(
 		row.Language,
 		row.CommandUiLanguage,
-		row.ReasoningEnabled,
 		row.ReasoningEffort,
 		row.HeartbeatEnabled,
 		row.HeartbeatInterval,
 		row.CompactionEnabled,
 		row.CompactionThreshold,
-		row.CompactionRatio,
+		row.CompactionTargetPercent,
 		row.Timezone,
 		row.ChatModelID,
 		row.ChatRuntime,
@@ -502,13 +561,12 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 	return normalizeBotSettingsFields(
 		row.Language,
 		row.CommandUiLanguage,
-		row.ReasoningEnabled,
 		row.ReasoningEffort,
 		row.HeartbeatEnabled,
 		row.HeartbeatInterval,
 		row.CompactionEnabled,
 		row.CompactionThreshold,
-		row.CompactionRatio,
+		row.CompactionTargetPercent,
 		row.Timezone,
 		row.ChatModelID,
 		row.ChatRuntime,
@@ -537,13 +595,12 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 func normalizeBotSettingsFields(
 	language string,
 	commandUILanguage string,
-	reasoningEnabled bool,
 	reasoningEffort string,
 	heartbeatEnabled bool,
 	heartbeatInterval int32,
 	compactionEnabled bool,
 	compactionThreshold int32,
-	compactionRatio int32,
+	compactionTargetPercent pgtype.Int4,
 	timezone pgtype.Text,
 	chatModelID pgtype.UUID,
 	chatRuntime string,
@@ -567,7 +624,7 @@ func normalizeBotSettingsFields(
 	overlayEnabled bool,
 	overlayConfig []byte,
 ) Settings {
-	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio)
+	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionTargetPercent)
 	if timezone.Valid {
 		settings.Timezone = timezone.String
 	}

@@ -19,6 +19,7 @@ import (
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/media"
 	"github.com/memohai/memoh/internal/runtimefence"
 )
 
@@ -661,6 +662,9 @@ func (s *DBService) finishPersistedMessage(ctx context.Context, result Message, 
 			Role:        role,
 			Ordinal:     int32(ref.Ordinal),
 			ContentHash: contentHash,
+			Mime:        strings.TrimSpace(ref.Mime),
+			SizeBytes:   ref.SizeBytes,
+			StorageKey:  strings.TrimSpace(ref.StorageKey),
 			Name:        ref.Name,
 			Metadata:    marshalMetadata(ref.Metadata),
 		}); assetErr != nil {
@@ -679,9 +683,9 @@ func (s *DBService) finishPersistedMessage(ctx context.Context, result Message, 
 				ContentHash: ch,
 				Role:        coalesce(ref.Role, "attachment"),
 				Ordinal:     ref.Ordinal,
-				Mime:        ref.Mime,
+				Mime:        strings.TrimSpace(ref.Mime),
 				SizeBytes:   ref.SizeBytes,
-				StorageKey:  ref.StorageKey,
+				StorageKey:  strings.TrimSpace(ref.StorageKey),
 				Name:        ref.Name,
 				Metadata:    ref.Metadata,
 			})
@@ -1436,6 +1440,9 @@ func (s *DBService) LinkAssets(ctx context.Context, messageID string, assets []A
 				Role:        role,
 				Ordinal:     int32(ref.Ordinal),
 				ContentHash: contentHash,
+				Mime:        strings.TrimSpace(ref.Mime),
+				SizeBytes:   ref.SizeBytes,
+				StorageKey:  strings.TrimSpace(ref.StorageKey),
 				Name:        ref.Name,
 				Metadata:    marshalMetadata(ref.Metadata),
 			}); assetErr != nil {
@@ -2394,12 +2401,25 @@ func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
 		if contentHash == "" {
 			continue
 		}
+		metadata := unmarshalMetadata(row.Metadata)
+		storageKey := strings.TrimSpace(row.StorageKey)
+		if storageKey == "" {
+			storageKey, _ = metadata["storage_key"].(string)
+			storageKey = strings.TrimSpace(storageKey)
+		}
+		mimeType := strings.TrimSpace(row.Mime)
+		if mimeType == "" {
+			mimeType = media.MimeFromPath(coalesce(storageKey, row.Name))
+		}
 		assetMap[msgID] = append(assetMap[msgID], MessageAsset{
 			ContentHash: contentHash,
 			Role:        row.Role,
 			Ordinal:     int(row.Ordinal),
+			Mime:        mimeType,
+			SizeBytes:   row.SizeBytes,
+			StorageKey:  storageKey,
 			Name:        row.Name,
-			Metadata:    unmarshalMetadata(row.Metadata),
+			Metadata:    metadata,
 		})
 	}
 	for i := range messages {

@@ -189,6 +189,21 @@ WHERE team_id = public.memoh_current_team_id()
   AND state IN ('accepted', 'running', 'waiting_decision')
 RETURNING *;
 
+-- name: LockSessionRunForAgentStepCommit :one
+-- Linearize a complete-step commit against abort and terminal transitions.
+-- RequestSessionRunAbort updates the same row, so either the step locks first
+-- and commits, or the abort becomes visible here and the step is refused.
+SELECT run_id
+FROM session_runs
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = sqlc.arg(run_id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND fencing_token = sqlc.arg(fencing_token)
+  AND state IN ('running', 'waiting_decision')
+  AND abort_requested_at IS NULL
+FOR UPDATE;
+
 -- name: ListStaleGenerationSessionRuns :many
 -- Fail-closed recovery sweep. Matching on "not the current generation" rather
 -- than one specific old value means a backend lost twice in quick succession

@@ -119,6 +119,10 @@ export function createACPStaging(deps: ACPStagingDeps) {
     return { loaded: true, input: input ? cloneACPInput(input) : null }
   }
 
+  function clearDefaultACPInputs() {
+    defaultACPInputsByBot.clear()
+  }
+
   function cacheDefaultACPSession(input: ACPAgentSessionInput | null) {
     rememberDefaultACPInput(currentBotId.value ?? '', input)
   }
@@ -425,6 +429,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
     pendingACPRuntimeEnsuring,
     rememberDefaultACPInput,
     cachedDefaultACPInput,
+    clearDefaultACPInputs,
     cacheDefaultACPSession,
     stageACPSession,
     stageDefaultACPSession,

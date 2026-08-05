@@ -7,7 +7,6 @@
     "web:dev": "pnpm --filter @memohai/web dev",
     "web:build": "pnpm --filter @memohai/web build",
     "web:start": "pnpm --filter @memohai/web start",
-    "dev:minify": "mise run dev:minify",
     "release": "bumpp",
     "release:patch": "bumpp patch --yes",
     "release:minor": "bumpp minor --yes",

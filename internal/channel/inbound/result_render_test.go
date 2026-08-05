@@ -8,6 +8,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"
+	"github.com/memohai/memoh/internal/models"
 )
 
 func listResult(total, page, pageSize int) *command.Result {
@@ -304,7 +305,7 @@ func TestFormatStartWelcomeMessageTelegramGroup(t *testing.T) {
 func TestFormatNewSessionMessage(t *testing.T) {
 	got := formatNewSessionMessage(i18n.New("en"), "chat", command.CurrentContext{
 		ChatModel: "Claude Opus 4.7 (Anthropic)", HeartbeatModel: "DeepSeek V4 (DeepSeek)",
-		ReasoningEnabled: true, ReasoningEffort: "medium", ContextWindow: "128.0K",
+		ReasoningEffort: "medium", ContextWindow: "128.0K",
 	}, "")
 	// A fresh-start card confirms the full setup: model (+provider), reasoning,
 	// and context budget. Header is bold; values are plain (display names/enums).
@@ -335,7 +336,7 @@ func TestFormatNewSessionMessage(t *testing.T) {
 
 	// Reasoning off is still shown (it sets expectations on a fresh start); no
 	// heartbeat and no known context window are omitted.
-	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false}, "")
+	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEffort: models.ReasoningEffortDisable}, "")
 	if !strings.Contains(off, "Reasoning: off") {
 		t.Errorf("reasoning state should be confirmed on the fresh-start card: %s", off)
 	}

@@ -68,13 +68,15 @@ services:
       #   HTTP_PROXY=http://host.docker.internal:7890 docker compose up -d
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,connect-it,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel,memoh-connect-it"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,connect-it,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel,memoh-connect-it"
       MEMOH_INTERNAL_RPC_SHARED_SECRET: "${MEMOH_INTERNAL_RPC_SHARED_SECRET:?MEMOH_INTERNAL_RPC_SHARED_SECRET is required}"
       MEMOH_INTERNAL_RPC_SERVER_TARGET: "server:9090"
       MEMOH_INTERNAL_RPC_CHANNEL_TARGET: "channel:9091"
+      MEMOH_CONNECT_IT_BASE_URL: "${MEMOH_CONNECT_IT_BASE_URL:-}"
+      MEMOH_CONNECT_IT_API_TOKEN: "${MEMOH_CONNECT_IT_API_TOKEN:-}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:
@@ -163,6 +165,37 @@ services:
       - channel
     expose:
       - "18735"
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  # Optional co-hosted Connect-It (enable with --profile connectors). It owns
+  # and migrates its own connect_it schema inside the shared memoh database;
+  # Memoh reaches it over HTTP only. The bootstrap API token is seeded by
+  # Connect-It at startup and presented by the Memoh server as its bearer
+  # token — the install script generates and persists all of these values.
+  connect-it:
+    image: "${MEMOH_CONNECT_IT_IMAGE:-ghcr.io/memohai/connect-it:0.1.1}"
+    container_name: memoh-connect-it
+    profiles: [connectors]
+    environment:
+      DATABASE_URL: "postgres://memoh:${POSTGRES_PASSWORD:-memoh123}@postgres:5432/memoh?sslmode=disable&search_path=connect_it"
+      CONNECT_IT_SECRET_KEY: "${MEMOH_CONNECT_IT_SECRET_KEY:-}"
+      COOKIE_SECRET: "${MEMOH_CONNECT_IT_COOKIE_SECRET:-}"
+      CONNECT_IT_ADMIN_PASSWORD: "${MEMOH_CONNECT_IT_ADMIN_PASSWORD:-}"
+      CONNECT_IT_BOOTSTRAP_API_TOKEN: "${MEMOH_CONNECT_IT_API_TOKEN:-}"
+      CONNECT_IT_BASE_URL: "${MEMOH_CONNECT_IT_PUBLIC_BASE_URL:-http://localhost:${MEMOH_CONNECT_IT_PORT:-8421}}"
+      HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,server,connect-it,memoh-postgres,memoh-server,memoh-connect-it"
+      http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
+      https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,server,connect-it,memoh-postgres,memoh-server,memoh-connect-it"
+    ports:
+      - "${MEMOH_CONNECT_IT_PORT:-8421}:8421"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - memoh-network

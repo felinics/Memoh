@@ -7,6 +7,7 @@ dotenv.config()
 
 const webRoot = fileURLToPath(new URL('./apps/web', import.meta.url))
 const desktopRoot = fileURLToPath(new URL('./apps/desktop', import.meta.url))
+const repoRoot = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
   test: {
@@ -39,6 +40,15 @@ export default defineConfig({
           include: ['src/**/*.test.ts'],
           env: process.env,
           testTimeout: Infinity,
+        },
+      },
+      {
+        root: repoRoot,
+        test: {
+          name: 'docker',
+          include: ['docker/**/*.test.ts'],
+          env: process.env,
+          testTimeout: 15_000,
         },
       },
     ],

@@ -80,47 +80,17 @@ run = "pnpm --filter @memohai/icon generate"
 [tasks.dev]
 description = "Start development environment"
 depends = ["//:dev:workspace-image"]
-run = """
-#!/bin/bash
-set -e
-docker compose -f devenv/docker-compose.yml up --build
-"""
+run = "scripts/dev-compose.sh devenv/docker-compose.yml"
 
 [tasks."dev:webhook-tunnel"]
 description = "Start development environment with Cloudflare Quick Tunnel for webhooks"
 depends = ["//:dev:workspace-image"]
-run = """
-#!/bin/bash
-set -e
-docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.webhook-tunnel.yml up --build
-"""
-
-[tasks."dev:minify"]
-description = "Start development environment with minified services"
-depends = ["//:dev:workspace-image"]
-run = """
-#!/bin/bash
-set -e
-docker compose -f devenv/docker-compose.minify.yml up --build
-"""
-
-[tasks."dev:minify:webhook-tunnel"]
-description = "Start minified development environment with Cloudflare Quick Tunnel for webhooks"
-depends = ["//:dev:workspace-image"]
-run = """
-#!/bin/bash
-set -e
-docker compose -f devenv/docker-compose.minify.yml -f devenv/docker-compose.webhook-tunnel.yml up --build
-"""
+run = "scripts/dev-compose.sh devenv/docker-compose.yml devenv/docker-compose.webhook-tunnel.yml"
 
 [tasks."dev:selinux"]
 description = "Start development environment on SELinux systems"
 depends = ["//:dev:workspace-image"]
-run = """
-#!/bin/bash
-set -e
-docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml up --build
-"""
+run = "scripts/dev-compose.sh devenv/docker-compose.yml devenv/docker-compose.selinux.yml"
 
 [tasks."dev:down"]
 description = "Stop development environment"

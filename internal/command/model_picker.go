@@ -245,10 +245,11 @@ func formatProvidersSummary(cc CommandContext, groups []providerGroup, cands []m
 
 // formatReasoningLabel renders the current reasoning state for picker headers.
 func formatReasoningLabel(cc CommandContext, s settings.Settings) string {
-	if !s.ReasoningEnabled {
+	e := strings.TrimSpace(s.ReasoningEffort)
+	if models.IsReasoningDisabled(e) {
 		return cc.T("cmd.common.off")
 	}
-	if e := strings.TrimSpace(s.ReasoningEffort); e != "" {
+	if e != "" {
 		return e
 	}
 	return cc.T("cmd.common.on")

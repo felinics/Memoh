@@ -1,6 +1,6 @@
 #!/bin/sh
 
-apt_get() {
+apt_get_once() {
   timeout_seconds="${MEMOH_APT_COMMAND_TIMEOUT:-300}"
   if has_cmd timeout; then
     timeout "$timeout_seconds" apt-get \
@@ -17,6 +17,33 @@ apt_get() {
     -o "Acquire::http::Timeout=${MEMOH_APT_HTTP_TIMEOUT:-30}" \
     -o "Acquire::https::Timeout=${MEMOH_APT_HTTP_TIMEOUT:-30}" \
     "$@"
+}
+
+apt_get() {
+  max_attempts="${MEMOH_APT_COMMAND_RETRIES:-3}"
+  retry_delay="${MEMOH_APT_RETRY_DELAY:-5}"
+  case "$max_attempts" in
+    ""|*[!0-9]*|0) max_attempts=3 ;;
+  esac
+  case "$retry_delay" in
+    ""|*[!0-9]*) retry_delay=5 ;;
+  esac
+
+  attempt=1
+  while :; do
+    if apt_get_once "$@"; then
+      return 0
+    else
+      status=$?
+    fi
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      return "$status"
+    fi
+    wait_seconds=$((retry_delay * attempt))
+    echo "apt-get failed with exit code $status (attempt $attempt/$max_attempts); retrying in ${wait_seconds}s" >&2
+    sleep "$wait_seconds"
+    attempt=$((attempt + 1))
+  done
 }
 
 run_limited() {

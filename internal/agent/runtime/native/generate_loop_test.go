@@ -429,6 +429,8 @@ func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
 		nil,
 		nil,
 		&sdk.StreamResult{Messages: []sdk.Message{sdk.UserMessage("previous step")}},
+		&stepMessageCapture{},
+		nil,
 		0,
 		"api error 500",
 		&strings.Builder{},

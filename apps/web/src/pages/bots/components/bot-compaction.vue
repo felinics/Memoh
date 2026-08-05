@@ -5,7 +5,7 @@ import { ConfirmPopover, InlineLoadingRow, PageShell, SettingsRow, SettingsSecti
 import { Box } from 'lucide-vue-next'
 import {
   ActionCard, Button, Badge, Dialog, DialogBody, DialogDescription, DialogHeader, DialogPanel, DialogTitle,
-  Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input, Slider,
+  Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input, Label,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
@@ -13,14 +13,19 @@ import {
 import ModelSelect from './model-select.vue'
 import { filterCompactionModels } from './compaction-models'
 import {
+  compactionTargetPercentAfterToggle,
+  isCompactionTargetPercentInvalid,
+} from './compaction-target'
+import {
   getBotsByBotIdSettings, putBotsByBotIdSettings,
   getBotsByBotIdCompactionLogs, deleteBotsByBotIdCompactionLogs,
   getModels, getProviders,
 } from '@memohai/sdk'
 import type { SettingsSettings, SettingsUpsertRequest, CompactionLog } from '@memohai/sdk'
-import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
+import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{
@@ -62,68 +67,145 @@ const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 const compactionModels = computed(() => filterCompactionModels(models.value, providers.value))
 
-const settingsForm = reactive({
+// ---- Settings (autosaved) ----
+// No Save button by design (web skill §8); same autosave contract as
+// bot-settings.vue. Number inputs are free-typing drafts committed on
+// blur/Enter so autosave fires once per edit, never per keystroke; an invalid
+// draft never enters `form` (it reverts on commit), which replaces the old
+// "Save button stays disabled while invalid" gate.
+// A type alias (not interface) so the record satisfies the queue's
+// Record<string, unknown> constraint.
+type CompactionForm = {
+  compaction_enabled: boolean
+  compaction_threshold: number
+  compaction_target_percent: number | null
+  compaction_model_id: string
+}
+
+const form = reactive<CompactionForm>({
   compaction_enabled: false,
   compaction_threshold: 0,
-  compaction_ratio: 80,
+  compaction_target_percent: null,
   compaction_model_id: '',
 })
 
+// Last-known-server snapshot; see bot-settings.vue for the full contract. Any
+// non-user write to `form` (hydration, rollback) must advance `synced` in the
+// same block or the diff misreads it as an edit.
+const synced = reactive<CompactionForm>({ ...form })
+
 watch(settings, (val: SettingsSettings | undefined) => {
-  if (val) {
-    settingsForm.compaction_enabled = val.compaction_enabled ?? false
-    settingsForm.compaction_threshold = val.compaction_threshold ?? 0
-    settingsForm.compaction_ratio = val.compaction_ratio ?? 80
-    settingsForm.compaction_model_id = val.compaction_model_id ?? ''
+  if (!val) return
+  const next: CompactionForm = {
+    compaction_enabled: val.compaction_enabled ?? false,
+    compaction_threshold: val.compaction_threshold ?? 0,
+    compaction_target_percent: val.compaction_target_percent ?? null,
+    compaction_model_id: val.compaction_model_id ?? '',
+  }
+  // Per-field guard: a refetch landing mid-edit must not clobber it.
+  for (const key of Object.keys(next) as (keyof CompactionForm)[]) {
+    if (form[key] === synced[key]) form[key] = next[key] as never
+    synced[key] = next[key] as never
   }
 }, { immediate: true })
 
 const advancedOpen = ref(false)
 
-// Logs context follows the SAVED state, not the pending form: a toggle the user
-// hasn't saved yet must not change what the logs panel claims is running.
-const savedEnabled = computed(() => settings.value?.compaction_enabled ?? false)
+// Threshold draft: commits on blur/Enter; non-integer or negative reverts.
+const thresholdDraft = ref(String(form.compaction_threshold))
+const thresholdFocused = ref(false)
 
-const settingsChanged = computed(() => {
-  if (!settings.value) return false
-  const s: SettingsSettings = settings.value
-  return settingsForm.compaction_enabled !== (s.compaction_enabled ?? false)
-    || settingsForm.compaction_threshold !== (s.compaction_threshold ?? 0)
-    || settingsForm.compaction_ratio !== (s.compaction_ratio ?? 80)
-    || settingsForm.compaction_model_id !== (s.compaction_model_id ?? '')
+watch(() => form.compaction_threshold, (value) => {
+  if (!thresholdFocused.value) thresholdDraft.value = String(value)
 })
 
-// Was on, now toggled off but not yet saved — the cue that disabling is pending.
-const pendingDisable = computed(() => !settingsForm.compaction_enabled && savedEnabled.value)
-
-function resetSettings() {
-  const s = settings.value
-  settingsForm.compaction_enabled = s?.compaction_enabled ?? false
-  settingsForm.compaction_threshold = s?.compaction_threshold ?? 0
-  settingsForm.compaction_ratio = s?.compaction_ratio ?? 80
-  settingsForm.compaction_model_id = s?.compaction_model_id ?? ''
-}
-
-const { mutateAsync: updateSettings, isLoading: isSaving } = useMutation({
-  mutation: async (body: SettingsUpsertRequest) => {
-    const { data } = await putBotsByBotIdSettings({
-      path: { bot_id: botIdRef.value },
-      body,
-      throwOnError: true,
-    })
-    return data
-  },
-  onSettled: () => queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] }),
-})
-
-async function handleSaveSettings() {
-  try {
-    await updateSettings({ ...settingsForm })
-    toast.success(t('bots.settings.saveSuccess'))
-  } catch {
+function commitThresholdDraft() {
+  const parsed = Number(thresholdDraft.value.trim())
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    thresholdDraft.value = String(form.compaction_threshold)
     return
   }
+  form.compaction_threshold = parsed
+  thresholdDraft.value = String(form.compaction_threshold)
 }
+
+// Target-percent draft: '' means "use the default" (null → backend clears the
+// override). The inline error is live typing feedback; the value only reaches
+// `form` via commit, so an invalid draft can never be saved.
+const percentDraft = ref(form.compaction_target_percent === null ? '' : String(form.compaction_target_percent))
+const percentFocused = ref(false)
+
+watch(() => form.compaction_target_percent, (value) => {
+  if (!percentFocused.value) percentDraft.value = value === null ? '' : String(value)
+})
+
+const parsedPercentDraft = computed(() => {
+  const raw = percentDraft.value.trim()
+  if (raw === '') return null
+  const parsed = Number(raw)
+  return Number.isNaN(parsed) ? null : parsed
+})
+
+const compactionTargetPercentInvalid = computed(() => {
+  if (percentDraft.value.trim() === '') return false
+  const parsed = Number(percentDraft.value.trim())
+  return Number.isNaN(parsed) || isCompactionTargetPercentInvalid(parsed)
+})
+
+function commitPercentDraft() {
+  if (compactionTargetPercentInvalid.value) {
+    percentDraft.value = form.compaction_target_percent === null ? '' : String(form.compaction_target_percent)
+    return
+  }
+  form.compaction_target_percent = parsedPercentDraft.value
+  percentDraft.value = form.compaction_target_percent === null ? '' : String(form.compaction_target_percent)
+}
+
+// Logs context follows the SAVED state, not an in-flight edit: the panel must
+// describe what is actually running.
+const savedEnabled = computed(() => synced.compaction_enabled)
+
+function updateCompactionEnabled(value: boolean) {
+  // Toggling off drops an invalid in-progress draft (helper returns the saved
+  // value); a valid draft is kept so the toggle doesn't eat typing.
+  const kept = compactionTargetPercentAfterToggle(value, parsedPercentDraft.value, form.compaction_target_percent)
+  if (kept !== parsedPercentDraft.value) {
+    percentDraft.value = kept === null ? '' : String(kept)
+  }
+  form.compaction_enabled = value
+}
+
+function buildJobs(changed: (keyof CompactionForm)[]): AutosaveJob<CompactionForm>[] {
+  const payload: SettingsUpsertRequest = {}
+  const sent: Partial<CompactionForm> = {}
+  for (const key of changed) {
+    sent[key] = form[key] as never
+    // Backend clears the override on any out-of-range value when the field is
+    // explicitly sent (1-99 normalizes, everything else → NULL), so the null
+    // "use default" state travels as 0; omitting the key would mean "keep".
+    ;(payload as Record<string, unknown>)[key] = key === 'compaction_target_percent'
+      ? (form.compaction_target_percent ?? 0)
+      : form[key]
+  }
+  return [{
+    payload: sent,
+    save: async () => {
+      await putBotsByBotIdSettings({
+        path: { bot_id: botIdRef.value },
+        body: payload,
+        throwOnError: true,
+      })
+    },
+    onError: (error) => toast.error(resolveApiErrorMessage(error, t('common.saveFailed'))),
+  }]
+}
+
+useAutosaveQueue<CompactionForm>({
+  form,
+  synced,
+  buildJobs,
+  onDrained: () => queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] }),
+})
 
 // ---- Logs ----
 const isLoading = ref(false)
@@ -260,85 +342,87 @@ onBeforeUnmount(() => {
           :description="$t('bots.settings.compactionDescription')"
         >
           <Switch
-            :model-value="settingsForm.compaction_enabled"
-            @update:model-value="(val) => settingsForm.compaction_enabled = !!val"
+            :model-value="form.compaction_enabled"
+            @update:model-value="updateCompactionEnabled"
           />
         </SettingsRow>
 
-        <template v-if="settingsForm.compaction_enabled">
-          <SettingsRow :label="$t('bots.settings.compactionThreshold')">
+        <template v-if="form.compaction_enabled">
+          <SettingsRow stack="sm">
+            <template #content>
+              <Label for="compaction-threshold">
+                {{ $t('bots.settings.compactionThreshold') }}
+              </Label>
+            </template>
             <Input
-              v-model.number="settingsForm.compaction_threshold"
+              id="compaction-threshold"
+              :model-value="thresholdDraft"
               type="number"
               :min="0"
+              :step="1"
               placeholder="0"
-              class="h-8 w-32 tabular-nums"
+              size="sm"
+              class="w-32 tabular-nums"
+              @update:model-value="(value) => thresholdDraft = String(value ?? '')"
+              @focus="thresholdFocused = true"
+              @change="commitThresholdDraft"
+              @blur="thresholdFocused = false; commitThresholdDraft()"
+              @keydown.enter="commitThresholdDraft"
             />
           </SettingsRow>
 
           <SettingsRow
-            v-if="settingsForm.compaction_threshold > 0"
-            :label="$t('bots.settings.compactionRatio')"
-            :description="$t('bots.settings.compactionRatioDescription')"
+            stack="sm"
           >
-            <div class="flex w-48 items-center gap-3">
-              <Slider
-                :model-value="[settingsForm.compaction_ratio]"
-                :min="1"
-                :max="100"
-                :step="1"
-                class="min-w-0 flex-1"
-                @update:model-value="(val) => settingsForm.compaction_ratio = val[0]"
-              />
-              <span class="w-10 text-right text-xs tabular-nums text-muted-foreground">
-                {{ settingsForm.compaction_ratio }}%
-              </span>
-            </div>
+            <template #content>
+              <Label for="compaction-target-percent">
+                {{ $t('bots.settings.compactionTargetPercent') }}
+              </Label>
+              <p
+                id="compaction-target-percent-description"
+                class="mt-0.5 text-body text-muted-foreground"
+              >
+                {{ $t('bots.settings.compactionTargetPercentDescription') }}
+              </p>
+              <p
+                v-if="compactionTargetPercentInvalid"
+                id="compaction-target-percent-error"
+                class="mt-1 text-body text-destructive"
+              >
+                {{ $t('bots.settings.compactionTargetPercentInvalid') }}
+              </p>
+            </template>
+            <Input
+              id="compaction-target-percent"
+              :model-value="percentDraft"
+              type="number"
+              :min="1"
+              :max="99"
+              :step="1"
+              placeholder="40"
+              size="sm"
+              class="w-32 tabular-nums"
+              :aria-describedby="compactionTargetPercentInvalid
+                ? 'compaction-target-percent-description compaction-target-percent-error'
+                : 'compaction-target-percent-description'"
+              :aria-invalid="compactionTargetPercentInvalid"
+              @update:model-value="(value) => percentDraft = String(value ?? '')"
+              @focus="percentFocused = true"
+              @change="commitPercentDraft"
+              @blur="percentFocused = false; commitPercentDraft()"
+              @keydown.enter="commitPercentDraft"
+            />
           </SettingsRow>
-        </template>
-
-        <!-- Turning the toggle off is a pending change, not an instant stop — say so, so the
-             switch state doesn't read as already-applied before Save. -->
-        <div
-          v-if="pendingDisable"
-          class="mx-4 border-b border-border py-3 last:border-b-0"
-        >
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.compaction.disableNote') }}
-          </p>
-        </div>
-
-        <!-- Save is the result of pending changes, not a permanent fixture: the footer only
-             exists while there is something to commit. -->
-        <template
-          v-if="settingsChanged"
-          #footer
-        >
-          <Button
-            variant="ghost"
-            size="sm"
-            :disabled="isSaving"
-            @click="resetSettings"
-          >
-            {{ $t('common.cancel') }}
-          </Button>
-          <Button
-            size="sm"
-            :loading="isSaving"
-            @click="handleSaveSettings"
-          >
-            {{ $t('common.saveChanges') }}
-          </Button>
         </template>
       </SettingsSection>
 
       <!-- Model override is a power-user facet (defaults to the bot's chat
            model), so it lives behind a named ActionCard entry opening a
            focused dialog — the house replacement for the old in-card
-           "Advanced" expand row. Draft semantics unchanged: the dialog edits
-           the same settingsForm, and the settings card's footer Save commits. -->
+           "Advanced" expand row. The dialog edits the same autosaved form, so
+           a selection persists the moment it is made. -->
       <section
-        v-if="settingsForm.compaction_enabled"
+        v-if="form.compaction_enabled"
         class="space-y-2.5"
       >
         <h2 class="px-2 text-label font-medium text-muted-foreground">
@@ -579,9 +663,9 @@ onBeforeUnmount(() => {
     </div>
   </PageShell>
 
-  <!-- Advanced model override dialog (workbench form). Edits settingsForm
-       directly — the Save/Cancel footer on the settings card remains the
-       single commit point, so closing this dialog never loses or applies
+  <!-- Advanced model override dialog (workbench form). Edits the autosaved
+       form directly: picking a model (or None, which clears the override)
+       saves immediately, so closing the dialog never loses or applies
        anything by itself. -->
   <Dialog v-model:open="advancedOpen">
     <DialogPanel width="lg">
@@ -591,7 +675,7 @@ onBeforeUnmount(() => {
       </DialogHeader>
       <DialogBody>
         <ModelSelect
-          v-model="settingsForm.compaction_model_id"
+          v-model="form.compaction_model_id"
           :models="compactionModels"
           :providers="providers"
           model-type="chat"

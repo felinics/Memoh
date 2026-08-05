@@ -57,7 +57,9 @@ function makeController() {
   const activityHandlers: Array<(event: BotSessionActivityEvent) => void> = []
   const callbacks: ChatRealtimeCallbacks = {
     onWebSocketEvent: vi.fn(),
-    prepareSessionRuntime: vi.fn().mockResolvedValue(undefined),
+    prepareSessionRuntime: vi.fn(async (_botId, _sessionId, commitInitialHistory) => {
+      await commitInitialHistory(() => {})
+    }),
     onRuntimeProjection: vi.fn(),
     onBotSessionsActivityEvent: vi.fn(),
   }
@@ -192,6 +194,7 @@ describe('chat realtime controller', () => {
         updated_at: '2026-07-27T08:00:00.000Z',
       },
     })
+    await flushPromises()
 
     expect(callbacks.onRuntimeProjection).toHaveBeenCalledOnce()
     expect(controller.runtimeProjection('session-1')).toMatchObject({
@@ -200,15 +203,51 @@ describe('chat realtime controller', () => {
     })
   })
 
-  it('lets history apply buffered runtime state before hydration completes', async () => {
+  it('holds fetched history until the initial runtime snapshot is ready', async () => {
     const { controller, callbacks, sockets } = makeController()
-    let applyBufferedProjections: (() => void) | undefined
-    let finishPreparation: (() => void) | undefined
-    callbacks.prepareSessionRuntime = vi.fn((_botId, _sessionId, applyBuffered) => {
-      applyBufferedProjections = applyBuffered
-      return new Promise<void>((resolve) => {
-        finishPreparation = resolve
-      })
+    const phases: string[] = []
+    callbacks.onRuntimeProjection = vi.fn(() => phases.push('runtime'))
+    callbacks.prepareSessionRuntime = vi.fn(async (_botId, _sessionId, commitInitialHistory) => {
+      phases.push('history-fetched')
+      await commitInitialHistory(() => phases.push('history'))
+      phases.push('prepared')
+    })
+    controller.startWebSocket('bot-1')
+    controller.startSessionRuntime('bot-1', 'session-1')
+    await flushPromises()
+
+    expect(phases).toEqual(['history-fetched'])
+    expect(callbacks.onRuntimeProjection).not.toHaveBeenCalled()
+
+    sockets[0]!.handler({
+      type: 'runtime_snapshot',
+      session_id: 'session-1',
+      epoch: 'epoch-1',
+      seq: 1,
+      snapshot: {
+        bot_id: 'bot-1',
+        session_id: 'session-1',
+        epoch: 'epoch-1',
+        seq: 1,
+        updated_at: '2026-07-27T08:00:00.000Z',
+      },
+    })
+    await flushPromises()
+
+    expect(phases).toEqual(['history-fetched', 'history', 'runtime', 'prepared'])
+  })
+
+  it('holds the initial runtime snapshot until fetched history can commit', async () => {
+    const { controller, callbacks, sockets } = makeController()
+    const phases: string[] = []
+    let finishHistoryFetch!: () => void
+    const historyFetched = new Promise<void>((resolve) => {
+      finishHistoryFetch = resolve
+    })
+    callbacks.onRuntimeProjection = vi.fn(() => phases.push('runtime'))
+    callbacks.prepareSessionRuntime = vi.fn(async (_botId, _sessionId, commitInitialHistory) => {
+      await historyFetched
+      await commitInitialHistory(() => phases.push('history'))
     })
     controller.startWebSocket('bot-1')
     controller.startSessionRuntime('bot-1', 'session-1')
@@ -226,13 +265,32 @@ describe('chat realtime controller', () => {
         updated_at: '2026-07-27T08:00:00.000Z',
       },
     })
+    await flushPromises()
+
+    expect(phases).toEqual([])
     expect(callbacks.onRuntimeProjection).not.toHaveBeenCalled()
 
-    applyBufferedProjections?.()
-    expect(callbacks.onRuntimeProjection).toHaveBeenCalledOnce()
-
-    finishPreparation?.()
+    finishHistoryFetch()
     await flushPromises()
+
+    expect(phases).toEqual(['history', 'runtime'])
+  })
+
+  it('releases a pending hydration when its runtime subscription stops', async () => {
+    const { controller, callbacks } = makeController()
+    const prepared = vi.fn()
+    callbacks.prepareSessionRuntime = vi.fn(async (_botId, _sessionId, commitInitialHistory) => {
+      await commitInitialHistory(() => {})
+      prepared()
+    })
+    controller.startWebSocket('bot-1')
+    controller.startSessionRuntime('bot-1', 'session-1')
+
+    controller.stopSessionRuntime('bot-1', 'session-1')
+    await flushPromises()
+
+    expect(prepared).toHaveBeenCalledOnce()
+    expect(callbacks.onRuntimeProjection).not.toHaveBeenCalled()
   })
 
   it('unsubscribes a hidden session without stopping another session', async () => {

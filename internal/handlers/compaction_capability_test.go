@@ -42,14 +42,14 @@ func (q *compactionCapabilityQueries) GetSettingsByBotID(context.Context, pgtype
 		return sqlc.GetSettingsByBotIDRow{}, q.settingsErr
 	}
 	return sqlc.GetSettingsByBotIDRow{
-		Language:           settings.DefaultLanguage,
-		ReasoningEffort:    settings.DefaultReasoningEffort,
-		HeartbeatInterval:  settings.DefaultHeartbeatInterval,
-		CompactionRatio:    80,
-		CompactionModelID:  q.model.ID,
-		CommandUiLanguage:  settings.DefaultCommandUILanguage,
-		ChatAcpProjectPath: settings.DefaultACPProjectPath,
-		ChatAcpProjectMode: settings.DefaultACPProjectMode,
+		Language:                settings.DefaultLanguage,
+		ReasoningEffort:         settings.DefaultReasoningEffort,
+		HeartbeatInterval:       settings.DefaultHeartbeatInterval,
+		CompactionTargetPercent: pgtype.Int4{},
+		CompactionModelID:       q.model.ID,
+		CommandUiLanguage:       settings.DefaultCommandUILanguage,
+		ChatAcpProjectPath:      settings.DefaultACPProjectPath,
+		ChatAcpProjectMode:      settings.DefaultACPProjectMode,
 	}, nil
 }
 

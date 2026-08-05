@@ -175,9 +175,10 @@ declare module '@memohai/web/pages/home/commands/workspace-tab-commands' {
 }
 
 declare module '@memohai/web/store/settings' {
-  // We don't need the concrete Pinia store type here. Desktop just calls the
-  // composable for its registration side-effect.
-  export function useSettingsStore(): unknown
+  export type ThemePreference = 'light' | 'dark' | 'system'
+  export function useSettingsStore(pinia?: unknown): {
+    theme: ThemePreference
+  }
 }
 
 declare module '@memohai/web/store/workspace-tabs' {

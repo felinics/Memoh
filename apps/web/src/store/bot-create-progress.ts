@@ -32,6 +32,7 @@ export type BotCreateDisplay = {
 export type BotCreateSettings = {
   chat_model_id?: string
   memory_provider_id?: string
+  reasoning_effort?: string
 }
 
 export type StartBotCreateOptions = {
@@ -40,13 +41,14 @@ export type StartBotCreateOptions = {
 }
 
 function hasSettings(settings?: BotCreateSettings): boolean {
-  return !!(settings && (settings.chat_model_id || settings.memory_provider_id))
+  return !!(settings && (settings.chat_model_id || settings.memory_provider_id || settings.reasoning_effort))
 }
 
 function settingsBody(settings: BotCreateSettings) {
   return {
     ...(settings.chat_model_id ? { chat_model_id: settings.chat_model_id } : {}),
     ...(settings.memory_provider_id ? { memory_provider_id: settings.memory_provider_id } : {}),
+    ...(settings.reasoning_effort ? { reasoning_effort: settings.reasoning_effort } : {}),
   }
 }
 

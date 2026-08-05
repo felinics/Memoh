@@ -311,7 +311,7 @@
       "unknownOption": "Unknown option: {option}\n\n{usage}",
       "unknownLanguage": "Unknown language {value}. Choose auto, en, zh, or ja.",
       "unavailable": "Settings aren't available right now.",
-      "updateUsage": "Usage: /settings update [options]\n\nOptions:\n- --language <value>\n- --acl_default_effect <allow|deny>\n- --reasoning_enabled <true|false>\n- --reasoning_effort <none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <minutes>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n(Command UI language: /settings language <auto|en|zh|ja>)",
+      "updateUsage": "Usage: /settings update [options]\n\nOptions:\n- --language <value>\n- --acl_default_effect <allow|deny>\n- --reasoning_effort <disable|none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <minutes>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n(Command UI language: /settings language <auto|en|zh|ja>)",
       "langJa": "日本語"
     },
     "language": {

@@ -7,3 +7,72 @@ body,
   overflow: hidden;
   background: var(--background);
 }
+
+html {
+  --desktop-sidebar-width: 15rem;
+}
+
+html[data-native-sidebar-material] {
+  /* Keep the sidebar calmer than raw vibrancy while preserving enough of the
+   * macOS material to read as translucent. A vibrancy material's rendered
+   * color is hostage to whatever sits behind the window (clean over the
+   * default wallpaper, muddy over a dark window) — 70% theme color bounds
+   * that swing to the remaining 30%. */
+  --desktop-native-sidebar-tint: color-mix(
+    in oklab,
+    var(--sidebar) 70%,
+    transparent
+  );
+}
+
+html.dark[data-native-sidebar-material] {
+  /* Desktop's dark reading plane is intentionally softer than the shared Web
+   * near-black. The literal belongs to this platform token, never a page. */
+  --background: #181818;
+}
+
+/* Electron's native sidebar material sits behind the full renderer. Keep the
+ * document canvas transparent on macOS, then let normal bg-background content
+ * panes cover it. Only the marked sidebar surfaces expose the material. */
+html[data-native-sidebar-material],
+html[data-native-sidebar-material] body,
+html[data-native-sidebar-material] #app,
+html[data-native-sidebar-material] [data-desktop-window-layer],
+html[data-native-sidebar-material] [data-native-sidebar-surface] {
+  background: transparent;
+}
+
+html[data-native-sidebar-material] [data-native-sidebar-tint] {
+  background: var(--desktop-native-sidebar-tint);
+}
+
+/* Opaque sidebar fades would paint over the native material at the footer. */
+html[data-native-sidebar-material] [data-native-sidebar-fade] {
+  background-image: none;
+}
+
+/* Sidebar ↔ chat seam: the stroke derives from the family divider color (an
+ * invented or translucent line reads foreign over the glass); the seam's
+ * extra weight comes from a soft shadow spilling left onto the sidebar, so
+ * the chat plane reads as floating above the glass layer. */
+html[data-native-sidebar-material] [data-native-sidebar-seam] {
+  border-right-width: 1px;
+  border-right-color: var(--native-sidebar-seam);
+  box-shadow: inset -10px 0 10px -10px var(--native-sidebar-seam-shadow);
+}
+
+/* Settings stays mounted above the persistent chat workspace. Clear the exact
+ * native-sidebar column from that underlay so the transparent settings sidebar
+ * reaches the OS material instead of revealing opaque chat content beneath it. */
+html[data-native-sidebar-material] [data-native-sidebar-underlay-clear="true"] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0 var(--desktop-sidebar-width),
+    black var(--desktop-sidebar-width)
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0 var(--desktop-sidebar-width),
+    black var(--desktop-sidebar-width)
+  );
+}

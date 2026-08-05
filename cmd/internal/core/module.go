@@ -11,6 +11,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channelaccess"
 	"github.com/memohai/memoh/internal/chat/event"
+	"github.com/memohai/memoh/internal/connectors"
 	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
@@ -91,6 +92,8 @@ func ServerModule() fx.Option {
 			fetchproviders.NewService,
 			searchproviders.NewService,
 			mcp.NewConnectionService,
+			connectors.NewService,
+			connectors.NewSource,
 			pluginspkg.NewService,
 			mcp.NewToolSessionContextStore,
 			provideAudioRegistry,
@@ -124,6 +127,7 @@ func ServerModule() fx.Option {
 		fx.Invoke(
 			injectToolProviders,
 			injectACPToolProviders,
+			injectBotConnectorLifecycle,
 			configureMemoryProviderRegistry,
 			startProviderTemplateSync,
 			startScheduleService,

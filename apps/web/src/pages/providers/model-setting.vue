@@ -54,7 +54,7 @@
         :provider="curProvider"
         :edit-loading="editLoading"
         :ensure-provider="ensureOAuthProvider"
-        @submit="changeProvider"
+        :save-provider="saveProvider"
       />
 
       <ModelList
@@ -150,7 +150,10 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
   onSettled: invalidateProviderQueries,
 })
 
-const { mutate: changeProvider, isLoading: editLoading } = useMutation({
+// mutateAsync (not mutate) because the form's autosave queue must await each
+// save to know whether to roll the field back; onSettled invalidation keeps
+// working regardless of which caller fired it.
+const { mutateAsync: saveProvider, isLoading: editLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
     if (!curProviderId.value) {
       return materializeProvider(data, data.enable !== false)

@@ -79,6 +79,27 @@ type Config struct {
 	InstanceID     string               `toml:"instance_id"`
 	BridgeTLS      BridgeTLSConfig      `toml:"bridge_tls"`
 	WebhookTunnel  WebhookTunnelConfig  `toml:"webhook_tunnel"`
+	ConnectIt      ConnectItConfig      `toml:"connect_it"`
+}
+
+// ConnectItConfig is the deployment-level credential Memoh uses to call its
+// trusted Connect-It instance. It is never persisted in bot configuration.
+type ConnectItConfig struct {
+	BaseURL  string `toml:"base_url"`
+	APIToken string `toml:"api_token" json:"-"`
+}
+
+func (c ConnectItConfig) Configured() bool {
+	return strings.TrimSpace(c.BaseURL) != "" && strings.TrimSpace(c.APIToken) != ""
+}
+
+func (c ConnectItConfig) Validate() error {
+	hasBaseURL := strings.TrimSpace(c.BaseURL) != ""
+	hasAPIToken := strings.TrimSpace(c.APIToken) != ""
+	if hasBaseURL == hasAPIToken {
+		return nil
+	}
+	return errors.New("connect_it: base_url and api_token must be configured together")
 }
 
 const (
@@ -744,6 +765,9 @@ func (cfg Config) validate() error {
 	if err := cfg.SessionRuntime.Validate(); err != nil {
 		return err
 	}
+	if err := cfg.ConnectIt.Validate(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -825,6 +849,12 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_INTERNAL_RPC_CHANNEL_TARGET")); value != "" {
 		cfg.InternalRPC.ChannelTarget = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_CONNECT_IT_BASE_URL")); value != "" {
+		cfg.ConnectIt.BaseURL = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_CONNECT_IT_API_TOKEN")); value != "" {
+		cfg.ConnectIt.APIToken = value
 	}
 }
 

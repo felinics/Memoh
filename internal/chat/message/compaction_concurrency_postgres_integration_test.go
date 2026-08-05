@@ -226,6 +226,22 @@ func TestPostgresIdempotentAssetUpsertPreservesCurrentCompaction(t *testing.T) {
 	if got := fixture.epoch(t); got != 0 {
 		t.Fatalf("identical asset link advanced epoch to %d", got)
 	}
+	asset.Mime = "image/png"
+	asset.SizeBytes = 42
+	asset.StorageKey = "aa/stable.png"
+	if _, err := queries.CreateMessageAsset(ctx, asset); err != nil {
+		t.Fatalf("enrich persisted asset metadata: %v", err)
+	}
+	if got := fixture.epoch(t); got != 0 {
+		t.Fatalf("presentation-only asset metadata advanced epoch to %d", got)
+	}
+	storedAssets, err := queries.ListMessageAssets(ctx, asset.MessageID)
+	if err != nil {
+		t.Fatalf("list enriched asset: %v", err)
+	}
+	if len(storedAssets) != 1 || storedAssets[0].Mime != asset.Mime || storedAssets[0].SizeBytes != asset.SizeBytes || storedAssets[0].StorageKey != asset.StorageKey {
+		t.Fatalf("stored asset metadata = %#v, want mime=%q size=%d storage_key=%q", storedAssets, asset.Mime, asset.SizeBytes, asset.StorageKey)
+	}
 	asset.Ordinal = 1
 	if _, err := queries.CreateMessageAsset(ctx, asset); err != nil {
 		t.Fatalf("change persisted asset shape: %v", err)

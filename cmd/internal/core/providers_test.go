@@ -14,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
 	modelspkg "github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -79,6 +80,29 @@ func TestLazyLLMCompactResolvesModelWithRequestBotID(t *testing.T) {
 	if queries.fallbackLookups != 0 {
 		t.Fatalf("fallback lookups = %d, want 0", queries.fallbackLookups)
 	}
+}
+
+func TestConfigureMemoryProviderRegistryLoadsPersistedProviderOnCacheMiss(t *testing.T) {
+	queries := &memoryProviderLazyLoadQueries{}
+	service := memprovider.NewService(slog.Default(), queries, config.Config{})
+	registry := memprovider.NewRegistry(slog.Default())
+	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(context.Context, string, string, map[string]any) (memprovider.Provider, error) {
+		return membuiltin.NewBuiltinProvider(slog.Default(), nil), nil
+	})
+
+	configureMemoryProviderRegistry(service, registry)
+
+	if _, err := registry.Get(context.Background(), "44444444-4444-4444-4444-444444444444"); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+}
+
+type memoryProviderLazyLoadQueries struct {
+	dbstore.Queries
+}
+
+func (*memoryProviderLazyLoadQueries) GetMemoryProviderByID(context.Context, pgtype.UUID) (sqlc.MemoryProvider, error) {
+	return sqlc.MemoryProvider{Provider: string(memprovider.ProviderBuiltin)}, nil
 }
 
 type lazyLLMTestQueries struct {

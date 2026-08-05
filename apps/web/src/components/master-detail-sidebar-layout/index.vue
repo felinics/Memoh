@@ -9,7 +9,7 @@
          responsive widths; desktop matches SettingsSidebar's fixed 15rem width. -->
     <Sidebar
       class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
-      :class="desktopShell ? 'w-60!' : 'w-48! lg:w-52! xl:w-60!'"
+      :class="desktopShell ? 'w-(--desktop-sidebar-width)!' : 'w-48! lg:w-52! xl:w-60!'"
     >
       <SidebarContent
         class="overflow-hidden h-full flex flex-col"
@@ -20,6 +20,8 @@
              it goes edge-to-edge with a right divider, matching SettingsSidebar. -->
         <div
           class="flex-1 flex flex-col overflow-hidden min-h-0"
+          :data-native-sidebar-surface="flush || undefined"
+          :data-native-sidebar-tint="flush || undefined"
           :class="flush
             ? 'workspace-divider-r bg-sidebar'
             : 'border border-border-soft bg-muted/10 rounded-lg'"

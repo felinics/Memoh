@@ -2,14 +2,13 @@
 SELECT
   bots.id AS bot_id,
   bots.language,
-  bots.reasoning_enabled,
   bots.reasoning_effort,
   bots.heartbeat_enabled,
   bots.heartbeat_interval,
   bots.heartbeat_prompt,
   bots.compaction_enabled,
   bots.compaction_threshold,
-  bots.compaction_ratio,
+  bots.compaction_target_percent,
   bots.timezone,
   chat_models.id AS chat_model_id,
   bots.chat_runtime,
@@ -50,35 +49,62 @@ WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $1;
 WITH updated AS (
   UPDATE bots
   SET language = sqlc.arg(language),
-      reasoning_enabled = sqlc.arg(reasoning_enabled),
       reasoning_effort = sqlc.arg(reasoning_effort),
       heartbeat_enabled = sqlc.arg(heartbeat_enabled),
       heartbeat_interval = sqlc.arg(heartbeat_interval),
       heartbeat_prompt = sqlc.arg(heartbeat_prompt),
       compaction_enabled = sqlc.arg(compaction_enabled),
       compaction_threshold = sqlc.arg(compaction_threshold),
-      compaction_ratio = sqlc.arg(compaction_ratio),
+      compaction_target_percent = CASE
+        WHEN sqlc.arg(compaction_target_percent_set)::boolean
+          THEN sqlc.narg(compaction_target_percent)::integer
+        ELSE bots.compaction_target_percent
+      END,
       timezone = COALESCE(sqlc.narg(timezone)::text, bots.timezone),
-      chat_model_id = COALESCE(sqlc.narg(chat_model_id)::uuid, bots.chat_model_id),
+      chat_model_id = CASE
+        WHEN sqlc.arg(chat_model_id_set)::boolean THEN sqlc.narg(chat_model_id)::uuid
+        ELSE bots.chat_model_id
+      END,
       chat_runtime = sqlc.arg(chat_runtime),
       chat_acp_agent_id = sqlc.narg(chat_acp_agent_id)::text,
       chat_acp_project_path = sqlc.arg(chat_acp_project_path),
       chat_acp_project_mode = sqlc.arg(chat_acp_project_mode),
-      heartbeat_model_id = COALESCE(sqlc.narg(heartbeat_model_id)::uuid, bots.heartbeat_model_id),
+      heartbeat_model_id = CASE
+        WHEN sqlc.arg(heartbeat_model_id_set)::boolean THEN sqlc.narg(heartbeat_model_id)::uuid
+        ELSE bots.heartbeat_model_id
+      END,
       compaction_model_id = CASE
         WHEN sqlc.arg(compaction_model_id_set)::boolean THEN sqlc.narg(compaction_model_id)::uuid
         ELSE bots.compaction_model_id
       END,
-      search_provider_id = COALESCE(sqlc.narg(search_provider_id)::uuid, bots.search_provider_id),
+      search_provider_id = CASE
+        WHEN sqlc.arg(search_provider_id_set)::boolean THEN sqlc.narg(search_provider_id)::uuid
+        ELSE bots.search_provider_id
+      END,
       fetch_provider_id = CASE
         WHEN sqlc.arg(fetch_provider_id_set)::boolean THEN sqlc.narg(fetch_provider_id)::uuid
         ELSE bots.fetch_provider_id
       END,
-      memory_provider_id = COALESCE(sqlc.narg(memory_provider_id)::uuid, bots.memory_provider_id),
-      image_model_id = COALESCE(sqlc.narg(image_model_id)::uuid, bots.image_model_id),
-      tts_model_id = COALESCE(sqlc.narg(tts_model_id)::uuid, bots.tts_model_id),
-      transcription_model_id = COALESCE(sqlc.narg(transcription_model_id)::uuid, bots.transcription_model_id),
-      video_model_id = COALESCE(sqlc.narg(video_model_id)::uuid, bots.video_model_id),
+      memory_provider_id = CASE
+        WHEN sqlc.arg(memory_provider_id_set)::boolean THEN sqlc.narg(memory_provider_id)::uuid
+        ELSE bots.memory_provider_id
+      END,
+      image_model_id = CASE
+        WHEN sqlc.arg(image_model_id_set)::boolean THEN sqlc.narg(image_model_id)::uuid
+        ELSE bots.image_model_id
+      END,
+      tts_model_id = CASE
+        WHEN sqlc.arg(tts_model_id_set)::boolean THEN sqlc.narg(tts_model_id)::uuid
+        ELSE bots.tts_model_id
+      END,
+      transcription_model_id = CASE
+        WHEN sqlc.arg(transcription_model_id_set)::boolean THEN sqlc.narg(transcription_model_id)::uuid
+        ELSE bots.transcription_model_id
+      END,
+      video_model_id = CASE
+        WHEN sqlc.arg(video_model_id_set)::boolean THEN sqlc.narg(video_model_id)::uuid
+        ELSE bots.video_model_id
+      END,
       persist_full_tool_results = sqlc.arg(persist_full_tool_results),
       show_tool_calls_in_im = sqlc.arg(show_tool_calls_in_im),
       tool_approval_config = sqlc.arg(tool_approval_config),
@@ -89,19 +115,18 @@ WITH updated AS (
       command_ui_language = sqlc.arg(command_ui_language),
       updated_at = now()
   WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  RETURNING bots.id, bots.language, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
   updated.language,
-  updated.reasoning_enabled,
   updated.reasoning_effort,
   updated.heartbeat_enabled,
   updated.heartbeat_interval,
   updated.heartbeat_prompt,
   updated.compaction_enabled,
   updated.compaction_threshold,
-  updated.compaction_ratio,
+  updated.compaction_target_percent,
   updated.timezone,
   chat_models.id AS chat_model_id,
   updated.chat_runtime,
@@ -141,14 +166,13 @@ LEFT JOIN models AS video_models ON video_models.id = updated.video_model_id AND
 UPDATE bots
 SET language = 'auto',
     command_ui_language = 'auto',
-    reasoning_enabled = false,
     reasoning_effort = 'medium',
     heartbeat_enabled = false,
     heartbeat_interval = 1440,
     heartbeat_prompt = '',
     compaction_enabled = true,
     compaction_threshold = 0,
-    compaction_ratio = 80,
+    compaction_target_percent = NULL,
     chat_model_id = NULL,
     chat_runtime = 'model',
     chat_acp_agent_id = NULL,
@@ -166,7 +190,7 @@ SET language = 'auto',
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
     tool_approval_config = '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'::jsonb,
-    display_enabled = false,
+    display_enabled = true,
     overlay_provider = '',
     overlay_enabled = false,
     overlay_config = '{}'::jsonb,

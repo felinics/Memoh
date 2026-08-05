@@ -48,3 +48,19 @@ func TestFederationProviderSkipsBuiltInNameCollisions(t *testing.T) {
 		t.Fatalf("Tools() = %#v, want only non-built-in federated tool", tools)
 	}
 }
+
+func TestNormalizeMCPResultExposesReauthorization(t *testing.T) {
+	structured := map[string]any{
+		"error":   "reauth_required",
+		"message": "connection needs reauthorization",
+	}
+	result := normalizeMCPResult(map[string]any{
+		"isError":           true,
+		"structuredContent": structured,
+	})
+	got, ok := result.(map[string]any)
+	if !ok || got["error"] != "reauth_required" ||
+		got["message"] != "connection needs reauthorization" {
+		t.Fatalf("normalizeMCPResult() = %#v, want structured reauthorization error", result)
+	}
+}

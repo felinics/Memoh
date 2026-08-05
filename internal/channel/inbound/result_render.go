@@ -9,6 +9,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"
+	"github.com/memohai/memoh/internal/models"
 )
 
 const actionTypeCallback = "callback"
@@ -32,10 +33,10 @@ func friendlyOps(t *i18n.Localizer, verbKey string) string {
 }
 
 func reasoningLabel(t *i18n.Localizer, cc command.CurrentContext) string {
-	if !cc.ReasoningEnabled {
+	reasoning := strings.TrimSpace(cc.ReasoningEffort)
+	if models.IsReasoningDisabled(reasoning) {
 		return t.T("cmd.common.off")
 	}
-	reasoning := strings.TrimSpace(cc.ReasoningEffort)
 	if reasoning == "" {
 		return t.T("cmd.common.on")
 	}

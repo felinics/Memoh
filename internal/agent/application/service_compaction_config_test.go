@@ -46,7 +46,7 @@ func compactionConfigUUID(t *testing.T, id string) pgtype.UUID {
 	return parsed
 }
 
-func TestBuildCompactionConfigKeepsRatioSelection(t *testing.T) {
+func TestBuildCompactionConfigLeavesSelectionToController(t *testing.T) {
 	t.Parallel()
 
 	const modelUUID = "00000000-0000-0000-0000-000000000401"
@@ -79,18 +79,15 @@ func TestBuildCompactionConfigKeepsRatioSelection(t *testing.T) {
 		BotID:    "00000000-0000-0000-0000-000000000403",
 		ThreadID: "00000000-0000-0000-0000-000000000404",
 	}, settings.Settings{
-		CompactionModelID: modelUUID,
-		CompactionRatio:   60,
+		CompactionModelID:       modelUUID,
+		CompactionTargetPercent: intPtr(40),
 	}, 150000, "")
 	if err != nil {
 		t.Fatalf("buildCompactionConfig: %v", err)
 	}
 
-	if cfg.TargetTokens != 0 {
-		t.Fatalf("TargetTokens = %d, want 0 so ratio-based selection applies", cfg.TargetTokens)
-	}
-	if cfg.Ratio != 60 {
-		t.Fatalf("Ratio = %d, want 60", cfg.Ratio)
+	if cfg.Ratio != 0 {
+		t.Fatalf("Ratio = %d, want 0 because automatic compaction is target-driven", cfg.Ratio)
 	}
 	if cfg.TotalInputTokens != 150000 {
 		t.Fatalf("TotalInputTokens = %d, want 150000", cfg.TotalInputTokens)
@@ -103,30 +100,6 @@ func TestBuildCompactionConfigKeepsRatioSelection(t *testing.T) {
 	}
 	if cfg.MaxCompactTokens != 170000 {
 		t.Fatalf("MaxCompactTokens = %d, want 170000 (85%% of the summarizer window)", cfg.MaxCompactTokens)
-	}
-}
-
-func TestEffectiveCompactionThreshold(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name      string
-		threshold int
-		budget    int
-		want      int
-	}{
-		{name: "clamps to budget share when user threshold exceeds it", threshold: 100000, budget: 10000, want: 7000},
-		{name: "keeps lower user threshold", threshold: 5000, budget: 200000, want: 5000},
-		{name: "keeps threshold when budget unknown", threshold: 100000, budget: 0, want: 100000},
-		{name: "zero threshold stays disabled", threshold: 0, budget: 200000, want: 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := effectiveCompactionThreshold(tc.threshold, tc.budget); got != tc.want {
-				t.Fatalf("effectiveCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.want)
-			}
-		})
 	}
 }
 
@@ -168,30 +141,6 @@ func TestAsyncCompactionInputTokensPrefersKnownCompactableHistory(t *testing.T) 
 	}
 }
 
-func TestSyncCompactionTargetTokens(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name   string
-		budget int
-		ratio  int
-		want   int
-	}{
-		{name: "default ratio keeps 20% of budget", budget: 200000, ratio: 80, want: 40000},
-		{name: "light ratio keeps most of budget", budget: 10000, ratio: 20, want: 8000},
-		{name: "full ratio keeps nothing", budget: 200000, ratio: 100, want: 0},
-		{name: "unknown budget disables target", budget: 0, ratio: 80, want: 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := syncCompactionTargetTokens(tc.budget, tc.ratio); got != tc.want {
-				t.Fatalf("syncCompactionTargetTokens(%d, %d) = %d, want %d", tc.budget, tc.ratio, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestBuildCompactionConfigSkipsProviderWithoutOutputLimit(t *testing.T) {
 	t.Parallel()
 
@@ -222,8 +171,8 @@ func TestBuildCompactionConfigSkipsProviderWithoutOutputLimit(t *testing.T) {
 		BotID:    "00000000-0000-0000-0000-000000000413",
 		ThreadID: "00000000-0000-0000-0000-000000000414",
 	}, settings.Settings{
-		CompactionModelID: modelUUID,
-		CompactionRatio:   80,
+		CompactionModelID:       modelUUID,
+		CompactionTargetPercent: intPtr(20),
 	}, 150000, "")
 	if err != nil {
 		t.Fatalf("buildCompactionConfig() error = %v, want nil", err)

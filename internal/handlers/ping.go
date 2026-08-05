@@ -15,6 +15,7 @@ type PingResponse struct {
 	Status            string `json:"status"`
 	ContainerBackend  string `json:"container_backend"`
 	SnapshotSupported bool   `json:"snapshot_supported"`
+	Connectors        bool   `json:"connectors"`
 	Version           string `json:"version"`
 	CommitHash        string `json:"commit_hash"`
 }
@@ -48,6 +49,7 @@ func (h *PingHandler) Ping(c echo.Context) error {
 		Status:            "ok",
 		ContainerBackend:  h.runtime.ContainerBackend,
 		SnapshotSupported: h.snapshotSupported(),
+		Connectors:        h.cfg.ConnectIt.Configured(),
 		Version:           version.Version,
 		CommitHash:        version.ShortCommitHash(),
 	})

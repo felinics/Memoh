@@ -182,6 +182,12 @@ providers_dir = "conf/providers"
 [supermarket]
 base_url = "https://supermarket.memoh.ai"
 
+[connect_it]
+# Trusted server-to-server credential. Prefer the matching environment
+# variables in deployed environments.
+base_url = ""
+api_token = ""
+
 [oauth_clients]
 config_path = "conf/oauth-clients.toml"
 

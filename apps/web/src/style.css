@@ -74,6 +74,17 @@
   --workspace-divider-width: 1.2px;
   --workspace-tab-stroke-width: 1px;
   --workspace-divider-color: rgb(240 239 237);
+
+  /* Desktop native-material sidebar seam (desktop-shell.css consumes these).
+   * Raw --workspace-divider-color washes out over the glass material, and a
+   * color-mix derivation from it reads as the wrong hue — a plain alpha
+   * stroke is what survived tuning. Polarity flips with the mode: the line is
+   * a luminance STEP AWAY from the surface (black over light glass, white
+   * over dark glass), while the shadow stays black in both modes because its
+   * metaphor is occlusion — spilling LEFT onto the sidebar so the chat plane
+   * reads as floating ABOVE the glass layer. */
+  --native-sidebar-seam: oklch(0 0 0 / 0.06);
+  --native-sidebar-seam-shadow: oklch(0 0 0 / 0.04);
   --workspace-tab-strip-color: color-mix(
     in oklab,
     var(--workspace-divider-color) 75%,
@@ -132,6 +143,8 @@
   --surface-chrome: var(--sidebar);
   --surface-composer: var(--card);
   --workspace-divider-color: var(--border);
+  --native-sidebar-seam: oklch(1 0 0 / 0.07);
+  --native-sidebar-seam-shadow: oklch(0 0 0 / 0.12);
   --composer-edge-rest: oklch(0.255 0 0);
   /* Dark = a solid deep purple ≈ rgb(83,45,141) with pure-white ink (a filled
    * "sent" bubble); same relative recipe, just a darker L and near-full C. */

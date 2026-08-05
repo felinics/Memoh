@@ -70,6 +70,12 @@ func normalizeMCPResult(result map[string]any) any {
 		return map[string]any{"ok": true}
 	}
 	if isErr, ok := result["isError"].(bool); ok && isErr {
+		if structured, ok := result["structuredContent"].(map[string]any); ok &&
+			structured["error"] == "reauth_required" {
+			// Keep the actionable Connect-It signal at the top level so the
+			// agent can tell the user to reauthorize the bot connector.
+			return structured
+		}
 		return result
 	}
 	if sc, ok := result["structuredContent"]; ok && sc != nil {

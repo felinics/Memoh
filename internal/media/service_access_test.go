@@ -62,3 +62,14 @@ func TestServiceEnsureAccessPathRejectsEmptyMaterializedPath(t *testing.T) {
 		t.Fatalf("EnsureAccessPath() error = %v, want ErrAccessPathUnavailable", err)
 	}
 }
+
+func TestMimeFromPathUsesMetadataOnly(t *testing.T) {
+	t.Parallel()
+
+	if got := MimeFromPath(" aa/asset.webp "); got != "image/webp" {
+		t.Fatalf("MimeFromPath() = %q, want image/webp", got)
+	}
+	if got := MimeFromPath("aa/asset.unknown"); got != "" {
+		t.Fatalf("MimeFromPath() = %q, want empty for unknown extension", got)
+	}
+}

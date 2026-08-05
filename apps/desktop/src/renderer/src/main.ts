@@ -18,6 +18,7 @@ import { registerWorkspaceTabCommands } from '@memohai/web/pages/home/commands/w
 import { useWorkspaceTabsStore } from '@memohai/web/store/workspace-tabs'
 import { useKeyboardShortcutsStore } from '@memohai/web/store/keyboard-shortcuts'
 import { useChatStore } from '@memohai/web/store/chat-list'
+import { normalizeDesktopThemeSource } from '../../shared/theme'
 
 import '@fontsource-variable/inter'
 import 'markstream-vue/index.css'
@@ -30,6 +31,13 @@ import router from './chat/router'
 import { setupRendererCacheSync } from './renderer-cache-sync'
 import { handleRendererNavigate } from './renderer-navigation'
 import { isCurrentServerProbe } from './connect/connection-navigation'
+
+// Native sidebar material exists only on macOS. Marking this before Vue mounts
+// lets desktop-shell.css expose the native backdrop without changing Web or the
+// opaque fallback used by Windows and Linux.
+if (navigator.platform.toLowerCase().includes('mac')) {
+  document.documentElement.dataset.nativeSidebarMaterial = ''
+}
 
 // Window-management fallback, intentionally kept separate from the close-tab app
 // command. Cmd/Ctrl+W closes the active workspace tab; when the registry reports
@@ -60,6 +68,17 @@ async function bootstrap() {
   const serverProbe = window.api.desktop.probeServer()
 
   const pinia = createPinia().use(piniaPluginPersistedstate)
+  // NSVisualEffectView follows Electron's nativeTheme rather than the page's
+  // `.dark` class. Seed it before mounting so a persisted manual preference
+  // cannot flash the opposite material; App.vue keeps later changes in sync
+  // from component setup, where the settings store can safely use vue-i18n.
+  try {
+    await window.api.desktop.setThemeSource(
+      normalizeDesktopThemeSource(localStorage.getItem('theme')),
+    )
+  } catch (error) {
+    console.warn('failed to synchronize desktop native theme', error)
+  }
   const keyboardCommands = createKeyboardCommandRegistry()
   registerWorkspaceTabCommands(keyboardCommands, useWorkspaceTabsStore(pinia))
   // Menu-delivered commands arrive over IPC; closing the window when no tab

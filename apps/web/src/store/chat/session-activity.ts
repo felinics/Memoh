@@ -10,6 +10,7 @@ export function createSessionActivity(deps: {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
   userScopeGeneration: () => number
+  currentSessionListRevision: () => number
   currentSelectRequest: () => number
   knownSession: (sessionId: string) => SessionSummary | null | undefined
   rememberSession: (session: SessionSummary) => void
@@ -26,6 +27,7 @@ export function createSessionActivity(deps: {
   refreshSessionsList: (botId: string) => Promise<void>
 }) {
   const visibleSummaryRequests = new Map<string, Promise<SessionSummary | null>>()
+  let loadMoreRequestVersion = 0
 
   async function ensureSessionSummary(
     botId: string,
@@ -95,17 +97,28 @@ export function createSessionActivity(deps: {
     const botId = (deps.currentBotId.value ?? '').trim()
     const cursor = deps.sessionsCursor.value
     if (!botId || !cursor) return
+    const userGeneration = deps.userScopeGeneration()
+    const listRevision = deps.currentSessionListRevision()
+    const requestVersion = ++loadMoreRequestVersion
     deps.loadingMoreSessions.value = true
     try {
       const response = await fetchSessions(botId, { cursor })
-      if ((deps.currentBotId.value ?? '').trim() !== botId) return
+      if (
+        requestVersion !== loadMoreRequestVersion
+        || userGeneration !== deps.userScopeGeneration()
+        || (deps.currentBotId.value ?? '').trim() !== botId
+        || deps.sessionsCursor.value !== cursor
+        || deps.currentSessionListRevision() !== listRevision
+      ) return
       deps.appendSessions(response.items)
       deps.sessionsCursor.value = response.nextCursor
       deps.hasMoreSessions.value = response.nextCursor !== null
     } catch (error) {
       console.error('Failed to load more sessions:', error)
     } finally {
-      deps.loadingMoreSessions.value = false
+      if (requestVersion === loadMoreRequestVersion) {
+        deps.loadingMoreSessions.value = false
+      }
     }
   }
 
@@ -144,6 +157,10 @@ export function createSessionActivity(deps: {
     ensureVisibleSessionSummary,
     loadMoreSessions,
     handleActivity,
-    reset: () => { visibleSummaryRequests.clear() },
+    reset: () => {
+      visibleSummaryRequests.clear()
+      loadMoreRequestVersion += 1
+      deps.loadingMoreSessions.value = false
+    },
   }
 }

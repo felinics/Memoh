@@ -17,11 +17,13 @@ import (
 type runtimeSnapshotQueries struct {
 	dbstore.Queries
 
-	created  sqlc.CreateMessageParams
-	assetErr error
+	created      sqlc.CreateMessageParams
+	createdAsset sqlc.CreateMessageAssetParams
+	assetErr     error
 }
 
-func (q *runtimeSnapshotQueries) CreateMessageAsset(context.Context, sqlc.CreateMessageAssetParams) (sqlc.CreateMessageAssetRow, error) {
+func (q *runtimeSnapshotQueries) CreateMessageAsset(_ context.Context, arg sqlc.CreateMessageAssetParams) (sqlc.CreateMessageAssetRow, error) {
+	q.createdAsset = arg
 	return sqlc.CreateMessageAssetRow{}, q.assetErr
 }
 
@@ -118,6 +120,106 @@ func TestPersistPropagatesMessageAssetCreationFailure(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "asset link failed") {
 		t.Fatalf("Persist() error = %v, want asset creation failure", err)
+	}
+}
+
+func TestPersistStoresMessageAssetMetadata(t *testing.T) {
+	queries := &runtimeSnapshotQueries{}
+	svc := NewService(nil, queries)
+
+	msg, err := svc.Persist(context.Background(), PersistInput{
+		BotID:     "11111111-1111-1111-1111-111111111111",
+		SessionID: "22222222-2222-2222-2222-222222222222",
+		Role:      "user",
+		Content:   []byte(`{"type":"text","text":"hello"}`),
+		Assets: []AssetRef{{
+			ContentHash: "sha256:asset",
+			Role:        "attachment",
+			Mime:        " image/png ",
+			SizeBytes:   42,
+			StorageKey:  " ab/asset.png ",
+			Name:        "asset.png",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Persist() error = %v", err)
+	}
+	if got := queries.createdAsset.Mime; got != "image/png" {
+		t.Fatalf("persisted mime = %q, want image/png", got)
+	}
+	if got := queries.createdAsset.SizeBytes; got != 42 {
+		t.Fatalf("persisted size_bytes = %d, want 42", got)
+	}
+	if got := queries.createdAsset.StorageKey; got != "ab/asset.png" {
+		t.Fatalf("persisted storage_key = %q, want ab/asset.png", got)
+	}
+	if len(msg.Assets) != 1 || msg.Assets[0].Mime != "image/png" || msg.Assets[0].StorageKey != "ab/asset.png" {
+		t.Fatalf("returned assets = %#v", msg.Assets)
+	}
+}
+
+func TestLinkAssetsStoresMessageAssetMetadata(t *testing.T) {
+	queries := &runtimeSnapshotQueries{}
+	svc := NewService(nil, queries)
+
+	err := svc.LinkAssets(context.Background(), "33333333-3333-3333-3333-333333333333", []AssetRef{{
+		ContentHash: "sha256:asset",
+		Mime:        " image/png ",
+		SizeBytes:   42,
+		StorageKey:  " ab/asset.png ",
+		Name:        "asset.png",
+	}})
+	if err != nil {
+		t.Fatalf("LinkAssets() error = %v", err)
+	}
+	if got := queries.createdAsset; got.Mime != "image/png" || got.SizeBytes != 42 || got.StorageKey != "ab/asset.png" {
+		t.Fatalf("linked asset metadata = %#v", got)
+	}
+}
+
+type assetReadQueries struct {
+	dbstore.Queries
+	rows []sqlc.ListMessageAssetsBatchRow
+}
+
+func (q *assetReadQueries) ListMessageAssetsBatch(context.Context, []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
+	return q.rows, nil
+}
+
+func TestEnrichAssetsUsesPersistedMetadataWithoutStorage(t *testing.T) {
+	messageID := testMessageUUID("33333333-3333-3333-3333-333333333333")
+	queries := &assetReadQueries{rows: []sqlc.ListMessageAssetsBatchRow{
+		{
+			MessageID:   messageID,
+			ContentHash: "sha256:new",
+			Role:        "attachment",
+			Mime:        "image/webp",
+			SizeBytes:   99,
+			StorageKey:  "aa/new.webp",
+			Name:        "new.webp",
+			Metadata:    []byte(`{}`),
+		},
+		{
+			MessageID:   messageID,
+			ContentHash: "sha256:legacy",
+			Role:        "attachment",
+			Name:        "legacy.png",
+			Metadata:    []byte(`{"storage_key":"bb/legacy.png"}`),
+		},
+	}}
+	svc := NewService(nil, queries)
+	messages := []Message{{ID: messageID.String()}}
+
+	svc.enrichAssets(context.Background(), messages)
+
+	if len(messages[0].Assets) != 2 {
+		t.Fatalf("assets length = %d, want 2", len(messages[0].Assets))
+	}
+	if got := messages[0].Assets[0]; got.Mime != "image/webp" || got.SizeBytes != 99 || got.StorageKey != "aa/new.webp" {
+		t.Fatalf("persisted asset = %#v", got)
+	}
+	if got := messages[0].Assets[1]; got.Mime != "image/png" || got.StorageKey != "bb/legacy.png" {
+		t.Fatalf("legacy asset = %#v", got)
 	}
 }
 

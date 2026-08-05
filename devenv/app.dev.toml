@@ -79,6 +79,17 @@ providers_dir = "conf/providers"
 [supermarket]
 base_url = "https://supermarket.memoh.ai"
 
+[connect_it]
+# The Connect-It dev service is available at http://localhost:18421.
+# `mise run dev` shares one fixed bootstrap token between both sides: the
+# Connect-It container seeds it at startup and the Memoh server presents it.
+# If that token was revoked through the Connect-It admin UI, rotate it once:
+#   MEMOH_CONNECT_IT_API_TOKEN=cit_<64 hex chars> mise run dev
+# The new value is seeded as a fresh token; the revoked one stays revoked.
+# These empty values are overridden by the dev Compose environment.
+base_url = ""
+api_token = ""
+
 [oauth_clients]
 config_path = "conf/oauth-clients.toml"
 

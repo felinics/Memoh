@@ -209,7 +209,7 @@ func (m *Manager) Start(ctx context.Context) {
 	if m.logger != nil {
 		m.logger.Info("manager start")
 	}
-	m.startInboundWorkers(ctx)
+	m.startInboundWorkers() //nolint:contextcheck // The shared pool intentionally owns a request-independent lifecycle context.
 	go func() {
 		m.refresh(ctx)
 		ticker := time.NewTicker(m.refreshInterval)

@@ -181,10 +181,12 @@
         <Label class="mb-2">{{ $t('bots.settings.chatModel') }}</Label>
         <ModelSelect
           v-model="form.chat_model_id"
+          v-model:reasoning-effort="form.reasoning_effort"
           :models="models"
           :providers="providers"
           model-type="chat"
           :placeholder="$t('common.none')"
+          show-reasoning
         />
       </div>
 
@@ -309,6 +311,9 @@ const form = reactive({
   avatar_url: '',
   acl_preset: defaultAclPreset as string,
   chat_model_id: '',
+  // Matches the bots.reasoning_effort column default, so creating a bot without
+  // touching this control produces the same state as not sending it at all.
+  reasoning_effort: 'medium',
   memory_provider_id: '',
   timezone: emptyTimezoneValue,
 })
@@ -473,6 +478,9 @@ function createStartOptions() {
     settings: {
       chat_model_id: form.chat_model_id || undefined,
       memory_provider_id: form.memory_provider_id || undefined,
+      // Only meaningful alongside a model; without one there are no tiers to pick
+      // from and the stored value would be a guess.
+      reasoning_effort: form.chat_model_id ? form.reasoning_effort || undefined : undefined,
     },
   }
 }

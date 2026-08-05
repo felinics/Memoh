@@ -12,104 +12,58 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-// compactionBudgetThresholdPercent is the shared budget share at which
-// compaction triggers: the pre-send synchronous backstop fires when
-// compactable history reaches it, and async triggers clamp the user
-// threshold to it so they fire before the blocking backstop does.
-const compactionBudgetThresholdPercent = 70
-
-// Model-relative policy: when the configured absolute threshold is zero, the
-// controller derives every level from the chat model's context window. The
-// async maintenance pass fires at the soft share, the blocking pre-send
-// backstop waits for the hard share, and both compact the raw tail down to
-// the target share — three separate roles so background maintenance normally
-// keeps the backstop from ever blocking a turn. The shares are bench-tuned
-// against strict 8k/16k provider windows: soft above 50 leaves too thin a
-// margin on small windows, a hard below 75 adds blocking latency without
-// preventing single-turn jumps, and a target above 40 can re-trigger into
-// the summarizer's output cap.
+// Automatic compaction derives its soft trigger, hard backstop, and target
+// from the chat model's context window. A configured absolute threshold only
+// overrides the async trigger and is capped at the hard backstop.
 const (
 	compactionSoftThresholdPercent = 50
 	compactionHardThresholdPercent = 75
-	compactionTargetPercent        = 40
+	defaultCompactionTargetPercent = 40
 	// maxAsyncCompactionPasses bounds how many consecutive summarizer calls
 	// one background trigger may spend draining a backlog.
 	maxAsyncCompactionPasses = 3
 )
 
-// modelRelativeCompaction reports whether the bot runs the model-relative
-// default policy instead of a legacy absolute threshold.
-func modelRelativeCompaction(userThreshold int) bool {
-	return userThreshold <= 0
-}
-
-// autoCompactionThreshold is the async trigger level: the soft window share
-// under the model-relative policy, or the clamped absolute threshold in
-// legacy mode. A zero return (no usable window in model-relative mode)
-// leaves the async trigger off.
+// autoCompactionThreshold is the async trigger level. A zero return leaves
+// automatic compaction off when no usable model window is available.
 func autoCompactionThreshold(userThreshold, contextTokenBudget int) int {
-	if modelRelativeCompaction(userThreshold) {
-		if contextTokenBudget <= 0 {
-			return 0
-		}
-		return contextTokenBudget * compactionSoftThresholdPercent / 100
-	}
-	return effectiveCompactionThreshold(userThreshold, contextTokenBudget)
-}
-
-// compactionTargetTokensFor is the post-compaction raw-tail goal shared by the
-// async and synchronous paths under the model-relative policy, so both modes
-// converge on the same pressure. Legacy mode keeps its historical split:
-// async compacts a ratio of the corpus (no target), sync keeps the
-// (100-ratio)% share of the window.
-func compactionTargetTokensFor(userThreshold, ratio, contextTokenBudget int) int {
-	if modelRelativeCompaction(userThreshold) {
-		if contextTokenBudget <= 0 {
-			return 0
-		}
-		return contextTokenBudget * compactionTargetPercent / 100
-	}
-	return syncCompactionTargetTokens(contextTokenBudget, ratio)
-}
-
-// asyncCompactionTargetTokens is the background trigger's goal: only the
-// model-relative policy drives the engine's target-based selection; a legacy
-// absolute threshold keeps ratio-based selection (target zero), matching the
-// pre-policy behavior where a 2M-window bot with a 100k threshold compacted
-// on trigger instead of waiting for a 900k backlog.
-func asyncCompactionTargetTokens(userThreshold, contextTokenBudget int) int {
-	if !modelRelativeCompaction(userThreshold) {
+	if contextTokenBudget <= 0 {
 		return 0
 	}
-	return compactionTargetTokensFor(userThreshold, 0, contextTokenBudget)
+	if userThreshold <= 0 {
+		return max(1, contextTokenBudget*compactionSoftThresholdPercent/100)
+	}
+	return min(userThreshold, hardCompactionThreshold(contextTokenBudget))
 }
 
-// syncCompactionShouldRun gates the blocking backstop: model-relative bots
-// wait for the hard share so the soft async pass gets a chance first; legacy
-// bots keep the caller's shared-budget gate.
-func syncCompactionShouldRun(userThreshold, pressure, contextTokenBudget int) bool {
-	if !modelRelativeCompaction(userThreshold) {
-		return true
-	}
+func hardCompactionThreshold(contextTokenBudget int) int {
 	if contextTokenBudget <= 0 {
-		return false
+		return 0
 	}
-	return pressure >= contextTokenBudget*compactionHardThresholdPercent/100
+	return max(1, contextTokenBudget*compactionHardThresholdPercent/100)
 }
 
-// effectiveCompactionThreshold clamps the user-configured absolute threshold
-// to the budget share, so an absolute default (e.g. 100000) still fires on
-// models whose context window never reaches it. A non-positive threshold
-// keeps async compaction disabled.
-func effectiveCompactionThreshold(threshold, contextTokenBudget int) int {
-	if threshold <= 0 || contextTokenBudget <= 0 {
-		return threshold
+func compactionTargetTokens(targetPercent *int, contextTokenBudget int) int {
+	if contextTokenBudget <= 0 {
+		return 0
 	}
-	budgetThreshold := contextTokenBudget * compactionBudgetThresholdPercent / 100
-	if budgetThreshold > 0 && budgetThreshold < threshold {
-		return budgetThreshold
+	percent := defaultCompactionTargetPercent
+	if targetPercent != nil && *targetPercent >= 1 && *targetPercent <= 99 {
+		percent = *targetPercent
 	}
-	return threshold
+	return max(1, contextTokenBudget*percent/100)
+}
+
+// syncBackstopTargetTokens caps the hard-share backstop at the soft share so it
+// always makes progress and lands below the soft trigger, restoring hysteresis.
+func syncBackstopTargetTokens(targetPercent *int, contextTokenBudget int) int {
+	softTarget := max(1, contextTokenBudget*compactionSoftThresholdPercent/100)
+	return min(compactionTargetTokens(targetPercent, contextTokenBudget), softTarget)
+}
+
+func syncCompactionShouldRun(pressure, contextTokenBudget int) bool {
+	threshold := hardCompactionThreshold(contextTokenBudget)
+	return threshold > 0 && pressure >= threshold
 }
 
 func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int {
@@ -155,7 +109,6 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		slog.String("session_id", req.ThreadID),
 		slog.Int("input_tokens", inputTokens),
 		slog.Int("threshold", threshold),
-		slog.Int("ratio", botSettings.CompactionRatio),
 	)
 
 	cfg, err := s.buildCompactionConfig(ctx, req, botSettings, inputTokens, rc.model.ID)
@@ -169,23 +122,10 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		// so the compaction service doesn't run hooks + fail on empty UUIDs.
 		return
 	}
-	cfg.TargetTokens = asyncCompactionTargetTokens(botSettings.CompactionThreshold, rc.contextTokenBudget)
-	if err := s.drainCompactionBacklog(ctx, cfg, asyncCompactionPasses(botSettings.CompactionThreshold)); err != nil {
+	cfg.TargetTokens = compactionTargetTokens(botSettings.CompactionTargetPercent, rc.contextTokenBudget)
+	if err := s.drainCompactionBacklog(ctx, cfg); err != nil {
 		s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
 	}
-}
-
-// asyncCompactionPasses bounds the background drain per mode: the
-// model-relative policy may need several passes because a small summarizer
-// window caps each pass's input, while a legacy absolute threshold keeps the
-// historical one-shot semantics — its ratio selection re-reads the original
-// TotalInputTokens, so repeating it would keep compacting an already-reduced
-// tail.
-func asyncCompactionPasses(userThreshold int) int {
-	if modelRelativeCompaction(userThreshold) {
-		return maxAsyncCompactionPasses
-	}
-	return 1
 }
 
 // drainCompactionBacklog runs bounded consecutive passes until the backlog is
@@ -194,8 +134,8 @@ func asyncCompactionPasses(userThreshold int) int {
 // session barrier is re-acquired per pass: a turn that arrives between
 // passes runs before the next summarizer call instead of waiting out the
 // whole drain.
-func (s *Service) drainCompactionBacklog(ctx context.Context, cfg compaction.TriggerConfig, maxPasses int) error {
-	for pass := 0; pass < maxPasses; pass++ {
+func (s *Service) drainCompactionBacklog(ctx context.Context, cfg compaction.TriggerConfig) error {
+	for pass := 0; pass < maxAsyncCompactionPasses; pass++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -217,9 +157,8 @@ func (s *Service) runCompactionPass(ctx context.Context, cfg compaction.TriggerC
 }
 
 // runCompactionSync runs compaction synchronously when context reaches the
-// blocking share of the model's context window (the hard threshold under the
-// model-relative policy, the shared budget gate in legacy mode) and reports
-// the session-scoped result.
+// blocking share of the model's context window and reports the session-scoped
+// result.
 // A noop (failure cooldown, another compaction in flight, or nothing to
 // compact) leaves this turn's context untouched: the request proceeds as-is,
 // possibly still above the threshold, and the next turn re-evaluates.
@@ -237,14 +176,6 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		s.logger.Warn("compaction sync: compaction disabled, skipping")
 		return compaction.Result{}
 	}
-	if !syncCompactionShouldRun(botSettings.CompactionThreshold, inputTokens, contextTokenBudget) {
-		s.logger.Info("compaction sync: below the hard threshold, leaving maintenance to the async pass",
-			slog.Int("input_tokens", inputTokens),
-			slog.Int("context_token_budget", contextTokenBudget),
-		)
-		return compaction.Result{}
-	}
-
 	cfg, err := s.buildCompactionConfig(ctx, req, botSettings, inputTokens, turnModelID)
 	if err != nil {
 		s.logger.Warn("compaction sync: failed to build config", slog.Any("error", err))
@@ -255,7 +186,7 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
 	}
-	cfg.TargetTokens = compactionTargetTokensFor(botSettings.CompactionThreshold, cfg.Ratio, contextTokenBudget)
+	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
 
 	s.logger.Info("compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),
@@ -285,10 +216,6 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 // credentials. Unavailable-model conditions stand the automatic trigger down
 // silently; infrastructure errors propagate.
 func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, botSettings settings.Settings, inputTokens int, turnModelID string) (compaction.TriggerConfig, error) {
-	ratio := botSettings.CompactionRatio
-	if ratio <= 0 || ratio > 100 {
-		ratio = 80
-	}
 	sessionModelID := ""
 	if strings.TrimSpace(botSettings.CompactionModelID) == "" && strings.TrimSpace(turnModelID) == "" && strings.TrimSpace(botSettings.ChatModelID) == "" {
 		sessionModelID = models.LatestSessionModelID(ctx, s.queries, req.ThreadID)
@@ -332,18 +259,7 @@ func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, bo
 	})
 	cfg.BotID = req.BotID
 	cfg.SessionID = req.ThreadID
-	cfg.Ratio = ratio
 	cfg.TotalInputTokens = inputTokens
 	cfg.HTTPClient = s.streamHTTPClient
 	return cfg, nil
-}
-
-// syncCompactionTargetTokens derives the synchronous-compaction goal from the
-// context budget: after compaction the kept tail should be the (100-ratio)%
-// share the user asked to preserve, instead of a fixed absolute size.
-func syncCompactionTargetTokens(contextTokenBudget, ratio int) int {
-	if contextTokenBudget <= 0 || ratio >= 100 {
-		return 0
-	}
-	return contextTokenBudget * (100 - ratio) / 100
 }

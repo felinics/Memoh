@@ -92,7 +92,8 @@ type Execution struct {
 	AbortCh chan<- struct{}
 	Cancel  context.CancelFunc
 	// InjectCh receives steering messages; nil means this caller does not
-	// support steering.
+	// support steering. The caller owns channel closure; the runtime only stops
+	// sending during teardown.
 	InjectCh chan<- turn.InjectMessage
 	// OwnershipCancel revokes the caller's execution context when the lease is
 	// lost, so a superseded owner stops producing output rather than racing the

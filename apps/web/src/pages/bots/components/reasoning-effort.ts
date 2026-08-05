@@ -71,6 +71,36 @@ export function resolveEffortLevels(config?: ModelConfigLike | null, clientType?
   return levels
 }
 
+// nearestEffortToMedium picks the tier closest to medium from levels, breaking
+// ties toward the weaker tier. It is the fallback when a model does not
+// advertise medium: [minimal, low] -> low, [high, max] -> high, [low, high] -> low.
+// Values outside KNOWN_EFFORTS (including the "disable" sentinel that
+// availableEffortsForMode prepends) are ignored, so passing a selectable list
+// straight in never yields "off"; returns '' when no usable tier is present.
+//
+// Keep in sync with NearestEffortToMedium in internal/models/types.go.
+export function nearestEffortToMedium(levels: string[]): string {
+  const order = KNOWN_EFFORTS as readonly string[]
+  const mediumIdx = order.indexOf('medium')
+
+  let best = ''
+  let bestIdx = -1
+  let bestDistance = 0
+  for (const level of levels) {
+    const idx = order.indexOf(level)
+    if (idx < 0) continue
+    const distance = Math.abs(idx - mediumIdx)
+    // Ties break toward the weaker tier rather than toward whichever came first,
+    // because levels arrives in registry order and is not guaranteed sorted.
+    if (best === '' || distance < bestDistance || (distance === bestDistance && idx < bestIdx)) {
+      best = level
+      bestIdx = idx
+      bestDistance = distance
+    }
+  }
+  return best
+}
+
 // availableEffortsForMode builds the selectable list for a thinking mode:
 //   - none:          nothing
 //   - adaptive/toggle: an explicit "off" plus the effort tiers

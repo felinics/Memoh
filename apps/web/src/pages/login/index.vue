@@ -32,7 +32,6 @@
       <!-- 两字段 + Continue 等距 gap-2.5(不学 SaaS 密码步拉开 CTA)。
            placeholder 用 Enter …(P0 label≠placeholder)。 -->
       <form
-        v-if="!loginSucceeded"
         class="flex w-full flex-col gap-2.5"
         @submit.prevent="login"
       >
@@ -62,12 +61,6 @@
           {{ $t('auth.continue') }}
         </LoadingButton>
       </form>
-      <div
-        v-else
-        class="flex w-full flex-col items-center gap-3"
-      >
-        <CircleCheck class="size-12 text-foreground" />
-      </div>
     </section>
   </main>
 </template>
@@ -75,7 +68,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { Input } from '@felinic/ui'
-import { CircleCheck } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { toast } from '@felinic/ui'
@@ -94,7 +86,6 @@ const { t } = useI18n()
 
 const username = ref('')
 const password = ref('')
-const loginSucceeded = ref(false)
 const exiting = ref(false)
 const shouldAnimateEntry = safeSessionGet(LOGIN_ENTRY_ANIMATION_KEY) === '1'
 if (shouldAnimateEntry) safeSessionRemove(LOGIN_ENTRY_ANIMATION_KEY)
@@ -124,9 +115,10 @@ const login = async () => {
     {
       authenticate: (body) => postAuthLogin({ body }),
       applyLogin: loginHandle,
+      // 成功后直接退场进应用,不设成功勾中间页:纯勾无信息量,只是人为
+      // 推迟跳转;忙碌反馈由提交按钮的 loading 覆盖(isSubmitting 到
+      // navigateHome 返回后才复位)。
       navigateHome: async () => {
-        loginSucceeded.value = true
-        await new Promise<void>(resolve => setTimeout(resolve, 700))
         exiting.value = true
         safeSessionSet(ONBOARDING_KEYS.entryAnimation, '1')
         await new Promise<void>(resolve => setTimeout(resolve, 175))

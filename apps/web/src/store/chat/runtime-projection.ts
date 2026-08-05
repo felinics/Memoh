@@ -69,9 +69,10 @@ function cloneUIMessage(message: UIMessage): UIMessage {
 }
 
 function cloneRunView(run: RuntimeCurrentRunView): RuntimeCurrentRunView {
+  const messages = run.messages ?? []
   return {
     ...run,
-    messages: run.messages.map(cloneUIMessage),
+    messages: messages.map(cloneUIMessage),
     request_user_turn: run.request_user_turn
       ? {
           ...run.request_user_turn,

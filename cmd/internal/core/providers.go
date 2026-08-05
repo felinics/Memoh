@@ -50,6 +50,7 @@ import (
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/connectors"
 	ctr "github.com/memohai/memoh/internal/container"
 	containerprovider "github.com/memohai/memoh/internal/container/provider"
 	"github.com/memohai/memoh/internal/db"
@@ -455,6 +456,10 @@ func injectToolProviders(a *native.Agent, msgService *message.DBService, hookSer
 	}
 }
 
+func injectBotConnectorLifecycle(botService *bots.Service, connectorService *connectors.Service) {
+	botService.SetConnectorLifecycle(connectorService)
+}
+
 func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.Runner {
 	return acpclient.NewRunner(log, manager)
 }
@@ -597,11 +602,11 @@ func injectACPToolProviders(source *agenttools.NativeToolSource, toolProviders [
 	}
 }
 
-func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
 	limits := agentLimitsFromConfig(cfg.Agent)
-	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, fedSource}, mcp.WithToolOutputLimit(limits.ToolOutputLimit()))
+	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, connectorSource, fedSource}, mcp.WithToolOutputLimit(limits.ToolOutputLimit()))
 	containerdHandler.SetToolGatewayService(svc)
 	containerdHandler.SetToolSessionContextStore(toolContexts)
 	return svc
@@ -625,7 +630,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -650,6 +655,7 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
 		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
 		agenttools.NewVideoGenProvider(log, settingsService, videoService, bgManager, manager, config.DefaultDataMount),
+		agenttools.NewFederationProvider(log, connectorSource),
 		agenttools.NewFederationProvider(log, fedSource),
 		agenttools.NewHistoryProvider(log, channelthreadadapter.NewLister(sessionService, routeService), messageService, queries),
 	}
@@ -752,6 +758,13 @@ func startProviderTemplateSync(
 
 func configureMemoryProviderRegistry(mpService *memprovider.Service, registry *memprovider.Registry) {
 	mpService.SetRegistry(registry)
+	registry.SetConfigLoader(func(ctx context.Context, id string) (string, map[string]any, error) {
+		provider, err := mpService.Get(ctx, id)
+		if err != nil {
+			return "", nil, err
+		}
+		return provider.Provider, provider.Config, nil
+	})
 }
 
 func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {

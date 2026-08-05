@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -15,13 +16,11 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMDefault(t *testing.T) {
 
 	row := sqlc.GetSettingsByBotIDRow{
 		Language:            "en",
-		ReasoningEnabled:    false,
 		ReasoningEffort:     "medium",
 		HeartbeatEnabled:    false,
 		HeartbeatInterval:   60,
 		CompactionEnabled:   false,
 		CompactionThreshold: 0,
-		CompactionRatio:     80,
 		ShowToolCallsInIm:   false,
 	}
 	got := normalizeBotSettingsReadRow(row)
@@ -37,7 +36,6 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMPropagates(t *testing.T) {
 		Language:          "en",
 		ReasoningEffort:   "medium",
 		HeartbeatInterval: 60,
-		CompactionRatio:   80,
 		ShowToolCallsInIm: true,
 	}
 	got := normalizeBotSettingsReadRow(row)
@@ -55,7 +53,6 @@ func TestNormalizeBotSettingsReadRow_CommandUILanguage(t *testing.T) {
 		CommandUiLanguage: "zh",
 		ReasoningEffort:   "medium",
 		HeartbeatInterval: 60,
-		CompactionRatio:   80,
 	})
 	if got.CommandUILanguage != "zh" {
 		t.Fatalf("CommandUILanguage = %q, want zh", got.CommandUILanguage)
@@ -66,7 +63,6 @@ func TestNormalizeBotSettingsReadRow_CommandUILanguage(t *testing.T) {
 		Language:          "en",
 		ReasoningEffort:   "medium",
 		HeartbeatInterval: 60,
-		CompactionRatio:   80,
 	})
 	if def.CommandUILanguage != DefaultCommandUILanguage {
 		t.Fatalf("default CommandUILanguage = %q, want %q", def.CommandUILanguage, DefaultCommandUILanguage)
@@ -80,7 +76,6 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 		Language:           "en",
 		ReasoningEffort:    "medium",
 		HeartbeatInterval:  60,
-		CompactionRatio:    80,
 		ChatRuntime:        ChatRuntimeACPAgent,
 		ChatAcpAgentID:     pgtype.Text{String: "Codex", Valid: true},
 		ChatAcpProjectPath: "/data/app",
@@ -100,7 +95,6 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 		Language:          "en",
 		ReasoningEffort:   "medium",
 		HeartbeatInterval: 60,
-		CompactionRatio:   80,
 	})
 	if def.ChatRuntime != ChatRuntimeModel || def.ChatACPProjectPath != DefaultACPProjectPath || def.ChatACPProjectMode != DefaultACPProjectMode {
 		t.Fatalf("default chat runtime fields = %#v", def)
@@ -173,16 +167,118 @@ func TestUpsertRequestShowToolCallsInIM_PointerSemantics(t *testing.T) {
 	}
 }
 
+func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
+	t.Parallel()
+
+	// The autosaving web client relies on this contract: an omitted key must
+	// decode to nil (keep current value), while an explicit empty string must
+	// decode to a non-nil pointer (clear the reference).
+	var omitted UpsertRequest
+	if err := json.Unmarshal([]byte(`{"reasoning_effort":"low"}`), &omitted); err != nil {
+		t.Fatal(err)
+	}
+	for name, ptr := range map[string]*string{
+		"chat_model_id": omitted.ChatModelID, "image_model_id": omitted.ImageModelID,
+		"search_provider_id": omitted.SearchProviderID, "memory_provider_id": omitted.MemoryProviderID,
+		"tts_model_id": omitted.TtsModelID, "transcription_model_id": omitted.TranscriptionModelID,
+		"video_model_id": omitted.VideoModelID, "language": omitted.Language,
+		"heartbeat_model_id": omitted.HeartbeatModelID,
+	} {
+		if ptr != nil {
+			t.Fatalf("%s: omitted key must stay nil, got %q", name, *ptr)
+		}
+	}
+
+	var cleared UpsertRequest
+	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":"","memory_provider_id":"","language":"","heartbeat_model_id":""}`), &cleared); err != nil {
+		t.Fatal(err)
+	}
+	for name, ptr := range map[string]*string{
+		"chat_model_id": cleared.ChatModelID, "search_provider_id": cleared.SearchProviderID,
+		"memory_provider_id": cleared.MemoryProviderID, "language": cleared.Language,
+		"heartbeat_model_id": cleared.HeartbeatModelID,
+	} {
+		if ptr == nil || *ptr != "" {
+			t.Fatalf("%s: explicit empty string must decode to a non-nil empty pointer", name)
+		}
+	}
+}
+
 func TestNormalizeBotSettingDefaultHeartbeatInterval(t *testing.T) {
 	t.Parallel()
 
-	got := normalizeBotSetting("en", "auto", "allow", false, "medium", false, 0, false, 0, 80)
+	got := normalizeBotSetting("en", "auto", "allow", "medium", false, 0, false, 0, pgtype.Int4{})
 	if got.HeartbeatInterval != DefaultHeartbeatInterval {
 		t.Fatalf("heartbeat interval = %d, want %d", got.HeartbeatInterval, DefaultHeartbeatInterval)
 	}
 	if got.HeartbeatInterval != 1440 {
 		t.Fatalf("heartbeat interval = %d, want 1440", got.HeartbeatInterval)
 	}
+}
+
+func TestNormalizeCompactionTargetPercent(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		value pgtype.Int4
+		want  *int
+	}{
+		{name: "null uses controller default"},
+		{name: "minimum is valid", value: pgtype.Int4{Int32: 1, Valid: true}, want: settingsIntPointer(1)},
+		{name: "default override stays explicit", value: pgtype.Int4{Int32: 40, Valid: true}, want: settingsIntPointer(40)},
+		{name: "maximum is valid", value: pgtype.Int4{Int32: 99, Valid: true}, want: settingsIntPointer(99)},
+		{name: "zero normalizes to null", value: pgtype.Int4{Valid: true}},
+		{name: "one hundred normalizes to null", value: pgtype.Int4{Int32: 100, Valid: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := normalizeCompactionTargetPercent(tc.value)
+			if !equalOptionalInt(got, tc.want) {
+				t.Fatalf("normalizeCompactionTargetPercent(%v) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyCompactionTargetPercentOverride(t *testing.T) {
+	t.Parallel()
+
+	current := settingsIntPointer(55)
+	got, set := applyCompactionTargetPercentOverride(current, nil)
+	if set || !equalOptionalInt(got, current) {
+		t.Fatalf("omitted override = (%v, %t), want preserved %v and set=false", got, set, current)
+	}
+
+	got, set = applyCompactionTargetPercentOverride(current, settingsIntPointer(30))
+	if !set || !equalOptionalInt(got, settingsIntPointer(30)) {
+		t.Fatalf("valid override = (%v, %t), want 30 and set=true", got, set)
+	}
+
+	got, set = applyCompactionTargetPercentOverride(current, settingsIntPointer(0))
+	if !set || got != nil {
+		t.Fatalf("clear sentinel = (%v, %t), want nil and set=true", got, set)
+	}
+
+	if got := nullableCompactionTargetPercent(settingsIntPointer(30)); !got.Valid || got.Int32 != 30 {
+		t.Fatalf("nullableCompactionTargetPercent(30) = %v, want valid 30", got)
+	}
+	if got := nullableCompactionTargetPercent(nil); got.Valid {
+		t.Fatalf("nullableCompactionTargetPercent(nil) = %v, want null", got)
+	}
+}
+
+func settingsIntPointer(value int) *int {
+	return &value
+}
+
+func equalOptionalInt(left, right *int) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
@@ -192,7 +288,7 @@ func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
 		if !isValidReasoningEffort(effort) {
 			t.Fatalf("isValidReasoningEffort(%q) = false, want true", effort)
 		}
-		got := normalizeBotSetting("en", "auto", "allow", true, effort, false, 60, false, 0, 80)
+		got := normalizeBotSetting("en", "auto", "allow", effort, false, 60, false, 0, pgtype.Int4{})
 		if got.ReasoningEffort != effort {
 			t.Fatalf("normalizeBotSetting effort = %q, want %q", got.ReasoningEffort, effort)
 		}

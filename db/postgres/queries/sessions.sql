@@ -193,6 +193,9 @@ copied_assets AS (
     role,
     ordinal,
     content_hash,
+    mime,
+    size_bytes,
+    storage_key,
     name,
     metadata
   )
@@ -201,6 +204,9 @@ copied_assets AS (
     a.role,
     a.ordinal,
     a.content_hash,
+    a.mime,
+    a.size_bytes,
+    a.storage_key,
     a.name,
     a.metadata
   FROM bot_history_message_assets a

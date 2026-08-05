@@ -117,6 +117,15 @@
     "search_provider": {
       "type_conflict": "このWeb検索プロバイダーはすでに設定されています。"
     },
+    "connector": {
+      "request_invalid": "コネクターのリクエストが無効です。",
+      "not_configured": "このサーバーではコネクターが設定されていません。管理者に Connect-It の有効化を依頼してください。",
+      "not_found": "このコネクターは利用できなくなりました。再読み込みして接続し直してください。",
+      "conflict": "このコネクターは既存の接続と競合しています。",
+      "request_rejected": "Connect-It がコネクターのリクエストを拒否しました。入力内容を確認して、もう一度お試しください。",
+      "upstream_unavailable": "Connect-It でリクエストを処理できませんでした。しばらくしてからもう一度お試しください。",
+      "operation_failed": "コネクターの操作に失敗しました。もう一度お試しください。"
+    },
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
       "image_incompatible": "Workspace イメージに互換性がありません。最新の Memoh Workspace イメージを基に再構築してください。",
@@ -615,6 +624,11 @@
     },
     "panel": {
       "regionLabel": "保留中の項目"
+    },
+    "answers": {
+      "skipped": "スキップ",
+      "cancelled": "キャンセル",
+      "unanswered": "未回答"
     },
     "tools": {
       "read": "読む",
@@ -1593,8 +1607,6 @@
     "loadFailed": "Tool の承認設定を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
     "saveFailed": "Tool の承認設定を保存できませんでした",
-    "saveSuccess": "Tool の承認設定を保存しました",
-    "partialSaveFailed": "一部の変更は保存されましたが、{count} 件の場所で失敗しました。失敗した下書きは保持されています。",
     "enabled": "Tool の承認",
     "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
     "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
@@ -1949,6 +1961,7 @@
       "schedule": "スケジュール",
       "history": "歴史",
       "plugins": "Plugin",
+      "connectors": "コネクター",
       "skills": "Skill",
       "email": "メール",
       "files": "ファイル",
@@ -2369,9 +2382,10 @@
       "heartbeatModelPlaceholder": "チャット Modelを使用する (デフォルト)",
       "compactionEnabled": "コンテキスト圧縮を有効にする",
       "compactionDescription": "コンテキストが大きくなりすぎる場合、古いメッセージを自動的に要約する",
-      "compactionThreshold": "圧縮しきい値 (入力Token、0 = 自動)",
-      "compactionRatio": "圧縮率(%)",
-      "compactionRatioDescription": "要約する古いメッセージの割合。最近のメッセージはそのまま保持されます。",
+      "compactionThreshold": "圧縮しきい値（入力Token数。0 = モデルのコンテキストウィンドウが50%に達したら自動実行）",
+      "compactionTargetPercent": "圧縮後に保持するコンテキスト（%）",
+      "compactionTargetPercentDescription": "圧縮後に保持するモデルのコンテキストウィンドウの割合です。空欄の場合は40%を使用します。",
+      "compactionTargetPercentInvalid": "1から99までの整数を入力するか、空欄にしてください。",
       "compactionModel": "圧縮Model",
       "compactionModelDescription": "要約するModelを選択します。設定されていない場合、デフォルトでBotのチャット Modelが使用されます。",
       "compactionModelPlaceholder": "チャット Modelを使用する (デフォルト)",
@@ -3106,11 +3120,14 @@
   "supermarket": {
     "title": "マーケットプレイス",
     "searchPlaceholder": "プラグインとスキルを検索...",
+    "searchPlaceholderWithConnectors": "プラグイン、スキル、コネクターを検索...",
     "pluginSection": "プラグイン",
     "skillsSection": "スキル",
+    "connectorsSection": "コネクター",
     "noResults": "結果が見つかりませんでした",
     "noPluginResults": "プラグインが見つかりません",
     "noSkillResults": "スキルが見つかりません",
+    "noConnectorResults": "コネクターが見つかりません",
     "install": "インストール",
     "installToBot": "Botにインストールする",
     "selectBot": "Botを選択してください",
@@ -3149,6 +3166,50 @@
     "authManagedOAuth": "マネージドOAuth",
     "authUserSecret": "ユーザーシークレット",
     "authNone": "認証なし"
+  },
+  "connectors": {
+    "title": "コネクター",
+    "connected": "接続済みサービス",
+    "browse": "コネクターを見る",
+    "connect": "接続",
+    "connectTitle": "{name} に接続",
+    "unavailable": "利用不可",
+    "unknown": "不明なコネクター",
+    "emptyTitle": "コネクターはまだありません",
+    "emptyDescription": "サービスを接続して、この Bot からツールを利用できるようにします。",
+    "catalogEmptyTitle": "利用できるコネクターがありません",
+    "catalogEmptyDescription": "Connect-It を設定すると、サービスを参照して接続できます。",
+    "authMethod": "認証方法",
+    "selectAuthMethod": "認証方法を選択",
+    "credentialPlaceholder": "{field}を入力",
+    "enabled": "コネクターを有効にする",
+    "reauthorize": "再認証",
+    "disconnect": "切断",
+    "disconnectTitle": "コネクターを切断しますか？",
+    "disconnectDescription": "Bot から {name} を削除し、保存された接続も削除します。",
+    "disconnected": "コネクターを切断しました",
+    "disconnectFailed": "コネクターを切断できませんでした",
+    "loadFailed": "コネクターを読み込めませんでした",
+    "updateFailed": "コネクターを更新できませんでした",
+    "oauthSuccess": "認証が完了しました",
+    "oauthFailed": "認証に失敗しました",
+    "oauthPopupBlocked": "認証ウィンドウがブロックされました。このページのポップアップを許可して再試行してください。",
+    "connectedSuccess": "{name} に接続しました",
+    "connectFailed": "サービスに接続できませんでした",
+    "status": {
+      "active": "接続済み",
+      "pending": "認証待ち",
+      "reauthRequired": "再認証が必要です",
+      "authorizationFailed": "認証に失敗しました",
+      "unavailable": "利用不可",
+      "disabled": "無効"
+    },
+    "validation": {
+      "botRequired": "Bot を選択してください",
+      "authMethodRequired": "認証方法を選択してください",
+      "fieldRequired": "{field}を入力してください",
+      "fieldInvalid": "{field}の形式が正しくありません"
+    }
   },
   "platform": {
     "addTitle": "プラットフォームの追加",

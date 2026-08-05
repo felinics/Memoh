@@ -10,6 +10,7 @@ on:
       - "apps/**/*.ts"
       - "apps/**/*.tsx"
       - "apps/**/*.vue"
+      - "docker/**"
       - "packages/**"
       - "packages/**/*.js"
       - "packages/**/*.ts"
@@ -33,6 +34,7 @@ on:
       - "apps/**/*.ts"
       - "apps/**/*.tsx"
       - "apps/**/*.vue"
+      - "docker/**"
       - "packages/**"
       - "packages/**/*.js"
       - "packages/**/*.ts"
@@ -96,6 +98,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test release scripts
         run: node --test scripts/publish-auth.test.mjs
+      - name: Test server entrypoint
+        run: pnpm test --run --project docker
       - name: Run Vitest
         run: pnpm test --run --testTimeout=15000 apps/web/src/composables/api/useChat.ws.test.ts apps/web/src/store/chat-list.test.ts
       # Report-only until the pre-existing error backlog (~476 at introduction)

@@ -13,6 +13,7 @@
     <section
       v-if="show"
       class="absolute inset-0 flex flex-col bg-background"
+      data-desktop-window-layer
     >
       <div class="flex-1 relative">
         <MasterDetailSidebarLayout
@@ -260,7 +261,7 @@ import {
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
   BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft, Workflow, Laptop
+  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft, Workflow, Laptop, Plug
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
@@ -287,6 +288,7 @@ import BotDesktop from './components/bot-desktop.vue'
 import BotNetwork from './components/bot-network.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
+import BotConnectors from './components/bot-connectors.vue'
 import BotMemory from './components/bot-memory.vue'
 import BotPlugins from './components/bot-plugins.vue'
 import BotSkills from './components/bot-skills.vue'
@@ -401,6 +403,9 @@ const tabList = computed(() => {
     { value: 'acp', label: 'bots.tabs.acp', icon: BotIcon, component: BotAcp, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
     { value: 'plugins', label: 'bots.tabs.plugins', icon: PackageOpen, component: BotPlugins, params: { 'bot-id': bot_id } },
+    ...(capabilitiesStore.loaded && capabilitiesStore.connectors
+      ? [{ value: 'connectors', label: 'bots.tabs.connectors', icon: Plug, component: BotConnectors, params: { 'bot-id': bot_id } }]
+      : []),
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'heartbeat', label: 'bots.tabs.heartbeat', icon: HeartPulse, component: BotHeartbeat, params: { 'bot-id': bot_id } },
     { value: 'compaction', label: 'bots.tabs.compaction', icon: FileBox, component: BotCompaction, params: { 'bot-id': bot_id } },
@@ -438,6 +443,9 @@ const searchIndex = computed(() => {
     { tab: 'acp', key: 'bots.tabs.acp', keywords: ['codex', 'claude code', 'coding agent', 'acp'] },
     { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
     { tab: 'plugins', key: 'bots.plugins.title', keywords: ['plugin', 'marketplace', 'mcp', 'oauth', 'skills'] },
+    ...(capabilitiesStore.loaded && capabilitiesStore.connectors
+      ? [{ tab: 'connectors', key: 'bots.tabs.connectors', keywords: ['providers', 'apps', 'oauth', 'api', '连接器', 'コネクター'] }]
+      : []),
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'custom mcp'] },
     { tab: 'heartbeat', key: 'bots.heartbeat.title', keywords: ['cron', 'ping', 'alive'] },
     { tab: 'compaction', key: 'bots.compaction.title', keywords: ['compress', 'summarize', 'context window'] },
@@ -474,7 +482,7 @@ function selectTab(value: string): void {
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
-  const capabilityKeys = ['plugins', 'skills', 'hooks', 'tool-approval', 'acp', 'mcp', 'memory']
+  const capabilityKeys = ['plugins', 'skills', 'hooks', 'tool-approval', 'acp', 'connectors', 'mcp', 'memory']
   const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction', 'heartbeat']
   const securityKeys = ['access', 'email']
 
@@ -539,9 +547,11 @@ watch(bot, (val) => {
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
 watch([tabList, activeTab], ([tabs, tab]) => {
-  if (!tabs.some(item => item.value === tab)) {
-    activeTab.value = 'overview'
-  }
+  if (tabs.some(item => item.value === tab)) return
+  // 'connectors' only joins the list once the capability ping lands; don't
+  // bounce a deep link / refresh to overview while that's still in flight.
+  if (tab === 'connectors' && !capabilitiesStore.loaded) return
+  activeTab.value = 'overview'
 }, { immediate: true })
 const avatarDialogOpen = ref(false)
 const avatarUrlModel = ref('')

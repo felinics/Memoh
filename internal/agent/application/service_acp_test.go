@@ -1714,12 +1714,12 @@ type storeRoundSettingsQueries struct {
 
 func (*storeRoundSettingsQueries) GetSettingsByBotID(_ context.Context, botID pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
-		BotID:             botID,
-		Language:          "auto",
-		ReasoningEffort:   "medium",
-		HeartbeatInterval: 30,
-		CompactionRatio:   80,
-		MemoryProviderID:  flowTestUUID(storeRoundMemoryProviderID),
+		BotID:                   botID,
+		Language:                "auto",
+		ReasoningEffort:         "medium",
+		HeartbeatInterval:       30,
+		CompactionTargetPercent: pgtype.Int4{},
+		MemoryProviderID:        flowTestUUID(storeRoundMemoryProviderID),
 	}, nil
 }
 

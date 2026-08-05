@@ -120,6 +120,15 @@
     "search_provider": {
       "type_conflict": "该搜索提供方已完成配置。"
     },
+    "connector": {
+      "request_invalid": "连接器请求无效。",
+      "not_configured": "此服务器尚未配置连接器，请联系管理员启用 Connect-It。",
+      "not_found": "该连接器已不可用，请刷新后重新连接。",
+      "conflict": "该连接器与现有连接冲突。",
+      "request_rejected": "Connect-It 拒绝了该连接器请求，请检查填写内容后重试。",
+      "upstream_unavailable": "Connect-It 暂时无法完成请求，请稍后重试。",
+      "operation_failed": "连接器操作失败，请重试。"
+    },
     "workspace": {
       "unreachable": "暂时无法连接工作区，请稍后重试。",
       "image_incompatible": "工作区镜像与当前版本不兼容，请基于最新 Memoh Workspace 镜像重建后重试。",
@@ -646,6 +655,11 @@
     },
     "panel": {
       "regionLabel": "待处理事项"
+    },
+    "answers": {
+      "skipped": "已跳过",
+      "cancelled": "已取消",
+      "unanswered": "未作答"
     },
     "tools": {
       "read": "读取",
@@ -1608,8 +1622,6 @@
       "loadFailed": "无法加载工具审核",
       "loadFailedDescription": "请检查服务器连接后重试。",
       "saveFailed": "无法保存工具审核",
-      "saveSuccess": "已保存工具审核更改",
-      "partialSaveFailed": "部分更改已保存，但有 {count} 个位置保存失败；失败位置的草稿已保留。",
       "enabled": "工具调用审核",
       "enabledDescription": "这个位置会执行允许、询问和拒绝规则。",
       "disabledDescription": "文件和命令工具将直接执行，已保存的模式和规则会保留。",
@@ -1967,6 +1979,7 @@
       "schedule": "定时任务",
       "history": "对话历史",
       "plugins": "Plugins",
+      "connectors": "连接器",
       "skills": "技能",
       "email": "邮件",
       "files": "文件",
@@ -2378,9 +2391,10 @@
       "heartbeatModelPlaceholder": "使用聊天模型（默认）",
       "compactionEnabled": "启用上下文压缩",
       "compactionDescription": "当对话上下文过长时，自动对旧消息进行摘要以节省 Token。",
-      "compactionThreshold": "压缩阈值（输入 token 数，0 表示自动）",
-      "compactionRatio": "压缩比例（%）",
-      "compactionRatioDescription": "指定需要压缩的旧消息比例，最近的消息将保持原样。",
+      "compactionThreshold": "压缩阈值（输入 Token 数；0 表示在模型上下文窗口达到 50% 时自动压缩）",
+      "compactionTargetPercent": "压缩后保留的上下文（%）",
+      "compactionTargetPercentDescription": "压缩后保留的模型上下文窗口比例。留空时使用 40%。",
+      "compactionTargetPercentInvalid": "请输入 1 到 99 之间的整数，或将此字段留空。",
       "compactionModel": "压缩模型",
       "compactionModelDescription": "选择用于摘要的模型，未设置时默认使用聊天模型。",
       "compactionModelPlaceholder": "使用聊天模型（默认）",
@@ -2914,7 +2928,6 @@
       "title": "压缩记录",
       "settingsTitle": "压缩设置",
       "advanced": "高级设置",
-      "disableNote": "保存后压缩将停止。",
       "loadFailed": "加载压缩记录失败",
       "empty": "暂无压缩记录",
       "emptyHint": "机器人压缩会话历史后，这里会出现记录。",
@@ -2940,7 +2953,6 @@
       "checkEvery": "检查间隔",
       "intervalUnit": "分钟",
       "advanced": "高级设置",
-      "disableNote": "保存后心跳将停止。",
       "loadFailed": "加载心跳日志失败",
       "empty": "暂无心跳日志",
       "logsDisabledTitle": "心跳已关闭",
@@ -3138,11 +3150,14 @@
   "supermarket": {
     "title": "市场",
     "searchPlaceholder": "搜索 Plugins 和 Skills...",
+    "searchPlaceholderWithConnectors": "搜索 Plugins、Skills 和连接器...",
     "pluginSection": "Plugins",
     "skillsSection": "Skills",
+    "connectorsSection": "连接器",
     "noResults": "未找到结果",
     "noPluginResults": "未找到 Plugin",
     "noSkillResults": "未找到 Skill",
+    "noConnectorResults": "未找到连接器",
     "install": "安装",
     "installToBot": "安装到 Bot",
     "selectBot": "选择 Bot",
@@ -3181,6 +3196,50 @@
     "authManagedOAuth": "托管 OAuth",
     "authUserSecret": "用户凭据",
     "authNone": "无需授权"
+  },
+  "connectors": {
+    "title": "连接器",
+    "connected": "已连接的服务",
+    "browse": "浏览连接器",
+    "connect": "连接",
+    "connectTitle": "连接 {name}",
+    "unavailable": "暂不可用",
+    "unknown": "未知连接器",
+    "emptyTitle": "还没有连接器",
+    "emptyDescription": "连接服务，让这个 Bot 可以使用服务提供的工具。",
+    "catalogEmptyTitle": "暂无可用连接器",
+    "catalogEmptyDescription": "请先配置 Connect-It，再浏览和连接服务。",
+    "authMethod": "认证方式",
+    "selectAuthMethod": "选择认证方式",
+    "credentialPlaceholder": "请输入{field}",
+    "enabled": "启用连接器",
+    "reauthorize": "重新授权",
+    "disconnect": "断开连接",
+    "disconnectTitle": "断开这个连接器？",
+    "disconnectDescription": "这会从 Bot 中移除 {name}，并删除已保存的连接。",
+    "disconnected": "已断开连接器",
+    "disconnectFailed": "断开连接器失败",
+    "loadFailed": "加载连接器失败",
+    "updateFailed": "更新连接器失败",
+    "oauthSuccess": "授权完成",
+    "oauthFailed": "授权失败",
+    "oauthPopupBlocked": "授权窗口被浏览器拦截了,请允许此页面的弹出窗口后重试。",
+    "connectedSuccess": "{name} 已连接",
+    "connectFailed": "连接服务失败",
+    "status": {
+      "active": "已连接",
+      "pending": "等待授权",
+      "reauthRequired": "需要重新授权",
+      "authorizationFailed": "授权失败",
+      "unavailable": "不可用",
+      "disabled": "已停用"
+    },
+    "validation": {
+      "botRequired": "请选择 Bot",
+      "authMethodRequired": "请选择认证方式",
+      "fieldRequired": "请输入{field}",
+      "fieldInvalid": "{field}格式不正确"
+    }
   },
   "platform": {
     "addTitle": "添加平台",

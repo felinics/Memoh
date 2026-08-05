@@ -13,7 +13,7 @@ import (
 // but the level button labels and their dispatched Args stay canonical tokens.
 func TestReasoningResultZhLocalizesProseNotTokens(t *testing.T) {
 	t.Parallel()
-	res := reasoningResult(i18n.New("zh"), true, "xhigh")
+	res := reasoningResult(i18n.New("zh"), "xhigh")
 	title := res.Interactive.Choices.Title
 	if !strings.Contains(title, "🧠 推理") {
 		t.Errorf("zh header missing, title=%q", title)

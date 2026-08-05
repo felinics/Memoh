@@ -304,6 +304,21 @@ func mimeFromExtension(ext string) string {
 	return "application/octet-stream"
 }
 
+// MimeFromPath derives MIME from an already-persisted filename or storage key.
+// It is deliberately metadata-only: history reads can use it without opening
+// workspace storage or waking a runtime provider.
+func MimeFromPath(filePath string) string {
+	ext := path.Ext(strings.TrimSpace(filePath))
+	if ext == "" {
+		return ""
+	}
+	mime := mimeFromExtension(ext)
+	if mime == "application/octet-stream" {
+		return ""
+	}
+	return mime
+}
+
 func extensionFromMime(mime string) string {
 	if ext, ok := mimeToExt[strings.ToLower(strings.TrimSpace(mime))]; ok {
 		return ext

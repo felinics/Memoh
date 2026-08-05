@@ -22,31 +22,68 @@ function makeCoordinator() {
   const currentBotId = ref<string | null>('bot-1')
   const fetchSessions = vi.fn<(_botId: string) => Promise<FetchSessionsResult>>()
   const applySessionsSnapshot = vi.fn()
+  let revision = 0
   return {
     currentBotId,
     fetchSessions,
     applySessionsSnapshot,
+    bumpRevision: () => { revision += 1 },
     coordinator: createChatRefreshCoordinator({
       currentBotId,
       fetchSessions,
+      currentSessionListRevision: () => revision,
       applySessionsSnapshot,
     }),
   }
 }
 
 describe('chat refresh coordinator', () => {
-  it('deduplicates session-list refreshes for the same bot', async () => {
+  it('coalesces an in-flight signal into one trailing refresh', async () => {
     const { coordinator, fetchSessions, applySessionsSnapshot } = makeCoordinator()
-    const request = deferred<FetchSessionsResult>()
-    fetchSessions.mockReturnValue(request.promise)
+    const firstRequest = deferred<FetchSessionsResult>()
+    const trailingRequest = deferred<FetchSessionsResult>()
+    fetchSessions
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockReturnValueOnce(trailingRequest.promise)
 
     const first = coordinator.refreshSessionsList('bot-1')
     const second = coordinator.refreshSessionsList('bot-1')
     expect(fetchSessions).toHaveBeenCalledOnce()
 
-    request.resolve(page('session-current'))
+    firstRequest.resolve(page('session-stale'))
+    await Promise.resolve()
+    expect(applySessionsSnapshot).not.toHaveBeenCalled()
+    expect(fetchSessions).toHaveBeenCalledTimes(2)
+
+    trailingRequest.resolve(page('session-current'))
     await Promise.all([first, second])
     expect(applySessionsSnapshot).toHaveBeenCalledOnce()
+    expect(applySessionsSnapshot).toHaveBeenCalledWith(page('session-current'))
+  })
+
+  it('reruns when an SSE mutation advances the list revision', async () => {
+    const {
+      coordinator,
+      fetchSessions,
+      applySessionsSnapshot,
+      bumpRevision,
+    } = makeCoordinator()
+    const firstRequest = deferred<FetchSessionsResult>()
+    const trailingRequest = deferred<FetchSessionsResult>()
+    fetchSessions
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockReturnValueOnce(trailingRequest.promise)
+
+    const refresh = coordinator.refreshSessionsList('bot-1')
+    bumpRevision()
+    firstRequest.resolve(page('session-stale'))
+    await Promise.resolve()
+    expect(applySessionsSnapshot).not.toHaveBeenCalled()
+
+    trailingRequest.resolve(page('session-current'))
+    await refresh
+    expect(applySessionsSnapshot).toHaveBeenCalledOnce()
+    expect(applySessionsSnapshot).toHaveBeenCalledWith(page('session-current'))
   })
 
   it('invalidates old responses and lets a new scope request win', async () => {

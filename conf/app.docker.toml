@@ -95,6 +95,14 @@ providers_dir = "conf/providers"
 [supermarket]
 base_url = "https://supermarket.memoh.ai"
 
+[connect_it]
+# Co-hosted Connect-It (docker compose --profile connectors). The install
+# script generates the credentials and the Compose environment overrides
+# these values via MEMOH_CONNECT_IT_BASE_URL / MEMOH_CONNECT_IT_API_TOKEN;
+# leave both empty to disable the connectors feature.
+base_url = ""
+api_token = ""
+
 [oauth_clients]
 config_path = "conf/oauth-clients.toml"
 
