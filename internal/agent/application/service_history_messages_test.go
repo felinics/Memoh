@@ -41,6 +41,30 @@ func TestProjectInterruptedHistoryReasoning(t *testing.T) {
 	}
 }
 
+func TestProjectInterruptedHistoryReasoningSkipsSupersededCheckpoint(t *testing.T) {
+	checkpoint := historyfrag.HistoryRecord{
+		ModelMessage: sdkMessagesToModelMessages([]sdk.Message{{
+			Role:    sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ReasoningPart{Text: "partial reasoning"}},
+		}})[0],
+		Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
+	}
+	answer := historyfrag.HistoryRecord{
+		ModelMessage: sdkMessagesToModelMessages([]sdk.Message{{
+			Role:    sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "the answer"}},
+		}})[0],
+	}
+	projected := projectInterruptedHistoryReasoning([]historyfrag.HistoryRecord{checkpoint, answer})
+	got := modelMessageToSDKMessage(projected[0].ModelMessage)
+	if len(got.Content) != 1 {
+		t.Fatalf("projected content = %#v, want the reasoning part untouched", got.Content)
+	}
+	if _, ok := got.Content[0].(sdk.ReasoningPart); !ok {
+		t.Fatalf("superseded checkpoint was projected into prompt text: %#v", got.Content[0])
+	}
+}
+
 const (
 	pipelineTestBotID     = "11111111-1111-1111-1111-111111111111"
 	pipelineTestSessionID = "22222222-2222-2222-2222-222222222222"

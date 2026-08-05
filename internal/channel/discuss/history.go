@@ -26,12 +26,5 @@ func (r discussHistoryReader) Load(ctx context.Context, sessionID string) []time
 		return nil
 	}
 
-	var responses []timeline.TurnResponseEntry
-	for _, message := range messages {
-		entry, ok := timeline.DecodeTurnResponseEntry(message)
-		if ok {
-			responses = append(responses, entry)
-		}
-	}
-	return responses
+	return timeline.DecodeTurnResponseEntries(messages)
 }

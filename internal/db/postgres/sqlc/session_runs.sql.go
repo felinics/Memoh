@@ -544,7 +544,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = $3
   AND fencing_token = $4
   AND state IN ('running', 'waiting_decision')
-  AND abort_requested_at IS NULL
+  AND ($5::boolean OR abort_requested_at IS NULL)
 FOR UPDATE
 `
 
@@ -553,53 +553,18 @@ type LockSessionRunForAgentStepCommitParams struct {
 	BotID        pgtype.UUID `json:"bot_id"`
 	SessionID    pgtype.UUID `json:"session_id"`
 	FencingToken int64       `json:"fencing_token"`
+	Interrupted  bool        `json:"interrupted"`
 }
 
-// Linearize a complete-step commit against abort and terminal transitions.
-// RequestSessionRunAbort updates the same row, so either the step locks first
-// and commits, or the abort becomes visible here and the step is refused.
+// Complete steps must precede abort intent; interrupted checkpoints only need
+// the same active owner because some cancellation paths do not record intent.
 func (q *Queries) LockSessionRunForAgentStepCommit(ctx context.Context, arg LockSessionRunForAgentStepCommitParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockSessionRunForAgentStepCommit,
 		arg.RunID,
 		arg.BotID,
 		arg.SessionID,
 		arg.FencingToken,
-	)
-	var run_id pgtype.UUID
-	err := row.Scan(&run_id)
-	return run_id, err
-}
-
-const lockSessionRunForInterruptedAgentStepCommit = `-- name: LockSessionRunForInterruptedAgentStepCommit :one
-SELECT run_id
-FROM session_runs
-WHERE team_id = public.memoh_current_team_id()
-  AND run_id = $1
-  AND bot_id = $2
-  AND session_id = $3
-  AND fencing_token = $4
-  AND state IN ('running', 'waiting_decision')
-  AND abort_requested_at IS NOT NULL
-FOR UPDATE
-`
-
-type LockSessionRunForInterruptedAgentStepCommitParams struct {
-	RunID        pgtype.UUID `json:"run_id"`
-	BotID        pgtype.UUID `json:"bot_id"`
-	SessionID    pgtype.UUID `json:"session_id"`
-	FencingToken int64       `json:"fencing_token"`
-}
-
-// An interrupted text/reasoning snapshot is writable only after abort intent
-// is durable and before this owner finalizes the run. It deliberately uses a
-// separate predicate from complete-step commits so tool steps keep their
-// existing abort race semantics.
-func (q *Queries) LockSessionRunForInterruptedAgentStepCommit(ctx context.Context, arg LockSessionRunForInterruptedAgentStepCommitParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, lockSessionRunForInterruptedAgentStepCommit,
-		arg.RunID,
-		arg.BotID,
-		arg.SessionID,
-		arg.FencingToken,
+		arg.Interrupted,
 	)
 	var run_id pgtype.UUID
 	err := row.Scan(&run_id)

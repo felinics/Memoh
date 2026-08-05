@@ -75,10 +75,17 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if stepIndex != c.nextStep {
-		err := fmt.Errorf("unexpected agent step %d, want %d", stepIndex, c.nextStep)
-		c.commitErr = err
+	// A failed interrupted checkpoint is reported to its caller but never
+	// recorded as a commit failure: the turn is already ending, and losing an
+	// unfinished snapshot must not turn an abort into a turn error.
+	fail := func(err error) error {
+		if !interrupted {
+			c.commitErr = err
+		}
 		return err
+	}
+	if stepIndex != c.nextStep {
+		return fail(fmt.Errorf("unexpected agent step %d, want %d", stepIndex, c.nextStep))
 	}
 	if !hasPersistableAssistantOutput(messages) {
 		c.nextStep++
@@ -102,8 +109,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	}
 	inputs, err := c.service.buildPersistInputs(context.WithoutCancel(ctx), storeReq, messages, c.rc.model.ID, opts)
 	if err != nil {
-		c.commitErr = err
-		return err
+		return fail(err)
 	}
 	for i := range inputs {
 		inputs[i].TurnRequestMessageID = c.turnRequestMessageID
@@ -112,8 +118,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		RunID: c.req.RunID, Messages: inputs, Interrupted: interrupted,
 	})
 	if err != nil {
-		c.commitErr = err
-		return err
+		return fail(err)
 	}
 	c.nextStep++
 	for _, message := range persisted {

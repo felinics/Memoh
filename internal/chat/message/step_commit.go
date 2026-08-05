@@ -19,12 +19,11 @@ var ErrAgentStepNotWritable = errors.New("agent step is no longer writable")
 
 type agentStepQueries interface {
 	LockSessionRunForAgentStepCommit(context.Context, sqlc.LockSessionRunForAgentStepCommitParams) (pgtype.UUID, error)
-	LockSessionRunForInterruptedAgentStepCommit(context.Context, sqlc.LockSessionRunForInterruptedAgentStepCommitParams) (pgtype.UUID, error)
 }
 
 // PersistAgentStep appends one SDK step in a runtime-fenced transaction.
-// Complete steps lock before abort; interrupted text/reasoning snapshots lock
-// after abort intent but before terminal finalization.
+// Complete steps precede abort intent; interrupted checkpoints remain writable
+// until terminal finalization for cancellation paths without recorded intent.
 func (s *DBService) PersistAgentStep(ctx context.Context, step AgentStep) ([]Message, error) {
 	if s == nil || s.queries == nil {
 		return nil, errors.New("message service is not configured")
@@ -68,14 +67,10 @@ func (s *DBService) PersistAgentStep(ctx context.Context, step AgentStep) ([]Mes
 			return errors.New("persistence store does not support agent step writes")
 		}
 		params := sqlc.LockSessionRunForAgentStepCommitParams{
-			RunID: pgRunID, BotID: pgBotID, SessionID: pgSessionID, FencingToken: fence.Token,
+			RunID: pgRunID, BotID: pgBotID, SessionID: pgSessionID,
+			FencingToken: fence.Token, Interrupted: step.Interrupted,
 		}
-		var lockErr error
-		if step.Interrupted {
-			_, lockErr = writer.LockSessionRunForInterruptedAgentStepCommit(ctx, sqlc.LockSessionRunForInterruptedAgentStepCommitParams(params))
-		} else {
-			_, lockErr = writer.LockSessionRunForAgentStepCommit(ctx, params)
-		}
+		_, lockErr := writer.LockSessionRunForAgentStepCommit(ctx, params)
 		if errors.Is(lockErr, pgx.ErrNoRows) {
 			return ErrAgentStepNotWritable
 		} else if lockErr != nil {

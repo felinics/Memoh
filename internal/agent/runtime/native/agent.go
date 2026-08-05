@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -287,14 +286,14 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		modelStepIndex++
 		return nil
 	}))
-	var nextDurableStep atomic.Int64
+	var nextDurableStep int
 	var onStepCommitted func(context.Context, int, *sdk.StepResult) error
 	if cfg.OnStepCommitted != nil {
 		onStepCommitted = func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
 			if err := cfg.OnStepCommitted(ctx, stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)); err != nil {
 				return err
 			}
-			nextDurableStep.Store(int64(stepIndex + 1))
+			nextDurableStep = stepIndex + 1
 			return nil
 		}
 		opts = append(opts, sdk.WithOnStepCommitted(onStepCommitted))
@@ -559,7 +558,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				streamResult, aborted = a.runMidStreamRetry(
 					ctx, streamCtx, cancel, toolLoopAbortCallIDs,
 					ch, cfg, sdkTools, approvalTools, prepareStep, streamResult,
-					committedStepMessages, onStepCommitted, stepNumber, errMsg, &allText, textLoopProbeBuffer,
+					committedStepMessages, onStepCommitted, &interruptedStep,
+					stepNumber, errMsg, &allText, textLoopProbeBuffer,
 				)
 				if !aborted {
 					turnError = ""
@@ -583,27 +583,37 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		aborted = true
 	}
 
-	// Only external cancellation can represent a user/session abort. Provider
-	// errors and loop guards keep their existing failure semantics.
-	if aborted && ctx.Err() != nil && cfg.OnStepInterrupted != nil {
-		if step := interruptedStep.snapshot(); step != nil {
-			stepIndex := int(nextDurableStep.Load())
-			step = committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)
-			if err := cfg.OnStepInterrupted(context.WithoutCancel(streamCtx), stepIndex, step); err != nil {
-				a.logger.Error("persist interrupted model step failed", slog.Any("error", err))
-			} else {
-				interruptedMessages = step.Messages
-			}
-		}
-	}
-
 	if aborted && !streamClosed {
 		// A provider is expected to close its stream when the context is
 		// cancelled, but run termination must not depend on that cooperation.
 		// Preserve the final snapshot when it arrives promptly, then stop
 		// waiting so the caller can fence and finalize the run as aborted.
 		cancel(context.Canceled)
-		streamClosed = drainStreamUntilClosed(streamResult.Stream, streamCancelDrainGrace)
+		streamClosed = drainStreamUntilClosed(streamResult.Stream, streamCancelDrainGrace, interruptedStep.observe)
+	}
+
+	// Only external cancellation can represent a user/session abort. Provider
+	// errors and loop guards keep their existing failure semantics.
+	//
+	// A closed stream is what makes this write safe, so it is required rather
+	// than merely convenient. It means the SDK's step goroutine has returned:
+	// no further complete step can commit after this checkpoint, and the
+	// prepared-message capture read below is published by that goroutine's exit
+	// instead of racing its next PrepareStep. When a provider refuses to close
+	// within the drain grace, the checkpoint is dropped rather than risk
+	// duplicating an answer the SDK is still about to commit.
+	if aborted && streamClosed && ctx.Err() != nil && cfg.OnStepInterrupted != nil {
+		stepIndex := nextDurableStep
+		if step := interruptedStep.snapshot(stepIndex); step != nil {
+			step = committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)
+			if err := cfg.OnStepInterrupted(context.WithoutCancel(streamCtx), stepIndex, step); err != nil {
+				// An owner that lost its lease, or a run another writer already
+				// finalized, is an expected outcome of racing an abort.
+				a.logger.Warn("persist interrupted model step failed", slog.Any("error", err))
+			} else {
+				interruptedMessages = step.Messages
+			}
+		}
 	}
 
 	if textLoopProbeBuffer != nil {
@@ -680,7 +690,12 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	sendEvent(deliveryCtx, ch, termEvent)
 }
 
-func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration) bool {
+// drainStreamUntilClosed consumes what the provider still has buffered after
+// cancellation. observe sees those parts too: a finish-step or tool call left in
+// the buffer is state this run reached, so an interrupted checkpoint must be
+// judged against it rather than against the prefix the event loop happened to
+// read before the abort.
+func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration, observe func(sdk.StreamPart)) bool {
 	if stream == nil {
 		return true
 	}
@@ -688,9 +703,12 @@ func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration) b
 	defer timer.Stop()
 	for {
 		select {
-		case _, ok := <-stream:
+		case part, ok := <-stream:
 			if !ok {
 				return true
+			}
+			if observe != nil {
+				observe(part)
 			}
 		case <-timer.C:
 			return false
@@ -1331,6 +1349,7 @@ func (a *Agent) runMidStreamRetry(
 	prevResult *sdk.StreamResult,
 	committedStepMessages *stepMessageCapture,
 	onStepCommitted func(context.Context, int, *sdk.StepResult) error,
+	interruptedStep *interruptedStepCapture,
 	stepNumber int,
 	errMsg string,
 	allText *strings.Builder,
@@ -1343,6 +1362,10 @@ func (a *Agent) runMidStreamRetry(
 		}
 	}
 	stepOffset := len(prevResult.Steps)
+	// The failed attempt's partial output is regenerated from the last
+	// committed boundary, so it must not survive as a checkpoint. Retried
+	// steps are numbered from the offset the commit barrier already uses.
+	interruptedStep.rebase(stepOffset)
 
 	retryCfg := DefaultRetryConfig()
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
@@ -1399,6 +1422,7 @@ func (a *Agent) runMidStreamRetry(
 				aborted = true
 				break
 			}
+			interruptedStep.observe(retryPart)
 			switch rp := retryPart.(type) {
 			case *sdk.TextStartPart:
 				if !sendEvent(sendCtx, ch, StreamEvent{Type: EventTextStart}) {
@@ -1503,7 +1527,8 @@ func (a *Agent) runMidStreamRetry(
 			}
 		}
 		if aborted {
-			for range retryResult.Stream {
+			for retryPart := range retryResult.Stream {
+				interruptedStep.observe(retryPart)
 			}
 		}
 		// Merge prev messages into retryResult so the caller sees the full

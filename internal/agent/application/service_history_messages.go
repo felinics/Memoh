@@ -131,15 +131,7 @@ func (s *Service) loadTurnResponses(ctx context.Context, sessionID string) []tim
 		s.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil
 	}
-	var trs []timeline.TurnResponseEntry
-	for _, m := range msgs {
-		entry, ok := timeline.DecodeTurnResponseEntry(m)
-		if !ok {
-			continue
-		}
-		trs = append(trs, entry)
-	}
-	return trs
+	return timeline.DecodeTurnResponseEntries(msgs)
 }
 
 // stripToolMessages removes bulky tool interactions from the context while
