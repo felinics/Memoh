@@ -1580,13 +1580,24 @@ const activeModel = computed(() => {
 const isPdfFile = (file: File) =>
   file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
 
+// Mirrors the backend's nativeAttachmentMaxBinaryBytes: larger PDFs are demoted
+// to the workspace-path fallback even when the model supports file-input.
+const nativePdfMaxBytes = 12 * 1024 * 1024
+
 watch(() => pendingFiles.value.length, (len, prevLen) => {
   if (len <= (prevLen ?? 0)) return
   if (activeUsesACPComposer.value) return
   const model = activeModel.value
-  if (!model || model.config?.compatibilities?.includes('file-input')) return
-  if (pendingFiles.value.slice(prevLen ?? 0).some(isPdfFile)) {
-    toast.warning(t('chat.pdfUnsupportedByModel'))
+  if (!model) return
+  const added = pendingFiles.value.slice(prevLen ?? 0)
+  if (!model.config?.compatibilities?.includes('file-input')) {
+    if (added.some(isPdfFile)) {
+      toast.warning(t('chat.pdfUnsupportedByModel'))
+    }
+    return
+  }
+  if (added.some((file) => isPdfFile(file) && file.size > nativePdfMaxBytes)) {
+    toast.warning(t('chat.pdfTooLargeForNative'))
   }
 })
 

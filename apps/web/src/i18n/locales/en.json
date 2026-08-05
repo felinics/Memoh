@@ -600,6 +600,7 @@
     "computerNone": "No computers available",
     "computerUnavailable": "Unavailable computer",
     "attachFiles": "Attach files",
+    "pdfTooLargeForNative": "This PDF exceeds 12MB, so it will be saved to the workspace as a path; the model can't view its content directly.",
     "pdfUnsupportedByModel": "The current model can't read PDFs natively. The file will be saved to the workspace as a path, but the model won't be able to view its content.",
     "send": "Send",
     "sendFailed": "Message failed to send",

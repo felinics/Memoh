@@ -569,6 +569,7 @@
     "computerNone": "利用できるコンピューターがありません",
     "computerUnavailable": "利用できないコンピューター",
     "attachFiles": "ファイルを添付する",
+    "pdfTooLargeForNative": "PDF が 12MB を超えているため、ワークスペースにパスとして保存されます。モデルは内容を直接閲覧できません。",
     "pdfUnsupportedByModel": "現在のモデルは PDF の読み取りに対応していません。ファイルはワークスペースにパスとして保存され、モデルは内容を閲覧できません。",
     "send": "送信",
     "sendFailed": "メッセージの送信に失敗しました",
