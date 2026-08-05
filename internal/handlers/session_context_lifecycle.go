@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,7 +28,8 @@ const (
 )
 
 type ContextLifecycleResponse struct {
-	Turns []ContextLifecycleTurn `json:"turns"`
+	Turns      []ContextLifecycleTurn     `json:"turns"`
+	Aggregates ContextLifecycleAggregates `json:"aggregates"`
 }
 
 // ContextLifecycleTurn is one persisted lifecycle snapshot, newest first.
@@ -40,9 +42,30 @@ type ContextLifecycleTurn struct {
 	Snapshot           contextfrag.LifecycleSnapshot `json:"snapshot"`
 }
 
+type ContextLifecycleAggregates struct {
+	Turns                     int                `json:"turns"`
+	CacheOutcomes             map[string]int     `json:"cache_outcomes,omitempty"`
+	CacheHitRate              float64            `json:"cache_hit_rate"`
+	TotalCacheReadTokens      int                `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens     int                `json:"total_cache_write_tokens"`
+	TotalExpectedStableTokens int                `json:"total_expected_stable_tokens"`
+	CacheReadEfficiency       float64            `json:"cache_read_efficiency"`
+	DropReasons               map[string]int     `json:"drop_reasons,omitempty"`
+	MutationKinds             map[string]int     `json:"mutation_kinds,omitempty"`
+	ToolRosterChanges         int                `json:"tool_roster_changes"`
+	ToolRosterChangeDetails   []ToolRosterChange `json:"tool_roster_change_details,omitempty"`
+}
+
+type ToolRosterChange struct {
+	RunID   string   `json:"run_id"`
+	Added   []string `json:"added,omitempty"`
+	Removed []string `json:"removed,omitempty"`
+	Resized []string `json:"resized,omitempty"`
+}
+
 // GetSessionContextLifecycle godoc
 // @Summary Get session context lifecycle
-// @Description List run-keyed context lifecycle snapshots for a chat session; sessions predating run lifecycle persistence fall back to legacy assistant metadata
+// @Description List run-keyed context lifecycle snapshots and aggregate cache, drop, mutation, and tool-roster diagnostics for a chat session; sessions predating run lifecycle persistence fall back to legacy assistant metadata
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
@@ -121,7 +144,10 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 	if err != nil {
 		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
-	return c.JSON(http.StatusOK, ContextLifecycleResponse{Turns: turns})
+	return c.JSON(http.StatusOK, ContextLifecycleResponse{
+		Turns:      turns,
+		Aggregates: aggregateContextLifecycle(turns),
+	})
 }
 
 func mapContextLifecycleError(err error) error {
@@ -234,7 +260,7 @@ func legacyLifecycleTurnsFromRows(rows []sqlc.ListRecentAssistantMessagesBySessi
 		if len(turns) >= limit {
 			break
 		}
-		snapshot, ok := lifecycleSnapshotFromMetadata(row.Metadata)
+		snapshot, ok := contextfrag.LifecycleSnapshotFromMetadata(row.Metadata)
 		if !ok {
 			continue
 		}
@@ -248,15 +274,131 @@ func legacyLifecycleTurnsFromRows(rows []sqlc.ListRecentAssistantMessagesBySessi
 	return turns
 }
 
-func lifecycleSnapshotFromMetadata(raw []byte) (contextfrag.LifecycleSnapshot, bool) {
-	if len(raw) == 0 {
-		return contextfrag.LifecycleSnapshot{}, false
+func latestContextComposition(turns []ContextLifecycleTurn) ([]contextfrag.KindBreakdown, []ToolDefBucket) {
+	if len(turns) == 0 {
+		return nil, nil
 	}
-	var metadata struct {
-		ContextLifecycle *contextfrag.LifecycleSnapshot `json:"context_lifecycle"`
+	snapshot := turns[0].Snapshot
+	var buckets []ToolDefBucket
+	if len(snapshot.ToolDefs) > 0 {
+		byProvider := make(map[string]*ToolDefBucket, 2)
+		for _, def := range snapshot.ToolDefs {
+			bucket, ok := byProvider[def.Provider]
+			if !ok {
+				bucket = &ToolDefBucket{Provider: def.Provider}
+				byProvider[def.Provider] = bucket
+			}
+			bucket.Tools++
+			bucket.TokenEstimate += def.TokenEstimate
+		}
+		buckets = make([]ToolDefBucket, 0, len(byProvider))
+		for _, bucket := range byProvider {
+			buckets = append(buckets, *bucket)
+		}
+		sort.Slice(buckets, func(i, j int) bool {
+			if buckets[i].TokenEstimate != buckets[j].TokenEstimate {
+				return buckets[i].TokenEstimate > buckets[j].TokenEstimate
+			}
+			return buckets[i].Provider < buckets[j].Provider
+		})
 	}
-	if json.Unmarshal(raw, &metadata) != nil || metadata.ContextLifecycle == nil {
-		return contextfrag.LifecycleSnapshot{}, false
+	return snapshot.Breakdown, buckets
+}
+
+func aggregateContextLifecycle(turns []ContextLifecycleTurn) ContextLifecycleAggregates {
+	agg := ContextLifecycleAggregates{Turns: len(turns)}
+	comparableTurns := 0
+	hits := 0
+	comparableReadTokens := 0
+	for _, turn := range turns {
+		agg.TotalCacheReadTokens += turn.Snapshot.CacheReadTokens
+		agg.TotalCacheWriteTokens += turn.Snapshot.CacheWriteTokens
+		if comparison := turn.Snapshot.CacheComparison; comparison != nil {
+			if agg.CacheOutcomes == nil {
+				agg.CacheOutcomes = make(map[string]int, 4)
+			}
+			agg.CacheOutcomes[comparison.Outcome]++
+			if comparison.Outcome != contextfrag.CacheOutcomeFirstObservation {
+				comparableTurns++
+				comparableReadTokens += turn.Snapshot.CacheReadTokens
+				agg.TotalExpectedStableTokens += turn.Snapshot.StablePrefixTokenEstimate
+				if comparison.Outcome == contextfrag.CacheOutcomeHit {
+					hits++
+				}
+			}
+		}
+		for reason, count := range turn.Snapshot.Selection.DropReasons {
+			if agg.DropReasons == nil {
+				agg.DropReasons = make(map[string]int, 4)
+			}
+			agg.DropReasons[reason] += count
+		}
+		for _, record := range turn.Snapshot.Mutations {
+			if agg.MutationKinds == nil {
+				agg.MutationKinds = make(map[string]int, 4)
+			}
+			agg.MutationKinds[string(record.Kind)]++
+		}
 	}
-	return *metadata.ContextLifecycle, true
+	if comparableTurns > 0 {
+		agg.CacheHitRate = float64(hits) / float64(comparableTurns) * 100
+	}
+	if agg.TotalExpectedStableTokens > 0 {
+		agg.CacheReadEfficiency = float64(comparableReadTokens) / float64(agg.TotalExpectedStableTokens) * 100
+	}
+	agg.ToolRosterChanges, agg.ToolRosterChangeDetails = toolRosterChurn(turns)
+	return agg
+}
+
+const toolRosterChangeDetailCap = 10
+
+func toolRosterChurn(turns []ContextLifecycleTurn) (int, []ToolRosterChange) {
+	changes := 0
+	var details []ToolRosterChange
+	for i := 0; i+1 < len(turns); i++ {
+		current, previous := turns[i], turns[i+1]
+		if len(current.Snapshot.ToolDefs) == 0 || len(previous.Snapshot.ToolDefs) == 0 {
+			continue
+		}
+		change := diffToolRosters(previous.Snapshot.ToolDefs, current.Snapshot.ToolDefs)
+		if len(change.Added) == 0 && len(change.Removed) == 0 && len(change.Resized) == 0 {
+			continue
+		}
+		change.RunID = current.RunID
+		changes++
+		if len(details) < toolRosterChangeDetailCap {
+			details = append(details, change)
+		}
+	}
+	return changes, details
+}
+
+func diffToolRosters(previous, current []contextfrag.ToolDefAccounting) ToolRosterChange {
+	key := func(def contextfrag.ToolDefAccounting) string { return def.Provider + "/" + def.Name }
+	prevBytes := make(map[string]int, len(previous))
+	for _, def := range previous {
+		prevBytes[key(def)] = def.Bytes
+	}
+	var change ToolRosterChange
+	seen := make(map[string]bool, len(current))
+	for _, def := range current {
+		k := key(def)
+		seen[k] = true
+		before, existed := prevBytes[k]
+		switch {
+		case !existed:
+			change.Added = append(change.Added, k)
+		case before != def.Bytes:
+			change.Resized = append(change.Resized, k)
+		}
+	}
+	for _, def := range previous {
+		if k := key(def); !seen[k] {
+			change.Removed = append(change.Removed, k)
+		}
+	}
+	sort.Strings(change.Added)
+	sort.Strings(change.Removed)
+	sort.Strings(change.Resized)
+	return change
 }

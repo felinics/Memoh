@@ -44,6 +44,7 @@ type LifecycleSnapshot struct {
 	CacheReadTokens           int                 `json:"cache_read_tokens"`
 	CacheWriteTokens          int                 `json:"cache_write_tokens"`
 	CacheUsage                []CacheUsageRecord  `json:"cache_usage,omitempty"`
+	CacheComparison           *CacheComparison    `json:"cache_comparison,omitempty"`
 	Mutations                 []MutationRecord    `json:"mutations,omitempty"`
 	FinalInputHash            string              `json:"final_input_hash,omitempty"`
 	Model                     string              `json:"model,omitempty"`
@@ -194,6 +195,10 @@ func cloneLifecycleSnapshot(snapshot LifecycleSnapshot) LifecycleSnapshot {
 	snapshot.CacheUsage = append([]CacheUsageRecord(nil), snapshot.CacheUsage...)
 	snapshot.Steps = cloneStepSnapshots(snapshot.Steps)
 	snapshot.MemoryRecall = cloneMemoryRecallTrace(snapshot.MemoryRecall)
+	if snapshot.CacheComparison != nil {
+		comparison := *snapshot.CacheComparison
+		snapshot.CacheComparison = &comparison
+	}
 	if snapshot.BudgetPlan != nil {
 		plan := *snapshot.BudgetPlan
 		snapshot.BudgetPlan = &plan

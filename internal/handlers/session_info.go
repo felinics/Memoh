@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/bots"
 	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db"
@@ -51,8 +52,16 @@ type SessionInfoResponse struct {
 }
 
 type ContextUsage struct {
-	UsedTokens    int64  `json:"used_tokens"`
-	ContextWindow *int64 `json:"context_window,omitempty"`
+	UsedTokens    int64                       `json:"used_tokens"`
+	ContextWindow *int64                      `json:"context_window,omitempty"`
+	Breakdown     []contextfrag.KindBreakdown `json:"breakdown,omitempty"`
+	ToolDefs      []ToolDefBucket             `json:"tool_defs,omitempty"`
+}
+
+type ToolDefBucket struct {
+	Provider      string `json:"provider"`
+	Tools         int    `json:"tools"`
+	TokenEstimate int    `json:"token_estimate"`
 }
 
 type CacheStats struct {
@@ -165,11 +174,21 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		skills = []string{}
 	}
 
+	var breakdown []contextfrag.KindBreakdown
+	var toolDefs []ToolDefBucket
+	if turns, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, 1); err != nil {
+		h.logger.Warn("load latest context snapshot failed", slog.Any("error", err))
+	} else {
+		breakdown, toolDefs = latestContextComposition(turns)
+	}
+
 	resp := SessionInfoResponse{
 		MessageCount: messageCount,
 		ContextUsage: ContextUsage{
 			UsedTokens:    usedTokens,
 			ContextWindow: contextWindow,
+			Breakdown:     breakdown,
+			ToolDefs:      toolDefs,
 		},
 		CacheStats: CacheStats{
 			CacheReadTokens:  cacheRow.CacheReadTokens,

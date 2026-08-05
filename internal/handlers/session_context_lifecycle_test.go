@@ -116,21 +116,24 @@ func TestGetSessionContextLifecycleReturnsFailedRunWithoutAssistantMessage(t *te
 	t.Parallel()
 
 	const (
-		failedRunID        = "33333333-3333-3333-3333-333333333333"
-		completedRunID     = "44444444-4444-4444-4444-444444444444"
-		assistantMessageID = "55555555-5555-5555-5555-555555555555"
+		failedRunID          = "33333333-3333-3333-3333-333333333333"
+		completedRunID       = "44444444-4444-4444-4444-444444444444"
+		assistantMessageID   = "55555555-5555-5555-5555-555555555555"
+		budgetErrorCode      = "context.budget_unsatisfied"
+		failedFinalInputHash = "failed-before-assistant"
 	)
 	createdAt := time.Unix(1000, 0).UTC()
 	queries := newContextLifecycleTestQueries()
 	queries.lifecycleRows = []sqlc.ListRecentContextLifecyclesBySessionRow{
 		{
 			RunID:     testUUID(failedRunID),
-			Status:    "failed_provider",
-			ErrorCode: pgtype.Text{String: "workspace.unreachable", Valid: true},
+			Status:    "failed_budget",
+			ErrorCode: pgtype.Text{String: budgetErrorCode, Valid: true},
 			CreatedAt: pgtype.Timestamptz{Time: createdAt.Add(time.Minute), Valid: true},
 			Snapshot: lifecycleSnapshotJSON(t, contextfrag.LifecycleSnapshot{
-				Version: 1,
-				Counts:  contextfrag.ManifestCounts{Fragments: 2, Messages: 1},
+				Version:        1,
+				Counts:         contextfrag.ManifestCounts{Fragments: 2, Messages: 1},
+				FinalInputHash: failedFinalInputHash,
 			}),
 		},
 		{
@@ -156,8 +159,8 @@ func TestGetSessionContextLifecycleReturnsFailedRunWithoutAssistantMessage(t *te
 	if err := json.Unmarshal(ctx.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &topLevel); err != nil {
 		t.Fatalf("decode top-level response: %v", err)
 	}
-	if len(topLevel) != 1 || topLevel["turns"] == nil {
-		t.Fatalf("top-level response = %#v, want only turns", topLevel)
+	if len(topLevel) != 2 || topLevel["turns"] == nil || topLevel["aggregates"] == nil {
+		t.Fatalf("top-level response = %#v, want turns and aggregates", topLevel)
 	}
 	var response ContextLifecycleResponse
 	if err := json.Unmarshal(ctx.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &response); err != nil {
@@ -167,14 +170,17 @@ func TestGetSessionContextLifecycleReturnsFailedRunWithoutAssistantMessage(t *te
 		t.Fatalf("turns = %d, want 2", len(response.Turns))
 	}
 	failed := response.Turns[0]
-	if failed.RunID != failedRunID || failed.Status != "failed_provider" ||
-		failed.ErrorCode != "workspace.unreachable" || failed.AssistantMessageID != "" ||
-		failed.Snapshot.Counts.Fragments != 2 {
+	if failed.RunID != failedRunID || failed.Status != "failed_budget" ||
+		failed.ErrorCode != budgetErrorCode || failed.AssistantMessageID != "" ||
+		failed.Snapshot.Counts.Fragments != 2 || failed.Snapshot.FinalInputHash != failedFinalInputHash {
 		t.Fatalf("failed run response = %#v", failed)
 	}
 	completed := response.Turns[1]
 	if completed.RunID != completedRunID || completed.AssistantMessageID != assistantMessageID {
 		t.Fatalf("completed run response = %#v, want assistant association", completed)
+	}
+	if response.Aggregates.Turns != 2 {
+		t.Fatalf("aggregate turns = %d, want 2", response.Aggregates.Turns)
 	}
 	if len(queries.legacyParams) != 0 {
 		t.Fatalf("legacy query calls = %d, want 0", len(queries.legacyParams))
@@ -192,12 +198,13 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 	queries := &contextLifecycleQueryStub{
 		lifecycleRows: []sqlc.ListRecentContextLifecyclesBySessionRow{{
 			RunID:     runID,
-			Status:    "failed_provider",
-			ErrorCode: pgtype.Text{String: "workspace.unreachable", Valid: true},
+			Status:    "failed_budget",
+			ErrorCode: pgtype.Text{String: "context.budget_unsatisfied", Valid: true},
 			CreatedAt: pgtype.Timestamptz{Time: createdAt, Valid: true},
 			Snapshot: lifecycleSnapshotJSON(t, contextfrag.LifecycleSnapshot{
-				Version: 1,
-				Counts:  contextfrag.ManifestCounts{Fragments: 1},
+				Version:        1,
+				Counts:         contextfrag.ManifestCounts{Fragments: 1},
+				FinalInputHash: "failed-before-assistant",
 			}),
 		}},
 	}
@@ -215,10 +222,13 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 		t.Fatalf("turns = %d, want failed run without an assistant message", len(turns))
 	}
 	turn := turns[0]
-	if turn.RunID != runID.String() || turn.Status != "failed_provider" ||
-		turn.ErrorCode != "workspace.unreachable" || turn.AssistantMessageID != "" ||
+	if turn.RunID != runID.String() || turn.Status != "failed_budget" ||
+		turn.ErrorCode != "context.budget_unsatisfied" || turn.AssistantMessageID != "" ||
 		!turn.CreatedAt.Equal(createdAt) {
-		t.Fatalf("turn = %#v, want run-keyed failed_provider lifecycle", turn)
+		t.Fatalf("turn = %#v, want run-keyed failed_budget lifecycle", turn)
+	}
+	if turn.Snapshot.FinalInputHash != "failed-before-assistant" {
+		t.Fatalf("snapshot = %#v, want persisted run snapshot", turn.Snapshot)
 	}
 	if len(queries.legacyParams) != 0 {
 		t.Fatalf("legacy query calls = %d, want 0 when run rows exist", len(queries.legacyParams))
@@ -353,6 +363,86 @@ func TestLegacyLifecycleTurnsFromRowsFiltersAndOrders(t *testing.T) {
 	limited := legacyLifecycleTurnsFromRows(rows, 1)
 	if len(limited) != 1 || limited[0].Snapshot.Counts.Fragments != 2 {
 		t.Fatalf("limit must keep the newest lifecycle turn: %#v", limited)
+	}
+}
+
+func TestLegacyLifecycleTurnsFromRowsSupportsLegacyAndMemoryOnlySnapshots(t *testing.T) {
+	t.Parallel()
+
+	base := time.Unix(1000, 0).UTC()
+	rows := []sqlc.ListRecentAssistantMessagesBySessionRow{
+		legacyLifecycleRow(t, pgtype.UUID{Bytes: [16]byte{2}, Valid: true}, base.Add(time.Minute), &contextfrag.LifecycleSnapshot{
+			Version: 1,
+			MemoryRecall: &contextfrag.MemoryRecallTrace{
+				ProviderID: "provider-1",
+				CacheState: "miss",
+				Result: contextfrag.MemoryRecallResultTrace{
+					Count: 1,
+					Refs:  []string{"memory-1"},
+				},
+			},
+		}),
+		legacyLifecycleRow(t, pgtype.UUID{Bytes: [16]byte{1}, Valid: true}, base, &contextfrag.LifecycleSnapshot{
+			Version:        1,
+			FinalInputHash: "legacy-snapshot",
+		}),
+	}
+
+	turns := legacyLifecycleTurnsFromRows(rows, 10)
+	if len(turns) != 2 {
+		t.Fatalf("turns = %d, want memory and legacy snapshots", len(turns))
+	}
+	if turns[0].Snapshot.MemoryRecall == nil || turns[0].Snapshot.MemoryRecall.ProviderID != "provider-1" ||
+		turns[0].Snapshot.MemoryRecall.Result.Count != 1 {
+		t.Fatalf("memory-only snapshot = %#v", turns[0].Snapshot)
+	}
+	if turns[1].Snapshot.MemoryRecall != nil || turns[1].Snapshot.FinalInputHash != "legacy-snapshot" {
+		t.Fatalf("legacy snapshot changed compatibility semantics: %#v", turns[1].Snapshot)
+	}
+}
+
+func TestAggregateContextLifecycle(t *testing.T) {
+	t.Parallel()
+
+	turns := []ContextLifecycleTurn{
+		{Snapshot: contextfrag.LifecycleSnapshot{
+			CacheReadTokens:  100,
+			CacheWriteTokens: 10,
+			CacheComparison:  &contextfrag.CacheComparison{Outcome: contextfrag.CacheOutcomeHit},
+			Selection:        contextfrag.SelectionTrace{DropReasons: map[string]int{"can_drop": 3}},
+			Mutations: []contextfrag.MutationRecord{
+				{Kind: contextfrag.MutationBeforeModelCallHook},
+				{Kind: contextfrag.MutationMidTaskPrune},
+			},
+		}},
+		{Snapshot: contextfrag.LifecycleSnapshot{
+			CacheReadTokens: 0,
+			CacheComparison: &contextfrag.CacheComparison{Outcome: contextfrag.CacheOutcomeMissSamePrefix},
+			Selection:       contextfrag.SelectionTrace{DropReasons: map[string]int{"can_drop": 1, "trust_gate:external_in_system_slot": 1}},
+		}},
+		{Snapshot: contextfrag.LifecycleSnapshot{
+			CacheComparison: &contextfrag.CacheComparison{Outcome: contextfrag.CacheOutcomeFirstObservation},
+		}},
+	}
+
+	agg := aggregateContextLifecycle(turns)
+	if agg.Turns != 3 {
+		t.Fatalf("turns = %d, want 3", agg.Turns)
+	}
+	if agg.CacheOutcomes[contextfrag.CacheOutcomeHit] != 1 || agg.CacheOutcomes[contextfrag.CacheOutcomeMissSamePrefix] != 1 {
+		t.Fatalf("cache outcomes = %#v", agg.CacheOutcomes)
+	}
+	if agg.CacheHitRate != 50 {
+		t.Fatalf("hit rate = %v, want 50", agg.CacheHitRate)
+	}
+	if agg.TotalCacheReadTokens != 100 || agg.TotalCacheWriteTokens != 10 {
+		t.Fatalf("cache totals = %d/%d", agg.TotalCacheReadTokens, agg.TotalCacheWriteTokens)
+	}
+	if agg.DropReasons["can_drop"] != 4 || agg.DropReasons["trust_gate:external_in_system_slot"] != 1 {
+		t.Fatalf("drop reasons = %#v", agg.DropReasons)
+	}
+	if agg.MutationKinds["before_model_call_hook"] != 1 || agg.MutationKinds["mid_task_prune"] != 1 {
+		t.Fatalf("mutation kinds = %#v", agg.MutationKinds)
 	}
 }
 

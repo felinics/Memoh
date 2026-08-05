@@ -32,6 +32,24 @@ type MutationRecord struct {
 	Detail string       `json:"detail,omitempty"`
 }
 
+// Cache comparison outcomes describe how a persisted run's rendered stable
+// prefix related to the previous run of the same session. Landing keeps these
+// values read-compatible without restoring the dropped runtime comparator.
+const (
+	CacheOutcomeFirstObservation = "first_observation"
+	CacheOutcomeHit              = "hit"
+	CacheOutcomeMissSamePrefix   = "miss_same_prefix"
+	CacheOutcomeExpired          = "expired"
+	CacheOutcomePrefixChanged    = "prefix_changed"
+	CacheOutcomeModelChanged     = "model_changed"
+)
+
+type CacheComparison struct {
+	Outcome                  string `json:"outcome"`
+	PrevAgeMs                int64  `json:"prev_age_ms,omitempty"`
+	FirstStepCacheReadTokens int    `json:"first_step_cache_read_tokens,omitempty"`
+}
+
 type CacheUsageRecord struct {
 	Attempt            int `json:"attempt,omitempty"`
 	StepIndex          int `json:"step_index"`
