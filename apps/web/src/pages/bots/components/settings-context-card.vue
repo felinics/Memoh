@@ -1,8 +1,11 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
   <SettingsSection :title="$t('bots.settings.blocks.context')">
-    <SettingsRow :label="$t('bots.settings.searchProvider')">
-      <div class="w-52">
+    <SettingsRow
+      :label="$t('bots.settings.searchProvider')"
+      stack="sm"
+    >
+      <div class="w-full sm:w-52">
         <SearchProviderSelect
           v-model="form.search_provider_id"
           :providers="searchProviders"
@@ -11,8 +14,11 @@
       </div>
     </SettingsRow>
 
-    <SettingsRow :label="$t('bots.settings.fetchProvider')">
-      <div class="w-52">
+    <SettingsRow
+      :label="$t('bots.settings.fetchProvider')"
+      stack="sm"
+    >
+      <div class="w-full sm:w-52">
         <FetchProviderSelect
           v-model="form.fetch_provider_id"
           :providers="fetchProviders"
@@ -21,8 +27,11 @@
       </div>
     </SettingsRow>
 
-    <SettingsRow :label="$t('bots.settings.memoryProvider')">
-      <div class="w-52">
+    <SettingsRow
+      :label="$t('bots.settings.memoryProvider')"
+      stack="sm"
+    >
+      <div class="w-full sm:w-52">
         <MemoryProviderSelect
           v-model="form.memory_provider_id"
           :providers="memoryProviders"

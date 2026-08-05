@@ -1,11 +1,14 @@
 <template>
   <ContextMenu>
     <ContextMenuTrigger as-child>
+      <!-- active: mirrors the hover fill so a touch press (incl. the hold that
+           opens the context menu) gives visible feedback — touch has no hover,
+           and without this the long-press felt dead until the menu appeared. -->
       <div
         role="button"
         tabindex="0"
         class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        :class="isActive ? '' : 'hover:bg-[color:var(--sidebar-hover)]'"
+        :class="isActive ? '' : rowInteractionClass"
         :data-ui-selected="isActive ? '' : undefined"
         :title="hoverTitle"
         @click="$emit('select', session)"
@@ -174,6 +177,12 @@ defineEmits<{
 const { t } = useI18n()
 
 const menuOpen = ref(false)
+
+// Row interaction fill: hover for real pointers, the same fill on :active so a
+// touch press (incl. the long-press that opens the context menu) reads as
+// feedback. --sidebar-hover is the sidebar family's pinned row fill; waiver
+// pattern follows nav-button.vue (component-owned chrome, no global token).
+const rowInteractionClass = 'hover:bg-[color:var(--sidebar-hover)] active:bg-[color:var(--sidebar-hover)]' /* ui-allow-style */
 
 const titleRuns = computed(() =>
   splitScriptRuns((props.session.title ?? '').trim() || t('chat.untitledSession')),

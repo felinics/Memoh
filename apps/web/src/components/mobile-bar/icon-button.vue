@@ -7,7 +7,7 @@
     variant="ghost"
     size="icon"
     shape="circle"
-    :class="iconButtonClass"
+    :class="mobileBarIconButtonClass"
     :title="label"
     :aria-label="label"
     @click="emit('click')"
@@ -22,14 +22,19 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
 import { Button } from '@felinic/ui'
+import { mobileBarIconButtonClass } from './icon-button-class'
 
 defineProps<{
   icon: Component
   label: string
 }>()
+// WARNING: this component must NOT be used as the child of a reka
+// `as-child` trigger (DropdownMenuTrigger/PopoverTrigger …). Declaring a
+// `click` emit makes Vue consume the trigger's injected onClick as an emit
+// listener instead of a fallthrough attr, and the ref lands on the component
+// instance — together they break the trigger (menu never opens, reka throws
+// on the missing anchor). For trigger usage compose `Button` from
+// @felinic/ui with `mobileBarIconButtonClass` directly (see the mobile top
+// bar's "+" menu).
 const emit = defineEmits<{ click: [] }>()
-
-// Chrome lives here (not at call sites) so the bars can't drift: muted at rest,
-// foreground on hover, stay-lit while a menu it triggers is open.
-const iconButtonClass = 'shrink-0 text-muted-foreground hover:text-foreground data-[state=open]:text-foreground' /* ui-allow-style */
 </script>

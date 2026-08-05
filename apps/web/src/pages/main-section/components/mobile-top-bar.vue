@@ -22,11 +22,20 @@
 
     <template #right>
       <DropdownMenu v-if="hasAnyAction">
+        <!-- as-child trigger must stay a plain ui Button: a wrapper component
+             that declares its own click emit breaks reka's trigger wiring
+             (see the warning in mobile-bar/icon-button.vue). -->
         <DropdownMenuTrigger as-child>
-          <MobileBarIconButton
-            :icon="Plus"
-            :label="menuLabel"
-          />
+          <Button
+            variant="ghost"
+            size="icon"
+            shape="circle"
+            :class="mobileBarIconButtonClass"
+            :title="menuLabel"
+            :aria-label="menuLabel"
+          >
+            <Plus :stroke-width="1.75" />
+          </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
@@ -75,6 +84,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { ChevronLeft, Globe, Menu, Monitor, Plus, Terminal, X } from 'lucide-vue-next'
 import {
+  Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -83,6 +93,7 @@ import {
 } from '@felinic/ui'
 import MobileBar from '@/components/mobile-bar/index.vue'
 import MobileBarIconButton from '@/components/mobile-bar/icon-button.vue'
+import { mobileBarIconButtonClass } from '@/components/mobile-bar/icon-button-class'
 import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'

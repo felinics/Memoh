@@ -9,8 +9,9 @@
         <SettingsRow
           :label="$t('bots.name')"
           :description="$t('bots.nameHint')"
+          stack="sm"
         >
-          <div class="w-52 space-y-1">
+          <div class="w-full sm:w-52 space-y-1">
             <div class="relative">
               <Input
                 v-model="form.name"

@@ -9,12 +9,13 @@
     <SettingsRow
       :label="$t('bots.settings.defaultAgent')"
       :description="defaultAgentDescription"
+      stack="sm"
     >
       <Select
         :model-value="defaultAgentValue"
         @update:model-value="(value) => setDefaultAgent(String(value))"
       >
-        <SelectTrigger class="w-56">
+        <SelectTrigger class="w-full sm:w-56">
           <SelectValue>
             <div class="flex min-w-0 items-center gap-2">
               <img
@@ -59,8 +60,9 @@
     <SettingsRow
       :label="$t('bots.settings.chatModel')"
       :description="$t('bots.settings.chatModelDescription')"
+      stack="sm"
     >
-      <div class="w-56">
+      <div class="w-full sm:w-56">
         <ModelSelect
           v-model="form.chat_model_id"
           v-model:reasoning-effort="form.reasoning_effort"
