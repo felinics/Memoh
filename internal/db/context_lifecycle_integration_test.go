@@ -4,8 +4,10 @@ package db_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/team"
@@ -78,14 +81,41 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 		t.Fatalf("seed context lifecycle owner: %v", err)
 	}
 
-	snapshot := map[string]any{
-		"version": 1,
-		"view":    "run_config_pre_provider",
-		"counts": map[string]any{
-			"fragments":  1,
-			"messages":   1,
-			"images":     0,
-			"text_bytes": len(secret),
+	contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(secret)))
+	snapshot := contextfrag.LifecycleSnapshot{
+		Version: 1,
+		View:    contextfrag.ViewRunConfigPreProvider,
+		Counts: contextfrag.ManifestCounts{
+			Fragments:     1,
+			Messages:      1,
+			TextBytes:     len(secret),
+			TokenEstimate: 9,
+		},
+		SelectionDecisions: []contextfrag.SelectionDecision{{
+			ID: "system-policy",
+			Ref: contextfrag.ContextRef{
+				Namespace:   "native-system",
+				ID:          "policy",
+				HashAlgo:    "sha256",
+				ContentHash: contentHash,
+				Schema:      "context-frag/v1",
+			},
+			Slot:          contextfrag.SlotSystem,
+			Source:        "embedded-template",
+			Decision:      contextfrag.DecisionSelected,
+			TokenEstimate: 9,
+			TextBytes:     len(secret),
+			CacheClass:    contextfrag.CacheStable,
+			RetentionTier: contextfrag.RetentionRequired,
+		}},
+		BudgetPlan: &contextfrag.ContextBudgetPlan{
+			Estimator:                    contextfrag.ProviderBudgetEstimator,
+			EstimatorSafetyFactorPercent: contextfrag.ProviderBudgetSafetyFactorPercent,
+			Window:                       32_768,
+			OutputReserve:                4_096,
+			SystemBudget:                 8_192,
+			ActualSystemCost:             9,
+			HistoryBudget:                20_471,
 		},
 	}
 	snapshotJSON, err := json.Marshal(snapshot)
@@ -104,28 +134,34 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 		RunID:     parsedRunID,
 		BotID:     parsedBotID,
 		SessionID: parsedSessionID,
-		Status:    "failed_provider",
-		ErrorCode: pgtype.Text{String: "workspace.unreachable", Valid: true},
+		Status:    "failed_budget",
+		ErrorCode: pgtype.Text{String: "context.budget_unsatisfied", Valid: true},
 		Snapshot:  snapshotJSON,
 	})
 	if err != nil {
 		t.Fatalf("create context lifecycle: %v", err)
 	}
-	if created.RunID != parsedRunID || created.Status != "failed_provider" {
-		t.Fatalf("created lifecycle identity = (%v, %q), want (%v, failed_provider)", created.RunID, created.Status, parsedRunID)
+	if created.RunID != parsedRunID || created.Status != "failed_budget" {
+		t.Fatalf("created lifecycle identity = (%v, %q), want (%v, failed_budget)", created.RunID, created.Status, parsedRunID)
 	}
 
 	got, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
 	if err != nil {
 		t.Fatalf("get context lifecycle: %v", err)
 	}
-	assertJSONSemanticallyEqual(t, got.Snapshot, snapshotJSON)
+	var roundTripped contextfrag.LifecycleSnapshot
+	if err := json.Unmarshal(got.Snapshot, &roundTripped); err != nil {
+		t.Fatalf("unmarshal lifecycle snapshot: %v", err)
+	}
+	if !reflect.DeepEqual(roundTripped, snapshot) {
+		t.Fatalf("round-tripped lifecycle snapshot = %#v, want %#v", roundTripped, snapshot)
+	}
 	if strings.Contains(string(got.Snapshot), secret) {
 		t.Fatal("persisted lifecycle snapshot contains raw prompt text")
 	}
 
 	const pausedRunID = "00000000-0000-0000-0000-00000000d502"
-	pausedMetadata, err := json.Marshal(map[string]any{"context_lifecycle": snapshot})
+	pausedMetadata, err := json.Marshal(map[string]any{contextfrag.MetadataContextLifecycleKey: snapshot})
 	if err != nil {
 		t.Fatalf("marshal paused lifecycle metadata: %v", err)
 	}
@@ -158,6 +194,10 @@ VALUES ($1, $2, 'assistant', '{}'::jsonb, '{"other":"metadata"}'::jsonb,
 		t.Fatalf("get paused assistant lifecycle metadata: %v", err)
 	}
 	assertJSONSemanticallyEqual(t, pausedRaw, pausedMetadata)
+	pausedSnapshot, ok := contextfrag.LifecycleSnapshotFromMetadata(pausedRaw)
+	if !ok || !reflect.DeepEqual(pausedSnapshot, snapshot) {
+		t.Fatalf("paused lifecycle snapshot = %#v, %t; want %#v", pausedSnapshot, ok, snapshot)
+	}
 	legacyRecent, err := queries.ListRecentAssistantMessagesBySession(ctx, sqlc.ListRecentAssistantMessagesBySessionParams{
 		SessionID: parsedSessionID,
 		MaxCount:  1,
@@ -176,9 +216,9 @@ VALUES ($1, $2, 'assistant', '{}'::jsonb, '{"other":"metadata"}'::jsonb,
 	if err != nil {
 		t.Fatalf("list context lifecycles: %v", err)
 	}
-	if len(recent) != 1 || recent[0].RunID != parsedRunID || recent[0].Status != "failed_provider" ||
-		!recent[0].ErrorCode.Valid || recent[0].ErrorCode.String != "workspace.unreachable" {
-		t.Fatalf("recent context lifecycles = %#v, want one failed_provider row for %s", recent, runID)
+	if len(recent) != 1 || recent[0].RunID != parsedRunID || recent[0].Status != "failed_budget" ||
+		!recent[0].ErrorCode.Valid || recent[0].ErrorCode.String != "context.budget_unsatisfied" {
+		t.Fatalf("recent context lifecycles = %#v, want one failed_budget row for %s", recent, runID)
 	}
 
 	if _, err := queries.CreateContextLifecycle(ctx, sqlc.CreateContextLifecycleParams{
@@ -425,7 +465,6 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 		t.Fatalf("recovered-metadata repair code = %#v, want richer provider.timeout code", recoveredMetadataRepair.ErrorCode)
 	}
 	assertJSONSemanticallyEqual(t, recoveredMetadataRepair.Snapshot, recoveredMetadataSnapshot)
-	authoritativeSnapshot = recoveredMetadataSnapshot
 
 	reclassifiedSnapshot := []byte(`{"version":3,"source":"authoritative-reclassification"}`)
 	reclassified, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
@@ -498,7 +537,8 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 
 func assertContextLifecycleSchema(t *testing.T, ctx context.Context, database interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, want bool) {
+}, want bool,
+) {
 	t.Helper()
 	var exists bool
 	if err := database.QueryRow(ctx, "SELECT to_regclass('public.context_lifecycles') IS NOT NULL").Scan(&exists); err != nil {

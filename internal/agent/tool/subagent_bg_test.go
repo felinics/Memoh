@@ -23,6 +23,8 @@ import (
 type fakeSpawnAgent struct {
 	block            chan struct{}
 	failFor          map[string]string
+	failureResult    *SpawnResult
+	failureErr       error
 	contextLifecycle *contextfrag.LifecycleSnapshot
 
 	mu    sync.Mutex
@@ -44,6 +46,9 @@ func (f *fakeSpawnAgent) GenerateWithWatchdog(ctx context.Context, cfg SpawnRunC
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+	if f.failureErr != nil {
+		return f.failureResult, f.failureErr
 	}
 	if msg, ok := f.failFor[cfg.Query]; ok {
 		return nil, errors.New(msg)
@@ -726,6 +731,54 @@ func TestSpawnAgentPersistsLifecycleOnFinalAssistantAndAssociatesItsID(t *testin
 	}
 	if got := terminals[0].contextLifecycle.AssistantMessageID; got != stored[1].ID {
 		t.Fatalf("assistant message association = %q, want %q", got, stored[1].ID)
+	}
+}
+
+func TestSpawnAgentRetainsContextLifecycleWhenBudgetPreflightFails(t *testing.T) {
+	snapshot := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 4, Messages: 3},
+		BudgetPlan: &contextfrag.ContextBudgetPlan{
+			Window:           4096,
+			OutputReserve:    8192,
+			ActualSystemCost: 123,
+		},
+	}
+	agent := &fakeSpawnAgent{
+		failureResult: &SpawnResult{ContextLifecycle: snapshot},
+		failureErr:    contextfrag.ErrBudgetUnsatisfied,
+	}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+
+	result := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "too much context",
+	}))
+	if result["status"] != string(background.TaskFailed) {
+		t.Fatalf("spawn_agent status = %v, want %q", result["status"], background.TaskFailed)
+	}
+	if result["error"] != contextfrag.ErrBudgetUnsatisfied.Error() {
+		t.Fatalf("spawn_agent error = %v, want %q", result["error"], contextfrag.ErrBudgetUnsatisfied)
+	}
+	if _, ok := result["context_lifecycle"]; ok {
+		t.Fatalf("spawn_agent exposed internal context lifecycle: %#v", result)
+	}
+
+	audit := p.coord.snapshot(session.BotID, session.SessionID, "worker").Last
+	if !reflect.DeepEqual(audit.ContextLifecycle, snapshot) {
+		t.Fatalf("retained lifecycle = %#v, want %#v", audit.ContextLifecycle, snapshot)
+	}
+	if audit.ContextLifecycle == nil || audit.ContextLifecycle.BudgetPlan == nil ||
+		audit.ContextLifecycle.BudgetPlan.ActualSystemCost != snapshot.BudgetPlan.ActualSystemCost {
+		t.Fatalf("retained budget plan = %#v, want %#v", audit.ContextLifecycle, snapshot.BudgetPlan)
+	}
+	encoded, err := json.Marshal(audit)
+	if err != nil {
+		t.Fatalf("marshal retained audit: %v", err)
+	}
+	if strings.Contains(string(encoded), "context_lifecycle") {
+		t.Fatalf("serialized audit exposed internal context lifecycle: %s", encoded)
 	}
 }
 
