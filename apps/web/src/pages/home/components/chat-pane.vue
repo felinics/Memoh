@@ -790,6 +790,7 @@ import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, m
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
@@ -2168,6 +2169,7 @@ const {
 } = useMediaGallery(messages)
 
 const inputText = ref('')
+const isMobile = useIsMobile()
 const {
   textareaEl,
   composerEl,
@@ -2183,6 +2185,7 @@ const {
   inputText,
   isActive,
   showAttachmentGrid,
+  mobileMultiline: isMobile,
   modelTriggerLabel,
   activeIsACP,
   activeACPProjectLabel,
