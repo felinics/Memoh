@@ -1498,7 +1498,13 @@ func (a *Agent) runMidStreamRetry(
 	}
 	// All retry attempts failed to even start a new stream — return the
 	// previous (already drained) result so its accumulated messages are
-	// preserved as the final partial state.
+	// preserved as the final partial state. Publish the giving-up error: every
+	// EventRetry retracts the failure it retried, so without this last event a
+	// consumer would see the run end with nothing to explain why it stopped.
+	sendEvent(sendCtx, ch, StreamEvent{
+		Type:  EventError,
+		Error: fmt.Sprintf("mid-stream retry: all %d attempts failed (last: %s)", retryCfg.MaxAttempts, errMsg),
+	})
 	return prevResult, true
 }
 

@@ -179,6 +179,12 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 			allText.WriteString(evt.Delta)
 		case EventError:
 			lastError = evt.Error
+		case EventRetry:
+			// The stream is retrying what it just reported, so the error is no
+			// longer this run's outcome. Holding it would turn a later abort
+			// into a failure report naming a provider error the run recovered
+			// from; a retry that gives up publishes its own final error.
+			lastError = ""
 		case EventAgentEnd, EventAgentAbort:
 			completed = evt.Type == EventAgentEnd
 			if evt.Messages != nil {

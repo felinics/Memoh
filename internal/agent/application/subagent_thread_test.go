@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"testing"
 
 	session "github.com/memohai/memoh/internal/chat/thread"
@@ -67,6 +68,40 @@ func TestApplySubagentThreadDefaults(t *testing.T) {
 	got = s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1", SessionType: "schedule"})
 	if got.SessionType != "schedule" {
 		t.Fatalf("session type = %q, want schedule preserved", got.SessionType)
+	}
+}
+
+// The defaults are worthless if they stay inside resolve: Chat and StreamChat
+// keep their own copy of the request for title generation, the step committer
+// and terminal persistence, so resolve has to hand the effective request back.
+func TestResolveReturnsTheEffectiveSubagentRequest(t *testing.T) {
+	svc := &fakeSubagentThreadService{
+		fakeBackgroundSessionService: fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Thread, error) {
+				return session.Thread{ID: sessionID, Type: session.TypeSubagent}, nil
+			},
+		},
+		config: session.SubagentConfig{ModelUUID: "model-uuid-1", ModelID: "gpt-x", ProviderName: "prov"},
+	}
+	s := &Service{sessionService: svc, logger: slog.New(slog.DiscardHandler)}
+
+	// Resolution fails at model selection (no settings service), which is the
+	// point: even the failure path must not hand back a request that has lost
+	// the subagent defaults.
+	_, effective, err := s.resolve(context.Background(), ChatRequest{
+		BotID: "bot-1", ChatID: "chat-1", ThreadID: "sub-1", Query: "hello",
+	})
+	if err == nil {
+		t.Fatal("resolve unexpectedly succeeded without a settings service")
+	}
+	if effective.SessionType != session.TypeSubagent {
+		t.Fatalf("session type = %q, want subagent", effective.SessionType)
+	}
+	if !effective.SkipMemoryExtraction || !effective.SkipTitleGeneration {
+		t.Fatalf("skip flags lost on the way out of resolve: %+v", effective)
+	}
+	if effective.Model != "model-uuid-1" {
+		t.Fatalf("model = %q, want the pinned model uuid", effective.Model)
 	}
 }
 

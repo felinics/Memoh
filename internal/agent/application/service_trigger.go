@@ -52,7 +52,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		Token:       token,
 		SessionType: sessionmode.Schedule,
 	}
-	rc, err := s.resolve(ctx, req)
+	rc, req, err := s.resolve(ctx, req)
 	if err != nil {
 		return schedule.TriggerResult{}, err
 	}
@@ -130,7 +130,7 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 		Model:       heartbeatModel,
 		SessionType: sessionmode.Heartbeat,
 	}
-	rc, err := s.resolve(ctx, req)
+	rc, req, err := s.resolve(ctx, req)
 	if err != nil {
 		return heartbeat.TriggerResult{}, err
 	}

@@ -1070,6 +1070,14 @@ func (p *SpawnProvider) createAgentSession(
 			Metadata: map[string]any{
 				"agent_id":              agentID,
 				"agent_control_version": agentControlVersion,
+				// The pinned runtime, mirrored where a reader of the session
+				// can see it: a client that lets a human talk to this subagent
+				// directly has to offer the model the agent was spawned on,
+				// otherwise the first direct message silently moves it onto the
+				// parent bot's default. subagent_configs stays authoritative.
+				"model_uuid":     runtime.UUID,
+				"model_id":       runtime.ModelID,
+				"model_provider": runtime.ProviderName,
 			},
 		},
 		ModelUUID:    runtime.UUID,

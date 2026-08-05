@@ -313,19 +313,26 @@ type resolvedContext struct {
 	contextTokenBudget          int // token budget used to clamp compaction triggers
 }
 
-func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext, error) {
+// resolve builds the run context for one turn and returns the effective
+// request alongside it. Resolution fills in defaults the caller's copy does not
+// have — a direct turn on a subagent thread learns its session type, pinned
+// model, and skip flags here — so everything that runs after resolution (title
+// generation, the step committer, terminal persistence) must use the returned
+// request, not the one that went in. Query is deliberately untouched: callers
+// that persist a headerified user message still take it from resolvedContext.
+func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext, ChatRequest, error) {
 	modelQuery := modelQueryText(req)
 	if strings.TrimSpace(modelQuery) == "" && len(req.Attachments) == 0 {
-		return resolvedContext{}, errors.New("query or attachments is required")
+		return resolvedContext{}, req, errors.New("query or attachments is required")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return resolvedContext{}, errors.New("bot id is required")
+		return resolvedContext{}, req, errors.New("bot id is required")
 	}
 	if strings.TrimSpace(req.ChatID) == "" {
-		return resolvedContext{}, errors.New("chat id is required")
+		return resolvedContext{}, req, errors.New("chat id is required")
 	}
 	if err := s.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
-		return resolvedContext{}, err
+		return resolvedContext{}, req, err
 	}
 	req = s.applySubagentThreadDefaults(ctx, req)
 
@@ -350,7 +357,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
-		return resolvedContext{}, err
+		return resolvedContext{}, req, err
 	}
 	if strings.EqualFold(strings.TrimSpace(req.SessionType), sessionpkg.TypeSubagent) {
 		// A direct turn on a subagent thread runs as the subagent, not as a
@@ -400,7 +407,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 				slog.String("stage", "initial"),
 				slog.Any("error", loadErr),
 			)
-			return resolvedContext{}, loadErr
+			return resolvedContext{}, req, loadErr
 		}
 		messages = prepared.messages
 		historyRecords = prepared.records
@@ -431,7 +438,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 						slog.String("stage", "post_compaction"),
 						slog.Any("error", loadErr),
 					)
-					return resolvedContext{}, loadErr
+					return resolvedContext{}, req, loadErr
 				}
 				messages = prepared.messages
 				historyRecords = prepared.records
@@ -555,7 +562,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		compactableTokens:           compactableTokens,
 		compactableTokensKnown:      compactableTokensKnown,
 		contextTokenBudget:          contextTokenBudget,
-	}, nil
+	}, req, nil
 }
 
 // Chat sends a synchronous chat request and stores the result.
@@ -590,7 +597,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			return ChatResponse{}, err
 		}
 	}
-	rc, err := s.resolve(ctx, req)
+	rc, req, err := s.resolve(ctx, req)
 	if err != nil {
 		return ChatResponse{}, err
 	}

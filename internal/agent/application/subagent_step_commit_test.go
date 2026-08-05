@@ -31,27 +31,34 @@ func TestSubagentStepCommitRequiresHandleAndFence(t *testing.T) {
 	store := &recordingStepPersister{recordingMessageService: &recordingMessageService{}}
 	service := &Service{messageService: store}
 
-	if got := service.SubagentStepCommit(context.Background(), botID, sessionID, "model", "", nil); got != nil {
+	if got := service.SubagentStepCommit(context.Background(), botID, sessionID, "model", "req-msg-1", nil); got != nil {
 		t.Fatal("commit enabled without an admitted run handle")
 	}
 	noFence := withSubagentRunHandle(context.Background(), sessionruntime.RunHandle{
 		BotID: botID, SessionID: sessionID, RunID: uuid.NewString(), Generation: "g", FencingToken: 7,
 	})
-	if got := service.SubagentStepCommit(noFence, botID, sessionID, "model", "", nil); got != nil {
+	if got := service.SubagentStepCommit(noFence, botID, sessionID, "model", "req-msg-1", nil); got != nil {
 		t.Fatal("commit enabled without a runtime fence")
 	}
 	unfenced := runtimefence.WithContext(context.Background(), runtimefence.Fence{BotID: botID, SessionID: sessionID, Token: 7})
 	unfenced = withSubagentRunHandle(unfenced, sessionruntime.RunHandle{
 		BotID: botID, SessionID: sessionID, RunID: uuid.NewString(), Generation: "g",
 	})
-	if got := service.SubagentStepCommit(unfenced, botID, sessionID, "model", "", nil); got != nil {
+	if got := service.SubagentStepCommit(unfenced, botID, sessionID, "model", "req-msg-1", nil); got != nil {
 		t.Fatal("commit enabled with a zero fencing token")
 	}
-	if got := service.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "", nil); got == nil {
+	// A failed pre-run user message write leaves no request row. Committing
+	// steps then would report the run persisted and lose the task prompt for
+	// good, so incremental persistence must decline and let the terminal path
+	// write the whole run, user message included.
+	if got := service.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "  ", nil); got != nil {
+		t.Fatal("commit enabled without a persisted request row")
+	}
+	if got := service.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "req-msg-1", nil); got == nil {
 		t.Fatal("commit not enabled for an admitted fenced subagent run")
 	}
 	bare := &Service{messageService: &recordingMessageService{}}
-	if got := bare.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "", nil); got != nil {
+	if got := bare.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "req-msg-1", nil); got != nil {
 		t.Fatal("commit enabled on a message service without step persistence")
 	}
 }

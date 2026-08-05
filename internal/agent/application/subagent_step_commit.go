@@ -20,9 +20,10 @@ import (
 
 // SubagentStepCommit returns the per-step persistence callback for one spawned
 // agent run, or nil when incremental persistence is unavailable — no admitted
-// handle on the context, no fence, or a message service that cannot write
-// fenced steps. A nil return means the spawn path keeps its terminal-snapshot
-// persistence, so this is a capability probe as much as a constructor.
+// handle on the context, no fence, no persisted request row to bind steps to,
+// or a message service that cannot write fenced steps. A nil return means the
+// spawn path keeps its terminal-snapshot persistence, so this is a capability
+// probe as much as a constructor.
 //
 // The callback persists exactly what the legacy terminal path persists — every
 // non-user message of the step, marshalled whole — only earlier: each complete
@@ -45,6 +46,14 @@ func (s *Service) SubagentStepCommit(ctx context.Context, botID, sessionID, mode
 		return nil
 	}
 	if strings.TrimSpace(botID) == "" || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	// No request row means the pre-run user message write failed. Committing
+	// steps anyway would file them under no turn and — because the spawn path
+	// then reports the run as persisted — permanently drop the task prompt.
+	// Decline instead: terminal persistence still writes the user message and
+	// the whole run behind it.
+	if strings.TrimSpace(turnRequestMessageID) == "" {
 		return nil
 	}
 	committer := &subagentStepCommitter{

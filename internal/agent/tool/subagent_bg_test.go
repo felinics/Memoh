@@ -541,6 +541,28 @@ func TestSendMessageReusesSessionAndHistory(t *testing.T) {
 	}
 }
 
+func TestSpawnAgentRecordsPinnedModelOnSessionMetadata(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, sessions, _ := newAgentControlProvider(t, agent)
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+
+	mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "worker", "task": "first"})
+
+	rec, ok := sessions.byAgent("parent1", "worker")
+	if !ok {
+		t.Fatal("spawned session not recorded")
+	}
+	// A client that lets a human talk to this subagent directly reads the model
+	// off the session; without it the composer would offer the parent bot's
+	// default and silently move the agent onto another model.
+	if rec.Metadata["model_uuid"] != "00000000-0000-0000-0000-000000000123" {
+		t.Fatalf("session metadata lost the pinned model uuid: %+v", rec.Metadata)
+	}
+	if rec.Metadata["model_id"] != "test-model" || rec.Metadata["model_provider"] != "test-provider" {
+		t.Fatalf("session metadata lost the pinned model identity: %+v", rec.Metadata)
+	}
+}
+
 func TestForkedSubagentKeepsInvisibleParentSnapshotAcrossFollowUps(t *testing.T) {
 	agent := &fakeSpawnAgent{}
 	p, _, _, messages := newAgentControlProvider(t, agent)
