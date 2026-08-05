@@ -133,15 +133,20 @@ async function bootstrap() {
   // The composer reads its agent list from the chat store's one-shot bot
   // snapshot, not the Colada cache, so the sync above can't refresh it. When the
   // settings window mutates bot config — enabling an ACP agent, renaming,
-  // switching model — it invalidates ['bots'] / ['bot', <id>]; mirror that into a
-  // store re-pull so the chat window's agent menu updates without a manual
-  // reload. (Web does this via its route watcher when leaving the settings
-  // overlay; desktop's chat window route never enters settings.)
+  // switching model — it invalidates the bots list / ['bot', <id>]; mirror that
+  // into a store re-pull so the chat window's agent menu updates without a
+  // manual reload. (Web does this via its route watcher when leaving the
+  // settings overlay; desktop's chat window route never enters settings.)
   const chatStore = useChatStore(pinia)
   window.api.desktop.onInvalidate((payload) => {
     const key = payload?.filters?.key
-    const head = Array.isArray(key) ? key[0] : undefined
-    if (head === 'bots' || head === 'bot') {
+    const head: unknown = Array.isArray(key) ? key[0] : undefined
+    // The bots list entry lives under the SDK-generated object key
+    // ([{ _id: 'getBots', … }]); accept the legacy string head 'bots' too so
+    // an older settings window's broadcast still lands.
+    const isBotsList = typeof head === 'object' && head !== null
+      && (head as { _id?: unknown })._id === 'getBots'
+    if (head === 'bots' || head === 'bot' || isBotsList) {
       void chatStore.refreshBots()
     }
   })

@@ -105,7 +105,7 @@ const { data: settings } = useQuery({
 })
 
 const { data: memoryProviderData } = useQuery({
-  key: ['all-memory-providers'],
+  key: ['memory-providers'],
   query: async () => {
     const { data } = await getMemoryProviders({ throwOnError: true })
     return data

@@ -137,6 +137,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { getAcpProfiles, getBotsById, putBotsById } from '@memohai/sdk'
+import { getBotsQueryKey } from '@memohai/sdk/colada'
 import type { AcpprofilePublicProfile, BotsUpdateBotRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import SettingsAcpDetail from './settings-acp-detail.vue'
@@ -213,7 +214,7 @@ const { mutateAsync: updateBot } = useMutation({
   },
   onSettled: () => {
     queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
-    queryCache.invalidateQueries({ key: ['bots'] })
+    queryCache.invalidateQueries({ key: getBotsQueryKey() })
     void chatStore.refreshBots().catch(() => {})
   },
 })
