@@ -1747,10 +1747,17 @@
       "securityDesc": "访问控制",
       "model": "模型",
       "modelDesc": "选择聊天模型（可选）",
+      "agent": "Agent",
+      "agentDesc": "托管 Agent 自带模型。",
       "memory": "记忆",
       "memoryDesc": "记忆提供者（可选）",
       "settings": "设置",
       "settingsDesc": "时区等"
+    },
+    "agentCreate": {
+      "typeAriaLabel": "Agent 类型",
+      "oauthSettingsHint": "授权在创建后进行，可随时在 Bot 设置中完成。",
+      "requiredError": "请填写「{field}」"
     },
     "createBotLocalHint": "Local Bot 会使用这台电脑上的文件夹，且不提供沙箱隔离。",
     "create": {
@@ -3358,17 +3365,6 @@
         "manualAddBtn": "添加",
         "manualAddedCount": "已添加 {count} 个模型",
         "removeModel": "移除"
-      },
-      "acp": {
-        "setupMode": "接入方式",
-        "modeApiKey": "API 密钥",
-        "modeChatGPT": "使用 ChatGPT 登录",
-        "modeClaude": "使用 Claude 登录",
-        "modeOAuth": "OAuth 授权",
-        "modeSelf": "使用本地配置",
-        "oauthDeferredHint": "授权将在下一步创建 Bot 并准备好工作区后进行。",
-        "selfHint": "沿用工作区中已配置好的 Agent。",
-        "requiredError": "请填写「{field}」"
       }
     },
     "bot": {
@@ -3380,7 +3376,7 @@
         "hint": "选择 Bot 回复时使用的模型。建议现在选择，之后也可随时在设置中更改。"
       },
       "acp": {
-        "banner": "该 Bot 将以 {agent} 作为主要智能体",
+        "deferredHint": "授权将在下一步创建 Bot 并准备好工作区后进行。",
         "oauthTitle": "授权 {agent}",
         "oauthAuthorized": "已授权",
         "oauthNotAuthorized": "尚未授权",

@@ -1736,10 +1736,17 @@
       "securityDesc": "アクセス制御",
       "model": "Model",
       "modelDesc": "チャット Modelを選択します (オプション)",
+      "agent": "エージェント",
+      "agentDesc": "ホステッドエージェントは独自のモデルを使用します。",
       "memory": "Memory",
       "memoryDesc": "MemoryProvider (オプション)",
       "settings": "設定",
       "settingsDesc": "タイムゾーンなど"
+    },
+    "agentCreate": {
+      "typeAriaLabel": "エージェントの種類",
+      "oauthSettingsHint": "認可は作成後に行います。Bot の設定でいつでも完了できます。",
+      "requiredError": "「{field}」を入力してください"
     },
     "createBotLocalHint": "ローカル Botはこのコンピューター上のフォルダーを使用し、サンドボックス化されていません。",
     "create": {
@@ -3335,17 +3342,6 @@
         "manualAddBtn": "追加",
         "manualAddedCount": "{count}件のモデルを追加しました",
         "removeModel": "削除"
-      },
-      "acp": {
-        "setupMode": "設定方法",
-        "modeApiKey": "APIキー",
-        "modeChatGPT": "ChatGPT でサインインする",
-        "modeClaude": "クロードでサインイン",
-        "modeOAuth": "OAuth",
-        "modeSelf": "ローカル構成",
-        "oauthDeferredHint": "認可は、Bot とワークスペースの準備ができた後の次のステップで行われます。",
-        "selfHint": "ワークスペースですでに設定されているエージェントを再利用します。",
-        "requiredError": "「{field}」と入力してください"
       }
     },
     "bot": {
@@ -3357,7 +3353,7 @@
         "hint": "Bot が応答に使用するモデルを選択します。推奨項目ですが、設定でいつでも変更できます。"
       },
       "acp": {
-        "banner": "このBotはプライマリ エージェントとして {agent} を使用します",
+        "deferredHint": "認可は、Bot とワークスペースの準備ができた後の次のステップで行われます。",
         "oauthTitle": "{agent}を承認する",
         "oauthAuthorized": "認可された",
         "oauthNotAuthorized": "まだ認可されていません",

@@ -1747,10 +1747,17 @@
       "securityDesc": "Access control",
       "model": "Model",
       "modelDesc": "Choose a chat model (optional)",
+      "agent": "Agent",
+      "agentDesc": "The hosted agent brings its own model.",
       "memory": "Memory",
       "memoryDesc": "Memory provider (optional)",
       "settings": "Settings",
       "settingsDesc": "Timezone and more"
+    },
+    "agentCreate": {
+      "typeAriaLabel": "Agent type",
+      "oauthSettingsHint": "Authorization happens after creation — finish it anytime in the bot's settings.",
+      "requiredError": "Please fill in \"{field}\""
     },
     "createBotLocalHint": "Local bots use a folder on this computer and are not sandboxed.",
     "create": {
@@ -3358,17 +3365,6 @@
         "manualAddBtn": "Add",
         "manualAddedCount": "{count} model(s) added",
         "removeModel": "Remove"
-      },
-      "acp": {
-        "setupMode": "Setup method",
-        "modeApiKey": "API key",
-        "modeChatGPT": "Sign in with ChatGPT",
-        "modeClaude": "Sign in with Claude",
-        "modeOAuth": "OAuth",
-        "modeSelf": "Local config",
-        "oauthDeferredHint": "Authorization happens in the next step, after the bot and its workspace are ready.",
-        "selfHint": "Reuses the agent already configured in the workspace.",
-        "requiredError": "Please fill in \"{field}\""
       }
     },
     "bot": {
@@ -3380,7 +3376,7 @@
         "hint": "Pick the model your bot replies with. Recommended, but you can change it anytime in settings."
       },
       "acp": {
-        "banner": "This bot will use {agent} as its primary agent",
+        "deferredHint": "Authorization happens in the next step, after the bot and its workspace are ready.",
         "oauthTitle": "Authorize {agent}",
         "oauthAuthorized": "Authorized",
         "oauthNotAuthorized": "Not authorized yet",
