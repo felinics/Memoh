@@ -52,7 +52,6 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { ConfirmDeleteDialog, InlineLoadingRow, toast } from '@felinic/ui'
-import { useQueryCache } from '@pinia/colada'
 import {
   deleteBotsByBotIdScheduleById,
   getBotsByBotIdScheduleById,
@@ -74,7 +73,6 @@ const props = defineProps<{
 const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
-const queryCache = useQueryCache()
 
 const scheduleId = ref(typeof props.params.params.scheduleId === 'string' ? props.params.params.scheduleId : undefined)
 const schedule = ref<ScheduleSchedule | null>(null)
@@ -112,15 +110,8 @@ async function fetchSchedule() {
   }
 }
 
-function invalidateScheduleList() {
-  const botId = currentBotId.value
-  if (!botId) return
-  queryCache.invalidateQueries({ key: ['bot-schedule', botId] })
-}
-
 async function handleSaved() {
   toast.success(t('bots.schedule.saveSuccess'))
-  invalidateScheduleList()
   await fetchSchedule()
 }
 
@@ -139,7 +130,6 @@ async function confirmDelete() {
       throwOnError: true,
     })
     toast.success(t('bots.schedule.deleteSuccess'))
-    invalidateScheduleList()
     props.params.api.close()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.deleteFailed')))

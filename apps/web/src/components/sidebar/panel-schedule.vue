@@ -107,7 +107,6 @@ import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { Plus } from 'lucide-vue-next'
 import { ConfirmDeleteDialog, toast } from '@felinic/ui'
-import { useQueryCache } from '@pinia/colada'
 import {
   Button, Spinner,
 } from '@felinic/ui'
@@ -129,7 +128,6 @@ const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 const workspaceTabs = useWorkspaceTabsStore()
 const { sidebarView } = storeToRefs(workspaceTabs)
-const queryCache = useQueryCache()
 
 const isLoading = ref(false)
 const schedules = ref<ScheduleSchedule[]>([])
@@ -246,18 +244,6 @@ watch(sidebarView, (view) => {
   if (view === 'schedule') void fetchSchedules()
 })
 
-// Refresh when bot-schedule.vue invalidates the cache (after create/edit/delete)
-watch(
-  () => {
-    const entries = queryCache.getEntries({ key: ['bot-schedule', currentBotId.value ?? ''] })
-    return entries[0]?.state.value.data
-  },
-  (next, prev) => {
-    if (!currentBotId.value || next === prev) return
-    void fetchSchedules()
-  },
-)
-
 // Refresh when active bot changes
 watch(currentBotId, () => void fetchSchedules())
 
@@ -292,7 +278,6 @@ async function handleToggleEnabled(item: ScheduleSchedule, enabled: boolean) {
       throwOnError: true,
     })
     await fetchSchedules()
-    queryCache.invalidateQueries({ key: ['bot-schedule', botId] })
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.saveFailed')))
   } finally {
