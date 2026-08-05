@@ -1,6 +1,6 @@
 <template>
-  <!-- Projects — a sidebar section that is a SIBLING of Recents, never a
-       group inside it: folders organize project-bound chats, Recents keeps
+  <!-- Folders — a sidebar section that is a SIBLING of Recents, never a
+       group inside it: folders organize workdir-bound chats, Recents keeps
        the ungrouped timeline. Bounded height so a long folder list can never
        squeeze the Recents list out of the panel. -->
   <div
@@ -15,7 +15,7 @@
         :class="sectionHeaderClass"
         @click="toggleSectionCollapsed"
       >
-        {{ t('chat.projects') }}
+        {{ t('chat.folders') }}
         <ChevronDown
           class="size-2.5 transition-transform"
           :class="sectionCollapsed ? '-rotate-90' : ''"
@@ -26,7 +26,7 @@
            folder rows' new-session plus (their rightmost trailing slot). -->
       <div :class="sectionTrailingClass">
         <TextButton
-          :aria-label="t('bots.projects.create')"
+          :aria-label="t('bots.folders.create')"
           @click="createDialogOpen = true"
         >
           <Plus />
@@ -39,8 +39,8 @@
       class="sidebar-scroll max-h-56 overflow-y-auto pr-1 pt-0.5"
     >
       <template
-        v-for="project in liveProjects"
-        :key="project.id"
+        v-for="folder in liveFolders"
+        :key="folder.id"
       >
         <!-- Folder rows share the session rows' geometry (34px pill, 11px
              gutter, sidebar hover fill) so the two lists read as one system.
@@ -51,23 +51,23 @@
             role="button"
             tabindex="0"
             :class="folderRowClass"
-            @click="toggleExpanded(project.id ?? '')"
-            @keydown.enter.prevent="toggleExpanded(project.id ?? '')"
-            @keydown.space.prevent="toggleExpanded(project.id ?? '')"
+            @click="toggleExpanded(folder.id ?? '')"
+            @keydown.enter.prevent="toggleExpanded(folder.id ?? '')"
+            @keydown.space.prevent="toggleExpanded(folder.id ?? '')"
           >
             <component
-              :is="isExpanded(project.id ?? '') ? FolderOpen : Folder"
+              :is="isExpanded(folder.id ?? '') ? FolderOpen : Folder"
               class="mr-2 size-4 shrink-0 text-muted-foreground"
             />
-            <span class="min-w-0 flex-1 truncate text-control text-foreground">{{ project.name }}</span>
+            <span class="min-w-0 flex-1 truncate text-control text-foreground">{{ folder.name }}</span>
             <!-- Menu first, plus last: the new-session plus takes the
                  rightmost slot so it lines up with the header's add button. -->
             <div class="ml-1.5 flex shrink-0 items-center">
               <DropdownMenu>
                 <DropdownMenuTrigger as-child>
                   <TextButton
-                    class="opacity-0 focus-visible:opacity-100 group-hover/project:opacity-100 data-[state=open]:opacity-100"
-                    :aria-label="t('bots.projects.rowActions', { name: project.name ?? '' })"
+                    class="opacity-0 focus-visible:opacity-100 group-hover/folder:opacity-100 data-[state=open]:opacity-100"
+                    :aria-label="t('bots.folders.rowActions', { name: folder.name ?? '' })"
                     @click.stop
                   >
                     <MoreHorizontal />
@@ -77,29 +77,29 @@
                   align="end"
                   @click.stop
                 >
-                  <DropdownMenuItem @select="openRenameDialog(project)">
+                  <DropdownMenuItem @select="openRenameDialog(folder)">
                     <Pencil class="mr-2 size-3.5" />
-                    {{ t('bots.projects.rename') }}
+                    {{ t('bots.folders.rename') }}
                   </DropdownMenuItem>
-                  <DropdownMenuItem @select="confirmArchive(project)">
+                  <DropdownMenuItem @select="confirmArchive(folder)">
                     <Archive class="mr-2 size-3.5" />
-                    {{ t('bots.projects.archive') }}
+                    {{ t('bots.folders.archive') }}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <TextButton
-                class="opacity-0 focus-visible:opacity-100 group-hover/project:opacity-100"
-                :aria-label="t('chat.projectNewSession', { name: project.name ?? '' })"
-                @click.stop="startProjectSession(project.id ?? '')"
+                class="opacity-0 focus-visible:opacity-100 group-hover/folder:opacity-100"
+                :aria-label="t('chat.folderNewSession', { name: folder.name ?? '' })"
+                @click.stop="startFolderSession(folder.id ?? '')"
               >
                 <Plus />
               </TextButton>
             </div>
           </div>
         </div>
-        <template v-if="isExpanded(project.id ?? '')">
+        <template v-if="isExpanded(folder.id ?? '')">
           <div
-            v-for="session in sessionsOf(project.id ?? '')"
+            v-for="session in sessionsOf(folder.id ?? '')"
             :key="session.id"
             class="pb-0.5 pl-4"
           >
@@ -113,28 +113,28 @@
               @delete="sessionDialogs?.openDelete($event, { fallbackMode: 'recent' })"
             />
           </div>
-          <!-- The folder pages the project-filtered endpoint, so an old
-               project's chats stay reachable even when they fall outside the
+          <!-- The folder pages the workdir-filtered endpoint, so an old
+               folder's chats stay reachable even when they fall outside the
                Recents timeline's loaded pages. -->
           <div
-            v-if="pagingState(project.id ?? '').loading"
+            v-if="pagingState(folder.id ?? '').loading"
             class="flex justify-center py-2 pl-4"
           >
             <Spinner class="size-4" />
           </div>
           <div
-            v-else-if="pagingState(project.id ?? '').hasMore"
+            v-else-if="pagingState(folder.id ?? '').hasMore"
             class="pb-0.5 pl-4"
           >
             <TextButton
               class="text-xs"
-              @click="chatStore.loadMoreProjectSessions(project.id ?? '')"
+              @click="chatStore.loadMoreWorkdirSessions(folder.id ?? '')"
             >
               {{ t('chat.showMore') }}
             </TextButton>
           </div>
           <div
-            v-else-if="pagingState(project.id ?? '').loaded && sessionsOf(project.id ?? '').length === 0"
+            v-else-if="pagingState(folder.id ?? '').loaded && sessionsOf(folder.id ?? '').length === 0"
             class="px-3 py-2 pl-4 text-xs text-muted-foreground"
           >
             {{ t('chat.noSessions') }}
@@ -143,17 +143,17 @@
       </template>
     </div>
 
-    <ProjectCreateDialog
+    <FolderCreateDialog
       v-model:open="createDialogOpen"
       :bot-id="currentBotId"
     />
 
     <ConfirmDeleteDialog
       v-model:open="archiveDialogOpen"
-      :title="t('bots.projects.archiveTitle')"
-      :description="t('bots.projects.archiveDescription', { name: pendingArchive?.name ?? '' })"
+      :title="t('bots.folders.archiveTitle')"
+      :description="t('bots.folders.archiveDescription', { name: pendingArchive?.name ?? '' })"
       :cancel-label="t('common.cancel')"
-      :confirm-label="t('bots.projects.archive')"
+      :confirm-label="t('bots.folders.archive')"
       :loading="archiving"
       @confirm="handleArchive"
     />
@@ -161,7 +161,7 @@
     <Dialog v-model:open="renameDialogOpen">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{{ t('bots.projects.renameTitle') }}</DialogTitle>
+          <DialogTitle>{{ t('bots.folders.renameTitle') }}</DialogTitle>
         </DialogHeader>
         <form
           class="space-y-4"
@@ -221,19 +221,19 @@ import {
   toast,
 } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
-import { useProjectsStore } from '@/store/projects'
+import { useWorkdirsStore } from '@/store/workdirs'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { archiveProject, renameProject, type BotProject } from '@/composables/api/useProjects'
+import { archiveWorkdir, renameWorkdir, type BotWorkdir } from '@/composables/api/useWorkdirs'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import SessionItem from './session-item.vue'
 import SessionDialogs from './session-dialogs.vue'
-import ProjectCreateDialog from './project-create-dialog.vue'
+import FolderCreateDialog from './folder-create-dialog.vue'
 import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
-const projectsStore = useProjectsStore()
+const workdirsStore = useWorkdirsStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { sessionId, currentBotId } = storeToRefs(chatStore)
 
@@ -248,33 +248,33 @@ const sectionTrailingClass = 'flex shrink-0 items-center pr-[11px]' /* ui-allow-
 
 // Folder rows copy session-item.vue's row geometry (34px pill, 11px gutter,
 // sidebar hover fill) so folders and session rows read as one list system.
-const folderRowClass = 'group/project relative flex w-full min-h-[2.125rem] cursor-pointer select-none items-center rounded-[9px] px-[11px] text-left transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-px: matches session-item.vue's 11px sidebar row gutter */ /* ui-allow-style: sidebar rows are a deliberately local row system (see ui-owners) — same hover token as session-item.vue */
+const folderRowClass = 'group/folder relative flex w-full min-h-[2.125rem] cursor-pointer select-none items-center rounded-[9px] px-[11px] text-left transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-px: matches session-item.vue's 11px sidebar row gutter */ /* ui-allow-style: sidebar rows are a deliberately local row system (see ui-owners) — same hover token as session-item.vue */
 
 const sessionDialogs = ref<InstanceType<typeof SessionDialogs> | null>(null)
 
 watch(currentBotId, (botId) => {
-  if (botId) void projectsStore.ensureProjects(botId)
+  if (botId) void workdirsStore.ensureWorkdirs(botId)
 }, { immediate: true })
 
-const liveProjects = computed(() => (
-  projectsStore.projectsFor(currentBotId.value).filter(project => !project.archived && !!project.id)
+const liveFolders = computed(() => (
+  workdirsStore.workdirsFor(currentBotId.value).filter(folder => !folder.archived && !!folder.id)
 ))
 
-// Folder rows come from the store's per-project paging, not from filtering the
-// shared Recents list — that list pages the whole bot timeline, so a project
+// Folder rows come from the store's per-workdir paging, not from filtering the
+// shared Recents list — that list pages the whole bot timeline, so a folder
 // older than the loaded pages would read as empty with nothing to expand into.
-function sessionsOf(projectId: string): SessionSummary[] {
-  return chatStore.projectSessionsFor(projectId)
+function sessionsOf(workdirId: string): SessionSummary[] {
+  return chatStore.workdirSessionsFor(workdirId)
 }
 
-function pagingState(projectId: string) {
-  return chatStore.projectSessionsState(projectId)
+function pagingState(workdirId: string) {
+  return chatStore.workdirSessionsState(workdirId)
 }
 
 // Section fold + per-folder expand state, per bot. Persisted: both are
 // reading preferences, not transient UI state. Folders start collapsed.
 const sectionCollapsedByBot = useLocalStorage<Record<string, boolean>>(
-  'workspace-sidebar-projects-collapsed',
+  'workspace-sidebar-folders-collapsed',
   {},
 )
 const sectionCollapsed = computed(() => sectionCollapsedByBot.value[currentBotId.value ?? ''] === true)
@@ -288,33 +288,33 @@ function toggleSectionCollapsed() {
 }
 
 const expandedByBot = useLocalStorage<Record<string, string[]>>(
-  'workspace-sidebar-expanded-projects',
+  'workspace-sidebar-expanded-folders',
   {},
 )
 const expanded = computed(() => new Set(expandedByBot.value[currentBotId.value ?? ''] ?? []))
-function isExpanded(projectId: string): boolean {
-  return expanded.value.has(projectId)
+function isExpanded(workdirId: string): boolean {
+  return expanded.value.has(workdirId)
 }
-function toggleExpanded(projectId: string) {
+function toggleExpanded(workdirId: string) {
   const botId = (currentBotId.value ?? '').trim()
-  if (!botId || !projectId) return
+  if (!botId || !workdirId) return
   const current = new Set(expandedByBot.value[botId] ?? [])
-  if (current.has(projectId)) current.delete(projectId)
-  else current.add(projectId)
+  if (current.has(workdirId)) current.delete(workdirId)
+  else current.add(workdirId)
   expandedByBot.value = { ...expandedByBot.value, [botId]: [...current] }
 }
 
 // Expanded folders (including ones restored from the persisted preference)
-// fetch their first page once. ensureProjectSessions is idempotent, so this
-// can fire freely as the project list or the expanded set changes.
+// fetch their first page once. ensureWorkdirSessions is idempotent, so this
+// can fire freely as the folder list or the expanded set changes.
 watch(
-  [currentBotId, expanded, liveProjects] as const,
+  [currentBotId, expanded, liveFolders] as const,
   () => {
     if (!currentBotId.value) return
-    for (const project of liveProjects.value) {
-      const projectId = project.id ?? ''
-      if (projectId && expanded.value.has(projectId)) {
-        void chatStore.ensureProjectSessions(projectId)
+    for (const folder of liveFolders.value) {
+      const workdirId = folder.id ?? ''
+      if (workdirId && expanded.value.has(workdirId)) {
+        void chatStore.ensureWorkdirSessions(workdirId)
       }
     }
   },
@@ -335,13 +335,13 @@ function handleOpenNewTab(session: SessionSummary) {
   })
 }
 
-// Starting a session from a folder makes that project the bot's working
-// project — the draft composer shows the binding and the created session
+// Starting a session from a folder makes that workdir the bot's working
+// directory — the draft composer shows the binding and the created session
 // lands in this folder.
-function startProjectSession(projectId: string) {
+function startFolderSession(workdirId: string) {
   const botId = (currentBotId.value ?? '').trim()
-  if (!botId || !projectId) return
-  projectsStore.setWorkingProject(botId, projectId)
+  if (!botId || !workdirId) return
+  workdirsStore.setWorkingWorkdir(botId, workdirId)
   workspaceTabs.openDraftChat({ title: t('chat.newSession'), explicitSelection: false })
 }
 
@@ -350,11 +350,11 @@ const createDialogOpen = ref(false)
 const renameDialogOpen = ref(false)
 const renaming = ref(false)
 const renameTitle = ref('')
-const pendingRename = ref<BotProject | null>(null)
+const pendingRename = ref<BotWorkdir | null>(null)
 
-function openRenameDialog(project: BotProject) {
-  pendingRename.value = project
-  renameTitle.value = project.name ?? ''
+function openRenameDialog(folder: BotWorkdir) {
+  pendingRename.value = folder
+  renameTitle.value = folder.name ?? ''
   renameDialogOpen.value = true
 }
 
@@ -365,12 +365,12 @@ async function handleRename() {
   if (!botId || !target?.id || !name || renaming.value) return
   renaming.value = true
   try {
-    await renameProject(botId, target.id, name)
-    await projectsStore.refreshProjects(botId)
+    await renameWorkdir(botId, target.id, name)
+    await workdirsStore.refreshWorkdirs(botId)
     renameDialogOpen.value = false
     pendingRename.value = null
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.projects.renameFailed')))
+    toast.error(resolveApiErrorMessage(error, t('bots.folders.renameFailed')))
   } finally {
     renaming.value = false
   }
@@ -378,10 +378,10 @@ async function handleRename() {
 
 const archiveDialogOpen = ref(false)
 const archiving = ref(false)
-const pendingArchive = ref<BotProject | null>(null)
+const pendingArchive = ref<BotWorkdir | null>(null)
 
-function confirmArchive(project: BotProject) {
-  pendingArchive.value = project
+function confirmArchive(folder: BotWorkdir) {
+  pendingArchive.value = folder
   archiveDialogOpen.value = true
 }
 
@@ -391,12 +391,12 @@ async function handleArchive() {
   if (!botId || !target?.id || archiving.value) return
   archiving.value = true
   try {
-    await archiveProject(botId, target.id)
-    await projectsStore.refreshProjects(botId)
+    await archiveWorkdir(botId, target.id)
+    await workdirsStore.refreshWorkdirs(botId)
     archiveDialogOpen.value = false
     pendingArchive.value = null
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.projects.archiveFailed')))
+    toast.error(resolveApiErrorMessage(error, t('bots.folders.archiveFailed')))
   } finally {
     archiving.value = false
   }

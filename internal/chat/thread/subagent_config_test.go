@@ -23,19 +23,19 @@ type subagentConfigQueries struct {
 	contextCreate bool
 	contextJSON   []byte
 	failConfig    bool
-	// parentProject, when set, is returned as the parent session's
-	// project_id so tests can assert subagent project inheritance.
-	parentProject pgtype.UUID
+	// parentWorkdir, when set, is returned as the parent session's
+	// workdir_id so tests can assert subagent workdir inheritance.
+	parentWorkdir pgtype.UUID
 }
 
 // GetSessionByID serves the parent-session lookup CreateSubagent performs to
-// inherit the parent's project binding.
+// inherit the parent's workdir binding.
 func (q *subagentConfigQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
 	now := pgtype.Timestamptz{Time: time.Unix(1, 0).UTC(), Valid: true}
 	return sqlc.BotSession{
 		ID:        id,
 		Type:      TypeChat,
-		ProjectID: q.parentProject,
+		WorkdirID: q.parentWorkdir,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}, nil
@@ -66,7 +66,7 @@ func (q *subagentConfigQueries) CreateSession(_ context.Context, arg sqlc.Create
 		Metadata:        arg.Metadata,
 		ParentSessionID: arg.ParentSessionID,
 		CreatedByUserID: arg.CreatedByUserID,
-		ProjectID:       arg.ProjectID,
+		WorkdirID:       arg.WorkdirID,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}, nil
@@ -191,9 +191,9 @@ func TestSubagentConfigJSONKeepsSessionID(t *testing.T) {
 	}
 }
 
-func TestCreateSubagentInheritsParentProject(t *testing.T) {
-	parentProject := mustSessionUUID("00000000-0000-0000-0000-000000000601")
-	queries := &subagentConfigQueries{parentProject: parentProject}
+func TestCreateSubagentInheritsParentWorkdir(t *testing.T) {
+	parentWorkdir := mustSessionUUID("00000000-0000-0000-0000-000000000601")
+	queries := &subagentConfigQueries{parentWorkdir: parentWorkdir}
 	svc := NewService(nil, queries, nil)
 	session, _, err := svc.CreateSubagent(context.Background(), CreateSubagentInput{
 		Thread: CreateInput{
@@ -208,7 +208,7 @@ func TestCreateSubagentInheritsParentProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSubagent: %v", err)
 	}
-	if session.ProjectID != parentProject.String() {
-		t.Fatalf("subagent ProjectID = %q, want parent's %q", session.ProjectID, parentProject.String())
+	if session.WorkdirID != parentWorkdir.String() {
+		t.Fatalf("subagent WorkdirID = %q, want parent's %q", session.WorkdirID, parentWorkdir.String())
 	}
 }

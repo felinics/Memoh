@@ -1,5 +1,5 @@
--- name: CreateBotProject :one
-INSERT INTO bot_projects (
+-- name: CreateBotWorkdir :one
+INSERT INTO bot_workdirs (
   bot_id, name, target_kind, remote_binding_id, path, created_by_user_id
 )
 VALUES (
@@ -12,38 +12,38 @@ VALUES (
 )
 RETURNING *;
 
--- name: ListBotProjects :many
+-- name: ListBotWorkdirs :many
 SELECT *
-FROM bot_projects
+FROM bot_workdirs
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
   AND (sqlc.arg(include_archived)::bool OR archived_at IS NULL)
 ORDER BY created_at ASC, id ASC;
 
--- name: GetBotProject :one
+-- name: GetBotWorkdir :one
 -- Archived rows are returned on purpose: sessions bound to an archived
--- project keep resolving their working directory; callers that must refuse
--- archived projects (session creation) check archived_at themselves.
+-- workdir keep resolving their working directory; callers that must refuse
+-- archived workdirs (session creation) check archived_at themselves.
 SELECT *
-FROM bot_projects
+FROM bot_workdirs
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
-  AND id = sqlc.arg(project_id);
+  AND id = sqlc.arg(workdir_id);
 
--- name: RenameBotProject :one
-UPDATE bot_projects
+-- name: RenameBotWorkdir :one
+UPDATE bot_workdirs
 SET name = sqlc.arg(name), updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
-  AND id = sqlc.arg(project_id)
+  AND id = sqlc.arg(workdir_id)
   AND archived_at IS NULL
 RETURNING *;
 
--- name: ArchiveBotProject :one
-UPDATE bot_projects
+-- name: ArchiveBotWorkdir :one
+UPDATE bot_workdirs
 SET archived_at = now(), updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
-  AND id = sqlc.arg(project_id)
+  AND id = sqlc.arg(workdir_id)
   AND archived_at IS NULL
 RETURNING id;

@@ -17,7 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/project"
+	"github.com/memohai/memoh/internal/workdir"
 )
 
 // SessionHandler handles bot session CRUD endpoints.
@@ -25,15 +25,15 @@ type SessionHandler struct {
 	sessionService *session.Service
 	threadEnricher threadEnricher
 	acpPool        acpSessionCloser
-	projects       sessionProjectService
+	workdirs       sessionWorkdirService
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
 }
 
-// sessionProjectService validates a project binding at session creation.
-type sessionProjectService interface {
-	RequireActive(ctx context.Context, botID, projectID string) (project.Project, error)
+// sessionWorkdirService validates a workdir binding at session creation.
+type sessionWorkdirService interface {
+	RequireActive(ctx context.Context, botID, workdirID string) (workdir.Workdir, error)
 }
 
 type acpSessionCloser interface {
@@ -62,10 +62,10 @@ func (h *SessionHandler) SetThreadEnricher(enricher threadEnricher) {
 	h.threadEnricher = enricher
 }
 
-// SetProjectService installs the project domain used to validate project
+// SetWorkdirService installs the workdir domain used to validate workdir
 // bindings at session creation.
-func (h *SessionHandler) SetProjectService(projects sessionProjectService) {
-	h.projects = projects
+func (h *SessionHandler) SetWorkdirService(workdirs sessionWorkdirService) {
+	h.workdirs = workdirs
 }
 
 // Register registers session routes.
@@ -91,10 +91,10 @@ type createSessionRequest struct {
 	// POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
 	// transient in-memory handle reference, never persisted in metadata.
 	ACPRuntimeID string `json:"acp_runtime_id,omitempty"`
-	// ProjectID immutably binds the new session to a bot project. The
-	// project decides the session's workspace target and working directory
+	// WorkdirID immutably binds the new session to a bot workdir. The
+	// workdir decides the session's workspace target and working directory
 	// for its whole life; there is no way to change or clear it later.
-	ProjectID string `json:"project_id,omitempty"`
+	WorkdirID string `json:"workdir_id,omitempty"`
 }
 
 type updateSessionRequest struct {
@@ -148,7 +148,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	boundProject, err := h.resolveCreateSessionProject(c.Request().Context(), bot.ID, req.ProjectID, targetRuntimeType)
+	boundWorkdir, err := h.resolveCreateSessionWorkdir(c.Request().Context(), bot.ID, req.WorkdirID, targetRuntimeType)
 	if err != nil {
 		return err
 	}
@@ -170,9 +170,9 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		RuntimeMetadata: req.RuntimeMetadata,
 		CreatedByUserID: channelIdentityID,
 	}
-	if boundProject != nil {
-		createInput.ProjectID = boundProject.ID
-		createInput.ProjectPath = boundProject.Path
+	if boundWorkdir != nil {
+		createInput.WorkdirID = boundWorkdir.ID
+		createInput.WorkdirPath = boundWorkdir.Path
 	}
 	sess, err := h.sessionService.Create(c.Request().Context(), createInput)
 	if err != nil {
@@ -265,7 +265,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param types query string false "Comma-separated session types to include. Defaults to user-facing types (chat,discuss,acp_agent), or subagent when parent_session_id is set."
 // @Param parent_session_id query string false "Only include child sessions under this parent session."
-// @Param project_id query string false "Only include sessions bound to this project. The literal none selects sessions with no project."
+// @Param workdir_id query string false "Only include sessions bound to this workdir. The literal none selects sessions with no workdir."
 // @Param limit query int false "Page size (1..200). Defaults to 50."
 // @Param cursor query string false "Opaque cursor returned as next_cursor on a previous page."
 // @Success 200 {object} listSessionsResponse
@@ -307,16 +307,16 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 		return err
 	}
 	filter := session.ListFilter{ParentThreadID: parentSessionID}
-	if projectParam := strings.TrimSpace(c.QueryParam("project_id")); projectParam != "" {
+	if workdirParam := strings.TrimSpace(c.QueryParam("workdir_id")); workdirParam != "" {
 		// The literal "none" selects the unassigned bucket so the sidebar can
 		// page ungrouped sessions with the same cursor machinery.
-		if strings.EqualFold(projectParam, "none") {
-			filter.ProjectUnassigned = true
+		if strings.EqualFold(workdirParam, "none") {
+			filter.WorkdirUnassigned = true
 		} else {
-			if _, parseErr := uuid.Parse(projectParam); parseErr != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, "invalid project_id")
+			if _, parseErr := uuid.Parse(workdirParam); parseErr != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid workdir_id")
 			}
-			filter.ProjectID = projectParam
+			filter.WorkdirID = workdirParam
 		}
 	}
 
@@ -834,26 +834,26 @@ func filterSessionsForPermissions(items []session.Thread, userID string, perms [
 	return out
 }
 
-// resolveCreateSessionProject validates a requested project binding: the
-// project must exist on this bot and be live, and ACP sessions can only bind
-// native-workspace projects — the ACP runtime cannot reach a remote computer
+// resolveCreateSessionWorkdir validates a requested workdir binding: the
+// workdir must exist on this bot and be live, and ACP sessions can only bind
+// native-workspace workdirs — the ACP runtime cannot reach a remote computer
 // yet, so accepting the binding would create a session that fails on its
 // first prompt.
-func (h *SessionHandler) resolveCreateSessionProject(ctx context.Context, botID, projectID, runtimeType string) (*project.Project, error) {
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
+func (h *SessionHandler) resolveCreateSessionWorkdir(ctx context.Context, botID, workdirID, runtimeType string) (*workdir.Workdir, error) {
+	workdirID = strings.TrimSpace(workdirID)
+	if workdirID == "" {
 		return nil, nil
 	}
-	if h.projects == nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, "project service not configured")
+	if h.workdirs == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "workdir service not configured")
 	}
-	bound, err := h.projects.RequireActive(ctx, botID, projectID)
+	bound, err := h.workdirs.RequireActive(ctx, botID, workdirID)
 	if err != nil {
-		return nil, projectHTTPError(h.logger, err)
+		return nil, workdirHTTPError(h.logger, err)
 	}
-	if runtimeType == session.RuntimeACPAgent && bound.TargetKind == project.TargetKindRemote {
+	if runtimeType == session.RuntimeACPAgent && bound.TargetKind == workdir.TargetKindRemote {
 		return nil, echo.NewHTTPError(http.StatusBadRequest,
-			"ACP sessions cannot use a remote computer project yet; bind a native workspace project instead")
+			"ACP sessions cannot use a remote computer workdir yet; bind a native workspace workdir instead")
 	}
 	return &bound, nil
 }

@@ -3485,12 +3485,6 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
-      project_id:
-        description: |-
-          ProjectID immutably binds the new session to a bot project. The
-          project decides the session's workspace target and working directory
-          for its whole life; there is no way to change or clear it later.
-        type: string
       runtime_metadata:
         additionalProperties: {}
         type: object
@@ -3501,6 +3495,12 @@ definitions:
       title:
         type: string
       type:
+        type: string
+      workdir_id:
+        description: |-
+          WorkdirID immutably binds the new session to a bot workdir. The
+          workdir decides the session's workspace target and working directory
+          for its whole life; there is no way to change or clear it later.
         type: string
     type: object
   handlers.displayInfoResponse:
@@ -4331,55 +4331,6 @@ definitions:
       path:
         type: string
     type: object
-  project.CreateRequest:
-    properties:
-      name:
-        type: string
-      path:
-        type: string
-      workspace_target_id:
-        type: string
-    required:
-    - name
-    - path
-    type: object
-  project.Project:
-    properties:
-      archived:
-        type: boolean
-      bot_id:
-        type: string
-      created_at:
-        type: string
-      created_by_user_id:
-        type: string
-      id:
-        type: string
-      name:
-        type: string
-      path:
-        type: string
-      target_kind:
-        type: string
-      updated_at:
-        type: string
-      workspace_target_id:
-        type: string
-    type: object
-  project.ProjectsResponse:
-    properties:
-      projects:
-        items:
-          $ref: '#/definitions/project.Project'
-        type: array
-    type: object
-  project.UpdateRequest:
-    properties:
-      name:
-        type: string
-    required:
-    - name
-    type: object
   providers.CountResponse:
     properties:
       count:
@@ -4828,8 +4779,6 @@ definitions:
         type: object
       parent_session_id:
         type: string
-      project_id:
-        type: string
       route_conversation_type:
         type: string
       route_id:
@@ -4849,6 +4798,8 @@ definitions:
       type:
         type: string
       updated_at:
+        type: string
+      workdir_id:
         type: string
     type: object
   settings.Settings:
@@ -5245,6 +5196,55 @@ definitions:
         type: string
       status:
         type: string
+    type: object
+  workdir.CreateRequest:
+    properties:
+      name:
+        type: string
+      path:
+        type: string
+      workspace_target_id:
+        type: string
+    required:
+    - name
+    - path
+    type: object
+  workdir.UpdateRequest:
+    properties:
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  workdir.Workdir:
+    properties:
+      archived:
+        type: boolean
+      bot_id:
+        type: string
+      created_at:
+        type: string
+      created_by_user_id:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      path:
+        type: string
+      target_kind:
+        type: string
+      updated_at:
+        type: string
+      workspace_target_id:
+        type: string
+    type: object
+  workdir.WorkdirsResponse:
+    properties:
+      workdirs:
+        items:
+          $ref: '#/definitions/workdir.Workdir'
+        type: array
     type: object
   workspace.SetPrimaryWorkspaceTargetRequest:
     properties:
@@ -9577,152 +9577,6 @@ paths:
       summary: Uninstall bot plugin
       tags:
       - plugins
-  /bots/{bot_id}/projects:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Include archived projects
-        in: query
-        name: include_archived
-        type: boolean
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/project.ProjectsResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List a Bot's projects
-      tags:
-      - projects
-    post:
-      consumes:
-      - application/json
-      description: Registers a named project directory on a workspace target. The
-        directory must already exist on that target.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Project
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/project.CreateRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/project.Project'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create a Bot project
-      tags:
-      - projects
-  /bots/{bot_id}/projects/{project_id}:
-    delete:
-      description: 'Archiving refuses new session bindings but keeps existing sessions
-        working: their directory never changes underneath them.'
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Project ID
-        in: path
-        name: project_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Archive a Bot project
-      tags:
-      - projects
-    patch:
-      consumes:
-      - application/json
-      description: 'Only the name can change. The target and path are immutable: they
-        are baked into the working directory of every session bound to this project.'
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Project ID
-        in: path
-        name: project_id
-        required: true
-        type: string
-      - description: New name
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/project.UpdateRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/project.Project'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Rename a Bot project
-      tags:
-      - projects
   /bots/{bot_id}/quick-actions/execute:
     post:
       consumes:
@@ -10002,10 +9856,10 @@ paths:
         in: query
         name: parent_session_id
         type: string
-      - description: Only include sessions bound to this project. The literal none
-          selects sessions with no project.
+      - description: Only include sessions bound to this workdir. The literal none
+          selects sessions with no workdir.
         in: query
-        name: project_id
+        name: workdir_id
         type: string
       - description: Page size (1..200). Defaults to 50.
         in: query
@@ -11214,6 +11068,152 @@ paths:
       summary: WebSocket chat endpoint
       tags:
       - local-channel
+  /bots/{bot_id}/workdirs:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Include archived workdirs
+        in: query
+        name: include_archived
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workdir.WorkdirsResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List a Bot's workdirs
+      tags:
+      - workdirs
+    post:
+      consumes:
+      - application/json
+      description: Registers a named working directory on a workspace target. The
+        directory must already exist on that target.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workdir
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/workdir.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/workdir.Workdir'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a Bot workdir
+      tags:
+      - workdirs
+  /bots/{bot_id}/workdirs/{workdir_id}:
+    delete:
+      description: 'Archiving refuses new session bindings but keeps existing sessions
+        working: their directory never changes underneath them.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workdir ID
+        in: path
+        name: workdir_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Archive a Bot workdir
+      tags:
+      - workdirs
+    patch:
+      consumes:
+      - application/json
+      description: 'Only the name can change. The target and path are immutable: they
+        are baked into the working directory of every session bound to this workdir.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workdir ID
+        in: path
+        name: workdir_id
+        required: true
+        type: string
+      - description: New name
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/workdir.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workdir.Workdir'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Rename a Bot workdir
+      tags:
+      - workdirs
   /bots/{bot_id}/workspace-targets:
     get:
       parameters:

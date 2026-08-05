@@ -8,30 +8,30 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/project"
+	"github.com/memohai/memoh/internal/workdir"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
-func TestProjectHTTPError(t *testing.T) {
+func TestWorkdirHTTPError(t *testing.T) {
 	for name, tc := range map[string]struct {
 		err  error
 		code int
 	}{
-		"name required":      {project.ErrNameRequired, http.StatusBadRequest},
-		"path required":      {project.ErrPathRequired, http.StatusBadRequest},
-		"invalid path":       {project.ErrInvalidPath, http.StatusBadRequest},
-		"path missing":       {project.ErrPathNotFound, http.StatusBadRequest},
-		"path not directory": {project.ErrPathNotDirectory, http.StatusBadRequest},
-		"project not found":  {project.ErrProjectNotFound, http.StatusNotFound},
+		"name required":      {workdir.ErrNameRequired, http.StatusBadRequest},
+		"path required":      {workdir.ErrPathRequired, http.StatusBadRequest},
+		"invalid path":       {workdir.ErrInvalidPath, http.StatusBadRequest},
+		"path missing":       {workdir.ErrPathNotFound, http.StatusBadRequest},
+		"path not directory": {workdir.ErrPathNotDirectory, http.StatusBadRequest},
+		"workdir not found":  {workdir.ErrWorkdirNotFound, http.StatusNotFound},
 		"target not found":   {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
 		"db not found":       {db.ErrNotFound, http.StatusNotFound},
-		"duplicate path":     {project.ErrDuplicatePath, http.StatusConflict},
-		"archived":           {project.ErrProjectArchived, http.StatusConflict},
+		"duplicate path":     {workdir.ErrDuplicatePath, http.StatusConflict},
+		"archived":           {workdir.ErrWorkdirArchived, http.StatusConflict},
 		"runtime offline":    {workspace.ErrRemoteRuntimeOffline, http.StatusConflict},
 		"unexpected failure": {errors.New("boom"), http.StatusInternalServerError},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := projectHTTPError(nil, tc.err)
+			err := workdirHTTPError(nil, tc.err)
 			var httpErr *echo.HTTPError
 			if !errors.As(err, &httpErr) || httpErr.Code != tc.code {
 				t.Fatalf("error = %v, want HTTP %d", err, tc.code)

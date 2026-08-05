@@ -7,60 +7,60 @@ import (
 	"testing"
 
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/project"
+	"github.com/memohai/memoh/internal/workdir"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
-type sessionProjectSessionService struct {
+type sessionWorkdirSessionService struct {
 	thread sessionpkg.Thread
 }
 
-func (s sessionProjectSessionService) Get(context.Context, string) (sessionpkg.Thread, error) {
+func (s sessionWorkdirSessionService) Get(context.Context, string) (sessionpkg.Thread, error) {
 	return s.thread, nil
 }
 
-func (s sessionProjectSessionService) UpdateTitle(context.Context, string, string) (sessionpkg.Thread, error) {
+func (s sessionWorkdirSessionService) UpdateTitle(context.Context, string, string) (sessionpkg.Thread, error) {
 	return s.thread, nil
 }
 
-func (s sessionProjectSessionService) UpdateMetadata(context.Context, string, map[string]any) (sessionpkg.Thread, error) {
+func (s sessionWorkdirSessionService) UpdateMetadata(context.Context, string, map[string]any) (sessionpkg.Thread, error) {
 	return s.thread, nil
 }
 
-type fakeSessionProjectResolver struct {
-	resolved project.Resolved
+type fakeSessionWorkdirResolver struct {
+	resolved workdir.Resolved
 	err      error
 }
 
-func (f fakeSessionProjectResolver) ResolveForSession(context.Context, string, string) (project.Resolved, error) {
+func (f fakeSessionWorkdirResolver) ResolveForSession(context.Context, string, string) (workdir.Resolved, error) {
 	return f.resolved, f.err
 }
 
-func projectBoundService(resolved project.Resolved) *Service {
+func workdirBoundService(resolved workdir.Resolved) *Service {
 	return &Service{
-		sessionService:   sessionProjectSessionService{thread: sessionpkg.Thread{ID: "s1", BotID: "bot-1", ProjectID: "p1"}},
-		projects:         fakeSessionProjectResolver{resolved: resolved},
+		sessionService:   sessionWorkdirSessionService{thread: sessionpkg.Thread{ID: "s1", BotID: "bot-1", WorkdirID: "p1"}},
+		workdirs:         fakeSessionWorkdirResolver{resolved: resolved},
 		workspaceTargets: workspaceRequestTargetService{},
 	}
 }
 
-func TestPrepareWorkspaceRequestRejectsProjectTargetConflict(t *testing.T) {
-	service := projectBoundService(project.Resolved{
-		ProjectID: "p1", TargetID: workspace.WorkspaceTargetNative, Kind: project.TargetKindNative, WorkDir: "/data/proj",
+func TestPrepareWorkspaceRequestRejectsWorkdirTargetConflict(t *testing.T) {
+	service := workdirBoundService(workdir.Resolved{
+		WorkdirID: "p1", TargetID: workspace.WorkspaceTargetNative, Kind: workdir.TargetKindNative, WorkDir: "/data/proj",
 	})
 	req := ChatRequest{BotID: "bot-1", ThreadID: "s1", UserID: "user-1", WorkspaceTargetID: "computer-b"}
-	if _, _, err := service.prepareWorkspaceRequest(t.Context(), req); !errors.Is(err, ErrWorkspaceTargetProjectConflict) {
-		t.Fatalf("error = %v, want ErrWorkspaceTargetProjectConflict", err)
+	if _, _, err := service.prepareWorkspaceRequest(t.Context(), req); !errors.Is(err, ErrWorkspaceTargetWorkdirConflict) {
+		t.Fatalf("error = %v, want ErrWorkspaceTargetWorkdirConflict", err)
 	}
 }
 
-func TestPrepareWorkspaceRequestInjectsNativeProjectTargetWithoutWorkspaceRead(t *testing.T) {
-	// A native project pins the same workspace every chat session already
+func TestPrepareWorkspaceRequestInjectsNativeWorkdirTargetWithoutWorkspaceRead(t *testing.T) {
+	// A native workdir pins the same workspace every chat session already
 	// uses — it must not demand workspace_read just to keep chatting.
 	// botPermissions is deliberately nil: any permission check would panic
 	// the "checker not configured" branch into an error.
-	service := projectBoundService(project.Resolved{
-		ProjectID: "p1", TargetID: workspace.WorkspaceTargetNative, Kind: project.TargetKindNative, WorkDir: "/data/proj",
+	service := workdirBoundService(workdir.Resolved{
+		WorkdirID: "p1", TargetID: workspace.WorkspaceTargetNative, Kind: workdir.TargetKindNative, WorkDir: "/data/proj",
 	})
 	ctx, got, err := service.prepareWorkspaceRequest(t.Context(), ChatRequest{BotID: "bot-1", ThreadID: "s1"})
 	if err != nil {
@@ -74,19 +74,19 @@ func TestPrepareWorkspaceRequestInjectsNativeProjectTargetWithoutWorkspaceRead(t
 	}
 }
 
-func TestPrepareWorkspaceRequestRemoteProjectRequiresWorkspaceRead(t *testing.T) {
-	resolved := project.Resolved{
-		ProjectID: "p1", TargetID: "computer-b", Kind: project.TargetKindRemote, WorkDir: "/Users/alice/code",
+func TestPrepareWorkspaceRequestRemoteWorkdirRequiresWorkspaceRead(t *testing.T) {
+	resolved := workdir.Resolved{
+		WorkdirID: "p1", TargetID: "computer-b", Kind: workdir.TargetKindRemote, WorkDir: "/Users/alice/code",
 	}
 
-	denied := projectBoundService(resolved)
+	denied := workdirBoundService(resolved)
 	denied.botPermissions = workspaceRequestPermission(false)
 	req := ChatRequest{BotID: "bot-1", ThreadID: "s1", UserID: "user-1"}
 	if _, _, err := denied.prepareWorkspaceRequest(t.Context(), req); err == nil || !strings.Contains(err.Error(), "workspace_read") {
 		t.Fatalf("denied error = %v, want workspace_read denial", err)
 	}
 
-	allowed := projectBoundService(resolved)
+	allowed := workdirBoundService(resolved)
 	allowed.botPermissions = workspaceRequestPermission(true)
 	ctx, got, err := allowed.prepareWorkspaceRequest(t.Context(), req)
 	if err != nil {
@@ -101,8 +101,8 @@ func TestPrepareWorkspaceRequestRemoteProjectRequiresWorkspaceRead(t *testing.T)
 }
 
 func TestPrepareWorkspaceRequestAcceptsMatchingExplicitTarget(t *testing.T) {
-	service := projectBoundService(project.Resolved{
-		ProjectID: "p1", TargetID: "computer-b", Kind: project.TargetKindRemote, WorkDir: "/Users/alice/code",
+	service := workdirBoundService(workdir.Resolved{
+		WorkdirID: "p1", TargetID: "computer-b", Kind: workdir.TargetKindRemote, WorkDir: "/Users/alice/code",
 	})
 	service.botPermissions = workspaceRequestPermission(true)
 	req := ChatRequest{BotID: "bot-1", ThreadID: "s1", UserID: "user-1", WorkspaceTargetID: "computer-b"}
@@ -111,12 +111,12 @@ func TestPrepareWorkspaceRequestAcceptsMatchingExplicitTarget(t *testing.T) {
 	}
 }
 
-func TestResolveSessionProjectBindingFailsClosed(t *testing.T) {
+func TestResolveSessionWorkdirBindingFailsClosed(t *testing.T) {
 	// A resolution failure must fail the turn, not silently degrade to the
 	// default workspace: running in the wrong directory is the bug class
-	// project bindings exist to eliminate.
-	service := projectBoundService(project.Resolved{})
-	service.projects = fakeSessionProjectResolver{err: errors.New("boom")}
+	// workdir bindings exist to eliminate.
+	service := workdirBoundService(workdir.Resolved{})
+	service.workdirs = fakeSessionWorkdirResolver{err: errors.New("boom")}
 	if _, _, err := service.prepareWorkspaceRequest(t.Context(), ChatRequest{BotID: "bot-1", ThreadID: "s1"}); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("error = %v, want propagated resolution failure", err)
 	}

@@ -1,4 +1,4 @@
-package project
+package workdir
 
 import (
 	"context"
@@ -10,36 +10,36 @@ import (
 	"github.com/memohai/memoh/internal/workspace"
 )
 
-// ResolveForSession resolves a session's project binding to the target it
+// ResolveForSession resolves a session's workdir binding to the target it
 // pins and the working directory it dictates. It reads only stored state —
 // no bridge round-trip — so it is safe on the turn hot path. Archived
-// projects still resolve: a session's working directory never changes
+// workdirs still resolve: a session's working directory never changes
 // underneath it.
-func (s *Service) ResolveForSession(ctx context.Context, botID, projectID string) (Resolved, error) {
+func (s *Service) ResolveForSession(ctx context.Context, botID, workdirID string) (Resolved, error) {
 	if s == nil || s.store == nil {
-		return Resolved{}, errors.New("project service not configured")
+		return Resolved{}, errors.New("workdir service not configured")
 	}
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
-		return Resolved{}, ErrProjectNotFound
+	workdirID = strings.TrimSpace(workdirID)
+	if workdirID == "" {
+		return Resolved{}, ErrWorkdirNotFound
 	}
-	record, err := s.store.GetProject(ctx, botID, projectID)
+	record, err := s.store.GetWorkdir(ctx, botID, workdirID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return Resolved{}, ErrProjectNotFound
+			return Resolved{}, ErrWorkdirNotFound
 		}
 		return Resolved{}, err
 	}
 	return resolvedFromRecord(record), nil
 }
 
-func resolvedFromRecord(record dbstore.BotProjectRecord) Resolved {
+func resolvedFromRecord(record dbstore.BotWorkdirRecord) Resolved {
 	targetID := workspace.WorkspaceTargetNative
 	if record.TargetKind == TargetKindRemote {
 		targetID = record.RemoteBindingID
 	}
 	return Resolved{
-		ProjectID: record.ID,
+		WorkdirID: record.ID,
 		TargetID:  targetID,
 		Kind:      record.TargetKind,
 		WorkDir:   record.Path,

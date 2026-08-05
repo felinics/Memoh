@@ -14,8 +14,8 @@ export interface SessionSummary {
   metadata?: Record<string, unknown>
   runtime_metadata?: Record<string, unknown>
   parent_session_id?: string
-  /** Immutable bot-project binding; empty for unbound sessions. */
-  project_id?: string
+  /** Immutable bot-workdir binding; empty for unbound sessions. */
+  workdir_id?: string
   created_at?: string
   updated_at?: string
   route_metadata?: Record<string, unknown>

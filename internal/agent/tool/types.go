@@ -323,9 +323,9 @@ type SessionContext struct {
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string
-	// ProjectWorkDir is the session's immutable project directory. When set,
+	// WorkdirPath is the session's immutable working directory. When set,
 	// relative tool paths resolve under it and exec defaults its cwd to it.
-	ProjectWorkDir   string
+	WorkdirPath      string
 	Skills           map[string]SkillDetail
 	TimezoneLocation *time.Location
 	Emitter          StreamEmitter

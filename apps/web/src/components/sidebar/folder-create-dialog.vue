@@ -1,10 +1,10 @@
 <template>
   <FormDialogShell
     v-model:open="open"
-    :title="t('bots.projects.createTitle')"
-    :description="t('bots.projects.createDescription')"
+    :title="t('bots.folders.createTitle')"
+    :description="t('bots.folders.createDescription')"
     :cancel-text="t('common.cancel')"
-    :submit-text="t('bots.projects.create')"
+    :submit-text="t('bots.folders.create')"
     :submit-disabled="!canSubmit"
     :loading="creating"
     @submit="handleCreate"
@@ -12,18 +12,18 @@
     <template #body>
       <FormStack class="mt-4">
         <FieldStack
-          :label="t('bots.projects.form.name')"
-          for="project-name"
+          :label="t('bots.folders.form.name')"
+          for="folder-name"
         >
           <Input
-            id="project-name"
+            id="folder-name"
             v-model="name"
-            :placeholder="t('bots.projects.form.namePlaceholder')"
+            :placeholder="t('bots.folders.form.namePlaceholder')"
           />
         </FieldStack>
         <FieldStack
           v-if="selectableTargets.length > 1"
-          :label="t('bots.projects.form.target')"
+          :label="t('bots.folders.form.target')"
         >
           <Select v-model="targetId">
             <SelectTrigger class="w-full">
@@ -46,13 +46,13 @@
              and the backend verifies the directory exists. -->
         <FieldStack
           v-if="targetIsNative"
-          :label="t('bots.projects.form.directory')"
-          :help="t('bots.projects.form.directoryHelp', { path: browsePath })"
+          :label="t('bots.folders.form.directory')"
+          :help="t('bots.folders.form.directoryHelp', { path: browsePath })"
         >
           <div class="overflow-hidden rounded-md border border-border">
             <div class="flex items-center gap-1.5 border-b border-border px-2 py-1.5">
               <TextButton
-                :aria-label="t('bots.projects.form.directoryUp')"
+                :aria-label="t('bots.folders.form.directoryUp')"
                 :disabled="browseAtRoot || browseLoading"
                 @click="browseUp"
               >
@@ -81,7 +81,7 @@
                     v-if="browseDirs.length === 0"
                     class="px-3 py-4 text-center text-body text-muted-foreground"
                   >
-                    {{ t('bots.projects.form.noSubdirectories') }}
+                    {{ t('bots.folders.form.noSubdirectories') }}
                   </p>
                 </template>
               </CommandList>
@@ -90,14 +90,14 @@
         </FieldStack>
         <FieldStack
           v-else
-          :label="t('bots.projects.form.path')"
-          for="project-path"
-          :help="t('bots.projects.form.remotePathHelp')"
+          :label="t('bots.folders.form.path')"
+          for="folder-path"
+          :help="t('bots.folders.form.remotePathHelp')"
         >
           <Input
-            id="project-path"
+            id="folder-path"
             v-model="remotePath"
-            :placeholder="t('bots.projects.form.remotePathPlaceholder')"
+            :placeholder="t('bots.folders.form.remotePathPlaceholder')"
           />
         </FieldStack>
       </FormStack>
@@ -128,8 +128,8 @@ import {
   toast,
 } from '@felinic/ui'
 import { getBotsByBotIdContainerFsList, getBotsByBotIdWorkspaceTargets, type WorkspaceWorkspaceTarget } from '@memohai/sdk'
-import { createProject } from '@/composables/api/useProjects'
-import { useProjectsStore } from '@/store/projects'
+import { createWorkdir } from '@/composables/api/useWorkdirs'
+import { useWorkdirsStore } from '@/store/workdirs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{ botId: string }>()
@@ -137,7 +137,7 @@ const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ created: [] }>()
 
 const { t } = useI18n()
-const projectsStore = useProjectsStore()
+const workdirsStore = useWorkdirsStore()
 
 // Workspace targets back the location choice; the select only appears when a
 // remote computer is actually bound.
@@ -159,7 +159,7 @@ const selectableTargets = computed<WorkspaceWorkspaceTarget[]>(() => (
 function targetDisplayName(target: WorkspaceWorkspaceTarget): string {
   const name = (target.name ?? '').trim()
   if (name) return name
-  return target.kind === 'remote' ? t('bots.projects.targetRemote') : t('bots.projects.targetNative')
+  return target.kind === 'remote' ? t('bots.folders.targetRemote') : t('bots.folders.targetNative')
 }
 
 const creating = ref(false)
@@ -191,17 +191,17 @@ async function handleCreate() {
   if (!canSubmit.value || creating.value) return
   creating.value = true
   try {
-    await createProject(props.botId, {
+    await createWorkdir(props.botId, {
       name: name.value.trim(),
       path: targetIsNative.value ? browsePath.value : remotePath.value.trim(),
       workspaceTargetId: targetId.value,
     })
-    await projectsStore.refreshProjects(props.botId)
+    await workdirsStore.refreshWorkdirs(props.botId)
     open.value = false
-    toast.success(t('bots.projects.created'))
+    toast.success(t('bots.folders.created'))
     emit('created')
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.projects.createFailed')))
+    toast.error(resolveApiErrorMessage(error, t('bots.folders.createFailed')))
   } finally {
     creating.value = false
   }
@@ -232,7 +232,7 @@ async function loadBrowseDirs() {
   } catch (error) {
     if (request !== browseRequest) return
     browseDirs.value = []
-    toast.error(resolveApiErrorMessage(error, t('bots.projects.form.browseFailed')))
+    toast.error(resolveApiErrorMessage(error, t('bots.folders.form.browseFailed')))
   } finally {
     if (request === browseRequest) browseLoading.value = false
   }

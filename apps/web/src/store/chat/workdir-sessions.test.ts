@@ -10,7 +10,7 @@ vi.mock('@/composables/api/useChat', () => ({
   },
 }))
 
-const { createProjectSessions } = await import('./project-sessions')
+const { createWorkdirSessions } = await import('./workdir-sessions')
 
 function session(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -18,7 +18,7 @@ function session(id: string, overrides: Partial<SessionSummary> = {}): SessionSu
     bot_id: 'bot-1',
     title: `Session ${id}`,
     type: 'chat',
-    project_id: 'project-1',
+    workdir_id: 'workdir-1',
     created_at: '2026-01-02T00:00:00.000Z',
     updated_at: '2026-01-02T00:00:00.000Z',
     ...overrides,
@@ -29,7 +29,7 @@ function harness() {
   const currentBotId = ref<string | null>('bot-1')
   const sessions = ref<SessionSummary[]>([])
   const remembered = new Map<string, SessionSummary>()
-  const store = createProjectSessions({
+  const store = createWorkdirSessions({
     currentBotId,
     sessions,
     userScopeGeneration: () => 0,
@@ -39,24 +39,24 @@ function harness() {
   return { currentBotId, sessions, remembered, store }
 }
 
-describe('project sessions paging', () => {
+describe('workdir sessions paging', () => {
   beforeEach(() => {
     fetchSessions.mockReset()
   })
 
-  // The whole point of the module: a project's chats must be reachable even
+  // The whole point of the module: a workdir's chats must be reachable even
   // when they are older than the pages the shared Recents list has loaded.
-  it('fetches a folder from the project-filtered endpoint', async () => {
+  it('fetches a folder from the workdir-filtered endpoint', async () => {
     fetchSessions.mockResolvedValue({ items: [session('old-chat')], nextCursor: null })
     const { store, sessions } = harness()
 
-    await store.ensureProjectSessions('project-1')
+    await store.ensureWorkdirSessions('workdir-1')
 
-    expect(fetchSessions).toHaveBeenCalledWith('bot-1', { projectId: 'project-1' })
+    expect(fetchSessions).toHaveBeenCalledWith('bot-1', { workdirId: 'workdir-1' })
     // Not in the shared list at all — it only exists because the folder paged.
     expect(sessions.value).toEqual([])
-    expect(store.projectSessionsFor('project-1').map(s => s.id)).toEqual(['old-chat'])
-    expect(store.projectSessionsState('project-1')).toEqual({
+    expect(store.workdirSessionsFor('workdir-1').map(s => s.id)).toEqual(['old-chat'])
+    expect(store.workdirSessionsState('workdir-1')).toEqual({
       loading: false,
       hasMore: false,
       loaded: true,
@@ -67,8 +67,8 @@ describe('project sessions paging', () => {
     fetchSessions.mockResolvedValue({ items: [session('a')], nextCursor: null })
     const { store } = harness()
 
-    await store.ensureProjectSessions('project-1')
-    await store.ensureProjectSessions('project-1')
+    await store.ensureWorkdirSessions('workdir-1')
+    await store.ensureWorkdirSessions('workdir-1')
 
     expect(fetchSessions).toHaveBeenCalledTimes(1)
   })
@@ -79,14 +79,14 @@ describe('project sessions paging', () => {
       .mockResolvedValueOnce({ items: [session('b', { updated_at: '2026-01-01T00:00:00.000Z' })], nextCursor: null })
     const { store } = harness()
 
-    await store.ensureProjectSessions('project-1')
-    expect(store.projectSessionsState('project-1').hasMore).toBe(true)
+    await store.ensureWorkdirSessions('workdir-1')
+    expect(store.workdirSessionsState('workdir-1').hasMore).toBe(true)
 
-    await store.loadMoreProjectSessions('project-1')
+    await store.loadMoreWorkdirSessions('workdir-1')
 
-    expect(fetchSessions).toHaveBeenLastCalledWith('bot-1', { projectId: 'project-1', cursor: 'cursor-1' })
-    expect(store.projectSessionsFor('project-1').map(s => s.id)).toEqual(['a', 'b'])
-    expect(store.projectSessionsState('project-1').hasMore).toBe(false)
+    expect(fetchSessions).toHaveBeenLastCalledWith('bot-1', { workdirId: 'workdir-1', cursor: 'cursor-1' })
+    expect(store.workdirSessionsFor('workdir-1').map(s => s.id)).toEqual(['a', 'b'])
+    expect(store.workdirSessionsState('workdir-1').hasMore).toBe(false)
   })
 
   it('merges sessions the shared list already holds, newest first', async () => {
@@ -97,12 +97,12 @@ describe('project sessions paging', () => {
     const { store, sessions } = harness()
     sessions.value = [
       session('brand-new', { updated_at: '2026-02-01T00:00:00.000Z' }),
-      session('other-project', { project_id: 'project-2' }),
+      session('other-workdir', { workdir_id: 'workdir-2' }),
     ]
 
-    await store.ensureProjectSessions('project-1')
+    await store.ensureWorkdirSessions('workdir-1')
 
-    expect(store.projectSessionsFor('project-1').map(s => s.id)).toEqual(['brand-new', 'fetched'])
+    expect(store.workdirSessionsFor('workdir-1').map(s => s.id)).toEqual(['brand-new', 'fetched'])
   })
 
   // A fetched row lives in the store's remembered-session map, so the delete
@@ -111,10 +111,10 @@ describe('project sessions paging', () => {
     fetchSessions.mockResolvedValue({ items: [session('a'), session('b')], nextCursor: null })
     const { store, remembered } = harness()
 
-    await store.ensureProjectSessions('project-1')
+    await store.ensureWorkdirSessions('workdir-1')
     remembered.delete('a')
 
-    expect(store.projectSessionsFor('project-1').map(s => s.id)).toEqual(['b'])
+    expect(store.workdirSessionsFor('workdir-1').map(s => s.id)).toEqual(['b'])
   })
 
   it('discards a response that lands after a reset', async () => {
@@ -122,12 +122,12 @@ describe('project sessions paging', () => {
     fetchSessions.mockReturnValue(new Promise((resolve) => { resolveFetch = resolve }))
     const { store } = harness()
 
-    const inFlight = store.ensureProjectSessions('project-1')
+    const inFlight = store.ensureWorkdirSessions('workdir-1')
     store.reset()
     resolveFetch({ items: [session('stale')], nextCursor: null })
     await inFlight
 
-    expect(store.projectSessionsFor('project-1')).toEqual([])
-    expect(store.projectSessionsState('project-1').loaded).toBe(false)
+    expect(store.workdirSessionsFor('workdir-1')).toEqual([])
+    expect(store.workdirSessionsState('workdir-1').loaded).toBe(false)
   })
 })

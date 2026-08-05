@@ -28,10 +28,10 @@ export interface CreateSessionOptions {
   /** Warm pre-session ACP runtime to bind at creation time. */
   acpRuntimeId?: string
   /**
-   * Bot project to bind the session to. Immutable after creation: the
-   * project pins the session's workspace target and working directory.
+   * Bot workdir to bind the session to. Immutable after creation: the
+   * workdir pins the session's workspace target and working directory.
    */
-  projectId?: string
+  workdirId?: string
 }
 
 export interface CreateACPRuntimeOptions {
@@ -48,11 +48,11 @@ export interface FetchSessionsOptions {
   types?: string[]
   parentSessionId?: string
   /**
-   * Only sessions bound to this project. The literal `none` selects the
+   * Only sessions bound to this workdir. The literal `none` selects the
    * unbound bucket. Pages independently of the unfiltered timeline, so a
-   * project folder can reach chats older than the loaded global pages.
+   * folder can reach chats older than the loaded global pages.
    */
-  projectId?: string
+  workdirId?: string
   limit?: number
   cursor?: string
 }
@@ -70,14 +70,14 @@ export async function fetchSessions(botId: string, options?: FetchSessionsOption
   if (!id) return { items: [], nextCursor: null }
   const types = (options?.types ?? DEFAULT_SESSION_TYPES).map(t => t.trim()).filter(Boolean)
   const parentSessionId = options?.parentSessionId?.trim() ?? ''
-  const projectId = options?.projectId?.trim() ?? ''
+  const workdirId = options?.workdirId?.trim() ?? ''
   const cursor = options?.cursor?.trim() ?? ''
   const { data } = await getBotsByBotIdSessions({
     path: { bot_id: id },
     query: {
       types: types.join(','),
       ...(parentSessionId ? { parent_session_id: parentSessionId } : {}),
-      ...(projectId ? { project_id: projectId } : {}),
+      ...(workdirId ? { workdir_id: workdirId } : {}),
       limit: options?.limit ?? DEFAULT_SESSION_PAGE_SIZE,
       ...(cursor ? { cursor } : {}),
     },
@@ -112,7 +112,7 @@ export async function createSession(botId: string, options?: string | CreateSess
         metadata: options?.metadata,
         runtime_metadata: options?.runtimeMetadata,
         acp_runtime_id: options?.acpRuntimeId?.trim() || undefined,
-        project_id: options?.projectId?.trim() || undefined,
+        workdir_id: options?.workdirId?.trim() || undefined,
       }
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },

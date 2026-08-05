@@ -1,7 +1,7 @@
 // Package vpath resolves user-supplied paths under a virtual workspace root
 // without consulting the host filesystem. The server process cannot evaluate
 // symlinks inside a workspace it does not mount, so containment is decided
-// purely on the cleaned path shape. Shared by the ACP runtime and the project
+// purely on the cleaned path shape. Shared by the ACP runtime and the workdir
 // service so the clamping semantics cannot drift between them.
 package vpath
 

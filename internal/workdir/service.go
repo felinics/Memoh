@@ -1,4 +1,4 @@
-package project
+package workdir
 
 import (
 	"context"
@@ -14,33 +14,33 @@ import (
 	"github.com/memohai/memoh/internal/workspace/vpath"
 )
 
-// targetResolver is the slice of *workspace.Manager the project service
+// targetResolver is the slice of *workspace.Manager the workdir service
 // needs: resolving a target address to a live bridge client and workspace
 // info, for directory validation at create time.
 type targetResolver interface {
 	ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (workspace.ResolvedWorkspaceTarget, error)
 }
 
-// Service owns bot project directories.
+// Service owns per-bot working directories.
 type Service struct {
-	store   dbstore.BotProjectStore
+	store   dbstore.BotWorkdirStore
 	targets targetResolver
 }
 
-func NewService(store dbstore.BotProjectStore, manager *workspace.Manager) *Service {
+func NewService(store dbstore.BotWorkdirStore, manager *workspace.Manager) *Service {
 	return &Service{store: store, targets: manager}
 }
 
-// Create validates the target and directory, then persists the project.
+// Create validates the target and directory, then persists the workdir.
 // The directory must already exist on the target: a mistyped path should
 // fail here, at the creation site, not on the first agent turn.
-func (s *Service) Create(ctx context.Context, botID, userID string, req CreateRequest) (Project, error) {
+func (s *Service) Create(ctx context.Context, botID, userID string, req CreateRequest) (Workdir, error) {
 	if s == nil || s.store == nil {
-		return Project{}, errors.New("project service not configured")
+		return Workdir{}, errors.New("workdir service not configured")
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Project{}, ErrNameRequired
+		return Workdir{}, ErrNameRequired
 	}
 	targetID := strings.TrimSpace(req.WorkspaceTargetID)
 	if targetID == "" {
@@ -48,16 +48,16 @@ func (s *Service) Create(ctx context.Context, botID, userID string, req CreateRe
 	}
 	resolved, err := s.targets.ResolveWorkspaceTarget(ctx, botID, targetID)
 	if err != nil {
-		return Project{}, err
+		return Workdir{}, err
 	}
-	normalized, err := normalizeProjectPath(req.Path, resolved)
+	normalized, err := normalizeWorkdirPath(req.Path, resolved)
 	if err != nil {
-		return Project{}, err
+		return Workdir{}, err
 	}
 	if err := s.requireDirectory(ctx, resolved, normalized); err != nil {
-		return Project{}, err
+		return Workdir{}, err
 	}
-	input := dbstore.CreateBotProjectInput{
+	input := dbstore.CreateBotWorkdirInput{
 		BotID:           botID,
 		Name:            name,
 		TargetKind:      resolved.Kind,
@@ -67,87 +67,87 @@ func (s *Service) Create(ctx context.Context, botID, userID string, req CreateRe
 	if resolved.Kind == TargetKindRemote {
 		input.RemoteBindingID = resolved.TargetID
 	}
-	record, err := s.store.CreateProject(ctx, input)
+	record, err := s.store.CreateWorkdir(ctx, input)
 	if err != nil {
 		if db.IsUniqueViolation(err) {
-			return Project{}, ErrDuplicatePath
+			return Workdir{}, ErrDuplicatePath
 		}
-		return Project{}, err
+		return Workdir{}, err
 	}
-	return toProject(record), nil
+	return toWorkdir(record), nil
 }
 
-func (s *Service) List(ctx context.Context, botID string, includeArchived bool) ([]Project, error) {
+func (s *Service) List(ctx context.Context, botID string, includeArchived bool) ([]Workdir, error) {
 	if s == nil || s.store == nil {
-		return nil, errors.New("project service not configured")
+		return nil, errors.New("workdir service not configured")
 	}
-	records, err := s.store.ListProjects(ctx, botID, includeArchived)
+	records, err := s.store.ListWorkdirs(ctx, botID, includeArchived)
 	if err != nil {
 		return nil, err
 	}
-	projects := make([]Project, 0, len(records))
+	workdirs := make([]Workdir, 0, len(records))
 	for _, record := range records {
-		projects = append(projects, toProject(record))
+		workdirs = append(workdirs, toWorkdir(record))
 	}
-	return projects, nil
+	return workdirs, nil
 }
 
-// Get returns the project regardless of archive state: sessions bound to an
-// archived project keep resolving their working directory.
-func (s *Service) Get(ctx context.Context, botID, projectID string) (Project, error) {
+// Get returns the workdir regardless of archive state: sessions bound to an
+// archived workdir keep resolving their working directory.
+func (s *Service) Get(ctx context.Context, botID, workdirID string) (Workdir, error) {
 	if s == nil || s.store == nil {
-		return Project{}, errors.New("project service not configured")
+		return Workdir{}, errors.New("workdir service not configured")
 	}
-	record, err := s.store.GetProject(ctx, botID, projectID)
+	record, err := s.store.GetWorkdir(ctx, botID, workdirID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return Project{}, ErrProjectNotFound
+			return Workdir{}, ErrWorkdirNotFound
 		}
-		return Project{}, err
+		return Workdir{}, err
 	}
-	return toProject(record), nil
+	return toWorkdir(record), nil
 }
 
 // RequireActive is Get plus an archive check — the gate for binding new
-// sessions to a project.
-func (s *Service) RequireActive(ctx context.Context, botID, projectID string) (Project, error) {
-	project, err := s.Get(ctx, botID, projectID)
+// sessions to a workdir.
+func (s *Service) RequireActive(ctx context.Context, botID, workdirID string) (Workdir, error) {
+	record, err := s.Get(ctx, botID, workdirID)
 	if err != nil {
-		return Project{}, err
+		return Workdir{}, err
 	}
-	if project.Archived {
-		return Project{}, ErrProjectArchived
+	if record.Archived {
+		return Workdir{}, ErrWorkdirArchived
 	}
-	return project, nil
+	return record, nil
 }
 
-func (s *Service) Rename(ctx context.Context, botID, projectID, name string) (Project, error) {
+func (s *Service) Rename(ctx context.Context, botID, workdirID, name string) (Workdir, error) {
 	if s == nil || s.store == nil {
-		return Project{}, errors.New("project service not configured")
+		return Workdir{}, errors.New("workdir service not configured")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return Project{}, ErrNameRequired
+		return Workdir{}, ErrNameRequired
 	}
-	record, err := s.store.RenameProject(ctx, botID, projectID, name)
+	record, err := s.store.RenameWorkdir(ctx, botID, workdirID, name)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return Project{}, ErrProjectNotFound
+			return Workdir{}, ErrWorkdirNotFound
 		}
-		return Project{}, err
+		return Workdir{}, err
 	}
-	return toProject(record), nil
+	return toWorkdir(record), nil
 }
 
-// Archive soft-deletes the project. Bound sessions keep their working
+// Archive soft-deletes the workdir. Bound sessions keep their working
 // directory (the row stays); only new bindings are refused from here on.
-func (s *Service) Archive(ctx context.Context, botID, projectID string) error {
+func (s *Service) Archive(ctx context.Context, botID, workdirID string) error {
 	if s == nil || s.store == nil {
-		return errors.New("project service not configured")
+		return errors.New("workdir service not configured")
 	}
-	if err := s.store.ArchiveProject(ctx, botID, projectID); err != nil {
+	if err := s.store.ArchiveWorkdir(ctx, botID, workdirID); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return ErrProjectNotFound
+			return ErrWorkdirNotFound
 		}
 		return err
 	}
@@ -165,7 +165,7 @@ func (*Service) requireDirectory(ctx context.Context, target workspace.ResolvedW
 		if errors.Is(err, bridge.ErrNotFound) {
 			return fmt.Errorf("%w: %s", ErrPathNotFound, normalized)
 		}
-		return fmt.Errorf("stat project path: %w", err)
+		return fmt.Errorf("stat workdir path: %w", err)
 	}
 	if !entry.GetIsDir() {
 		return fmt.Errorf("%w: %s", ErrPathNotDirectory, normalized)
@@ -173,11 +173,11 @@ func (*Service) requireDirectory(ctx context.Context, target workspace.ResolvedW
 	return nil
 }
 
-// normalizeProjectPath canonicalizes the user-supplied path for the target
+// normalizeWorkdirPath canonicalizes the user-supplied path for the target
 // it will live on. Native paths are clamped under the container data mount;
 // remote paths are host-absolute (Windows drive/UNC paths included) and the
 // remote runtime stays the authority on what exists there.
-func normalizeProjectPath(raw string, target workspace.ResolvedWorkspaceTarget) (string, error) {
+func normalizeWorkdirPath(raw string, target workspace.ResolvedWorkspaceTarget) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", ErrPathRequired
@@ -223,12 +223,12 @@ func isASCIILetter(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-func toProject(record dbstore.BotProjectRecord) Project {
+func toWorkdir(record dbstore.BotWorkdirRecord) Workdir {
 	targetID := workspace.WorkspaceTargetNative
 	if record.TargetKind == TargetKindRemote {
 		targetID = record.RemoteBindingID
 	}
-	return Project{
+	return Workdir{
 		ID:                record.ID,
 		BotID:             record.BotID,
 		Name:              record.Name,

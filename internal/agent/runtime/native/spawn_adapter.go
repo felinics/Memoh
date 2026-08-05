@@ -59,7 +59,7 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 		WorkspaceTargetID:   cfg.Identity.WorkspaceTargetID,
 		WorkspaceTargetKind: cfg.Identity.WorkspaceTargetKind,
 		WorkspaceTargetName: cfg.Identity.WorkspaceTargetName,
-		ProjectWorkDir:      cfg.Identity.ProjectWorkDir,
+		WorkdirPath:         cfg.Identity.WorkdirPath,
 		TimezoneLocation:    cfg.Identity.TimezoneLocation,
 		IsSubagent:          cfg.Identity.IsSubagent,
 	}

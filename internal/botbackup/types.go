@@ -209,7 +209,7 @@ type backupData struct {
 	Profile                 any                            `json:"profile,omitempty"`
 	Settings                any                            `json:"settings,omitempty"`
 	WorkspaceResourceLimits *backupWorkspaceResourceLimits `json:"workspace_resource_limits,omitempty"`
-	Projects                []backupProject                `json:"projects,omitempty"`
+	Workdirs                []backupWorkdir                `json:"workdirs,omitempty"`
 	ACLRules                any                            `json:"acl_rules,omitempty"`
 	Channels                any                            `json:"channels,omitempty"`
 	MCP                     any                            `json:"mcp,omitempty"`
@@ -219,11 +219,11 @@ type backupData struct {
 	History                 backupHistory                  `json:"history,omitempty"`
 }
 
-// backupProject is a native-workspace project directory. Remote projects are
+// backupWorkdir is a native-workspace workdir directory. Remote workdirs are
 // excluded on purpose: they reference a specific person's computer, which a
 // backup restored elsewhere cannot reach. ID is the source row id, kept so
-// restored sessions can be remapped onto the recreated projects.
-type backupProject struct {
+// restored sessions can be remapped onto the recreated workdirs.
+type backupWorkdir struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Path     string `json:"path"`

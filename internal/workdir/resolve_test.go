@@ -1,4 +1,4 @@
-package project
+package workdir
 
 import (
 	"context"
@@ -12,21 +12,21 @@ import (
 )
 
 func TestResolveForSessionNative(t *testing.T) {
-	service := &Service{store: &fakeProjectStore{get: dbstore.BotProjectRecord{
+	service := &Service{store: &fakeWorkdirStore{get: dbstore.BotWorkdirRecord{
 		ID: "p1", BotID: "b1", TargetKind: TargetKindNative, Path: "/data/site",
 	}}}
 	resolved, err := service.ResolveForSession(context.Background(), "b1", "p1")
 	if err != nil {
 		t.Fatalf("ResolveForSession error = %v", err)
 	}
-	want := Resolved{ProjectID: "p1", TargetID: workspace.WorkspaceTargetNative, Kind: TargetKindNative, WorkDir: "/data/site"}
+	want := Resolved{WorkdirID: "p1", TargetID: workspace.WorkspaceTargetNative, Kind: TargetKindNative, WorkDir: "/data/site"}
 	if resolved != want {
 		t.Fatalf("resolved = %+v, want %+v", resolved, want)
 	}
 }
 
 func TestResolveForSessionRemote(t *testing.T) {
-	service := &Service{store: &fakeProjectStore{get: dbstore.BotProjectRecord{
+	service := &Service{store: &fakeWorkdirStore{get: dbstore.BotWorkdirRecord{
 		ID: "p2", BotID: "b1", TargetKind: TargetKindRemote, RemoteBindingID: "bind-1", Path: `C:\Users\alice\code`,
 	}}}
 	resolved, err := service.ResolveForSession(context.Background(), "b1", "p2")
@@ -40,8 +40,8 @@ func TestResolveForSessionRemote(t *testing.T) {
 
 func TestResolveForSessionArchivedStillResolves(t *testing.T) {
 	// A session's working directory never changes underneath it: archiving
-	// the project must not break resolution for already-bound sessions.
-	service := &Service{store: &fakeProjectStore{get: dbstore.BotProjectRecord{
+	// the workdir must not break resolution for already-bound sessions.
+	service := &Service{store: &fakeWorkdirStore{get: dbstore.BotWorkdirRecord{
 		ID: "p1", TargetKind: TargetKindNative, Path: "/data/site", ArchivedAt: time.Now(),
 	}}}
 	resolved, err := service.ResolveForSession(context.Background(), "b1", "p1")
@@ -54,11 +54,11 @@ func TestResolveForSessionArchivedStillResolves(t *testing.T) {
 }
 
 func TestResolveForSessionErrors(t *testing.T) {
-	service := &Service{store: &fakeProjectStore{getErr: db.ErrNotFound}}
-	if _, err := service.ResolveForSession(context.Background(), "b1", "p1"); !errors.Is(err, ErrProjectNotFound) {
-		t.Fatalf("error = %v, want ErrProjectNotFound", err)
+	service := &Service{store: &fakeWorkdirStore{getErr: db.ErrNotFound}}
+	if _, err := service.ResolveForSession(context.Background(), "b1", "p1"); !errors.Is(err, ErrWorkdirNotFound) {
+		t.Fatalf("error = %v, want ErrWorkdirNotFound", err)
 	}
-	if _, err := service.ResolveForSession(context.Background(), "b1", " "); !errors.Is(err, ErrProjectNotFound) {
-		t.Fatalf("empty id error = %v, want ErrProjectNotFound", err)
+	if _, err := service.ResolveForSession(context.Background(), "b1", " "); !errors.Is(err, ErrWorkdirNotFound) {
+		t.Fatalf("empty id error = %v, want ErrWorkdirNotFound", err)
 	}
 }

@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-// Shared session rename/delete dialogs: the Recents list and the Projects
+// Shared session rename/delete dialogs: the Recents list and the Folders
 // section both surface SessionItem rows, so the dialogs behind their context
 // menus live once here instead of being hand-copied per list.
 import { ref } from 'vue'

@@ -50,7 +50,7 @@ type Thread struct {
 	Metadata              map[string]any `json:"metadata,omitempty"`
 	ParentThreadID        string         `json:"parent_session_id,omitempty"`
 	CreatedByUserID       string         `json:"created_by_user_id,omitempty"`
-	ProjectID             string         `json:"project_id,omitempty"`
+	WorkdirID             string         `json:"workdir_id,omitempty"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	RouteMetadata         map[string]any `json:"route_metadata,omitempty"`
@@ -135,15 +135,15 @@ type CreateInput struct {
 	RuntimeMetadata map[string]any
 	ParentThreadID  string
 	CreatedByUserID string
-	// ProjectID immutably binds the thread to a bot project. The caller
-	// (handler layer) validates the project; thread persistence only stores
-	// the reference so this package never imports the project domain.
-	ProjectID string
-	// ProjectPath is the resolved project directory, set if and only if
-	// ProjectID is set. For ACP threads it overrides the metadata
-	// project_path so the runtime works in the project directory; it also
+	// WorkdirID immutably binds the thread to a bot workdir. The caller
+	// (handler layer) validates the workdir; thread persistence only stores
+	// the reference so this package never imports the workdir domain.
+	WorkdirID string
+	// WorkdirPath is the resolved workdir directory, set if and only if
+	// WorkdirID is set. For ACP threads it overrides the metadata
+	// project_path so the runtime works in that directory; it also
 	// leaves a creation-time path snapshot in the metadata for history.
-	ProjectPath string
+	WorkdirPath string
 }
 
 // SubagentConfig is the persisted runtime selection for a managed subagent.
@@ -324,12 +324,12 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 		runtimeMeta = setACPRuntimeOwner(runtimeMeta, runtimeOwnerUserID)
 		meta = mergeACPMetadata(meta, runtimeMeta)
 		runtimeMeta = mergeACPMetadata(runtimeMeta, meta)
-		// A project binding owns the working directory: its resolved path
+		// A workdir binding owns the working directory: its resolved path
 		// wins over any request-supplied project_path, and the metadata
 		// keeps it as a creation-time snapshot.
-		if strings.TrimSpace(input.ProjectID) != "" && strings.TrimSpace(input.ProjectPath) != "" {
-			meta = overrideACPProjectPath(meta, input.ProjectPath)
-			runtimeMeta = overrideACPProjectPath(runtimeMeta, input.ProjectPath)
+		if strings.TrimSpace(input.WorkdirID) != "" && strings.TrimSpace(input.WorkdirPath) != "" {
+			meta = overrideACPProjectPath(meta, input.WorkdirPath)
+			runtimeMeta = overrideACPProjectPath(runtimeMeta, input.WorkdirPath)
 		}
 		if err := validateACPMetadata(meta); err != nil {
 			return Thread{}, err
@@ -351,9 +351,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 	if err != nil {
 		return Thread{}, fmt.Errorf("invalid parent session id: %w", err)
 	}
-	pgProjectID, err := parseOptionalUUID(input.ProjectID)
+	pgWorkdirID, err := parseOptionalUUID(input.WorkdirID)
 	if err != nil {
-		return Thread{}, fmt.Errorf("invalid project id: %w", err)
+		return Thread{}, fmt.Errorf("invalid workdir id: %w", err)
 	}
 
 	row, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
@@ -368,7 +368,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 		Metadata:        metaBytes,
 		ParentSessionID: pgParentSessionID,
 		CreatedByUserID: pgCreatedByUserID,
-		ProjectID:       pgProjectID,
+		WorkdirID:       pgWorkdirID,
 	})
 	if err != nil {
 		return Thread{}, err
@@ -418,10 +418,10 @@ func (s *Service) CreateSubagent(ctx context.Context, input CreateSubagentInput)
 		return Thread{}, SubagentConfig{}, fmt.Errorf("marshal fork context: %w", err)
 	}
 
-	// A subagent works inside its parent's project: same target, same
-	// working directory. Callers never pass ProjectID for subagents — it is
+	// A subagent works inside its parent's workdir: same target, same
+	// working directory. Callers never pass WorkdirID for subagents — it is
 	// derived here so the inheritance cannot be forgotten at a call site.
-	if strings.TrimSpace(input.Thread.ProjectID) == "" {
+	if strings.TrimSpace(input.Thread.WorkdirID) == "" {
 		if parentID := strings.TrimSpace(input.Thread.ParentThreadID); parentID != "" {
 			pgParentID, parseErr := dbpkg.ParseUUID(parentID)
 			if parseErr != nil {
@@ -431,8 +431,8 @@ func (s *Service) CreateSubagent(ctx context.Context, input CreateSubagentInput)
 			if parentErr != nil && !errors.Is(parentErr, pgx.ErrNoRows) {
 				return Thread{}, SubagentConfig{}, fmt.Errorf("load parent session: %w", parentErr)
 			}
-			if parentErr == nil && parentRow.ProjectID.Valid {
-				input.Thread.ProjectID = parentRow.ProjectID.String()
+			if parentErr == nil && parentRow.WorkdirID.Valid {
+				input.Thread.WorkdirID = parentRow.WorkdirID.String()
 			}
 		}
 	}
@@ -804,12 +804,12 @@ type Cursor struct {
 
 type ListFilter struct {
 	ParentThreadID string
-	// ProjectID filters to sessions bound to one project. Mutually
-	// exclusive with ProjectUnassigned.
-	ProjectID string
-	// ProjectUnassigned filters to sessions with no project binding — the
+	// WorkdirID filters to sessions bound to one workdir. Mutually
+	// exclusive with WorkdirUnassigned.
+	WorkdirID string
+	// WorkdirUnassigned filters to sessions with no workdir binding — the
 	// sidebar's ungrouped bucket.
-	ProjectUnassigned bool
+	WorkdirUnassigned bool
 }
 
 // IsZero reports whether the cursor carries neither half — the start-of-list
@@ -837,7 +837,7 @@ func (s *Service) ListByBotPagedWithFilter(ctx context.Context, botID string, ty
 	if err != nil {
 		return nil, err
 	}
-	projectID, projectUnassigned, useProject, err := pagedProjectParams(filter)
+	workdirID, workdirUnassigned, useWorkdir, err := pagedWorkdirParams(filter)
 	if err != nil {
 		return nil, err
 	}
@@ -854,9 +854,9 @@ func (s *Service) ListByBotPagedWithFilter(ctx context.Context, botID string, ty
 		Types:             types,
 		UseParentSession:  useParentSession,
 		ParentSessionID:   parentSessionID,
-		UseProject:        useProject,
-		ProjectUnassigned: projectUnassigned,
-		ProjectID:         projectID,
+		UseWorkdir:        useWorkdir,
+		WorkdirUnassigned: workdirUnassigned,
+		WorkdirID:         workdirID,
 		UseCursor:         useCursor,
 		CursorUpdatedAt:   cursorUpdatedAt,
 		CursorID:          cursorID,
@@ -890,7 +890,7 @@ func (s *Service) ListByBotAndCreatedByUserPagedWithFilter(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	projectID, projectUnassigned, useProject, err := pagedProjectParams(filter)
+	workdirID, workdirUnassigned, useWorkdir, err := pagedWorkdirParams(filter)
 	if err != nil {
 		return nil, err
 	}
@@ -908,9 +908,9 @@ func (s *Service) ListByBotAndCreatedByUserPagedWithFilter(ctx context.Context, 
 		Types:             types,
 		UseParentSession:  useParentSession,
 		ParentSessionID:   parentSessionID,
-		UseProject:        useProject,
-		ProjectUnassigned: projectUnassigned,
-		ProjectID:         projectID,
+		UseWorkdir:        useWorkdir,
+		WorkdirUnassigned: workdirUnassigned,
+		WorkdirID:         workdirID,
 		UseCursor:         useCursor,
 		CursorUpdatedAt:   cursorUpdatedAt,
 		CursorID:          cursorID,
@@ -950,13 +950,13 @@ func pagedParentSessionParam(filter ListFilter) (pgtype.UUID, bool, error) {
 	return parsed, true, nil
 }
 
-// pagedProjectParams maps the three-state project filter (off / one project /
+// pagedWorkdirParams maps the three-state workdir filter (off / one workdir /
 // unassigned bucket) onto the SQL binds.
-func pagedProjectParams(filter ListFilter) (projectID pgtype.UUID, unassigned, useProject bool, err error) {
-	id := strings.TrimSpace(filter.ProjectID)
-	if filter.ProjectUnassigned {
+func pagedWorkdirParams(filter ListFilter) (workdirID pgtype.UUID, unassigned, useWorkdir bool, err error) {
+	id := strings.TrimSpace(filter.WorkdirID)
+	if filter.WorkdirUnassigned {
 		if id != "" {
-			return pgtype.UUID{}, false, false, errors.New("session: project filter cannot combine a project id with unassigned")
+			return pgtype.UUID{}, false, false, errors.New("session: workdir filter cannot combine a workdir id with unassigned")
 		}
 		return pgtype.UUID{}, true, true, nil
 	}
@@ -965,7 +965,7 @@ func pagedProjectParams(filter ListFilter) (projectID pgtype.UUID, unassigned, u
 	}
 	parsed, parseErr := dbpkg.ParseUUID(id)
 	if parseErr != nil {
-		return pgtype.UUID{}, false, false, fmt.Errorf("invalid project id: %w", parseErr)
+		return pgtype.UUID{}, false, false, fmt.Errorf("invalid workdir id: %w", parseErr)
 	}
 	return parsed, false, true, nil
 }
@@ -1169,9 +1169,9 @@ func toThread(row sqlc.BotSession) Thread {
 	if row.CreatedByUserID.Valid {
 		createdByUserID = row.CreatedByUserID.String()
 	}
-	projectID := ""
-	if row.ProjectID.Valid {
-		projectID = row.ProjectID.String()
+	workdirID := ""
+	if row.WorkdirID.Valid {
+		workdirID = row.WorkdirID.String()
 	}
 	sessionMode := normalizeSessionMode(row.SessionMode, row.Type)
 	return Thread{
@@ -1187,7 +1187,7 @@ func toThread(row sqlc.BotSession) Thread {
 		Metadata:        parseJSONMap(row.Metadata),
 		ParentThreadID:  parentID,
 		CreatedByUserID: createdByUserID,
-		ProjectID:       projectID,
+		WorkdirID:       workdirID,
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
 		Visibility:      visibilityForMode(sessionMode),
@@ -1247,16 +1247,16 @@ func ApplyACPMetadataDefaults(meta map[string]any) map[string]any {
 	return out
 }
 
-// overrideACPProjectPath forces the ACP working directory onto a project's
+// overrideACPProjectPath forces the ACP working directory onto a workdir's
 // resolved path. Unlike ApplyACPMetadataDefaults this is not a fallback:
-// a project binding owns the directory, so a request-supplied project_path
+// a workdir binding owns the directory, so a request-supplied project_path
 // never wins over it.
-func overrideACPProjectPath(meta map[string]any, projectPath string) map[string]any {
+func overrideACPProjectPath(meta map[string]any, workdirPath string) map[string]any {
 	out := make(map[string]any, len(meta)+2)
 	for key, value := range meta {
 		out[key] = value
 	}
-	out["project_path"] = strings.TrimSpace(projectPath)
+	out["project_path"] = strings.TrimSpace(workdirPath)
 	out["acp_project_mode"] = DefaultACPProjectMode
 	return out
 }
@@ -1500,9 +1500,9 @@ func toThreadFromListRow(row sqlc.ListSessionsByBotRow) Thread {
 	if row.CreatedByUserID.Valid {
 		createdByUserID = row.CreatedByUserID.String()
 	}
-	projectID := ""
-	if row.ProjectID.Valid {
-		projectID = row.ProjectID.String()
+	workdirID := ""
+	if row.WorkdirID.Valid {
+		workdirID = row.WorkdirID.String()
 	}
 	sessionMode := normalizeSessionMode(row.SessionMode, row.Type)
 	return Thread{
@@ -1518,7 +1518,7 @@ func toThreadFromListRow(row sqlc.ListSessionsByBotRow) Thread {
 		Metadata:        parseJSONMap(row.Metadata),
 		ParentThreadID:  parentID,
 		CreatedByUserID: createdByUserID,
-		ProjectID:       projectID,
+		WorkdirID:       workdirID,
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
 		Visibility:      visibilityForMode(sessionMode),
@@ -1534,9 +1534,9 @@ func toThreadFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Thre
 	if row.CreatedByUserID.Valid {
 		createdByUserID = row.CreatedByUserID.String()
 	}
-	projectID := ""
-	if row.ProjectID.Valid {
-		projectID = row.ProjectID.String()
+	workdirID := ""
+	if row.WorkdirID.Valid {
+		workdirID = row.WorkdirID.String()
 	}
 	sessionMode := normalizeSessionMode(row.SessionMode, row.Type)
 	return Thread{
@@ -1552,7 +1552,7 @@ func toThreadFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Thre
 		Metadata:        parseJSONMap(row.Metadata),
 		ParentThreadID:  parentID,
 		CreatedByUserID: createdByUserID,
-		ProjectID:       projectID,
+		WorkdirID:       workdirID,
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
 		Visibility:      visibilityForMode(sessionMode),
@@ -1564,7 +1564,7 @@ func toThreadFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Thread {
 		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
 		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, RuntimeMetadata: row.RuntimeMetadata,
 		Title: row.Title, Metadata: row.Metadata,
-		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, ProjectID: row.ProjectID,
+		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	})
 }
@@ -1574,7 +1574,7 @@ func toThreadFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow
 		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
 		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, RuntimeMetadata: row.RuntimeMetadata,
 		Title: row.Title, Metadata: row.Metadata,
-		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, ProjectID: row.ProjectID,
+		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	})
 }
@@ -1596,7 +1596,7 @@ type pagedColumns struct {
 	Metadata        []byte
 	ParentThreadID  pgtype.UUID
 	CreatedByUserID pgtype.UUID
-	ProjectID       pgtype.UUID
+	WorkdirID       pgtype.UUID
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
 }
@@ -1610,9 +1610,9 @@ func threadFromPagedColumns(c pagedColumns) Thread {
 	if c.CreatedByUserID.Valid {
 		createdByUserID = c.CreatedByUserID.String()
 	}
-	projectID := ""
-	if c.ProjectID.Valid {
-		projectID = c.ProjectID.String()
+	workdirID := ""
+	if c.WorkdirID.Valid {
+		workdirID = c.WorkdirID.String()
 	}
 	sessionMode := normalizeSessionMode(c.SessionMode, c.Type)
 	return Thread{
@@ -1628,7 +1628,7 @@ func threadFromPagedColumns(c pagedColumns) Thread {
 		Metadata:        parseJSONMap(c.Metadata),
 		ParentThreadID:  parentID,
 		CreatedByUserID: createdByUserID,
-		ProjectID:       projectID,
+		WorkdirID:       workdirID,
 		CreatedAt:       c.CreatedAt.Time,
 		UpdatedAt:       c.UpdatedAt.Time,
 		Visibility:      visibilityForMode(sessionMode),

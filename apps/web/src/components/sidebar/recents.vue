@@ -2,7 +2,7 @@
   <div class="flex flex-col h-full min-w-0">
     <!-- Unified Recents: one timeline for chats, ACP chats, and schedule
          runs (each row carries its own type mark — see session-item.vue).
-         The header folds the section, mirroring the Projects header above. -->
+         The header folds the section, mirroring the Folders header above. -->
     <div class="shrink-0 px-2 pb-0.5 pt-1">
       <TextButton
         :class="sectionHeaderClass"
@@ -111,7 +111,7 @@ import { useIntersectionObserver } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
-import { useProjectsStore } from '@/store/projects'
+import { useWorkdirsStore } from '@/store/workdirs'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { normalizedSessionMode, sortByRecency } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
@@ -129,7 +129,7 @@ import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
-const projectsStore = useProjectsStore()
+const workdirsStore = useWorkdirsStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const {
   sessions,
@@ -148,12 +148,12 @@ const sessionDialogs = ref<InstanceType<typeof SessionDialogs> | null>(null)
 // Subagent runs stay reachable through their parent session only.
 const SIDEBAR_SESSION_MODES = new Set(['chat', 'discuss', 'schedule'])
 
-// Same header type as the Projects section above so the two sibling section
+// Same header type as the Folders section above so the two sibling section
 // titles read identically; the 11px inset aligns the sidebar's 19px
 // icon/label column (see panel-header.vue).
 const sectionHeaderClass = 'text-xs font-[550] tracking-[-0.02em] pl-[11px] select-none' /* ui-allow-px: aligns the sidebar 19px label column (see panel-header.vue) */ /* ui-allow-style */
 
-// Fold state per bot, persisted like the Projects section's.
+// Fold state per bot, persisted like the Folders section's.
 const sectionCollapsedByBot = useLocalStorage<Record<string, boolean>>(
   'workspace-sidebar-recents-collapsed',
   {},
@@ -168,21 +168,21 @@ function toggleSectionCollapsed() {
   }
 }
 
-// Sessions bound to a live project live in the Projects section — a SIBLING
-// of this list (projects-section.vue) — so Recents excludes them here.
-// Sessions of an archived or vanished project degrade back into this list.
+// Sessions bound to a live workdir live in the Folders section — a SIBLING
+// of this list (folders-section.vue) — so Recents excludes them here.
+// Sessions of an archived or vanished workdir degrade back into this list.
 watch(currentBotId, (botId) => {
-  if (botId) void projectsStore.ensureProjects(botId)
+  if (botId) void workdirsStore.ensureWorkdirs(botId)
 }, { immediate: true })
-const liveProjectIds = computed(() => new Set(
-  projectsStore.projectsFor(currentBotId.value)
-    .filter(project => !project.archived && !!project.id)
-    .map(project => project.id ?? ''),
+const liveWorkdirIds = computed(() => new Set(
+  workdirsStore.workdirsFor(currentBotId.value)
+    .filter(workdir => !workdir.archived && !!workdir.id)
+    .map(workdir => workdir.id ?? ''),
 ))
 
 const visibleSessions = computed(() => {
   const inScope = sessions.value.filter(s => SIDEBAR_SESSION_MODES.has(normalizedSessionMode(s)))
-  const unbound = inScope.filter(s => !liveProjectIds.value.has((s.project_id ?? '').trim()))
+  const unbound = inScope.filter(s => !liveWorkdirIds.value.has((s.workdir_id ?? '').trim()))
   return sortByRecency(unbound)
 })
 

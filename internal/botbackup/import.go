@@ -43,12 +43,12 @@ type importState struct {
 	entries  map[string]backupZipEntry
 	manifest Manifest
 	idMap    map[string]string
-	// projectMap remaps source project ids onto the projects recreated (or
+	// workdirMap remaps source workdir ids onto the workdirs recreated (or
 	// matched by path) in the target bot, so restored sessions keep their
-	// bindings. Sessions whose project was not restored (remote projects,
+	// bindings. Sessions whose workdir was not restored (remote workdirs,
 	// or an import without the workspace/history sections) degrade to no
-	// project.
-	projectMap map[string]pgtype.UUID
+	// workdir.
+	workdirMap map[string]pgtype.UUID
 	warnings   []string
 	// counts records how many items each section restored, surfaced to the UI.
 	counts map[Section]int
@@ -478,7 +478,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		entries:    entries,
 		manifest:   manifest,
 		idMap:      map[string]string{},
-		projectMap: map[string]pgtype.UUID{},
+		workdirMap: map[string]pgtype.UUID{},
 		warnings:   append([]string(nil), manifest.Warnings...),
 		counts:     map[Section]int{},
 	}
@@ -596,11 +596,11 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 			return err
 		}
 	}
-	// Projects must restore before history: restored sessions reference the
-	// recreated project rows through a real foreign key.
-	if (opts.wants(SectionWorkspace) || opts.wants(SectionHistory)) && hasEntry(state.entries, "bot/projects.json") {
-		if err := restore("project import failed", func() error {
-			return s.restoreProjects(ctx, targetBotID, actorUserID, state)
+	// Workdirs must restore before history: restored sessions reference the
+	// recreated workdir rows through a real foreign key.
+	if (opts.wants(SectionWorkspace) || opts.wants(SectionHistory)) && hasEntry(state.entries, "bot/workdirs.json") {
+		if err := restore("workdir import failed", func() error {
+			return s.restoreWorkdirs(ctx, targetBotID, actorUserID, state)
 		}); err != nil {
 			return err
 		}
@@ -1001,47 +1001,47 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	return err
 }
 
-// restoreProjects recreates the backup's native-workspace projects and
-// fills state.projectMap for the session remap in restoreHistory. Directory
+// restoreWorkdirs recreates the backup's native-workspace workdirs and
+// fills state.workdirMap for the session remap in restoreHistory. Directory
 // existence is deliberately not validated here: the workspace may not be
 // running yet (or the files section may not be part of this import), and a
-// project pointing at a missing directory fails visibly on the first agent
+// workdir pointing at a missing directory fails visibly on the first agent
 // turn, which the user can fix by recreating the directory.
-func (s *Service) restoreProjects(ctx context.Context, botID, actorUserID string, state *importState) error {
-	if s.projects == nil {
-		return errors.New("project store not configured")
+func (s *Service) restoreWorkdirs(ctx context.Context, botID, actorUserID string, state *importState) error {
+	if s.workdirs == nil {
+		return errors.New("workdir store not configured")
 	}
-	projects, err := readEntry[[]backupProject](state, "bot/projects.json")
+	workdirs, err := readEntry[[]backupWorkdir](state, "bot/workdirs.json")
 	if err != nil {
 		return err
 	}
-	if len(projects) == 0 {
+	if len(workdirs) == 0 {
 		return nil
 	}
-	existing, err := s.projects.ListProjects(ctx, botID, true)
+	existing, err := s.workdirs.ListWorkdirs(ctx, botID, true)
 	if err != nil {
-		return fmt.Errorf("list existing projects: %w", err)
+		return fmt.Errorf("list existing workdirs: %w", err)
 	}
-	nativeByPath := map[string]dbstore.BotProjectRecord{}
+	nativeByPath := map[string]dbstore.BotWorkdirRecord{}
 	for _, record := range existing {
 		if record.RemoteBindingID == "" && record.ArchivedAt.IsZero() {
 			nativeByPath[record.Path] = record
 		}
 	}
 	restored := 0
-	for _, item := range projects {
+	for _, item := range workdirs {
 		if strings.TrimSpace(item.Path) == "" || strings.TrimSpace(item.Name) == "" {
-			state.warnings = append(state.warnings, "project entry with empty name or path skipped")
+			state.warnings = append(state.warnings, "workdir entry with empty name or path skipped")
 			continue
 		}
 		if match, ok := nativeByPath[item.Path]; ok {
-			// Merge mode: the target bot already has a live project for this
+			// Merge mode: the target bot already has a live workdir for this
 			// directory — bind restored sessions onto it instead of failing
 			// the unique path constraint.
-			state.projectMap[item.ID] = optionalUUID(match.ID)
+			state.workdirMap[item.ID] = optionalUUID(match.ID)
 			continue
 		}
-		created, err := s.projects.CreateProject(ctx, dbstore.CreateBotProjectInput{
+		created, err := s.workdirs.CreateWorkdir(ctx, dbstore.CreateBotWorkdirInput{
 			BotID:           botID,
 			Name:            item.Name,
 			TargetKind:      "native",
@@ -1049,23 +1049,23 @@ func (s *Service) restoreProjects(ctx context.Context, botID, actorUserID string
 			CreatedByUserID: strings.TrimSpace(actorUserID),
 		})
 		if err != nil {
-			return fmt.Errorf("project %q: %w", item.Name, err)
+			return fmt.Errorf("workdir %q: %w", item.Name, err)
 		}
 		archived := false
 		if item.Archived {
-			if err := s.projects.ArchiveProject(ctx, botID, created.ID); err != nil {
-				state.warnings = append(state.warnings, "project archive flag restore failed for "+item.Name+": "+err.Error())
+			if err := s.workdirs.ArchiveWorkdir(ctx, botID, created.ID); err != nil {
+				state.warnings = append(state.warnings, "workdir archive flag restore failed for "+item.Name+": "+err.Error())
 			} else {
 				archived = true
 			}
 		}
-		state.projectMap[item.ID] = optionalUUID(created.ID)
+		state.workdirMap[item.ID] = optionalUUID(created.ID)
 		// nativeByPath is the LIVE path index — it is what makes a later
-		// backup entry for the same directory reuse this project instead of
-		// tripping the live-path unique constraint. A project we just
+		// backup entry for the same directory reuse this workdir instead of
+		// tripping the live-path unique constraint. A workdir we just
 		// archived is not live: registering it would make a later live entry
 		// for the same directory look already-restored, silently remapping
-		// its sessions onto the archived project and never recreating the
+		// its sessions onto the archived workdir and never recreating the
 		// live one. Live-path uniqueness ignores archived rows, so the later
 		// entry creates cleanly.
 		if !archived {
@@ -1317,12 +1317,12 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			metadata = rebindRestoredRuntimeOwner(metadata, actorUserID)
 			runtimeMetadata = rebindRestoredRuntimeOwner(runtimeMetadata, actorUserID)
 		}
-		// Remap the source project binding onto the recreated project. A
-		// missing map entry (remote project, or an import without projects)
-		// degrades the session to no project rather than tripping the FK.
-		projectID := pgtype.UUID{}
-		if item.ProjectID.Valid {
-			projectID = state.projectMap[item.ProjectID.String()]
+		// Remap the source workdir binding onto the recreated workdir. A
+		// missing map entry (remote workdir, or an import without workdirs)
+		// degrades the session to no workdir rather than tripping the FK.
+		workdirID := pgtype.UUID{}
+		if item.WorkdirID.Valid {
+			workdirID = state.workdirMap[item.WorkdirID.String()]
 		}
 		created, err := q.CreateSession(ctx, sqlc.CreateSessionParams{
 			BotID:           pgBotID,
@@ -1335,7 +1335,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			Metadata:        metadata,
 			ParentSessionID: parentSessionID,
 			CreatedByUserID: optionalUUID(actorUserID),
-			ProjectID:       projectID,
+			WorkdirID:       workdirID,
 		})
 		if err != nil {
 			return fmt.Errorf("session: %w", err)

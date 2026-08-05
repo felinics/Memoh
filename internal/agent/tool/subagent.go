@@ -69,7 +69,7 @@ type SpawnIdentity struct {
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string
-	ProjectWorkDir      string
+	WorkdirPath         string
 	TimezoneLocation    *time.Location
 	IsSubagent          bool
 }
@@ -919,8 +919,8 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			WorkspaceTargetID:   req.parentSession.WorkspaceTargetID,
 			WorkspaceTargetKind: req.parentSession.WorkspaceTargetKind,
 			WorkspaceTargetName: req.parentSession.WorkspaceTargetName,
-			// A subagent works in its parent's project directory.
-			ProjectWorkDir:   req.parentSession.ProjectWorkDir,
+			// A subagent works in its parent's working directory.
+			WorkdirPath:      req.parentSession.WorkdirPath,
 			TimezoneLocation: req.parentSession.TimezoneLocation,
 			IsSubagent:       true,
 		},
@@ -988,7 +988,7 @@ func (p *SpawnProvider) runSubagentHook(ctx context.Context, eventName string, r
 	if strings.TrimSpace(result.Text) != "" {
 		extra["text_bytes"] = len(result.Text)
 	}
-	hookCWD := strings.TrimSpace(req.parentSession.ProjectWorkDir)
+	hookCWD := strings.TrimSpace(req.parentSession.WorkdirPath)
 	if hookCWD == "" {
 		hookCWD = hooks.DefaultWorkDir
 	}

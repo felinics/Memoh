@@ -1,4 +1,4 @@
-package project
+package workdir
 
 import (
 	"context"
@@ -76,19 +76,19 @@ func newStatTestClient(t *testing.T, svc *statTestContainerService) *bridge.Clie
 	return bridge.NewClientFromConn(conn)
 }
 
-type fakeProjectStore struct {
-	created    []dbstore.CreateBotProjectInput
-	create     dbstore.BotProjectRecord
-	createFn   func(dbstore.CreateBotProjectInput) (dbstore.BotProjectRecord, error)
-	get        dbstore.BotProjectRecord
+type fakeWorkdirStore struct {
+	created    []dbstore.CreateBotWorkdirInput
+	create     dbstore.BotWorkdirRecord
+	createFn   func(dbstore.CreateBotWorkdirInput) (dbstore.BotWorkdirRecord, error)
+	get        dbstore.BotWorkdirRecord
 	getErr     error
-	renamed    dbstore.BotProjectRecord
+	renamed    dbstore.BotWorkdirRecord
 	renameErr  error
 	archiveErr error
-	list       []dbstore.BotProjectRecord
+	list       []dbstore.BotWorkdirRecord
 }
 
-func (f *fakeProjectStore) CreateProject(_ context.Context, input dbstore.CreateBotProjectInput) (dbstore.BotProjectRecord, error) {
+func (f *fakeWorkdirStore) CreateWorkdir(_ context.Context, input dbstore.CreateBotWorkdirInput) (dbstore.BotWorkdirRecord, error) {
 	f.created = append(f.created, input)
 	if f.createFn != nil {
 		return f.createFn(input)
@@ -96,19 +96,19 @@ func (f *fakeProjectStore) CreateProject(_ context.Context, input dbstore.Create
 	return f.create, nil
 }
 
-func (f *fakeProjectStore) ListProjects(context.Context, string, bool) ([]dbstore.BotProjectRecord, error) {
+func (f *fakeWorkdirStore) ListWorkdirs(context.Context, string, bool) ([]dbstore.BotWorkdirRecord, error) {
 	return f.list, nil
 }
 
-func (f *fakeProjectStore) GetProject(context.Context, string, string) (dbstore.BotProjectRecord, error) {
+func (f *fakeWorkdirStore) GetWorkdir(context.Context, string, string) (dbstore.BotWorkdirRecord, error) {
 	return f.get, f.getErr
 }
 
-func (f *fakeProjectStore) RenameProject(context.Context, string, string, string) (dbstore.BotProjectRecord, error) {
+func (f *fakeWorkdirStore) RenameWorkdir(context.Context, string, string, string) (dbstore.BotWorkdirRecord, error) {
 	return f.renamed, f.renameErr
 }
 
-func (f *fakeProjectStore) ArchiveProject(context.Context, string, string) error {
+func (f *fakeWorkdirStore) ArchiveWorkdir(context.Context, string, string) error {
 	return f.archiveErr
 }
 
@@ -123,7 +123,7 @@ func (f *fakeTargetResolver) ResolveWorkspaceTarget(_ context.Context, _, target
 	return f.target, f.err
 }
 
-func TestNormalizeProjectPathNative(t *testing.T) {
+func TestNormalizeWorkdirPathNative(t *testing.T) {
 	native := workspace.ResolvedWorkspaceTarget{Kind: TargetKindNative}
 	for name, tc := range map[string]struct {
 		raw  string
@@ -136,47 +136,47 @@ func TestNormalizeProjectPathNative(t *testing.T) {
 		"dot segments kept": {"/data/site/../site", "/data/site"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := normalizeProjectPath(tc.raw, native)
+			got, err := normalizeWorkdirPath(tc.raw, native)
 			if err != nil {
-				t.Fatalf("normalizeProjectPath(%q) error = %v", tc.raw, err)
+				t.Fatalf("normalizeWorkdirPath(%q) error = %v", tc.raw, err)
 			}
 			if got != tc.want {
-				t.Fatalf("normalizeProjectPath(%q) = %q, want %q", tc.raw, got, tc.want)
+				t.Fatalf("normalizeWorkdirPath(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestNormalizeProjectPathNativeRejectsEscape(t *testing.T) {
+func TestNormalizeWorkdirPathNativeRejectsEscape(t *testing.T) {
 	native := workspace.ResolvedWorkspaceTarget{Kind: TargetKindNative}
 	for _, raw := range []string{"/etc/passwd", "/data/../etc", "../x", "/tmp/x"} {
-		if _, err := normalizeProjectPath(raw, native); !errors.Is(err, ErrInvalidPath) {
-			t.Fatalf("normalizeProjectPath(%q) error = %v, want ErrInvalidPath", raw, err)
+		if _, err := normalizeWorkdirPath(raw, native); !errors.Is(err, ErrInvalidPath) {
+			t.Fatalf("normalizeWorkdirPath(%q) error = %v, want ErrInvalidPath", raw, err)
 		}
 	}
 }
 
-func TestNormalizeProjectPathEmpty(t *testing.T) {
-	if _, err := normalizeProjectPath("  ", workspace.ResolvedWorkspaceTarget{Kind: TargetKindNative}); !errors.Is(err, ErrPathRequired) {
+func TestNormalizeWorkdirPathEmpty(t *testing.T) {
+	if _, err := normalizeWorkdirPath("  ", workspace.ResolvedWorkspaceTarget{Kind: TargetKindNative}); !errors.Is(err, ErrPathRequired) {
 		t.Fatalf("error = %v, want ErrPathRequired", err)
 	}
 }
 
-func TestNormalizeProjectPathRemotePosix(t *testing.T) {
+func TestNormalizeWorkdirPathRemotePosix(t *testing.T) {
 	remote := workspace.ResolvedWorkspaceTarget{Kind: TargetKindRemote, Info: bridge.WorkspaceInfo{OS: "darwin"}}
-	got, err := normalizeProjectPath("/Users/alice/code/site/", remote)
+	got, err := normalizeWorkdirPath("/Users/alice/code/site/", remote)
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
 	if got != "/Users/alice/code/site" {
 		t.Fatalf("got %q", got)
 	}
-	if _, err := normalizeProjectPath("code/site", remote); !errors.Is(err, ErrInvalidPath) {
+	if _, err := normalizeWorkdirPath("code/site", remote); !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("relative remote path error = %v, want ErrInvalidPath", err)
 	}
 }
 
-func TestNormalizeProjectPathRemoteWindows(t *testing.T) {
+func TestNormalizeWorkdirPathRemoteWindows(t *testing.T) {
 	remote := workspace.ResolvedWorkspaceTarget{Kind: TargetKindRemote, Info: bridge.WorkspaceInfo{OS: "win32"}}
 	for name, tc := range map[string]struct {
 		raw  string
@@ -189,18 +189,18 @@ func TestNormalizeProjectPathRemoteWindows(t *testing.T) {
 		"unc":            {`\\server\share\dir`, `\\server\share\dir`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := normalizeProjectPath(tc.raw, remote)
+			got, err := normalizeWorkdirPath(tc.raw, remote)
 			if err != nil {
-				t.Fatalf("normalizeProjectPath(%q) error = %v", tc.raw, err)
+				t.Fatalf("normalizeWorkdirPath(%q) error = %v", tc.raw, err)
 			}
 			if got != tc.want {
-				t.Fatalf("normalizeProjectPath(%q) = %q, want %q", tc.raw, got, tc.want)
+				t.Fatalf("normalizeWorkdirPath(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
 		})
 	}
 	for _, raw := range []string{`code\site`, `/Users/alice`, `C:site`} {
-		if _, err := normalizeProjectPath(raw, remote); !errors.Is(err, ErrInvalidPath) {
-			t.Fatalf("normalizeProjectPath(%q) error = %v, want ErrInvalidPath", raw, err)
+		if _, err := normalizeWorkdirPath(raw, remote); !errors.Is(err, ErrInvalidPath) {
+			t.Fatalf("normalizeWorkdirPath(%q) error = %v, want ErrInvalidPath", raw, err)
 		}
 	}
 }
@@ -208,7 +208,7 @@ func TestNormalizeProjectPathRemoteWindows(t *testing.T) {
 func TestCreateValidatesDirectoryOnTarget(t *testing.T) {
 	svc := &statTestContainerService{dirs: map[string]bool{"/data/site": true}}
 	client := newStatTestClient(t, svc)
-	store := &fakeProjectStore{create: dbstore.BotProjectRecord{
+	store := &fakeWorkdirStore{create: dbstore.BotWorkdirRecord{
 		ID: "p1", BotID: "b1", Name: "Site", TargetKind: TargetKindNative, Path: "/data/site",
 	}}
 	resolver := &fakeTargetResolver{target: workspace.ResolvedWorkspaceTarget{
@@ -243,7 +243,7 @@ func TestCreateValidatesDirectoryOnTarget(t *testing.T) {
 func TestCreateRejectsMissingDirectory(t *testing.T) {
 	client := newStatTestClient(t, &statTestContainerService{})
 	service := &Service{
-		store: &fakeProjectStore{},
+		store: &fakeWorkdirStore{},
 		targets: &fakeTargetResolver{target: workspace.ResolvedWorkspaceTarget{
 			TargetID: workspace.WorkspaceTargetNative, Kind: TargetKindNative, Client: client,
 		}},
@@ -260,7 +260,7 @@ func TestCreateRejectsMissingDirectory(t *testing.T) {
 func TestCreateRejectsFilePath(t *testing.T) {
 	client := newStatTestClient(t, &statTestContainerService{files: map[string]bool{"/data/notes.txt": true}})
 	service := &Service{
-		store: &fakeProjectStore{},
+		store: &fakeWorkdirStore{},
 		targets: &fakeTargetResolver{target: workspace.ResolvedWorkspaceTarget{
 			TargetID: workspace.WorkspaceTargetNative, Kind: TargetKindNative, Client: client,
 		}},
@@ -274,7 +274,7 @@ func TestCreateRejectsFilePath(t *testing.T) {
 func TestCreateRemoteStoresBindingID(t *testing.T) {
 	svc := &statTestContainerService{dirs: map[string]bool{"/Users/alice/code": true}}
 	client := newStatTestClient(t, svc)
-	store := &fakeProjectStore{create: dbstore.BotProjectRecord{
+	store := &fakeWorkdirStore{create: dbstore.BotWorkdirRecord{
 		ID: "p2", BotID: "b1", TargetKind: TargetKindRemote, RemoteBindingID: "bind-1", Path: "/Users/alice/code",
 	}}
 	service := &Service{
@@ -302,8 +302,8 @@ func TestCreateRemoteStoresBindingID(t *testing.T) {
 
 func TestCreateMapsUniqueViolationToDuplicatePath(t *testing.T) {
 	client := newStatTestClient(t, &statTestContainerService{dirs: map[string]bool{"/data/site": true}})
-	store := &fakeProjectStore{createFn: func(dbstore.CreateBotProjectInput) (dbstore.BotProjectRecord, error) {
-		return dbstore.BotProjectRecord{}, &pgconn.PgError{Code: "23505"}
+	store := &fakeWorkdirStore{createFn: func(dbstore.CreateBotWorkdirInput) (dbstore.BotWorkdirRecord, error) {
+		return dbstore.BotWorkdirRecord{}, &pgconn.PgError{Code: "23505"}
 	}}
 	service := &Service{
 		store: store,
@@ -318,24 +318,24 @@ func TestCreateMapsUniqueViolationToDuplicatePath(t *testing.T) {
 }
 
 func TestCreateRequiresName(t *testing.T) {
-	service := &Service{store: &fakeProjectStore{}, targets: &fakeTargetResolver{}}
+	service := &Service{store: &fakeWorkdirStore{}, targets: &fakeTargetResolver{}}
 	if _, err := service.Create(context.Background(), "b1", "u1", CreateRequest{Name: "  ", Path: "/data/x"}); !errors.Is(err, ErrNameRequired) {
 		t.Fatalf("error = %v, want ErrNameRequired", err)
 	}
 }
 
 func TestRequireActiveRefusesArchived(t *testing.T) {
-	service := &Service{store: &fakeProjectStore{get: dbstore.BotProjectRecord{
+	service := &Service{store: &fakeWorkdirStore{get: dbstore.BotWorkdirRecord{
 		ID: "p1", TargetKind: TargetKindNative, ArchivedAt: time.Now(),
 	}}}
-	if _, err := service.RequireActive(context.Background(), "b1", "p1"); !errors.Is(err, ErrProjectArchived) {
-		t.Fatalf("error = %v, want ErrProjectArchived", err)
+	if _, err := service.RequireActive(context.Background(), "b1", "p1"); !errors.Is(err, ErrWorkdirArchived) {
+		t.Fatalf("error = %v, want ErrWorkdirArchived", err)
 	}
 }
 
 func TestGetMapsNotFound(t *testing.T) {
-	service := &Service{store: &fakeProjectStore{getErr: db.ErrNotFound}}
-	if _, err := service.Get(context.Background(), "b1", "p1"); !errors.Is(err, ErrProjectNotFound) {
-		t.Fatalf("error = %v, want ErrProjectNotFound", err)
+	service := &Service{store: &fakeWorkdirStore{getErr: db.ErrNotFound}}
+	if _, err := service.Get(context.Background(), "b1", "p1"); !errors.Is(err, ErrWorkdirNotFound) {
+		t.Fatalf("error = %v, want ErrWorkdirNotFound", err)
 	}
 }

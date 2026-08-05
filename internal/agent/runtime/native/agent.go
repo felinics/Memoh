@@ -911,7 +911,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		WorkspaceTargetID:    cfg.Identity.WorkspaceTargetID,
 		WorkspaceTargetKind:  cfg.Identity.WorkspaceTargetKind,
 		WorkspaceTargetName:  cfg.Identity.WorkspaceTargetName,
-		ProjectWorkDir:       cfg.Identity.ProjectWorkDir,
+		WorkdirPath:          cfg.Identity.WorkdirPath,
 		CurrentPlatform:      cfg.Identity.CurrentPlatform,
 		ReplyTarget:          cfg.Identity.ReplyTarget,
 		ConversationType:     cfg.Identity.ConversationType,

@@ -46,10 +46,10 @@ export interface ACPSessionDeps {
   isDraftCreationActive: (target: ChatViewTarget) => boolean
   beginDraftCreation: (target: ChatViewTarget) => void
   endDraftCreation: (target: ChatViewTarget) => void
-  // Resolves the bot's working project for a new session ('' = no binding).
-  // ACP sessions can only bind native-workspace projects, so the resolver is
+  // Resolves the bot's working workdir for a new session ('' = no binding).
+  // ACP sessions can only bind native-workspace workdirs, so the resolver is
   // told which runtime the session will use.
-  draftProjectIdFor: (botId: string, opts: { acp: boolean }) => string
+  draftWorkdirIdFor: (botId: string, opts: { acp: boolean }) => string
 }
 
 function normalizedACPInput(input: ACPAgentSessionInput): ACPAgentSessionInput {
@@ -72,7 +72,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
     const metadata = acpSessionMetadata(input)
     const runtimeId = input.runtimeId?.trim() ?? ''
     const sessionMode = input.sessionMode === 'discuss' ? 'discuss' : 'chat'
-    const projectId = deps.draftProjectIdFor(id, { acp: true })
+    const workdirId = deps.draftWorkdirIdFor(id, { acp: true })
     return createSession(id, {
       title: input.title ?? '',
       type: sessionMode,
@@ -81,7 +81,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
       metadata: {},
       runtimeMetadata: metadata,
       acpRuntimeId: runtimeId || undefined,
-      projectId: projectId || undefined,
+      workdirId: workdirId || undefined,
     })
   }
 
@@ -260,9 +260,9 @@ export function createACPSessions(deps: ACPSessionDeps) {
       }
 
       const generation = deps.userScopeGeneration()
-      const projectId = deps.draftProjectIdFor(target.botId, { acp: false })
+      const workdirId = deps.draftWorkdirIdFor(target.botId, { acp: false })
       const created = await createSession(target.botId, {
-        projectId: projectId || undefined,
+        workdirId: workdirId || undefined,
       })
       if (
         generation !== deps.userScopeGeneration()

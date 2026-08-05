@@ -69,7 +69,7 @@ type Service struct {
 	memoryProviders *memprovider.Service
 	workspace       WorkspaceData
 	acpRuntimes     ACPRuntimeCloser
-	projects        dbstore.BotProjectStore
+	workdirs        dbstore.BotWorkdirStore
 }
 
 const acpManagedSecretsWarning = "ACP managed secrets were excluded from bot/profile.json; re-enter API keys after import" // #nosec G101 -- user-facing warning text, not a credential.
@@ -92,7 +92,7 @@ type Params struct {
 	MemoryProviders *memprovider.Service
 	Workspace       WorkspaceData
 	ACPRuntimes     ACPRuntimeCloser
-	Projects        dbstore.BotProjectStore
+	Workdirs        dbstore.BotWorkdirStore
 }
 
 func New(params Params) *Service {
@@ -118,7 +118,7 @@ func New(params Params) *Service {
 		memoryProviders: params.MemoryProviders,
 		workspace:       params.Workspace,
 		acpRuntimes:     params.ACPRuntimes,
-		projects:        params.Projects,
+		workdirs:        params.Workdirs,
 	}
 }
 
@@ -170,10 +170,10 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 			return err
 		}
 	}
-	// Projects ride with workspace data, but history sessions reference them
+	// Workdirs ride with workspace data, but history sessions reference them
 	// too, so either section brings them along.
 	if opts.wants(SectionWorkspace) || opts.wants(SectionHistory) {
-		if err := writer.writeJSON("bot/projects.json", "bot_projects", data.Projects, opts); err != nil {
+		if err := writer.writeJSON("bot/workdirs.json", "bot_workdirs", data.Workdirs, opts); err != nil {
 			return err
 		}
 	}
@@ -306,13 +306,13 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 	} else {
 		warnings = append(warnings, "workspace resource limits export failed: "+err.Error())
 	}
-	if projects, skippedRemote, err := s.collectProjects(ctx, botID); err == nil {
-		data.Projects = projects
+	if workdirs, skippedRemote, err := s.collectWorkdirs(ctx, botID); err == nil {
+		data.Workdirs = workdirs
 		if skippedRemote > 0 {
-			warnings = append(warnings, fmt.Sprintf("%d remote computer project(s) were not exported: they reference machines outside this backup", skippedRemote))
+			warnings = append(warnings, fmt.Sprintf("%d remote computer workdir(s) were not exported: they reference machines outside this backup", skippedRemote))
 		}
 	} else {
-		warnings = append(warnings, "project export failed: "+err.Error())
+		warnings = append(warnings, "workdir export failed: "+err.Error())
 	}
 
 	if s.acl != nil {
@@ -371,32 +371,32 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 	return data, manifest, nil
 }
 
-// collectProjects exports the bot's native-workspace projects. Remote
-// projects are counted and skipped: they pin a specific person's computer,
+// collectWorkdirs exports the bot's native-workspace workdirs. Remote
+// workdirs are counted and skipped: they pin a specific person's computer,
 // which a backup restored elsewhere cannot reach.
-func (s *Service) collectProjects(ctx context.Context, botID string) ([]backupProject, int, error) {
-	if s.projects == nil {
+func (s *Service) collectWorkdirs(ctx context.Context, botID string) ([]backupWorkdir, int, error) {
+	if s.workdirs == nil {
 		return nil, 0, nil
 	}
-	records, err := s.projects.ListProjects(ctx, botID, true)
+	records, err := s.workdirs.ListWorkdirs(ctx, botID, true)
 	if err != nil {
 		return nil, 0, err
 	}
-	projects := make([]backupProject, 0, len(records))
+	workdirs := make([]backupWorkdir, 0, len(records))
 	skippedRemote := 0
 	for _, record := range records {
 		if record.RemoteBindingID != "" {
 			skippedRemote++
 			continue
 		}
-		projects = append(projects, backupProject{
+		workdirs = append(workdirs, backupWorkdir{
 			ID:       record.ID,
 			Name:     record.Name,
 			Path:     record.Path,
 			Archived: !record.ArchivedAt.IsZero(),
 		})
 	}
-	return projects, skippedRemote, nil
+	return workdirs, skippedRemote, nil
 }
 
 func (s *Service) collectWorkspaceResourceLimits(ctx context.Context, botID string) (backupWorkspaceResourceLimits, error) {

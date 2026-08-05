@@ -1076,21 +1076,21 @@ func TestSpawnProviderUsageGatesRegisteredTools(t *testing.T) {
 	}
 }
 
-func TestContainerProviderUsageNamesProjectWorkDir(t *testing.T) {
+func TestContainerProviderUsageNamesWorkdirPath(t *testing.T) {
 	t.Parallel()
 
 	provider := NewContainerProvider(nil, nil, nil, "")
 	got := provider.Usage(context.Background(), SessionContext{
-		ProjectWorkDir: "/data/site",
+		WorkdirPath: "/data/site",
 	}, availableToolsForTest(ToolRead(), ToolExec()))
 	for _, want := range []string{`"/data/site"`, "working directory", "commands run there by default"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("Usage with a project binding should contain %q, got:\n%s", want, got)
+			t.Fatalf("Usage with a workdir binding should contain %q, got:\n%s", want, got)
 		}
 	}
 
 	unbound := provider.Usage(context.Background(), SessionContext{}, availableToolsForTest(ToolRead(), ToolExec()))
-	if strings.Contains(unbound, "bound to a project") {
-		t.Fatalf("Usage without a project binding must not mention one, got:\n%s", unbound)
+	if strings.Contains(unbound, "working directory is") {
+		t.Fatalf("Usage without a workdir binding must not name one, got:\n%s", unbound)
 	}
 }
