@@ -1,32 +1,78 @@
 package contextfrag
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 )
 
 const MetadataContextLifecycleKey = "context_lifecycle"
 
+// LifecycleSnapshotFromMetadata extracts the persisted lifecycle snapshot
+// from a message metadata JSON payload, reporting whether one was present.
+func LifecycleSnapshotFromMetadata(raw []byte) (LifecycleSnapshot, bool) {
+	if len(raw) == 0 {
+		return LifecycleSnapshot{}, false
+	}
+	var metadata struct {
+		ContextLifecycle *LifecycleSnapshot `json:"context_lifecycle"`
+	}
+	if json.Unmarshal(raw, &metadata) != nil || metadata.ContextLifecycle == nil {
+		return LifecycleSnapshot{}, false
+	}
+	return cloneLifecycleSnapshot(*metadata.ContextLifecycle), true
+}
+
+const maxMemoryRecallTraceRefs = 32
+
 // LifecycleSnapshot is the durable, content-light audit for one provider
 // context build. It intentionally excludes manifest items and payloads.
 type LifecycleSnapshot struct {
-	Version            int                 `json:"version"`
-	View               ManifestView        `json:"view,omitempty"`
-	Counts             ManifestCounts      `json:"counts"`
-	AssistantMessageID string              `json:"assistant_message_id,omitempty"`
-	SelectionDecisions []SelectionDecision `json:"selection_decisions,omitempty"`
-	Selection          SelectionTrace      `json:"selection"`
-	BudgetPlan         *ContextBudgetPlan  `json:"budget_plan,omitempty"`
-	CachePlan          *CachePlan          `json:"cache_plan,omitempty"`
-	CacheReadTokens    int                 `json:"cache_read_tokens"`
-	CacheWriteTokens   int                 `json:"cache_write_tokens"`
-	CacheUsage         []CacheUsageRecord  `json:"cache_usage,omitempty"`
-	Mutations          []MutationRecord    `json:"mutations,omitempty"`
-	FinalInputHash     string              `json:"final_input_hash,omitempty"`
-	Model              string              `json:"model,omitempty"`
-	ClientType         string              `json:"client_type,omitempty"`
-	LoopSelectionMode  string              `json:"loop_selection_mode,omitempty"`
-	Steps              []StepSnapshot      `json:"steps,omitempty"`
+	Version                   int                 `json:"version"`
+	View                      ManifestView        `json:"view,omitempty"`
+	Counts                    ManifestCounts      `json:"counts"`
+	Breakdown                 []KindBreakdown     `json:"breakdown,omitempty"`
+	TrustBreakdown            []TrustBreakdown    `json:"trust_breakdown,omitempty"`
+	ToolDefs                  []ToolDefAccounting `json:"tool_defs,omitempty"`
+	AssistantMessageID        string              `json:"assistant_message_id,omitempty"`
+	SelectionDecisions        []SelectionDecision `json:"selection_decisions,omitempty"`
+	Selection                 SelectionTrace      `json:"selection"`
+	BudgetPlan                *ContextBudgetPlan  `json:"budget_plan,omitempty"`
+	StablePrefixHash          string              `json:"stable_prefix_hash,omitempty"`
+	StableMessageCount        int                 `json:"stable_message_count,omitempty"`
+	StablePrefixTokenEstimate int                 `json:"stable_prefix_token_estimate,omitempty"`
+	CacheReadTokens           int                 `json:"cache_read_tokens"`
+	CacheWriteTokens          int                 `json:"cache_write_tokens"`
+	CacheUsage                []CacheUsageRecord  `json:"cache_usage,omitempty"`
+	Mutations                 []MutationRecord    `json:"mutations,omitempty"`
+	FinalInputHash            string              `json:"final_input_hash,omitempty"`
+	Model                     string              `json:"model,omitempty"`
+	ClientType                string              `json:"client_type,omitempty"`
+	LoopSelectionMode         string              `json:"loop_selection_mode,omitempty"`
+	Steps                     []StepSnapshot      `json:"steps,omitempty"`
+	MemoryRecall              *MemoryRecallTrace  `json:"memory_recall,omitempty"`
+}
+
+type MemoryRecallTrace struct {
+	ProviderID     string                  `json:"provider_id"`
+	MemoryVersion  string                  `json:"memory_version,omitempty"`
+	CacheState     string                  `json:"cache_state"`
+	RetrievalMode  string                  `json:"retrieval_mode,omitempty"`
+	FallbackReason string                  `json:"fallback_reason,omitempty"`
+	Query          MemoryRecallQueryTrace  `json:"query"`
+	Result         MemoryRecallResultTrace `json:"result"`
+}
+
+type MemoryRecallQueryTrace struct {
+	Source         string `json:"source"`
+	RecentMessages int    `json:"recent_messages"`
+	Truncated      bool   `json:"truncated"`
+}
+
+type MemoryRecallResultTrace struct {
+	Count        int      `json:"count"`
+	Refs         []string `json:"refs,omitempty"`
+	ContextBytes int      `json:"context_bytes"`
 }
 
 // LifecycleHolder shares the latest audit across copied RunConfig values.
@@ -41,6 +87,18 @@ func NewLifecycleHolder() *LifecycleHolder {
 	return &LifecycleHolder{}
 }
 
+func (h *LifecycleHolder) SetMemoryRecall(trace MemoryRecallTrace) {
+	if h == nil {
+		return
+	}
+	trace.Result.Refs = normalizeMemoryRecallRefs(trace.Result.Refs)
+	h.mu.Lock()
+	h.snapshot.Version = 1
+	h.snapshot.MemoryRecall = cloneMemoryRecallTrace(&trace)
+	h.set = true
+	h.mu.Unlock()
+}
+
 func (h *LifecycleHolder) SetManifest(manifest Manifest) {
 	if h == nil {
 		return
@@ -48,6 +106,7 @@ func (h *LifecycleHolder) SetManifest(manifest Manifest) {
 	next := BuildLifecycleSnapshot(manifest)
 	h.mu.Lock()
 	next.AssistantMessageID = h.snapshot.AssistantMessageID
+	next.MemoryRecall = cloneMemoryRecallTrace(h.snapshot.MemoryRecall)
 	h.snapshot = next
 	h.ledger = manifest.Mutations
 	h.set = true
@@ -96,6 +155,9 @@ func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 		Version:            1,
 		View:               manifest.View,
 		Counts:             manifest.Counts,
+		Breakdown:          append([]KindBreakdown(nil), manifest.Breakdown...),
+		TrustBreakdown:     append([]TrustBreakdown(nil), manifest.TrustBreakdown...),
+		ToolDefs:           append([]ToolDefAccounting(nil), manifest.ToolDefs...),
 		SelectionDecisions: append([]SelectionDecision(nil), manifest.SelectionDecisions...),
 	}
 	if manifest.Selection != nil {
@@ -106,8 +168,9 @@ func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 		snapshot.BudgetPlan = &plan
 	}
 	if manifest.CachePlan != nil {
-		plan := *manifest.CachePlan
-		snapshot.CachePlan = &plan
+		snapshot.StablePrefixHash = manifest.CachePlan.StablePrefixHash
+		snapshot.StableMessageCount = manifest.CachePlan.StableMessageCount
+		snapshot.StablePrefixTokenEstimate = manifest.CachePlan.StablePrefixTokenEstimate
 	}
 	if manifest.Mutations != nil {
 		snapshot.Mutations = manifest.Mutations.Records()
@@ -122,20 +185,49 @@ func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 }
 
 func cloneLifecycleSnapshot(snapshot LifecycleSnapshot) LifecycleSnapshot {
+	snapshot.Breakdown = append([]KindBreakdown(nil), snapshot.Breakdown...)
+	snapshot.TrustBreakdown = append([]TrustBreakdown(nil), snapshot.TrustBreakdown...)
+	snapshot.ToolDefs = append([]ToolDefAccounting(nil), snapshot.ToolDefs...)
 	snapshot.SelectionDecisions = append([]SelectionDecision(nil), snapshot.SelectionDecisions...)
 	snapshot.Selection = cloneSelectionTrace(snapshot.Selection)
 	snapshot.Mutations = append([]MutationRecord(nil), snapshot.Mutations...)
 	snapshot.CacheUsage = append([]CacheUsageRecord(nil), snapshot.CacheUsage...)
 	snapshot.Steps = cloneStepSnapshots(snapshot.Steps)
+	snapshot.MemoryRecall = cloneMemoryRecallTrace(snapshot.MemoryRecall)
 	if snapshot.BudgetPlan != nil {
 		plan := *snapshot.BudgetPlan
 		snapshot.BudgetPlan = &plan
 	}
-	if snapshot.CachePlan != nil {
-		plan := *snapshot.CachePlan
-		snapshot.CachePlan = &plan
-	}
 	return snapshot
+}
+
+func cloneMemoryRecallTrace(trace *MemoryRecallTrace) *MemoryRecallTrace {
+	if trace == nil {
+		return nil
+	}
+	out := *trace
+	out.Result.Refs = append([]string(nil), trace.Result.Refs...)
+	return &out
+}
+
+func normalizeMemoryRecallRefs(refs []string) []string {
+	out := make([]string, 0, min(len(refs), maxMemoryRecallTraceRefs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+		if len(out) == maxMemoryRecallTraceRefs {
+			break
+		}
+	}
+	return out
 }
 
 func cacheUsageTotals(records []CacheUsageRecord) (readTokens, writeTokens int) {
@@ -158,7 +250,7 @@ func cloneStepSnapshots(steps []StepSnapshot) []StepSnapshot {
 }
 
 func cloneSelectionTrace(selection SelectionTrace) SelectionTrace {
-	if len(selection.DropReasons) > 0 {
+	if selection.DropReasons != nil {
 		reasons := make(map[string]int, len(selection.DropReasons))
 		for reason, count := range selection.DropReasons {
 			reasons[reason] = count
