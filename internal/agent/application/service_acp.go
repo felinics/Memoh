@@ -141,14 +141,19 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	contextReq := req
 	contextReq.Attachments = preparedAttachments.Context
 	contextReq.ReplyAttachments = nil
-	contextMarkdown := s.buildACPContextMarkdown(ctx, contextReq, agentID, projectPath)
-	contextLifecycle := contextfrag.NewLifecycleHolder()
-	contextLifecycle.SetManifest(contextfrag.BuildManifest(nil))
-
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	req.Query = strings.TrimSpace(req.Query)
+	contextSections, memoryTrace := s.buildACPContextSections(ctx, contextReq, agentID, projectPath)
+	contextMarkdown, contextURI, contextManifest := acpContextViaContextView(ctx, s.logger, contextSections, req.Query)
+	contextLifecycle := contextfrag.NewLifecycleHolder()
+	if contextManifest != nil {
+		contextLifecycle.SetManifest(*contextManifest)
+	}
+	if memoryTrace != nil {
+		contextLifecycle.SetMemoryRecall(*memoryTrace)
+	}
 	var leadingUser *messagepkg.Message
 	req, leadingUser, err = s.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
 	if err != nil {
@@ -296,6 +301,7 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	// block would pin the answer text above any reasoning that streams first.
 	// The first text_delta lazily creates the text block instead.
 
+	contextBudgetMaxTokens := s.acpContextBudgetDefault(streamCtx, req.BotID)
 	result, err := s.acpPool.Prompt(streamCtx, acpagent.PromptInput{
 		BotID:                    req.BotID,
 		ChatID:                   req.ChatID,
@@ -318,15 +324,17 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		CanRequestUserInput:      s.canDeliverUserInputWS(eventCh),
 		// This flag controls image bytes returned later by the read-media MCP
 		// tool. Initial user images use ACP ImageBlock transport above.
-		SupportsImageInput:    false,
-		ToolOutputLimit:       s.toolOutputLimit(),
-		ToolHTTPURL:           req.ToolHTTPURL,
-		ContextURI:            acpContextURI,
-		ContextMarkdown:       contextMarkdown,
-		RuntimeOwnerAccountID: runtimeOwnerAccountID,
-		ForceFreshRuntime:     req.ForceFreshRuntime,
-		RequiredCommand:       req.AgentCommand,
-		Sink:                  acpclient.EventSinkFunc(emit),
+		SupportsImageInput:        false,
+		ToolOutputLimit:           s.toolOutputLimit(),
+		ToolHTTPURL:               req.ToolHTTPURL,
+		ContextURI:                contextURI,
+		ContextMarkdown:           contextMarkdown,
+		ContextBudgetMaxTokens:    contextBudgetMaxTokens,
+		ContextToolExchangePolicy: defaultToolExchangePolicy(),
+		RuntimeOwnerAccountID:     runtimeOwnerAccountID,
+		ForceFreshRuntime:         req.ForceFreshRuntime,
+		RequiredCommand:           req.AgentCommand,
+		Sink:                      acpclient.EventSinkFunc(emit),
 	})
 	lifecycleCause = err
 	if err != nil {
@@ -499,6 +507,18 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	cleanupProjections()
 	emit(acpTerminalStreamEvent(native.EventEnd, result))
 	return nil
+}
+
+func (s *Service) acpContextBudgetDefault(ctx context.Context, botID string) int {
+	botSettings, err := s.loadBotSettings(ctx, botID)
+	if err != nil {
+		return 0
+	}
+	chatModel, _, err := s.selectChatModel(ctx, ChatRequest{BotID: botID}, botSettings)
+	if err != nil {
+		return 0
+	}
+	return contextBudgetFromChatModel(chatModel)
 }
 
 func acpRuntimeFailureEvent(cause error) native.StreamEvent {

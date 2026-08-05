@@ -179,9 +179,15 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 		MaxCalls:    payload.MaxCalls,
 		Command:     payload.Command,
 	})
-	contextMarkdown := s.buildACPContextMarkdown(ctx, req, info.AgentID, info.ProjectPath)
+	contextSections, memoryTrace := s.buildACPContextSections(ctx, req, info.AgentID, info.ProjectPath)
+	contextMarkdown, contextURI, contextManifest := acpContextViaContextView(ctx, s.logger, contextSections, req.Query)
 	contextLifecycle := contextfrag.NewLifecycleHolder()
-	contextLifecycle.SetManifest(contextfrag.BuildManifest(nil))
+	if contextManifest != nil {
+		contextLifecycle.SetManifest(*contextManifest)
+	}
+	if memoryTrace != nil {
+		contextLifecycle.SetMemoryRecall(*memoryTrace)
+	}
 	terminal := s.contextLifecycleTerminal(ctx, native.RunConfig{
 		RunID: runID,
 		Identity: native.SessionContext{
@@ -217,12 +223,14 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 		ChannelIdentityID: strings.TrimSpace(payload.OwnerUserID),
 		SessionToken:      token,
 		// Nobody is on the other end of a scheduled run.
-		CanRequestUserInput:   false,
-		SupportsImageInput:    false,
-		ToolOutputLimit:       s.toolOutputLimit(),
-		ContextURI:            acpContextURI,
-		ContextMarkdown:       contextMarkdown,
-		RuntimeOwnerAccountID: runtimeOwner,
+		CanRequestUserInput:       false,
+		SupportsImageInput:        false,
+		ToolOutputLimit:           s.toolOutputLimit(),
+		ContextURI:                contextURI,
+		ContextMarkdown:           contextMarkdown,
+		ContextBudgetMaxTokens:    s.acpContextBudgetDefault(ctx, botID),
+		ContextToolExchangePolicy: defaultToolExchangePolicy(),
+		RuntimeOwnerAccountID:     runtimeOwner,
 		Sink: acpclient.EventSinkFunc(func(ev event.StreamEvent) {
 			reasoningTiming.observe(ev)
 		}),

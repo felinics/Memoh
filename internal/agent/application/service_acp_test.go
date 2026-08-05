@@ -30,6 +30,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -37,6 +38,46 @@ const (
 	storeRoundBotID            = "11111111-1111-1111-1111-111111111111"
 	storeRoundMemoryProviderID = "22222222-2222-2222-2222-222222222222"
 )
+
+func TestStreamACPAgentWSPromptBytesMatchQuery(t *testing.T) {
+	t.Parallel()
+
+	pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "ok", StopReason: "end_turn"}}
+	resolver := &Service{
+		messageService: &recordingMessageService{},
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, _ string) (session.Thread, error) {
+				return session.Thread{
+					ID:    "session-1",
+					BotID: "bot-1",
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	if err := resolver.StreamChatWS(context.Background(), ChatRequest{
+		BotID:    "bot-1",
+		ThreadID: "session-1",
+		Query:    "  inspect the app  ",
+	}, make(chan WSStreamEvent, 8), make(chan struct{})); err != nil {
+		t.Fatalf("StreamChatWS() error = %v", err)
+	}
+	if pool.input.Prompt != "inspect the app" {
+		t.Fatalf("Prompt = %q, want trimmed query bytes", pool.input.Prompt)
+	}
+	if strings.Contains(pool.input.ContextMarkdown, "inspect the app") {
+		t.Fatalf("query must not join the context document: %q", pool.input.ContextMarkdown)
+	}
+}
 
 func newACPLifecycleService(
 	t *testing.T,
@@ -115,8 +156,11 @@ func TestStreamACPAgentWSPersistsMinimalCompletedLifecycle(t *testing.T) {
 	if row.ErrorCode.Valid {
 		t.Fatalf("completed lifecycle error code = %#v, want none", row.ErrorCode)
 	}
-	if snapshot.Version != 1 || snapshot.View != "" || snapshot.Counts != (contextfrag.ManifestCounts{}) {
-		t.Fatalf("minimal ACP snapshot = %#v, want empty legacy-context accounting", snapshot)
+	if snapshot.Version != 1 || snapshot.View != contextfrag.ViewACPRuntimePrompt || snapshot.Counts.Fragments == 0 {
+		t.Fatalf("ACP context-view snapshot = %#v, want populated ACP manifest", snapshot)
+	}
+	if len(snapshot.SelectionDecisions) == 0 {
+		t.Fatalf("ACP context-view snapshot omitted selection decisions: %#v", snapshot)
 	}
 	if snapshot.AssistantMessageID != "message-id" {
 		t.Fatalf("assistant message ID = %q, want message-id", snapshot.AssistantMessageID)
@@ -310,6 +354,12 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	}
 	if pool.input.ContextURI != acpContextURI || !strings.Contains(pool.input.ContextMarkdown, "## Current Runtime") || !strings.Contains(pool.input.ContextMarkdown, "Bot ID: bot-1") {
 		t.Fatalf("ACP context = uri %q markdown %q, want dynamic Memoh context", pool.input.ContextURI, pool.input.ContextMarkdown)
+	}
+	if pool.input.ContextBudgetMaxTokens != 0 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 0 when models/settings services are not configured", pool.input.ContextBudgetMaxTokens)
+	}
+	if pool.input.ContextToolExchangePolicy == nil || pool.input.ContextToolExchangePolicy.MinMessages != 10 {
+		t.Fatalf("ContextToolExchangePolicy = %#v, want default MinMessages=10", pool.input.ContextToolExchangePolicy)
 	}
 	if len(pool.input.Images) != 1 || pool.input.Images[0].Data != "aW1hZ2U=" || pool.input.Images[0].MimeType != "image/png" {
 		t.Fatalf("ACP prompt images = %#v, want inline PNG", pool.input.Images)
@@ -1117,6 +1167,94 @@ func TestStreamACPAgentWSRequestsAutoTitle(t *testing.T) {
 	waitForSessionGets(t, sessionGets, 2)
 }
 
+func TestStreamACPAgentWSPropagatesContextBudgetDefaults(t *testing.T) {
+	t.Parallel()
+
+	const modelID = "00000000-0000-0000-0000-000000000301"
+	const providerID = "00000000-0000-0000-0000-000000000302"
+	provider := modelSelectionProviderRow(t, providerID, "openai-completions", true)
+	model := modelSelectionModelRow(t, modelID, "gpt-context-window", provider.ID, models.ModelTypeChat, true)
+	model.Config = []byte(`{"context_window": 128000}`)
+	queries := &acpContextBudgetQueries{
+		modelSelectionFakeQueries: &modelSelectionFakeQueries{
+			models:   map[string]sqlc.Model{model.ModelID: model},
+			provider: provider,
+		},
+	}
+
+	messages := &recordingMessageService{}
+	pool := &recordingACPPrompter{
+		result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"},
+	}
+	resolver := &Service{
+		messageService:  messages,
+		acpPool:         pool,
+		botPermissions:  allowWorkspaceExecForBot(storeRoundBotID, "user-1"),
+		modelsService:   models.NewService(slog.New(slog.DiscardHandler), queries),
+		queries:         queries,
+		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &acpContextBudgetSettingsQueries{chatModelID: modelID}, nil, nil),
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Thread, error) {
+				return session.Thread{
+					ID:    sessionID,
+					BotID: storeRoundBotID,
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	if err := resolver.streamACPAgentWS(
+		context.Background(),
+		ChatRequest{
+			BotID:    storeRoundBotID,
+			ThreadID: "session-1",
+			Query:    "inspect the app",
+		},
+		make(chan WSStreamEvent, 8),
+		make(chan struct{}),
+	); err != nil {
+		t.Fatalf("streamACPAgentWS() error = %v", err)
+	}
+
+	if pool.input.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", pool.input.ContextBudgetMaxTokens)
+	}
+	if pool.input.ContextToolExchangePolicy == nil || pool.input.ContextToolExchangePolicy.MinMessages != 10 {
+		t.Fatalf("ContextToolExchangePolicy = %#v, want default MinMessages=10", pool.input.ContextToolExchangePolicy)
+	}
+}
+
+type acpContextBudgetSettingsQueries struct {
+	dbstore.Queries
+	chatModelID string
+}
+
+type acpContextBudgetQueries struct {
+	*modelSelectionFakeQueries
+}
+
+func (*acpContextBudgetQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
+	return sqlc.GetBotByIDRow{}, errors.New("bot timezone unavailable")
+}
+
+func (q *acpContextBudgetSettingsQueries) GetSettingsByBotID(_ context.Context, botID pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
+	return sqlc.GetSettingsByBotIDRow{
+		BotID:             botID,
+		Language:          "auto",
+		ReasoningEffort:   "medium",
+		HeartbeatInterval: 30,
+		CompactionRatio:   80,
+		ChatModelID:       flowTestUUID(q.chatModelID),
+	}, nil
+}
+
 func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -1764,7 +1902,15 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 	t.Parallel()
 
 	messages := &recordingMessageService{}
-	memory := &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 1)}
+	memory := &storeRoundMemoryProvider{
+		beforeChat: &memprovider.BeforeChatResult{
+			ContextText:   "remembered fact",
+			RetrievalMode: "graph",
+			ResultCount:   1,
+			ResultRefs:    []string{"memory-1"},
+		},
+		afterChat: make(chan memprovider.AfterChatRequest, 1),
+	}
 	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
 	registry.Register(storeRoundMemoryProviderID, memory)
 	pool := &recordingACPPrompter{
@@ -1821,6 +1967,25 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("memory was not called for successful ACP stream")
+	}
+
+	var snapshot *contextfrag.LifecycleSnapshot
+	for i := len(messages.persisted) - 1; i >= 0; i-- {
+		if messages.persisted[i].Role != "assistant" {
+			continue
+		}
+		value, ok := messages.persisted[i].Metadata[contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot)
+		if ok {
+			snapshot = &value
+		}
+		break
+	}
+	if snapshot == nil || snapshot.MemoryRecall == nil {
+		t.Fatalf("ACP lifecycle missing memory trace: %#v", snapshot)
+	}
+	if snapshot.MemoryRecall.ProviderID != storeRoundMemoryProviderID || snapshot.MemoryRecall.CacheState != "miss" ||
+		snapshot.MemoryRecall.Result.Count != 1 || !slices.Equal(snapshot.MemoryRecall.Result.Refs, []string{"memory-1"}) {
+		t.Fatalf("ACP memory trace = %#v", snapshot.MemoryRecall)
 	}
 }
 
@@ -2115,11 +2280,16 @@ type recordingACPPrompter struct {
 
 type storeRoundMemoryProvider struct {
 	memprovider.Provider
-	afterChat chan memprovider.AfterChatRequest
+	beforeChat *memprovider.BeforeChatResult
+	afterChat  chan memprovider.AfterChatRequest
 }
 
 func (*storeRoundMemoryProvider) Type() string {
 	return "test"
+}
+
+func (p *storeRoundMemoryProvider) OnBeforeChat(context.Context, memprovider.BeforeChatRequest) (*memprovider.BeforeChatResult, error) {
+	return p.beforeChat, nil
 }
 
 func (p *storeRoundMemoryProvider) OnAfterChat(_ context.Context, req memprovider.AfterChatRequest) error {
