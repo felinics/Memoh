@@ -20,6 +20,7 @@ import { createChatViews } from './chat/views'
 import { createChatTargets } from './chat/targets'
 import { createChatBots } from './chat/bots'
 import { createSessionActivity } from './chat/session-activity'
+import { createProjectSessions } from './chat/project-sessions'
 import { createSessionActions } from './chat/session-actions'
 import {
   commandErrorMessage,
@@ -142,6 +143,17 @@ export const useChatStore = defineStore('chat', () => {
     touchKnownSession, fallbackSessionAfterDelete, markSessionDeleted,
     clearDeletedSessionIds, clearRememberedSessions,
   } = sessionList
+  // Sidebar project folders page the project-filtered endpoint themselves —
+  // filtering the globally paged `sessions` list hides a project's older
+  // chats (see ./chat/project-sessions).
+  const {
+    projectSessionsFor, projectSessionsState, ensureProjectSessions,
+    loadMoreProjectSessions, reset: resetProjectSessions,
+  } = createProjectSessions({
+    currentBotId, sessions, rememberSession,
+    userScopeGeneration: () => userScopeGeneration,
+    knownSession: knownSessionSummary,
+  })
   const refreshCoordinator = createChatRefreshCoordinator({
     currentBotId,
     fetchSessions,
@@ -379,6 +391,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionsCursor.value = null
     hasMoreSessions.value = false
     loadingMoreSessions.value = false
+    resetProjectSessions()
     resetBots()
     sessionId.value = null
     explicitSessionSelection.value = false
@@ -445,7 +458,9 @@ export const useChatStore = defineStore('chat', () => {
     abort,
     abortAllAssistantStreams,
     clearFsForBotSwitch,
-    clearRememberedSessions,
+    // Folder rows resolve through the remembered-session map, so dropping it
+    // must drop the folders' paging state too, or a project reads as empty.
+    clearRememberedSessions: () => { clearRememberedSessions(); resetProjectSessions() },
     resetToEmptyComposer,
     stageDefaultACPFromSettings,
   })
@@ -586,6 +601,8 @@ export const useChatStore = defineStore('chat', () => {
     isChatViewCreatingSession, streaming, streamingSessionId,
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,
     loadMoreSessions, activeSession, knownSessions, knownSessionSummary,
+    projectSessionsFor, projectSessionsState,
+    ensureProjectSessions, loadMoreProjectSessions,
     activeChatReadOnly, activeChatCanFork,
     acpRuntimeStatuses, acpRuntimePending, pendingACPSessionInput,
     pendingACPSessionMetadata, pendingACPRuntimeId, pendingACPRuntimeStatus,

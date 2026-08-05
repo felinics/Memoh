@@ -47,6 +47,12 @@ export async function fetchBots(): Promise<Bot[]> {
 export interface FetchSessionsOptions {
   types?: string[]
   parentSessionId?: string
+  /**
+   * Only sessions bound to this project. The literal `none` selects the
+   * unbound bucket. Pages independently of the unfiltered timeline, so a
+   * project folder can reach chats older than the loaded global pages.
+   */
+  projectId?: string
   limit?: number
   cursor?: string
 }
@@ -64,12 +70,14 @@ export async function fetchSessions(botId: string, options?: FetchSessionsOption
   if (!id) return { items: [], nextCursor: null }
   const types = (options?.types ?? DEFAULT_SESSION_TYPES).map(t => t.trim()).filter(Boolean)
   const parentSessionId = options?.parentSessionId?.trim() ?? ''
+  const projectId = options?.projectId?.trim() ?? ''
   const cursor = options?.cursor?.trim() ?? ''
   const { data } = await getBotsByBotIdSessions({
     path: { bot_id: id },
     query: {
       types: types.join(','),
       ...(parentSessionId ? { parent_session_id: parentSessionId } : {}),
+      ...(projectId ? { project_id: projectId } : {}),
       limit: options?.limit ?? DEFAULT_SESSION_PAGE_SIZE,
       ...(cursor ? { cursor } : {}),
     },

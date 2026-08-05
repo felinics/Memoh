@@ -1,9 +1,12 @@
 package tools
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/hooks"
+	workspacepkg "github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -101,5 +104,116 @@ func TestToolWorkspaceFromInfoCarriesProjectWorkDir(t *testing.T) {
 	}
 	if workspace.defaultWorkDir != "/data" {
 		t.Fatalf("defaultWorkDir = %q — the project must never replace the strip root", workspace.defaultWorkDir)
+	}
+}
+
+// A project pins the session's execution location for its whole life. The
+// chat request path already rejects a switch; the tool path must too, or the
+// model can reach another computer through target_id while relative paths
+// still point at the project directory — which exists only on the project's
+// machine.
+func TestResolveToolTargetRejectsTargetSwitchForProjectBoundSession(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{resolved: workspacepkg.ResolvedWorkspaceTarget{
+		TargetID: "other-computer",
+		Client:   &bridge.Client{},
+		Info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendRemote, DefaultWorkDir: "/workspace"},
+	}}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	session := SessionContext{
+		BotID:             "bot-1",
+		WorkspaceTargetID: "project-computer",
+		ProjectWorkDir:    "/data/proj",
+	}
+	_, err := provider.resolveToolTarget(context.Background(), session, map[string]any{"target_id": "other-computer"})
+	if err == nil {
+		t.Fatal("resolveToolTarget() with a foreign target_id must fail for a project-bound session")
+	}
+	for _, want := range []string{"bound to a project", "project-computer"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to mention %q", err, want)
+		}
+	}
+	if targetProvider.resolvedInput != "" {
+		t.Fatalf("resolver was called with %q — the guard must run before resolution", targetProvider.resolvedInput)
+	}
+}
+
+func TestResolveToolTargetAllowsPinnedTargetForProjectBoundSession(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{resolved: workspacepkg.ResolvedWorkspaceTarget{
+		TargetID: "project-computer",
+		Client:   &bridge.Client{},
+		Info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendRemote, DefaultWorkDir: "/workspace"},
+	}}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	session := SessionContext{
+		BotID:             "bot-1",
+		WorkspaceTargetID: "project-computer",
+		ProjectWorkDir:    "/workspace/proj",
+	}
+	resolved, err := provider.resolveToolTarget(context.Background(), session, map[string]any{"target_id": "project-computer"})
+	if err != nil {
+		t.Fatalf("resolveToolTarget() with the pinned target error = %v", err)
+	}
+	if resolved.workspace.projectWorkDir != "/workspace/proj" {
+		t.Fatalf("projectWorkDir = %q, want the project directory on its own target", resolved.workspace.projectWorkDir)
+	}
+}
+
+// Browser Use and Computer Use always run on the native Server Workspace and
+// save screenshots there, so a remote-project session must still be able to
+// read them back — but without dragging the (remote) project directory onto
+// that machine.
+func TestResolveToolTargetAllowsNativeReadbackWithoutProjectDir(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{resolved: workspacepkg.ResolvedWorkspaceTarget{
+		TargetID: workspacepkg.WorkspaceTargetNative,
+		Client:   &bridge.Client{},
+		Info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+	}}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	session := SessionContext{
+		BotID:             "bot-1",
+		WorkspaceTargetID: "project-computer",
+		ProjectWorkDir:    `C:\Users\alice\proj`,
+	}
+	resolved, err := provider.resolveToolTarget(context.Background(), session, map[string]any{"target_id": workspacepkg.WorkspaceTargetNative})
+	if err != nil {
+		t.Fatalf("resolveToolTarget() to the native workspace error = %v", err)
+	}
+	if resolved.workspace.projectWorkDir != "" {
+		t.Fatalf("projectWorkDir = %q — the project directory does not exist on the native workspace", resolved.workspace.projectWorkDir)
+	}
+	if resolved.workspace.defaultWorkDir != "/data" {
+		t.Fatalf("defaultWorkDir = %q, want the native workspace root", resolved.workspace.defaultWorkDir)
+	}
+}
+
+func TestProjectBoundToolDescriptionsTellTheModelTargetIsPinned(t *testing.T) {
+	t.Parallel()
+
+	provider := NewContainerProvider(nil, nil, nil, "")
+	bound := provider.workspaceTargetParameter(SessionContext{ProjectWorkDir: "/data/proj"})["description"].(string)
+	if !strings.Contains(bound, "omit this parameter") {
+		t.Fatalf("project-bound target_id description = %q, want it to ask for omission", bound)
+	}
+	unbound := provider.workspaceTargetParameter(SessionContext{})["description"].(string)
+	if strings.Contains(unbound, "bound to a project") {
+		t.Fatalf("unbound target_id description must not mention a project, got %q", unbound)
+	}
+
+	usage := provider.Usage(context.Background(), SessionContext{
+		WorkspaceTargetID: "project-computer",
+		ProjectWorkDir:    "/data/proj",
+	}, availableToolsForTest(ToolRead(), ToolExec(), ToolListExecutionLocations()))
+	if strings.Contains(usage, "An explicit `target_id` still takes precedence") {
+		t.Fatalf("project-bound usage must not claim target_id wins, got:\n%s", usage)
+	}
+	if !strings.Contains(usage, "pins") {
+		t.Fatalf("project-bound usage should say the location is pinned, got:\n%s", usage)
 	}
 }

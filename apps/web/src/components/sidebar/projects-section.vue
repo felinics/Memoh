@@ -113,6 +113,32 @@
               @delete="sessionDialogs?.openDelete($event, { fallbackMode: 'recent' })"
             />
           </div>
+          <!-- The folder pages the project-filtered endpoint, so an old
+               project's chats stay reachable even when they fall outside the
+               Recents timeline's loaded pages. -->
+          <div
+            v-if="pagingState(project.id ?? '').loading"
+            class="flex justify-center py-2 pl-4"
+          >
+            <Spinner class="size-4" />
+          </div>
+          <div
+            v-else-if="pagingState(project.id ?? '').hasMore"
+            class="pb-0.5 pl-4"
+          >
+            <TextButton
+              class="text-xs"
+              @click="chatStore.loadMoreProjectSessions(project.id ?? '')"
+            >
+              {{ t('chat.showMore') }}
+            </TextButton>
+          </div>
+          <div
+            v-else-if="pagingState(project.id ?? '').loaded && sessionsOf(project.id ?? '').length === 0"
+            class="px-3 py-2 pl-4 text-xs text-muted-foreground"
+          >
+            {{ t('chat.noSessions') }}
+          </div>
         </template>
       </template>
     </div>
@@ -190,6 +216,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   Input,
+  Spinner,
   TextButton,
   toast,
 } from '@felinic/ui'
@@ -197,7 +224,6 @@ import { useChatStore } from '@/store/chat-list'
 import { useProjectsStore } from '@/store/projects'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { archiveProject, renameProject, type BotProject } from '@/composables/api/useProjects'
-import { sortByRecency } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import SessionItem from './session-item.vue'
@@ -209,7 +235,7 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const projectsStore = useProjectsStore()
 const workspaceTabs = useWorkspaceTabsStore()
-const { sessions, sessionId, currentBotId } = storeToRefs(chatStore)
+const { sessionId, currentBotId } = storeToRefs(chatStore)
 
 // Same header type as the Recents mode switcher so the two sibling section
 // titles read identically; the 11px inset aligns the sidebar's 19px
@@ -234,8 +260,15 @@ const liveProjects = computed(() => (
   projectsStore.projectsFor(currentBotId.value).filter(project => !project.archived && !!project.id)
 ))
 
+// Folder rows come from the store's per-project paging, not from filtering the
+// shared Recents list — that list pages the whole bot timeline, so a project
+// older than the loaded pages would read as empty with nothing to expand into.
 function sessionsOf(projectId: string): SessionSummary[] {
-  return sortByRecency(sessions.value.filter(session => (session.project_id ?? '').trim() === projectId))
+  return chatStore.projectSessionsFor(projectId)
+}
+
+function pagingState(projectId: string) {
+  return chatStore.projectSessionsState(projectId)
 }
 
 // Section fold + per-folder expand state, per bot. Persisted: both are
@@ -270,6 +303,23 @@ function toggleExpanded(projectId: string) {
   else current.add(projectId)
   expandedByBot.value = { ...expandedByBot.value, [botId]: [...current] }
 }
+
+// Expanded folders (including ones restored from the persisted preference)
+// fetch their first page once. ensureProjectSessions is idempotent, so this
+// can fire freely as the project list or the expanded set changes.
+watch(
+  [currentBotId, expanded, liveProjects] as const,
+  () => {
+    if (!currentBotId.value) return
+    for (const project of liveProjects.value) {
+      const projectId = project.id ?? ''
+      if (projectId && expanded.value.has(projectId)) {
+        void chatStore.ensureProjectSessions(projectId)
+      }
+    }
+  },
+  { immediate: true },
+)
 
 function handleSelect(session: SessionSummary) {
   workspaceTabs.openSessionChat({

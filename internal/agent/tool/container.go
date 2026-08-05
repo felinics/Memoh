@@ -90,7 +90,14 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 			targetDescription += " " + strconv.Quote(name)
 		}
 		text := "File and command tools default to the " + targetDescription + " for this turn"
-		parts = append(parts, text+". An explicit `target_id` still takes precedence.")
+		if sessionIsProjectBound(session) {
+			// The project pins the location for the session's whole life, so
+			// the model must not be told target_id can move it.
+			text += ". The chat's project pins this location: `target_id` cannot move file or command tools to another computer"
+		} else {
+			text += ". An explicit `target_id` still takes precedence"
+		}
+		parts = append(parts, text+".")
 	}
 	if workDir := strings.TrimSpace(session.ProjectWorkDir); workDir != "" {
 		parts = append(parts, "This chat is bound to a project whose working directory is "+strconv.Quote(workDir)+". Relative file paths resolve inside it, and commands run there by default.")
@@ -118,11 +125,15 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 		parts = append(parts, ref+": execute command")
 	}
 	if hasLocationTool && len(available.Refs(ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolApplyPatch(), ToolExec())) > 0 {
-		defaultDescription := "the Bot's default"
-		if strings.TrimSpace(session.WorkspaceTargetID) != "" {
-			defaultDescription = "the request-selected default for this turn"
+		if sessionIsProjectBound(session) {
+			parts = append(parts, "Use "+locationRef+" only to report which locations exist or to check availability: this chat's project pins its location. File and command tools must omit `target_id`; the one other accepted value is `native`, for reading files Browser Use and Computer Use leave on the Server Workspace. Any other location's `target_id` fails.")
+		} else {
+			defaultDescription := "the Bot's default"
+			if strings.TrimSpace(session.WorkspaceTargetID) != "" {
+				defaultDescription = "the request-selected default for this turn"
+			}
+			parts = append(parts, "Use "+locationRef+" when the user names a computer, you need a non-default location, availability may have changed, or a target call fails. Pass its `target_id` to file and command tools; omit `target_id` to use "+defaultDescription+". Listing locations does not switch locations or folders.")
 		}
-		parts = append(parts, "Use "+locationRef+" when the user names a computer, you need a non-default location, availability may have changed, or a target call fails. Pass its `target_id` to file and command tools; omit `target_id` to use "+defaultDescription+". Listing locations does not switch locations or folders.")
 	}
 	if sessionUsesRemoteWorkspaceTarget(session) {
 		displayRefs := available.Refs(ToolBrowserObserve(), ToolBrowserAction(), ToolBrowserRemoteSession(), ToolComputerObserve(), ToolComputerAction())
@@ -146,7 +157,7 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 		wd = workspace.projectWorkDir
 	}
 	sess := session
-	targetParameter := p.workspaceTargetParameter()
+	targetParameter := p.workspaceTargetParameter(sess)
 
 	readDesc := fmt.Sprintf("Read file content %s. Reads the full file by default; use line_offset and n_lines for pagination. Files up to ~16 MB are supported.", workspace.locationDescription)
 	if sess.SupportsImageInput {
@@ -452,11 +463,68 @@ func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir, projectWo
 	return workspace
 }
 
-func (*ContainerProvider) workspaceTargetParameter() map[string]any {
+func (*ContainerProvider) workspaceTargetParameter(session SessionContext) map[string]any {
+	description := "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn."
+	if sessionIsProjectBound(session) {
+		// A bound session's directory only exists on the project's machine,
+		// so the pinned target is the only accepted value — say so here as
+		// well as rejecting it at execution time.
+		description = "Exact target_id returned by list_execution_locations. This chat is bound to a project, which pins its execution location: omit this parameter. The only other accepted value is native, for reading files Browser Use and Computer Use leave on the Server Workspace; any other target_id is rejected."
+	}
 	return map[string]any{
 		"type":        "string",
-		"description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn.",
+		"description": description,
 	}
+}
+
+// sessionIsProjectBound reports whether the session derives its working
+// directory from a bot project. The project directory is the binding's only
+// per-session trace in tool land, so it doubles as the binding flag.
+func sessionIsProjectBound(session SessionContext) bool {
+	return strings.TrimSpace(session.ProjectWorkDir) != ""
+}
+
+// ensureProjectPinnedTarget rejects an explicit tool target that would move a
+// project-bound session off the location its project pins. The chat request
+// path rejects the same switch (ErrWorkspaceTargetProjectConflict); without
+// this guard the tool path bypasses it, running commands on another computer
+// while relative paths still resolve against the project directory — a
+// directory that exists only on the project's machine.
+func ensureProjectPinnedTarget(session SessionContext, requestedTargetID string) error {
+	requested := strings.TrimSpace(requestedTargetID)
+	if requested == "" || !sessionIsProjectBound(session) {
+		return nil
+	}
+	pinned := strings.TrimSpace(session.WorkspaceTargetID)
+	if strings.EqualFold(pinned, requested) {
+		return nil
+	}
+	// The native Server Workspace stays reachable: Browser Use and Computer
+	// Use always run there and save screenshots there, so even a session
+	// pinned to a remote project must be able to read them back. Those reads
+	// resolve against the native workspace root, never the project directory
+	// — see projectWorkDirForTarget.
+	if strings.EqualFold(requested, workspacepkg.WorkspaceTargetNative) {
+		return nil
+	}
+	if pinned == "" {
+		return errors.New("this chat is bound to a project, which pins its execution location; omit target_id")
+	}
+	return fmt.Errorf("this chat is bound to a project on execution location %q, which pins it for the whole chat; omit target_id (or pass %q)", pinned, pinned)
+}
+
+// projectWorkDirForTarget returns the project directory only for the target
+// the project actually lives on. The native escape hatch above lands on a
+// different machine, where the project directory does not exist; carrying it
+// there would resolve every relative path against a phantom directory.
+func projectWorkDirForTarget(session SessionContext, resolvedTargetID string) string {
+	workDir := strings.TrimSpace(session.ProjectWorkDir)
+	pinned := strings.TrimSpace(session.WorkspaceTargetID)
+	resolved := strings.TrimSpace(resolvedTargetID)
+	if workDir == "" || pinned == "" || resolved == "" || strings.EqualFold(pinned, resolved) {
+		return workDir
+	}
+	return ""
 }
 
 func executionLocationFromTarget(target workspacepkg.WorkspaceTarget, requestTargetID string) executionLocation {
@@ -500,6 +568,9 @@ func executionLocationFromTarget(target workspacepkg.WorkspaceTarget, requestTar
 func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session SessionContext, args map[string]any) (resolvedToolTarget, error) {
 	ctx = workspaceContextForSession(ctx, session)
 	targetID := StringArg(args, "target_id")
+	if err := ensureProjectPinnedTarget(session, targetID); err != nil {
+		return resolvedToolTarget{}, err
+	}
 	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
 		resolved, err := resolver.ResolveWorkspaceTarget(ctx, session.BotID, targetID)
 		if err != nil {
@@ -521,7 +592,7 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 			id:        resolved.TargetID,
 			client:    resolved.Client,
 			info:      resolved.Info,
-			workspace: toolWorkspaceFromInfo(resolved.Info, p.execWorkDir, session.ProjectWorkDir),
+			workspace: toolWorkspaceFromInfo(resolved.Info, p.execWorkDir, projectWorkDirForTarget(session, resolved.TargetID)),
 		}, nil
 	}
 	if targetID != "" {

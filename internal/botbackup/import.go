@@ -1051,13 +1051,26 @@ func (s *Service) restoreProjects(ctx context.Context, botID, actorUserID string
 		if err != nil {
 			return fmt.Errorf("project %q: %w", item.Name, err)
 		}
+		archived := false
 		if item.Archived {
 			if err := s.projects.ArchiveProject(ctx, botID, created.ID); err != nil {
 				state.warnings = append(state.warnings, "project archive flag restore failed for "+item.Name+": "+err.Error())
+			} else {
+				archived = true
 			}
 		}
 		state.projectMap[item.ID] = optionalUUID(created.ID)
-		nativeByPath[item.Path] = created
+		// nativeByPath is the LIVE path index — it is what makes a later
+		// backup entry for the same directory reuse this project instead of
+		// tripping the live-path unique constraint. A project we just
+		// archived is not live: registering it would make a later live entry
+		// for the same directory look already-restored, silently remapping
+		// its sessions onto the archived project and never recreating the
+		// live one. Live-path uniqueness ignores archived rows, so the later
+		// entry creates cleanly.
+		if !archived {
+			nativeByPath[item.Path] = created
+		}
 		restored++
 	}
 	if restored > 0 {
