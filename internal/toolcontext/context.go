@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/runtimefence"
 )
 
@@ -32,17 +33,19 @@ type Session struct {
 	// ReasoningStoredEffort and ReasoningRequestedEffort are unresolved turn
 	// inputs. A tool that selects another model must resolve them against that
 	// model instead of inheriting the parent runtime's provider-specific result.
-	ReasoningStoredEffort    string
-	ReasoningRequestedEffort string
-	CanRequestUserInput      bool
-	CanListUserInput         bool
-	IsSubagent               bool
-	RuntimeActive            bool
-	SupportsImageInput       bool
-	SupportsFileInput        bool
-	RuntimeFence             runtimefence.Fence          `json:"-"`
-	RunContext               context.Context             `json:"-"`
-	RuntimeGuard             func(context.Context) error `json:"-"`
+	ReasoningStoredEffort     string
+	ReasoningRequestedEffort  string
+	CanRequestUserInput       bool
+	CanListUserInput          bool
+	IsSubagent                bool
+	RuntimeActive             bool
+	SupportsImageInput        bool
+	SupportsFileInput         bool
+	ContextBudgetMaxTokens    int
+	ContextToolExchangePolicy *contextfrag.ToolExchangePolicy
+	RuntimeFence              runtimefence.Fence          `json:"-"`
+	RunContext                context.Context             `json:"-"`
+	RuntimeGuard              func(context.Context) error `json:"-"`
 }
 
 const runtimeGuardTimeout = 5 * time.Second
@@ -169,6 +172,12 @@ func Merge(base, latest Session) Session {
 	}
 	if latest.SupportsFileInput {
 		merged.SupportsFileInput = true
+	}
+	if latest.ContextBudgetMaxTokens > 0 {
+		merged.ContextBudgetMaxTokens = latest.ContextBudgetMaxTokens
+	}
+	if latest.ContextToolExchangePolicy != nil {
+		merged.ContextToolExchangePolicy = latest.ContextToolExchangePolicy
 	}
 	if latest.RuntimeFence.Valid() {
 		merged.RuntimeFence = latest.RuntimeFence

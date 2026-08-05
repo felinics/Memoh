@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 )
 
 type ctxKey string
@@ -122,5 +124,22 @@ func TestMergePreservesRuntimeLifecycle(t *testing.T) {
 	})
 	if merged.RunContext != runCtx || merged.RuntimeGuard == nil {
 		t.Fatalf("runtime lifecycle = context:%v guard:%v", merged.RunContext, merged.RuntimeGuard != nil)
+	}
+}
+
+func TestMergeCarriesContextBudgetAndToolExchangePolicy(t *testing.T) {
+	t.Parallel()
+
+	policy := &contextfrag.ToolExchangePolicy{}
+	merged := Merge(Session{BotID: "bot-1"}, Session{
+		ContextBudgetMaxTokens:    128000,
+		ContextToolExchangePolicy: policy,
+	})
+	if merged.ContextBudgetMaxTokens != 128000 || merged.ContextToolExchangePolicy != policy {
+		t.Fatalf("merged = %#v, want context budget and policy carried", merged)
+	}
+	kept := Merge(merged, Session{SessionID: "session-1"})
+	if kept.ContextBudgetMaxTokens != 128000 || kept.ContextToolExchangePolicy != policy {
+		t.Fatalf("kept = %#v, want context budget and policy preserved", kept)
 	}
 }

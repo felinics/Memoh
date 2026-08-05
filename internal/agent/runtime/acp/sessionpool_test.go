@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	"github.com/memohai/memoh/internal/agent/decision/feedback"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
@@ -2024,23 +2025,26 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	}
 
 	// During a prompt the live per-prompt fields overlay.
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 7}
 	wantFence := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 29}
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
 	guardCalls := 0
 	active := client.ToolSessionContext{
-		ChatID:                   "chat-1",
-		SessionID:                "session-1",
-		RunID:                    "stream-7",
-		SessionToken:             "token-7",
-		CurrentPlatform:          "web",
-		ReplyTarget:              "reply-7",
-		ConversationType:         "private",
-		ReasoningStoredEffort:    "low",
-		ReasoningRequestedEffort: "high",
-		SupportsImageInput:       true,
-		RuntimeFence:             wantFence,
-		RunContext:               runCtx,
+		ChatID:                    "chat-1",
+		SessionID:                 "session-1",
+		RunID:                     "stream-7",
+		SessionToken:              "token-7",
+		CurrentPlatform:           "web",
+		ReplyTarget:               "reply-7",
+		ConversationType:          "private",
+		ReasoningStoredEffort:     "low",
+		ReasoningRequestedEffort:  "high",
+		SupportsImageInput:        true,
+		ContextBudgetMaxTokens:    128000,
+		ContextToolExchangePolicy: policy,
+		RuntimeFence:              wantFence,
+		RunContext:                runCtx,
 		RuntimeGuard: func(context.Context) error {
 			guardCalls++
 			return nil
@@ -2066,6 +2070,12 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 		t.Fatalf("active tool context reasoning intent = stored %q, requested %q",
 			ctx.ReasoningStoredEffort, ctx.ReasoningRequestedEffort)
 	}
+	if ctx.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("active tool context lost context budget: %#v", ctx)
+	}
+	if ctx.ContextToolExchangePolicy != policy {
+		t.Fatalf("active tool context lost tool exchange policy: %#v", ctx)
+	}
 	if ctx.RuntimeFence != wantFence {
 		t.Fatalf("active tool context fence = %#v, want %#v", ctx.RuntimeFence, wantFence)
 	}
@@ -2081,6 +2091,27 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	ctx = h.toolContext()
 	if ctx.RunID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || !ctx.CanListUserInput || ctx.RunContext != nil || ctx.RuntimeGuard != nil || ctx.ReasoningStoredEffort != "" || ctx.ReasoningRequestedEffort != "" {
 		t.Fatalf("cleared tool context = %#v", ctx)
+	}
+	if ctx.ContextBudgetMaxTokens != 0 || ctx.ContextToolExchangePolicy != nil {
+		t.Fatalf("cleared tool context leaks context budget fields: %#v", ctx)
+	}
+}
+
+func TestToolSessionContextCopiesContextBudgetFields(t *testing.T) {
+	h := &runtimeHandle{id: "rt_test", botID: "bot-1"}
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 3}
+
+	got := toolSessionContext(context.Background(), PromptInput{
+		BotID:                     "bot-1",
+		ContextBudgetMaxTokens:    5000,
+		ContextToolExchangePolicy: policy,
+	}, h)
+
+	if got.ContextBudgetMaxTokens != 5000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 5000", got.ContextBudgetMaxTokens)
+	}
+	if got.ContextToolExchangePolicy != policy {
+		t.Fatalf("ContextToolExchangePolicy = %#v, want %#v", got.ContextToolExchangePolicy, policy)
 	}
 }
 

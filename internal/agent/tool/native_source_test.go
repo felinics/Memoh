@@ -10,6 +10,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
@@ -268,6 +269,37 @@ func TestNativeToolSourcePassesSupportsImageInputToProviders(t *testing.T) {
 	}
 	if !strings.Contains(descriptors[0].Description, "Also supports reading image files") {
 		t.Fatalf("read description missing image support hint:\n%s", descriptors[0].Description)
+	}
+}
+
+func TestNativeToolSourcePassesContextBudgetToProviders(t *testing.T) {
+	provider := &nativeSourceTestProvider{
+		tools: []sdk.Tool{{
+			Name:       ToolRead().String(),
+			Parameters: map[string]any{"type": "object"},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				return "ok", nil
+			},
+		}},
+	}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowTools: map[string]bool{ToolRead().String(): true},
+	})
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 7}
+
+	_, err := source.ListTools(context.Background(), mcp.ToolSessionContext{
+		BotID:                     "bot-1",
+		ContextBudgetMaxTokens:    12345,
+		ContextToolExchangePolicy: policy,
+	})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if provider.session.ContextBudgetMaxTokens != 12345 {
+		t.Fatalf("provider.session.ContextBudgetMaxTokens = %d, want 12345", provider.session.ContextBudgetMaxTokens)
+	}
+	if provider.session.ContextToolExchangePolicy != policy {
+		t.Fatalf("provider.session.ContextToolExchangePolicy = %#v, want %#v", provider.session.ContextToolExchangePolicy, policy)
 	}
 }
 

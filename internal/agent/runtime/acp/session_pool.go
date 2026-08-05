@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	"github.com/memohai/memoh/internal/agent/decision/feedback"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
@@ -234,20 +235,22 @@ type PromptInput struct {
 	ChannelIdentityID        string
 	// SessionToken is consumed only by Prompt, where it flows into the
 	// per-prompt tool context overlay. Ensure and SetModel ignore it.
-	SessionToken          string //nolint:gosec // runtime session credential, not a hardcoded secret.
-	CurrentPlatform       string
-	ReplyTarget           string
-	ConversationType      string
-	CanRequestUserInput   bool
-	SupportsImageInput    bool
-	ToolOutputLimit       client.ToolOutputLimit
-	ToolHTTPURL           string
-	ContextURI            string
-	ContextMarkdown       string
-	RuntimeOwnerAccountID string
-	ForceFreshRuntime     bool
-	Sink                  client.EventSink
-	RuntimeGuard          func(context.Context) error
+	SessionToken              string //nolint:gosec // runtime session credential, not a hardcoded secret.
+	CurrentPlatform           string
+	ReplyTarget               string
+	ConversationType          string
+	CanRequestUserInput       bool
+	SupportsImageInput        bool
+	ToolOutputLimit           client.ToolOutputLimit
+	ToolHTTPURL               string
+	ContextURI                string
+	ContextMarkdown           string
+	RuntimeOwnerAccountID     string
+	ForceFreshRuntime         bool
+	ContextBudgetMaxTokens    int
+	ContextToolExchangePolicy *contextfrag.ToolExchangePolicy
+	Sink                      client.EventSink
+	RuntimeGuard              func(context.Context) error
 	// RequiredCommand is the exact agent-command selector the admission layer
 	// matched against a live runtime. After applying per-prompt configuration,
 	// the client Session re-validates it against its latest command snapshot at
@@ -2676,6 +2679,12 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 	if h.active.SupportsImageInput {
 		ctx.SupportsImageInput = true
 	}
+	if h.active.ContextBudgetMaxTokens != 0 {
+		ctx.ContextBudgetMaxTokens = h.active.ContextBudgetMaxTokens
+	}
+	if h.active.ContextToolExchangePolicy != nil {
+		ctx.ContextToolExchangePolicy = h.active.ContextToolExchangePolicy
+	}
 	if h.active.RuntimeFence.Valid() {
 		ctx.RuntimeFence = h.active.RuntimeFence
 	}
@@ -2721,13 +2730,15 @@ func toolSessionContext(ctx context.Context, input PromptInput, h *runtimeHandle
 		// PromptInput.ReasoningEffort is the current turn's explicit selection.
 		// The bot-stored fallback is loaded by SpawnProvider when this ACP tool
 		// context does not already carry one.
-		ReasoningRequestedEffort: strings.TrimSpace(input.ReasoningEffort),
-		CanRequestUserInput:      input.CanRequestUserInput,
-		IsSubagent:               false,
-		SupportsImageInput:       input.SupportsImageInput,
-		RuntimeFence:             fence,
-		RunContext:               ctx,
-		RuntimeGuard:             input.RuntimeGuard,
+		ReasoningRequestedEffort:  strings.TrimSpace(input.ReasoningEffort),
+		CanRequestUserInput:       input.CanRequestUserInput,
+		IsSubagent:                false,
+		SupportsImageInput:        input.SupportsImageInput,
+		ContextBudgetMaxTokens:    input.ContextBudgetMaxTokens,
+		ContextToolExchangePolicy: input.ContextToolExchangePolicy,
+		RuntimeFence:              fence,
+		RunContext:                ctx,
+		RuntimeGuard:              input.RuntimeGuard,
 	}
 }
 
