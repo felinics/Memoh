@@ -1,15 +1,15 @@
 # Phase 4：Inbox
 
-> 前置阅读：[README.md](./README.md)、[03-wiki.md](./03-wiki.md)
-> 依赖：Phase 3的Wiki提及事件。
+> 前置阅读：[README.md](./README.md)、[03-project.md](./03-project.md)
+> 依赖：Phase 3的Project内@提及事件。
 
 ## 1. 职责范围
 
 Inbox是**事件驱动的投递层**。当共享空间中发生了与某个成员相关的事件时，把它送到该成员手上。
 
-本设计中Inbox的事件源只有一个：**Wiki中的@提及**（文档正文、评论、Issue）。
+本设计中Inbox的事件源只有一个：**Project中的@提及**——Wiki文档正文、Issue描述与任意节点上的评论，三处走同一条路径。
 
-由于Wiki有多个且各自带ACL（见[03-wiki.md](./03-wiki.md)第4节），提及必须受权限约束：**只能@对该Wiki有read授权的用户或Bot**，自动补全也只列出这些主体。否则会产生一条指向对方打不开的内容的通知。
+由于Project有多个且各自带ACL（见[03-project.md](./03-project.md)第4节），提及必须受权限约束：**只能@对该Project有read授权的用户或Bot**，自动补全也只列出这些主体。否则会产生一条指向对方打不开的内容的通知。权限判定只在Project一级发生，因此@提及出现在哪个视图里不影响可达性。
 
 **A2A不走Inbox**（决策D14）。分工规则：
 
@@ -18,7 +18,7 @@ Inbox是**事件驱动的投递层**。当共享空间中发生了与某个成�
 | 有人在等结果 | `contact_agent`工具（Phase 2），调用方持有句柄 |
 | 事件驱动，没人在等 | Inbox |
 
-这条切分让Inbox的复杂度大幅下降——去重、攒批、防风暴这些机制只需服务Wiki提及这一个场景，量级远小于承载全部Agent间通信。
+这条切分让Inbox的复杂度大幅下降——去重、攒批、防风暴这些机制只需服务Project内@提及这一个场景，量级远小于承载全部Agent间通信。
 
 ## 2. 投递模型
 
@@ -33,7 +33,7 @@ Inbox对两类成员的落地方式不同：
 
 ### 2.1 事务Outbox与持久化Delivery
 
-Wiki正文或评论写入时，mention记录与`wiki_outbox_events`必须在同一个Postgres事务中提交。不得先提交mention再向进程内队列发消息，否则Server在两步之间退出会永久丢通知。
+Project内的正文或评论写入时，mention记录与`project_outbox_events`必须在同一个Postgres事务中提交。不得先提交mention再向进程内队列发消息，否则Server在两步之间退出会永久丢通知。
 
 dispatcher以至少一次方式消费outbox，并为每个收件人创建持久化delivery。实现可以使用一张带`recipient_user_id`和`recipient_bot_id`两列且exactly-one CHECK的表，也可以拆成两张表；两类引用都必须有真实复合外键，不能使用无外键的多态ID。
 
@@ -73,19 +73,19 @@ dispatcher以至少一次方式消费outbox，并为每个收件人创建持久�
 
 同一话题的后续消息必须进入**同一个Session**，否则Bot每次都失忆。
 
-做法：Inbox消息携带`thread_key`（例如`wiki:issue:123`），通过持久化的Inbox thread route按`bot_id + thread_key`路由到已存在的Session；超时或超长后才开新的。
+做法：Inbox消息携带`thread_key`（例如`project:issue:123`），通过持久化的Inbox thread route按`bot_id + thread_key`路由到已存在的Session；超时或超长后才开新的。
 
 这与`bot_channel_routes`（外部会话到内部Thread的路由）是同一个模式，应当复用其思路而不是另造一套。
 
 ### 3.4 风暴控制
 
-一条评论@了三个Bot，每个Bot起一个Session，每个Session又在Wiki上回复并@别人——这是指数爆炸。必须具备：
+一条评论@了三个Bot，每个Bot起一个Session，每个Session又在Project上回复并@别人——这是指数爆炸。必须具备：
 
 - 提及传播的深度上限
 - 每个Bot的并发上限与队列
 - 冷却窗口
 
-传播深度不能靠解析文本猜测。人类直接产生的mention深度为0；由Inbox触发run写回Wiki时，新的mention必须携带来源delivery，沿`root_delivery_id / parent_delivery_id / depth`递增。缺少有效来源时fail closed为新的人工根事件，不能继承模型声称的深度。
+传播深度不能靠解析文本猜测。人类直接产生的mention深度为0；由Inbox触发run写回Project时，新的mention必须携带来源delivery，沿`root_delivery_id / parent_delivery_id / depth`递增。缺少有效来源时fail closed为新的人工根事件，不能继承模型声称的深度。
 
 ## 4. 送达语义（D20）
 
@@ -127,7 +127,7 @@ dispatcher以至少一次方式消费outbox，并为每个收件人创建持久�
 - 委托结果只属于发起它的run；该run不再接收结果时，不应自动唤醒新的run。
 - 丢弃的是投递，不是执行记录：被调Bot的会话与输出仍然完整持久化，人类可以在它的会话列表中查看。
 
-**因此本阶段的事件源仍然只有Wiki提及一个**，第1节的分工规则不需要修订。任何实现都不得为A2A结果新增Inbox投递路径。
+**因此本阶段的事件源仍然只有Project内@提及一个**，第1节的分工规则不需要修订。任何实现都不得为A2A结果新增Inbox投递路径。
 
 ## 7. 验收要求
 
@@ -172,7 +172,7 @@ dispatcher以至少一次方式消费outbox，并为每个收件人创建持久�
 
 ### INBOX-007：提及受权限约束
 
-- @对目标Wiki无read授权的用户或Bot必须被拒绝，自动补全也不得列出他们。
+- @对目标Project无read授权的用户或Bot必须被拒绝，自动补全也不得列出他们。
 - 授权在提及产生之后被撤销时，对应的Inbox条目必须不再可打开。
 
 ### INBOX-008：人类侧

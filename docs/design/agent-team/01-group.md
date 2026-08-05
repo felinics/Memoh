@@ -1,7 +1,7 @@
 # Phase 1：Group模型
 
 > 前置阅读：[README.md](./README.md)
-> 依赖：无。本阶段是Phase 2的地基。Phase 3（Wiki）与本阶段无依赖关系，可并行推进。
+> 依赖：无。本阶段是Phase 2的地基。Phase 3（Project）与本阶段无依赖关系，可并行推进。
 
 ## 1. 目标与定位
 
@@ -9,7 +9,7 @@
 
 **Group是可选的协作与授权分组，不是Bot的必选归属，也不是隔离边界。** Bot可以不属于任何Group；这时它继续按现有owner与`bot_user_grants`规则工作，只是没有Group带来的成员发现与A2A授权。隔离边界仍然是Team。
 
-**Group与Wiki解耦**（决策D3）：Wiki是与Group平行的独立实体，可以有多个，各自带ACL。Group不拥有Wiki，只能作为ACL的一种授予主体（「研发组的人都能写这个Wiki」）。Group不决定谁能看到哪些知识，只为Bot访问与A2A增加一种授权来源。
+**Group与Project解耦**（决策D3）：Project是与Group平行的独立实体，可以有多个，各自带ACL。Group不拥有Project，只能作为ACL的一种授予主体（「研发组的人都能写这个Project」）。Group不决定谁能看到哪些知识，只为Bot访问与A2A增加一种授权来源。
 
 ## 2. Team与Group的关系
 
@@ -83,7 +83,7 @@ group_bot_members(
 
 该列默认为真，与成员关系一起落地。**Phase 1不实现任何基于它的限制逻辑**；Phase 2直接将它作为同事发现与A2A授权的入站开关，不需要后续补迁移。
 
-Wiki相关的权限列不在这里，也不在`bots`上——Wiki与Group解耦后，「谁能读写哪个Wiki」完全由Wiki自身的ACL表达。见[03-wiki.md](./03-wiki.md)第4节。
+Project相关的权限列不在这里，也不在`bots`上——Project与Group解耦后，「谁能读写哪个Project」完全由Project自身的ACL表达。见[03-project.md](./03-project.md)第4节。
 
 ### 3.3 人格与角色的切分
 
@@ -113,17 +113,17 @@ Group成员关系只增加Bot列表可见性与`chat`权限，不授予`workspac
 
 Bot可以不属于任何Group。无Group Bot仍对owner和持有直接授权的用户可见并可用，只是不出现在任何Group视图中，也不能使用Phase 2的`list_teammates`或被其他Bot通过Group联系。**不得为了实现Group而创建Default Group、强制新Bot入组，或把未入组Bot从既有owner/直接授权视图中隐藏。**
 
-Group**不**约束知识的可见性——那由每个Wiki自身的ACL决定。
+Group**不**约束知识的可见性——那由每个Project自身的ACL决定。
 
 ### 4.3 关于早期设计中的跨组泄漏
 
-设计早期版本采用「每个Group一个Wiki＋Bot可访问其所属全部Group的Wiki」，由此产生过一个已知口子：Bot同时属于G1与G2时，会成为G1成员间接读取G2 Wiki的传导路径。
+设计早期版本采用「每个Group一个共享空间＋Bot可访问其所属全部Group的共享空间」，由此产生过一个已知口子：Bot同时属于G1与G2时，会成为G1成员间接读取G2内容的传导路径。
 
-**Wiki与Group解耦后（D3），这个口子的Group形态不再存在**——Wiki不归属于Group，多组归属不会带来任何额外的知识可见性。
+**Project与Group解耦后（D3），这个口子的Group形态不再存在**——Project不归属于Group，多组归属不会带来任何额外的知识可见性。
 
-但需要说明：该风险的**根因不是Group，而是Bot拥有独立于人的权限**，因此它在多Wiki＋ACL方案下换了个形式继续存在（Bot的Wiki授权集合与对话人的不一致）。处理方式记录在[03-wiki.md](./03-wiki.md)第4.4节，不在本阶段范围内。
+但需要说明：该风险的**根因不是Group，而是Bot拥有独立于人的权限**，因此它在多Project＋ACL方案下换了个形式继续存在（Bot的Project授权集合与对话人的不一致）。处理方式记录在[03-project.md](./03-project.md)第4.4节，不在本阶段范围内。
 
-保留本节是为了记录这个演进，避免后续有人重新引入per-group Wiki时忽略原始风险。
+保留本节是为了记录这个演进，避免后续有人重新引入per-group共享空间时忽略原始风险。
 
 ## 5. 兼容与迁移
 
@@ -145,7 +145,7 @@ D3、D5、D6三条决策消去了大量复杂度。以下内容**不要实现**�
 | --- | --- |
 | `bot_sessions`增加`group_id` | Session不携带group上下文（D6）。chat与channel inbound只需要`bot_id`。 |
 | `bot_channel_configs`、heartbeat、schedule配置增加group列 | 同上。 |
-| Wiki或`wiki_nodes`增加`group_id` | Wiki与Group解耦（D3）。Wiki是独立实体，权限由自身ACL决定；Group只能作为ACL主体出现。 |
+| Project或`project_nodes`增加`group_id` | Project与Group解耦（D3）。Project是独立实体，权限由自身ACL决定；Group只能作为ACL主体出现。 |
 | 长期记忆按Group分区 | D5。Group不决定知识可见性，单独按Group限制记忆没有意义。 |
 | memory provider接口增加scope参数 | 同上。 |
 | A2A工具增加group参数 | 共享任意一个Group即允许contact，无歧义需要消解。见Phase 2。 |
@@ -155,9 +155,9 @@ D3、D5、D6三条决策消去了大量复杂度。以下内容**不要实现**�
 
 1. 人类查看Bot列表时，把Group成员关系作为既有直接授权之外的增量访问来源（第4.2节）
 2. `list_teammates`与`contact_agent`的同事发现与授权（Phase 2）
-3. 解析`wiki_group_acl`时，为该Group的人类成员批量授予Wiki read/write（Phase 3的可后置集成层）
+3. 解析`project_group_acl`时，为该Group的人类成员批量授予Project read/write（Phase 3的可后置集成层）
 
-除此之外，任何地方都不应该出现group维度——不在Session上，不在渠道配置上，不作为Wiki归属字段，也不在记忆里。
+除此之外，任何地方都不应该出现group维度——不在Session上，不在渠道配置上，不作为Project归属字段，也不在记忆里。
 
 ## 7. 前端影响
 
@@ -168,9 +168,9 @@ Group成为Bot的可选协作单元后，Web侧需要：
 - 按Group查看该组授予的Bot
 - Bot加入、移出Group的管理界面
 
-**Wiki不在此列**——它有自己的列表与授权界面，不随Group切换器变化。这正是解耦的主要收益：用户不需要在「我现在在哪个组」和「这篇文档属于哪个组」之间建立心智映射。
+**Project不在此列**——它有自己的列表与授权界面，不随Group切换器变化。这正是解耦的主要收益：用户不需要在「我现在在哪个组」和「这篇文档属于哪个组」之间建立心智映射。
 
-唯一的交叉点是把Group作为ACL主体授予Wiki，以及建Group时可选的「顺手为这个组建一个Wiki」快捷操作——后者只是预填ACL，不建立任何结构关联。
+唯一的交叉点是把Group作为ACL主体授予Project，以及建Group时可选的「顺手为这个组建一个Project」快捷操作——后者只是预填ACL，不建立任何结构关联。
 
 详见`apps/web/AGENTS.md`的页面与路由约定。
 
@@ -193,14 +193,14 @@ Group成为Bot的可选协作单元后，Web侧需要：
 - 用户与Bot共享Group但没有直接授权时，必须可以看到该Bot并获得`chat`权限，但不得因此获得任何workspace或manage权限。
 - 用户与Bot不共享Group、也没有任何直接授权时，直接以ID访问必须返回未找到或无权限。
 - 无Group Bot必须继续对owner和持有直接授权的用户可见并可用。
-- Wiki**不**受此约束：访问权限由Wiki自身的ACL决定，与用户属于哪个Group无关。
+- Project**不**受此约束：访问权限由Project自身的ACL决定，与用户属于哪个Group无关。
 
-### GRP-004：Group不拥有Wiki
+### GRP-004：Group不拥有Project
 
-- Wiki不得有归属Group的字段；删除Group必须只移除对应的ACL条目，不影响任何Wiki或其内容。
-- Wiki的读写路径除ACL解析外不得引用Group表。
-- 用户切换当前Group时，其可访问的Wiki集合必须不发生变化。
-- 该项需要有测试守卫，防止后续实现把Wiki重新挂回Group。
+- Project不得有归属Group的字段；删除Group必须只移除对应的ACL条目，不影响任何Project或其内容。
+- Project的读写路径除ACL解析外不得引用Group表。
+- 用户切换当前Group时，其可访问的Project集合必须不发生变化。
+- 该项需要有测试守卫，防止后续实现把Project重新挂回Group。
 
 ### GRP-005：可选成员关系与迁移
 
