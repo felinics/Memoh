@@ -33,6 +33,7 @@
     "@memohai/icon": "workspace:*",
     "@memohai/sdk": "workspace:*",
     "@pinia/colada": "^0.21.2",
+    "@pinia/colada-plugin-cache-persister": "0.1.3",
     "@shikijs/transformers": "^4.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/vue-table": "^8.21.3",

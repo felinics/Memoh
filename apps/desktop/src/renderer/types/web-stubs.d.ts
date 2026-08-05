@@ -299,6 +299,12 @@ declare module '@memohai/web/lib/auth-session' {
   export function notifyAuthSessionCleared(reason: AuthSessionClearReason): void
 }
 
+declare module '@memohai/web/lib/query-cache-persistence' {
+  import type { UseQueryEntryFilter } from '@pinia/colada'
+  export const QUERY_CACHE_STORAGE_KEY: string
+  export const queryCachePersistFilter: UseQueryEntryFilter
+}
+
 declare module '@memohai/web/pages/login/transition' {
   export const LOGIN_ENTRY_ANIMATION_KEY: string
 }

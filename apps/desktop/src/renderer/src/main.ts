@@ -5,6 +5,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { PiniaColada, useQueryCache } from '@pinia/colada'
+import { PiniaColadaCachePersister, isCacheReady } from '@pinia/colada-plugin-cache-persister'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
 import { watchEffect } from 'vue'
@@ -18,6 +19,7 @@ import { registerWorkspaceTabCommands } from '@memohai/web/pages/home/commands/w
 import { useWorkspaceTabsStore } from '@memohai/web/store/workspace-tabs'
 import { useKeyboardShortcutsStore } from '@memohai/web/store/keyboard-shortcuts'
 import { useChatStore } from '@memohai/web/store/chat-list'
+import { QUERY_CACHE_STORAGE_KEY, queryCachePersistFilter } from '@memohai/web/lib/query-cache-persistence'
 import { normalizeDesktopThemeSource } from '../../shared/theme'
 
 import '@fontsource-variable/inter'
@@ -121,7 +123,16 @@ async function bootstrap() {
 
   const app = createApp(App)
     .use(pinia)
-    .use(PiniaColada)
+    .use(PiniaColada, {
+      plugins: [
+        // Same cross-reload snapshot as the web app (see
+        // @memohai/web/lib/query-cache-persistence.ts).
+        PiniaColadaCachePersister({
+          key: QUERY_CACHE_STORAGE_KEY,
+          filter: queryCachePersistFilter,
+        }),
+      ],
+    })
     .use(router)
     .use(i18n)
     .provide(KEYBOARD_REGISTRY, keyboardCommands)
@@ -167,6 +178,9 @@ async function bootstrap() {
     })
   })
 
+  // Mount only after the snapshot is hydrated so the first render already
+  // has the last-known values (storage is sync, so this resolves fast).
+  await isCacheReady()
   app.mount('#app')
 
   // The first frame stays optimistic: render the normal auth/app route while
