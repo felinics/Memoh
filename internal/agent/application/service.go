@@ -444,7 +444,11 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		runCfg.Identity.IsSubagent = true
 	}
 	runCfg.RunID = runIDForChatRequest(req.RunID)
-	memoryMsg := s.loadMemoryContextMessage(ctx, req)
+	memoryContext := s.loadMemoryContext(ctx, req)
+	if memoryContext.Trace != nil && runCfg.ContextLifecycle != nil {
+		runCfg.ContextLifecycle.SetMemoryRecall(*memoryContext.Trace)
+	}
+	memoryMsg := memoryContext.Message
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
 	if memoryMsg != nil {
 		pruned, _ := pruneMessageForGateway(*memoryMsg)

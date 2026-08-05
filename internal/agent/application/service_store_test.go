@@ -260,6 +260,19 @@ func TestStoreRoundPersistsLifecycleMetadataOnLastAssistant(t *testing.T) {
 		},
 		Items: []contextfrag.ManifestItem{{ID: "private-content-marker"}},
 	})
+	holder.SetMemoryRecall(contextfrag.MemoryRecallTrace{
+		ProviderID:    "provider-1",
+		CacheState:    "miss",
+		RetrievalMode: "graph",
+		Query: contextfrag.MemoryRecallQueryTrace{
+			Source: "current_query",
+		},
+		Result: contextfrag.MemoryRecallResultTrace{
+			Count:        1,
+			Refs:         []string{"memory-1"},
+			ContextBytes: 16,
+		},
+	})
 	messages := &lifecycleRecordingMessageService{
 		messageIDs: []string{"user-id", "first-assistant-id", " final-assistant-id "},
 	}
@@ -309,6 +322,11 @@ func TestStoreRoundPersistsLifecycleMetadataOnLastAssistant(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "private-content-marker") || strings.Contains(string(raw), `"items"`) {
 		t.Fatalf("lifecycle metadata leaked manifest items: %s", raw)
+	}
+	for _, want := range []string{"memory_recall", "provider-1", "memory-1"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("lifecycle metadata missing %q: %s", want, raw)
+		}
 	}
 
 	snapshot, ok := holder.Snapshot()
