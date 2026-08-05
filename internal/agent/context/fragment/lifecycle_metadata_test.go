@@ -33,6 +33,9 @@ func TestLifecycleSnapshotFromMetadata(t *testing.T) {
 		got.CacheComparison.PrevAgeMs != 1200 || got.CacheComparison.FirstStepCacheReadTokens != 800 {
 		t.Fatalf("parsed cache comparison = %+v, want legacy-compatible carrier", got.CacheComparison)
 	}
+	if got.Steps != nil {
+		t.Fatalf("parsed omitted steps = %#v, want nil preserved", got.Steps)
+	}
 }
 
 func TestLifecycleSnapshotFromMetadataAbsent(t *testing.T) {
