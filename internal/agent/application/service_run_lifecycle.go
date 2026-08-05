@@ -95,7 +95,7 @@ func (s *Service) stageContextLifecycleCandidate(
 	if !fenced {
 		return false
 	}
-	status, errorCode := classifyContextLifecycleTerminal(ctx, contextfrag.LifecycleSnapshot{}, cause)
+	status, _ := classifyContextLifecycleTerminal(ctx, contextfrag.LifecycleSnapshot{}, cause)
 	if snapshot == nil {
 		s.recordContextLifecyclePersistenceError(
 			errors.New("context lifecycle candidate snapshot is missing"),
@@ -106,7 +106,7 @@ func (s *Service) stageContextLifecycleCandidate(
 		)
 		return true
 	}
-	status, errorCode = classifyContextLifecycleTerminal(ctx, *snapshot, cause)
+	status, errorCode := classifyContextLifecycleTerminal(ctx, *snapshot, cause)
 	if err := runtimefence.ValidateScope(ctx, botID, sessionID); err != nil {
 		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
 		return true
