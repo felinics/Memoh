@@ -257,10 +257,18 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 	if retrievalMode == "" {
 		retrievalMode = strings.TrimSpace(p.service.Mode())
 	}
+	resultRefs := make([]string, 0, len(packed.Items))
+	for _, entry := range packed.Items {
+		if id := strings.TrimSpace(entry.Item.ID); id != "" {
+			resultRefs = append(resultRefs, id)
+		}
+	}
 	return &adapters.BeforeChatResult{
 		ContextText:    payload,
 		RetrievalMode:  retrievalMode,
 		FallbackReason: strings.TrimSpace(resp.FallbackReason),
+		ResultCount:    len(packed.Items),
+		ResultRefs:     resultRefs,
 	}, nil
 }
 

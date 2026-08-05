@@ -17,6 +17,8 @@ type BeforeChatResult struct {
 	ContextText    string // formatted text to inject as a user message
 	RetrievalMode  string // graph, file_fallback, mem0, etc.
 	FallbackReason string // non-empty when the provider degraded to another retrieval path
+	ResultCount    int    // number of memory items represented in ContextText; zero when item metadata is unavailable
+	ResultRefs     []string
 }
 
 // AfterChatRequest is passed to OnAfterChat after receiving the gateway response.
