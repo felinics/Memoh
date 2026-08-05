@@ -2360,5 +2360,22 @@ describe('workspace layout store', () => {
       expect(dock.panels.filter(panel => panel.id.startsWith('terminal:'))).toHaveLength(1)
       expect(dock.activePanel?.id).toBe('terminal:1')
     })
+
+    it('focuses the existing browser instead of stacking unreachable new ones', async () => {
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+
+      store.openBrowser()
+      store.activateChatPanel()
+      store.openBrowser()
+      store.activateChatPanel()
+      store.openBrowser()
+
+      expect(dock.panels.filter(panel => panel.id.startsWith('browser:'))).toHaveLength(1)
+      expect(dock.activePanel?.id).toBe('browser:1')
+    })
   })
 })
