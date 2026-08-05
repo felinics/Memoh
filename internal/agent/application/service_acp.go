@@ -412,7 +412,8 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		} else {
 			cleanupProjections()
 		}
-		if status, _ := classifyContextLifecycleTerminal(streamCtx, lifecycleCause); status != contextLifecycleStatusAborted {
+		lifecycleSnapshot, _ := contextLifecycle.Snapshot()
+		if status, _ := classifyContextLifecycleTerminal(streamCtx, lifecycleSnapshot, lifecycleCause); status != contextLifecycleStatusAborted {
 			emit(acpRuntimeFailureEvent(lifecycleCause))
 		}
 		emit(native.StreamEvent{Type: native.EventTextEnd})

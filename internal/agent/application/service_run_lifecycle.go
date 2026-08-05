@@ -24,7 +24,9 @@ import (
 
 const (
 	contextLifecycleStatusCompleted               = "completed"
+	contextLifecycleStatusFailedBudget            = "failed_budget"
 	contextLifecycleStatusFailedProvider          = "failed_provider"
+	contextLifecycleStatusFallback                = "fallback"
 	contextLifecycleStatusAborted                 = "aborted"
 	contextLifecycleWriteTimeout                  = 10 * time.Second
 	contextLifecycleReconciliationBatchSize int32 = 100
@@ -57,6 +59,7 @@ type contextLifecycleCandidate struct {
 	botID     string
 	sessionID string
 	snapshot  []byte
+	status    string
 	errorCode string
 	quality   contextLifecycleCandidateQuality
 }
@@ -92,7 +95,7 @@ func (s *Service) stageContextLifecycleCandidate(
 	if !fenced {
 		return false
 	}
-	status, _ := classifyContextLifecycleTerminal(ctx, cause)
+	status, errorCode := classifyContextLifecycleTerminal(ctx, contextfrag.LifecycleSnapshot{}, cause)
 	if snapshot == nil {
 		s.recordContextLifecyclePersistenceError(
 			errors.New("context lifecycle candidate snapshot is missing"),
@@ -103,6 +106,7 @@ func (s *Service) stageContextLifecycleCandidate(
 		)
 		return true
 	}
+	status, errorCode = classifyContextLifecycleTerminal(ctx, *snapshot, cause)
 	if err := runtimefence.ValidateScope(ctx, botID, sessionID); err != nil {
 		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
 		return true
@@ -127,7 +131,8 @@ func (s *Service) stageContextLifecycleCandidate(
 		botID:     strings.TrimSpace(botID),
 		sessionID: strings.TrimSpace(sessionID),
 		snapshot:  append([]byte(nil), raw...),
-		errorCode: string(apperror.CodeOf(cause)),
+		status:    status,
+		errorCode: errorCode,
 		quality:   quality,
 	}
 	key := contextLifecycleCandidateKey{runID: runID, fencingToken: fence.Token}
@@ -137,11 +142,11 @@ func (s *Service) stageContextLifecycleCandidate(
 	}
 	existing, exists := s.contextLifecycleCandidates[key]
 	if !exists || candidate.quality >= existing.quality {
-		if candidate.errorCode == "" && exists {
+		if candidate.errorCode == "" && exists && candidate.status == existing.status {
 			candidate.errorCode = existing.errorCode
 		}
 		s.contextLifecycleCandidates[key] = candidate
-	} else if existing.errorCode == "" && candidate.errorCode != "" {
+	} else if existing.status == candidate.status && existing.errorCode == "" && candidate.errorCode != "" {
 		existing.errorCode = candidate.errorCode
 		s.contextLifecycleCandidates[key] = existing
 	}
@@ -173,7 +178,7 @@ func (s *Service) EnsureTerminalContextLifecycle(
 	) {
 		return
 	}
-	status, _ := classifyContextLifecycleTerminal(ctx, cause)
+	status, _ := classifyContextLifecycleTerminal(ctx, snapshot, cause)
 	runUUID, botUUID, sessionUUID, err := parseContextLifecycleIDs(runID, botID, sessionID)
 	if err != nil {
 		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
@@ -229,7 +234,7 @@ func (s *Service) recoverContextLifecycleFromAssistantMetadata(
 		return
 	}
 	ctx = nonNilContext(ctx)
-	status, _ := classifyContextLifecycleTerminal(ctx, cause)
+	status, _ := classifyContextLifecycleTerminal(ctx, minimalContextLifecycleSnapshot(), cause)
 	runUUID, _, _, err := parseContextLifecycleIDs(runID, botID, sessionID)
 	if err != nil {
 		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
@@ -277,7 +282,7 @@ func (s *Service) persistContextLifecycleSnapshot(
 	if s.stageContextLifecycleCandidate(ctx, runID, botID, sessionID, snapshot, cause, quality) {
 		return
 	}
-	status, errorCode := classifyContextLifecycleTerminal(ctx, cause)
+	status, errorCode := classifyContextLifecycleTerminal(ctx, *snapshot, cause)
 	runUUID, botUUID, sessionUUID, err := parseContextLifecycleIDs(runID, botID, sessionID)
 	if err != nil {
 		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
@@ -384,6 +389,11 @@ func (s *Service) reconcileTerminalContextLifecycle(ctx context.Context, run ses
 		)
 		candidateReady = false
 	}
+	if candidateReady && contextLifecycleStatusCompatibleWithTerminalRun(run.State, candidate.status) {
+		status = candidate.status
+	} else if existingReady && contextLifecycleStatusCompatibleWithTerminalRun(run.State, existing.Status) {
+		status = existing.Status
+	}
 
 	var (
 		snapshot        []byte
@@ -429,7 +439,7 @@ func (s *Service) reconcileTerminalContextLifecycle(ctx context.Context, run ses
 		ErrorCode:        code,
 		Snapshot:         snapshot,
 		ReplaceSnapshot:  replaceSnapshot,
-		ReplaceErrorCode: candidateReady && candidate.errorCode != "",
+		ReplaceErrorCode: candidateReady && candidate.status == status && candidate.errorCode != "",
 	})
 	if err == nil {
 		s.clearContextLifecycleCandidates(run.RunID)
@@ -531,6 +541,23 @@ func contextLifecycleStatusForTerminalRun(state string) (string, bool) {
 	}
 }
 
+func contextLifecycleStatusCompatibleWithTerminalRun(state, status string) bool {
+	state = strings.ToLower(strings.TrimSpace(state))
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch state {
+	case "completed":
+		return status == contextLifecycleStatusCompleted || status == contextLifecycleStatusFallback
+	case "failed":
+		return status == contextLifecycleStatusFailedProvider || status == contextLifecycleStatusFailedBudget
+	case "lost":
+		return status == contextLifecycleStatusFailedProvider
+	case "aborted":
+		return status == contextLifecycleStatusAborted
+	default:
+		return false
+	}
+}
+
 func terminalContextLifecycleErrorCode(
 	run sessionruntime.TerminalRun,
 	status string,
@@ -539,29 +566,66 @@ func terminalContextLifecycleErrorCode(
 	existing sqlc.ContextLifecycle,
 	existingReady bool,
 ) string {
-	if status != contextLifecycleStatusFailedProvider {
+	if status != contextLifecycleStatusFailedProvider && status != contextLifecycleStatusFailedBudget {
 		return ""
 	}
-	if candidateReady && candidate.errorCode != "" {
+	if candidateReady && candidate.status == status && candidate.errorCode != "" {
 		return candidate.errorCode
 	}
 	if existingReady && existing.Status == status && existing.ErrorCode.Valid {
 		return existing.ErrorCode.String
 	}
-	return strings.TrimSpace(run.ErrorCode)
+	if status == contextLifecycleStatusFailedProvider {
+		return strings.TrimSpace(run.ErrorCode)
+	}
+	return ""
 }
 
-func classifyContextLifecycleTerminal(ctx context.Context, cause error) (string, string) {
-	if cause == nil {
-		return contextLifecycleStatusCompleted, ""
+func classifyContextLifecycleTerminal(
+	ctx context.Context,
+	snapshot contextfrag.LifecycleSnapshot,
+	cause error,
+) (string, string) {
+	var budgetFailure, fallback bool
+	var budgetReason string
+	for _, mutation := range snapshot.Mutations {
+		switch mutation.Kind {
+		case contextfrag.MutationContextBudgetFailure:
+			budgetFailure = true
+			budgetReason = strings.TrimSpace(mutation.Detail)
+		case contextfrag.MutationContextViewFallback:
+			fallback = true
+		}
 	}
 	privateCause := apperror.CauseOf(cause)
+	code := apperror.CodeOf(cause)
+	protectedOverflow := errors.Is(cause, contextfrag.ErrProtectedContextOverflow) ||
+		errors.Is(privateCause, contextfrag.ErrProtectedContextOverflow)
+	budgetUnsatisfied := errors.Is(cause, contextfrag.ErrBudgetUnsatisfied) ||
+		errors.Is(privateCause, contextfrag.ErrBudgetUnsatisfied)
+	if budgetFailure || protectedOverflow || budgetUnsatisfied ||
+		code == apperror.CodeContextProtectedOverflow || code == apperror.CodeContextBudgetUnsatisfied {
+		switch {
+		case code == apperror.CodeContextProtectedOverflow, code == apperror.CodeContextBudgetUnsatisfied:
+			return contextLifecycleStatusFailedBudget, string(code)
+		case protectedOverflow, budgetReason == "protected_context_overflow":
+			return contextLifecycleStatusFailedBudget, string(apperror.CodeContextProtectedOverflow)
+		default:
+			return contextLifecycleStatusFailedBudget, string(apperror.CodeContextBudgetUnsatisfied)
+		}
+	}
 	explicitlyCanceled := errors.Is(context.Cause(nonNilContext(ctx)), context.Canceled) &&
 		(errors.Is(cause, context.Canceled) || errors.Is(privateCause, context.Canceled))
 	if explicitlyCanceled {
 		return contextLifecycleStatusAborted, ""
 	}
-	return contextLifecycleStatusFailedProvider, string(apperror.CodeOf(cause))
+	if cause != nil {
+		return contextLifecycleStatusFailedProvider, string(code)
+	}
+	if fallback {
+		return contextLifecycleStatusFallback, ""
+	}
+	return contextLifecycleStatusCompleted, ""
 }
 
 func contextLifecycleOwnershipLost(ctx context.Context, cause error) bool {

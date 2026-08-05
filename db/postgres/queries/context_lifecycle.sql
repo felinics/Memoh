@@ -158,11 +158,12 @@ WHERE session_runs.team_id = public.memoh_current_team_id()
   AND session_runs.state IN ('completed', 'aborted', 'failed', 'lost')
   AND (
     context_lifecycles.run_id IS NULL
-    OR context_lifecycles.status IS DISTINCT FROM CASE session_runs.state
-      WHEN 'completed' THEN 'completed'
-      WHEN 'aborted' THEN 'aborted'
-      ELSE 'failed_provider'
-    END
+    OR NOT (
+      (session_runs.state = 'completed' AND context_lifecycles.status IN ('completed', 'fallback'))
+      OR (session_runs.state = 'failed' AND context_lifecycles.status IN ('failed_provider', 'failed_budget'))
+      OR (session_runs.state = 'aborted' AND context_lifecycles.status = 'aborted')
+      OR (session_runs.state = 'lost' AND context_lifecycles.status = 'failed_provider')
+    )
   )
 ORDER BY session_runs.updated_at, session_runs.run_id
 LIMIT sqlc.arg(batch_size);

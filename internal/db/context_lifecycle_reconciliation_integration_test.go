@@ -83,7 +83,12 @@ FROM (VALUES
   ('00000000-0000-0000-0000-00000000d525', $3::uuid, 'aligned-completed',5::bigint, 'completed',        15::bigint, NULL::text,              NULL::text,            '2025-11-01T00:00:00Z'),
   ('00000000-0000-0000-0000-00000000d526', $3::uuid, 'aligned-aborted',  6::bigint, 'aborted',          16::bigint, NULL::text,              NULL::text,            '2025-11-01T00:00:00Z'),
   ('00000000-0000-0000-0000-00000000d527', $3::uuid, 'aligned-failed',   7::bigint, 'failed',           17::bigint, 'runtime.generic'::text, 'generic failure',    '2025-11-01T00:00:00Z'),
-  ('00000000-0000-0000-0000-00000000d528', $3::uuid, 'aligned-lost',     8::bigint, 'lost',             18::bigint, 'runtime.owner_lost',    'owner expired',      '2025-11-01T00:00:00Z')
+  ('00000000-0000-0000-0000-00000000d528', $3::uuid, 'aligned-lost',     8::bigint, 'lost',             18::bigint, 'runtime.owner_lost',    'owner expired',      '2025-11-01T00:00:00Z'),
+  ('00000000-0000-0000-0000-00000000d52a', $3::uuid, 'rich-completed',   9::bigint, 'completed',        19::bigint, NULL::text,              NULL::text,            '2026-01-04T00:00:00Z'),
+  ('00000000-0000-0000-0000-00000000d52b', $3::uuid, 'rich-failed',     10::bigint, 'failed',           20::bigint, 'provider.failed'::text, 'provider exploded', '2026-01-05T00:00:00Z'),
+  ('00000000-0000-0000-0000-00000000d52c', $3::uuid, 'rich-lost',       11::bigint, 'lost',             21::bigint, 'runtime.owner_lost',    'owner expired',      '2026-01-06T00:00:00Z'),
+  ('00000000-0000-0000-0000-00000000d52d', $3::uuid, 'aligned-fallback',12::bigint, 'completed',        22::bigint, NULL::text,              NULL::text,            '2025-11-01T00:00:00Z'),
+  ('00000000-0000-0000-0000-00000000d52e', $3::uuid, 'aligned-budget',  13::bigint, 'failed',           23::bigint, 'context.budget_unsatisfied'::text, 'budget exhausted', '2025-11-01T00:00:00Z')
 ) AS fixtures(
   run_id, session_id, invocation_id, turn_position, state, fencing_token,
   error_code, error_message, terminal_at
@@ -99,7 +104,12 @@ VALUES
   ('00000000-0000-0000-0000-00000000d525', $1, $2, $3, 'completed',       NULL,           '{}'),
   ('00000000-0000-0000-0000-00000000d526', $1, $2, $3, 'aborted',         NULL,           '{}'),
   ('00000000-0000-0000-0000-00000000d527', $1, $2, $3, 'failed_provider', 'app.specific', '{}'),
-  ('00000000-0000-0000-0000-00000000d528', $1, $2, $3, 'failed_provider', NULL,           '{}')
+  ('00000000-0000-0000-0000-00000000d528', $1, $2, $3, 'failed_provider', NULL,           '{}'),
+  ('00000000-0000-0000-0000-00000000d52a', $1, $2, $3, 'failed_budget',   NULL,           '{}'),
+  ('00000000-0000-0000-0000-00000000d52b', $1, $2, $3, 'fallback',        NULL,           '{}'),
+  ('00000000-0000-0000-0000-00000000d52c', $1, $2, $3, 'failed_budget',   NULL,           '{}'),
+  ('00000000-0000-0000-0000-00000000d52d', $1, $2, $3, 'fallback',        NULL,           '{}'),
+  ('00000000-0000-0000-0000-00000000d52e', $1, $2, $3, 'failed_budget',   NULL,           '{}')
 `, team.DefaultTeamID, teamOneBotID, teamOneSessionID); err != nil {
 		t.Fatalf("seed team-one context lifecycles: %v", err)
 	}
@@ -145,6 +155,9 @@ VALUES ($1, $2, $3, $4, 'team-two-missing', gen_random_uuid(), 1,
 		"00000000-0000-0000-0000-00000000d522",
 		"00000000-0000-0000-0000-00000000d523",
 		"00000000-0000-0000-0000-00000000d524",
+		"00000000-0000-0000-0000-00000000d52a",
+		"00000000-0000-0000-0000-00000000d52b",
+		"00000000-0000-0000-0000-00000000d52c",
 	})
 	if all[2].State != "failed" || all[2].FencingToken != 13 ||
 		!all[2].ErrorCode.Valid || all[2].ErrorCode.String != "provider.failed" {
@@ -153,6 +166,17 @@ VALUES ($1, $2, $3, $4, 'team-two-missing', gen_random_uuid(), 1,
 	if all[3].State != "lost" || all[3].FencingToken != 14 ||
 		!all[3].ErrorCode.Valid || all[3].ErrorCode.String != "runtime.owner_lost" {
 		t.Fatalf("lost reconciliation candidate = %#v", all[3])
+	}
+	if all[4].State != "completed" || all[4].FencingToken != 19 {
+		t.Fatalf("rich completed reconciliation candidate = %#v", all[4])
+	}
+	if all[5].State != "failed" || all[5].FencingToken != 20 ||
+		!all[5].ErrorCode.Valid || all[5].ErrorCode.String != "provider.failed" {
+		t.Fatalf("rich failed reconciliation candidate = %#v", all[5])
+	}
+	if all[6].State != "lost" || all[6].FencingToken != 21 ||
+		!all[6].ErrorCode.Valid || all[6].ErrorCode.String != "runtime.owner_lost" {
+		t.Fatalf("rich lost reconciliation candidate = %#v", all[6])
 	}
 
 	if _, err := rls.Exec(ctx, "SELECT set_config('memoh.team_id', $1, false)", teamTwo); err != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -173,7 +174,11 @@ func (s *recordingContextLifecycleStore) ListTerminalSessionRunsNeedingContextLi
 	return append([]sqlc.ListTerminalSessionRunsNeedingContextLifecycleRow(nil), s.terminalRows...), s.terminalListErr
 }
 
-func lifecycleTestRunConfig() native.RunConfig {
+func lifecycleTestRunConfig(mutations ...contextfrag.MutationRecord) native.RunConfig {
+	ledger := contextfrag.NewMutationLedger()
+	for _, mutation := range mutations {
+		ledger.Record(mutation.Kind, mutation.Detail)
+	}
 	holder := contextfrag.NewLifecycleHolder()
 	holder.SetManifest(contextfrag.Manifest{
 		View: contextfrag.ViewRunConfigPreProvider,
@@ -182,7 +187,8 @@ func lifecycleTestRunConfig() native.RunConfig {
 			Messages:  1,
 			TextBytes: 64,
 		},
-		Items: []contextfrag.ManifestItem{{ID: "private-content-marker"}},
+		Items:     []contextfrag.ManifestItem{{ID: "private-content-marker"}},
+		Mutations: ledger,
 	})
 	return native.RunConfig{
 		RunID: lifecycleTestRunID,
@@ -217,13 +223,14 @@ func TestContextLifecycleTerminalWritesAdmittedRunExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestContextLifecycleTerminalClassifiesOnlyCurrentStackOutcomes(t *testing.T) {
+func TestContextLifecycleTerminalClassifiesTerminalState(t *testing.T) {
 	canceledCtx, cancel := context.WithCancelCause(context.Background())
 	cancel(context.Canceled)
 
 	tests := []struct {
 		name      string
 		ctx       context.Context
+		mutations []contextfrag.MutationRecord
 		cause     error
 		status    string
 		errorCode string
@@ -235,6 +242,47 @@ func TestContextLifecycleTerminalClassifiesOnlyCurrentStackOutcomes(t *testing.T
 			cause:     apperror.New(apperror.CodeWorkspaceUnreachable, nil),
 			status:    contextLifecycleStatusFailedProvider,
 			errorCode: string(apperror.CodeWorkspaceUnreachable),
+		},
+		{
+			name: "budget failure mutation",
+			mutations: []contextfrag.MutationRecord{{
+				Kind:   contextfrag.MutationContextBudgetFailure,
+				Detail: "protected_context_overflow",
+			}},
+			cause:     fmt.Errorf("private detail: %w", contextfrag.ErrProtectedContextOverflow),
+			status:    contextLifecycleStatusFailedBudget,
+			errorCode: string(apperror.CodeContextProtectedOverflow),
+		},
+		{
+			name: "budget failure mutation without error",
+			mutations: []contextfrag.MutationRecord{{
+				Kind:   contextfrag.MutationContextBudgetFailure,
+				Detail: "budget_unsatisfied",
+			}},
+			status:    contextLifecycleStatusFailedBudget,
+			errorCode: string(apperror.CodeContextBudgetUnsatisfied),
+		},
+		{
+			name:      "typed budget failure without mutation",
+			cause:     fmt.Errorf("private detail: %w", contextfrag.ErrBudgetUnsatisfied),
+			status:    contextLifecycleStatusFailedBudget,
+			errorCode: string(apperror.CodeContextBudgetUnsatisfied),
+		},
+		{
+			name:      "stable protected overflow code without sentinel",
+			cause:     apperror.New(apperror.CodeContextProtectedOverflow, nil),
+			status:    contextLifecycleStatusFailedBudget,
+			errorCode: string(apperror.CodeContextProtectedOverflow),
+		},
+		{
+			name: "typed budget failure behind stable application error",
+			cause: apperror.Wrap(
+				apperror.CodeContextBudgetUnsatisfied,
+				contextfrag.ErrBudgetUnsatisfied,
+				nil,
+			),
+			status:    contextLifecycleStatusFailedBudget,
+			errorCode: string(apperror.CodeContextBudgetUnsatisfied),
 		},
 		{
 			name:   "provider cancellation while owner remains active",
@@ -254,13 +302,58 @@ func TestContextLifecycleTerminalClassifiesOnlyCurrentStackOutcomes(t *testing.T
 			cause:  apperror.Wrap(apperror.CodeWorkspaceUnreachable, context.Canceled, nil),
 			status: contextLifecycleStatusAborted,
 		},
+		{
+			name: "fallback",
+			ctx:  context.Background(),
+			mutations: []contextfrag.MutationRecord{{
+				Kind:   contextfrag.MutationContextViewFallback,
+				Detail: "collector_error",
+			}},
+			status: contextLifecycleStatusFallback,
+		},
+		{
+			name: "provider failure outranks fallback",
+			ctx:  context.Background(),
+			mutations: []contextfrag.MutationRecord{{
+				Kind: contextfrag.MutationContextViewFallback,
+			}},
+			cause:  errors.New("private upstream failure"),
+			status: contextLifecycleStatusFailedProvider,
+		},
+		{
+			name: "explicit abort outranks fallback",
+			ctx:  canceledCtx,
+			mutations: []contextfrag.MutationRecord{{
+				Kind: contextfrag.MutationContextViewFallback,
+			}},
+			cause:  context.Canceled,
+			status: contextLifecycleStatusAborted,
+		},
+		{
+			name: "budget failure outranks explicit abort",
+			ctx:  canceledCtx,
+			mutations: []contextfrag.MutationRecord{{
+				Kind:   contextfrag.MutationContextBudgetFailure,
+				Detail: "protected_context_overflow",
+			}},
+			cause:     context.Canceled,
+			status:    contextLifecycleStatusFailedBudget,
+			errorCode: string(apperror.CodeContextProtectedOverflow),
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, code := classifyContextLifecycleTerminal(tt.ctx, tt.cause)
-			if status != tt.status || code != tt.errorCode {
-				t.Fatalf("classifyContextLifecycleTerminal() = (%q, %q), want (%q, %q)", status, code, tt.status, tt.errorCode)
+			store := &recordingContextLifecycleStore{}
+			service := &Service{contextLifecycles: store}
+			service.contextLifecycleTerminal(tt.ctx, lifecycleTestRunConfig(tt.mutations...))(tt.cause)
+
+			if len(store.creates) != 1 {
+				t.Fatalf("CreateContextLifecycle calls = %d, want 1", len(store.creates))
+			}
+			got := store.creates[0]
+			if got.Status != tt.status || got.ErrorCode.String != tt.errorCode || got.ErrorCode.Valid != (tt.errorCode != "") {
+				t.Fatalf("terminal classification = (%q, %#v), want (%q, %q)", got.Status, got.ErrorCode, tt.status, tt.errorCode)
 			}
 		})
 	}
