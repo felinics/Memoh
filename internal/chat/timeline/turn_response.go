@@ -19,7 +19,7 @@ import (
 // single message cannot tell whether a completed answer already followed it.
 func DecodeTurnResponseEntries(msgs []messagepkg.Message) []TurnResponseEntry {
 	checkpoint := messagepkg.LatestInterruptedCheckpoint(len(msgs), func(i int) (bool, bool) {
-		return strings.TrimSpace(msgs[i].Role) == "assistant",
+		return strings.EqualFold(strings.TrimSpace(msgs[i].Role), "assistant"),
 			msgs[i].Metadata[messagepkg.AgentStepInterruptedMetadataKey] == true
 	})
 	entries := make([]TurnResponseEntry, 0, len(msgs))
@@ -43,7 +43,7 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 // parts. They must not be rendered as assistant-visible pseudo-protocol text:
 // models may imitate that text instead of emitting real provider tool calls.
 func decodeTurnResponseEntry(msg messagepkg.Message, liveCheckpoint bool) (TurnResponseEntry, bool) {
-	role := strings.TrimSpace(msg.Role)
+	role := strings.ToLower(strings.TrimSpace(msg.Role))
 	if role != "assistant" && role != "tool" {
 		return TurnResponseEntry{}, false
 	}

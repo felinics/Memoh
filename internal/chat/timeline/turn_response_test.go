@@ -260,13 +260,13 @@ func TestDecodeTurnResponseEntryKeepsOnlyInterruptedReasoning(t *testing.T) {
 		t.Fatalf("marshal model message: %v", err)
 	}
 	if _, ok := DecodeTurnResponseEntry(messagepkg.Message{
-		Role:    "assistant",
+		Role:    " Assistant ",
 		Content: modelMessage,
 	}); ok {
 		t.Fatal("expected reasoning-only message to be skipped")
 	}
 	interrupted := messagepkg.Message{
-		Role: "assistant", Content: modelMessage,
+		Role: " Assistant ", Content: modelMessage,
 		Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
 	}
 	entries := DecodeTurnResponseEntries([]messagepkg.Message{interrupted, interrupted})
