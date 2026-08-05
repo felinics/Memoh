@@ -1689,6 +1689,17 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function openBrowser(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
+    const dock = api.value
+    // Mobile hides the tab strip, so an always-new browser would strand the
+    // previous panel alive but unreachable after returning to chat. Match the
+    // terminal/display mobile behavior: focus the existing browser first.
+    if (isMobile.value && dock) {
+      const existing = dock.panels.find(panel => panel.id.startsWith('browser:'))
+      if (existing) {
+        focusPanel(existing)
+        return
+      }
+    }
     addBrowserPanel(DEFAULT_BROWSER_ADDRESS, undefined, groupId)
   }
 
