@@ -303,6 +303,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		}
 		a.runTurnHook(context.WithoutCancel(ctx), cfg, event, turnError)
 	}()
+	defer func() {
+		a.logContextLifecycle(cfg)
+	}()
 
 	// Stream emitter: tools targeting the current conversation push
 	// side-effect events (attachments, reactions, speech) directly here.
@@ -888,6 +891,29 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	sendEvent(deliveryCtx, ch, termEvent)
 }
 
+// logContextLifecycle emits the one-line audit summary linking the context
+// view manifest to the final provider input: what was selected, what the
+// cache plan pinned, and which mutations ran after the view.
+func (a *Agent) logContextLifecycle(cfg RunConfig) {
+	if a == nil || a.logger == nil || cfg.ContextMutations == nil {
+		return
+	}
+	cacheOutcome := ""
+	if cfg.ContextLifecycle != nil {
+		if snapshot, ok := cfg.ContextLifecycle.Snapshot(); ok && snapshot.CacheComparison != nil {
+			cacheOutcome = snapshot.CacheComparison.Outcome
+		}
+	}
+	a.logger.Debug("context lifecycle",
+		slog.String("view", string(cfg.ContextManifest.View)),
+		slog.Int("manifest_items", len(cfg.ContextManifest.Items)),
+		slog.String("stable_prefix_hash", cfg.ContextCachePlan.StablePrefixHash),
+		slog.Int("mutations", len(cfg.ContextMutations.Records())),
+		slog.String("cache_outcome", cacheOutcome),
+		slog.String("final_input_hash", cfg.ContextMutations.FinalInputHash()),
+	)
+}
+
 // drainStreamUntilClosed consumes what the provider still has buffered after
 // cancellation. observe sees those parts too: a finish-step or tool call left in
 // the buffer is state this run reached, so an interrupted checkpoint must be
@@ -928,6 +954,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 			errMsg = retErr.Error()
 		}
 		a.runTurnHook(context.WithoutCancel(ctx), cfg, event, errMsg)
+	}()
+	defer func() {
+		a.logContextLifecycle(cfg)
 	}()
 	loopAbort := newLoopAbortState()
 
