@@ -334,8 +334,8 @@ func (s *Service) inlineFileAttachmentAssetIfNeeded(ctx context.Context, botID s
 	if item.Type != "file" {
 		return item
 	}
-	if !isNativeDocumentMime(item.Mime) &&
-		!(isInlineTextMime(item.Mime) && attachmentBinarySize(item) <= inlineTextAttachmentMaxBytes) {
+	if !(isNativeDocumentMime(item.Mime) ||
+		(isInlineTextMime(item.Mime) && attachmentBinarySize(item) <= inlineTextAttachmentMaxBytes)) {
 		return item
 	}
 	if strings.TrimSpace(item.Payload) != "" && item.Transport == gatewayTransportInlineDataURL {
