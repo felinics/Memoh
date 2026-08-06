@@ -129,8 +129,11 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	current.OverlayEnabled = overlayBindingRow.OverlayEnabled
 	current.OverlayProvider = strings.TrimSpace(overlayBindingRow.OverlayProvider)
 	current.OverlayConfig = normalizeJSONObject(overlayBindingRow.OverlayConfig)
-	if strings.TrimSpace(req.Language) != "" {
-		current.Language = strings.TrimSpace(req.Language)
+	if req.Language != nil {
+		current.Language = strings.TrimSpace(*req.Language)
+		if current.Language == "" {
+			current.Language = DefaultLanguage
+		}
 	}
 	if strings.TrimSpace(req.CommandUILanguage) != "" {
 		current.CommandUILanguage = strings.TrimSpace(req.CommandUILanguage)
@@ -220,23 +223,31 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		current.OverlayConfig = req.OverlayConfig
 	}
 	chatModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.ChatModelID); value != "" {
-		modelID, err := s.resolveModelUUID(ctx, value)
-		if err != nil {
-			return Settings{}, err
-		}
-		chatModelUUID = modelID
-		if modelID.Valid {
-			current.ChatModelID = uuid.UUID(modelID.Bytes).String()
+	chatModelIDSet := req.ChatModelID != nil
+	if req.ChatModelID != nil {
+		if value := strings.TrimSpace(*req.ChatModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, value)
+			if err != nil {
+				return Settings{}, err
+			}
+			chatModelUUID = modelID
+			if modelID.Valid {
+				current.ChatModelID = uuid.UUID(modelID.Bytes).String()
+			}
+		} else {
+			current.ChatModelID = ""
 		}
 	}
 	heartbeatModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.HeartbeatModelID); value != "" {
-		modelID, err := s.resolveModelUUID(ctx, value)
-		if err != nil {
-			return Settings{}, err
+	heartbeatModelIDSet := req.HeartbeatModelID != nil
+	if req.HeartbeatModelID != nil {
+		if value := strings.TrimSpace(*req.HeartbeatModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, value)
+			if err != nil {
+				return Settings{}, err
+			}
+			heartbeatModelUUID = modelID
 		}
-		heartbeatModelUUID = modelID
 	}
 	compactionModelUUID := pgtype.UUID{}
 	compactionModelIDSet := req.CompactionModelID != nil
@@ -250,20 +261,26 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 	}
 	imageModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.ImageModelID); value != "" {
-		modelID, err := s.resolveModelUUID(ctx, value)
-		if err != nil {
-			return Settings{}, err
+	imageModelIDSet := req.ImageModelID != nil
+	if req.ImageModelID != nil {
+		if value := strings.TrimSpace(*req.ImageModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, value)
+			if err != nil {
+				return Settings{}, err
+			}
+			imageModelUUID = modelID
 		}
-		imageModelUUID = modelID
 	}
 	searchProviderUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.SearchProviderID); value != "" {
-		providerID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	searchProviderIDSet := req.SearchProviderID != nil
+	if req.SearchProviderID != nil {
+		if value := strings.TrimSpace(*req.SearchProviderID); value != "" {
+			providerID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			searchProviderUUID = providerID
 		}
-		searchProviderUUID = providerID
 	}
 	fetchProviderUUID := pgtype.UUID{}
 	fetchProviderIDSet := req.FetchProviderID != nil
@@ -277,36 +294,48 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 	}
 	memoryProviderUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.MemoryProviderID); value != "" {
-		providerID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	memoryProviderIDSet := req.MemoryProviderID != nil
+	if req.MemoryProviderID != nil {
+		if value := strings.TrimSpace(*req.MemoryProviderID); value != "" {
+			providerID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			memoryProviderUUID = providerID
 		}
-		memoryProviderUUID = providerID
 	}
 	ttsModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.TtsModelID); value != "" {
-		modelID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	ttsModelIDSet := req.TtsModelID != nil
+	if req.TtsModelID != nil {
+		if value := strings.TrimSpace(*req.TtsModelID); value != "" {
+			modelID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			ttsModelUUID = modelID
 		}
-		ttsModelUUID = modelID
 	}
 	transcriptionModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.TranscriptionModelID); value != "" {
-		modelID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	transcriptionModelIDSet := req.TranscriptionModelID != nil
+	if req.TranscriptionModelID != nil {
+		if value := strings.TrimSpace(*req.TranscriptionModelID); value != "" {
+			modelID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			transcriptionModelUUID = modelID
 		}
-		transcriptionModelUUID = modelID
 	}
 	videoModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.VideoModelID); value != "" {
-		modelID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
+	videoModelIDSet := req.VideoModelID != nil
+	if req.VideoModelID != nil {
+		if value := strings.TrimSpace(*req.VideoModelID); value != "" {
+			modelID, err := db.ParseUUID(value)
+			if err != nil {
+				return Settings{}, err
+			}
+			videoModelUUID = modelID
 		}
-		videoModelUUID = modelID
 	}
 	current = normalizeChatRuntimeFields(current)
 	if err := validateChatRuntimeSettings(botRow.Metadata, current); err != nil {
@@ -358,21 +387,29 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		CompactionTargetPercentSet: compactionTargetPercentSet,
 		CompactionTargetPercent:    nullableCompactionTargetPercent(current.CompactionTargetPercent),
 		ChatModelID:                chatModelUUID,
+		ChatModelIDSet:             chatModelIDSet,
 		ChatRuntime:                current.ChatRuntime,
 		ChatAcpAgentID:             nullableText(current.ChatACPAgentID),
 		ChatAcpProjectPath:         current.ChatACPProjectPath,
 		ChatAcpProjectMode:         current.ChatACPProjectMode,
 		HeartbeatModelID:           heartbeatModelUUID,
+		HeartbeatModelIDSet:        heartbeatModelIDSet,
 		CompactionModelIDSet:       compactionModelIDSet,
 		CompactionModelID:          compactionModelUUID,
 		ImageModelID:               imageModelUUID,
+		ImageModelIDSet:            imageModelIDSet,
 		SearchProviderID:           searchProviderUUID,
+		SearchProviderIDSet:        searchProviderIDSet,
 		FetchProviderIDSet:         fetchProviderIDSet,
 		FetchProviderID:            fetchProviderUUID,
 		MemoryProviderID:           memoryProviderUUID,
+		MemoryProviderIDSet:        memoryProviderIDSet,
 		TtsModelID:                 ttsModelUUID,
+		TtsModelIDSet:              ttsModelIDSet,
 		TranscriptionModelID:       transcriptionModelUUID,
+		TranscriptionModelIDSet:    transcriptionModelIDSet,
 		VideoModelID:               videoModelUUID,
+		VideoModelIDSet:            videoModelIDSet,
 		PersistFullToolResults:     current.PersistFullToolResults,
 		ShowToolCallsInIm:          current.ShowToolCallsInIM,
 		ToolApprovalConfig:         toolApprovalConfig,

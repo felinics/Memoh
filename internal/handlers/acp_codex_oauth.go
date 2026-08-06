@@ -268,7 +268,7 @@ func (h *ACPCodexOAuthHandler) writeCodexOAuthAuth(ctx context.Context, botID st
 	if err != nil {
 		return err
 	}
-	return acpclient.WriteCodexManagedConfigWithAuth(ctx, client, acpclient.CodexManagedConfig{
+	return acpclient.WriteCodexManagedConfigWithAuthForBot(ctx, client, botID, acpclient.CodexManagedConfig{
 		Mode: acpclient.SetupModeOAuth,
 		OAuth: &acpclient.CodexOAuthCredentials{
 			AccessToken:  creds.AccessToken,

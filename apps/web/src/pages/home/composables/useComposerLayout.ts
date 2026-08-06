@@ -15,6 +15,10 @@ export interface ComposerLayoutDeps {
   inputText: Ref<string>
   isActive: ComputedRef<boolean>
   showAttachmentGrid: ComputedRef<boolean>
+  // The shell's mobile breakpoint (useIsMobile). When true the composer is
+  // ALWAYS expanded — the single-row pill is desktop-only affordance, too
+  // cramped a touch target on a phone.
+  mobileMultiline: Ref<boolean>
   // Right-cluster label sources; a change re-runs the width fit.
   modelTriggerLabel: ComputedRef<string>
   activeIsACP: ComputedRef<boolean>
@@ -22,20 +26,22 @@ export interface ComposerLayoutDeps {
 }
 
 export function useComposerLayout(deps: ComposerLayoutDeps) {
-  const { inputText, isActive, showAttachmentGrid, modelTriggerLabel, activeIsACP, activeACPProjectLabel } = deps
+  const { inputText, isActive, showAttachmentGrid, mobileMultiline, modelTriggerLabel, activeIsACP, activeACPProjectLabel } = deps
 
   const textareaEl = ref<HTMLTextAreaElement | null>(null)
   const composerEl = ref<HTMLElement | null>(null)
   const modelLabelEl = ref<HTMLElement | null>(null)
   const acpProjectLabelEl = ref<HTMLElement | null>(null)
   // The composer lifts to its multiline layout (textarea on its own row, controls
-  // below) for two independent reasons: the typed text wraps or holds a newline
-  // (textMultiline), or the pane is too narrow to seat the input + model capsule +
-  // send on one pill row (narrowMultiline). Either trigger flips isMultiline, so a
-  // cramped pane reflows into multiline instead of letting the pill explode.
+  // below) for three independent reasons: the shell is in mobile mode
+  // (mobileMultiline — the pill is a desktop affordance and never the default on
+  // a phone), the typed text wraps or holds a newline (textMultiline), or the pane
+  // is too narrow to seat the input + model capsule + send on one pill row
+  // (narrowMultiline). Any trigger flips isMultiline, so a cramped pane reflows
+  // into multiline instead of letting the pill explode.
   const textMultiline = ref(false)
   const narrowMultiline = ref(false)
-  const isMultiline = computed(() => textMultiline.value || narrowMultiline.value)
+  const isMultiline = computed(() => mobileMultiline.value || textMultiline.value || narrowMultiline.value)
   const compactContentWidth = ref(0)
   const composerInnerWidth = ref(0)
   const composerBoxHeight = ref(0)

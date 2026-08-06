@@ -64,10 +64,3 @@ func resolveWorkspacePaths(info bridge.WorkspaceInfo, rawProjectPath string) (st
 	}
 	return ctx.WorkspaceRoot, ctx.ProjectPath, ctx.Backend, nil
 }
-
-func resolvedHermesHome(ctx *ResolvedSessionContext) string {
-	if ctx == nil {
-		return ""
-	}
-	return strings.TrimSpace(ctx.HermesHome)
-}

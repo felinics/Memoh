@@ -121,6 +121,13 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if strings.TrimSpace(req.BotID) == "" {
 		return nil, errors.New("bot_id is required")
 	}
+	// Codex was the only ACP runtime before profiles were introduced, and the
+	// direct Runner API historically allowed callers (including embedders) to
+	// omit AgentID. Keep that compatibility default while still rejecting any
+	// explicit unknown profile in prepareRuntimeLease.
+	if strings.TrimSpace(req.AgentID) == "" {
+		req.AgentID = acpprofile.AgentCodexID
+	}
 
 	info, err := r.workspace.WorkspaceInfo(ctx, req.BotID)
 	if err != nil {
@@ -210,14 +217,15 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}
 
 	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
-		Backend:    backend,
-		AgentID:    req.AgentID,
-		SetupMode:  req.SetupMode,
-		Env:        req.Env,
-		CleanEnv:   req.CleanEnv,
-		UnsetEnv:   req.UnsetEnv,
-		HermesHome: resolvedHermesHome(req.Resolved),
-		NoTimeout:  true,
+		Backend:   backend,
+		BotID:     req.BotID,
+		AgentID:   req.AgentID,
+		SetupMode: req.SetupMode,
+		Env:       req.Env,
+		CleanEnv:  req.CleanEnv,
+		UnsetEnv:  req.UnsetEnv,
+		NoTimeout: true,
+		Logger:    r.logger,
 	})
 	if err != nil {
 		if toolHTTPStop != nil {
@@ -238,7 +246,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if preflightGateway == nil {
 		preflightGateway = req.ToolGateway
 	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.env, req.CleanEnv, req.UnsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
+	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, req.CleanEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
 	callbacks.logger = r.logger
 	conn := newClientConnection(callbacks, proc, proc)
 
@@ -356,6 +364,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		}
 	}
 
+	proc.Activate()
 	finishStartup()
 	return clientSession, nil
 }
@@ -698,6 +707,13 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		SessionId: sessionID,
 		Prompt:    promptBlocks,
 	})
+	if proc != nil {
+		if syncErr := proc.SyncPromptState(promptCtx); syncErr != nil && s.logger != nil {
+			s.logger.Warn("failed to synchronize ACP prompt runtime state",
+				slog.String("session_id", string(sessionID)),
+				slog.Any("error", syncErr))
+		}
+	}
 	collected := collector.result()
 	usage := promptUsageFromACP(resp.Usage)
 	result := PromptResult{

@@ -2,15 +2,18 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -88,6 +91,7 @@ func TestACPContainerAPIKeyCredentialNotInPSEF(t *testing.T) {
 	}
 	proc, err := startBridgeProcess(context.Background(), client, "sh", []string{"-c", "sleep 30"}, "/data", time.Minute, processOptions{
 		Backend:   WorkspaceBackendContainer,
+		BotID:     "bot-live-container",
 		AgentID:   "codex",
 		SetupMode: SetupModeAPIKey,
 		NoTimeout: true,
@@ -111,7 +115,83 @@ func TestACPContainerAPIKeyCredentialNotInPSEF(t *testing.T) {
 	}
 }
 
+func TestACPLiveContainerReplacementPreservesOnlyDurableState(t *testing.T) {
+	if os.Getenv("MEMOH_LIVE_CODEX_ACP_CONTAINER") != "1" {
+		t.Skip("set MEMOH_LIVE_CODEX_ACP_CONTAINER=1 to run the live ACP container replacement test")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skipf("docker is required for the live ACP container replacement test: %v", err)
+	}
+
+	dataRoot := t.TempDir()
+	persistentConfig := filepath.Join(dataRoot, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(persistentConfig), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(persistentConfig, []byte("model = \"before\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	image := liveBridgeContainerImage(t)
+	firstClient, stopFirst := startLiveBridgeContainerImage(t, dataRoot, image)
+	firstLease, err := prepareRuntimeLease(context.Background(), firstClient, processOptions{
+		BotID:     "bot-live-replacement",
+		AgentID:   acpprofile.AgentCodexID,
+		SetupMode: SetupModeSelf,
+	})
+	if err != nil {
+		t.Fatalf("prepare first container lease: %v", err)
+	}
+	firstRoot := firstLease.root
+	writeRuntimeTestFile(t, firstClient, filepath.ToSlash(filepath.Join(firstRoot, "state", "config.toml")), []byte("model = \"after\"\n"))
+	if err := firstLease.Sync(context.Background()); err != nil {
+		t.Fatalf("sync durable config in first container: %v", err)
+	}
+	if err := firstClient.Mkdir(context.Background(), filepath.ToSlash(filepath.Join(firstRoot, "sqlite"))); err != nil {
+		t.Fatalf("create runtime-only directory: %v", err)
+	}
+	writeRuntimeTestFile(t, firstClient, filepath.ToSlash(filepath.Join(firstRoot, "sqlite", "state.db")), []byte("runtime only"))
+
+	// Simulate replacement, not a graceful process close: the old UUID still
+	// exists in the first container's writable layer when that container dies.
+	stopFirst()
+
+	secondClient, _ := startLiveBridgeContainerImage(t, dataRoot, image)
+	if _, err := secondClient.Stat(context.Background(), firstRoot); !errors.Is(err, bridge.ErrNotFound) {
+		t.Fatalf("first container runtime root survived replacement: %v", err)
+	}
+	if got := string(readRuntimeTestFile(t, secondClient, "/data/.codex/config.toml")); got != "model = \"after\"\n" {
+		t.Fatalf("durable config after replacement = %q", got)
+	}
+
+	secondLease, err := prepareRuntimeLease(context.Background(), secondClient, processOptions{
+		BotID:     "bot-live-replacement",
+		AgentID:   acpprofile.AgentCodexID,
+		SetupMode: SetupModeSelf,
+	})
+	if err != nil {
+		t.Fatalf("prepare replacement container lease: %v", err)
+	}
+	t.Cleanup(func() { _ = secondLease.cleanup(context.Background()) })
+	if secondLease.root == firstRoot {
+		t.Fatalf("replacement reused runtime root %q", firstRoot)
+	}
+	if got := string(readRuntimeTestFile(t, secondClient, filepath.ToSlash(filepath.Join(secondLease.root, "state", "config.toml")))); got != "model = \"after\"\n" {
+		t.Fatalf("replacement did not stage durable config: %q", got)
+	}
+	if _, err := secondClient.Stat(context.Background(), filepath.ToSlash(filepath.Join(secondLease.root, "sqlite", "state.db"))); !errors.Is(err, bridge.ErrNotFound) {
+		t.Fatalf("runtime-only database was staged into replacement lease: %v", err)
+	}
+}
+
 func startLiveBridgeContainer(t *testing.T, dataRoot string) *bridge.Client {
+	t.Helper()
+	image := liveBridgeContainerImage(t)
+	client, _ := startLiveBridgeContainerImage(t, dataRoot, image)
+	return client
+}
+
+func liveBridgeContainerImage(t *testing.T) string {
 	t.Helper()
 	repoRoot := findRepoRoot(t)
 	image := strings.TrimSpace(os.Getenv("MEMOH_LIVE_CODEX_ACP_CONTAINER_IMAGE"))
@@ -125,7 +205,12 @@ func startLiveBridgeContainer(t *testing.T, dataRoot string) *bridge.Client {
 			".",
 		)
 	}
+	return image
+}
 
+func startLiveBridgeContainerImage(t *testing.T, dataRoot, image string) (*bridge.Client, func()) {
+	t.Helper()
+	repoRoot := findRepoRoot(t)
 	args := []string{
 		"run", "-d", "--rm",
 		"-e", "BRIDGE_TCP_ADDR=:1455",
@@ -139,20 +224,28 @@ func startLiveBridgeContainer(t *testing.T, dataRoot string) *bridge.Client {
 	if containerID == "" {
 		t.Fatal("docker run did not return a container id")
 	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = exec.CommandContext(ctx, "docker", "rm", "-f", containerID).Run() //nolint:gosec // live test runs operator-controlled docker cleanup.
-	})
+	var client *bridge.Client
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			if client != nil {
+				_ = client.Close()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = exec.CommandContext(ctx, "docker", "rm", "-f", containerID).Run() //nolint:gosec // live test runs operator-controlled docker cleanup.
+		})
+	}
+	t.Cleanup(stop)
 
 	port := waitForDockerBridgePort(t, containerID)
-	client, err := bridge.Dial(context.Background(), net.JoinHostPort("127.0.0.1", port))
+	var err error
+	client, err = bridge.Dial(context.Background(), net.JoinHostPort("127.0.0.1", port))
 	if err != nil {
 		t.Fatalf("dial bridge: %v", err)
 	}
-	t.Cleanup(func() { _ = client.Close() })
 	waitForBridgeExec(t, client)
-	return client
+	return client, stop
 }
 
 func findRepoRoot(t *testing.T) string {

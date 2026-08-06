@@ -13,9 +13,11 @@ import (
 
 const (
 	WorkspaceContractPath           = "/opt/memoh/workspace-contract.json"
-	CurrentWorkspaceContractVersion = 1
+	CurrentWorkspaceContractVersion = 2
 	WorkspaceToolkitDir             = "/opt/memoh/toolkit"
 	WorkspaceScriptsDir             = "/opt/memoh/scripts"
+	WorkspaceInitPath               = "/usr/bin/tini"
+	WorkspaceBridgePath             = "/opt/memoh/bridge"
 )
 
 var ErrWorkspaceImageIncompatible = errors.New("workspace image is incompatible")
@@ -37,6 +39,7 @@ type WorkspaceContractPaths struct {
 }
 
 var requiredWorkspaceExecutables = []string{
+	WorkspaceInitPath,
 	WorkspaceToolkitDir + "/bin/node",
 	WorkspaceToolkitDir + "/bin/python3",
 	WorkspaceToolkitDir + "/bin/uv",

@@ -1,7 +1,7 @@
 import { useQueryCache } from '@pinia/colada'
 import { postProvidersByIdImportModels } from '@memohai/sdk'
 
-const MODEL_QUERY_KEYS = ['provider-models', 'models', 'all-models'] as const
+const MODEL_QUERY_KEYS = ['provider-models', 'models'] as const
 
 export function useProviderModelCatalog() {
   const queryCache = useQueryCache()

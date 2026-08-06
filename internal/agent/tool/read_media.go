@@ -25,7 +25,14 @@ var readMediaSupportedMimeTypes = map[string]struct{}{
 	"image/jpeg": {},
 	"image/png":  {},
 	"image/webp": {},
+	// PDFs ride the same pipeline but surface as FileBase64 for native
+	// provider document input instead of ImageBase64.
+	"application/pdf": {},
 }
+
+// readMediaFileMaxBytes caps document payloads below the per-attachment
+// native-input budget (12MB binary; base64 inflates 4/3 on the wire).
+const readMediaFileMaxBytes = 12 * 1024 * 1024
 
 // ReadMediaToolResult is the public result returned to the model.
 type ReadMediaToolResult struct {
@@ -37,12 +44,16 @@ type ReadMediaToolResult struct {
 }
 
 // ReadMediaToolOutput is the internal execution result used by the agent to
-// inject the image into the next Twilight AI step while keeping the visible
-// tool result lightweight.
+// inject the media into the next Twilight AI step while keeping the visible
+// tool result lightweight. Exactly one of the Image/File pairs is populated:
+// images go through ImageBase64, documents (PDF) through FileBase64.
 type ReadMediaToolOutput struct {
 	Public         ReadMediaToolResult
 	ImageBase64    string
 	ImageMediaType string
+	FileBase64     string
+	FileMediaType  string
+	Filename       string
 }
 
 // mimeSniffSize is the number of bytes http.DetectContentType needs.
@@ -91,16 +102,36 @@ func ReadImageFromContainer(ctx context.Context, client *bridge.Client, path str
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
+	public := ReadMediaToolResult{
+		OK:   true,
+		Path: path,
+		Mime: mimeType,
+		Size: len(data),
+	}
+	if mimeType == "application/pdf" {
+		if int64(len(data)) > readMediaFileMaxBytes {
+			return readMediaErrorResult(fmt.Sprintf("failed to load document: file exceeds %d bytes", readMediaFileMaxBytes))
+		}
+		return ReadMediaToolOutput{
+			Public:        public,
+			FileBase64:    encoded,
+			FileMediaType: mimeType,
+			Filename:      filenameFromPath(path),
+		}
+	}
 	return ReadMediaToolOutput{
-		Public: ReadMediaToolResult{
-			OK:   true,
-			Path: path,
-			Mime: mimeType,
-			Size: len(data),
-		},
+		Public:         public,
 		ImageBase64:    encoded,
 		ImageMediaType: mimeType,
 	}
+}
+
+func filenameFromPath(path string) string {
+	path = strings.TrimSpace(path)
+	if idx := strings.LastIndexAny(path, "/\\"); idx >= 0 {
+		path = path[idx+1:]
+	}
+	return path
 }
 
 func readMediaErrorResult(message string) ReadMediaToolOutput {
@@ -124,11 +155,11 @@ func detectReadMediaMime(data []byte) (string, error) {
 
 	switch {
 	case sniffedMime == "":
-		return "", errors.New("only supports PNG, JPEG, GIF, or WebP image bytes")
+		return "", errors.New("only supports PNG, JPEG, GIF, WebP image or PDF document bytes")
 	case isSupportedReadMediaMime(sniffedMime):
 		return sniffedMime, nil
 	default:
-		return "", errors.New("only supports PNG, JPEG, GIF, or WebP image bytes")
+		return "", errors.New("only supports PNG, JPEG, GIF, WebP image or PDF document bytes")
 	}
 }
 

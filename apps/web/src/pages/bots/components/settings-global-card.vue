@@ -1,8 +1,11 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
   <SettingsSection :title="$t('bots.settings.blocks.global')">
-    <SettingsRow :label="$t('bots.settings.chatLanguage')">
-      <div class="w-52">
+    <SettingsRow
+      :label="$t('bots.settings.chatLanguage')"
+      stack="sm"
+    >
+      <div class="w-full sm:w-52">
         <SearchableSelectPopover
           :model-value="form.language || 'auto'"
           :options="languageOptions"
@@ -17,8 +20,11 @@
       </div>
     </SettingsRow>
 
-    <SettingsRow :label="$t('bots.timezone')">
-      <div class="w-52">
+    <SettingsRow
+      :label="$t('bots.timezone')"
+      stack="sm"
+    >
+      <div class="w-full sm:w-52">
         <TimezoneSelect
           :model-value="form.timezone || emptyTimezoneValue"
           :placeholder="$t('bots.timezonePlaceholder')"

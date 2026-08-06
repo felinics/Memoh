@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  cloneToolApprovalConfig,
   defaultToolApprovalConfig,
-  dirtyToolApprovalTargetIds,
   normalizeToolApprovalConfig,
   parseToolApprovalRules,
-  saveDirtyToolApprovalTargets,
 } from './tool-approval-config'
 
 describe('normalizeToolApprovalConfig', () => {
@@ -62,27 +59,5 @@ describe('tool approval drafts', () => {
       '#literal',
       '!literal',
     ])
-  })
-
-  it('saves only dirty targets and reports partial failures', async () => {
-    const native = defaultToolApprovalConfig('native')
-    const remote = defaultToolApprovalConfig('remote')
-    const drafts = {
-      native: cloneToolApprovalConfig(native),
-      remote: cloneToolApprovalConfig(remote),
-    }
-    drafts.native.read.force_review_globs = ['/etc/**']
-    drafts.remote.exec.bypass_commands = ['git status']
-    expect(dirtyToolApprovalTargetIds(drafts, { native, remote })).toEqual(['native', 'remote'])
-
-    const attempted: string[] = []
-    const result = await saveDirtyToolApprovalTargets(drafts, { native, remote }, async (targetId) => {
-      attempted.push(targetId)
-      if (targetId === 'remote') throw new Error('offline')
-    })
-
-    expect(attempted).toEqual(['native', 'remote'])
-    expect(result.savedTargetIds).toEqual(['native'])
-    expect(result.failedTargets.map(item => item.targetId)).toEqual(['remote'])
   })
 })

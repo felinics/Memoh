@@ -43,7 +43,13 @@ type importState struct {
 	entries  map[string]backupZipEntry
 	manifest Manifest
 	idMap    map[string]string
-	warnings []string
+	// workdirMap remaps source workdir ids onto the workdirs recreated (or
+	// matched by path) in the target bot, so restored sessions keep their
+	// bindings. Sessions whose workdir was not restored (remote workdirs,
+	// or an import without the workspace/history sections) degrade to no
+	// workdir.
+	workdirMap map[string]pgtype.UUID
+	warnings   []string
 	// counts records how many items each section restored, surfaced to the UI.
 	counts map[Section]int
 	// createMode is true for a fresh-bot import. In create mode any restore
@@ -469,11 +475,12 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		return ImportResult{}, fmt.Errorf("unsupported backup schema version: %d", manifest.SchemaVersion)
 	}
 	state := &importState{
-		entries:  entries,
-		manifest: manifest,
-		idMap:    map[string]string{},
-		warnings: append([]string(nil), manifest.Warnings...),
-		counts:   map[Section]int{},
+		entries:    entries,
+		manifest:   manifest,
+		idMap:      map[string]string{},
+		workdirMap: map[string]pgtype.UUID{},
+		warnings:   append([]string(nil), manifest.Warnings...),
+		counts:     map[Section]int{},
 	}
 
 	profile, err := readEntry[bots.Bot](state, "bot/profile.json")
@@ -585,6 +592,15 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 	if (opts.wants(SectionSettings) || opts.wants(SectionWorkspace)) && hasEntry(state.entries, "bot/workspace_resource_limits.json") {
 		if err := restore("workspace resource limits import failed", func() error {
 			return s.restoreWorkspaceResourceLimits(ctx, targetBotID, state)
+		}); err != nil {
+			return err
+		}
+	}
+	// Workdirs must restore before history: restored sessions reference the
+	// recreated workdir rows through a real foreign key.
+	if (opts.wants(SectionWorkspace) || opts.wants(SectionHistory)) && hasEntry(state.entries, "bot/workdirs.json") {
+		if err := restore("workdir import failed", func() error {
+			return s.restoreWorkdirs(ctx, targetBotID, actorUserID, state)
 		}); err != nil {
 			return err
 		}
@@ -951,24 +967,24 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	overlayProvider := eff.OverlayProvider
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
-		ChatModelID:             modelID(eff.ChatModelID, deps.models),
+		ChatModelID:             ptrStringAllowEmpty(modelID(eff.ChatModelID, deps.models)),
 		ChatRuntime:             ptrStringAllowEmpty(eff.ChatRuntime),
 		ChatACPAgentID:          ptrStringAllowEmpty(eff.ChatACPAgentID),
 		ChatACPProjectPath:      ptrStringAllowEmpty(eff.ChatACPProjectPath),
 		ChatACPProjectMode:      ptrStringAllowEmpty(eff.ChatACPProjectMode),
-		ImageModelID:            modelID(eff.ImageModelID, deps.models),
-		SearchProviderID:        modelID(eff.SearchProviderID, deps.searchProviders),
+		ImageModelID:            ptrStringAllowEmpty(modelID(eff.ImageModelID, deps.models)),
+		SearchProviderID:        ptrStringAllowEmpty(modelID(eff.SearchProviderID, deps.searchProviders)),
 		FetchProviderID:         &fetchProviderID,
-		MemoryProviderID:        modelID(eff.MemoryProviderID, deps.memoryProviders),
-		TtsModelID:              modelID(eff.TtsModelID, deps.models),
-		TranscriptionModelID:    modelID(eff.TranscriptionModelID, deps.models),
-		Language:                eff.Language,
+		MemoryProviderID:        ptrStringAllowEmpty(modelID(eff.MemoryProviderID, deps.memoryProviders)),
+		TtsModelID:              ptrStringAllowEmpty(modelID(eff.TtsModelID, deps.models)),
+		TranscriptionModelID:    ptrStringAllowEmpty(modelID(eff.TranscriptionModelID, deps.models)),
+		Language:                ptrStringAllowEmpty(eff.Language),
 		AclDefaultEffect:        eff.AclDefaultEffect,
 		Timezone:                &timezone,
 		ReasoningEffort:         &reasoningEffort,
 		HeartbeatEnabled:        &heartbeatEnabled,
 		HeartbeatInterval:       &heartbeatInterval,
-		HeartbeatModelID:        modelID(eff.HeartbeatModelID, deps.models),
+		HeartbeatModelID:        ptrStringAllowEmpty(modelID(eff.HeartbeatModelID, deps.models)),
 		CompactionEnabled:       &compactionEnabled,
 		CompactionThreshold:     &compactionThreshold,
 		CompactionTargetPercent: &compactionTargetPercent,
@@ -983,6 +999,84 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		OverlayConfig:           eff.OverlayConfig,
 	})
 	return err
+}
+
+// restoreWorkdirs recreates the backup's native-workspace workdirs and
+// fills state.workdirMap for the session remap in restoreHistory. Directory
+// existence is deliberately not validated here: the workspace may not be
+// running yet (or the files section may not be part of this import), and a
+// workdir pointing at a missing directory fails visibly on the first agent
+// turn, which the user can fix by recreating the directory.
+func (s *Service) restoreWorkdirs(ctx context.Context, botID, actorUserID string, state *importState) error {
+	if s.workdirs == nil {
+		return errors.New("workdir store not configured")
+	}
+	workdirs, err := readEntry[[]backupWorkdir](state, "bot/workdirs.json")
+	if err != nil {
+		return err
+	}
+	if len(workdirs) == 0 {
+		return nil
+	}
+	existing, err := s.workdirs.ListWorkdirs(ctx, botID, true)
+	if err != nil {
+		return fmt.Errorf("list existing workdirs: %w", err)
+	}
+	nativeByPath := map[string]dbstore.BotWorkdirRecord{}
+	for _, record := range existing {
+		if record.RemoteBindingID == "" && record.ArchivedAt.IsZero() {
+			nativeByPath[record.Path] = record
+		}
+	}
+	restored := 0
+	for _, item := range workdirs {
+		if strings.TrimSpace(item.Path) == "" || strings.TrimSpace(item.Name) == "" {
+			state.warnings = append(state.warnings, "workdir entry with empty name or path skipped")
+			continue
+		}
+		if match, ok := nativeByPath[item.Path]; ok {
+			// Merge mode: the target bot already has a live workdir for this
+			// directory — bind restored sessions onto it instead of failing
+			// the unique path constraint.
+			state.workdirMap[item.ID] = optionalUUID(match.ID)
+			continue
+		}
+		created, err := s.workdirs.CreateWorkdir(ctx, dbstore.CreateBotWorkdirInput{
+			BotID:           botID,
+			Name:            item.Name,
+			TargetKind:      "native",
+			Path:            item.Path,
+			CreatedByUserID: strings.TrimSpace(actorUserID),
+		})
+		if err != nil {
+			return fmt.Errorf("workdir %q: %w", item.Name, err)
+		}
+		archived := false
+		if item.Archived {
+			if err := s.workdirs.ArchiveWorkdir(ctx, botID, created.ID); err != nil {
+				state.warnings = append(state.warnings, "workdir archive flag restore failed for "+item.Name+": "+err.Error())
+			} else {
+				archived = true
+			}
+		}
+		state.workdirMap[item.ID] = optionalUUID(created.ID)
+		// nativeByPath is the LIVE path index — it is what makes a later
+		// backup entry for the same directory reuse this workdir instead of
+		// tripping the live-path unique constraint. A workdir we just
+		// archived is not live: registering it would make a later live entry
+		// for the same directory look already-restored, silently remapping
+		// its sessions onto the archived workdir and never recreating the
+		// live one. Live-path uniqueness ignores archived rows, so the later
+		// entry creates cleanly.
+		if !archived {
+			nativeByPath[item.Path] = created
+		}
+		restored++
+	}
+	if restored > 0 {
+		state.counts[SectionWorkspace] += restored
+	}
+	return nil
 }
 
 func (s *Service) restoreWorkspaceResourceLimits(ctx context.Context, botID string, state *importState) error {
@@ -1223,6 +1317,13 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			metadata = rebindRestoredRuntimeOwner(metadata, actorUserID)
 			runtimeMetadata = rebindRestoredRuntimeOwner(runtimeMetadata, actorUserID)
 		}
+		// Remap the source workdir binding onto the recreated workdir. A
+		// missing map entry (remote workdir, or an import without workdirs)
+		// degrades the session to no workdir rather than tripping the FK.
+		workdirID := pgtype.UUID{}
+		if item.WorkdirID.Valid {
+			workdirID = state.workdirMap[item.WorkdirID.String()]
+		}
 		created, err := q.CreateSession(ctx, sqlc.CreateSessionParams{
 			BotID:           pgBotID,
 			ChannelType:     item.ChannelType,
@@ -1234,6 +1335,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			Metadata:        metadata,
 			ParentSessionID: parentSessionID,
 			CreatedByUserID: optionalUUID(actorUserID),
+			WorkdirID:       workdirID,
 		})
 		if err != nil {
 			return fmt.Errorf("session: %w", err)

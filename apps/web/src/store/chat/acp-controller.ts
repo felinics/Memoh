@@ -36,6 +36,7 @@ export function createACPController(deps: {
   removeSessionFromList: (sessionId: string) => void
   ensureBot: () => Promise<string | null>
   knownSession: (sessionId: string) => SessionSummary | null | undefined
+  draftWorkdirIdFor: (botId: string, opts: { acp: boolean }) => string
 }) {
   const runtimeRegistry = createACPRuntimeRegistry({
     currentBotId: deps.currentBotId,
@@ -129,6 +130,7 @@ export function createACPController(deps: {
     endDraftCreation: target => {
       deps.draftSessionCreations.delete(deps.draftCreationKey(target))
     },
+    draftWorkdirIdFor: deps.draftWorkdirIdFor,
   })
 
   const draftViewRequested = ref<{

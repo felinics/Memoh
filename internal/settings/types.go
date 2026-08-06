@@ -54,26 +54,35 @@ type Settings struct {
 }
 
 type UpsertRequest struct {
-	ChatModelID             string              `json:"chat_model_id,omitempty"`
-	ChatRuntime             *string             `json:"chat_runtime,omitempty"`
-	ChatACPAgentID          *string             `json:"chat_acp_agent_id,omitempty"`
-	ChatACPProjectPath      *string             `json:"chat_acp_project_path,omitempty"`
-	ChatACPProjectMode      *string             `json:"chat_acp_project_mode,omitempty"`
-	ImageModelID            string              `json:"image_model_id,omitempty"`
-	SearchProviderID        string              `json:"search_provider_id,omitempty"`
-	FetchProviderID         *string             `json:"fetch_provider_id,omitempty"`
-	MemoryProviderID        string              `json:"memory_provider_id,omitempty"`
-	TtsModelID              string              `json:"tts_model_id,omitempty"`
-	TranscriptionModelID    string              `json:"transcription_model_id,omitempty"`
-	VideoModelID            string              `json:"video_model_id,omitempty"`
-	Language                string              `json:"language,omitempty"`
-	CommandUILanguage       string              `json:"command_ui_language,omitempty"`
-	AclDefaultEffect        string              `json:"acl_default_effect,omitempty"`
-	Timezone                *string             `json:"timezone,omitempty"`
-	ReasoningEffort         *string             `json:"reasoning_effort,omitempty"`
-	HeartbeatEnabled        *bool               `json:"heartbeat_enabled,omitempty"`
-	HeartbeatInterval       *int                `json:"heartbeat_interval,omitempty"`
-	HeartbeatModelID        string              `json:"heartbeat_model_id,omitempty"`
+	// Reference fields below use pointer semantics so autosaving clients can
+	// clear a selection: nil = keep current, "" = clear, value = set. The
+	// service mirrors each into a `<field>_set` SQL flag (same pattern as
+	// FetchProviderID / CompactionModelID); plain strings would make ""
+	// indistinguishable from "not sent".
+	ChatModelID          *string `json:"chat_model_id,omitempty"`
+	ChatRuntime          *string `json:"chat_runtime,omitempty"`
+	ChatACPAgentID       *string `json:"chat_acp_agent_id,omitempty"`
+	ChatACPProjectPath   *string `json:"chat_acp_project_path,omitempty"`
+	ChatACPProjectMode   *string `json:"chat_acp_project_mode,omitempty"`
+	ImageModelID         *string `json:"image_model_id,omitempty"`
+	SearchProviderID     *string `json:"search_provider_id,omitempty"`
+	FetchProviderID      *string `json:"fetch_provider_id,omitempty"`
+	MemoryProviderID     *string `json:"memory_provider_id,omitempty"`
+	TtsModelID           *string `json:"tts_model_id,omitempty"`
+	TranscriptionModelID *string `json:"transcription_model_id,omitempty"`
+	VideoModelID         *string `json:"video_model_id,omitempty"`
+	// Language follows the same pointer rule; "" normalizes to DefaultLanguage
+	// ("auto") rather than clearing the column.
+	Language          *string `json:"language,omitempty"`
+	CommandUILanguage string  `json:"command_ui_language,omitempty"`
+	AclDefaultEffect  string  `json:"acl_default_effect,omitempty"`
+	Timezone          *string `json:"timezone,omitempty"`
+	ReasoningEffort   *string `json:"reasoning_effort,omitempty"`
+	HeartbeatEnabled  *bool   `json:"heartbeat_enabled,omitempty"`
+	HeartbeatInterval *int    `json:"heartbeat_interval,omitempty"`
+	// HeartbeatModelID joins the pointer group above (nil/""/value) so the
+	// heartbeat tab's autosave can clear a model override.
+	HeartbeatModelID        *string             `json:"heartbeat_model_id,omitempty"`
 	CompactionEnabled       *bool               `json:"compaction_enabled,omitempty"`
 	CompactionThreshold     *int                `json:"compaction_threshold,omitempty"`
 	CompactionTargetPercent *int                `json:"compaction_target_percent,omitempty"`

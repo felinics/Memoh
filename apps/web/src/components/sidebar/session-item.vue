@@ -1,19 +1,23 @@
 <template>
   <ContextMenu>
     <ContextMenuTrigger as-child>
+      <!-- active: mirrors the hover fill so a touch press (incl. the hold that
+           opens the context menu) gives visible feedback — touch has no hover,
+           and without this the long-press felt dead until the menu appeared. -->
       <div
         role="button"
         tabindex="0"
         class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        :class="isActive ? '' : 'hover:bg-[color:var(--sidebar-hover)]'"
+        :class="isActive ? '' : rowInteractionClass"
         :data-ui-selected="isActive ? '' : undefined"
         :title="hoverTitle"
         @click="$emit('select', session)"
         @keydown.enter.prevent="$emit('select', session)"
         @keydown.space.prevent="$emit('select', session)"
       >
-        <!-- Native session rows stay text-only. ACP rows carry only the agent icon
-             because Recent now mixes local model chats with external-agent chats. -->
+        <!-- Native session rows stay text-only. ACP rows carry the agent icon
+             and schedule runs a yellow clock, because the unified Recents list
+             mixes model chats, external-agent chats, and schedule runs. -->
         <span
           v-if="isACPSession"
           class="mr-2 flex size-4 shrink-0 items-center justify-center text-muted-foreground"
@@ -23,6 +27,18 @@
           <component
             :is="acpAgentIcon(acpAgentId, true)"
             class="size-4"
+            aria-hidden="true"
+          />
+        </span>
+        <span
+          v-else-if="isScheduleSession"
+          class="mr-2 flex size-4 shrink-0 items-center justify-center"
+          role="img"
+          :aria-label="t('chat.activityBar.schedule')"
+        >
+          <!-- Status icons stay state-constant on the accent ramp. -->
+          <Clock
+            class="size-4 text-[color:var(--accent-yellow)]"
             aria-hidden="true"
           />
         </span>
@@ -127,7 +143,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { Clock, LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
@@ -143,7 +159,7 @@ import {
 } from '@felinic/ui'
 import { acpAgentDisplayName, acpAgentIcon, normalizeACPAgentID } from '@/utils/acp'
 import { splitScriptRuns } from '@/utils/script-runs'
-import { normalizedRuntimeType } from '@/store/chat-list.utils'
+import { normalizedRuntimeType, normalizedSessionMode } from '@/store/chat-list.utils'
 
 const props = defineProps<{
   session: SessionSummary
@@ -162,6 +178,12 @@ const { t } = useI18n()
 
 const menuOpen = ref(false)
 
+// Row interaction fill: hover for real pointers, the same fill on :active so a
+// touch press (incl. the long-press that opens the context menu) reads as
+// feedback. --sidebar-hover is the sidebar family's pinned row fill; waiver
+// pattern follows nav-button.vue (component-owned chrome, no global token).
+const rowInteractionClass = 'hover:bg-[color:var(--sidebar-hover)] active:bg-[color:var(--sidebar-hover)]' /* ui-allow-style */
+
 const titleRuns = computed(() =>
   splitScriptRuns((props.session.title ?? '').trim() || t('chat.untitledSession')),
 )
@@ -177,6 +199,7 @@ const acpAgentId = computed(() => normalizeACPAgentID(
   props.session.runtime_metadata?.acp_agent_id ?? props.session.metadata?.acp_agent_id,
 ))
 const isACPSession = computed(() => normalizedRuntimeType(props.session) === 'acp_agent')
+const isScheduleSession = computed(() => normalizedSessionMode(props.session) === 'schedule')
 const acpAgentLabel = computed(() => acpAgentDisplayName(acpAgentId.value, t('chat.sessionTypeACPAgent')))
 
 function routeMeta(): Record<string, unknown> {

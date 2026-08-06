@@ -42,24 +42,24 @@
                 <Spinner class="size-3.5" />
               </div>
 
-              <!-- Read-only sessions (subagent / system / synced channel
-                   threads) can't take new input, so an empty one states why it
-                   has nothing. A fresh, writable chat instead gets the centered
-                   welcome composer below, never a stray line in a blank pane. -->
+              <!-- A session with a live run but no messages yet (a subagent
+                   that has not produced output) reads as starting, not empty. -->
               <div
-                v-if="messages.length === 0 && !loadingChats && !loadingMessages && activeChatReadOnly"
+                v-if="messages.length === 0 && !loadingChats && !loadingMessages && streaming"
                 class="flex items-center justify-center min-h-75"
               >
-                <p
-                  v-if="activeSession?.type === 'subagent'"
-                  class="text-muted-foreground text-xs"
-                >
-                  {{ $t('chat.emptySubagent') }}
-                </p>
-                <p
-                  v-else
-                  class="text-muted-foreground text-xs"
-                >
+                <Spinner class="size-3.5" />
+              </div>
+
+              <!-- Read-only sessions (system / synced channel threads) can't
+                   take new input, so an empty one states why it has nothing.
+                   A fresh, writable chat instead gets the centered welcome
+                   composer below, never a stray line in a blank pane. -->
+              <div
+                v-else-if="messages.length === 0 && !loadingChats && !loadingMessages && activeChatReadOnly"
+                class="flex items-center justify-center min-h-75"
+              >
+                <p class="text-muted-foreground text-xs">
                   {{ $t('chat.emptySystemSession') }}
                 </p>
               </div>
@@ -97,7 +97,6 @@
                   >
                     <MessageItem
                       :message="msg"
-                      :session-type="activeSession?.type"
                       :bot-id="currentBotId"
                       :channel-thread="isChannelThread"
                       :channel-platform="channelPlatform"
@@ -180,6 +179,7 @@
         :class="isWelcome
           ? 'inset-0 flex flex-col items-center justify-start pt-[38dvh]'
           : 'inset-x-0 bottom-0 pt-2 pb-8'"
+        :style="composerLiftPx > 0 ? { bottom: `${composerLiftPx}px` } : undefined"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
              (its vertical centre). The box is solid and sits above the messages, so
@@ -446,6 +446,10 @@
                   @input="syncMultiline"
                 />
 
+                <!-- max-md size bumps on the composer controls (here, the model
+                     trigger, and the send ring below) grow the tap targets from
+                     36px to the 44px touch floor on phones; desktop keeps the
+                     compact pill. -->
                 <DropdownMenu v-model:open="agentPopoverOpen">
                   <DropdownMenuTrigger as-child>
                     <Button
@@ -453,7 +457,7 @@
                       variant="ghost"
                       :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
                       :title="$t('chat.composerActions')"
-                      class="order-1 size-9 rounded-full text-foreground/85"
+                      class="order-1 size-9 max-md:size-11 rounded-full text-foreground/85"
                       :class="isMultiline ? 'self-end' : 'self-center'"
                       :aria-label="$t('chat.composerActions')"
                     >
@@ -502,6 +506,26 @@
                           v-if="activeACPAgentId === normalizedProfileID(profile.id)"
                           class="ml-auto"
                         />
+                      </DropdownMenuItem>
+                    </template>
+                    <!-- Folder-bound chats pin the workspace target for the
+                       session's whole life, so the computer switcher gives way
+                       to a read-only folder entry; a draft can still opt out
+                       before the session exists. -->
+                    <template v-if="composerFolderLocked">
+                      <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuLabel>{{ $t('chat.folder') }}</DropdownMenuLabel>
+                      <DropdownMenuItem disabled>
+                        <FolderOpen class="size-4 shrink-0" />
+                        <span class="min-w-0 flex-1 truncate">{{ composerFolderName }}</span>
+                        <Check class="ml-auto" />
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-if="!activeSession"
+                        @select="clearWorkingFolder"
+                      >
+                        <X class="size-4 shrink-0" />
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.folderDetachDraft') }}</span>
                       </DropdownMenuItem>
                     </template>
                     <template v-if="showComputersMenu">
@@ -561,7 +585,7 @@
                         />
                       </DropdownMenuItem>
                     </template>
-                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu" />
+                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu || composerFolderLocked" />
                     <DropdownMenuItem
                       :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
                       @select="fileInput?.click()"
@@ -586,7 +610,7 @@
                         type="button"
                         variant="ghost"
                         :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
-                        class="composer-pill-press h-9 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
+                        class="composer-pill-press h-9 max-md:h-11 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
                         :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
                         <Spinner
@@ -601,7 +625,7 @@
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent
-                      class="w-80 overflow-hidden p-0"
+                      class="w-80 max-w-[calc(100vw-2rem)] overflow-hidden p-0"
                       align="end"
                       side="top"
                       :side-offset="4"
@@ -646,12 +670,12 @@
                     >{{ activeACPProjectLabel }}</span>
                   </Button>
 
-                  <div class="relative size-9 shrink-0">
+                  <div class="relative size-9 max-md:size-11 shrink-0">
                     <SessionInfoRing
                       v-if="!activeIsACP"
                       :override-model-id="overrideModelId"
                       :fallback-context-window="activeModel?.config?.context_window ?? null"
-                      class="absolute inset-0 size-9 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                      class="absolute inset-0 size-9 max-md:size-11 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
                       :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
                     />
                     <!-- Send and stop are one brand circle: the surface never
@@ -663,7 +687,7 @@
                       variant="brand"
                       :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel)"
                       :aria-label="streaming ? 'Stop generating response' : 'Send message'"
-                      class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
+                      class="absolute inset-0 size-9 max-md:size-11 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
                       @click="streaming ? chatStore.abort(paneTarget) : handleSend()"
                     >
@@ -732,6 +756,7 @@ import {
 } from 'lucide-vue-next'
 import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Spinner, menuChromeClass, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
+import { useWorkdirsStore } from '@/store/workdirs'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
@@ -761,9 +786,11 @@ import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useCom
 import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultQuickActionText, isCommandResultItemSelectable } from './slash-command-result'
-import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, shouldRefreshACPComposerConfig } from './chat-pane-send'
+import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
+import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
@@ -841,6 +868,9 @@ const activeChatReadOnly = computed(() => chatStore.chatReadOnlyFor(paneTarget.v
 const activeChatCanFork = computed(() => chatStore.chatCanForkFor(paneTarget.value))
 const overrideModelId = ref('')
 const overrideReasoningEffort = ref('')
+// Set once the user picks a model in this pane, so late-arriving defaults
+// (a subagent's pinned model, bot settings) never overwrite their choice.
+const userPickedModel = ref(false)
 const paneComposerScope = computed(() => {
   const botId = paneTarget.value.botId
   return botId ? `${botId}:${paneTarget.value.viewId}` : 'chat'
@@ -854,8 +884,8 @@ const hasRenderedSession = computed(() =>
 )
 
 // A fresh, writable chat opens with the composer centred and a greeting above
-// it. Read-only sessions (subagent / system / synced channel threads) hide the
-// composer entirely, so they never reach this state.
+// it. Read-only sessions (system / synced channel threads) hide the composer
+// entirely, so they never reach this state.
 const isWelcome = computed(() =>
   !!currentBotId.value
   && !hasRenderedSession.value
@@ -876,9 +906,13 @@ function pickWelcomeGreetingIndex() {
   return Math.floor(Math.random() * WELCOME_GREETING_KEYS.length)
 }
 const welcomeGreetingIndex = ref(pickWelcomeGreetingIndex())
-const welcomeGreeting = computed(() =>
-  t(WELCOME_GREETING_KEYS[welcomeGreetingIndex.value] ?? WELCOME_GREETING_KEYS[0]),
-)
+const welcomeGreeting = computed(() => {
+  // A draft under a working folder names its destination instead of the
+  // generic rotation — the greeting doubles as the binding's visibility.
+  const folderName = draftWorkingFolder.value?.name?.trim()
+  if (folderName) return t('chat.welcome.folder', { name: folderName })
+  return t(WELCOME_GREETING_KEYS[welcomeGreetingIndex.value] ?? WELCOME_GREETING_KEYS[0])
+})
 watch([isWelcome, currentBotId, () => activeSession.value?.id], ([welcome]) => {
   if (welcome) welcomeGreetingIndex.value = pickWelcomeGreetingIndex()
 })
@@ -1068,10 +1102,52 @@ const forkSourceDividerAfterIndex = computed<number | null>(() => {
 const activeIsPendingACP = computed(() => activeChatTarget.value.isPendingACP)
 const activeIsACP = computed(() => activeChatTarget.value.isACP)
 const activeUsesACPComposer = computed(() => activeIsPendingACP.value || activeIsACP.value)
+// ---- workdir binding ----
+// A session bound to a bot workdir (or a draft under the bot's working
+// folder) has its workspace target pinned by that binding: the computer
+// switcher is replaced by a read-only folder entry, and sends carry no
+// explicit workspace_target_id — the backend derives it from the binding.
+const workdirsStore = useWorkdirsStore()
+watch(() => currentBotId.value, (botId) => {
+  if (botId) void workdirsStore.ensureWorkdirs(botId)
+}, { immediate: true })
+const activeSessionWorkdirId = computed(() => (activeSession.value?.workdir_id ?? '').trim())
+const draftWorkingFolder = computed(() => {
+  if (activeSession.value || !currentBotId.value) return null
+  const workdir = workdirsStore.workingWorkdirFor(currentBotId.value)
+  if (!workdir) return null
+  // ACP sessions can only bind native-workspace workdirs; a remote working
+  // workdir is skipped at creation, so don't pretend it applies here.
+  if (activeUsesACPComposer.value && workdir.target_kind === 'remote') return null
+  return workdir
+})
+const composerFolderLocked = computed(() => (
+  !!activeSessionWorkdirId.value || !!draftWorkingFolder.value
+))
+const composerFolderName = computed(() => {
+  if (activeSessionWorkdirId.value) {
+    const workdir = workdirsStore.workdirById(currentBotId.value, activeSessionWorkdirId.value)
+    return workdir?.name?.trim() || t('chat.folderUnavailable')
+  }
+  return draftWorkingFolder.value?.name?.trim() || t('chat.folderUnavailable')
+})
+
+function clearWorkingFolder() {
+  workdirsStore.setWorkingWorkdir(currentBotId.value, null)
+}
+
+// Sends from a folder-bound chat carry no explicit workspace_target_id: the
+// binding decides the target, and a lingering earlier selection would be
+// rejected by the backend as a target conflict.
+const sendWorkspaceTargetId = computed(() => (
+  composerFolderLocked.value ? '' : selectedWorkspaceTargetId.value
+))
+
 const showComputersMenu = computed(() => (
   !activeIsACP.value
   && !activeIsPendingACP.value
   && canWorkspaceRead.value
+  && !composerFolderLocked.value
 ))
 const computerSwitchLocked = computed(() => (
   streaming.value
@@ -1573,6 +1649,34 @@ const activeModel = computed(() => {
   return models.value.find((m) => m.id === id)
 })
 
+// PDFs reach the model natively only when it carries the file-input
+// capability; without it the file lands in the workspace as a path the model
+// cannot open. Warn at attach time so the user is not surprised mid-turn.
+// ACP sessions are exempt — Claude Code / Codex read PDFs themselves.
+const isPdfFile = (file: File) =>
+  file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+
+// Mirrors the backend's nativeAttachmentMaxBinaryBytes: larger PDFs are demoted
+// to the workspace-path fallback even when the model supports file-input.
+const nativePdfMaxBytes = 12 * 1024 * 1024
+
+watch(() => pendingFiles.value.length, (len, prevLen) => {
+  if (len <= (prevLen ?? 0)) return
+  if (activeUsesACPComposer.value) return
+  const model = activeModel.value
+  if (!model) return
+  const added = pendingFiles.value.slice(prevLen ?? 0)
+  if (!model.config?.compatibilities?.includes('file-input')) {
+    if (added.some(isPdfFile)) {
+      toast.warning(t('chat.pdfUnsupportedByModel'))
+    }
+    return
+  }
+  if (added.some((file) => isPdfFile(file) && file.size > nativePdfMaxBytes)) {
+    toast.warning(t('chat.pdfTooLargeForNative'))
+  }
+})
+
 type DefaultACPSettings = {
   chat_runtime?: string
   chat_acp_agent_id?: string
@@ -1692,10 +1796,21 @@ const modelTriggerLabel = computed(() =>
     : selectedModelLabel.value,
 )
 
+// A subagent runs on the model it was pinned to when it was spawned, recorded
+// on its session at creation. The composer has to open on that model: it sends
+// model_id with every message, so defaulting to the bot's chat model would move
+// the agent onto another model the moment a human talks to it — silently, since
+// the picker would still read as "the default".
+const pinnedSubagentModelId = computed(() => resolvePinnedSubagentModelId(
+  activeSession.value?.type,
+  activeSessionMetadata.value,
+  models.value.map(model => model.id),
+))
+
 function initFromBotSettings() {
   if (activeUsesACPComposer.value || !botSettings.value) return
   if (!overrideModelId.value) {
-    overrideModelId.value = botSettings.value.chat_model_id ?? ''
+    overrideModelId.value = pinnedSubagentModelId.value || botSettings.value.chat_model_id || ''
   }
   if (!overrideReasoningEffort.value) {
     // reasoning_effort is the bot's whole reasoning decision now, including
@@ -1706,6 +1821,20 @@ function initFromBotSettings() {
 }
 
 watch([botSettings, activeUsesACPComposer], () => initFromBotSettings(), { immediate: true })
+
+// The session summary and the model list are both fetched, so the pinned model
+// routinely lands after bot settings already seeded the default. Adopt it then
+// too — but never over a model the user picked themselves.
+watch(pinnedSubagentModelId, (pinned, previous) => {
+  if (userPickedModel.value || activeUsesACPComposer.value) return
+  if (pinned) {
+    overrideModelId.value = pinned
+    return
+  }
+  // Repointed off a subagent: hand the composer back to the bot's own default
+  // rather than leaving the agent's pinned model selected for a plain chat.
+  if (previous) overrideModelId.value = botSettings.value?.chat_model_id ?? ''
+}, { immediate: true })
 
 watch(availableReasoningEfforts, (efforts) => {
   if (activeUsesACPComposer.value) return
@@ -1722,12 +1851,21 @@ watch(availableReasoningEfforts, (efforts) => {
 watch(currentBotId, () => {
   overrideModelId.value = ''
   overrideReasoningEffort.value = ''
+  userPickedModel.value = false
+})
+
+// A pane can be repointed at another session without remounting, and the model
+// a user picked belongs to the session they picked it in — clear the flag so the
+// next session's pinned model can still seed the composer.
+watch(() => paneTarget.value.sessionId, () => {
+  userPickedModel.value = false
 })
 
 watch(activeUsesACPComposer, (usesACP, previouslyUsedACP) => {
   if (usesACP === previouslyUsedACP) return
   overrideModelId.value = ''
   overrideReasoningEffort.value = ''
+  userPickedModel.value = false
   if (!usesACP) initFromBotSettings()
 })
 
@@ -1959,6 +2097,7 @@ async function onComposerModelValueSelected(value: string) {
   if (activeUsesACPComposer.value && acpConfigChanging.value) return
   const previousModel = overrideModelId.value
   const previousReasoningEffort = overrideReasoningEffort.value
+  userPickedModel.value = true
   overrideModelId.value = value
   if (!activeUsesACPComposer.value) {
     onModelSelected()
@@ -2030,6 +2169,7 @@ const {
 } = useMediaGallery(messages)
 
 const inputText = ref('')
+const isMobile = useIsMobile()
 const {
   textareaEl,
   composerEl,
@@ -2045,6 +2185,7 @@ const {
   inputText,
   isActive,
   showAttachmentGrid,
+  mobileMultiline: isMobile,
   modelTriggerLabel,
   activeIsACP,
   activeACPProjectLabel,
@@ -2081,7 +2222,18 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
 const dockEl = useTemplateRef<InstanceType<typeof ComposerDock>>('dockEl')
 const { height: dockHeight } = useElementSize(() => dockEl.value?.$el ?? null)
 const dockMaskHeight = computed(() => dockEl.value?.maskHeight ?? `${COMPOSER_MASK_BELOW_PX}px`)
-const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24}px`)
+
+// Virtual-keyboard lift (iOS Safari; Android lifts via the resized layout
+// viewport instead — see useVirtualKeyboard). The whole dock container rises
+// by the keyboard height, and the message column's bottom padding grows by
+// the same amount so follow-mode keeps the last message clear of the lifted
+// composer. While the model picker is open its search field may itself hold
+// focus: lifting then would yank the trigger out from under the popover and
+// fight iOS's own scroll-to-caret, so the lift is suppressed until the picker
+// closes (the plus menu has no focusable input and never hits this).
+const virtualKeyboardHeight = useVirtualKeyboard()
+const composerLiftPx = computed(() => (modelPopoverOpen.value ? 0 : virtualKeyboardHeight.value))
+const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24 + composerLiftPx.value}px`)
 
 // The textarea belongs to the pane, so when the dock hands the input slot
 // back after ask_user is resolved or canceled, it emits and we focus here.
@@ -2335,7 +2487,7 @@ async function handleRetryMessage(messageId: string) {
     target: paneTarget.value,
     modelId: overrideModelId.value,
     reasoningEffort: overrideReasoningEffort.value,
-    workspaceTargetId: selectedWorkspaceTargetId.value,
+    workspaceTargetId: sendWorkspaceTargetId.value,
   })
   await refreshACPComposerConfigAfterSelectionError(result)
   if (!result.ok && result.error) {
@@ -2354,7 +2506,7 @@ async function handleEditMessage(messageId: string, text: string, done?: (starte
       target: paneTarget.value,
       modelId: overrideModelId.value,
       reasoningEffort: overrideReasoningEffort.value,
-      workspaceTargetId: selectedWorkspaceTargetId.value,
+      workspaceTargetId: sendWorkspaceTargetId.value,
     })
     await refreshACPComposerConfigAfterSelectionError(result)
     if (!result.ok && result.error) {
@@ -2411,7 +2563,7 @@ async function handleSend() {
   )
   const sentModelId = overrideModelId.value
   const sentReasoningEffort = overrideReasoningEffort.value
-  const sentWorkspaceTargetId = selectedWorkspaceTargetId.value
+  const sentWorkspaceTargetId = sendWorkspaceTargetId.value
   composerError.value = ''
   inputText.value = ''
   saveInputDraft(sentDraftKey, '')

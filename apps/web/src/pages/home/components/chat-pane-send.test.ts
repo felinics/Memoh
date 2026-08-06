@@ -3,6 +3,7 @@ import {
   captureChatPaneSendContext,
   composerHasNoModel,
   matchesChatPaneSendContext,
+  pinnedSubagentModelId,
   shouldRefreshACPComposerConfig,
 } from './chat-pane-send'
 
@@ -88,5 +89,26 @@ describe('composer model gate', () => {
   it('never blocks an ACP composer, whose agent supplies its own model', () => {
     expect(composerHasNoModel(true, '')).toBe(false)
     expect(composerHasNoModel(true, 'model-1')).toBe(false)
+  })
+})
+
+describe('pinned subagent model', () => {
+  const models = ['model-default', 'model-pinned']
+
+  it('opens a subagent session on the model it was spawned with', () => {
+    expect(pinnedSubagentModelId('subagent', { model_uuid: 'model-pinned' }, models))
+      .toBe('model-pinned')
+  })
+
+  it('leaves non-subagent sessions on the bot default', () => {
+    expect(pinnedSubagentModelId('chat', { model_uuid: 'model-pinned' }, models)).toBe('')
+    expect(pinnedSubagentModelId(undefined, { model_uuid: 'model-pinned' }, models)).toBe('')
+  })
+
+  it('falls back to the bot default when the pinned model is unusable', () => {
+    // Sessions spawned before the model was recorded, and models deleted since.
+    expect(pinnedSubagentModelId('subagent', {}, models)).toBe('')
+    expect(pinnedSubagentModelId('subagent', { model_uuid: '  ' }, models)).toBe('')
+    expect(pinnedSubagentModelId('subagent', { model_uuid: 'model-gone' }, models)).toBe('')
   })
 })

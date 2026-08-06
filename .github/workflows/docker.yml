@@ -201,7 +201,7 @@ jobs:
         if: steps.should-build.outputs.skip != 'true' && env.PUSH != 'true' && matrix.image == 'workspace' && matrix.platform == 'linux/amd64'
         run: |
           docker run --rm memoh-ci-workspace:debian sh -eux -c '
-            grep -q "\"contract_version\": 1" /opt/memoh/workspace-contract.json
+            grep -q "\"contract_version\": 2" /opt/memoh/workspace-contract.json
             ldd --version >/dev/null
             node --version
             python3 --version

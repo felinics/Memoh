@@ -298,6 +298,7 @@ import {
   type AcpprofilePublicProfile,
 } from '@memohai/sdk'
 import { useACPOAuth } from '@/composables/useACPOAuth'
+import { getBotsQueryKey } from '@memohai/sdk/colada'
 import {
   HERMES_CUSTOM_MODEL_VALUE,
   HERMES_PROVIDER_PRESETS,
@@ -582,7 +583,7 @@ function claudeOAuthTextClass(): string {
 
 function invalidateOAuthQueries() {
   void queryCache.invalidateQueries({ key: ['bot', props.botId] })
-  void queryCache.invalidateQueries({ key: ['bots'] })
+  void queryCache.invalidateQueries({ key: getBotsQueryKey() })
 }
 
 function markCodexOAuthAuthorized() {

@@ -135,7 +135,6 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 	hostCfg := &container.HostConfig{
 		Mounts: toDockerMounts(req.Spec.Mounts),
 		DNS:    req.Spec.DNS,
-		Init:   boolPtr(true),
 		PortBindings: nat.PortMap{
 			nat.Port(bridgeTCPPort + "/tcp"): []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: ""}},
 		},
@@ -538,8 +537,6 @@ func hasReadonlyOption(options []string) bool {
 	}
 	return false
 }
-
-func boolPtr(v bool) *bool { return &v }
 
 func cloneLabels(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))

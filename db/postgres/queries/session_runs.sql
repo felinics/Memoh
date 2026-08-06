@@ -190,9 +190,8 @@ WHERE team_id = public.memoh_current_team_id()
 RETURNING *;
 
 -- name: LockSessionRunForAgentStepCommit :one
--- Linearize a complete-step commit against abort and terminal transitions.
--- RequestSessionRunAbort updates the same row, so either the step locks first
--- and commits, or the abort becomes visible here and the step is refused.
+-- Complete steps must precede abort intent; interrupted checkpoints only need
+-- the same active owner because some cancellation paths do not record intent.
 SELECT run_id
 FROM session_runs
 WHERE team_id = public.memoh_current_team_id()
@@ -201,7 +200,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
   AND fencing_token = sqlc.arg(fencing_token)
   AND state IN ('running', 'waiting_decision')
-  AND abort_requested_at IS NULL
+  AND (sqlc.arg(interrupted)::boolean OR abort_requested_at IS NULL)
 FOR UPDATE;
 
 -- name: ListStaleGenerationSessionRuns :many

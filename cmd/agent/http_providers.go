@@ -45,6 +45,7 @@ import (
 	"github.com/memohai/memoh/internal/server"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/version"
+	"github.com/memohai/memoh/internal/workdir"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
@@ -76,9 +77,10 @@ func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sess
 	return h
 }
 
-func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService) *handlers.SessionHandler {
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service) *handlers.SessionHandler {
 	handler := handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
 	handler.SetThreadEnricher(routeService)
+	handler.SetWorkdirService(workdirService)
 	return handler
 }
 

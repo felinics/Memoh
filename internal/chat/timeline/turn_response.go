@@ -4,18 +4,46 @@ import (
 	"encoding/json"
 	"strings"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/agent/turn"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/memohai/memoh/internal/messageconv"
 )
 
-// DecodeTurnResponseEntry converts a persisted bot message into a TR entry for
-// pipeline context composition.
+// DecodeTurnResponseEntries converts a chronological run of persisted bot
+// messages into TR entries for pipeline context composition.
 //
+// Decoding the run as a whole is what lets an interrupted checkpoint's
+// reasoning be projected only while it is still the unfinished frontier; a
+// single message cannot tell whether a completed answer already followed it.
+func DecodeTurnResponseEntries(msgs []messagepkg.Message) []TurnResponseEntry {
+	checkpoint := messagepkg.LatestInterruptedCheckpoint(len(msgs), func(i int) (bool, bool) {
+		return strings.EqualFold(strings.TrimSpace(msgs[i].Role), "assistant"),
+			msgs[i].Metadata[messagepkg.AgentStepInterruptedMetadataKey] == true
+	})
+	entries := make([]TurnResponseEntry, 0, len(msgs))
+	for i, msg := range msgs {
+		if entry, ok := decodeTurnResponseEntry(msg, i == checkpoint); ok {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+// DecodeTurnResponseEntry converts a single persisted bot message into a TR
+// entry. Reasoning is always dropped: an interrupted checkpoint's reasoning
+// needs the surrounding history to know whether it is still live, so callers
+// composing context use DecodeTurnResponseEntries instead.
+func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
+	return decodeTurnResponseEntry(msg, false)
+}
+
 // Tool calls and tool results are preserved as native structured content
 // parts. They must not be rendered as assistant-visible pseudo-protocol text:
 // models may imitate that text instead of emitting real provider tool calls.
-func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
-	role := strings.TrimSpace(msg.Role)
+func decodeTurnResponseEntry(msg messagepkg.Message, liveCheckpoint bool) (TurnResponseEntry, bool) {
+	role := strings.ToLower(strings.TrimSpace(msg.Role))
 	if role != "assistant" && role != "tool" {
 		return TurnResponseEntry{}, false
 	}
@@ -30,6 +58,9 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 	case "tool":
 		rawContent = nativeToolRoleContent(modelMsg)
 	default:
+		if liveCheckpoint {
+			modelMsg = ProjectInterruptedReasoning(modelMsg)
+		}
 		rawContent = nativeAssistantContent(modelMsg)
 	}
 
@@ -44,6 +75,54 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 		RawContent:      rawContent,
 		SourceMessageID: msg.ID,
 	}, true
+}
+
+// ProjectInterruptedReasoning exposes an unfinished reasoning part as text so
+// every provider can continue it on the next turn. Other message fields and
+// content parts remain unchanged.
+func ProjectInterruptedReasoning(modelMsg turn.ModelMessage) turn.ModelMessage {
+	message := messageconv.ModelMessageToSDKMessage(modelMsg)
+	var reasoning strings.Builder
+	parts := make([]sdk.MessagePart, 0, len(message.Content))
+	for _, part := range message.Content {
+		switch p := part.(type) {
+		case sdk.ReasoningPart:
+			reasoning.WriteString(p.Text)
+		case *sdk.ReasoningPart:
+			reasoning.WriteString(p.Text)
+		default:
+			parts = append(parts, part)
+		}
+	}
+	if strings.TrimSpace(reasoning.String()) == "" {
+		return modelMsg
+	}
+
+	checkpoint := messagepkg.AgentStepInterruptedReasoningPrefix + reasoning.String()
+	for i, part := range parts {
+		switch p := part.(type) {
+		case sdk.TextPart:
+			p.Text = checkpoint + "\n\n" + p.Text
+			parts[i], checkpoint = p, ""
+		case *sdk.TextPart:
+			clone := *p
+			clone.Text = checkpoint + "\n\n" + clone.Text
+			parts[i], checkpoint = clone, ""
+		}
+		if checkpoint == "" {
+			break
+		}
+	}
+	if checkpoint != "" {
+		parts = append([]sdk.MessagePart{sdk.TextPart{Text: checkpoint}}, parts...)
+	}
+	message.Content = parts
+	projected := messageconv.SDKMessagesToModelMessages([]sdk.Message{message})[0]
+	projected.Usage = modelMsg.Usage
+	projected.ToolCalls = modelMsg.ToolCalls
+	projected.ToolCallID = modelMsg.ToolCallID
+	projected.Name = modelMsg.Name
+	return projected
 }
 
 // turnResponsePart is a permissive view of a persisted content part. It
@@ -94,8 +173,6 @@ func nativeAssistantContent(msg turn.ModelMessage) json.RawMessage {
 				"text": text,
 			})
 		case "reasoning":
-			// Intentionally omitted: reasoning is model-internal and must not
-			// leak back into subsequent prompts verbatim.
 			continue
 		case "tool-call":
 			out = append(out, nativeToolCallPart(p.ToolCallID, p.ToolName, p.Input, p.ProviderMetadata))
@@ -107,7 +184,6 @@ func nativeAssistantContent(msg turn.ModelMessage) json.RawMessage {
 			out = append(out, nativeToolResultPart(p.ToolCallID, p.ToolName, payload))
 		}
 	}
-
 	// 3) Top-level ToolCalls field (older OpenAI-style wire format).
 	for _, call := range msg.ToolCalls {
 		id := strings.TrimSpace(call.ID)

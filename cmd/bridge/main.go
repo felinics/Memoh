@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"os"
@@ -25,6 +26,10 @@ const (
 )
 
 func main() {
+	os.Exit(runBridge())
+}
+
+func runBridge() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -36,25 +41,12 @@ func main() {
 	startDisplaySupervisor(ctx)
 	startACPToolsProxy(ctx, reverseHTTP)
 
-	// PID 1 zombie reaping: when bridge runs as PID 1 inside a container,
-	// orphaned child processes become zombies unless reaped.
-	// On Linux 5.3+, Go's os/exec uses pidfd_open which avoids races between
-	// this reaper and cmd.Wait(). Kernels below 5.3 may see rare ECHILD errors.
-	go func() {
-		var status syscall.WaitStatus
-		for {
-			if _, err := syscall.Wait4(-1, &status, 0, nil); err != nil {
-				time.Sleep(time.Second)
-			}
-		}
-	}()
-
 	network := "unix"
 	address := os.Getenv("BRIDGE_SOCKET_PATH")
 	if tcpAddr := os.Getenv("BRIDGE_TCP_ADDR"); tcpAddr != "" {
 		if !isBridgeTCPListenAddrAllowed(tcpAddr) {
 			logger.Error("BRIDGE_TCP_ADDR must be loopback or use :port bind shorthand; explicit non-loopback TCP exposes bridge gRPC without TLS/auth", slog.String("addr", tcpAddr))
-			return
+			return 1
 		}
 		network = "tcp"
 		address = tcpAddr
@@ -70,7 +62,7 @@ func main() {
 	lis, err := (&net.ListenConfig{}).Listen(ctx, network, address)
 	if err != nil {
 		logger.Error("failed to listen", slog.String("network", network), slog.String("address", address), slog.Any("error", err))
-		return
+		return 1
 	}
 
 	serverOpts := []grpc.ServerOption{
@@ -94,7 +86,7 @@ func main() {
 		creds, err := bridgeServerCredentials()
 		if err != nil {
 			logger.Error("bridge TLS configuration invalid", slog.Any("error", err))
-			return
+			return 1
 		}
 		if creds != nil {
 			serverOpts = append(serverOpts, grpc.Creds(creds))
@@ -110,17 +102,38 @@ func main() {
 	}))
 	reflection.Register(srv)
 
+	shutdownDone := make(chan struct{})
 	go func() {
-		<-ctx.Done()
-		logger.FromContext(ctx).Info("shutting down gRPC server")
-		srv.GracefulStop()
+		stopBridgeGRPCServer(ctx, srv)
+		close(shutdownDone)
 	}()
 
 	logger.Info("bridge gRPC server listening", slog.String("network", network), slog.String("address", address))
-	if err := srv.Serve(lis); err != nil {
-		logger.Error("gRPC server failed", slog.Any("error", err))
-		return
+	serveErr := srv.Serve(lis)
+	unexpectedServeErr := serveErr != nil && !errors.Is(serveErr, grpc.ErrServerStopped)
+	if unexpectedServeErr {
+		stop()
 	}
+	if ctx.Err() != nil {
+		<-shutdownDone
+	}
+	if unexpectedServeErr {
+		logger.Error("gRPC server failed", slog.Any("error", serveErr))
+		return 1
+	}
+	return 0
+}
+
+func stopBridgeGRPCServer(ctx context.Context, srv *grpc.Server) {
+	<-ctx.Done()
+	logger.FromContext(ctx).Info("shutting down gRPC server")
+	// Bridge Exec streams can legitimately live for the lifetime of an ACP
+	// process, so graceful draining has no useful upper bound here. Calling
+	// GracefulStop and Stop concurrently can also deadlock inside grpc-go when
+	// an active handler ignores cancellation. Stop closes transports and
+	// returns without waiting for those handlers, allowing the container's init
+	// process to complete shutdown.
+	srv.Stop()
 }
 
 func isBridgeTCPListenAddrAllowed(addr string) bool {

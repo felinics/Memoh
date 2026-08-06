@@ -291,7 +291,6 @@ export function useProviderSetup(options: {
       })
       queryCache.invalidateQueries({ key: ['provider-models'] })
       queryCache.invalidateQueries({ key: ['models'] })
-      queryCache.invalidateQueries({ key: ['all-models'] })
     } catch {
       // Non-fatal: the user will still see the model list and can enable
       // models manually if the auto-activate failed.

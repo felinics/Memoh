@@ -516,6 +516,7 @@ func mergeUserInputs(turns []chatview.UITurn, requests []userinput.Request, canR
 				ShortID:     req.ShortID,
 				Status:      req.Status,
 				Questions:   req.UIPayload.Questions,
+				Answers:     userinput.AnswersFromResult(req.Result),
 				CanRespond:  canRespond,
 			}
 		}

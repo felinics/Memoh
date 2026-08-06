@@ -55,7 +55,7 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     const session = activeSession.value
     if (!session) return false
     const type = session.type ?? 'chat'
-    if (type === 'heartbeat' || type === 'schedule' || type === 'subagent') return true
+    if (type === 'heartbeat' || type === 'schedule') return true
     const ct = (session.channel_type ?? '').trim().toLowerCase()
     if (ct && ct !== 'local') return true
     return false

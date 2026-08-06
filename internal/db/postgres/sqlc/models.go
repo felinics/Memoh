@@ -274,6 +274,7 @@ type BotSession struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
 	TeamID              pgtype.UUID        `json:"team_id"`
+	WorkdirID           pgtype.UUID        `json:"workdir_id"`
 }
 
 type BotSessionDiscussCursor struct {
@@ -345,6 +346,20 @@ type BotVisibleHistoryMessage struct {
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+}
+
+type BotWorkdir struct {
+	ID              pgtype.UUID        `json:"id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	Name            string             `json:"name"`
+	TargetKind      string             `json:"target_kind"`
+	RemoteBindingID pgtype.UUID        `json:"remote_binding_id"`
+	Path            string             `json:"path"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotWorkspaceResourceLimit struct {

@@ -1,8 +1,11 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
   <SettingsSection :title="$t('bots.settings.blocks.multimedia')">
-    <SettingsRow :label="$t('bots.settings.ttsModel')">
-      <div class="w-56">
+    <SettingsRow
+      :label="$t('bots.settings.ttsModel')"
+      stack="sm"
+    >
+      <div class="w-full sm:w-56">
         <ModelSelect
           v-model="form.tts_model_id"
           :models="speechModelOptions"
@@ -14,8 +17,11 @@
       </div>
     </SettingsRow>
 
-    <SettingsRow :label="$t('bots.settings.transcriptionModel')">
-      <div class="w-56">
+    <SettingsRow
+      :label="$t('bots.settings.transcriptionModel')"
+      stack="sm"
+    >
+      <div class="w-full sm:w-56">
         <ModelSelect
           v-model="form.transcription_model_id"
           :models="transcriptionModelOptions"
@@ -30,8 +36,10 @@
     <SettingsRow
       :label="$t('bots.settings.imageModel')"
       :description="$t('bots.settings.imageModelDescription')"
+    
+      stack="sm"
     >
-      <div class="w-56">
+      <div class="w-full sm:w-56">
         <ModelSelect
           v-model="form.image_model_id"
           :models="imageCapableModels"
@@ -45,8 +53,10 @@
     <SettingsRow
       :label="$t('bots.settings.videoModel')"
       :description="$t('bots.settings.videoModelDescription')"
+    
+      stack="sm"
     >
-      <div class="w-56">
+      <div class="w-full sm:w-56">
         <ModelSelect
           v-model="form.video_model_id"
           :models="videoModels"

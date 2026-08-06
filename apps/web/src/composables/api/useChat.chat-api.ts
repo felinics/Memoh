@@ -27,6 +27,11 @@ export interface CreateSessionOptions {
   runtimeMetadata?: Record<string, unknown>
   /** Warm pre-session ACP runtime to bind at creation time. */
   acpRuntimeId?: string
+  /**
+   * Bot workdir to bind the session to. Immutable after creation: the
+   * workdir pins the session's workspace target and working directory.
+   */
+  workdirId?: string
 }
 
 export interface CreateACPRuntimeOptions {
@@ -42,6 +47,12 @@ export async function fetchBots(): Promise<Bot[]> {
 export interface FetchSessionsOptions {
   types?: string[]
   parentSessionId?: string
+  /**
+   * Only sessions bound to this workdir. The literal `none` selects the
+   * unbound bucket. Pages independently of the unfiltered timeline, so a
+   * folder can reach chats older than the loaded global pages.
+   */
+  workdirId?: string
   limit?: number
   cursor?: string
 }
@@ -59,12 +70,14 @@ export async function fetchSessions(botId: string, options?: FetchSessionsOption
   if (!id) return { items: [], nextCursor: null }
   const types = (options?.types ?? DEFAULT_SESSION_TYPES).map(t => t.trim()).filter(Boolean)
   const parentSessionId = options?.parentSessionId?.trim() ?? ''
+  const workdirId = options?.workdirId?.trim() ?? ''
   const cursor = options?.cursor?.trim() ?? ''
   const { data } = await getBotsByBotIdSessions({
     path: { bot_id: id },
     query: {
       types: types.join(','),
       ...(parentSessionId ? { parent_session_id: parentSessionId } : {}),
+      ...(workdirId ? { workdir_id: workdirId } : {}),
       limit: options?.limit ?? DEFAULT_SESSION_PAGE_SIZE,
       ...(cursor ? { cursor } : {}),
     },
@@ -99,6 +112,7 @@ export async function createSession(botId: string, options?: string | CreateSess
         metadata: options?.metadata,
         runtime_metadata: options?.runtimeMetadata,
         acp_runtime_id: options?.acpRuntimeId?.trim() || undefined,
+        workdir_id: options?.workdirId?.trim() || undefined,
       }
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },

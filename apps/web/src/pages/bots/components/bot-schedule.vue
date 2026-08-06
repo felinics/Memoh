@@ -140,7 +140,6 @@ import {
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { InlineLoadingRow, PageShell, toast } from '@felinic/ui'
-import { useQueryCache } from '@pinia/colada'
 import {
   Button,
   Dialog, DialogContent, DialogScrollContent, DialogHeader, DialogTitle, DialogFooter,
@@ -223,7 +222,6 @@ async function confirmDelete() {
     toast.success(t('bots.schedule.deleteSuccess'))
     deleteTarget.value = null
     await fetchSchedules()
-    invalidateSidebarSchedule()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.deleteFailed')))
   } finally {
@@ -247,11 +245,6 @@ function describeItem(pattern: string | undefined): string | undefined {
 }
 
 // --- API ---
-const queryCache = useQueryCache()
-function invalidateSidebarSchedule() {
-  queryCache.invalidateQueries({ key: ['bot-schedule', props.botId] })
-}
-
 async function fetchSchedules() {
   if (!props.botId) return
   isLoading.value = true
@@ -308,7 +301,6 @@ async function handleEditorSaved() {
   formVisible.value = false
   editingSchedule.value = null
   await fetchSchedules()
-  invalidateSidebarSchedule()
 }
 
 async function handleToggleEnabled(item: ScheduleSchedule, enabled: boolean) {
@@ -318,7 +310,6 @@ async function handleToggleEnabled(item: ScheduleSchedule, enabled: boolean) {
   try {
     await putBotsByBotIdScheduleById({ path: { bot_id: props.botId, id }, body: { enabled }, throwOnError: true })
     await fetchSchedules()
-    invalidateSidebarSchedule()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.saveFailed')))
   } finally {
@@ -330,17 +321,6 @@ onMounted(() => {
   fetchSchedules()
   fetchBotSettings()
 })
-
-watch(
-  () => {
-    const entries = queryCache.getEntries({ key: ['bot-schedule', props.botId] })
-    return entries[0]?.state.value.data
-  },
-  (next, prev) => {
-    if (!props.botId || next === prev) return
-    void fetchSchedules()
-  },
-)
 
 watch(
   () => props.initialScheduleId,

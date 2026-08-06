@@ -9,14 +9,61 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	sdk "github.com/memohai/twilight-ai/sdk"
 
 	compaction "github.com/memohai/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
+	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	"github.com/memohai/memoh/internal/chat/timeline"
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
+
+func TestProjectInterruptedHistoryReasoning(t *testing.T) {
+	records := []historyfrag.HistoryRecord{{
+		ModelMessage: sdkMessagesToModelMessages([]sdk.Message{{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{
+				sdk.ReasoningPart{Text: "partial reasoning"}, sdk.TextPart{Text: "partial text"},
+			},
+		}})[0],
+		Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
+	}}
+	got := modelMessageToSDKMessage(projectInterruptedHistoryReasoning(records)[0].ModelMessage)
+	if len(got.Content) != 1 || got.Content[0].(sdk.TextPart).Text !=
+		messagepkg.AgentStepInterruptedReasoningPrefix+"partial reasoning\n\npartial text" {
+		t.Fatalf("projected content = %#v", got.Content)
+	}
+	if len(modelMessageToSDKMessage(records[0].ModelMessage).Content) != 2 {
+		t.Fatal("input records were mutated")
+	}
+}
+
+func TestProjectInterruptedHistoryReasoningSkipsSupersededCheckpoint(t *testing.T) {
+	checkpoint := historyfrag.HistoryRecord{
+		ModelMessage: sdkMessagesToModelMessages([]sdk.Message{{
+			Role:    sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ReasoningPart{Text: "partial reasoning"}},
+		}})[0],
+		Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
+	}
+	answer := historyfrag.HistoryRecord{
+		ModelMessage: sdkMessagesToModelMessages([]sdk.Message{{
+			Role:    sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "the answer"}},
+		}})[0],
+	}
+	projected := projectInterruptedHistoryReasoning([]historyfrag.HistoryRecord{checkpoint, answer})
+	got := modelMessageToSDKMessage(projected[0].ModelMessage)
+	if len(got.Content) != 1 {
+		t.Fatalf("projected content = %#v, want the reasoning part untouched", got.Content)
+	}
+	if _, ok := got.Content[0].(sdk.ReasoningPart); !ok {
+		t.Fatalf("superseded checkpoint was projected into prompt text: %#v", got.Content[0])
+	}
+}
 
 const (
 	pipelineTestBotID     = "11111111-1111-1111-1111-111111111111"

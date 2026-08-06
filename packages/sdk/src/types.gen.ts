@@ -1183,6 +1183,7 @@ export type ConversationUiTurn = {
 };
 
 export type ConversationUiUserInput = {
+    answers?: Array<UserinputUiAnswer>;
     can_respond?: boolean;
     questions?: Array<UserinputUiQuestion>;
     short_id?: number;
@@ -2070,6 +2071,12 @@ export type HandlersCreateSessionRequest = {
     session_mode?: string;
     title?: string;
     type?: string;
+    /**
+     * WorkdirID immutably binds the new session to a bot workdir. The
+     * workdir decides the session's workspace target and working directory
+     * for its whole life; there is no way to change or clear it later.
+     */
+    workdir_id?: string;
 };
 
 export type HandlersDisplayInfoResponse = {
@@ -2836,6 +2843,7 @@ export type SessionSession = {
     title?: string;
     type?: string;
     updated_at?: string;
+    workdir_id?: string;
 };
 
 export type SettingsSettings = {
@@ -2907,6 +2915,13 @@ export type SettingsUpsertRequest = {
     chat_acp_agent_id?: string;
     chat_acp_project_mode?: string;
     chat_acp_project_path?: string;
+    /**
+     * Reference fields below use pointer semantics so autosaving clients can
+     * clear a selection: nil = keep current, "" = clear, value = set. The
+     * service mirrors each into a `<field>_set` SQL flag (same pattern as
+     * FetchProviderID / CompactionModelID); plain strings would make ""
+     * indistinguishable from "not sent".
+     */
     chat_model_id?: string;
     chat_runtime?: string;
     command_ui_language?: string;
@@ -2919,8 +2934,16 @@ export type SettingsUpsertRequest = {
     fetch_provider_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
+    /**
+     * HeartbeatModelID joins the pointer group above (nil/""/value) so the
+     * heartbeat tab's autosave can clear a model override.
+     */
     heartbeat_model_id?: string;
     image_model_id?: string;
+    /**
+     * Language follows the same pointer rule; "" normalizes to DefaultLanguage
+     * ("auto") rather than clearing the column.
+     */
     language?: string;
     memory_provider_id?: string;
     overlay_config?: {
@@ -2945,6 +2968,15 @@ export type SkillsSafeCatalogItem = {
     name?: string;
     source_kind?: string;
     state?: string;
+};
+
+export type UserinputUiAnswer = {
+    custom_text?: string;
+    question?: string;
+    question_id?: string;
+    selected?: Array<UserinputUiOption>;
+    skipped?: boolean;
+    text?: string;
 };
 
 export type UserinputUiOption = {
@@ -3059,6 +3091,33 @@ export type WebhooktunnelStatus = {
     mode?: string;
     public_base_url?: string;
     status?: string;
+};
+
+export type WorkdirCreateRequest = {
+    name: string;
+    path: string;
+    workspace_target_id?: string;
+};
+
+export type WorkdirUpdateRequest = {
+    name: string;
+};
+
+export type WorkdirWorkdir = {
+    archived?: boolean;
+    bot_id?: string;
+    created_at?: string;
+    created_by_user_id?: string;
+    id?: string;
+    name?: string;
+    path?: string;
+    target_kind?: string;
+    updated_at?: string;
+    workspace_target_id?: string;
+};
+
+export type WorkdirWorkdirsResponse = {
+    workdirs?: Array<WorkdirWorkdir>;
 };
 
 export type WorkspaceSetPrimaryWorkspaceTargetRequest = {
@@ -3366,6 +3425,10 @@ export type GetBotsNameAvailabilityData = {
          * Candidate bot name
          */
         name: string;
+        /**
+         * Bot ID to exclude from the conflict check (used when renaming)
+         */
+        exclude_bot_id?: string;
     };
     url: '/bots/name-availability';
 };
@@ -8767,6 +8830,10 @@ export type GetBotsByBotIdSessionsData = {
          */
         parent_session_id?: string;
         /**
+         * Only include sessions bound to this workdir. The literal none selects sessions with no workdir.
+         */
+        workdir_id?: string;
+        /**
          * Page size (1..200). Defaults to 50.
          */
         limit?: number;
@@ -10206,6 +10273,171 @@ export type GetBotsByBotIdWebWsErrors = {
 };
 
 export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
+
+export type GetBotsByBotIdWorkdirsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Include archived workdirs
+         */
+        include_archived?: boolean;
+    };
+    url: '/bots/{bot_id}/workdirs';
+};
+
+export type GetBotsByBotIdWorkdirsErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWorkdirsError = GetBotsByBotIdWorkdirsErrors[keyof GetBotsByBotIdWorkdirsErrors];
+
+export type GetBotsByBotIdWorkdirsResponses = {
+    /**
+     * OK
+     */
+    200: WorkdirWorkdirsResponse;
+};
+
+export type GetBotsByBotIdWorkdirsResponse = GetBotsByBotIdWorkdirsResponses[keyof GetBotsByBotIdWorkdirsResponses];
+
+export type PostBotsByBotIdWorkdirsData = {
+    /**
+     * Workdir
+     */
+    body: WorkdirCreateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/workdirs';
+};
+
+export type PostBotsByBotIdWorkdirsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdWorkdirsError = PostBotsByBotIdWorkdirsErrors[keyof PostBotsByBotIdWorkdirsErrors];
+
+export type PostBotsByBotIdWorkdirsResponses = {
+    /**
+     * Created
+     */
+    201: WorkdirWorkdir;
+};
+
+export type PostBotsByBotIdWorkdirsResponse = PostBotsByBotIdWorkdirsResponses[keyof PostBotsByBotIdWorkdirsResponses];
+
+export type DeleteBotsByBotIdWorkdirsByWorkdirIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Workdir ID
+         */
+        workdir_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/workdirs/{workdir_id}';
+};
+
+export type DeleteBotsByBotIdWorkdirsByWorkdirIdErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdWorkdirsByWorkdirIdError = DeleteBotsByBotIdWorkdirsByWorkdirIdErrors[keyof DeleteBotsByBotIdWorkdirsByWorkdirIdErrors];
+
+export type DeleteBotsByBotIdWorkdirsByWorkdirIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PatchBotsByBotIdWorkdirsByWorkdirIdData = {
+    /**
+     * New name
+     */
+    body: WorkdirUpdateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Workdir ID
+         */
+        workdir_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/workdirs/{workdir_id}';
+};
+
+export type PatchBotsByBotIdWorkdirsByWorkdirIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PatchBotsByBotIdWorkdirsByWorkdirIdError = PatchBotsByBotIdWorkdirsByWorkdirIdErrors[keyof PatchBotsByBotIdWorkdirsByWorkdirIdErrors];
+
+export type PatchBotsByBotIdWorkdirsByWorkdirIdResponses = {
+    /**
+     * OK
+     */
+    200: WorkdirWorkdir;
+};
+
+export type PatchBotsByBotIdWorkdirsByWorkdirIdResponse = PatchBotsByBotIdWorkdirsByWorkdirIdResponses[keyof PatchBotsByBotIdWorkdirsByWorkdirIdResponses];
 
 export type GetBotsByBotIdWorkspaceTargetsData = {
     body?: never;

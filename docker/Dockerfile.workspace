@@ -81,6 +81,7 @@ COPY --from=toolkit-builder /opt/memoh/toolkit /opt/memoh/toolkit
 COPY scripts/desktop-style.sh scripts/display-apply-style.sh scripts/display-prepare.sh /opt/memoh/scripts/
 COPY docker/workspace-contract.json /opt/memoh/workspace-contract.json
 RUN chmod 0755 /opt/memoh/scripts/*.sh \
+  && test -x /usr/bin/tini \
   && test -x /opt/memoh/toolkit/bin/node \
   && test -x /opt/memoh/toolkit/bin/python3 \
   && test -x /opt/memoh/toolkit/bin/uv \
@@ -91,7 +92,7 @@ FROM workspace AS toolkit-acp-bridge-live
 COPY --from=bridge-builder /out/bridge /usr/local/bin/bridge
 ENV BRIDGE_TCP_ADDR=:1455
 EXPOSE 1455
-ENTRYPOINT ["/usr/local/bin/bridge"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/bridge"]
 
 # Keep the default build output equal to the production workspace target.
 FROM workspace AS final

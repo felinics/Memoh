@@ -78,7 +78,7 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 			for _, item := range items {
 				if strings.EqualFold(item.Name, name) {
 					_, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, settings.UpsertRequest{
-						SearchProviderID: item.ID,
+						SearchProviderID: &item.ID,
 					})
 					if err != nil {
 						return "", err

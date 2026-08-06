@@ -1,3 +1,5 @@
+import { QUERY_CACHE_STORAGE_KEY } from './query-cache-persistence'
+
 export type AuthSessionClearReason = 'login' | 'logout' | 'token-cleared' | 'unauthorized'
 
 export interface AuthSessionClearedDetail {
@@ -21,6 +23,9 @@ const USER_SCOPED_STORAGE_KEYS = [
   // Was 'workspace-tabs' — a long-dead key. The live dockview layout key is
   // 'workspace-layout'; logout never actually cleared it before this fix.
   'workspace-layout',
+  // Cross-reload query-cache snapshot (lib/query-cache-persistence.ts) —
+  // without this the next account would see the previous one's catalog data.
+  QUERY_CACHE_STORAGE_KEY,
 ]
 
 export function clearPersistedUserScopedState() {

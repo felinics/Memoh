@@ -4160,7 +4160,9 @@ describe('chat-list store', () => {
         id: 'session-subagent',
         type: 'subagent',
       })
-      expect(store.activeChatReadOnly).toBe(true)
+      // Subagent sessions are writable: the user can talk to (and abort) the
+      // spawned agent directly from its own session view.
+      expect(store.activeChatReadOnly).toBe(false)
 
       api.fetchSessions.mockResolvedValueOnce({ items: [
         { id: 'session-parent', bot_id: 'bot-1', title: 'Parent', type: 'chat' },
@@ -4840,7 +4842,9 @@ describe('chat-list store', () => {
         runtimeType: 'acp_agent',
         isACP: true,
       })
-      expect(store.chatReadOnlyFor(targetB)).toBe(true)
+      // Hydration proof: the summary's subagent type reached the target; the
+      // session itself stays writable so the user can chat with the agent.
+      expect(store.chatReadOnlyFor(targetB)).toBe(false)
       expect(api.fetchSession).toHaveBeenCalledWith('bot-1', 'session-b')
     })
 

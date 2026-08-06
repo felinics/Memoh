@@ -463,7 +463,7 @@
     "usernamePlaceholder": "ユーザー名",
     "usernameRequired": "ユーザー名は必須です",
     "email": "メール",
-    "emailPlaceholder": "名前@example.com",
+    "emailPlaceholder": "名前{'@'}example.com",
     "role": "役割",
     "roles": {
       "admin": "管理者",
@@ -525,8 +525,10 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "welcome": {
+      "folder": "{name} で何をしましょうか？"
+    },
     "greeting": "こんにちは！今日はどのようにお手伝いできますか?",
-    "emptySubagent": "このサブエージェント タスクにはメッセージが記録されていません",
     "emptySystemSession": "このシステムセッションにはメッセージが記録されていません",
     "selectBot": "Botを選択してください",
     "selectBotHint": "サイドバーからBotを選択してチャットを開始します",
@@ -568,7 +570,14 @@
     "computerLoadFailed": "コンピューターを読み込めませんでした",
     "computerNone": "利用できるコンピューターがありません",
     "computerUnavailable": "利用できないコンピューター",
+    "folder": "フォルダ",
+    "folders": "フォルダ",
+    "folderUnavailable": "利用できないフォルダ",
+    "folderDetachDraft": "フォルダに入れずに開始",
+    "folderNewSession": "{name} で新しいセッション",
     "attachFiles": "ファイルを添付する",
+    "pdfTooLargeForNative": "PDF が 12MB を超えているため、ワークスペースにパスとして保存されます。モデルは内容を直接閲覧できません。",
+    "pdfUnsupportedByModel": "現在のモデルは PDF の読み取りに対応していません。ファイルはワークスペースにパスとして保存され、モデルは内容を閲覧できません。",
     "send": "送信",
     "sendFailed": "メッセージの送信に失敗しました",
     "forkFailed": "セッションのフォークに失敗しました",
@@ -941,7 +950,13 @@
       "hideWorkbench": "サイドバーを隠す",
       "showWorkbench": "サイドバーを表示",
       "goBack": "戻る",
-      "goForward": "進む"
+      "goForward": "進む",
+      "openNav": "ナビゲーションを開く",
+      "closePanel": "閉じる"
+    },
+    "mobileNav": {
+      "title": "ナビゲーション",
+      "description": "Bot、チャット、ファイル、スケジュール、設定を切り替え"
     },
     "activityBar": {
       "sessions": "チャット",
@@ -969,10 +984,15 @@
     "sessionInfoTooltipHint": "カーソルを合わせるとセッション情報が表示されます",
     "sessionActions": "セッションアクション",
     "tabBarToolkit": {
+      "openMenu": "新規パネル",
       "newTerminal": "新しいターミナルを開く",
       "openBrowser": "ブラウザーを開く",
+      "openDesktop": "デスクトップ",
       "openDisplay": "デスクトップウィンドウを開く",
+      "splitRight": "右に分割",
+      "splitDown": "下に分割",
       "menu": "タブのアクション",
+      "more": "その他",
       "closeAll": "すべて閉じる"
     },
     "browser": {
@@ -1078,6 +1098,7 @@
     "compatibilities": "互換性",
     "compatibility": {
       "vision": "ビジョン",
+      "file-input": "ファイル入力(PDF)",
       "tool-call": "ツール呼び出し",
       "image-output": "画像出力",
       "reasoning": "推論"
@@ -1418,7 +1439,7 @@
     "emptyTitle": "MCPサーバーはありません",
     "emptyDescription": "MCPサーバーを追加してBotの機能を拡張します",
     "command": "コマンド",
-    "commandPlaceholder": "npx -y @modelcontextprotocol/server-everything",
+    "commandPlaceholder": "npx -y {'@'}modelcontextprotocol/server-everything",
     "cwd": "作業ディレクトリ",
     "cwdPlaceholder": "作業ディレクトリのパスを入力してください",
     "env": "環境",
@@ -1605,8 +1626,6 @@
     "loadFailed": "Tool の承認設定を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
     "saveFailed": "Tool の承認設定を保存できませんでした",
-    "saveSuccess": "Tool の承認設定を保存しました",
-    "partialSaveFailed": "一部の変更は保存されましたが、{count} 件の場所で失敗しました。失敗した下書きは保持されています。",
     "enabled": "Tool の承認",
     "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
     "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
@@ -1969,6 +1988,36 @@
       "terminal": "Terminal",
       "settings": "設定"
     },
+    "folders": {
+      "create": "新しいフォルダ",
+      "createTitle": "新しいフォルダ",
+      "createDescription": "このフォルダが作業するディレクトリを選択してください。ディレクトリはすでに存在している必要があります。",
+      "created": "フォルダを作成しました",
+      "createFailed": "フォルダの作成に失敗しました",
+      "rename": "名前を変更",
+      "renameTitle": "フォルダの名前を変更",
+      "renameFailed": "フォルダの名前変更に失敗しました",
+      "archive": "アーカイブ",
+      "archiveTitle": "フォルダをアーカイブ",
+      "archiveDescription": "「{name}」内のセッションは元のディレクトリで動き続けます。新しいセッションは追加できなくなります。",
+      "archiveFailed": "フォルダのアーカイブに失敗しました",
+      "rowActions": "{name} の操作",
+      "targetNative": "サーバー Workspace",
+      "targetRemote": "接続済みのコンピューター",
+      "form": {
+        "name": "名前",
+        "namePlaceholder": "例：サイトリニューアル",
+        "target": "場所",
+        "directory": "ディレクトリ",
+        "directoryHelp": "セッションは {path} で作業します",
+        "directoryUp": "1 つ上へ",
+        "noSubdirectories": "サブフォルダはありません",
+        "browseFailed": "フォルダを読み込めませんでした",
+        "path": "ディレクトリパス",
+        "remotePathHelp": "そのコンピューター上の絶対パス。すでに存在している必要があります。",
+        "remotePathPlaceholder": "/Users/you/code/project"
+      }
+    },
     "remoteRuntime": {
       "title": "コンピューター",
       "workspaceTitle": "使用場所",
@@ -2141,7 +2190,7 @@
       "inbox": "受信箱",
       "outbox": "送信ボックス",
       "emailAddress": "Emailアドレス",
-      "emailPlaceholder": "user@example.com",
+      "emailPlaceholder": "user{'@'}example.com",
       "noBindings": "メール連携が設定されていません",
       "noEmails": "Emailはありません",
       "canRead": "読む",

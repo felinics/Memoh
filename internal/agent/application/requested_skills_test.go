@@ -206,7 +206,7 @@ func TestRejectRequestedSkillsRejectsUnsupportedContexts(t *testing.T) {
 
 func TestResolveRejectsRequestedSkillsBeforeModelResolution(t *testing.T) {
 	resolver := &Service{}
-	_, err := resolver.resolve(context.Background(), ChatRequest{
+	_, _, err := resolver.resolve(context.Background(), ChatRequest{
 		BotID:       "bot-1",
 		ChatID:      "chat-1",
 		ThreadID:    "session-1",

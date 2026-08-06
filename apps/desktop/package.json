@@ -37,6 +37,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/inter": "^5.2.8",
     "@memohai/runtime": "workspace:*",
+    "@pinia/colada-plugin-cache-persister": "0.1.3",
     "electron-updater": "^6.6.2"
   },
   "devDependencies": {

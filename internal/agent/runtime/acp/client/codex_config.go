@@ -112,6 +112,21 @@ func WriteCodexManagedConfigWithAuth(ctx context.Context, client *bridge.Client,
 	return nil
 }
 
+// WriteCodexManagedConfigWithAuthForBot serializes the OAuth handler with
+// RuntimeLease auth.json freshness checks for the same bot. This closes the
+// check-then-write window where a process-local stale token could otherwise
+// replace credentials written by a concurrent device-flow callback.
+func WriteCodexManagedConfigWithAuthForBot(ctx context.Context, client *bridge.Client, botID string, cfg CodexManagedConfig) error {
+	botID = strings.TrimSpace(botID)
+	if botID == "" {
+		return errors.New("bot ID is required")
+	}
+	lock := runtimeSyncLock(botID + "|" + codexAgentID)
+	lock.Lock()
+	defer lock.Unlock()
+	return WriteCodexManagedConfigWithAuth(ctx, client, cfg)
+}
+
 // WriteCodexManagedConfigFile writes only config.toml. It is used to refresh
 // managed Codex runtime behavior without touching an existing OAuth auth.json.
 // When refreshing an OAuth config without credentials in hand, the provider
@@ -337,8 +352,4 @@ func renderCodexManagedOAuthAuth(creds *CodexOAuthCredentials) ([]byte, error) {
 		return nil, err
 	}
 	return append(content, '\n'), nil
-}
-
-func isCodexAgent(agentID string) bool {
-	return strings.EqualFold(strings.TrimSpace(agentID), codexAgentID)
 }

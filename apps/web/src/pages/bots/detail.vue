@@ -19,6 +19,8 @@
         <MasterDetailSidebarLayout
           flush
           class="[&_td:last-child]:w-45"
+          :detail-open="mobileDetailOpen"
+          @close-detail="closeMobileDetail"
         >
           <template #sidebar-header>
             <!-- Back: a full-width row at the very top — same position, size and
@@ -230,8 +232,11 @@
                 v-if="macTrafficReserve"
                 class="h-8 shrink-0 [-webkit-app-region:drag]"
               />
-              <!-- Ensure consistent padding matching Box-in-Box bento architecture -->
-              <div class="px-6 pt-4 pb-4">
+              <!-- Ensure consistent padding matching Box-in-Box bento architecture.
+                   The <md step mirrors PageShell's page gutter (px-4 md:px-6) so a
+                   phone keeps a 16px margin; the 'tab' PageShell variant inside
+                   adds no horizontal padding of its own. -->
+              <div class="px-4 md:px-6 pt-4 pb-4">
                 <KeepAlive>
                   <component
                     :is="activeComponent?.component"
@@ -264,7 +269,7 @@ import {
   Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft, Workflow, Laptop, Plug
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
-import { useRoute, onBeforeRouteLeave } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { NavItem, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
@@ -306,6 +311,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBackAffordance } from '@/composables/useBackOr'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { registerBotBreadcrumbName } from '@/lib/bot-breadcrumb'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
@@ -317,7 +323,9 @@ type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
 
 const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
+const isMobile = useIsMobile()
 
 // macOS desktop: this page renders its own full-height sidebar (no full-width
 // topbar above it), so the sidebar header clears the traffic lights and the
@@ -476,8 +484,46 @@ function tabMatches(tab: { value: string, label: string }): boolean {
 }
 
 function selectTab(value: string): void {
-  activeTab.value = value
   searchQuery.value = ''
+  // Mobile: the tab list and a tab's content are two addressable levels —
+  // bare path = list, ?tab=x = content — so the tap is a real push and the
+  // system back button pops straight back to the list. The synced-param
+  // watcher picks the value up from the new query; the desktop path below
+  // stays a replace (in-page state sync, not a navigation).
+  if (isMobile.value) {
+    tabPushedFromList.value = true
+    void router.push({ query: { ...route.query, tab: value } }).catch(() => {})
+    return
+  }
+  activeTab.value = value
+}
+
+// Mobile stack state for MasterDetailSidebarLayout, derived from the URL so a
+// refresh / deep link (?tab=heartbeat) opens straight on the content and the
+// KeepAlive'd page can never inherit a stale stack state from another bot.
+const mobileDetailOpen = computed(() => {
+  const tab = route.query.tab
+  return typeof tab === 'string' && tab.length > 0
+})
+// Whether the current content was reached by tapping a tab in the list (i.e.
+// history has the list entry right below). Cleared when the URL loses the tab
+// or the bot changes, so deep links / bot switches fall through to replace
+// instead of router.back() into an unrelated page.
+const tabPushedFromList = ref(false)
+watch(() => route.query.tab, (tab) => {
+  if (!tab) tabPushedFromList.value = false
+})
+watch(() => route.params.botName, () => {
+  tabPushedFromList.value = false
+})
+function closeMobileDetail(): void {
+  if (tabPushedFromList.value) {
+    tabPushedFromList.value = false
+    router.back()
+    return
+  }
+  const { tab: _drop, ...rest } = route.query
+  void router.replace({ query: rest }).catch(() => {})
 }
 
 const groupedTabs = computed(() => {

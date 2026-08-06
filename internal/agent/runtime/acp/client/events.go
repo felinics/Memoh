@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -142,13 +143,21 @@ func contentText(block acp.ContentBlock) string {
 }
 
 type acpToolEventMapper struct {
-	mu       sync.Mutex
-	tools    map[string]*acpToolState
-	lastPlan string
-	quirks   acpprofile.ToolQuirks
+	mu           sync.Mutex
+	tools        map[acpToolStateKey]*acpToolState
+	lastPlan     string
+	promptActive bool
+	quirks       acpprofile.ToolQuirks
+	changed      chan struct{}
+}
+
+type acpToolStateKey struct {
+	sessionID  string
+	toolCallID string
 }
 
 type acpToolState struct {
+	sessionID string
 	id        string
 	title     string
 	kind      string
@@ -164,7 +173,26 @@ type acpToolState struct {
 }
 
 func newACPToolEventMapper(quirks acpprofile.ToolQuirks) *acpToolEventMapper {
-	return &acpToolEventMapper{tools: map[string]*acpToolState{}, quirks: quirks}
+	return &acpToolEventMapper{
+		tools:   map[acpToolStateKey]*acpToolState{},
+		quirks:  quirks,
+		changed: make(chan struct{}),
+	}
+}
+
+// setPromptActive makes tool-call correlation prompt-scoped. ACP permission
+// requests carry ToolCallUpdate deltas, so they may need fields from an earlier
+// session/update, but state from a previous prompt must never authorize a new
+// request that happens to reuse the same tool call ID.
+func (m *acpToolEventMapper) setPromptActive(active bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.promptActive = active
+	m.tools = map[acpToolStateKey]*acpToolState{}
+	m.notifyChangedLocked()
+	m.mu.Unlock()
 }
 
 func (m *acpToolEventMapper) eventsFromNotification(n acp.SessionNotification) []event.StreamEvent {
@@ -191,9 +219,9 @@ func (m *acpToolEventMapper) eventsFromNotification(n acp.SessionNotification) [
 	case update.Plan != nil:
 		return m.applyPlan(*update.Plan)
 	case update.ToolCall != nil:
-		return m.applyToolCall(*update.ToolCall)
+		return m.applyToolCall(n.SessionId, *update.ToolCall)
 	case update.ToolCallUpdate != nil:
-		return m.applyToolUpdate(*update.ToolCallUpdate)
+		return m.applyToolUpdate(n.SessionId, *update.ToolCallUpdate)
 	default:
 		return nil
 	}
@@ -243,7 +271,7 @@ func formatPlanEntries(entries []acp.PlanEntry) string {
 	return strings.TrimSpace(sb.String())
 }
 
-func (m *acpToolEventMapper) applyToolCall(tc acp.SessionUpdateToolCall) []event.StreamEvent {
+func (m *acpToolEventMapper) applyToolCall(sessionID acp.SessionId, tc acp.SessionUpdateToolCall) []event.StreamEvent {
 	id := strings.TrimSpace(string(tc.ToolCallId))
 	if id == "" {
 		return nil
@@ -251,7 +279,7 @@ func (m *acpToolEventMapper) applyToolCall(tc acp.SessionUpdateToolCall) []event
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	state := m.ensureTool(id)
+	state := m.ensureTool(strings.TrimSpace(string(sessionID)), id)
 	state.title = strings.TrimSpace(tc.Title)
 	state.kind = strings.TrimSpace(string(tc.Kind))
 	state.status = strings.TrimSpace(string(tc.Status))
@@ -259,10 +287,12 @@ func (m *acpToolEventMapper) applyToolCall(tc acp.SessionUpdateToolCall) []event
 	state.output = tc.RawOutput
 	state.locations = append([]acp.ToolCallLocation(nil), tc.Locations...)
 	state.content = append([]acp.ToolCallContent(nil), tc.Content...)
-	return m.eventsForState(state)
+	events := m.eventsForState(state)
+	m.notifyChangedLocked()
+	return events
 }
 
-func (m *acpToolEventMapper) applyToolUpdate(tc acp.SessionToolCallUpdate) []event.StreamEvent {
+func (m *acpToolEventMapper) applyToolUpdate(sessionID acp.SessionId, tc acp.SessionToolCallUpdate) []event.StreamEvent {
 	id := strings.TrimSpace(string(tc.ToolCallId))
 	if id == "" {
 		return nil
@@ -270,7 +300,7 @@ func (m *acpToolEventMapper) applyToolUpdate(tc acp.SessionToolCallUpdate) []eve
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	state := m.ensureTool(id)
+	state := m.ensureTool(strings.TrimSpace(string(sessionID)), id)
 	if tc.Title != nil {
 		state.title = strings.TrimSpace(*tc.Title)
 	}
@@ -292,20 +322,153 @@ func (m *acpToolEventMapper) applyToolUpdate(tc acp.SessionToolCallUpdate) []eve
 	if len(tc.Content) > 0 {
 		state.content = append([]acp.ToolCallContent(nil), tc.Content...)
 	}
-	return m.eventsForState(state)
+	events := m.eventsForState(state)
+	m.notifyChangedLocked()
+	return events
 }
 
-func (m *acpToolEventMapper) ensureTool(id string) *acpToolState {
-	state := m.tools[id]
+// permissionState merges a permission-time ToolCallUpdate with the complete
+// state previously reported for the same session and tool call. The returned
+// value is a snapshot; callers never retain a pointer into the mapper.
+func (m *acpToolEventMapper) permissionState(sessionID acp.SessionId, tc acp.ToolCallUpdate) *acpToolState {
+	id := strings.TrimSpace(string(tc.ToolCallId))
+	session := strings.TrimSpace(string(sessionID))
+	if m == nil || id == "" {
+		state := &acpToolState{sessionID: session, id: id}
+		mergePermissionToolUpdate(state, tc)
+		return state
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.permissionStateLocked(session, id, tc)
+}
+
+// waitForPermissionState closes the ACP SDK's notification/request ordering
+// gap without broadening permission policy. It only observes the exact
+// prompt-scoped session and tool-call state and returns when the caller can
+// classify it, the prompt ends, or the request context expires.
+func (m *acpToolEventMapper) waitForPermissionState(
+	ctx context.Context,
+	sessionID acp.SessionId,
+	tc acp.ToolCallUpdate,
+	ready func(*acpToolState) bool,
+) *acpToolState {
+	id := strings.TrimSpace(string(tc.ToolCallId))
+	session := strings.TrimSpace(string(sessionID))
+	if m == nil || id == "" {
+		state := &acpToolState{sessionID: session, id: id}
+		mergePermissionToolUpdate(state, tc)
+		return state
+	}
+
+	for {
+		m.mu.Lock()
+		state := m.permissionStateLocked(session, id, tc)
+		active := m.promptActive
+		if m.changed == nil {
+			m.changed = make(chan struct{})
+		}
+		changed := m.changed
+		m.mu.Unlock()
+
+		if !active || ready == nil || ready(state) {
+			return state
+		}
+		select {
+		case <-ctx.Done():
+			return state
+		case <-changed:
+		}
+	}
+}
+
+func (m *acpToolEventMapper) permissionStateLocked(session, id string, tc acp.ToolCallUpdate) *acpToolState {
+	key := acpToolStateKey{sessionID: session, toolCallID: id}
+	var state *acpToolState
+	if m.promptActive {
+		state = m.tools[key]
+	}
+	if state == nil {
+		state = &acpToolState{sessionID: session, id: id}
+		if m.promptActive {
+			if len(m.tools) >= maxTrackedACPToolStates {
+				for staleKey := range m.tools {
+					delete(m.tools, staleKey)
+					break
+				}
+			}
+			m.tools[key] = state
+		}
+	}
+	mergePermissionToolUpdate(state, tc)
+	return cloneACPToolState(state)
+}
+
+func (m *acpToolEventMapper) notifyChangedLocked() {
+	if m.changed != nil {
+		close(m.changed)
+	}
+	m.changed = make(chan struct{})
+}
+
+func mergePermissionToolUpdate(state *acpToolState, tc acp.ToolCallUpdate) {
+	if state == nil {
+		return
+	}
+	if tc.Title != nil {
+		state.title = strings.TrimSpace(*tc.Title)
+	}
+	if tc.Kind != nil {
+		state.kind = strings.TrimSpace(string(*tc.Kind))
+	}
+	if tc.Status != nil {
+		state.status = strings.TrimSpace(string(*tc.Status))
+	}
+	// ToolCallUpdate fields are deltas. A nil interface is indistinguishable
+	// from an omitted field after decoding, so retain the earlier value.
+	if tc.RawInput != nil {
+		state.input = tc.RawInput
+	}
+	if tc.RawOutput != nil {
+		state.output = tc.RawOutput
+	}
+	if len(tc.Locations) > 0 {
+		state.locations = append([]acp.ToolCallLocation(nil), tc.Locations...)
+	}
+	if len(tc.Content) > 0 {
+		state.content = append([]acp.ToolCallContent(nil), tc.Content...)
+	}
+}
+
+func cloneACPToolState(state *acpToolState) *acpToolState {
+	if state == nil {
+		return nil
+	}
+	clone := *state
+	clone.locations = append([]acp.ToolCallLocation(nil), state.locations...)
+	clone.content = append([]acp.ToolCallContent(nil), state.content...)
+	if state.nativeIn != nil {
+		clone.nativeIn = make(map[string]any, len(state.nativeIn))
+		for key, value := range state.nativeIn {
+			clone.nativeIn[key] = value
+		}
+	}
+	return &clone
+}
+
+func (m *acpToolEventMapper) ensureTool(sessionID, id string) *acpToolState {
+	key := acpToolStateKey{sessionID: sessionID, toolCallID: id}
+	state := m.tools[key]
 	if state == nil {
 		if len(m.tools) >= maxTrackedACPToolStates {
-			for staleID := range m.tools {
-				delete(m.tools, staleID)
+			for staleKey := range m.tools {
+				delete(m.tools, staleKey)
 				break
 			}
 		}
-		state = &acpToolState{id: id}
-		m.tools[id] = state
+		state = &acpToolState{sessionID: sessionID, id: id}
+		m.tools[key] = state
 	}
 	return state
 }
@@ -352,7 +515,7 @@ func (m *acpToolEventMapper) eventsForState(state *acpToolState) []event.StreamE
 			ev.Error = state.status
 		}
 		events = append(events, ev)
-		delete(m.tools, state.id)
+		delete(m.tools, acpToolStateKey{sessionID: state.sessionID, toolCallID: state.id})
 	}
 	return events
 }
@@ -368,7 +531,10 @@ func nativeToolFromACPState(state *acpToolState, quirks acpprofile.ToolQuirks) (
 	switch strings.ToLower(strings.TrimSpace(state.kind)) {
 	case string(acp.ToolKindExecute):
 		command := commandFromACPInput(state.input)
-		if command == "" {
+		// A structured non-command input (for example an MCP call carrying
+		// server/tool/arguments) must not be reinterpreted as a shell command
+		// merely because its display title is non-generic.
+		if command == "" && !hasStructuredACPToolInput(state.input) {
 			command = quirks.CommandFromTitle(state.title)
 		}
 		if command == "" {
@@ -522,6 +688,23 @@ func commandFromACPInput(value any) string {
 		}
 	}
 	return ""
+}
+
+func hasStructuredACPToolInput(value any) bool {
+	input, ok := value.(map[string]any)
+	if !ok || len(input) == 0 {
+		return false
+	}
+	for _, key := range []string{
+		"method", "params", "request", "tool_call", "toolCall",
+		"server", "server_name", "serverName",
+		"tool", "tool_name", "toolName", "name",
+	} {
+		if _, present := input[key]; present {
+			return true
+		}
+	}
+	return false
 }
 
 func pathFromACPInput(value any) string {

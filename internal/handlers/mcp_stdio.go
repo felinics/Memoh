@@ -198,9 +198,9 @@ func (c *mcpStdioClient) dispatch(ctx context.Context, req mcptools.JSONRPCReque
 			return c.session.Complete(ctx, params)
 		})
 	case "logging/setLevel":
-		params := &sdkmcp.SetLoggingLevelParams{}
+		params := &sdkmcp.SetLoggingLevelParams{} //nolint:staticcheck // SEP-2577: proxy must keep forwarding logging/setLevel for external clients during the deprecation window.
 		return c.sdkCall(ctx, req, params, func(ctx context.Context) (any, error) {
-			return map[string]any{}, c.session.SetLoggingLevel(ctx, params)
+			return map[string]any{}, c.session.SetLoggingLevel(ctx, params) //nolint:staticcheck // SEP-2577: passthrough, see above.
 		})
 	default:
 		return nil, errMCPMethodNotFound
@@ -622,10 +622,10 @@ func sdkClientForInitialize(rawParams json.RawMessage) *sdkmcp.Client {
 			Capabilities map[string]json.RawMessage `json:"capabilities"`
 		}
 		if err := json.Unmarshal(rawParams, &wire); err == nil {
-			if rawRoots, hasRoots := wire.Capabilities["roots"]; hasRoots && caps.RootsV2 == nil {
-				roots := &sdkmcp.RootCapabilities{}
+			if rawRoots, hasRoots := wire.Capabilities["roots"]; hasRoots && caps.RootsV2 == nil { //nolint:staticcheck // SEP-2577: proxy re-advertises the external client's roots capability verbatim during the deprecation window.
+				roots := &sdkmcp.RootCapabilities{} //nolint:staticcheck // SEP-2577: passthrough, see above.
 				if err := json.Unmarshal(rawRoots, roots); err == nil {
-					caps.RootsV2 = roots
+					caps.RootsV2 = roots //nolint:staticcheck // SEP-2577: passthrough, see above.
 				}
 			}
 		}

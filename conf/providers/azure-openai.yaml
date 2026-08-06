@@ -106,7 +106,7 @@ models:
     name: "GPT 4 Turbo 2024 04 09"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 128000
   - model_id: "gpt-4-turbo-vision-preview"
     name: "GPT 4 Turbo Vision Preview"
@@ -118,37 +118,37 @@ models:
     name: "GPT 4.1"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1047576
   - model_id: "gpt-4.1-2025-04-14"
     name: "GPT 4.1 2025 04 14"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1047576
   - model_id: "gpt-4.1-mini"
     name: "GPT 4.1 Mini"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1047576
   - model_id: "gpt-4.1-mini-2025-04-14"
     name: "GPT 4.1 Mini 2025 04 14"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1047576
   - model_id: "gpt-4.1-nano"
     name: "GPT 4.1 Nano"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1047576
   - model_id: "gpt-4.1-nano-2025-04-14"
     name: "GPT 4.1 Nano 2025 04 14"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1047576
   - model_id: "gpt-4.5-preview"
     name: "GPT 4.5 Preview"
@@ -160,25 +160,25 @@ models:
     name: "GPT 4o"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 128000
   - model_id: "gpt-4o-2024-05-13"
     name: "GPT 4o 2024 05 13"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 128000
   - model_id: "gpt-4o-2024-08-06"
     name: "GPT 4o 2024 08 06"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 128000
   - model_id: "gpt-4o-2024-11-20"
     name: "GPT 4o 2024 11 20"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 128000
   - model_id: "gpt-4o-audio-preview-2024-12-17"
     name: "GPT 4o Audio Preview 2024 12 17"
@@ -190,13 +190,13 @@ models:
     name: "GPT 4o Mini"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 128000
   - model_id: "gpt-4o-mini-2024-07-18"
     name: "GPT 4o Mini 2024 07 18"
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 128000
   - model_id: "gpt-4o-mini-audio-preview-2024-12-17"
     name: "GPT 4o Mini Audio Preview 2024 12 17"
@@ -226,7 +226,7 @@ models:
     name: "GPT 5"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [minimal, low, medium, high]
@@ -234,7 +234,7 @@ models:
     name: "GPT 5 2025 08 07"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [minimal, low, medium, high]
@@ -242,7 +242,7 @@ models:
     name: "GPT 5 Chat"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 128000
       thinking_mode: toggle
       reasoning_efforts: [minimal, low, medium, high]
@@ -250,7 +250,7 @@ models:
     name: "GPT 5 Chat Latest"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 128000
       thinking_mode: toggle
       reasoning_efforts: [minimal, low, medium, high]
@@ -258,7 +258,7 @@ models:
     name: "GPT 5 Mini"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [minimal, low, medium, high]
@@ -266,7 +266,7 @@ models:
     name: "GPT 5 Mini 2025 08 07"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [minimal, low, medium, high]
@@ -274,7 +274,7 @@ models:
     name: "GPT 5 Nano"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [minimal, low, medium, high]
@@ -282,7 +282,7 @@ models:
     name: "GPT 5 Nano 2025 08 07"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [minimal, low, medium, high]
@@ -290,7 +290,7 @@ models:
     name: "GPT 5.1"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [none, minimal, low, medium, high]
@@ -298,7 +298,7 @@ models:
     name: "GPT 5.1 2025 11 13"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [none, minimal, low, medium, high]
@@ -322,7 +322,7 @@ models:
     name: "GPT 5.2"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [none, minimal, low, medium, high, xhigh]
@@ -330,7 +330,7 @@ models:
     name: "GPT 5.2 2025 12 11"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
       reasoning_efforts: [none, minimal, low, medium, high, xhigh]
@@ -362,7 +362,7 @@ models:
     name: "GPT 5.4"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
       reasoning_efforts: [none, minimal, low, medium, high, xhigh]
@@ -370,7 +370,7 @@ models:
     name: "GPT 5.4 2026 03 05"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -378,7 +378,7 @@ models:
     name: "GPT 5.4 Mini"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
       reasoning_efforts: [none, low, medium, high, xhigh]
@@ -386,7 +386,7 @@ models:
     name: "GPT 5.4 Mini 2026 03 17"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
       reasoning_efforts: [none, low, medium, high, xhigh]
@@ -394,7 +394,7 @@ models:
     name: "GPT 5.4 Nano"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
       reasoning_efforts: [none, low, medium, high, xhigh]
@@ -402,7 +402,7 @@ models:
     name: "GPT 5.4 Nano 2026 03 17"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
       reasoning_efforts: [none, low, medium, high, xhigh]
@@ -410,7 +410,7 @@ models:
     name: "GPT 5.5"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
       reasoning_efforts: [none, low, medium, high, xhigh]
@@ -418,7 +418,7 @@ models:
     name: "GPT 5.5 2026 04 23"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
       reasoning_efforts: [none, low, medium, high, xhigh]
@@ -474,7 +474,7 @@ models:
     name: "O1"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -482,7 +482,7 @@ models:
     name: "O1 2024 12 17"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -522,7 +522,7 @@ models:
     name: "O3"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -530,7 +530,7 @@ models:
     name: "O3 2025 04 16"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -554,7 +554,7 @@ models:
     name: "O4 Mini"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -562,7 +562,7 @@ models:
     name: "O4 Mini 2025 04 16"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]

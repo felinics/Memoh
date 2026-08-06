@@ -71,6 +71,10 @@
     the 24px visual disc via absolute -inset-[3px]; icon center x=28, text x=48.
     -->
 
+    <!-- Folders is a SIBLING section of Recents: folders of workdir-bound
+         chats above, the ungrouped timeline below. -->
+    <FoldersSection />
+
     <Recents class="flex-1 min-h-0" />
   </div>
 </template>
@@ -85,6 +89,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import SidebarPanelHeader from './panel-header.vue'
 import SidebarNavButton from './nav-button.vue'
+import FoldersSection from './folders-section.vue'
 import Recents from './recents.vue'
 
 const { t } = useI18n()
@@ -102,6 +107,10 @@ function handleNewSession() {
   // Opens (or focuses) the single draft tab; its activation resets the view to a
   // fresh draft (selectDraft), so no separate createNewSession is needed.
   workspaceTabs.openDraftChat({ title: t('chat.newSession'), explicitSelection: false })
+  // Select-to-dismiss for the mobile nav sheet: when the draft is ALREADY the
+  // active panel, openDraftChat short-circuits and no session/route/active-id
+  // change fires the sheet's watchers — close it explicitly. No-op on desktop.
+  workspaceTabs.closeMobileNav()
 }
 
 // Navigate to the current bot's settings overview.

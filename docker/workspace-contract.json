@@ -1,5 +1,5 @@
 {
-  "contract_version": 1,
+  "contract_version": 2,
   "platform": {
     "os": "linux",
     "libc": "glibc"

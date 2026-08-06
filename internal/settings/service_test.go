@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -163,6 +164,43 @@ func TestUpsertRequestShowToolCallsInIM_PointerSemantics(t *testing.T) {
 	}
 	if current.ShowToolCallsInIM {
 		t.Fatalf("explicit false pointer must clear the flag")
+	}
+}
+
+func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
+	t.Parallel()
+
+	// The autosaving web client relies on this contract: an omitted key must
+	// decode to nil (keep current value), while an explicit empty string must
+	// decode to a non-nil pointer (clear the reference).
+	var omitted UpsertRequest
+	if err := json.Unmarshal([]byte(`{"reasoning_effort":"low"}`), &omitted); err != nil {
+		t.Fatal(err)
+	}
+	for name, ptr := range map[string]*string{
+		"chat_model_id": omitted.ChatModelID, "image_model_id": omitted.ImageModelID,
+		"search_provider_id": omitted.SearchProviderID, "memory_provider_id": omitted.MemoryProviderID,
+		"tts_model_id": omitted.TtsModelID, "transcription_model_id": omitted.TranscriptionModelID,
+		"video_model_id": omitted.VideoModelID, "language": omitted.Language,
+		"heartbeat_model_id": omitted.HeartbeatModelID,
+	} {
+		if ptr != nil {
+			t.Fatalf("%s: omitted key must stay nil, got %q", name, *ptr)
+		}
+	}
+
+	var cleared UpsertRequest
+	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":"","memory_provider_id":"","language":"","heartbeat_model_id":""}`), &cleared); err != nil {
+		t.Fatal(err)
+	}
+	for name, ptr := range map[string]*string{
+		"chat_model_id": cleared.ChatModelID, "search_provider_id": cleared.SearchProviderID,
+		"memory_provider_id": cleared.MemoryProviderID, "language": cleared.Language,
+		"heartbeat_model_id": cleared.HeartbeatModelID,
+	} {
+		if ptr == nil || *ptr != "" {
+			t.Fatalf("%s: explicit empty string must decode to a non-nil empty pointer", name)
+		}
 	}
 }
 

@@ -14,6 +14,8 @@ export interface SessionSummary {
   metadata?: Record<string, unknown>
   runtime_metadata?: Record<string, unknown>
   parent_session_id?: string
+  /** Immutable bot-workdir binding; empty for unbound sessions. */
+  workdir_id?: string
   created_at?: string
   updated_at?: string
   route_metadata?: Record<string, unknown>
@@ -209,7 +211,17 @@ export interface UIUserInput {
   short_id?: number
   status: string
   questions?: UIUserInputQuestion[]
+  answers?: UIUserInputAnswer[]
   can_respond?: boolean
+}
+
+export interface UIUserInputAnswer {
+  question_id: string
+  question: string
+  selected?: UIUserInputOption[]
+  custom_text?: string
+  text?: string
+  skipped?: boolean
 }
 
 export interface UIUserInputQuestion {

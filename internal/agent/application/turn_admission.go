@@ -12,8 +12,10 @@ import (
 	"github.com/google/uuid"
 
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	tools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/apperror"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 // turnAdmitter is the durable admission gate StartTurn depends on.
@@ -231,19 +233,34 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 // have several agents working at once, and each of those threads still runs one
 // turn at a time. Busy therefore means *this agent* is already working — a fact
 // the parent model can act on — rather than a failure to report.
-func (s *Service) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, func(error), error) {
-	runCtx, _, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission)
+func (s *Service) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, tools.SubagentAdmission, func(error), error) {
+	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission)
 	switch {
 	case errors.Is(err, sessionruntime.ErrSessionBusy):
-		return nil, nil, fmt.Errorf("%w: thread %s", turn.ErrSessionBusy, threadID)
+		return nil, tools.SubagentAdmission{}, nil, fmt.Errorf("%w: thread %s", turn.ErrSessionBusy, threadID)
 	case errors.Is(err, sessionruntime.ErrInvocationConflict):
 		// This task already has a run. Executing it again would answer one
 		// message twice, so it is dropped exactly like a channel redelivery.
-		return nil, nil, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, invocationID)
+		return nil, tools.SubagentAdmission{}, nil, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, invocationID)
 	case err != nil:
-		return nil, nil, fmt.Errorf("admit subagent turn: %w", err)
+		return nil, tools.SubagentAdmission{}, nil, fmt.Errorf("admit subagent turn: %w", err)
 	}
-	return runCtx, finish, nil
+	// The handle and its fence travel on the run context rather than through the
+	// tool layer's port: the step committer and runtime observer installed on
+	// the spawn path need the run's identity, but the SubagentAdmitter port
+	// deliberately speaks only turn vocabulary — the admission value it does
+	// return carries exactly the identity persistence files under.
+	runCtx = runtimefence.WithContext(runCtx, runtimefence.Fence{
+		BotID:     botID,
+		SessionID: threadID,
+		Token:     admission.Handle.FencingToken,
+	})
+	runCtx = withSubagentRunHandle(runCtx, admission.Handle)
+	return runCtx, tools.SubagentAdmission{
+		RunID:        admission.RunID,
+		TurnID:       admission.TurnID,
+		TurnPosition: admission.TurnPosition,
+	}, finish, nil
 }
 
 // turnInvocationID resolves the command's retry identity.

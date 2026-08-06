@@ -2059,6 +2059,10 @@ definitions:
     type: object
   conversation.UIUserInput:
     properties:
+      answers:
+        items:
+          $ref: '#/definitions/userinput.UIAnswer'
+        type: array
       can_respond:
         type: boolean
       questions:
@@ -3496,6 +3500,12 @@ definitions:
         type: string
       type:
         type: string
+      workdir_id:
+        description: |-
+          WorkdirID immutably binds the new session to a bot workdir. The
+          workdir decides the session's workspace target and working directory
+          for its whole life; there is no way to change or clear it later.
+        type: string
     type: object
   handlers.displayInfoResponse:
     properties:
@@ -4793,6 +4803,8 @@ definitions:
         type: string
       updated_at:
         type: string
+      workdir_id:
+        type: string
     type: object
   settings.Settings:
     properties:
@@ -4928,6 +4940,12 @@ definitions:
       chat_acp_project_path:
         type: string
       chat_model_id:
+        description: |-
+          Reference fields below use pointer semantics so autosaving clients can
+          clear a selection: nil = keep current, "" = clear, value = set. The
+          service mirrors each into a `<field>_set` SQL flag (same pattern as
+          FetchProviderID / CompactionModelID); plain strings would make ""
+          indistinguishable from "not sent".
         type: string
       chat_runtime:
         type: string
@@ -4952,10 +4970,16 @@ definitions:
       heartbeat_interval:
         type: integer
       heartbeat_model_id:
+        description: |-
+          HeartbeatModelID joins the pointer group above (nil/""/value) so the
+          heartbeat tab's autosave can clear a model override.
         type: string
       image_model_id:
         type: string
       language:
+        description: |-
+          Language follows the same pointer rule; "" normalizes to DefaultLanguage
+          ("auto") rather than clearing the column.
         type: string
       memory_provider_id:
         type: string
@@ -4996,6 +5020,23 @@ definitions:
       source_kind:
         type: string
       state:
+        type: string
+    type: object
+  userinput.UIAnswer:
+    properties:
+      custom_text:
+        type: string
+      question:
+        type: string
+      question_id:
+        type: string
+      selected:
+        items:
+          $ref: '#/definitions/userinput.UIOption'
+        type: array
+      skipped:
+        type: boolean
+      text:
         type: string
     type: object
   userinput.UIOption:
@@ -5188,6 +5229,55 @@ definitions:
         type: string
       status:
         type: string
+    type: object
+  workdir.CreateRequest:
+    properties:
+      name:
+        type: string
+      path:
+        type: string
+      workspace_target_id:
+        type: string
+    required:
+    - name
+    - path
+    type: object
+  workdir.UpdateRequest:
+    properties:
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  workdir.Workdir:
+    properties:
+      archived:
+        type: boolean
+      bot_id:
+        type: string
+      created_at:
+        type: string
+      created_by_user_id:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      path:
+        type: string
+      target_kind:
+        type: string
+      updated_at:
+        type: string
+      workspace_target_id:
+        type: string
+    type: object
+  workdir.WorkdirsResponse:
+    properties:
+      workdirs:
+        items:
+          $ref: '#/definitions/workdir.Workdir'
+        type: array
     type: object
   workspace.SetPrimaryWorkspaceTargetRequest:
     properties:
@@ -9799,6 +9889,11 @@ paths:
         in: query
         name: parent_session_id
         type: string
+      - description: Only include sessions bound to this workdir. The literal none
+          selects sessions with no workdir.
+        in: query
+        name: workdir_id
+        type: string
       - description: Page size (1..200). Defaults to 50.
         in: query
         name: limit
@@ -11006,6 +11101,152 @@ paths:
       summary: WebSocket chat endpoint
       tags:
       - local-channel
+  /bots/{bot_id}/workdirs:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Include archived workdirs
+        in: query
+        name: include_archived
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workdir.WorkdirsResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List a Bot's workdirs
+      tags:
+      - workdirs
+    post:
+      consumes:
+      - application/json
+      description: Registers a named working directory on a workspace target. The
+        directory must already exist on that target.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workdir
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/workdir.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/workdir.Workdir'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a Bot workdir
+      tags:
+      - workdirs
+  /bots/{bot_id}/workdirs/{workdir_id}:
+    delete:
+      description: 'Archiving refuses new session bindings but keeps existing sessions
+        working: their directory never changes underneath them.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workdir ID
+        in: path
+        name: workdir_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Archive a Bot workdir
+      tags:
+      - workdirs
+    patch:
+      consumes:
+      - application/json
+      description: 'Only the name can change. The target and path are immutable: they
+        are baked into the working directory of every session bound to this workdir.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workdir ID
+        in: path
+        name: workdir_id
+        required: true
+        type: string
+      - description: New name
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/workdir.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workdir.Workdir'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Rename a Bot workdir
+      tags:
+      - workdirs
   /bots/{bot_id}/workspace-targets:
     get:
       parameters:
@@ -11781,6 +12022,10 @@ paths:
         in: query
         name: name
         required: true
+        type: string
+      - description: Bot ID to exclude from the conflict check (used when renaming)
+        in: query
+        name: exclude_bot_id
         type: string
       responses:
         "200":

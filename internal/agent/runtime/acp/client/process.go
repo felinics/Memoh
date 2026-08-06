@@ -5,12 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
@@ -44,26 +43,34 @@ const (
 
 type processOptions struct {
 	Backend   WorkspaceBackend
+	BotID     string
 	AgentID   string
 	SetupMode SetupMode
 	Env       []string
 	CleanEnv  bool
 	UnsetEnv  []string
-	// HermesHome is the bot-scoped HERMES_HOME resolved by SessionPool and
-	// reused by Runner so config writes and process startup share one path.
-	HermesHome string
-	NoTimeout  bool
+	NoTimeout bool
+	Logger    *slog.Logger
 }
 
 type bridgeProcess struct {
-	stream  *bridge.ExecStream
-	stdin   *io.PipeWriter
-	stdout  *io.PipeReader
-	tail    *stderrTail
-	done    chan struct{}
-	env     []string
-	cleanup func()
-	once    sync.Once
+	stream   *bridge.ExecStream
+	stdin    *io.PipeWriter
+	stdout   *io.PipeReader
+	tail     *stderrTail
+	done     chan struct{}
+	env      []string
+	toolEnv  []string
+	unsetEnv []string
+	lease    *runtimeLease
+	logger   *slog.Logger
+
+	stateMu      sync.Mutex
+	activated    bool
+	closeOnce    sync.Once
+	finalizeOnce sync.Once
+	finalizeDone chan struct{}
+	finalizeErr  error
 }
 
 func startBridgeProcess(ctx context.Context, client *bridge.Client, command string, args []string, workDir string, timeout time.Duration, opts processOptions) (*bridgeProcess, error) {
@@ -86,42 +93,49 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		timeoutSeconds = int32(DefaultRunTimeout.Seconds())
 	}
 
-	env, cleanup, err := prepareProcessEnv(ctx, client, workDir, opts)
+	lease, err := prepareRuntimeLease(ctx, client, opts)
 	if err != nil {
 		return nil, err
 	}
+	env := lease.agentEnv
+	runtimeOpts := opts
+	runtimeOpts.UnsetEnv = lease.unsetEnv
 
-	resolvedCommand, err := resolveCommand(ctx, client, command, workDir, env, opts)
+	resolvedCommand, err := resolveCommand(ctx, client, command, workDir, env, runtimeOpts)
 	if err != nil {
-		if cleanup != nil {
-			cleanup()
-		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = lease.finalize(cleanupCtx, false)
 		return nil, err
 	}
 
 	shellCommand := buildShellCommand(resolvedCommand, args)
 	execStream, err := client.ExecStreamWithOptions(ctx, shellCommand, workDir, timeoutSeconds, bridge.ExecOptions{
 		Env:      env,
-		CleanEnv: opts.CleanEnv,
-		UnsetEnv: opts.UnsetEnv,
+		CleanEnv: runtimeOpts.CleanEnv,
+		UnsetEnv: runtimeOpts.UnsetEnv,
 	})
 	if err != nil {
-		if cleanup != nil {
-			cleanup()
-		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = lease.finalize(cleanupCtx, false)
 		return nil, err
 	}
 
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
 	proc := &bridgeProcess{
-		stream:  execStream,
-		stdin:   stdinW,
-		stdout:  stdoutR,
-		tail:    &stderrTail{},
-		done:    make(chan struct{}),
-		env:     append([]string(nil), env...),
-		cleanup: cleanup,
+		stream:       execStream,
+		stdin:        stdinW,
+		stdout:       stdoutR,
+		tail:         &stderrTail{},
+		done:         make(chan struct{}),
+		env:          append([]string(nil), env...),
+		toolEnv:      append([]string(nil), lease.toolEnv...),
+		unsetEnv:     append([]string(nil), lease.unsetEnv...),
+		lease:        lease,
+		logger:       opts.Logger,
+		finalizeDone: make(chan struct{}),
 	}
 
 	go func() {
@@ -167,78 +181,12 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 			}
 		}
 	}()
+	go func(parent context.Context) {
+		<-proc.done
+		proc.finalizeAfterExit(parent)
+	}(ctx)
 
 	return proc, nil
-}
-
-func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir string, opts processOptions) ([]string, func(), error) {
-	mode := normalizeSetupMode(opts.SetupMode)
-
-	env := withoutEnvKeys(opts.Env, "HOME", "PATH", "CODEX_HOME")
-	switch mode {
-	case SetupModeAPIKey, SetupModeOAuth:
-		if isHermesAgent(opts.AgentID) {
-			hermesHome := strings.TrimSpace(opts.HermesHome)
-			if hermesHome == "" {
-				return nil, nil, errors.New("hermes managed setup in an isolated workspace requires HERMES_HOME isolation")
-			}
-			env = withoutEnvKeys(withoutBlockedEnvNames(opts.Env, HermesManagedUnsetEnvKeys()), "HOME", "PATH", "CODEX_HOME")
-			env = append(env, "HOME="+dataMountPath, "PATH="+defaultContainerPath, "HERMES_HOME="+hermesHome)
-			if err := client.Mkdir(ctx, hermesHome); err != nil {
-				return nil, nil, fmt.Errorf("prepare Hermes HOME: %w", err)
-			}
-			return env, nil, nil
-		}
-		homeDir := dataMountPath
-		tempHomeDir := "/tmp/memoh-acp/" + uuid.NewString()
-		if !isCodexAgent(opts.AgentID) {
-			homeDir = tempHomeDir
-		}
-		env = append(env, "HOME="+homeDir, "PATH="+defaultContainerPath)
-
-		if err := client.Mkdir(ctx, homeDir); err != nil {
-			return nil, nil, fmt.Errorf("prepare ACP HOME: %w", err)
-		}
-		// Managed sessions isolate via a fresh HOME and start with the managed
-		// ask rule in effect.
-		if isClaudeCodeAgent(opts.AgentID) {
-			if err := WriteClaudeManagedSettings(ctx, client, homeDir); err != nil {
-				return nil, nil, fmt.Errorf("prepare Claude managed settings: %w", err)
-			}
-		}
-
-		// Cleanup intentionally derives a fresh background ctx with its own
-		// short deadline: the parent ctx is usually already cancelled by the
-		// time we tear down the ACP HOME, but we still want to issue rm -rf.
-		cleanup := func() { //nolint:contextcheck // cleanup uses independent background ctx by design.
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if homeDir == tempHomeDir {
-				_, _ = client.ExecWithOptions(cleanupCtx, "rm -rf "+escapeShellArg(homeDir), workDir, 5, nil, bridge.ExecOptions{
-					Env:      env,
-					CleanEnv: opts.CleanEnv,
-					UnsetEnv: opts.UnsetEnv,
-				})
-			}
-		}
-		return env, cleanup, nil
-	case SetupModeSelf:
-		env = withoutEnvKeys(opts.Env, "HOME", "PATH", "CODEX_HOME")
-		env = append(env, "PATH="+defaultContainerPath)
-		if isCodexAgent(opts.AgentID) {
-			env = append(env, "HOME="+dataMountPath)
-		}
-		if isHermesAgent(opts.AgentID) {
-			home := dataMountPath + "/.hermes"
-			env = append(env, "HOME="+dataMountPath, "HERMES_HOME="+home)
-			if err := client.Mkdir(ctx, home); err != nil {
-				return nil, nil, fmt.Errorf("prepare Hermes self HOME: %w", err)
-			}
-		}
-		return env, nil, nil
-	default:
-		return nil, nil, fmt.Errorf("unsupported ACP setup mode %q", mode)
-	}
 }
 
 func normalizeSetupMode(mode SetupMode) SetupMode {
@@ -383,7 +331,10 @@ func (p *bridgeProcess) Write(b []byte) (int, error) {
 }
 
 func (p *bridgeProcess) Close() error {
-	p.once.Do(func() {
+	if p == nil {
+		return nil
+	}
+	p.closeOnce.Do(func() {
 		if p.stdin != nil {
 			_ = p.stdin.Close()
 		}
@@ -393,15 +344,85 @@ func (p *bridgeProcess) Close() error {
 		if p.stream != nil {
 			_ = p.stream.Close()
 		}
-		if p.cleanup != nil {
-			p.cleanup()
-		}
 	})
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-p.done:
-	case <-time.After(2 * time.Second):
+	case <-timer.C:
+		return errors.New("ACP process did not exit before the cleanup deadline")
 	}
-	return nil
+	<-p.finalizeDone
+	return p.finalizeErr
+}
+
+// Activate marks a fully initialized ACP process as eligible to synchronize
+// durable artifacts. Startup failures call Close before activation and only
+// remove their process-local directory.
+func (p *bridgeProcess) Activate() {
+	if p == nil {
+		return
+	}
+	p.stateMu.Lock()
+	if !p.activated {
+		p.activated = true
+		go p.syncLoop()
+	}
+	p.stateMu.Unlock()
+}
+
+func (p *bridgeProcess) syncLoop() {
+	if p == nil || p.lease == nil {
+		return
+	}
+	ticker := time.NewTicker(runtimeSyncInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.done:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := p.lease.syncLiveState(ctx)
+			cancel()
+			if err != nil && p.logger != nil {
+				p.logger.Warn("failed to refresh ACP runtime lease",
+					slog.String("agent_id", p.lease.agentID),
+					slog.String("bot_id", p.lease.botID),
+					slog.Any("error", err))
+			}
+		}
+	}
+}
+
+func (p *bridgeProcess) SyncPromptState(ctx context.Context) error {
+	if p == nil || p.lease == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	return p.lease.syncLiveState(ctx)
+}
+
+func (p *bridgeProcess) finalizeAfterExit(parent context.Context) {
+	if p == nil {
+		return
+	}
+	p.finalizeOnce.Do(func() {
+		defer close(p.finalizeDone)
+		p.stateMu.Lock()
+		commit := p.activated
+		p.stateMu.Unlock()
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 15*time.Second)
+		defer cancel()
+		p.finalizeErr = p.lease.finalize(ctx, commit)
+		if p.finalizeErr != nil && p.logger != nil {
+			p.logger.Warn("failed to finalize ACP runtime state",
+				slog.String("agent_id", p.lease.agentID),
+				slog.String("bot_id", p.lease.botID),
+				slog.Any("error", p.finalizeErr))
+		}
+	})
 }
 
 func withoutEnvKeys(env []string, keys ...string) []string {

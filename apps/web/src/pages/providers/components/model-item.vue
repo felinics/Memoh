@@ -226,11 +226,10 @@ async function handleToggleEnable(value: boolean) {
     }
     await putModelsById({ path: { id: props.model.id }, body, throwOnError: true })
     queryCache.invalidateQueries({ key: ['provider-models'] })
+    // The bot model picker shares this entry (bot-settings kept a separate
+    // ['all-models'] key until the two were unified), so one invalidation
+    // covers both pickers.
     queryCache.invalidateQueries({ key: ['models'] })
-    // bot-settings caches the full model list under ['all-models']; without
-    // this, the bot picker keeps a disabled model visible until the route
-    // remounts because the tab is kept alive.
-    queryCache.invalidateQueries({ key: ['all-models'] })
   } catch {
     enableOverride.value = prev
     toast.error(t('models.toggleFailed'))

@@ -257,7 +257,7 @@ install_debian() {
     apt_get install -y --no-install-recommends apt-utils
   fi
   progress 42 installing "Installing VNC, desktop, accessibility, and CJK fonts"
-  apt_get install -y --no-install-recommends ca-certificates curl gnupg dbus-x11 x11-xserver-utils xterm xfce4 xfce4-terminal tigervnc-standalone-server fontconfig fonts-dejavu fonts-noto-cjk fonts-noto-color-emoji procps at-spi2-core
+  apt_get install -y --no-install-recommends ca-certificates curl gnupg dbus-x11 x11-xserver-utils xterm xfce4 xfce4-terminal tigervnc-standalone-server fontconfig fonts-dejavu fonts-noto-cjk fonts-noto-color-emoji procps at-spi2-core tini
   install_debian_style_extras
   if ! find_browser >/dev/null 2>&1; then
     progress 66 browser "Installing browser"

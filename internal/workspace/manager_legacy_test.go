@@ -237,10 +237,13 @@ func TestBuildWorkspaceContainerSpecInjectsBridgeTLSMaterial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build spec: %v", err)
 	}
+	if got, want := strings.Join(spec.Cmd, " "), WorkspaceInitPath+" -g -- "+WorkspaceBridgePath; got != want {
+		t.Fatalf("workspace command = %q, want %q", got, want)
+	}
 
 	var foundMount, foundBridgeMount bool
 	for _, mount := range spec.Mounts {
-		if mount.Destination == "/opt/memoh/bridge" {
+		if mount.Destination == WorkspaceBridgePath {
 			foundBridgeMount = true
 			if mount.Source != bridgePath {
 				t.Fatalf("bridge mount source = %q, want %q", mount.Source, bridgePath)

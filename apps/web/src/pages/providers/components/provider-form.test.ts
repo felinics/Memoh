@@ -5,6 +5,7 @@ import type { Slots } from 'vue'
 
 const mocks = vi.hoisted(() => ({
   ensureProvider: vi.fn(),
+  saveProvider: vi.fn(),
   getAuthorize: vi.fn(),
   getOAuthStatus: vi.fn(),
   pollOAuth: vi.fn(),
@@ -153,6 +154,7 @@ describe('provider OAuth model sync', () => {
       },
       editLoading: false,
       ensureProvider: mocks.ensureProvider,
+      saveProvider: mocks.saveProvider,
     })
     app.config.globalProperties.$t = translate
     app.mount(root)
@@ -186,6 +188,7 @@ describe('provider OAuth model sync', () => {
       },
       editLoading: false,
       ensureProvider: mocks.ensureProvider,
+      saveProvider: mocks.saveProvider,
     })
     app.config.globalProperties.$t = translate
     app.mount(root)
@@ -239,6 +242,7 @@ describe('provider OAuth model sync', () => {
           provider: provider.value,
           editLoading: false,
           ensureProvider,
+          saveProvider: mocks.saveProvider,
         })
       },
     })

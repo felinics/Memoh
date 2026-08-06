@@ -286,10 +286,15 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		modelStepIndex++
 		return nil
 	}))
+	var nextDurableStep int
 	var onStepCommitted func(context.Context, int, *sdk.StepResult) error
 	if cfg.OnStepCommitted != nil {
 		onStepCommitted = func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
-			return cfg.OnStepCommitted(ctx, stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata))
+			if err := cfg.OnStepCommitted(ctx, stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)); err != nil {
+				return err
+			}
+			nextDurableStep = stepIndex + 1
+			return nil
 		}
 		opts = append(opts, sdk.WithOnStepCommitted(onStepCommitted))
 	}
@@ -342,6 +347,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	sendEvent(ctx, ch, StreamEvent{Type: EventAgentStart})
 
 	var allText strings.Builder
+	var interruptedStep interruptedStepCapture
+	var interruptedMessages []sdk.Message
 	stepNumber := 0
 
 	streamClosed := false
@@ -358,6 +365,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			}
 			part = next
 		}
+		interruptedStep.observe(part)
 
 		switch p := part.(type) {
 		case *sdk.StartPart:
@@ -550,7 +558,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				streamResult, aborted = a.runMidStreamRetry(
 					ctx, streamCtx, cancel, toolLoopAbortCallIDs,
 					ch, cfg, sdkTools, approvalTools, prepareStep, streamResult,
-					committedStepMessages, onStepCommitted, stepNumber, errMsg, &allText, textLoopProbeBuffer,
+					committedStepMessages, onStepCommitted, &interruptedStep,
+					stepNumber, errMsg, &allText, textLoopProbeBuffer,
 				)
 				if !aborted {
 					turnError = ""
@@ -570,6 +579,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			break
 		}
 	}
+	if ctx.Err() != nil {
+		aborted = true
+	}
 
 	if aborted && !streamClosed {
 		// A provider is expected to close its stream when the context is
@@ -577,7 +589,31 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		// Preserve the final snapshot when it arrives promptly, then stop
 		// waiting so the caller can fence and finalize the run as aborted.
 		cancel(context.Canceled)
-		streamClosed = drainStreamUntilClosed(streamResult.Stream, streamCancelDrainGrace)
+		streamClosed = drainStreamUntilClosed(streamResult.Stream, streamCancelDrainGrace, interruptedStep.observe)
+	}
+
+	// Only external cancellation can represent a user/session abort. Provider
+	// errors and loop guards keep their existing failure semantics.
+	//
+	// A closed stream is what makes this write safe, so it is required rather
+	// than merely convenient. It means the SDK's step goroutine has returned:
+	// no further complete step can commit after this checkpoint, and the
+	// prepared-message capture read below is published by that goroutine's exit
+	// instead of racing its next PrepareStep. When a provider refuses to close
+	// within the drain grace, the checkpoint is dropped rather than risk
+	// duplicating an answer the SDK is still about to commit.
+	if aborted && streamClosed && ctx.Err() != nil && cfg.OnStepInterrupted != nil {
+		stepIndex := nextDurableStep
+		if step := interruptedStep.snapshot(stepIndex); step != nil {
+			step = committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)
+			if err := cfg.OnStepInterrupted(context.WithoutCancel(streamCtx), stepIndex, step); err != nil {
+				// An owner that lost its lease, or a run another writer already
+				// finalized, is an expected outcome of racing an abort.
+				a.logger.Warn("persist interrupted model step failed", slog.Any("error", err))
+			} else {
+				interruptedMessages = step.Messages
+			}
+		}
 	}
 
 	if textLoopProbeBuffer != nil {
@@ -608,6 +644,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			totalUsage.OutputTokenDetails.ReasoningTokens += step.Usage.OutputTokenDetails.ReasoningTokens
 		}
 	}
+	finalMessages = append(finalMessages, interruptedMessages...)
 	usageJSON, _ := json.Marshal(totalUsage)
 
 	termEvent := StreamEvent{
@@ -653,7 +690,12 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	sendEvent(deliveryCtx, ch, termEvent)
 }
 
-func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration) bool {
+// drainStreamUntilClosed consumes what the provider still has buffered after
+// cancellation. observe sees those parts too: a finish-step or tool call left in
+// the buffer is state this run reached, so an interrupted checkpoint must be
+// judged against it rather than against the prefix the event loop happened to
+// read before the abort.
+func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration, observe func(sdk.StreamPart)) bool {
 	if stream == nil {
 		return true
 	}
@@ -661,9 +703,12 @@ func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration) b
 	defer timer.Stop()
 	for {
 		select {
-		case _, ok := <-stream:
+		case part, ok := <-stream:
 			if !ok {
 				return true
+			}
+			if observe != nil {
+				observe(part)
 			}
 		case <-timer.C:
 			return false
@@ -911,11 +956,13 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		WorkspaceTargetID:    cfg.Identity.WorkspaceTargetID,
 		WorkspaceTargetKind:  cfg.Identity.WorkspaceTargetKind,
 		WorkspaceTargetName:  cfg.Identity.WorkspaceTargetName,
+		WorkdirPath:          cfg.Identity.WorkdirPath,
 		CurrentPlatform:      cfg.Identity.CurrentPlatform,
 		ReplyTarget:          cfg.Identity.ReplyTarget,
 		ConversationType:     cfg.Identity.ConversationType,
 		CanRequestUserInput:  cfg.CanRequestUserInput,
 		SupportsImageInput:   cfg.SupportsImageInput,
+		SupportsFileInput:    cfg.SupportsFileInput,
 		IsSubagent:           cfg.Identity.IsSubagent,
 		CurrentModelUUID:     cfg.CurrentModelUUID,
 		CurrentModelID:       cfg.CurrentModelID,
@@ -1304,6 +1351,7 @@ func (a *Agent) runMidStreamRetry(
 	prevResult *sdk.StreamResult,
 	committedStepMessages *stepMessageCapture,
 	onStepCommitted func(context.Context, int, *sdk.StepResult) error,
+	interruptedStep *interruptedStepCapture,
 	stepNumber int,
 	errMsg string,
 	allText *strings.Builder,
@@ -1316,6 +1364,10 @@ func (a *Agent) runMidStreamRetry(
 		}
 	}
 	stepOffset := len(prevResult.Steps)
+	// The failed attempt's partial output is regenerated from the last
+	// committed boundary, so it must not survive as a checkpoint. Retried
+	// steps are numbered from the offset the commit barrier already uses.
+	interruptedStep.rebase(stepOffset)
 
 	retryCfg := DefaultRetryConfig()
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
@@ -1372,6 +1424,7 @@ func (a *Agent) runMidStreamRetry(
 				aborted = true
 				break
 			}
+			interruptedStep.observe(retryPart)
 			switch rp := retryPart.(type) {
 			case *sdk.TextStartPart:
 				if !sendEvent(sendCtx, ch, StreamEvent{Type: EventTextStart}) {
@@ -1476,7 +1529,8 @@ func (a *Agent) runMidStreamRetry(
 			}
 		}
 		if aborted {
-			for range retryResult.Stream {
+			for retryPart := range retryResult.Stream {
+				interruptedStep.observe(retryPart)
 			}
 		}
 		// Merge prev messages into retryResult so the caller sees the full
@@ -1498,7 +1552,13 @@ func (a *Agent) runMidStreamRetry(
 	}
 	// All retry attempts failed to even start a new stream — return the
 	// previous (already drained) result so its accumulated messages are
-	// preserved as the final partial state.
+	// preserved as the final partial state. Publish the giving-up error: every
+	// EventRetry retracts the failure it retried, so without this last event a
+	// consumer would see the run end with nothing to explain why it stopped.
+	sendEvent(sendCtx, ch, StreamEvent{
+		Type:  EventError,
+		Error: fmt.Sprintf("mid-stream retry: all %d attempts failed (last: %s)", retryCfg.MaxAttempts, errMsg),
+	})
 	return prevResult, true
 }
 

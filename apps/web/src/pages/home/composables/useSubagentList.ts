@@ -76,8 +76,7 @@ export function useSubagentList() {
   function navigateToSession(subagentSessionId: string) {
     if (!subagentSessionId || !currentBotId.value) return
     const agent = subagents.value.find(item => item.id === subagentSessionId)
-    workspaceTabs.openSessionChatFromView({
-      viewId: target.value.viewId,
+    workspaceTabs.openSubagentSession({
       sessionId: subagentSessionId,
       title: agent?.title || agent?.agentId,
     })

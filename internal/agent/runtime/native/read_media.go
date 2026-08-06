@@ -18,7 +18,7 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 
 	clientType := models.ResolveClientType(model)
 	state := &readMediaDecorationState{
-		pendingImages: make(map[string]sdk.ImagePart),
+		pendingMedia: make(map[string]sdk.MessagePart),
 	}
 	wrapped := make([]sdk.Tool, 0, len(tools))
 	found := false
@@ -38,16 +38,16 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 				return output, err
 			}
 
-			publicResult, image, ok := normalizeReadMediaOutput(output, clientType)
+			publicResult, media, ok := normalizeReadMediaOutput(output, clientType)
 			if !ok {
 				return output, nil
 			}
-			if ctx != nil && strings.TrimSpace(ctx.ToolCallID) != "" && strings.TrimSpace(image.Image) != "" {
+			if ctx != nil && strings.TrimSpace(ctx.ToolCallID) != "" && mediaPartHasContent(media) {
 				state.mu.Lock()
-				if _, exists := state.pendingImages[ctx.ToolCallID]; !exists {
+				if _, exists := state.pendingMedia[ctx.ToolCallID]; !exists {
 					state.pendingOrder = append(state.pendingOrder, ctx.ToolCallID)
 				}
-				state.pendingImages[ctx.ToolCallID] = image
+				state.pendingMedia[ctx.ToolCallID] = media
 				state.mu.Unlock()
 			}
 			return publicResult, nil
@@ -63,11 +63,11 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 }
 
 type readMediaDecorationState struct {
-	mu            sync.Mutex
-	pendingOrder  []string
-	pendingImages map[string]sdk.ImagePart
-	prepareCalls  int
-	injections    []readMediaInjection
+	mu           sync.Mutex
+	pendingOrder []string
+	pendingMedia map[string]sdk.MessagePart
+	prepareCalls int
+	injections   []readMediaInjection
 }
 
 type readMediaInjection struct {
@@ -91,12 +91,12 @@ func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.
 
 	parts := make([]sdk.MessagePart, 0, len(s.pendingOrder))
 	for _, toolCallID := range s.pendingOrder {
-		image, ok := s.pendingImages[toolCallID]
-		delete(s.pendingImages, toolCallID)
-		if !ok || strings.TrimSpace(image.Image) == "" {
+		media, ok := s.pendingMedia[toolCallID]
+		delete(s.pendingMedia, toolCallID)
+		if !ok || !mediaPartHasContent(media) {
 			continue
 		}
-		parts = append(parts, image)
+		parts = append(parts, media)
 	}
 	s.pendingOrder = s.pendingOrder[:0]
 
@@ -146,17 +146,44 @@ func (s *readMediaDecorationState) mergeMessages(steps []sdk.StepResult, fallbac
 	return merged
 }
 
-func normalizeReadMediaOutput(output any, clientType string) (any, sdk.ImagePart, bool) {
+func normalizeReadMediaOutput(output any, clientType string) (any, sdk.MessagePart, bool) {
 	switch value := output.(type) {
 	case agenttools.ReadMediaToolOutput:
-		return value.Public, buildReadMediaImagePart(clientType, value.ImageBase64, value.ImageMediaType), true
+		return value.Public, buildReadMediaPart(clientType, value), true
 	case *agenttools.ReadMediaToolOutput:
 		if value == nil {
-			return nil, sdk.ImagePart{}, false
+			return nil, nil, false
 		}
-		return value.Public, buildReadMediaImagePart(clientType, value.ImageBase64, value.ImageMediaType), true
+		return value.Public, buildReadMediaPart(clientType, *value), true
 	default:
-		return nil, sdk.ImagePart{}, false
+		return nil, nil, false
+	}
+}
+
+// buildReadMediaPart converts a read-media tool output into the message part
+// injected on the next step: documents become FilePart (bare base64 by the
+// twilight convention — provider framing is the adapters' job), images keep
+// the legacy per-client data URL shaping.
+func buildReadMediaPart(clientType string, value agenttools.ReadMediaToolOutput) sdk.MessagePart {
+	if strings.TrimSpace(value.FileBase64) != "" {
+		return sdk.FilePart{
+			Data:      strings.TrimSpace(value.FileBase64),
+			MediaType: strings.TrimSpace(value.FileMediaType),
+			Filename:  strings.TrimSpace(value.Filename),
+		}
+	}
+	return buildReadMediaImagePart(clientType, value.ImageBase64, value.ImageMediaType)
+}
+
+// mediaPartHasContent reports whether an injected media part carries a payload.
+func mediaPartHasContent(part sdk.MessagePart) bool {
+	switch p := part.(type) {
+	case sdk.ImagePart:
+		return strings.TrimSpace(p.Image) != ""
+	case sdk.FilePart:
+		return strings.TrimSpace(p.Data) != ""
+	default:
+		return false
 	}
 }
 

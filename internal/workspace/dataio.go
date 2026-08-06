@@ -46,7 +46,7 @@ func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, 
 
 	mounts, err := m.snapshotMounts(ctx, ref.info)
 	if errors.Is(err, errMountNotSupported) {
-		return m.exportDataViaGRPC(ctx, botID)
+		return m.exportDataViaGRPC(ctx, botID, false)
 	}
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, 
 			if _, err := os.Stat(dataDir); err != nil {
 				return nil // no /data, produce empty archive
 			}
-			return tarGzDir(pw, dataDir)
+			return tarGzDir(pw, dataDir, false)
 		})
 	}()
 
@@ -81,6 +81,10 @@ func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, 
 // ImportData extracts a tar.gz archive into the container's /data directory.
 // The container is stopped during import and restarted afterwards.
 func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) error {
+	return m.importData(ctx, botID, r, false)
+}
+
+func (m *Manager) importData(ctx context.Context, botID string, r io.Reader, preserveCredentials bool) error {
 	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("get workspace runtime: %w", err)
@@ -89,7 +93,7 @@ func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) err
 
 	mounts, err := m.snapshotMounts(ctx, ref.info)
 	if errors.Is(err, errMountNotSupported) {
-		return m.importDataViaGRPC(ctx, botID, r)
+		return m.importDataViaGRPC(ctx, botID, r, preserveCredentials)
 	}
 	if err != nil {
 		return err
@@ -106,7 +110,7 @@ func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) err
 		if err := os.MkdirAll(dataDir, 0o750); err != nil {
 			return err
 		}
-		return untarGzDir(r, dataDir)
+		return untarGzDir(r, dataDir, preserveCredentials)
 	})
 }
 
@@ -124,7 +128,7 @@ func (m *Manager) PreserveData(ctx context.Context, botID string) error {
 
 	mounts, mountErr := m.snapshotMounts(ctx, ref.info)
 	if errors.Is(mountErr, errMountNotSupported) {
-		return m.preserveDataViaGRPC(ctx, botID, m.backupPath(botID))
+		return m.preserveDataViaGRPC(ctx, botID, m.backupPath(botID), true)
 	}
 	if mountErr != nil {
 		return mountErr
@@ -135,20 +139,9 @@ func (m *Manager) PreserveData(ctx context.Context, botID string) error {
 // RestorePreservedData imports preserved data (backup tar.gz) into a running
 // container's /data.
 func (m *Manager) RestorePreservedData(ctx context.Context, botID string) error {
-	bp := m.backupPath(botID)
-	if _, err := os.Stat(bp); err != nil {
-		return errors.New("no preserved data found")
-	}
-	f, err := os.Open(bp) //nolint:gosec // G304: operator-controlled path
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	if err := m.ImportData(ctx, botID, f); err != nil {
-		return err
-	}
-	return os.Remove(bp)
+	return m.consumePreservedData(botID, func(r io.Reader) error {
+		return m.importData(ctx, botID, r, true)
+	})
 }
 
 // HasPreservedData checks whether a backup tar.gz exists for a bot.
@@ -189,7 +182,7 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 		return false
 	}
 
-	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
+	f, err := createPrivateWorkspaceArchive(backupPath)
 	if err != nil {
 		m.logger.Warn("recover orphaned snapshot: create backup file failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
@@ -201,7 +194,7 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 		if _, statErr := os.Stat(dataDir); statErr != nil {
 			return nil
 		}
-		return tarGzDir(f, dataDir)
+		return tarGzDir(f, dataDir, true)
 	})
 
 	closeErr := f.Close()
@@ -221,37 +214,46 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 // restorePreservedIntoSnapshot restores a preserved backup directly into
 // the container's snapshot before the task is started. This avoids the
 // stop/start cycle that RestorePreservedData (via ImportData) requires.
-func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string) error {
+func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string, info ctr.ContainerInfo) error {
+	mounts, err := m.snapshotMounts(ctx, info)
+	if err != nil {
+		return err
+	}
+
+	return m.consumePreservedData(botID, func(r io.Reader) error {
+		return mount.WithTempMount(ctx, mounts, func(root string) error {
+			dataDir := mountedDataDir(root)
+			if err := os.MkdirAll(dataDir, 0o750); err != nil {
+				return err
+			}
+			return untarGzDir(r, dataDir, true)
+		})
+	})
+}
+
+func (m *Manager) restorePreservedDataViaGRPC(ctx context.Context, botID string) error {
+	return m.consumePreservedData(botID, func(r io.Reader) error {
+		return m.importDataViaGRPC(ctx, botID, r, true)
+	})
+}
+
+func (m *Manager) consumePreservedData(botID string, restore func(io.Reader) error) error {
 	bp := m.backupPath(botID)
 	f, err := os.Open(bp) //nolint:gosec // G304: operator-controlled path
 	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	ref, err := m.loadLockedContainer(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("get workspace runtime: %w", err)
-	}
-	defer ref.Close()
-
-	mounts, err := m.snapshotMounts(ctx, ref.info)
-	if err != nil {
-		return err
-	}
-
-	if err := mount.WithTempMount(ctx, mounts, func(root string) error {
-		dataDir := mountedDataDir(root)
-		if err := os.MkdirAll(dataDir, 0o750); err != nil {
-			return err
+		if os.IsNotExist(err) {
+			return errors.New("no preserved data found")
 		}
-		return untarGzDir(f, dataDir)
-	}); err != nil {
 		return err
 	}
-
-	_ = os.Remove(bp)
-	return nil
+	if err := restore(f); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Remove(bp)
 }
 
 // errMountNotSupported indicates the backend doesn't support snapshot mounts
@@ -319,12 +321,17 @@ func (m *Manager) stopTaskForMutation(ctx context.Context, botID, containerID st
 	}, nil
 }
 
-func (*Manager) preserveDataToArchive(ctx context.Context, archivePath string, mounts []mount.Mount) error {
+func (*Manager) preserveDataToArchive(
+	ctx context.Context,
+	archivePath string,
+	mounts []mount.Mount,
+	preserveCredentials bool,
+) error {
 	if err := os.MkdirAll(filepath.Dir(archivePath), 0o750); err != nil {
 		return fmt.Errorf("create backup dir: %w", err)
 	}
 
-	f, err := os.Create(archivePath) //nolint:gosec // G304: operator-controlled path
+	f, err := createPrivateWorkspaceArchive(archivePath)
 	if err != nil {
 		return fmt.Errorf("create backup file: %w", err)
 	}
@@ -334,7 +341,7 @@ func (*Manager) preserveDataToArchive(ctx context.Context, archivePath string, m
 		if _, statErr := os.Stat(dataDir); statErr != nil {
 			return nil // no /data to backup
 		}
-		return tarGzDir(f, dataDir)
+		return tarGzDir(f, dataDir, preserveCredentials)
 	})
 
 	closeErr := f.Close()
@@ -349,7 +356,7 @@ func (*Manager) preserveDataToArchive(ctx context.Context, archivePath string, m
 }
 
 func (m *Manager) preserveDataToBackup(ctx context.Context, botID string, mounts []mount.Mount) error {
-	return m.preserveDataToArchive(ctx, m.backupPath(botID), mounts)
+	return m.preserveDataToArchive(ctx, m.backupPath(botID), mounts, true)
 }
 
 func (m *Manager) preserveDataBeforeDelete(ctx context.Context, botID string) error {
@@ -361,7 +368,7 @@ func (m *Manager) preserveDataBeforeDelete(ctx context.Context, botID string) er
 
 	mounts, err := m.snapshotMounts(ctx, ref.info)
 	if errors.Is(err, errMountNotSupported) {
-		return m.preserveDataViaGRPC(ctx, botID, m.backupPath(botID))
+		return m.preserveDataViaGRPC(ctx, botID, m.backupPath(botID), true)
 	}
 	if err != nil {
 		return err
@@ -383,6 +390,18 @@ func mountedDataDir(root string) string {
 
 func (m *Manager) backupPath(botID string) string {
 	return filepath.Join(m.dataRoot(), backupsSubdir, botID+".tar.gz")
+}
+
+func createPrivateWorkspaceArchive(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) //nolint:gosec // G304: operator-controlled path
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 func (*Manager) archiveSnapshotKey(botID string) string {
@@ -420,7 +439,11 @@ func (m *Manager) CountData(ctx context.Context, botID string) (int, error) {
 	return count, nil
 }
 
-func (m *Manager) exportDataViaGRPC(ctx context.Context, botID string) (io.ReadCloser, error) {
+func (m *Manager) exportDataViaGRPC(
+	ctx context.Context,
+	botID string,
+	preserveCredentials bool,
+) (io.ReadCloser, error) {
 	client, err := m.nativeMCPClient(ctx, botID)
 	if err != nil {
 		return nil, fmt.Errorf("grpc connect: %w", err)
@@ -446,11 +469,11 @@ func (m *Manager) exportDataViaGRPC(ctx context.Context, botID string) (io.ReadC
 			if entry.GetIsDir() {
 				continue
 			}
-			if isWorkspaceArchiveSymlinkMode(entry.GetMode()) {
+			if !isWorkspaceArchiveRegularMode(entry.GetMode()) {
 				continue
 			}
 			relPath := strings.TrimPrefix(entry.GetPath(), "/")
-			if shouldSkipWorkspaceArchivePath(relPath, false) {
+			if shouldSkipWorkspaceArchivePath(relPath, false, preserveCredentials) {
 				continue
 			}
 			absPath := containerDataDir + "/" + strings.TrimPrefix(relPath, "/")
@@ -480,8 +503,13 @@ func (m *Manager) exportDataViaGRPC(ctx context.Context, botID string) (io.ReadC
 	return pr, nil
 }
 
-func (m *Manager) preserveDataViaGRPC(ctx context.Context, botID, backupPath string) error {
-	reader, err := m.exportDataViaGRPC(ctx, botID)
+func (m *Manager) preserveDataViaGRPC(
+	ctx context.Context,
+	botID string,
+	backupPath string,
+	preserveCredentials bool,
+) error {
+	reader, err := m.exportDataViaGRPC(ctx, botID, preserveCredentials)
 	if err != nil {
 		return err
 	}
@@ -490,7 +518,7 @@ func (m *Manager) preserveDataViaGRPC(ctx context.Context, botID, backupPath str
 	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
 		return fmt.Errorf("create backup dir: %w", err)
 	}
-	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
+	f, err := createPrivateWorkspaceArchive(backupPath)
 	if err != nil {
 		return fmt.Errorf("create backup file: %w", err)
 	}
@@ -509,7 +537,7 @@ func (m *Manager) createArchiveSnapshotFromRef(ctx context.Context, ref *lockedC
 		var lastErr error
 		for range 20 {
 			m.grpcPool.Remove(ref.botID)
-			if err := m.preserveDataViaGRPC(ctx, ref.botID, archivePath); err == nil {
+			if err := m.preserveDataViaGRPC(ctx, ref.botID, archivePath, false); err == nil {
 				return nil
 			} else {
 				lastErr = err
@@ -530,7 +558,7 @@ func (m *Manager) createArchiveSnapshotFromRef(ctx context.Context, ref *lockedC
 		return fmt.Errorf("stop workspace runtime: %w", err)
 	}
 	defer restartTask()
-	return m.preserveDataToArchive(ctx, archivePath, mounts)
+	return m.preserveDataToArchive(ctx, archivePath, mounts, false)
 }
 
 func (m *Manager) restoreArchiveSnapshotFromRef(ctx context.Context, ref *lockedContainerRef, archiveKey string) error {
@@ -549,10 +577,15 @@ func (m *Manager) restoreArchiveSnapshotFromRef(ctx context.Context, ref *locked
 	if err := client.Mkdir(ctx, containerDataDir); err != nil {
 		return fmt.Errorf("mkdir data dir: %w", err)
 	}
-	return m.importDataViaGRPC(ctx, ref.botID, f)
+	return m.importDataViaGRPC(ctx, ref.botID, f, false)
 }
 
-func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Reader) error {
+func (m *Manager) importDataViaGRPC(
+	ctx context.Context,
+	botID string,
+	r io.Reader,
+	preserveCredentials bool,
+) error {
 	client, err := m.nativeMCPClient(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("grpc connect: %w", err)
@@ -564,8 +597,10 @@ func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Read
 	}
 	defer func() { _ = gr.Close() }()
 
-	if err := cleanWorkspaceACPSecretsViaGRPC(ctx, client); err != nil {
-		return err
+	if !preserveCredentials {
+		if err := cleanWorkspaceACPSecretsViaGRPC(ctx, client); err != nil {
+			return err
+		}
 	}
 
 	tr := tar.NewReader(gr)
@@ -584,7 +619,7 @@ func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Read
 		if err != nil {
 			return err
 		}
-		if target == "" || shouldSkipWorkspaceArchivePath(target, false) {
+		if target == "" || shouldSkipWorkspaceArchivePath(target, false, preserveCredentials) {
 			continue
 		}
 		absPath := containerDataDir + "/" + filepath.ToSlash(target)
@@ -600,7 +635,7 @@ func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Read
 
 // tarGzDir writes a gzip-compressed tar archive of all files under dir to w.
 // Paths inside the archive are relative to dir.
-func tarGzDir(w io.Writer, dir string) error {
+func tarGzDir(w io.Writer, dir string, preserveCredentials bool) error {
 	gw := gzip.NewWriter(w)
 	defer func() { _ = gw.Close() }()
 	tw := tar.NewWriter(gw)
@@ -617,7 +652,7 @@ func tarGzDir(w io.Writer, dir string) error {
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
-		if shouldSkipWorkspaceArchivePath(rel, d.IsDir()) {
+		if shouldSkipWorkspaceArchivePath(rel, d.IsDir(), preserveCredentials) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -636,6 +671,13 @@ func tarGzDir(w io.Writer, dir string) error {
 			header.Name = filepath.ToSlash(rel)
 			return tw.WriteHeader(header)
 		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
 
 		// For regular files: open first, then Fstat on the same fd so that
 		// the size in the tar header is guaranteed to match the content we
@@ -647,11 +689,11 @@ func tarGzDir(w io.Writer, dir string) error {
 		}
 		defer func() { _ = f.Close() }()
 
-		info, err := f.Stat()
+		fileInfo, err := f.Stat()
 		if err != nil {
 			return err
 		}
-		header, err := tar.FileInfoHeader(info, "")
+		header, err := tar.FileInfoHeader(fileInfo, "")
 		if err != nil {
 			return err
 		}
@@ -660,17 +702,24 @@ func tarGzDir(w io.Writer, dir string) error {
 		if err := tw.WriteHeader(header); err != nil {
 			return err
 		}
-		_, err = io.Copy(tw, io.LimitReader(f, info.Size()))
+		_, err = io.Copy(tw, io.LimitReader(f, fileInfo.Size()))
 		return err
 	})
 }
 
-func shouldSkipWorkspaceArchivePath(rel string, isDir bool) bool {
+func shouldSkipWorkspaceArchivePath(rel string, isDir, preserveCredentials bool) bool {
 	rel = filepath.ToSlash(filepath.Clean(rel))
 	rel = strings.TrimPrefix(rel, "/")
 	sub, ok := workspaceACPSecretSubpath(rel)
 	if !ok {
 		return false
+	}
+	if preserveCredentials {
+		if isDir {
+			return workspaceACPRuntimeDirSubpath(sub)
+		}
+		return workspaceACPRuntimeDirSubpath(filepath.ToSlash(filepath.Dir(sub))) ||
+			sub == "state.db" || strings.HasPrefix(sub, "state.db-")
 	}
 	if isDir {
 		return workspaceACPSecretDirSubpath(sub)
@@ -689,8 +738,8 @@ func shouldSkipWorkspaceArchivePath(rel string, isDir bool) bool {
 	}
 }
 
-func isWorkspaceArchiveSymlinkMode(mode string) bool {
-	return strings.HasPrefix(mode, "L")
+func isWorkspaceArchiveRegularMode(mode string) bool {
+	return strings.HasPrefix(mode, "-")
 }
 
 func workspaceACPSecretDirSubpath(sub string) bool {
@@ -700,6 +749,15 @@ func workspaceACPSecretDirSubpath(sub string) bool {
 	}
 	for _, part := range strings.Split(sub, "/") {
 		if _, ok := workspaceACPSecretDirNames[part]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceACPRuntimeDirSubpath(sub string) bool {
+	for _, part := range strings.Split(strings.Trim(filepath.ToSlash(sub), "/"), "/") {
+		if part == "sessions" {
 			return true
 		}
 	}
@@ -722,7 +780,7 @@ func cleanWorkspaceACPSecretsViaGRPC(ctx context.Context, client *bridge.Client)
 	}
 	for _, entry := range entries {
 		relPath := strings.TrimPrefix(entry.GetPath(), "/")
-		if !shouldSkipWorkspaceArchivePath(relPath, entry.GetIsDir()) {
+		if !shouldSkipWorkspaceArchivePath(relPath, entry.GetIsDir(), false) {
 			continue
 		}
 		absPath := containerDataDir + "/" + strings.TrimPrefix(relPath, "/")
@@ -750,7 +808,7 @@ func cleanWorkspaceACPSecretsInDir(root string) error {
 			if err != nil {
 				return err
 			}
-			if !shouldSkipWorkspaceArchivePath(rel, d.IsDir()) {
+			if !shouldSkipWorkspaceArchivePath(rel, d.IsDir(), false) {
 				return nil
 			}
 			if d.IsDir() {
@@ -771,7 +829,7 @@ func cleanWorkspaceACPSecretsInDir(root string) error {
 }
 
 // untarGzDir extracts a gzip-compressed tar archive into dst.
-func untarGzDir(r io.Reader, dst string) error {
+func untarGzDir(r io.Reader, dst string, preserveCredentials bool) error {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("gzip reader: %w", err)
@@ -784,8 +842,10 @@ func untarGzDir(r io.Reader, dst string) error {
 	}
 	defer func() { _ = root.Close() }()
 
-	if err := cleanWorkspaceACPSecretsInDir(dst); err != nil {
-		return fmt.Errorf("clean ACP secrets: %w", err)
+	if !preserveCredentials {
+		if err := cleanWorkspaceACPSecretsInDir(dst); err != nil {
+			return fmt.Errorf("clean ACP secrets: %w", err)
+		}
 	}
 
 	for {
@@ -804,7 +864,7 @@ func untarGzDir(r io.Reader, dst string) error {
 		if target == "" {
 			continue
 		}
-		if shouldSkipWorkspaceArchivePath(target, header.Typeflag == tar.TypeDir) {
+		if shouldSkipWorkspaceArchivePath(target, header.Typeflag == tar.TypeDir, preserveCredentials) {
 			continue
 		}
 

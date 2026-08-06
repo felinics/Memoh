@@ -4,7 +4,7 @@
        not a divider between the nav cluster and the tabs. The right padding keeps the buttons
        off the first tab; the tab's own pl-4 keeps its title off the gap. -->
   <div
-    v-if="isFirstGroup"
+    v-if="isFirstGroup && !isMobile"
     class="flex h-full items-center gap-0.5 pr-0 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
     :class="shouldReserveTrafficLight ? 'pl-[88px]' : 'pl-2'"
   >
@@ -84,7 +84,10 @@ const props = defineProps<{
 const { t } = useI18n()
 const router = useRouter()
 const workspaceTabs = useWorkspaceTabsStore()
-const { workbenchOpen } = storeToRefs(workspaceTabs)
+// The mobile shell replaces this whole cluster with its own top bar (the rail
+// it toggles is not rendered there), so the cluster stays desktop-only even if
+// the group header becomes visible.
+const { workbenchOpen, isMobile } = storeToRefs(workspaceTabs)
 
 // Determine if this is the first (leftmost/topmost) group
 const firstGroupId = ref(props.params.containerApi.groups[0]?.id ?? '')

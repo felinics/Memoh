@@ -34,7 +34,6 @@ describe('useProviderModelCatalog', () => {
     expect(mocks.invalidateQueries.mock.calls).toEqual([
       [{ key: ['provider-models'] }],
       [{ key: ['models'] }],
-      [{ key: ['all-models'] }],
     ])
   })
 })

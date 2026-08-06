@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -528,5 +529,38 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 	assertInjectedReadMediaMessage(t, messages[2], expectedDataURL, "image/png")
 	if messages[3].Role != sdk.MessageRoleAssistant {
 		t.Fatalf("expected final persisted message to be assistant, got %s", messages[3].Role)
+	}
+}
+
+func TestBuildReadMediaPartPDFBecomesFilePart(t *testing.T) {
+	out := agenttools.ReadMediaToolOutput{
+		FileBase64:    "JVBERi0xLjQ=",
+		FileMediaType: "application/pdf",
+		Filename:      "report.pdf",
+	}
+	part := buildReadMediaPart(string(models.ClientTypeOpenAICompletions), out)
+	fp, ok := part.(sdk.FilePart)
+	if !ok {
+		t.Fatalf("expected sdk.FilePart, got %T", part)
+	}
+	// Bare base64 regardless of client type — provider framing belongs to the
+	// twilight adapters, unlike the image lane's per-client data URL shaping.
+	if fp.Data != "JVBERi0xLjQ=" {
+		t.Fatalf("expected bare base64, got %q", fp.Data)
+	}
+	if fp.MediaType != "application/pdf" || fp.Filename != "report.pdf" {
+		t.Fatalf("unexpected part: %+v", fp)
+	}
+}
+
+func TestMediaPartHasContent(t *testing.T) {
+	if mediaPartHasContent(sdk.ImagePart{}) || mediaPartHasContent(sdk.FilePart{}) || mediaPartHasContent(nil) {
+		t.Fatal("empty parts must report no content")
+	}
+	if !mediaPartHasContent(sdk.ImagePart{Image: "data:image/png;base64,abc"}) {
+		t.Fatal("image with payload must report content")
+	}
+	if !mediaPartHasContent(sdk.FilePart{Data: "JVBERi0="}) {
+		t.Fatal("file with payload must report content")
 	}
 }

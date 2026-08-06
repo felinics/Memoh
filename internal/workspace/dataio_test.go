@@ -27,7 +27,7 @@ func TestTarGzDirSkipsHermesSecrets(t *testing.T) {
 	writeTestSymlink(t, root, "../.memoh-hermes/.env", "notes/env-link")
 
 	var buf bytes.Buffer
-	if err := tarGzDir(&buf, root); err != nil {
+	if err := tarGzDir(&buf, root, false); err != nil {
 		t.Fatalf("tarGzDir error = %v", err)
 	}
 
@@ -44,7 +44,7 @@ func TestExportDataViaGRPCSkipsHermesSecrets(t *testing.T) {
 
 	client := newDataIOTestBridgeClient(t, root)
 	manager := &Manager{service: &dataIOBridgeProvider{client: client}}
-	reader, err := manager.exportDataViaGRPC(context.Background(), "bot-1")
+	reader, err := manager.exportDataViaGRPC(context.Background(), "bot-1", false)
 	if err != nil {
 		t.Fatalf("exportDataViaGRPC error = %v", err)
 	}
@@ -69,7 +69,7 @@ func TestImportDataViaGRPCSkipsHermesSecrets(t *testing.T) {
 	manager := &Manager{service: &dataIOBridgeProvider{client: client}}
 	raw := buildWorkspaceArchive(t, workspaceArchiveFixture())
 
-	if err := manager.importDataViaGRPC(context.Background(), "bot-1", bytes.NewReader(raw)); err != nil {
+	if err := manager.importDataViaGRPC(context.Background(), "bot-1", bytes.NewReader(raw), false); err != nil {
 		t.Fatalf("importDataViaGRPC error = %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestUntarGzDirSkipsHermesSecrets(t *testing.T) {
 	writeTestFile(t, root, ".hermes/auth/stale-target.json", `{"refresh_token":"old"}`)
 	raw := buildWorkspaceArchive(t, workspaceArchiveFixture())
 
-	if err := untarGzDir(bytes.NewReader(raw), root); err != nil {
+	if err := untarGzDir(bytes.NewReader(raw), root, false); err != nil {
 		t.Fatalf("untarGzDir error = %v", err)
 	}
 
@@ -94,6 +94,43 @@ func TestUntarGzDirSkipsHermesSecrets(t *testing.T) {
 	assertPathMissing(t, root, ".memoh-hermes/mcp-tokens/stale-target.json")
 	assertPathMissing(t, root, ".hermes/auth/stale-target.json")
 	assertWorkspaceUserDataOnDisk(t, root)
+}
+
+func TestPreservedDataKeepsCredentialsAndSkipsRuntimeFiles(t *testing.T) {
+	root, err := os.MkdirTemp("/tmp", "memoh-archive-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	writeWorkspaceArchiveFixture(t, root)
+
+	socketPath := filepath.Join(root, "runtime.sock")
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(context.Background(), "unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	var archive bytes.Buffer
+	if err := tarGzDir(&archive, root, true); err != nil {
+		t.Fatal(err)
+	}
+	names := tarGzNames(t, archive.Bytes())
+	if !hasArchiveName(names, ".codex/auth.json") {
+		t.Fatalf("archive did not preserve Codex credentials: %v", names)
+	}
+	for _, path := range []string{".memoh-hermes/sessions/latest.json", ".memoh-hermes/state.db", "runtime.sock"} {
+		if hasArchiveName(names, path) {
+			t.Fatalf("archive included runtime file %s: %v", path, names)
+		}
+	}
+
+	restored := t.TempDir()
+	if err := untarGzDir(bytes.NewReader(archive.Bytes()), restored, true); err != nil {
+		t.Fatal(err)
+	}
+	assertPathContent(t, restored, ".codex/auth.json", `{"OPENAI_API_KEY":"secret"}`)
 }
 
 func workspaceArchiveFixture() map[string]string {

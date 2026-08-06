@@ -136,7 +136,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				return
 			}
 		}
-		rc, err := s.resolve(streamCtx, streamReq)
+		rc, streamReq, err := s.resolve(streamCtx, streamReq)
 		if err != nil {
 			s.logger.Error("agent stream resolve failed",
 				slog.String("bot_id", streamReq.BotID),
@@ -156,6 +156,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
 		if stepCommitter != nil {
 			cfg.OnStepCommitted = stepCommitter.commit
+			cfg.OnStepInterrupted = stepCommitter.interrupt
 		}
 		cfg = s.prepareRunConfig(streamCtx, cfg)
 
@@ -365,7 +366,7 @@ func (s *Service) streamChatWSResultWithHooks(
 			return nil, err
 		}
 	}
-	rc, err := s.resolve(ctx, req)
+	rc, req, err := s.resolve(ctx, req)
 	if err != nil {
 		s.logger.Error("StreamChatWS: resolve failed",
 			slog.String("bot_id", req.BotID),
@@ -394,6 +395,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
 	if stepCommitter != nil {
 		cfg.OnStepCommitted = stepCommitter.commit
+		cfg.OnStepInterrupted = stepCommitter.interrupt
 	}
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 

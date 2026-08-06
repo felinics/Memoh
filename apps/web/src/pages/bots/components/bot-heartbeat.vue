@@ -10,68 +10,41 @@
           :description="$t('bots.settings.heartbeatDescription')"
         >
           <Switch
-            :model-value="settingsForm.heartbeat_enabled"
-            @update:model-value="(val) => settingsForm.heartbeat_enabled = !!val"
+            :model-value="form.heartbeat_enabled"
+            @update:model-value="(val) => form.heartbeat_enabled = !!val"
           />
         </SettingsRow>
 
-        <template v-if="settingsForm.heartbeat_enabled">
+        <template v-if="form.heartbeat_enabled">
           <SettingsRow :label="$t('bots.heartbeat.checkEvery')">
             <div class="flex items-center gap-2">
+              <!-- Free-typing draft, committed on blur/Enter (appearance-page
+                   idiom): a per-keystroke v-model would autosave every digit. -->
               <Input
-                v-model.number="settingsForm.heartbeat_interval"
+                :model-value="intervalDraft"
                 type="number"
                 :min="1"
                 placeholder="1440"
                 class="h-8 w-20 tabular-nums"
+                @update:model-value="(value) => intervalDraft = String(value ?? '')"
+                @focus="intervalFocused = true"
+                @change="commitIntervalDraft"
+                @blur="intervalFocused = false; commitIntervalDraft()"
+                @keydown.enter="commitIntervalDraft"
               />
               <span class="text-sm text-muted-foreground">{{ $t('bots.heartbeat.intervalUnit') }}</span>
             </div>
           </SettingsRow>
         </template>
-
-        <!-- Turning the toggle off is a pending change, not an instant stop — say so, so the
-             switch state doesn't read as already-applied before Save. -->
-        <div
-          v-if="pendingDisable"
-          class="mx-4 border-b border-border py-3 last:border-b-0"
-        >
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.heartbeat.disableNote') }}
-          </p>
-        </div>
-
-        <!-- Save is the result of pending changes, not a permanent fixture: the footer only
-             exists while there is something to commit. -->
-        <div
-          v-if="settingsChanged"
-          class="flex items-center justify-end gap-2 px-4 py-3"
-        >
-          <Button
-            variant="ghost"
-            size="sm"
-            :disabled="isSaving"
-            @click="resetSettings"
-          >
-            {{ $t('common.cancel') }}
-          </Button>
-          <Button
-            size="sm"
-            :loading="isSaving"
-            @click="handleSaveSettings"
-          >
-            {{ $t('common.saveChanges') }}
-          </Button>
-        </div>
       </SettingsSection>
 
       <!-- Model override is a power-user facet (defaults to the bot's chat
            model), so it lives behind a named ActionCard entry opening a
            focused dialog — the house replacement for the old in-card
-           "Advanced" expand row. Draft semantics unchanged: the dialog edits
-           the same settingsForm, and the settings card's footer Save commits. -->
+           "Advanced" expand row. The dialog edits the same autosaved form, so
+           a selection persists the moment it is made. -->
       <section
-        v-if="settingsForm.heartbeat_enabled"
+        v-if="form.heartbeat_enabled"
         class="space-y-2.5"
       >
         <h2 class="px-2 text-label font-medium text-muted-foreground">
@@ -293,9 +266,9 @@
     </div>
   </PageShell>
 
-  <!-- Advanced model override dialog (workbench form). Edits settingsForm
-       directly — the Save/Cancel footer on the settings card remains the
-       single commit point, so closing this dialog never loses or applies
+  <!-- Advanced model override dialog (workbench form). Edits the autosaved
+       form directly: picking a model (or None, which clears the override)
+       saves immediately, so closing the dialog never loses or applies
        anything by itself. -->
   <Dialog v-model:open="advancedOpen">
     <DialogPanel width="lg">
@@ -305,11 +278,12 @@
       </DialogHeader>
       <DialogBody>
         <ModelSelect
-          v-model="settingsForm.heartbeat_model_id"
+          v-model="form.heartbeat_model_id"
           :models="models"
           :providers="providers"
           model-type="chat"
           :placeholder="$t('bots.settings.heartbeatModelPlaceholder')"
+          :none-label="$t('bots.settings.heartbeatModelPlaceholder')"
           class="w-full"
         />
       </DialogBody>
@@ -336,9 +310,10 @@ import {
   getModels, getProviders,
 } from '@memohai/sdk'
 import type { SettingsSettings, SettingsUpsertRequest, HeartbeatLog } from '@memohai/sdk'
-import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
+import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{
@@ -379,65 +354,99 @@ const { data: providerData } = useQuery({
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 
-const settingsForm = reactive({
+// ---- Settings (autosaved) ----
+// This tab has no Save button by design (web skill §8: a page of toggles and
+// selects auto-saves; success stays silent, only errors surface). The queue
+// lives in use-autosave-queue.ts; this file owns the heartbeat slice of the
+// settings endpoint plus the interval draft-commit idiom.
+// A type alias (not interface) so the record satisfies the queue's
+// Record<string, unknown> constraint.
+type HeartbeatForm = {
+  heartbeat_enabled: boolean
+  heartbeat_interval: number
+  heartbeat_model_id: string
+}
+
+const form = reactive<HeartbeatForm>({
   heartbeat_enabled: false,
   heartbeat_interval: 1440,
   heartbeat_model_id: '',
 })
 
+// Last-known-server snapshot; see bot-settings.vue for the full contract. Any
+// non-user write to `form` (hydration, rollback) must advance `synced` in the
+// same block or the diff misreads it as an edit.
+const synced = reactive<HeartbeatForm>({ ...form })
+
 watch(settings, (val: SettingsSettings | undefined) => {
-  if (val) {
-    settingsForm.heartbeat_enabled = val.heartbeat_enabled ?? false
-    settingsForm.heartbeat_interval = val.heartbeat_interval ?? 1440
-    settingsForm.heartbeat_model_id = val.heartbeat_model_id ?? ''
+  if (!val) return
+  const next: HeartbeatForm = {
+    heartbeat_enabled: val.heartbeat_enabled ?? false,
+    heartbeat_interval: val.heartbeat_interval ?? 1440,
+    heartbeat_model_id: val.heartbeat_model_id ?? '',
+  }
+  // Per-field guard: a refetch landing mid-edit must not clobber it.
+  for (const key of Object.keys(next) as (keyof HeartbeatForm)[]) {
+    if (form[key] === synced[key]) form[key] = next[key] as never
+    synced[key] = next[key] as never
   }
 }, { immediate: true })
 
 const advancedOpen = ref(false)
 
-// Logs context follows the SAVED state, not the pending form: a toggle the user
-// hasn't saved yet must not change what the logs panel claims is running.
-const savedEnabled = computed(() => settings.value?.heartbeat_enabled ?? false)
-const savedInterval = computed(() => settings.value?.heartbeat_interval ?? 1440)
+// The interval input is a free-typing draft so autosave fires once per edit,
+// not per keystroke. Commit on blur/Enter; an invalid value reverts to the
+// last committed one (appearance-page idiom).
+const intervalDraft = ref(String(form.heartbeat_interval))
+const intervalFocused = ref(false)
 
-const settingsChanged = computed(() => {
-  if (!settings.value) return false
-  const s: SettingsSettings = settings.value
-  return settingsForm.heartbeat_enabled !== (s.heartbeat_enabled ?? false)
-    || settingsForm.heartbeat_interval !== (s.heartbeat_interval ?? 1440)
-    || settingsForm.heartbeat_model_id !== (s.heartbeat_model_id ?? '')
+watch(() => form.heartbeat_interval, (value) => {
+  // Hydration/rollback rewrote the committed value; refresh the draft unless
+  // the user is mid-typing (their newer edit owns the box).
+  if (!intervalFocused.value) intervalDraft.value = String(value)
 })
 
-// Was on, now toggled off but not yet saved — the cue that disabling is pending.
-const pendingDisable = computed(() => !settingsForm.heartbeat_enabled && savedEnabled.value)
-
-function resetSettings() {
-  const s = settings.value
-  settingsForm.heartbeat_enabled = s?.heartbeat_enabled ?? false
-  settingsForm.heartbeat_interval = s?.heartbeat_interval ?? 1440
-  settingsForm.heartbeat_model_id = s?.heartbeat_model_id ?? ''
-}
-
-const { mutateAsync: updateSettings, isLoading: isSaving } = useMutation({
-  mutation: async (body: SettingsUpsertRequest) => {
-    const { data } = await putBotsByBotIdSettings({
-      path: { bot_id: botIdRef.value },
-      body,
-      throwOnError: true,
-    })
-    return data
-  },
-  onSettled: () => queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] }),
-})
-
-async function handleSaveSettings() {
-  try {
-    await updateSettings({ ...settingsForm })
-    toast.success(t('bots.settings.saveSuccess'))
-  } catch {
+function commitIntervalDraft() {
+  const parsed = Number(intervalDraft.value.trim())
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    intervalDraft.value = String(form.heartbeat_interval)
     return
   }
+  form.heartbeat_interval = parsed
+  intervalDraft.value = String(form.heartbeat_interval)
 }
+
+// Logs context follows the SAVED state, not an in-flight edit: the panel must
+// describe what is actually running.
+const savedEnabled = computed(() => synced.heartbeat_enabled)
+const savedInterval = computed(() => synced.heartbeat_interval)
+
+function buildJobs(changed: (keyof HeartbeatForm)[]): AutosaveJob<HeartbeatForm>[] {
+  const payload: SettingsUpsertRequest = {}
+  const sent: Partial<HeartbeatForm> = {}
+  for (const key of changed) {
+    sent[key] = form[key] as never
+    ;(payload as Record<string, unknown>)[key] = form[key]
+  }
+  return [{
+    payload: sent,
+    save: async () => {
+      await putBotsByBotIdSettings({
+        path: { bot_id: botIdRef.value },
+        body: payload,
+        throwOnError: true,
+      })
+    },
+    onError: (error) => toast.error(resolveApiErrorMessage(error, t('common.saveFailed'))),
+  }]
+}
+
+useAutosaveQueue<HeartbeatForm>({
+  form,
+  synced,
+  buildJobs,
+  onDrained: () => queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] }),
+})
 
 const isLoading = ref(false)
 const isClearing = ref(false)

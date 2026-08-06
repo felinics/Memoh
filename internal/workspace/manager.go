@@ -548,7 +548,7 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 			Options:     []string{"rbind", "ro"},
 		},
 		{
-			Destination: "/opt/memoh/bridge",
+			Destination: WorkspaceBridgePath,
 			Type:        "bind",
 			Source:      bridgePath,
 			Options:     []string{"bind", "ro"},
@@ -594,7 +594,7 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	env = append(env, skillEnv...)
 
 	return ctr.ContainerSpec{
-		Cmd:        []string{"/opt/memoh/bridge"},
+		Cmd:        []string{WorkspaceInitPath, "-g", "--", WorkspaceBridgePath},
 		Mounts:     mounts,
 		Env:        env,
 		CDIDevices: normalizeWorkspaceGPUDevices(gpu.Devices),
@@ -780,7 +780,11 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 	// without mount support restore through the bridge after the task starts.
 	restoreAfterStart := false
 	if m.HasPreservedData(botID) {
-		if err := m.restorePreservedIntoSnapshot(ctx, botID); err != nil {
+		info, err := m.service.GetContainer(ctx, containerID)
+		if err != nil {
+			return fmt.Errorf("load workspace for preserved data restore: %w", err)
+		}
+		if err := m.restorePreservedIntoSnapshot(ctx, botID, info); err != nil {
 			if errors.Is(err, errMountNotSupported) {
 				restoreAfterStart = true
 			} else {
@@ -798,7 +802,7 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 		return err
 	}
 	if restoreAfterStart {
-		if err := m.RestorePreservedData(ctx, botID); err != nil {
+		if err := m.restorePreservedDataViaGRPC(ctx, botID); err != nil {
 			return fmt.Errorf("restore preserved data through bridge: %w", err)
 		}
 	}

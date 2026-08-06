@@ -94,3 +94,24 @@ func TestDerive_SilentRegistryIsUnknown(t *testing.T) {
 		t.Fatalf("vision should be filled")
 	}
 }
+
+func TestDerive_FileInputMirrorsPDFField(t *testing.T) {
+	yes, no := true, false
+
+	caps := derive(litellmEntry{SupportsPDFInput: &yes})
+	if caps.FileInput == nil || !*caps.FileInput {
+		t.Fatalf("expected FileInput true, got %+v", caps.FileInput)
+	}
+
+	caps = derive(litellmEntry{SupportsPDFInput: &no})
+	if caps.FileInput == nil || *caps.FileInput {
+		t.Fatalf("expected FileInput false, got %+v", caps.FileInput)
+	}
+
+	// Registry silence must stay nil so callers can tell "unknown" apart
+	// from an explicit false and leave hand-maintained tokens untouched.
+	caps = derive(litellmEntry{})
+	if caps.FileInput != nil {
+		t.Fatalf("expected FileInput nil on silence, got %v", *caps.FileInput)
+	}
+}

@@ -187,6 +187,7 @@ func (s *fakeAgentSessionService) byAgent(parentSessionID, agentID string) (sess
 type fakeAgentMessageService struct {
 	mu       sync.Mutex
 	messages map[string][]messagepkg.Message
+	inputs   []messagepkg.PersistInput
 }
 
 func newFakeAgentMessageService() *fakeAgentMessageService {
@@ -196,6 +197,7 @@ func newFakeAgentMessageService() *fakeAgentMessageService {
 func (s *fakeAgentMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.inputs = append(s.inputs, input)
 	msg := messagepkg.Message{
 		ID:        "msg_" + strconv.Itoa(len(s.messages[input.SessionID])+1),
 		BotID:     input.BotID,
@@ -207,6 +209,12 @@ func (s *fakeAgentMessageService) Persist(_ context.Context, input messagepkg.Pe
 	}
 	s.messages[input.SessionID] = append(s.messages[input.SessionID], msg)
 	return msg, nil
+}
+
+func (s *fakeAgentMessageService) persistInputs() []messagepkg.PersistInput {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]messagepkg.PersistInput(nil), s.inputs...)
 }
 
 func (s *fakeAgentMessageService) ListBySession(_ context.Context, sessionID string) ([]messagepkg.Message, error) {
@@ -530,6 +538,28 @@ func TestSendMessageReusesSessionAndHistory(t *testing.T) {
 	if len(stored) != 4 {
 		raw, _ := json.Marshal(stored)
 		t.Fatalf("expected two user+assistant turns persisted, got %d: %s", len(stored), raw)
+	}
+}
+
+func TestSpawnAgentRecordsPinnedModelOnSessionMetadata(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, sessions, _ := newAgentControlProvider(t, agent)
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+
+	mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"id": "worker", "task": "first"})
+
+	rec, ok := sessions.byAgent("parent1", "worker")
+	if !ok {
+		t.Fatal("spawned session not recorded")
+	}
+	// A client that lets a human talk to this subagent directly reads the model
+	// off the session; without it the composer would offer the parent bot's
+	// default and silently move the agent onto another model.
+	if rec.Metadata["model_uuid"] != "00000000-0000-0000-0000-000000000123" {
+		t.Fatalf("session metadata lost the pinned model uuid: %+v", rec.Metadata)
+	}
+	if rec.Metadata["model_id"] != "test-model" || rec.Metadata["model_provider"] != "test-provider" {
+		t.Fatalf("session metadata lost the pinned model identity: %+v", rec.Metadata)
 	}
 }
 

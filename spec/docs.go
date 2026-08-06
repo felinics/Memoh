@@ -359,6 +359,12 @@ const docTemplate = `{
                         "name": "name",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot ID to exclude from the conflict check (used when renaming)",
+                        "name": "exclude_bot_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -7016,6 +7022,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Only include sessions bound to this workdir. The literal none selects sessions with no workdir.",
+                        "name": "workdir_id",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "Page size (1..200). Defaults to 50.",
                         "name": "limit",
@@ -8804,6 +8816,221 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/workdirs": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workdirs"
+                ],
+                "summary": "List a Bot's workdirs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Include archived workdirs",
+                        "name": "include_archived",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workdir.WorkdirsResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Registers a named working directory on a workspace target. The directory must already exist on that target.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workdirs"
+                ],
+                "summary": "Create a Bot workdir",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Workdir",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/workdir.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/workdir.Workdir"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/workdirs/{workdir_id}": {
+            "delete": {
+                "description": "Archiving refuses new session bindings but keeps existing sessions working: their directory never changes underneath them.",
+                "tags": [
+                    "workdirs"
+                ],
+                "summary": "Archive a Bot workdir",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workdir ID",
+                        "name": "workdir_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Only the name can change. The target and path are immutable: they are baked into the working directory of every session bound to this workdir.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workdirs"
+                ],
+                "summary": "Rename a Bot workdir",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workdir ID",
+                        "name": "workdir_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New name",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/workdir.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workdir.Workdir"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -17342,6 +17569,12 @@ const docTemplate = `{
         "conversation.UIUserInput": {
             "type": "object",
             "properties": {
+                "answers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/userinput.UIAnswer"
+                    }
+                },
                 "can_respond": {
                     "type": "boolean"
                 },
@@ -19532,6 +19765,10 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                },
+                "workdir_id": {
+                    "description": "WorkdirID immutably binds the new session to a bot workdir. The\nworkdir decides the session's workspace target and working directory\nfor its whole life; there is no way to change or clear it later.",
+                    "type": "string"
                 }
             }
         },
@@ -21480,6 +21717,9 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "workdir_id": {
+                    "type": "string"
                 }
             }
         },
@@ -21679,6 +21919,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "chat_model_id": {
+                    "description": "Reference fields below use pointer semantics so autosaving clients can\nclear a selection: nil = keep current, \"\" = clear, value = set. The\nservice mirrors each into a ` + "`" + `\u003cfield\u003e_set` + "`" + ` SQL flag (same pattern as\nFetchProviderID / CompactionModelID); plain strings would make \"\"\nindistinguishable from \"not sent\".",
                     "type": "string"
                 },
                 "chat_runtime": {
@@ -21715,12 +21956,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "heartbeat_model_id": {
+                    "description": "HeartbeatModelID joins the pointer group above (nil/\"\"/value) so the\nheartbeat tab's autosave can clear a model override.",
                     "type": "string"
                 },
                 "image_model_id": {
                     "type": "string"
                 },
                 "language": {
+                    "description": "Language follows the same pointer rule; \"\" normalizes to DefaultLanguage\n(\"auto\") rather than clearing the column.",
                     "type": "string"
                 },
                 "memory_provider_id": {
@@ -21781,6 +22024,32 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "userinput.UIAnswer": {
+            "type": "object",
+            "properties": {
+                "custom_text": {
+                    "type": "string"
+                },
+                "question": {
+                    "type": "string"
+                },
+                "question_id": {
+                    "type": "string"
+                },
+                "selected": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/userinput.UIOption"
+                    }
+                },
+                "skipped": {
+                    "type": "boolean"
+                },
+                "text": {
                     "type": "string"
                 }
             }
@@ -22073,6 +22342,81 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "string"
+                }
+            }
+        },
+        "workdir.CreateRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "path"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "workdir.UpdateRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "workdir.Workdir": {
+            "type": "object",
+            "properties": {
+                "archived": {
+                    "type": "boolean"
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by_user_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "target_kind": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "workdir.WorkdirsResponse": {
+            "type": "object",
+            "properties": {
+                "workdirs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workdir.Workdir"
+                    }
                 }
             }
         },

@@ -65,6 +65,43 @@ type BotRemoteRuntimeBindingStore interface {
 	DeleteMount(ctx context.Context, botID, targetID string) error
 }
 
+// BotWorkdirRecord is a named per-bot working directory: a workspace target
+// (native, or a remote runtime binding) plus an absolute directory path.
+// RemoteBindingID is empty for native workdirs. ArchivedAt is zero while the
+// workdir is live.
+type BotWorkdirRecord struct {
+	ID              string
+	BotID           string
+	Name            string
+	TargetKind      string
+	RemoteBindingID string
+	Path            string
+	CreatedByUserID string
+	ArchivedAt      time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type CreateBotWorkdirInput struct {
+	BotID           string
+	Name            string
+	TargetKind      string
+	RemoteBindingID string
+	Path            string
+	CreatedByUserID string
+}
+
+type BotWorkdirStore interface {
+	CreateWorkdir(ctx context.Context, input CreateBotWorkdirInput) (BotWorkdirRecord, error)
+	ListWorkdirs(ctx context.Context, botID string, includeArchived bool) ([]BotWorkdirRecord, error)
+	// GetWorkdir returns archived rows too: sessions bound to an archived
+	// workdir keep resolving their working directory. Callers that must
+	// refuse archived workdirs check ArchivedAt themselves.
+	GetWorkdir(ctx context.Context, botID, workdirID string) (BotWorkdirRecord, error)
+	RenameWorkdir(ctx context.Context, botID, workdirID, name string) (BotWorkdirRecord, error)
+	ArchiveWorkdir(ctx context.Context, botID, workdirID string) error
+}
+
 type AccountRecord struct {
 	ID                  string
 	Username            string

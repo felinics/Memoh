@@ -466,7 +466,7 @@
     "usernamePlaceholder": "用户名",
     "usernameRequired": "请填写用户名",
     "email": "邮箱",
-    "emailPlaceholder": "name@example.com",
+    "emailPlaceholder": "name{'@'}example.com",
     "role": "角色",
     "roles": {
       "admin": "管理员",
@@ -529,6 +529,7 @@
   },
   "chat": {
     "welcome": {
+      "folder": "要在 {name} 里做点什么？",
       "g1": "我们从哪里开始？",
       "g2": "在想些什么？",
       "g3": "需要帮你做点什么？",
@@ -542,7 +543,6 @@
       "g11": "说说你的需求。",
       "g12": "先从哪件事开始？"
     },
-    "emptySubagent": "子代理任务暂无记录",
     "emptySystemSession": "系统会话暂无记录",
     "selectBot": "选择一个 Bot",
     "selectBotHint": "从侧边栏选择一个 Bot 开始对话",
@@ -599,7 +599,14 @@
     "computerLoadFailed": "无法加载电脑",
     "computerNone": "没有可用的电脑",
     "computerUnavailable": "不可用的电脑",
+    "folder": "文件夹",
+    "folders": "文件夹",
+    "folderUnavailable": "不可用的文件夹",
+    "folderDetachDraft": "不放入文件夹",
+    "folderNewSession": "在 {name} 中新建会话",
     "attachFiles": "上传文件",
+    "pdfTooLargeForNative": "PDF 超过 12MB,将以路径形式存入工作区,模型无法直接查看其内容。",
+    "pdfUnsupportedByModel": "当前模型不支持读取 PDF,文件将以路径形式存入工作区,模型无法直接查看其内容。",
     "send": "发送",
     "sendFailed": "消息发送失败",
     "forkFailed": "分叉会话失败",
@@ -768,8 +775,8 @@
       "generic": "调用工具",
       "approve": "允许",
       "reject": "拒绝",
-    "pendingApproval": "等待审核",
-    "executionLocation": "执行位置",
+      "pendingApproval": "等待审核",
+      "executionLocation": "执行位置",
       "pendingUserInput": "等待输入",
       "userInputSubmitted": "已回答",
       "userInputCanceled": "已取消",
@@ -975,7 +982,13 @@
       "hideWorkbench": "隐藏侧边栏",
       "showWorkbench": "显示侧边栏",
       "goBack": "后退",
-      "goForward": "前进"
+      "goForward": "前进",
+      "openNav": "打开导航",
+      "closePanel": "关闭"
+    },
+    "mobileNav": {
+      "title": "导航",
+      "description": "切换 Bot、对话、文件、日程和设置"
     },
     "activityBar": {
       "sessions": "对话",
@@ -1126,6 +1139,7 @@
     "compatibilities": "兼容性",
     "compatibility": {
       "vision": "视觉",
+      "file-input": "文件输入(PDF)",
       "tool-call": "工具调用",
       "image-output": "图片生成",
       "reasoning": "推理"
@@ -1466,7 +1480,7 @@
     "emptyTitle": "暂无 MCP 服务器",
     "emptyDescription": "添加 MCP 服务器以扩展 Bot 的能力",
     "command": "命令",
-    "commandPlaceholder": "npx -y @modelcontextprotocol/server-everything",
+    "commandPlaceholder": "npx -y {'@'}modelcontextprotocol/server-everything",
     "cwd": "工作目录",
     "cwdPlaceholder": "输入工作目录路径",
     "env": "环境变量",
@@ -1620,8 +1634,6 @@
       "loadFailed": "无法加载工具审核",
       "loadFailedDescription": "请检查服务器连接后重试。",
       "saveFailed": "无法保存工具审核",
-      "saveSuccess": "已保存工具审核更改",
-      "partialSaveFailed": "部分更改已保存，但有 {count} 个位置保存失败；失败位置的草稿已保留。",
       "enabled": "工具调用审核",
       "enabledDescription": "这个位置会执行允许、询问和拒绝规则。",
       "disabledDescription": "文件和命令工具将直接执行，已保存的模式和规则会保留。",
@@ -1987,6 +1999,36 @@
       "terminal": "终端",
       "settings": "设置"
     },
+    "folders": {
+      "create": "新建文件夹",
+      "createTitle": "新建文件夹",
+      "createDescription": "选择这个文件夹使用的目录，目录必须已经存在。",
+      "created": "文件夹已创建",
+      "createFailed": "创建文件夹失败",
+      "rename": "重命名",
+      "renameTitle": "重命名文件夹",
+      "renameFailed": "重命名文件夹失败",
+      "archive": "归档",
+      "archiveTitle": "归档文件夹",
+      "archiveDescription": "已在「{name}」中的会话会继续使用原目录；新会话将无法再加入。",
+      "archiveFailed": "归档文件夹失败",
+      "rowActions": "{name} 的操作",
+      "targetNative": "服务器工作区",
+      "targetRemote": "已连接的电脑",
+      "form": {
+        "name": "名称",
+        "namePlaceholder": "如：官网重构",
+        "target": "位置",
+        "directory": "目录",
+        "directoryHelp": "会话将在 {path} 中工作",
+        "directoryUp": "上一级",
+        "noSubdirectories": "没有子文件夹",
+        "browseFailed": "无法加载文件夹",
+        "path": "目录路径",
+        "remotePathHelp": "该电脑上的绝对路径，目录必须已经存在。",
+        "remotePathPlaceholder": "/Users/you/code/project"
+      }
+    },
     "remoteRuntime": {
       "title": "电脑",
       "workspaceTitle": "使用位置",
@@ -2124,7 +2166,7 @@
       "inbox": "收件箱",
       "outbox": "发件箱",
       "emailAddress": "邮箱地址",
-      "emailPlaceholder": "user@example.com",
+      "emailPlaceholder": "user{'@'}example.com",
       "noBindings": "尚未配置邮箱绑定",
       "noBindingsDescription": "绑定邮件提供方后，此 Bot 才能读取或发送邮件。",
       "noEmails": "暂无邮件",
@@ -2928,7 +2970,6 @@
       "title": "压缩记录",
       "settingsTitle": "压缩设置",
       "advanced": "高级设置",
-      "disableNote": "保存后压缩将停止。",
       "loadFailed": "加载压缩记录失败",
       "empty": "暂无压缩记录",
       "emptyHint": "机器人压缩会话历史后，这里会出现记录。",
@@ -2954,7 +2995,6 @@
       "checkEvery": "检查间隔",
       "intervalUnit": "分钟",
       "advanced": "高级设置",
-      "disableNote": "保存后心跳将停止。",
       "loadFailed": "加载心跳日志失败",
       "empty": "暂无心跳日志",
       "logsDisabledTitle": "心跳已关闭",

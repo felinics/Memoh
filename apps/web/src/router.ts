@@ -58,7 +58,10 @@ const routes = [
   {
     path: '/settings',
     component: () => import('@/pages/settings-section/index.vue'),
-    redirect: '/settings/bots',
+    // No redirect: below the JS breakpoint (<768px) bare /settings IS the
+    // mobile settings nav list — a real addressable level of the stack, so
+    // system back and the shell's ← walk the same history. The desktop
+    // default (/settings/bots) is re-applied by a guard in settings-section.
     children: [
       {
         path: 'bots',

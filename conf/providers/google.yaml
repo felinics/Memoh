@@ -8,7 +8,7 @@ models:
     name: Gemini Pro Latest
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -17,7 +17,7 @@ models:
     name: Gemini Flash Latest
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -26,7 +26,7 @@ models:
     name: Gemini Flash-Lite Latest
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -35,14 +35,14 @@ models:
     name: Nano Banana 2
     type: chat
     config:
-      compatibilities: [vision, reasoning, image-output]
+      compatibilities: [vision, file-input, reasoning, image-output]
       context_window: 163840
 
   - model_id: gemini-3.1-pro-preview
     name: Gemini 3.1 Pro Preview
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -51,7 +51,7 @@ models:
     name: Gemini 3.1 Flash-Lite Preview
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -60,7 +60,7 @@ models:
     name: Gemini 3 Flash Preview
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -69,14 +69,14 @@ models:
     name: Nano Banana Pro
     type: chat
     config:
-      compatibilities: [vision, reasoning, image-output]
+      compatibilities: [vision, file-input, reasoning, image-output]
       context_window: 163840
 
   - model_id: gemini-2.5-pro
     name: Gemini 2.5 Pro
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -85,21 +85,21 @@ models:
     name: Gemini 2.5 Pro Preview 06-05
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
 
   - model_id: gemini-2.5-pro-preview-05-06
     name: Gemini 2.5 Pro Preview 05-06
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
 
   - model_id: gemini-2.5-flash
     name: Gemini 2.5 Flash
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -108,14 +108,14 @@ models:
     name: Nano Banana
     type: chat
     config:
-      compatibilities: [vision, image-output]
+      compatibilities: [vision, file-input, image-output]
       context_window: 98304
 
   - model_id: gemini-2.5-flash-lite
     name: Gemini 2.5 Flash-Lite
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -124,7 +124,7 @@ models:
     name: Gemini 2.5 Flash-Lite Preview Sep 2025
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
@@ -133,56 +133,56 @@ models:
     name: Gemini 2.0 Flash
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1056768
 
   - model_id: gemini-2.0-flash-001
     name: Gemini 2.0 Flash 001
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1056768
 
   - model_id: gemini-2.0-flash-exp-image-generation
     name: Gemini 2.0 Flash (Image Generation) Experimental
     type: chat
     config:
-      compatibilities: [vision, image-output]
+      compatibilities: [vision, file-input, image-output]
       context_window: 1056768
 
   - model_id: gemini-2.0-flash-lite
     name: Gemini 2.0 Flash-Lite
     type: chat
     config:
-      compatibilities: [vision]
+      compatibilities: [vision, file-input]
       context_window: 1056768
 
   - model_id: gemini-2.0-flash-lite-001
     name: Gemini 2.0 Flash-Lite 001
     type: chat
     config:
-      compatibilities: [vision]
+      compatibilities: [vision, file-input]
       context_window: 1056768
 
   - model_id: gemini-1.5-flash-002
     name: Gemini 1.5 Flash 002
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1008192
 
   - model_id: gemini-1.5-pro-002
     name: Gemini 1.5 Pro 002
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 2008192
 
   - model_id: gemini-1.5-flash-8b-latest
     name: Gemini 1.5 Flash 8B
     type: chat
     config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call]
       context_window: 1008192
 
   - model_id: gemma-3-1b-it

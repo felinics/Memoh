@@ -8,20 +8,28 @@
          covered. dockview relays out per frame (no gating) to keep panels matched
          the whole way. -->
     <div class="flex h-full min-h-0 overflow-hidden">
-      <SideBar :mac-traffic-reserve="macTrafficReserve" />
+      <SideBar
+        v-if="!isMobile"
+        :mac-traffic-reserve="macTrafficReserve"
+      />
       <div class="flex min-w-0 min-h-0 flex-1 flex-col">
+        <MobileTopBar v-if="isMobile" />
         <MainContainer />
       </div>
+      <MobileNavSheet v-if="isMobile" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, ref, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import SideBar from '@/components/sidebar/index.vue'
 import MainContainer from '@/components/main-container/index.vue'
+import MobileTopBar from './components/mobile-top-bar.vue'
+import MobileNavSheet from './components/mobile-nav-sheet.vue'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
@@ -57,9 +65,13 @@ onMounted(() => {
 // the desktop settings sidebar's pinned-open intent AND prevent the web
 // browser from falling through to its native Mod+B (bookmarks bar).
 const workspaceTabs = useWorkspaceTabsStore()
+const { isMobile } = storeToRefs(workspaceTabs)
 const route = useRoute()
 useKeyboardCommand(appKeyboardCommands.toggleSidebar, () => {
   if (route.path.startsWith('/settings')) return true
+  // The mobile shell has no rail to toggle; still claim the command so the
+  // browser never sees it.
+  if (isMobile.value) return true
   workspaceTabs.toggleWorkbench()
   return true
 })

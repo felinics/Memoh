@@ -4,18 +4,6 @@
     :title="t('bots.toolApproval.title')"
     :description="t('bots.toolApproval.intro')"
   >
-    <template #actions>
-      <Button
-        v-if="!initialLoading && !loadFailed"
-        size="sm"
-        :disabled="!hasDirtyTargets || isSaving"
-        :loading="isSaving"
-        @click="saveChanges"
-      >
-        {{ t('common.saveChanges') }}
-      </Button>
-    </template>
-
     <SettingsSection v-if="initialLoading">
       <InlineLoadingRow surface="card-row">
         {{ t('bots.toolApproval.loading') }}
@@ -49,7 +37,6 @@
         <template #actions>
           <Switch
             :model-value="draftFor(target).enabled"
-            :disabled="isSaving"
             :aria-label="t('bots.toolApproval.enabled')"
             @update:model-value="(value) => updateEnabled(target, !!value)"
           />
@@ -84,15 +71,21 @@
                   :label="t('bots.toolApproval.bypass')"
                   :for="ruleFieldId(target, tool, 'bypass')"
                 >
+                  <!-- Free-typing draft committed on blur (no Enter commit —
+                       the rules list is multi-line). A per-keystroke model
+                       would autosave every character and normalize away
+                       trailing separators mid-word. -->
                   <Textarea
                     :id="ruleFieldId(target, tool, 'bypass')"
-                    :model-value="ruleText(target, tool, 'bypass')"
+                    :model-value="ruleDraftFor(target, tool, 'bypass')"
                     :placeholder="rulePlaceholder(tool, 'bypass')"
-                    :disabled="isSaving"
                     rows="4"
                     class="font-mono text-xs"
                     spellcheck="false"
-                    @update:model-value="(value) => updateRules(target, tool, 'bypass', String(value ?? ''))"
+                    @update:model-value="(value) => updateRuleDraft(target, tool, 'bypass', String(value ?? ''))"
+                    @focus="focusedRuleField = ruleFieldId(target, tool, 'bypass')"
+                    @change="commitRuleDraft(target, tool, 'bypass')"
+                    @blur="focusedRuleField = null; commitRuleDraft(target, tool, 'bypass')"
                   />
                 </FieldStack>
 
@@ -102,13 +95,15 @@
                 >
                   <Textarea
                     :id="ruleFieldId(target, tool, 'force')"
-                    :model-value="ruleText(target, tool, 'force')"
+                    :model-value="ruleDraftFor(target, tool, 'force')"
                     :placeholder="rulePlaceholder(tool, 'force')"
-                    :disabled="isSaving"
                     rows="4"
                     class="font-mono text-xs"
                     spellcheck="false"
-                    @update:model-value="(value) => updateRules(target, tool, 'force', String(value ?? ''))"
+                    @update:model-value="(value) => updateRuleDraft(target, tool, 'force', String(value ?? ''))"
+                    @focus="focusedRuleField = ruleFieldId(target, tool, 'force')"
+                    @change="commitRuleDraft(target, tool, 'force')"
+                    @blur="focusedRuleField = null; commitRuleDraft(target, tool, 'force')"
                   />
                 </FieldStack>
               </div>
@@ -121,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
 import {
@@ -142,17 +137,16 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   cloneToolApprovalConfig,
   defaultToolApprovalConfig,
-  dirtyToolApprovalTargetIds,
   formatToolApprovalRules,
   normalizeToolApprovalConfig,
   parseToolApprovalRules,
-  saveDirtyToolApprovalTargets,
   toolApprovalConfigsEqual,
   type ApprovalTool,
   type ToolApprovalConfig,
   type ToolApprovalMode,
   type WorkspaceTargetKind,
 } from './tool-approval-config'
+import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 
 const props = defineProps<{
   botId: string
@@ -186,40 +180,60 @@ const {
   refetchOnWindowFocus: true,
 })
 
+// ---- Autosaved per-target configs ----
+// This page has no Save button by design (web skill §8). The unit of
+// persistence is one workspace target's whole config (the PUT endpoint is a
+// whole-block replace), so the autosave queue's flat record is keyed by
+// target id: `form[targetId]` is the edited config, `synced[targetId]` the
+// last-known-server one. The diff is OBJECT IDENTITY — every edit clones the
+// config (replaceDraft), so an edited target is `!==` its synced snapshot.
+// That only holds if hydration assigns the SAME object to both maps for an
+// untouched target (never two clones), and if job payloads carry the live
+// `form` object so a successful save makes both maps reference it again.
+const form = reactive<Record<string, ToolApprovalConfig>>({})
+const synced = reactive<Record<string, ToolApprovalConfig>>({})
+
 const targetItems = ref<WorkspaceWorkspaceTarget[]>([])
-const drafts = ref<Record<string, ToolApprovalConfig>>({})
-const savedConfigs = ref<Record<string, ToolApprovalConfig>>({})
-const isSaving = ref(false)
+
+// Rule textareas are free-typing drafts (see template comment), keyed
+// `${targetId}:${tool}:${kind}`; they commit into `form` on blur.
+const ruleDrafts = reactive<Record<string, string>>({})
+const focusedRuleField = ref<string | null>(null)
 
 watch(workspaceTargetsResponse, (response) => {
   if (!response) return
-  const previousDrafts = drafts.value
-  const previousSaved = savedConfigs.value
-  const nextDrafts: Record<string, ToolApprovalConfig> = {}
-  const nextSaved: Record<string, ToolApprovalConfig> = {}
-
   targetItems.value = response.targets ?? []
+  const seen = new Set<string>()
+
   for (const target of targetItems.value) {
     if (!target.target_id) continue
-    const kind = targetKind(target)
+    seen.add(target.target_id)
     const serverConfig = normalizeToolApprovalConfig(
       target.tool_approval_config,
       target.tool_approval ?? {},
-      kind,
+      targetKind(target),
     )
-    const previousDraft = previousDrafts[target.target_id]
-    const previousServer = previousSaved[target.target_id]
-    const wasDirty = !!previousDraft
-      && !!previousServer
-      && !toolApprovalConfigsEqual(previousDraft, previousServer)
-    nextDrafts[target.target_id] = wasDirty
-      ? previousDraft
-      : cloneToolApprovalConfig(serverConfig)
-    nextSaved[target.target_id] = cloneToolApprovalConfig(serverConfig)
+    // Per-target guard (same contract as bot-settings.vue hydration): a
+    // refetch landing while the user has unsaved edits on this target must
+    // not clobber them — advance only `synced` so the queue re-pushes the
+    // draft. Untouched targets adopt the server object under ONE identity.
+    if (form[target.target_id] === synced[target.target_id]) {
+      form[target.target_id] = serverConfig
+      refreshRuleDrafts(target.target_id, serverConfig)
+    }
+    synced[target.target_id] = serverConfig
   }
 
-  drafts.value = nextDrafts
-  savedConfigs.value = nextSaved
+  // Targets that vanished from the response leave no drafts behind.
+  for (const targetId of Object.keys(form)) {
+    if (!seen.has(targetId)) {
+      delete form[targetId]
+      delete synced[targetId]
+      for (const key of Object.keys(ruleDrafts)) {
+        if (key.startsWith(`${targetId}:`)) delete ruleDrafts[key]
+      }
+    }
+  }
 }, { immediate: true })
 
 const validTargets = computed<ValidWorkspaceTarget[]>(() => (
@@ -232,23 +246,18 @@ const validTargets = computed<ValidWorkspaceTarget[]>(() => (
 ))
 const initialLoading = computed(() => workspaceTargetsLoading.value && !workspaceTargetsResponse.value)
 const loadFailed = computed(() => !!workspaceTargetsError.value && !workspaceTargetsResponse.value)
-const dirtyTargetIds = computed(() => dirtyToolApprovalTargetIds(drafts.value, savedConfigs.value))
-const hasDirtyTargets = computed(() => dirtyTargetIds.value.length > 0)
 const modeItems = computed(() => [
   {
     value: 'allow' as const,
     label: t('bots.toolApproval.modes.allow'),
-    disabled: isSaving.value,
   },
   {
     value: 'ask' as const,
     label: t('bots.toolApproval.modes.ask'),
-    disabled: isSaving.value,
   },
   {
     value: 'deny' as const,
     label: t('bots.toolApproval.modes.deny'),
-    disabled: isSaving.value,
   },
 ])
 
@@ -262,20 +271,13 @@ function targetName(target: WorkspaceWorkspaceTarget): string {
 }
 
 function draftFor(target: ValidWorkspaceTarget): ToolApprovalConfig {
-  return drafts.value[target.target_id] ?? defaultToolApprovalConfig(targetKind(target))
-}
-
-function replaceDraft(target: ValidWorkspaceTarget, config: ToolApprovalConfig): void {
-  drafts.value = {
-    ...drafts.value,
-    [target.target_id]: config,
-  }
+  return form[target.target_id] ?? defaultToolApprovalConfig(targetKind(target))
 }
 
 function updateEnabled(target: ValidWorkspaceTarget, enabled: boolean): void {
   const config = cloneToolApprovalConfig(draftFor(target))
   config.enabled = enabled
-  replaceDraft(target, config)
+  form[target.target_id] = config
 }
 
 function isMode(value: unknown): value is ToolApprovalMode {
@@ -291,25 +293,28 @@ function updateMode(target: ValidWorkspaceTarget, tool: ApprovalTool, value: str
   const config = cloneToolApprovalConfig(draftFor(target))
   config[tool].mode = value
   config[tool].require_approval = value === 'ask'
-  replaceDraft(target, config)
+  form[target.target_id] = config
 }
 
-function ruleList(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: RuleKind): string[] {
-  const config = draftFor(target)
-  if (tool === 'exec') {
-    return kind === 'bypass' ? config.exec.bypass_commands : config.exec.force_review_commands
-  }
-  const policy = config[tool]
-  return kind === 'bypass' ? policy.bypass_globs : policy.force_review_globs
+function ruleFieldId(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: RuleKind): string {
+  return `tool-approval-${target.target_id}-${tool}-${kind}`
 }
 
-function ruleText(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: RuleKind): string {
-  return formatToolApprovalRules(ruleList(target, tool, kind))
+function ruleDraftKey(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: RuleKind): string {
+  return `${target.target_id}:${tool}:${kind}`
 }
 
-function updateRules(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: RuleKind, value: string): void {
+function ruleDraftFor(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: RuleKind): string {
+  return ruleDrafts[ruleDraftKey(target, tool, kind)] ?? ''
+}
+
+function updateRuleDraft(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: RuleKind, value: string): void {
+  ruleDrafts[ruleDraftKey(target, tool, kind)] = value
+}
+
+function commitRuleDraft(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: RuleKind): void {
   const config = cloneToolApprovalConfig(draftFor(target))
-  const rules = parseToolApprovalRules(value)
+  const rules = parseToolApprovalRules(ruleDrafts[ruleDraftKey(target, tool, kind)] ?? '')
   if (tool === 'exec') {
     if (kind === 'bypass') config.exec.bypass_commands = rules
     else config.exec.force_review_commands = rules
@@ -318,7 +323,32 @@ function updateRules(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: Rul
   } else {
     config[tool].force_review_globs = rules
   }
-  replaceDraft(target, config)
+  // change-then-blur fires commit twice for one edit; a content-equal commit
+  // must not replace the config object, or the identity diff would read it as
+  // a fresh change and autosave again.
+  if (!toolApprovalConfigsEqual(config, draftFor(target))) {
+    form[target.target_id] = config
+  }
+  // Re-derive the draft from the committed config so separators normalize the
+  // same way they will render after the server round-trip.
+  ruleDrafts[ruleDraftKey(target, tool, kind)] = formatToolApprovalRules(rules)
+}
+
+// Re-derive a target's rule drafts after hydration replaced its config; the
+// focused field keeps what the user is typing.
+function refreshRuleDrafts(targetId: string, config: ToolApprovalConfig): void {
+  for (const tool of approvalTools) {
+    for (const kind of ['bypass', 'force'] as const) {
+      const key = `${targetId}:${tool}:${kind}`
+      // focusedRuleField holds the element id format (ruleFieldId), not the
+      // draft key format — keep the two namespace shapes straight here.
+      if (focusedRuleField.value === `tool-approval-${targetId}-${tool}-${kind}`) continue
+      const rules = tool === 'exec'
+        ? (kind === 'bypass' ? config.exec.bypass_commands : config.exec.force_review_commands)
+        : (kind === 'bypass' ? config[tool].bypass_globs : config[tool].force_review_globs)
+      ruleDrafts[key] = formatToolApprovalRules(rules)
+    }
+  }
 }
 
 function rulePlaceholder(tool: ApprovalTool, kind: RuleKind): string {
@@ -332,18 +362,20 @@ function rulePlaceholder(tool: ApprovalTool, kind: RuleKind): string {
     : 'bots.toolApproval.placeholders.fileMustReview')
 }
 
-function ruleFieldId(target: ValidWorkspaceTarget, tool: ApprovalTool, kind: RuleKind): string {
-  return `tool-approval-${target.target_id}-${tool}-${kind}`
-}
-
-async function saveChanges(): Promise<void> {
-  if (!hasDirtyTargets.value || isSaving.value) return
-  isSaving.value = true
-  try {
-    const result = await saveDirtyToolApprovalTargets(
-      drafts.value,
-      savedConfigs.value,
-      async (targetId, config) => {
+function buildJobs(changed: string[]): AutosaveJob<Record<string, ToolApprovalConfig>>[] {
+  const jobs: AutosaveJob<Record<string, ToolApprovalConfig>>[] = []
+  for (const targetId of changed) {
+    // Capture the live object: the save ships exactly what was diffed, and a
+    // successful save makes `synced` reference this same object (identity
+    // clean). A target removed between diff and save is skipped.
+    const config = form[targetId]
+    if (!config) continue
+    jobs.push({
+      payload: { [targetId]: config },
+      // rollback: false — a failed save must not snap typed rules back; the
+      // error toast carries the failure and the next edit retries.
+      rollback: false,
+      save: async () => {
         const body: WorkspaceUpdateWorkspaceTargetToolApprovalRequest = {
           enabled: config.enabled,
           read: config.read.mode,
@@ -360,30 +392,18 @@ async function saveChanges(): Promise<void> {
           throwOnError: true,
         })
       },
-    )
-
-    if (result.savedTargetIds.length > 0) {
-      const nextSaved = { ...savedConfigs.value }
-      for (const targetId of result.savedTargetIds) {
-        const draft = drafts.value[targetId]
-        if (draft) nextSaved[targetId] = cloneToolApprovalConfig(draft)
-      }
-      savedConfigs.value = nextSaved
-      await refetchWorkspaceTargets()
-    }
-
-    if (result.failedTargets.length === 0) {
-      toast.success(t('bots.toolApproval.saveSuccess'))
-    } else if (result.savedTargetIds.length > 0) {
-      toast.error(t('bots.toolApproval.partialSaveFailed', { count: result.failedTargets.length }))
-    } else {
-      toast.error(resolveApiErrorMessage(
-        result.failedTargets[0]?.error,
-        t('bots.toolApproval.saveFailed'),
-      ))
-    }
-  } finally {
-    isSaving.value = false
+      onError: (error) => toast.error(resolveApiErrorMessage(error, t('bots.toolApproval.saveFailed'))),
+    })
   }
+  return jobs
 }
+
+useAutosaveQueue<Record<string, ToolApprovalConfig>>({
+  form,
+  synced,
+  buildJobs,
+  // Refetch on drain so server-side normalization flows back into the drafts
+  // (the hydration guard keeps any target the user has since re-dirtied).
+  onDrained: () => refetchWorkspaceTargets(),
+})
 </script>

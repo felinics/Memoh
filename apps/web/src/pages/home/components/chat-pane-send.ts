@@ -39,6 +39,26 @@ export function composerHasNoModel(
   return !activeUsesACPComposer && !selectedModelId.trim()
 }
 
+// pinnedSubagentModelId reads the model a subagent was spawned on off its
+// session. The composer sends model_id with every message, so a subagent
+// session that opened on the bot's default would silently move the agent onto
+// another model the first time a human talks to it — and the picker would still
+// read as "the default", hiding the switch.
+//
+// An empty result means "no pinned model to honor": a session that is not a
+// subagent, one spawned before the model was recorded, or a model since deleted.
+// The caller then keeps the bot default, which is what those cases already did.
+export function pinnedSubagentModelId(
+  sessionType: string | undefined,
+  sessionMetadata: Record<string, unknown>,
+  availableModelIds: readonly string[],
+): string {
+  if (sessionType !== 'subagent') return ''
+  const id = String(sessionMetadata.model_uuid ?? '').trim()
+  if (!id) return ''
+  return availableModelIds.includes(id) ? id : ''
+}
+
 const ACP_STALE_CONFIG_CODES = new Set([
   'acp.model_unavailable',
   'acp.reasoning_effort_unavailable',

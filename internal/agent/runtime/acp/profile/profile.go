@@ -59,9 +59,12 @@ type Profile struct {
 	// mcpCapabilities.http. This is for agents that accept session/new
 	// mcpServers but do not advertise the capability yet.
 	ForceHTTPMCPServer bool
-	ManagedFields      []ManagedField
-	SupportedBackends  []string
-	SetupModes         []string
+	// RuntimeStorage is the internal allowlist and environment contract that
+	// separates durable configuration/credentials from process-local state.
+	RuntimeStorage    RuntimeStoragePolicy
+	ManagedFields     []ManagedField
+	SupportedBackends []string
+	SetupModes        []string
 }
 
 type ManagedField struct {
@@ -195,21 +198,20 @@ func Register(profile Profile) {
 		return
 	}
 	profile.ID = id
+	if err := validateRuntimeStorage(profile); err != nil {
+		panic(err)
+	}
 	registry[id] = profile
 }
 
 func codexProfile() Profile {
 	return Profile{
-		ID:             AgentCodexID,
-		DisplayName:    AgentCodexName,
-		Description:    "OpenAI Codex ACP adapter",
-		DynamicCommand: "npx",
-		DynamicArgs: []string{
-			"-y",
-		},
-		DynamicPackage:         "@agentclientprotocol/codex-acp",
+		ID:                     AgentCodexID,
+		DisplayName:            AgentCodexName,
+		Description:            "OpenAI Codex ACP adapter",
 		Command:                "codex-acp",
 		DefaultReasoningEffort: "medium",
+		RuntimeStorage:         codexRuntimeStorage(),
 		ManagedFields: []ManagedField{
 			{
 				ID:          "api_key",
@@ -234,15 +236,10 @@ func codexProfile() Profile {
 
 func claudeCodeProfile() Profile {
 	return Profile{
-		ID:             AgentClaudeCodeID,
-		DisplayName:    AgentClaudeCodeName,
-		Description:    "Claude Code ACP adapter",
-		DynamicCommand: "npx",
-		DynamicArgs: []string{
-			"-y",
-		},
-		DynamicPackage: "@agentclientprotocol/claude-agent-acp",
-		Command:        "claude-agent-acp",
+		ID:          AgentClaudeCodeID,
+		DisplayName: AgentClaudeCodeName,
+		Description: "Claude Code ACP adapter",
+		Command:     "claude-agent-acp",
 		// "default" routes every gated tool through session/request_permission;
 		// without the pin a host-level Claude settings file (defaultMode auto /
 		// acceptEdits) silently bypasses Memoh's approval flow.
@@ -252,6 +249,7 @@ func claudeCodeProfile() Profile {
 		// older/custom adapters that omit ACP's thought_level category.
 		ReasoningConfigID:      "effort",
 		DefaultReasoningEffort: "high",
+		RuntimeStorage:         claudeCodeRuntimeStorage(),
 		ManagedFields: []ManagedField{
 			{
 				ID:          "api_key",
@@ -299,6 +297,7 @@ func hermesProfile() Profile {
 			},
 		},
 		ForceHTTPMCPServer: true,
+		RuntimeStorage:     hermesRuntimeStorage(),
 		ManagedFields: []ManagedField{
 			{
 				ID:          "provider",

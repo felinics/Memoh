@@ -116,6 +116,7 @@ type Service struct {
 	platformIdentities PlatformIdentitySource
 	botPermissions     botPermissionChecker
 	workspaceTargets   workspaceTargetResolver
+	workdirs           sessionWorkdirResolver
 	pipeline           *timeline.Pipeline
 	streamHTTPClient   *http.Client
 	bgManager          *background.Manager
@@ -313,20 +314,28 @@ type resolvedContext struct {
 	contextTokenBudget          int // token budget used to clamp compaction triggers
 }
 
-func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext, error) {
+// resolve builds the run context for one turn and returns the effective
+// request alongside it. Resolution fills in defaults the caller's copy does not
+// have — a direct turn on a subagent thread learns its session type, pinned
+// model, and skip flags here — so everything that runs after resolution (title
+// generation, the step committer, terminal persistence) must use the returned
+// request, not the one that went in. Query is deliberately untouched: callers
+// that persist a headerified user message still take it from resolvedContext.
+func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext, ChatRequest, error) {
 	modelQuery := modelQueryText(req)
 	if strings.TrimSpace(modelQuery) == "" && len(req.Attachments) == 0 {
-		return resolvedContext{}, errors.New("query or attachments is required")
+		return resolvedContext{}, req, errors.New("query or attachments is required")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return resolvedContext{}, errors.New("bot id is required")
+		return resolvedContext{}, req, errors.New("bot id is required")
 	}
 	if strings.TrimSpace(req.ChatID) == "" {
-		return resolvedContext{}, errors.New("chat id is required")
+		return resolvedContext{}, req, errors.New("chat id is required")
 	}
 	if err := s.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
-		return resolvedContext{}, err
+		return resolvedContext{}, req, err
 	}
+	req = s.applySubagentThreadDefaults(ctx, req)
 
 	runCfg, chatModel, provider, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
 		BotID:             req.BotID,
@@ -349,7 +358,13 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
-		return resolvedContext{}, err
+		return resolvedContext{}, req, err
+	}
+	if strings.EqualFold(strings.TrimSpace(req.SessionType), sessionpkg.TypeSubagent) {
+		// A direct turn on a subagent thread runs as the subagent, not as a
+		// chat turn that happens to share its history: same restricted tool
+		// surface (no nested spawns), same prompt mode.
+		runCfg.Identity.IsSubagent = true
 	}
 	memoryMsg := s.loadMemoryContextMessage(ctx, req)
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
@@ -393,7 +408,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 				slog.String("stage", "initial"),
 				slog.Any("error", loadErr),
 			)
-			return resolvedContext{}, loadErr
+			return resolvedContext{}, req, loadErr
 		}
 		messages = prepared.messages
 		historyRecords = prepared.records
@@ -424,7 +439,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 						slog.String("stage", "post_compaction"),
 						slog.Any("error", loadErr),
 					)
-					return resolvedContext{}, loadErr
+					return resolvedContext{}, req, loadErr
 				}
 				messages = prepared.messages
 				historyRecords = prepared.records
@@ -436,6 +451,11 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 				messages = stripToolMessagesWhenCompactionSummaryIsActive(messages, historyRecords)
 			}
 		}
+	}
+	if forkContext := s.subagentForkContextModelMessages(ctx, req); len(forkContext) > 0 {
+		// The inherited parent snapshot precedes the thread's own transcript,
+		// exactly as parent-driven subagent tasks assemble it.
+		messages = append(forkContext, messages...)
 	}
 	if notice := s.currentWorkspaceContextMessage(ctx, req); notice != nil {
 		messages = append(messages, *notice)
@@ -496,6 +516,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		runCfg.Query = headerifiedModelQuery
 	}
 	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)
+	runCfg.InlineAttachments = extractNativeAttachmentParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
 
@@ -543,7 +564,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		compactableTokens:           compactableTokens,
 		compactableTokensKnown:      compactableTokensKnown,
 		contextTokenBudget:          contextTokenBudget,
-	}, nil
+	}, req, nil
 }
 
 // Chat sends a synchronous chat request and stores the result.
@@ -578,7 +599,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			return ChatResponse{}, err
 		}
 	}
-	rc, err := s.resolve(ctx, req)
+	rc, req, err := s.resolve(ctx, req)
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -736,6 +757,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
 		SessionType:           p.SessionType,
 		SupportsImageInput:    supportsImageInputForModel(chatModel),
+		SupportsFileInput:     supportsFileInputForModel(chatModel),
 		SupportsToolCall:      chatModel.HasCompatibility(models.CompatToolCall),
 		Identity: native.SessionContext{
 			BotID:             p.BotID,
@@ -767,6 +789,14 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 	if s.toolApproval != nil || s.userInput != nil {
 		cfg.ToolApprovalHandler = s.buildToolApprovalHandler(p)
 	}
+	if bound, hasWorkdir, workdirErr := s.resolveSessionWorkdirBinding(ctx, p.BotID, p.SessionID); workdirErr != nil {
+		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, workdirErr
+	} else if hasWorkdir {
+		cfg.Identity.WorkdirPath = bound.WorkDir
+		// Pin the workdir's target so the resolution below runs against it —
+		// including its error path when the target is unreachable.
+		ctx = workspace.WithWorkspaceTarget(ctx, bound.TargetID)
+	}
 	if s.workspaceTargets != nil {
 		if target, targetErr := s.workspaceTargets.ResolveWorkspaceTarget(ctx, p.BotID, ""); targetErr == nil {
 			cfg.Identity.WorkspaceTargetID = strings.TrimSpace(target.TargetID)
@@ -790,6 +820,10 @@ func (s *Service) canDeliverUserInputWS(eventCh chan<- WSStreamEvent) bool {
 
 func supportsImageInputForModel(m models.GetResponse) bool {
 	return m.HasCompatibility(models.CompatVision)
+}
+
+func supportsFileInputForModel(m models.GetResponse) bool {
+	return m.HasCompatibility(models.CompatFileInput)
 }
 
 const (
@@ -1293,19 +1327,21 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 				extra = append(extra, img)
 			}
 		}
+		extra = append(extra, cfg.InlineAttachments...)
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query, extra...))
 		cfg.ForkContextSourceMessageIDs = append(cfg.ForkContextSourceMessageIDs, "")
 		cfg.ContextQueryMaterialized = true
-	} else if len(cfg.InlineImages) > 0 {
+	} else if len(cfg.InlineImages) > 0 || len(cfg.InlineAttachments) > 0 {
 		// Pipeline path: the user query is already embedded in the RC messages,
-		// but image parts are not rendered by the pipeline renderer. Inject the
-		// inline images into the last user message so the model receives them.
-		imageParts := make([]sdk.MessagePart, 0, len(cfg.InlineImages))
+		// but media parts are not rendered by the pipeline renderer. Inject the
+		// inline media into the last user message so the model receives them.
+		imageParts := make([]sdk.MessagePart, 0, len(cfg.InlineImages)+len(cfg.InlineAttachments))
 		for _, img := range cfg.InlineImages {
 			if strings.TrimSpace(img.Image) != "" {
 				imageParts = append(imageParts, img)
 			}
 		}
+		imageParts = append(imageParts, cfg.InlineAttachments...)
 		if len(imageParts) > 0 {
 			injected := false
 			for i := len(cfg.Messages) - 1; i >= 0; i-- {

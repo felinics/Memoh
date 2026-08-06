@@ -21,9 +21,9 @@ type agentStepQueries interface {
 	LockSessionRunForAgentStepCommit(context.Context, sqlc.LockSessionRunForAgentStepCommitParams) (pgtype.UUID, error)
 }
 
-// PersistAgentStep appends a complete SDK step in one runtime-fenced
-// transaction. Locking the run row linearizes the commit against abort; the
-// caller must not replay a step after this method returns.
+// PersistAgentStep appends one SDK step in a runtime-fenced transaction.
+// Complete steps precede abort intent; interrupted checkpoints remain writable
+// until terminal finalization for cancellation paths without recorded intent.
 func (s *DBService) PersistAgentStep(ctx context.Context, step AgentStep) ([]Message, error) {
 	if s == nil || s.queries == nil {
 		return nil, errors.New("message service is not configured")
@@ -66,12 +66,15 @@ func (s *DBService) PersistAgentStep(ctx context.Context, step AgentStep) ([]Mes
 		if !ok {
 			return errors.New("persistence store does not support agent step writes")
 		}
-		if _, err := writer.LockSessionRunForAgentStepCommit(ctx, sqlc.LockSessionRunForAgentStepCommitParams{
-			RunID: pgRunID, BotID: pgBotID, SessionID: pgSessionID, FencingToken: fence.Token,
-		}); errors.Is(err, pgx.ErrNoRows) {
+		params := sqlc.LockSessionRunForAgentStepCommitParams{
+			RunID: pgRunID, BotID: pgBotID, SessionID: pgSessionID,
+			FencingToken: fence.Token, Interrupted: step.Interrupted,
+		}
+		_, lockErr := writer.LockSessionRunForAgentStepCommit(ctx, params)
+		if errors.Is(lockErr, pgx.ErrNoRows) {
 			return ErrAgentStepNotWritable
-		} else if err != nil {
-			return fmt.Errorf("lock session run for agent step: %w", err)
+		} else if lockErr != nil {
+			return fmt.Errorf("lock session run for agent step: %w", lockErr)
 		}
 
 		txService := *s

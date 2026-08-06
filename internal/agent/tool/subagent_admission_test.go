@@ -38,16 +38,16 @@ type subagentTerminalRecord struct {
 	cause    string
 }
 
-func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, func(error), error) {
+func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, SubagentAdmission, func(error), error) {
 	f.mu.Lock()
 	if f.reject != nil {
 		err := f.reject
 		f.mu.Unlock()
-		return nil, nil, err
+		return nil, SubagentAdmission{}, nil, err
 	}
 	if f.active[threadID] {
 		f.mu.Unlock()
-		return nil, nil, fmt.Errorf("%w: thread %s", turn.ErrSessionBusy, threadID)
+		return nil, SubagentAdmission{}, nil, fmt.Errorf("%w: thread %s", turn.ErrSessionBusy, threadID)
 	}
 	if f.active == nil {
 		f.active = make(map[string]bool)
@@ -62,7 +62,12 @@ func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, thre
 	f.mu.Unlock()
 
 	runCtx, cancel := context.WithCancel(ctx)
-	return runCtx, func(cause error) {
+	admission := SubagentAdmission{
+		RunID:        "run-" + invocationID,
+		TurnID:       "turn-" + invocationID,
+		TurnPosition: 1,
+	}
+	return runCtx, admission, func(cause error) {
 		defer cancel()
 		f.mu.Lock()
 		defer f.mu.Unlock()

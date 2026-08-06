@@ -9,9 +9,59 @@ import (
 )
 
 // sdkMessagesToModelMessages converts SDK messages to the persistence/API format
-// for resolver call sites using the shared conversion helper.
+// for resolver call sites using the shared conversion helper. File parts are
+// redacted to text placeholders first — document bytes never enter
+// bot_history_messages (see redactFilePartsForStorage).
 func sdkMessagesToModelMessages(msgs []sdk.Message) []ModelMessage {
-	return messageconv.SDKMessagesToModelMessages(msgs)
+	return messageconv.SDKMessagesToModelMessages(redactFilePartsForStorage(msgs))
+}
+
+// redactFilePartsForStorage replaces FileParts with text placeholders before
+// persistence. Storing document base64 in message history would bloat rows,
+// blow up the length-based token estimator (triggering history trimming), and
+// deadlock replay after switching to a model without native file input. The
+// file itself stays in the workspace: follow-up turns re-read it via the read
+// tool, which re-injects it for whatever model is current.
+func redactFilePartsForStorage(msgs []sdk.Message) []sdk.Message {
+	out := msgs
+	copied := false
+	for i, msg := range msgs {
+		hasFile := false
+		for _, part := range msg.Content {
+			if _, ok := part.(sdk.FilePart); ok {
+				hasFile = true
+				break
+			}
+		}
+		if !hasFile {
+			continue
+		}
+		if !copied {
+			out = append([]sdk.Message(nil), msgs...)
+			copied = true
+		}
+		kept := make([]sdk.MessagePart, 0, len(msg.Content))
+		for _, part := range msg.Content {
+			fp, ok := part.(sdk.FilePart)
+			if !ok {
+				kept = append(kept, part)
+				continue
+			}
+			name := strings.TrimSpace(fp.Filename)
+			if name == "" {
+				name = "attachment"
+			}
+			mime := strings.TrimSpace(fp.MediaType)
+			if mime == "" {
+				mime = "application/pdf"
+			}
+			kept = append(kept, sdk.TextPart{
+				Text: "[attachment " + name + " (" + mime + ") was shown to the model this turn; its bytes are not persisted — use the read tool to view it again]",
+			})
+		}
+		out[i].Content = kept
+	}
+	return out
 }
 
 // modelMessageToSDKMessage converts a persistence format message to SDK message

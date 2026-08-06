@@ -2,6 +2,7 @@ import { defineStore, storeToRefs } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { toast } from '@felinic/ui'
 import { useChatSelectionStore } from '@/store/chat-selection'
+import { useWorkdirsStore } from '@/store/workdirs'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { createInvocationId } from './chat-list.normalize'
@@ -19,6 +20,7 @@ import { createChatViews } from './chat/views'
 import { createChatTargets } from './chat/targets'
 import { createChatBots } from './chat/bots'
 import { createSessionActivity } from './chat/session-activity'
+import { createWorkdirSessions } from './chat/workdir-sessions'
 import { createSessionActions } from './chat/session-actions'
 import {
   commandErrorMessage,
@@ -64,6 +66,7 @@ export type { ChatViewEntry, ChatViewTarget } from './chat/view-registry'
 
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
+  const workdirsStore = useWorkdirsStore()
   const { currentBotId, sessionId, draftIntent, explicitSelection: explicitSessionSelection } = storeToRefs(selectionStore)
   const fsBeacon = createFsChangeBeacon({ currentBotId, sessionId })
   const {
@@ -140,6 +143,17 @@ export const useChatStore = defineStore('chat', () => {
     touchKnownSession, fallbackSessionAfterDelete, markSessionDeleted,
     clearDeletedSessionIds, clearRememberedSessions,
   } = sessionList
+  // Sidebar folders page the workdir-filtered endpoint themselves —
+  // filtering the globally paged `sessions` list hides a folder's older
+  // chats (see ./chat/workdir-sessions).
+  const {
+    workdirSessionsFor, workdirSessionsState, ensureWorkdirSessions,
+    loadMoreWorkdirSessions, reset: resetWorkdirSessions,
+  } = createWorkdirSessions({
+    currentBotId, sessions, rememberSession,
+    userScopeGeneration: () => userScopeGeneration,
+    knownSession: knownSessionSummary,
+  })
   const refreshCoordinator = createChatRefreshCoordinator({
     currentBotId,
     fetchSessions,
@@ -305,6 +319,7 @@ export const useChatStore = defineStore('chat', () => {
     removeSessionFromList,
     ensureBot,
     knownSession: knownSessionSummary,
+    draftWorkdirIdFor: (botId, opts) => workdirsStore.sessionWorkdirIdFor(botId, opts),
   })
   const {
     acpRuntimeStatuses, acpRuntimePending, acpRuntimeKey,
@@ -376,6 +391,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionsCursor.value = null
     hasMoreSessions.value = false
     loadingMoreSessions.value = false
+    resetWorkdirSessions()
     resetBots()
     sessionId.value = null
     explicitSessionSelection.value = false
@@ -442,7 +458,9 @@ export const useChatStore = defineStore('chat', () => {
     abort,
     abortAllAssistantStreams,
     clearFsForBotSwitch,
-    clearRememberedSessions,
+    // Folder rows resolve through the remembered-session map, so dropping it
+    // must drop the folders' paging state too, or a folder reads as empty.
+    clearRememberedSessions: () => { clearRememberedSessions(); resetWorkdirSessions() },
     resetToEmptyComposer,
     stageDefaultACPFromSettings,
   })
@@ -583,6 +601,8 @@ export const useChatStore = defineStore('chat', () => {
     isChatViewCreatingSession, streaming, streamingSessionId,
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,
     loadMoreSessions, activeSession, knownSessions, knownSessionSummary,
+    workdirSessionsFor, workdirSessionsState,
+    ensureWorkdirSessions, loadMoreWorkdirSessions,
     activeChatReadOnly, activeChatCanFork,
     acpRuntimeStatuses, acpRuntimePending, pendingACPSessionInput,
     pendingACPSessionMetadata, pendingACPRuntimeId, pendingACPRuntimeStatus,

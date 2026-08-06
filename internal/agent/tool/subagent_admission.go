@@ -21,11 +21,23 @@ import (
 // dependency pointing the one way it can — the runtime is built on top of the
 // agent, which is built on top of these tools.
 type SubagentAdmitter interface {
-	// AdmitSubagentRun returns the context the run must execute in and the
-	// terminal write that releases the thread's slot, or an error naming why
-	// nothing was started. turn.ErrSessionBusy means the agent is already
-	// working; turn.ErrDuplicateTurn means this task already has a run.
-	AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, func(error), error)
+	// AdmitSubagentRun returns the context the run must execute in, the
+	// admitted identity, and the terminal write that releases the thread's
+	// slot, or an error naming why nothing was started. turn.ErrSessionBusy
+	// means the agent is already working; turn.ErrDuplicateTurn means this
+	// task already has a run.
+	AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, SubagentAdmission, func(error), error)
+}
+
+// SubagentAdmission names what admission allocated for the run. The turn
+// identity matters to persistence: the task's user message must file as that
+// turn's request (SR-TURN-001) so history and the live runtime view agree on
+// which turn the run writes into — minting a second turn here would split one
+// run across two turns in every subscriber's transcript.
+type SubagentAdmission struct {
+	RunID        string
+	TurnID       string
+	TurnPosition int64
 }
 
 // SetSubagentAdmitter injects the admission gate. Setter injection for the same
@@ -37,7 +49,9 @@ func (p *SpawnProvider) SetSubagentAdmitter(admitter SubagentAdmitter) {
 }
 
 // admitAgentRun claims the agent's thread for this task and returns the run
-// context plus the write that ends the run's record.
+// context plus the write that ends the run's record. The admitted identity is
+// recorded on the request so persistence can file the task's messages under
+// the turn admission allocated.
 //
 // The finish takes the result rather than an error because how a run ended is
 // not always visible in one: a killed task carries the cancellation as its
@@ -50,7 +64,7 @@ func (p *SpawnProvider) admitAgentRun(ctx context.Context, req *agentRequest) (c
 	if err != nil {
 		return nil, nil, fmt.Errorf("encode subagent submission: %w", err)
 	}
-	runCtx, finish, err := p.admitter.AdmitSubagentRun(
+	runCtx, admission, finish, err := p.admitter.AdmitSubagentRun(
 		ctx,
 		req.parentSession.BotID,
 		req.agentSessionID,
@@ -60,6 +74,7 @@ func (p *SpawnProvider) admitAgentRun(ctx context.Context, req *agentRequest) (c
 	if err != nil {
 		return nil, nil, err
 	}
+	req.admission = admission
 	return runCtx, func(result agentRunResult) {
 		if result.Status == string(background.TaskKilled) {
 			// A kill cancels the run's context, which is what the terminal write

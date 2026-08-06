@@ -40,7 +40,7 @@ func TestDecodeTurnResponseEntryUsesVisibleText(t *testing.T) {
 	if entry.Content != "任务完成" {
 		t.Fatalf("content = %q, want %q", entry.Content, "任务完成")
 	}
-	// Reasoning must never leak into TRs to avoid re-injection into prompts.
+	// Completed reasoning must not be re-injected into later prompts.
 	if strings.Contains(entry.Content, "thinking") {
 		t.Fatalf("reasoning leaked into TR: %q", entry.Content)
 	}
@@ -241,10 +241,11 @@ func TestDecodeTurnResponseEntryToolRoleLegacyEnvelope(t *testing.T) {
 	}
 }
 
-func TestDecodeTurnResponseEntrySkipsEmpty(t *testing.T) {
+func TestDecodeTurnResponseEntryKeepsOnlyInterruptedReasoning(t *testing.T) {
 	t.Parallel()
 
-	// Only reasoning → nothing to expose to future prompts → skip.
+	// Completed reasoning remains hidden, while an interrupted checkpoint is
+	// continuation state and must survive into the next prompt.
 	content, err := json.Marshal([]map[string]any{
 		{"type": "reasoning", "text": "thinking out loud"},
 	})
@@ -259,11 +260,56 @@ func TestDecodeTurnResponseEntrySkipsEmpty(t *testing.T) {
 		t.Fatalf("marshal model message: %v", err)
 	}
 	if _, ok := DecodeTurnResponseEntry(messagepkg.Message{
-		Role:    "assistant",
+		Role:    " Assistant ",
 		Content: modelMessage,
 	}); ok {
 		t.Fatal("expected reasoning-only message to be skipped")
 	}
+	interrupted := messagepkg.Message{
+		Role: " Assistant ", Content: modelMessage,
+		Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
+	}
+	entries := DecodeTurnResponseEntries([]messagepkg.Message{interrupted, interrupted})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want only the latest interrupted checkpoint", len(entries))
+	}
+	assertRawPart(t, entries[0].RawContent, "text", messagepkg.AgentStepInterruptedReasoningPrefix+"thinking out loud", "")
+}
+
+func TestDecodeTurnResponseEntriesDropSupersededCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	// Once a completed answer follows the checkpoint, its reasoning is history:
+	// re-injecting the continuation instruction would ask the model to resume an
+	// answer it already delivered, on every later turn.
+	reasoning, err := json.Marshal([]map[string]any{{"type": "reasoning", "text": "thinking out loud"}})
+	if err != nil {
+		t.Fatalf("marshal reasoning content: %v", err)
+	}
+	interruptedMessage, err := json.Marshal(turn.ModelMessage{Role: "assistant", Content: reasoning})
+	if err != nil {
+		t.Fatalf("marshal interrupted message: %v", err)
+	}
+	answer, err := json.Marshal([]map[string]any{{"type": "text", "text": "done"}})
+	if err != nil {
+		t.Fatalf("marshal answer content: %v", err)
+	}
+	answerMessage, err := json.Marshal(turn.ModelMessage{Role: "assistant", Content: answer})
+	if err != nil {
+		t.Fatalf("marshal answer message: %v", err)
+	}
+
+	entries := DecodeTurnResponseEntries([]messagepkg.Message{
+		{
+			Role: "assistant", Content: interruptedMessage,
+			Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
+		},
+		{Role: "assistant", Content: answerMessage},
+	})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want only the completed answer", len(entries))
+	}
+	assertRawPart(t, entries[0].RawContent, "text", "done", "")
 }
 
 func TestDecodeTurnResponseEntryLegacyToolCallsField(t *testing.T) {
@@ -313,7 +359,7 @@ func assertRawPart(t *testing.T, raw json.RawMessage, partType, nameOrText, call
 			continue
 		}
 		switch partType {
-		case "text":
+		case "text", "reasoning":
 			if part["text"] == nameOrText {
 				return part
 			}

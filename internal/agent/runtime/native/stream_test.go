@@ -2,6 +2,8 @@ package native
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -9,66 +11,46 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
-type agentToolPlaceholderProvider struct{}
+type agentStreamTestProvider func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error)
 
-func (*agentToolPlaceholderProvider) Name() string { return "tool-placeholder-mock" }
-
-func (*agentToolPlaceholderProvider) ListModels(context.Context) ([]sdk.Model, error) {
+func (agentStreamTestProvider) Name() string { return "stream-mock" }
+func (agentStreamTestProvider) ListModels(context.Context) ([]sdk.Model, error) {
 	return nil, nil
 }
 
-type agentNonClosingStreamProvider struct{}
-
-func (*agentNonClosingStreamProvider) Name() string { return "non-closing-stream-mock" }
-
-func (*agentNonClosingStreamProvider) ListModels(context.Context) ([]sdk.Model, error) {
-	return nil, nil
-}
-
-func (*agentNonClosingStreamProvider) Test(context.Context) *sdk.ProviderTestResult {
+func (agentStreamTestProvider) Test(context.Context) *sdk.ProviderTestResult {
 	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
 }
 
-func (*agentNonClosingStreamProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
+func (agentStreamTestProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
 	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
 }
 
-func (*agentNonClosingStreamProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (agentStreamTestProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
 	return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
 }
 
-func (*agentNonClosingStreamProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
-	return &sdk.StreamResult{Stream: make(chan sdk.StreamPart)}, nil
+func (p agentStreamTestProvider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+	return p(ctx, params)
 }
 
-func (*agentToolPlaceholderProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+func closedAgentTestStream(parts ...sdk.StreamPart) *sdk.StreamResult {
+	ch := make(chan sdk.StreamPart, len(parts))
+	for _, part := range parts {
+		ch <- part
+	}
+	close(ch)
+	return &sdk.StreamResult{Stream: ch}
 }
 
-func (*agentToolPlaceholderProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
-	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
-}
-
-func (*agentToolPlaceholderProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
-	return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
-}
-
-func (*agentToolPlaceholderProvider) DoStream(_ context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
-	ch := make(chan sdk.StreamPart, 8)
-	go func() {
-		defer close(ch)
-		ch <- &sdk.StartPart{}
-		ch <- &sdk.StartStepPart{}
-		ch <- &sdk.ToolInputStartPart{ID: "call-1", ToolName: "write"}
-		ch <- &sdk.StreamToolCallPart{
-			ToolCallID: "call-1",
-			ToolName:   "write",
-			Input:      map[string]any{"path": "/tmp/long.txt"},
-		}
-		ch <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
-		ch <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
-	}()
-	return &sdk.StreamResult{Stream: ch}, nil
+func finishedTextTestProvider(text string) agentStreamTestProvider {
+	return func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+		return closedAgentTestStream(
+			&sdk.StartStepPart{},
+			&sdk.TextDeltaPart{ID: "text", Text: text},
+			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop},
+		), nil
+	}
 }
 
 // TestAgentStreamEmitsToolCallInputStartThenStart asserts that a tool call
@@ -82,14 +64,20 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 	t.Parallel()
 
 	a := New(Deps{})
+	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+		return closedAgentTestStream(
+			&sdk.StartPart{}, &sdk.StartStepPart{},
+			&sdk.ToolInputStartPart{ID: "call-1", ToolName: "write"},
+			&sdk.StreamToolCallPart{ToolCallID: "call-1", ToolName: "write", Input: map[string]any{"path": "/tmp/long.txt"}},
+			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop},
+			&sdk.FinishPart{FinishReason: sdk.FinishReasonStop},
+		), nil
+	})
 
 	var events []StreamEvent
 	commits := 0
 	for event := range a.Stream(context.Background(), RunConfig{
-		Model: &sdk.Model{
-			ID:       "mock-model",
-			Provider: &agentToolPlaceholderProvider{},
-		},
+		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
 		Messages:         []sdk.Message{sdk.UserMessage("write a long file")},
 		SupportsToolCall: false,
 		Identity:         SessionContext{BotID: "bot-1"},
@@ -132,11 +120,11 @@ func TestAgentStreamCancellationDoesNotWaitForProviderToClose(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+		return &sdk.StreamResult{Stream: make(chan sdk.StreamPart)}, nil
+	})
 	events := New(Deps{}).Stream(ctx, RunConfig{
-		Model: &sdk.Model{
-			ID:       "mock-model",
-			Provider: &agentNonClosingStreamProvider{},
-		},
+		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
 		Messages: []sdk.Message{sdk.UserMessage("keep streaming")},
 		Identity: SessionContext{BotID: "bot-1"},
 	})
@@ -165,5 +153,156 @@ func TestAgentStreamCancellationDoesNotWaitForProviderToClose(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("stream did not close after its terminal abort")
+	}
+}
+
+func TestAgentStreamPersistsInterruptedInferenceStep(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider := agentStreamTestProvider(func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		ch := make(chan sdk.StreamPart, 3)
+		ch <- &sdk.StartStepPart{}
+		ch <- &sdk.ReasoningDeltaPart{ID: "reasoning", Text: "thinking"}
+		ch <- &sdk.TextDeltaPart{ID: "text", Text: "partial"}
+		go func() { <-ctx.Done(); close(ch) }()
+		return &sdk.StreamResult{Stream: ch}, nil
+	})
+	var interrupted *sdk.StepResult
+	events := New(Deps{}).Stream(ctx, RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages: []sdk.Message{sdk.UserMessage("keep streaming")},
+		Identity: SessionContext{BotID: "bot-1"},
+		OnStepInterrupted: func(callbackCtx context.Context, stepIndex int, step *sdk.StepResult) error {
+			if callbackCtx.Err() != nil || stepIndex != 0 {
+				t.Errorf("callback context/index = %v/%d", callbackCtx.Err(), stepIndex)
+			}
+			interrupted = step
+			return nil
+		},
+	})
+	var terminal StreamEvent
+	for event := range events {
+		if event.Type == EventTextDelta {
+			cancel()
+		}
+		if event.IsTerminal() {
+			terminal = event
+		}
+	}
+	if interrupted == nil || interrupted.Reasoning != "thinking" || interrupted.Text != "partial" {
+		t.Fatalf("interrupted step = %#v", interrupted)
+	}
+	var messages []sdk.Message
+	if terminal.Type != EventAgentAbort || json.Unmarshal(terminal.Messages, &messages) != nil || len(messages) != 1 {
+		t.Fatalf("terminal event/messages = %#v / %#v", terminal, messages)
+	}
+}
+
+func TestInterruptedStepCaptureRejectsToolStep(t *testing.T) {
+	var capture interruptedStepCapture
+	capture.observe(&sdk.TextDeltaPart{Text: "partial"})
+	capture.observe(&sdk.ToolInputStartPart{ID: "call", ToolName: "exec"})
+	if step := capture.snapshot(0); step != nil {
+		t.Fatalf("snapshot after tool activity = %#v, want nil", step)
+	}
+}
+
+func TestInterruptedStepCaptureRejectsAlreadyCommittedStep(t *testing.T) {
+	var capture interruptedStepCapture
+	capture.observe(&sdk.StartStepPart{})
+	capture.observe(&sdk.TextDeltaPart{Text: "partial"})
+	if step := capture.snapshot(1); step != nil {
+		t.Fatalf("snapshot of a step the SDK already committed = %#v, want nil", step)
+	}
+	if step := capture.snapshot(0); step == nil {
+		t.Fatal("snapshot of the uncommitted frontier = nil, want the partial text")
+	}
+	capture.observe(&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop})
+	if step := capture.snapshot(0); step == nil {
+		t.Fatal("finished step whose complete commit failed = nil, want interrupted fallback")
+	}
+}
+
+func TestAgentStreamDoesNotCheckpointAnAlreadyCommittedStep(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	committed := make(chan string, 4)
+	interrupted := make(chan string, 4)
+	events := New(Deps{}).Stream(ctx, RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: finishedTextTestProvider("final answer")},
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+		Identity: SessionContext{BotID: "bot-1"},
+		OnStepCommitted: func(_ context.Context, _ int, step *sdk.StepResult) error {
+			committed <- step.Text
+			return nil
+		},
+		OnStepInterrupted: func(_ context.Context, _ int, step *sdk.StepResult) error {
+			interrupted <- step.Text
+			return nil
+		},
+	})
+
+	// Take only agent_start so the event loop parks on the text delta it has
+	// already observed, leaving the finish-step part unread.
+	if first, ok := <-events; !ok || first.Type != EventAgentStart {
+		t.Fatalf("first event = %#v", first)
+	}
+	select {
+	case <-committed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("step was never committed")
+	}
+
+	cancel()
+	for range events {
+	}
+
+	select {
+	case text := <-interrupted:
+		t.Fatalf("checkpointed %q, which the complete-step barrier already made durable", text)
+	default:
+	}
+}
+
+func TestAgentStreamCheckpointsWhenCompleteCommitLosesAbortRace(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	commitStarted := make(chan struct{})
+	interrupted := make(chan string, 1)
+	events := New(Deps{}).Stream(ctx, RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: finishedTextTestProvider("final answer")},
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+		Identity: SessionContext{BotID: "bot-1"},
+		OnStepCommitted: func(context.Context, int, *sdk.StepResult) error {
+			close(commitStarted)
+			<-ctx.Done()
+			return errors.New("abort won")
+		},
+		OnStepInterrupted: func(_ context.Context, _ int, step *sdk.StepResult) error {
+			interrupted <- step.Text
+			return nil
+		},
+	})
+
+	if first := <-events; first.Type != EventAgentStart {
+		t.Fatalf("first event = %#v", first)
+	}
+	<-commitStarted
+	cancel()
+	for range events {
+	}
+	select {
+	case text := <-interrupted:
+		if text != "final answer" {
+			t.Fatalf("interrupted text = %q", text)
+		}
+	default:
+		t.Fatal("complete step rejected by abort was not checkpointed")
 	}
 }

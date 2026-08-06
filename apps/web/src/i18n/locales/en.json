@@ -466,7 +466,7 @@
     "usernamePlaceholder": "username",
     "usernameRequired": "Username is required",
     "email": "Email",
-    "emailPlaceholder": "name@example.com",
+    "emailPlaceholder": "name{'@'}example.com",
     "role": "Role",
     "roles": {
       "admin": "Admin",
@@ -529,6 +529,7 @@
   },
   "chat": {
     "welcome": {
+      "folder": "What can I do in {name}?",
       "g1": "Where should we begin?",
       "g2": "What's on your mind?",
       "g3": "What can I help with?",
@@ -542,7 +543,6 @@
       "g11": "Tell me what you need.",
       "g12": "What should we tackle first?"
     },
-    "emptySubagent": "No messages recorded for this subagent task",
     "emptySystemSession": "No messages recorded for this system session",
     "selectBot": "Select a Bot",
     "selectBotHint": "Choose a bot from the sidebar to start chatting",
@@ -599,7 +599,14 @@
     "computerLoadFailed": "Couldn’t load computers",
     "computerNone": "No computers available",
     "computerUnavailable": "Unavailable computer",
+    "folder": "Folder",
+    "folders": "Folders",
+    "folderUnavailable": "Unavailable folder",
+    "folderDetachDraft": "Start without a folder",
+    "folderNewSession": "New session in {name}",
     "attachFiles": "Attach files",
+    "pdfTooLargeForNative": "This PDF exceeds 12MB, so it will be saved to the workspace as a path; the model can't view its content directly.",
+    "pdfUnsupportedByModel": "The current model can't read PDFs natively. The file will be saved to the workspace as a path, but the model won't be able to view its content.",
     "send": "Send",
     "sendFailed": "Message failed to send",
     "forkFailed": "Failed to fork session",
@@ -768,8 +775,8 @@
       "generic": "Tool",
       "approve": "Allow",
       "reject": "Reject",
-    "pendingApproval": "pending approval",
-    "executionLocation": "Execution location",
+      "pendingApproval": "pending approval",
+      "executionLocation": "Execution location",
       "pendingUserInput": "waiting for input",
       "userInputSubmitted": "answered",
       "userInputCanceled": "canceled",
@@ -975,7 +982,13 @@
       "hideWorkbench": "Hide sidebar",
       "showWorkbench": "Show sidebar",
       "goBack": "Back",
-      "goForward": "Forward"
+      "goForward": "Forward",
+      "openNav": "Open navigation",
+      "closePanel": "Close"
+    },
+    "mobileNav": {
+      "title": "Navigation",
+      "description": "Switch bots, chat, files, schedule, and settings"
     },
     "activityBar": {
       "sessions": "Chat",
@@ -1126,6 +1139,7 @@
     "compatibilities": "Compatibilities",
     "compatibility": {
       "vision": "Vision",
+      "file-input": "File Input (PDF)",
       "tool-call": "Tool Call",
       "image-output": "Image Output",
       "reasoning": "Reasoning"
@@ -1466,7 +1480,7 @@
     "emptyTitle": "No MCP Servers",
     "emptyDescription": "Add an MCP server to extend your bot's capabilities",
     "command": "Command",
-    "commandPlaceholder": "npx -y @modelcontextprotocol/server-everything",
+    "commandPlaceholder": "npx -y {'@'}modelcontextprotocol/server-everything",
     "cwd": "Working Directory",
     "cwdPlaceholder": "Enter working directory path",
     "env": "Environment",
@@ -1620,8 +1634,6 @@
       "loadFailed": "Couldn’t load tool approval",
       "loadFailedDescription": "Check the server connection and try again.",
       "saveFailed": "Couldn’t save tool approval",
-      "saveSuccess": "Tool approval changes saved",
-      "partialSaveFailed": "Some changes were saved, but {count} location failed. Its draft was kept.",
       "enabled": "Tool approval",
       "enabledDescription": "Allow, Ask, and Deny rules are enforced for this location.",
       "disabledDescription": "File and command tools run directly. Saved modes and rules are retained.",
@@ -1987,6 +1999,36 @@
       "terminal": "Terminal",
       "settings": "Settings"
     },
+    "folders": {
+      "create": "New folder",
+      "createTitle": "New folder",
+      "createDescription": "Pick the directory this folder works in. It must already exist.",
+      "created": "Folder created",
+      "createFailed": "Failed to create folder",
+      "rename": "Rename",
+      "renameTitle": "Rename folder",
+      "renameFailed": "Failed to rename folder",
+      "archive": "Archive",
+      "archiveTitle": "Archive folder",
+      "archiveDescription": "Sessions already in “{name}” keep their directory; new sessions can no longer join it.",
+      "archiveFailed": "Failed to archive folder",
+      "rowActions": "Actions for {name}",
+      "targetNative": "Server workspace",
+      "targetRemote": "Connected computer",
+      "form": {
+        "name": "Name",
+        "namePlaceholder": "e.g. Website revamp",
+        "target": "Location",
+        "directory": "Directory",
+        "directoryHelp": "Sessions will work in {path}",
+        "directoryUp": "Up one level",
+        "noSubdirectories": "No subfolders",
+        "browseFailed": "Couldn’t load folders",
+        "path": "Directory path",
+        "remotePathHelp": "Absolute path on that computer. It must already exist.",
+        "remotePathPlaceholder": "/Users/you/code/project"
+      }
+    },
     "remoteRuntime": {
       "title": "Computers",
       "workspaceTitle": "Work locations",
@@ -2124,7 +2166,7 @@
       "inbox": "Inbox",
       "outbox": "Outbox",
       "emailAddress": "Email Address",
-      "emailPlaceholder": "user@example.com",
+      "emailPlaceholder": "user{'@'}example.com",
       "noBindings": "No email bindings configured",
       "noBindingsDescription": "Bind an email provider to let this bot read or send mail.",
       "noEmails": "No emails",
@@ -2928,7 +2970,6 @@
       "title": "Compaction Logs",
       "settingsTitle": "Compaction Settings",
       "advanced": "Advanced settings",
-      "disableNote": "Compaction will stop after you save this change.",
       "loadFailed": "Failed to load compaction logs",
       "empty": "No compaction logs yet",
       "emptyHint": "Logs appear after the bot compacts its conversation history.",
@@ -2954,7 +2995,6 @@
       "checkEvery": "Check every",
       "intervalUnit": "minutes",
       "advanced": "Advanced settings",
-      "disableNote": "Heartbeat will stop after you save this change.",
       "loadFailed": "Failed to load heartbeat logs",
       "empty": "No heartbeat logs yet",
       "logsDisabledTitle": "Heartbeat is disabled",

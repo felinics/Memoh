@@ -19,7 +19,9 @@ import { useKeyboardShortcutsStore } from './store/keyboard-shortcuts'
 import { createPinia } from 'pinia'
 import i18n from './i18n'
 import { PiniaColada } from '@pinia/colada'
+import { PiniaColadaCachePersister, isCacheReady } from '@pinia/colada-plugin-cache-persister'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
+import { QUERY_CACHE_STORAGE_KEY, queryCachePersistFilter } from './lib/query-cache-persistence'
 import 'katex/dist/katex.min.css'
 
 setupApiClient({
@@ -57,7 +59,16 @@ const forceDesktopShell =
 
 const app = createApp(App)
   .use(pinia)
-  .use(PiniaColada)
+  .use(PiniaColada, {
+    plugins: [
+      // Persist whitelisted catalog/config queries across reloads; hydrated
+      // entries revalidate on mount (see lib/query-cache-persistence.ts).
+      PiniaColadaCachePersister({
+        key: QUERY_CACHE_STORAGE_KEY,
+        filter: queryCachePersistFilter,
+      }),
+    ],
+  })
   .use(router)
   .use(i18n)
   .provide(KEYBOARD_REGISTRY, keyboardCommands)
@@ -66,4 +77,6 @@ if (forceDesktopShell) {
   app.provide(DesktopShellKey, true)
 }
 
-app.mount('#app')
+// Mount only after the snapshot is hydrated so the first render already has
+// the last-known values (storage is sync, so this resolves in a microtask).
+void isCacheReady().then(() => app.mount('#app'))

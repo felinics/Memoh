@@ -22,6 +22,11 @@ export function setCollapseOpen(key: string, open: boolean): void {
   if (key) openState.set(key, open)
 }
 
+export function migrateCollapseOpen(previousKey: string, key: string, open: boolean): void {
+  if (previousKey && previousKey !== key) openState.delete(previousKey)
+  setCollapseOpen(key, open)
+}
+
 function hash(value: string): string {
   let h = 0
   for (let i = 0; i < value.length; i += 1) {

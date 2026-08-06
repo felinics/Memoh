@@ -1,6 +1,6 @@
 -- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id
+  bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, workdir_id
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -13,7 +13,8 @@ VALUES (
   sqlc.arg(title),
   sqlc.arg(metadata),
   sqlc.narg(parent_session_id)::uuid,
-  sqlc.narg(created_by_user_id)::uuid
+  sqlc.narg(created_by_user_id)::uuid,
+  sqlc.narg(workdir_id)::uuid
 )
 RETURNING *;
 
@@ -116,7 +117,8 @@ created_session AS (
     title,
     metadata,
     next_turn_position,
-    created_by_user_id
+    created_by_user_id,
+    workdir_id
   )
   SELECT
     fp.bot_id,
@@ -133,7 +135,10 @@ created_session AS (
       true
     ),
     fp.next_turn_position_value,
-    sqlc.narg(created_by_user_id)::uuid
+    sqlc.narg(created_by_user_id)::uuid,
+    -- A fork continues the source conversation, so it stays in the same
+    -- workdir (and therefore the same working directory).
+    fp.workdir_id
   FROM fork_plan fp
   CROSS JOIN prepared_metadata pm
   RETURNING *
@@ -270,7 +275,7 @@ FOR UPDATE;
 -- name: ListSessionsByBot :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -280,7 +285,7 @@ ORDER BY s.updated_at DESC;
 -- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -291,10 +296,12 @@ ORDER BY s.updated_at DESC;
 -- name: ListSessionsByBotPaged :many
 -- Cursor uses (updated_at, id) so pages stay stable when many rows share an
 -- updated_at. Callers always pass an explicit types filter; to opt out of
--- filtering, pass every known type.
+-- filtering, pass every known type. The workdir filter is three-state:
+-- disabled, "sessions of this workdir", or "sessions with no workdir"
+-- (workdir_unassigned) for the sidebar's ungrouped bucket.
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -303,6 +310,13 @@ WHERE s.team_id = public.memoh_current_team_id()
   AND (
     NOT sqlc.arg(use_parent_session)::bool
     OR s.parent_session_id = sqlc.narg(parent_session_id)::uuid
+  )
+  AND (
+    NOT sqlc.arg(use_workdir)::bool
+    OR CASE WHEN sqlc.arg(workdir_unassigned)::bool
+            THEN s.workdir_id IS NULL
+            ELSE s.workdir_id = sqlc.narg(workdir_id)::uuid
+       END
   )
   AND (
     NOT sqlc.arg(use_cursor)::bool
@@ -314,7 +328,7 @@ LIMIT sqlc.arg(limit_count)::int;
 -- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -324,6 +338,13 @@ WHERE s.team_id = public.memoh_current_team_id()
   AND (
     NOT sqlc.arg(use_parent_session)::bool
     OR s.parent_session_id = sqlc.narg(parent_session_id)::uuid
+  )
+  AND (
+    NOT sqlc.arg(use_workdir)::bool
+    OR CASE WHEN sqlc.arg(workdir_unassigned)::bool
+            THEN s.workdir_id IS NULL
+            ELSE s.workdir_id = sqlc.narg(workdir_id)::uuid
+       END
   )
   AND (
     NOT sqlc.arg(use_cursor)::bool

@@ -24,6 +24,7 @@ func (s *Service) prepareContinuationRunConfig(
 	if err != nil {
 		return native.RunConfig{}, err
 	}
+	loaded = projectInterruptedHistoryReasoning(loaded)
 	messages, retained, _ := trimMessagesAndRecordsByTokens(s.logger, loaded, 0)
 	messages = sanitizeMessages(messages)
 

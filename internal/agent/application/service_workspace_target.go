@@ -8,6 +8,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/workdir"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
@@ -29,7 +30,29 @@ func (s *Service) ValidateWorkspaceTarget(ctx context.Context, botID, targetID s
 
 func (s *Service) prepareWorkspaceRequest(ctx context.Context, req ChatRequest) (context.Context, ChatRequest, error) {
 	requestedTargetID := strings.TrimSpace(req.WorkspaceTargetID)
-	if requestedTargetID != "" {
+	bound, hasWorkdir, err := s.resolveSessionWorkdirBinding(ctx, req.BotID, req.ThreadID)
+	if err != nil {
+		return ctx, req, err
+	}
+	enforceSelection := requestedTargetID != ""
+	if hasWorkdir {
+		// The workdir pins the target for the session's whole life. An
+		// explicit different target is rejected loudly — silently ignoring
+		// it would let the user believe the switch took effect.
+		if requestedTargetID != "" && requestedTargetID != bound.TargetID {
+			return ctx, req, ErrWorkspaceTargetWorkdirConflict
+		}
+		requestedTargetID = bound.TargetID
+		req.WorkspaceTargetID = bound.TargetID
+		// Reaching a remote computer is a permission boundary whether the
+		// target comes from the request or from the workdir binding. A
+		// native workdir adds no capability beyond the default workspace,
+		// so it does not demand workspace_read just to chat.
+		if bound.Kind == workdir.TargetKindRemote {
+			enforceSelection = true
+		}
+	}
+	if enforceSelection {
 		if strings.TrimSpace(req.UserID) == "" {
 			return ctx, req, errors.New("user id is required to select a computer")
 		}

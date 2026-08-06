@@ -77,6 +77,43 @@ vi.hoisted(() => {
   })
 })
 
+// Controllable matchMedia for the mobile breakpoint (useIsMobile). The window
+// mock above deliberately omits browser APIs until a test needs them; the
+// store reads the query once at setup and subscribes to 'change', so tests
+// drive both through setMobile. reset() runs between tests: a leaked
+// mobile=true would flip every store created afterwards.
+const mobileBreakpoint = vi.hoisted(() => {
+  const listeners = new Set<(event: { matches: boolean }) => void>()
+  const state = { mobile: false }
+  Object.defineProperty(globalThis.window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      media: query,
+      get matches() {
+        return state.mobile
+      },
+      addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => {
+        listeners.add(listener)
+      },
+      removeEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => {
+        listeners.delete(listener)
+      },
+      dispatchEvent: () => true,
+    }),
+  })
+  return {
+    setMobile(next: boolean) {
+      state.mobile = next
+      for (const listener of [...listeners]) listener({ matches: next })
+    },
+    reset() {
+      state.mobile = false
+      listeners.clear()
+    },
+  }
+})
+
 // workspace-tabs imports @/i18n to localize the desktop panel title; that
 // module reads localStorage at load to pick the initial locale, which isn't
 // polyfilled in this test's environment. Mock it so the import stays
@@ -228,12 +265,16 @@ interface FakePanel {
 interface FakeGroup {
   id: string
   element: HTMLElement
+  // Mirrors DockviewGroupPanel.model: the store toggles header.hidden at
+  // runtime for the mobile single stack (runtime-only, never persisted).
+  model: { header: { hidden: boolean } }
   api: {
     getHeaderPosition: () => 'top' | 'bottom'
     setHeaderPosition: ReturnType<typeof vi.fn>
     setActivePanel: (panel: FakePanel) => void
     setActive: () => void
     setSize: ReturnType<typeof vi.fn>
+    moveTo: (options: { group?: FakeGroup, position?: 'top' | 'bottom' | 'left' | 'right' | 'center' }) => void
   }
   readonly panels: FakePanel[]
   readonly activePanel: FakePanel | null
@@ -245,6 +286,25 @@ function createFakeDock() {
   const groupActivePanels = new Map<string, FakePanel | null>()
   const groupPositions = new Map<string, { referenceGroup: string; direction: string }>()
   const removeListeners: Array<(panel: FakePanel) => void> = []
+  // Drop-veto probes: the store subscribes veto handlers in registerApi; tests
+  // fire synthetic events through dock.emitWillShowOverlay / emitWillDrop.
+  interface FakeDropEvent {
+    position: string
+    group: FakeGroup
+    getData: () => { panelId?: string | null } | undefined
+    preventDefault: ReturnType<typeof vi.fn>
+  }
+  const willShowOverlayListeners: Array<(event: FakeDropEvent) => void> = []
+  const willDropListeners: Array<(event: FakeDropEvent) => void> = []
+  const collectDropListener = <T>(bucket: T[]) => (listener: T) => {
+    bucket.push(listener)
+    return {
+      dispose: () => {
+        const idx = bucket.indexOf(listener)
+        if (idx >= 0) bucket.splice(idx, 1)
+      },
+    }
+  }
   // Mirror dockview v7's real onDidActivePanelChange payload: `{ panel, origin }`.
   // The old fake used `{ activePanel }` (the v6 shape); that masked the v6→v7
   // rename bug because the store read the same wrong field the fake emitted.
@@ -301,12 +361,30 @@ function createFakeDock() {
     const group: FakeGroup = {
       id,
       element: groupElement,
+      model: { header: { hidden: false } },
       api: {
         getHeaderPosition: () => 'top' as const,
         setHeaderPosition: vi.fn(),
         setActivePanel: (panel: FakePanel) => setActivePanel(panel),
         setActive: () => setActivePanel(group.activePanel),
         setSize: vi.fn(),
+        // A 'center' group move merges every panel into the target as tabs and
+        // dissolves the emptied source — the semantics the mobile breakpoint
+        // watcher relies on to collapse a multi-group desktop arrangement.
+        moveTo: (options: { group?: FakeGroup, position?: 'top' | 'bottom' | 'left' | 'right' | 'center' }) => {
+          const target = options.group ?? primaryGroup
+          for (const panel of panels.filter(p => p.group === group)) {
+            panel.group = target
+            groupActivePanels.set(target.id, panel)
+          }
+          if (group !== primaryGroup && group.panels.length === 0) {
+            const groupIndex = groups.indexOf(group)
+            if (groupIndex >= 0) groups.splice(groupIndex, 1)
+            groupActivePanels.delete(group.id)
+            groupPositions.delete(group.id)
+          }
+          emitLayoutChange()
+        },
       },
       get panels() {
         return panels.filter(panel => panel.group === group)
@@ -334,8 +412,8 @@ function createFakeDock() {
     onDidRemovePanel: removeDisposable,
     onDidAddPanel: noopDisposable,
     onDidMovePanel: noopDisposable,
-    onWillShowOverlay: noopDisposable,
-    onWillDrop: noopDisposable,
+    onWillShowOverlay: collectDropListener(willShowOverlayListeners),
+    onWillDrop: collectDropListener(willDropListeners),
     onWillDragPanel: noopDisposable,
     onWillDragGroup: noopDisposable,
     getGroup(id: string) {
@@ -407,6 +485,7 @@ function createFakeDock() {
             const targetGroup = options.position === 'center'
               ? options.group ?? sourceGroup
               : createGroup()
+            if (!targetGroup) return
             if (options.position && options.position !== 'center' && options.group) {
               groupPositions.set(targetGroup.id, {
                 referenceGroup: options.group.id,
@@ -448,6 +527,12 @@ function createFakeDock() {
     },
     allowClose(id: string) {
       closeVetoPanelIds.delete(id)
+    },
+    emitWillShowOverlay(event: FakeDropEvent) {
+      willShowOverlayListeners.forEach(listener => listener(event))
+    },
+    emitWillDrop(event: FakeDropEvent) {
+      willDropListeners.forEach(listener => listener(event))
     },
     activePanelListenerCount() {
       return activePanelListeners.length
@@ -1216,6 +1301,43 @@ describe('workspace layout store', () => {
     await nextTick()
 
     expect(dock.getPanel(chatPanel.id)?.title).toBe('Fetched subagent task')
+  })
+
+  it('opens the first subagent session in a right split and later ones as tabs beside it', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    // Anchor the primary region with the conversation tab.
+    store.openSessionChat({ sessionId: 'parent-1', title: 'Parent' })
+    const parentPanel = dock.panels.find(panel => panel.component === 'chat')!
+    const primaryGroupId = parentPanel.group.id
+
+    store.openSubagentSession({ sessionId: 'subagent-1', title: 'agent-a' })
+    const first = dock.panels.find(panel => panel.params.sessionId === 'subagent-1')!
+    expect(first.group.id).not.toBe(primaryGroupId)
+
+    store.openSubagentSession({ sessionId: 'subagent-2', title: 'agent-b' })
+    const second = dock.panels.find(panel => panel.params.sessionId === 'subagent-2')!
+    // The region already exists: the second subagent joins it as a tab
+    // instead of expanding again.
+    expect(second.group.id).toBe(first.group.id)
+    expect(dock.groups.filter(group => group.id !== primaryGroupId)).toHaveLength(1)
+  })
+
+  it('focuses an already-open subagent tab instead of opening a duplicate', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 'parent-1', title: 'Parent' })
+    store.openSubagentSession({ sessionId: 'subagent-1', title: 'agent-a' })
+    const panelCount = dock.panels.length
+
+    store.openSubagentSession({ sessionId: 'subagent-1', title: 'agent-a' })
+
+    expect(dock.panels.length).toBe(panelCount)
+    expect(dock.activePanel?.params.sessionId).toBe('subagent-1')
   })
 
   it('does not reconcile remembered hidden subagent chat tabs as deleted', async () => {
@@ -2033,5 +2155,227 @@ describe('workspace layout store', () => {
     useWorkspaceTabsStore()
     expect(localStorage.getItem('workspace-tabs')).toBeNull()
     expect(localStorage.getItem('workspace-panes')).toBeNull()
+  })
+
+  // The mobile single-stack constraint (useIsMobile): below 768px the dock is
+  // one group with a hidden tab strip, splits are vetoed or degraded to tabs,
+  // and the persisted desktop layout is neither restored nor overwritten.
+  // mobileBreakpoint simulates the media query; reset between tests so a
+  // mobile state can never leak into the desktop suite.
+  describe('mobile single-stack constraint', () => {
+    afterEach(() => {
+      mobileBreakpoint.reset()
+    })
+
+    it('ignores the persisted desktop layout and cold-starts a single hidden-header group', async () => {
+      mobileBreakpoint.setMobile(true)
+      const storedLayout = persistedLayoutWithPanel(
+        'file:1',
+        'file',
+        { filePath: '/data/a.ts' },
+        'a.ts',
+      )
+      const storedJson = JSON.stringify({ 'bot-1': { layout: storedLayout, ephemeralIds: [] } })
+      localStorage.setItem('workspace-layout', storedJson)
+
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+
+      // The desktop tree is NOT deserialized: no file panel, one group, and
+      // the draft fallback owns the stack.
+      expect(dock.getPanel('file:1')).toBeUndefined()
+      expect(dock.groups).toHaveLength(1)
+      expect(dock.panels).toHaveLength(1)
+      expect(dock.panels[0]!.component).toBe('chat')
+      expect(dock.groups[0]!.model.header.hidden).toBe(true)
+      // The stored LAYOUT tree is untouched: mobile never restores it and
+      // never serializes over it. Per-bot counters living in the same record
+      // (chatCounter for the draft spawn) may still tick — they number new
+      // panels, they are not the desktop arrangement.
+      const written = JSON.parse(localStorage.getItem('workspace-layout')!)
+      expect(written['bot-1'].layout).toEqual(storedLayout)
+    })
+
+    it('keeps programmatic opens inside the single group instead of splitting', async () => {
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+
+      store.openTerminal()
+      expect(dock.getPanel('terminal:1')).toBeTruthy()
+      expect(dock.groups).toHaveLength(1)
+
+      store.openFile('/data/notes/todo.md')
+      store.splitGroup('group-1', 'right')
+      expect(dock.getPanel('file:/data/notes/todo.md~2')).toBeTruthy()
+      expect(dock.groups).toHaveLength(1)
+      expect(dock.groups[0]!.panels.map(panel => panel.id).sort()).toEqual([
+        'file:/data/notes/todo.md',
+        'file:/data/notes/todo.md~2',
+        'terminal:1',
+        ...dock.panels.filter(panel => panel.component === 'chat').map(panel => panel.id),
+      ].sort())
+    })
+
+    it('merges groups and hides the tab strip on entry, restores the strip on exit', async () => {
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      store.openFile('/data/notes/todo.md')
+      store.splitGroup('group-1', 'right')
+      expect(dock.groups).toHaveLength(2)
+
+      mobileBreakpoint.setMobile(true)
+      await nextTick()
+      expect(dock.groups).toHaveLength(1)
+      expect(dock.groups[0]!.model.header.hidden).toBe(true)
+
+      mobileBreakpoint.setMobile(false)
+      await nextTick()
+      expect(dock.groups[0]!.model.header.hidden).toBe(false)
+    })
+
+    it('vetoes drop overlays and drops that would split off a new group', () => {
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+
+      const overlay = {
+        position: 'right',
+        group: dock.groups[0]!,
+        getData: () => undefined,
+        preventDefault: vi.fn(),
+      }
+      dock.emitWillShowOverlay(overlay)
+      expect(overlay.preventDefault).toHaveBeenCalled()
+
+      const drop = {
+        position: 'below',
+        group: dock.groups[0]!,
+        getData: () => undefined,
+        preventDefault: vi.fn(),
+      }
+      dock.emitWillDrop(drop)
+      expect(drop.preventDefault).toHaveBeenCalled()
+
+      // A center drop merges as a tab — the only arrangement mobile allows.
+      const center = {
+        position: 'center',
+        group: dock.groups[0]!,
+        getData: () => undefined,
+        preventDefault: vi.fn(),
+      }
+      dock.emitWillShowOverlay(center)
+      expect(center.preventDefault).not.toHaveBeenCalled()
+    })
+
+    it('never serializes the mobile stack over the desktop layout snapshot', async () => {
+      mobileBreakpoint.setMobile(true)
+      const storedLayout = persistedLayoutWithPanel(
+        'chat:bot-1:7',
+        'chat',
+        { sessionId: null, explicitSelection: true },
+        'Old Session',
+      )
+      const storedJson = JSON.stringify({ 'bot-1': { layout: storedLayout, ephemeralIds: [] } })
+      localStorage.setItem('workspace-layout', storedJson)
+
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+      store.openTerminal()
+      await nextTick()
+
+      // The mobile stack (draft chat + terminal) must NOT be serialized over
+      // the desktop snapshot: the layout tree round-trips untouched. The
+      // terminalCounter bump sharing the record is expected — it numbers the
+      // new panel, it does not reshape the desktop arrangement.
+      const written = JSON.parse(localStorage.getItem('workspace-layout')!)
+      expect(written['bot-1'].layout).toEqual(storedLayout)
+    })
+
+    it('keeps the desktop snapshot sealed after leaving mobile until the next desktop restore', async () => {
+      const storedLayout = persistedLayoutWithPanel(
+        'chat:bot-1:7',
+        'chat',
+        { sessionId: null, explicitSelection: true },
+        'Old Session',
+      )
+      localStorage.setItem('workspace-layout', JSON.stringify({
+        'bot-1': { layout: storedLayout, ephemeralIds: [] },
+      }))
+
+      // Start on DESKTOP so the snapshot is deserialized with persistence
+      // live; the restore round-trips it back into storage. That
+      // round-tripped form (not the seed above) is the baseline — the exit
+      // path must leave exactly it untouched.
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+      const desktopPersistedLayout = JSON.parse(localStorage.getItem('workspace-layout')!)['bot-1'].layout
+
+      // Enter mobile and open a terminal: the stack diverges from the
+      // snapshot (persist blocked by isMobile).
+      mobileBreakpoint.setMobile(true)
+      await nextTick()
+      store.openTerminal()
+      await nextTick()
+
+      // Exit mobile: only the tab strip comes back — the dock is STILL the
+      // merged stack, so the isMobile guard no longer covers it. Any layout
+      // change in this window (here a file open; in the wild a tab
+      // activation or an async panel title) must not serialize the merged
+      // stack over the desktop snapshot.
+      mobileBreakpoint.setMobile(false)
+      await nextTick()
+      store.openFile('/data/notes/todo.md')
+      await flushDraftChatFallback()
+
+      const written = JSON.parse(localStorage.getItem('workspace-layout')!)
+      expect(written['bot-1'].layout).toEqual(desktopPersistedLayout)
+    })
+
+    it('focuses the existing terminal instead of stacking unreachable new ones', async () => {
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+
+      store.openTerminal()
+      store.openTerminal()
+      store.openTerminal()
+
+      // The mobile shell has no tab strip to enumerate open panels and ←
+      // only re-activates chat, so every "New Terminal" after the first must
+      // focus the existing one — a second terminal would stay alive but
+      // unreachable and unclosable, leaking its shell.
+      expect(dock.panels.filter(panel => panel.id.startsWith('terminal:'))).toHaveLength(1)
+      expect(dock.activePanel?.id).toBe('terminal:1')
+    })
+
+    it('focuses the existing browser instead of stacking unreachable new ones', async () => {
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+
+      store.openBrowser()
+      store.activateChatPanel()
+      store.openBrowser()
+      store.activateChatPanel()
+      store.openBrowser()
+
+      expect(dock.panels.filter(panel => panel.id.startsWith('browser:'))).toHaveLength(1)
+      expect(dock.activePanel?.id).toBe('browser:1')
+    })
   })
 })

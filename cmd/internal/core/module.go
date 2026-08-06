@@ -26,6 +26,7 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/userruntime"
 	videopkg "github.com/memohai/memoh/internal/video"
+	"github.com/memohai/memoh/internal/workdir"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
@@ -70,12 +71,14 @@ func ServerModule() fx.Option {
 			providePGVectorStore,
 			provideUserRuntimeStore,
 			provideBotRemoteRuntimeBindingStore,
+			provideBotWorkdirStore,
 			provideUserRuntimeHub,
 			userruntime.NewService,
 			workspace.NewRemoteWorkspaceService,
 			provideUserRuntimePipe,
 			provideWikiStore,
 			provideWorkspaceManager,
+			workdir.NewService,
 			provideBridgeProvider,
 			providePluginBridgeProvider,
 			provideMemoryLLM,

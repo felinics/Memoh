@@ -85,6 +85,7 @@ type UIUserInput struct {
 	ShortID     int                    `json:"short_id,omitempty"`
 	Status      string                 `json:"status"`
 	Questions   []userinput.UIQuestion `json:"questions,omitempty"`
+	Answers     []userinput.UIAnswer   `json:"answers,omitempty"`
 	CanRespond  bool                   `json:"can_respond,omitempty"`
 } // @name conversation.UIUserInput
 

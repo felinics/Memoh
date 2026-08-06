@@ -6,6 +6,29 @@ import (
 	"time"
 )
 
+const (
+	AgentStepInterruptedMetadataKey     = "agent_step_interrupted"
+	AgentStepInterruptedReasoningPrefix = "[Previous assistant response was interrupted during reasoning. Continue from this checkpoint:]\n"
+)
+
+// LatestInterruptedCheckpoint returns the last assistant entry only when it is
+// an interrupted checkpoint. Earlier checkpoints are ordinary history.
+func LatestInterruptedCheckpoint(n int, classify func(int) (assistant, interrupted bool)) int {
+	if n <= 0 || classify == nil {
+		return -1
+	}
+	for i := n - 1; i >= 0; i-- {
+		assistant, interrupted := classify(i)
+		if assistant {
+			if interrupted {
+				return i
+			}
+			return -1
+		}
+	}
+	return -1
+}
+
 // MessageAsset carries media asset metadata attached to a message.
 // ContentHash is the content-addressed identifier for the media file.
 type MessageAsset struct {
@@ -144,10 +167,13 @@ type AtomicRoundPersister interface {
 	PersistRound(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions) ([]Message, bool, error)
 }
 
-// AgentStep is one complete native-agent step persisted atomically.
+// AgentStep is one native-agent step persisted atomically. Interrupted marks a
+// text/reasoning snapshot of a step the model never finished, which takes a
+// different writability predicate than a complete step.
 type AgentStep struct {
-	RunID    string
-	Messages []PersistInput
+	RunID       string
+	Messages    []PersistInput
+	Interrupted bool
 }
 
 type AgentStepPersister interface {

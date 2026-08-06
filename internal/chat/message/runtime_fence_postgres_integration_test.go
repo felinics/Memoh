@@ -179,7 +179,8 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	}
 }
 
-func TestPostgresAgentStepCommitStopsAfterAbort(t *testing.T) {
+// Named for the ^TestPostgresRuntimeFence filter the durable-fencing CI job runs.
+func TestPostgresRuntimeFenceAgentStepCompleteAndInterruptedWrites(t *testing.T) {
 	ctx := context.Background()
 	pool := openRuntimeFencePostgresPool(t, ctx)
 	botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
@@ -205,16 +206,52 @@ func TestPostgresAgentStepCommitStopsAfterAbort(t *testing.T) {
 	if err != nil || len(persisted) != 2 {
 		t.Fatalf("first step commit = (%d, %v), want (2, nil)", len(persisted), err)
 	}
+	// Cancellation without recorded abort intent — an idle timeout, a channel
+	// /stop that only cancels locally, a client that disconnected — must still
+	// checkpoint. Requiring intent would limit the feature to the Web stop
+	// button, which is the one path that records it.
+	step.Interrupted = true
+	step.Messages = []PersistInput{interruptedCheckpointInput(botID, sessionID, runID, persisted[0].ID, "cut short")}
+	if checkpoint, err := service.PersistAgentStep(owner, step); err != nil || len(checkpoint) != 1 {
+		t.Fatalf("interrupted commit without abort intent = (%d, %v), want (1, nil)", len(checkpoint), err)
+	}
 	pgRunID, _ := dbpkg.ParseUUID(runID.String())
 	if _, err := queries.RequestSessionRunAbort(ctx, pgRunID); err != nil {
 		t.Fatalf("request abort: %v", err)
 	}
+	step.Interrupted = false
 	step.Messages = []PersistInput{{
 		BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), Role: "assistant",
 		Content: []byte(`{"role":"assistant","content":"too late"}`), TurnRequestMessageID: persisted[0].ID,
 	}}
 	if _, err := service.PersistAgentStep(owner, step); !errors.Is(err, ErrAgentStepNotWritable) {
 		t.Fatalf("post-abort step error = %v, want ErrAgentStepNotWritable", err)
+	}
+	step.Interrupted = true
+	step.Messages = []PersistInput{interruptedCheckpointInput(botID, sessionID, runID, persisted[0].ID, "stopped")}
+	if interrupted, err := service.PersistAgentStep(owner, step); err != nil || len(interrupted) != 1 {
+		t.Fatalf("interrupted step commit = (%d, %v), want (1, nil)", len(interrupted), err)
+	}
+	history, err := service.ListBySession(ctx, sessionID.String())
+	if err != nil || len(history) != 4 || history[0].Role != "user" ||
+		history[2].Metadata[AgentStepInterruptedMetadataKey] != true ||
+		history[3].Metadata[AgentStepInterruptedMetadataKey] != true {
+		t.Fatalf("history after interrupt = %#v, %v", history, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE session_runs SET state = 'aborted' WHERE run_id = $1", runID); err != nil {
+		t.Fatalf("finalize aborted run: %v", err)
+	}
+	if _, err := service.PersistAgentStep(owner, step); !errors.Is(err, ErrAgentStepNotWritable) {
+		t.Fatalf("post-finalize interrupted step error = %v, want ErrAgentStepNotWritable", err)
+	}
+}
+
+func interruptedCheckpointInput(botID, sessionID pgtype.UUID, runID uuid.UUID, requestMessageID, text string) PersistInput {
+	return PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), Role: "assistant",
+		Content:              []byte(`{"role":"assistant","content":"` + text + `"}`),
+		TurnRequestMessageID: requestMessageID,
+		Metadata:             map[string]any{AgentStepInterruptedMetadataKey: true},
 	}
 }
 

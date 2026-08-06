@@ -50,6 +50,23 @@ func newFakeScriptPool(t *testing.T) *SessionPool {
 	return pool
 }
 
+// Built-in profiles deliberately use the adapter binaries pinned in the
+// workspace image. These tests exercise the optional dynamic-launch extension
+// itself, so they temporarily opt the Codex profile into that mechanism.
+func enableDynamicCodexProfileForTest(t *testing.T) {
+	t.Helper()
+	original, ok := acpprofile.Lookup(acpprofile.AgentCodexID)
+	if !ok {
+		t.Fatal("Codex profile is not registered")
+	}
+	dynamic := original
+	dynamic.DynamicCommand = "npx"
+	dynamic.DynamicArgs = []string{"-y"}
+	dynamic.DynamicPackage = "@agentclientprotocol/codex-acp"
+	acpprofile.Register(dynamic)
+	t.Cleanup(func() { acpprofile.Register(original) })
+}
+
 func newFakeScriptPoolForBot(t *testing.T, bot bots.Bot) (*SessionPool, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -61,8 +78,8 @@ func newFakeScriptPoolForBot(t *testing.T, bot bots.Bot) (*SessionPool, string) 
 	if err := os.MkdirAll(binDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	writeSessionPoolFakeAgentScript(t, binDir, "npx")
-	writeSessionPoolFakeNPMScript(t, binDir)
+	writeSessionPoolFakeAgentScript(t, binDir, "codex-acp")
+	writeSessionPoolFakeAgentScript(t, binDir, "hermes-acp")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	runner := client.NewRunner(nil, sessionPoolWorkspace{
 		client: newSessionPoolBridgeClient(t, root),
@@ -1106,6 +1123,7 @@ func TestSessionPoolRuntimeStatusReportsActiveDuringColdStart(t *testing.T) {
 }
 
 func TestSessionPoolPinsExactAdapterVersionForProcess(t *testing.T) {
+	enableDynamicCodexProfileForTest(t)
 	runner := &dynamicRecordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
 		versions: []string{"1.2.0"},
@@ -1194,6 +1212,7 @@ func TestSessionPoolPinsAdapterVersionsPerBot(t *testing.T) {
 }
 
 func TestSessionPoolSharesAdapterLookupAcrossConcurrentColdStarts(t *testing.T) {
+	enableDynamicCodexProfileForTest(t)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	runner := &dynamicRecordingRunner{
@@ -1251,6 +1270,7 @@ func TestSessionPoolSharesAdapterLookupAcrossConcurrentColdStarts(t *testing.T) 
 }
 
 func TestSessionPoolCanceledAdapterLookupCanRetry(t *testing.T) {
+	enableDynamicCodexProfileForTest(t)
 	started := make(chan struct{})
 	runner := &dynamicRecordingRunner{
 		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
@@ -1381,6 +1401,7 @@ func TestSessionPoolAdapterLookupWaiterCanCancel(t *testing.T) {
 }
 
 func TestSessionPoolAdapterLookupTimeoutFallsBackAndDisables(t *testing.T) {
+	enableDynamicCodexProfileForTest(t)
 	started := make(chan struct{})
 	runner := &dynamicRecordingRunner{
 		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
@@ -1439,6 +1460,7 @@ func TestSessionPoolAdapterLookupTimeoutFallsBackAndDisables(t *testing.T) {
 }
 
 func TestSessionPoolDynamicAdapterFailureFallsBackAndBinds(t *testing.T) {
+	enableDynamicCodexProfileForTest(t)
 	fallbackSession := &client.Session{}
 	runner := &dynamicRecordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
@@ -1506,6 +1528,7 @@ func TestSessionPoolDynamicAdapterFailureFallsBackAndBinds(t *testing.T) {
 }
 
 func TestSessionPoolDynamicAdapterCancellationDoesNotFallback(t *testing.T) {
+	enableDynamicCodexProfileForTest(t)
 	started := make(chan struct{})
 	runner := &dynamicRecordingRunner{
 		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
@@ -1567,6 +1590,7 @@ func TestSessionPoolDynamicAdapterCancellationDoesNotFallback(t *testing.T) {
 }
 
 func TestSessionPoolDynamicAdapterTimeoutFallsBack(t *testing.T) {
+	enableDynamicCodexProfileForTest(t)
 	started := make(chan struct{})
 	runner := &dynamicRecordingRunner{
 		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
@@ -1613,6 +1637,7 @@ func TestSessionPoolDynamicAdapterTimeoutFallsBack(t *testing.T) {
 }
 
 func TestSessionPoolAdapterLookupFailureDisablesDynamicLaunchForProcess(t *testing.T) {
+	enableDynamicCodexProfileForTest(t)
 	runner := &dynamicRecordingRunner{
 		info:        bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
 		resolveErrs: []error{errors.New("registry unavailable")},
@@ -1908,8 +1933,7 @@ func TestSessionPoolCloseSessionCancelsActivePrompt(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	writeSessionPoolFakeAgentScript(t, binDir, "npx")
-	writeSessionPoolFakeNPMScript(t, binDir)
+	writeSessionPoolFakeAgentScript(t, binDir, "codex-acp")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	runner := client.NewRunner(nil, sessionPoolWorkspace{
@@ -1975,8 +1999,7 @@ func TestSessionPoolSerializesColdStartForSameSession(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	writeSessionPoolFakeAgentScript(t, binDir, "npx")
-	writeSessionPoolFakeNPMScript(t, binDir)
+	writeSessionPoolFakeAgentScript(t, binDir, "codex-acp")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	startLog := filepath.Join(root, "starts.log")
 	t.Setenv("MEMOH_ACP_START_LOG", startLog)
@@ -2065,8 +2088,10 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		t.Fatalf("api_key mode must use Codex files, not credential env: %v", apiKeyRunner.req.Env)
 	}
 
-	oauthRunner := &recordingRunner{
+	oauthRoot := t.TempDir()
+	oauthRunner := &hermesRecordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+		client:   newSessionPoolBridgeClient(t, oauthRoot),
 		startErr: errors.New("started"),
 	}
 	oauthPool := newSessionPool(nil, oauthRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "oauth", map[string]any{"provider_id": "provider-1"})})
@@ -3325,14 +3350,6 @@ func writeSessionPoolFakeAgentScript(t *testing.T, dir, name string) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func writeSessionPoolFakeNPMScript(t *testing.T, dir string) {
-	t.Helper()
-	path := filepath.Join(dir, "npm")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '\"1.1.4\"\\n'\n"), 0o700); err != nil { //nolint:gosec // test helper must be executable.
-		t.Fatal(err)
-	}
 }
 
 func TestSessionPoolFakeAgentHelper(_ *testing.T) {

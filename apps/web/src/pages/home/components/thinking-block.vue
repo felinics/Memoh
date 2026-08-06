@@ -37,7 +37,7 @@ import { useI18n } from 'vue-i18n'
 import type { ThinkingBlock } from '@/store/chat-list'
 import CollapseSection from './collapse-section.vue'
 import { getReasoningDuration } from './reasoning-timing'
-import { getCollapseOpen, reasoningCollapseKey, setCollapseOpen } from './process-collapse'
+import { getCollapseOpen, migrateCollapseOpen, reasoningCollapseKey, setCollapseOpen } from './process-collapse'
 
 const props = defineProps<{
   block: ThinkingBlock
@@ -52,8 +52,8 @@ const { t } = useI18n()
 // Persisted, user-driven toggle (survives the post-turn refetch/remount).
 const collapseKey = computed(() => reasoningCollapseKey(props.block.content ?? ''))
 const open = ref(getCollapseOpen(collapseKey.value))
-watch(collapseKey, (key) => {
-  open.value = getCollapseOpen(key)
+watch(collapseKey, (key, previousKey) => {
+  migrateCollapseOpen(previousKey, key, open.value)
 })
 
 // Trimmed so the expanded body doesn't open with leading blank lines/space.

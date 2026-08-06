@@ -51,6 +51,11 @@ const (
 	CompatToolCall    = "tool-call"
 	CompatImageOutput = "image-output"
 	CompatReasoning   = "reasoning"
+	// CompatFileInput marks models whose provider API accepts documents (PDF)
+	// as native input parts. Distinct from CompatVision: a model can have
+	// vision yet lack a provider-side PDF ingestion pipeline (and vice versa
+	// never occurs), so the two are routed independently.
+	CompatFileInput = "file-input"
 )
 
 const (
@@ -151,6 +156,7 @@ const (
 // validCompatibilities enumerates accepted compatibility tokens.
 var validCompatibilities = map[string]struct{}{
 	CompatVision: {}, CompatToolCall: {}, CompatImageOutput: {}, CompatReasoning: {},
+	CompatFileInput: {},
 }
 
 var validReasoningEfforts = map[string]struct{}{

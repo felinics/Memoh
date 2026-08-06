@@ -48,7 +48,9 @@
           <Monitor class="mr-2 size-3.5" />
           {{ t('chat.tabBarToolkit.openDesktop') }}
         </DropdownMenuItem>
-        <template v-if="canSplit">
+        <!-- Splitting is a desktop-only affordance: the mobile shell is a
+             single stack, so the split items are hidden there. -->
+        <template v-if="canSplit && !isMobile">
           <DropdownMenuSeparator v-if="canWorkspaceExec || canSplitExtras" />
           <DropdownMenuItem @select="store.splitGroup(props.params.group.id, 'right')">
             <Columns2 class="mr-2 size-3.5" />
@@ -92,6 +94,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
+const { isMobile } = storeToRefs(store)
 const chatStore = useChatStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
 
@@ -124,6 +127,6 @@ const canSplit = computed(() => {
 })
 
 const hasAnyAction = computed(() =>
-  canWorkspaceExec.value || canSplitExtras.value || canSplit.value,
+  canWorkspaceExec.value || canSplitExtras.value || (canSplit.value && !isMobile.value),
 )
 </script>

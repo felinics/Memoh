@@ -6,7 +6,7 @@ import (
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 )
 
-func uiUserInputFromPayload(userInputID string, shortID int, status string, payload any, canRespond bool) *UIUserInput {
+func uiUserInputFromPayload(userInputID string, shortID int, status string, payload, answers any, canRespond bool) *UIUserInput {
 	userInputID = strings.TrimSpace(userInputID)
 	if userInputID == "" {
 		return nil
@@ -19,6 +19,7 @@ func uiUserInputFromPayload(userInputID string, shortID int, status string, payl
 		ShortID:     shortID,
 		Status:      status,
 		Questions:   userinput.PayloadFromStored(payload).Questions,
+		Answers:     userinput.AnswersFromStored(answers),
 		CanRespond:  canRespond,
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -126,6 +127,7 @@ func (s *Service) prepareGatewayAttachments(ctx context.Context, req ChatRequest
 		}
 		item = normalizeGatewayAttachmentPayload(item)
 		item = s.inlineImageAttachmentAssetIfNeeded(ctx, strings.TrimSpace(req.BotID), item)
+		item = s.inlineFileAttachmentAssetIfNeeded(ctx, strings.TrimSpace(req.BotID), item)
 		prepared = append(prepared, item)
 	}
 	return prepared
@@ -187,6 +189,78 @@ func isLikelyPublicURL(raw string) bool {
 	return strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://")
 }
 
+// extractNativeAttachmentParts returns non-image native parts for attachments
+// routed to inline multimodal input: sdk.FilePart for provider-native
+// documents (PDF), wrapped sdk.TextPart for the small plain-text channel.
+// Images are handled by extractNativeImageParts.
+func extractNativeAttachmentParts(attachments []any) []sdk.MessagePart {
+	var parts []sdk.MessagePart
+	for _, att := range attachments {
+		ga, ok := att.(gatewayAttachment)
+		if !ok || ga.Type != "file" {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(ga.Transport)) != gatewayTransportInlineDataURL {
+			continue
+		}
+		if strings.TrimSpace(ga.Payload) == "" {
+			continue
+		}
+		switch {
+		case isNativeDocumentMime(ga.Mime):
+			data, mime := splitInlineDataURL(ga.Payload)
+			if strings.TrimSpace(ga.Mime) != "" {
+				mime = strings.TrimSpace(ga.Mime)
+			}
+			parts = append(parts, sdk.FilePart{
+				Data:      data,
+				MediaType: mime,
+				Filename:  strings.TrimSpace(ga.Name),
+			})
+		case isInlineTextMime(ga.Mime):
+			if part, ok := inlineTextAttachmentPart(ga); ok {
+				parts = append(parts, part)
+			}
+		}
+	}
+	return parts
+}
+
+// splitInlineDataURL strips a data URL down to bare base64 plus the header
+// mime. FilePart.Data carries bare base64 by convention; provider framing is
+// the adapters' job.
+func splitInlineDataURL(payload string) (string, string) {
+	payload = strings.TrimSpace(payload)
+	if !strings.HasPrefix(strings.ToLower(payload), "data:") {
+		return payload, ""
+	}
+	idx := strings.Index(payload, ",")
+	if idx < 0 {
+		return payload, ""
+	}
+	header := payload[len("data:"):idx]
+	if semi := strings.Index(header, ";"); semi >= 0 {
+		header = header[:semi]
+	}
+	return payload[idx+1:], strings.TrimSpace(header)
+}
+
+func inlineTextAttachmentPart(ga gatewayAttachment) (sdk.TextPart, bool) {
+	data, _ := splitInlineDataURL(ga.Payload)
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || !utf8.Valid(decoded) {
+		return sdk.TextPart{}, false
+	}
+	name := strings.TrimSpace(ga.Name)
+	if name == "" {
+		name = "attachment.txt"
+	}
+	// The wrapper delimits untrusted user content; escape a would-be closing
+	// tag so the content cannot break out of the attachment envelope.
+	content := strings.ReplaceAll(string(decoded), "</attachment", "<\\/attachment")
+	return sdk.TextPart{Text: fmt.Sprintf("<attachment filename=%q>\n%s\n</attachment>", name, content)}, true
+}
+
 // inlineInjectAttachments converts image attachments from an injected message
 // into sdk.ImagePart values for direct vision input. Non-image attachments and
 // images that cannot be inlined are silently skipped.
@@ -237,6 +311,46 @@ func (s *Service) inlineImageAttachmentAssetIfNeeded(ctx context.Context, botID 
 		if s != nil && s.logger != nil {
 			s.logger.Warn(
 				"inline gateway image attachment failed",
+				slog.Any("error", err),
+				slog.String("bot_id", botID),
+				slog.String("content_hash", contentHash),
+			)
+		}
+		return item
+	}
+	item.Transport = gatewayTransportInlineDataURL
+	item.Payload = dataURL
+	if strings.TrimSpace(item.Mime) == "" {
+		item.Mime = mime
+	}
+	return item
+}
+
+// inlineFileAttachmentAssetIfNeeded mirrors inlineImageAttachmentAssetIfNeeded
+// for the file lane: native-document (PDF) and inline-text candidates get
+// their payload materialized from the media store so the capability router can
+// route them natively. Other file types are left to the workspace fallback.
+func (s *Service) inlineFileAttachmentAssetIfNeeded(ctx context.Context, botID string, item gatewayAttachment) gatewayAttachment {
+	if item.Type != "file" {
+		return item
+	}
+	nativeDoc := isNativeDocumentMime(item.Mime)
+	smallText := isInlineTextMime(item.Mime) && attachmentBinarySize(item) <= inlineTextAttachmentMaxBytes
+	if !nativeDoc && !smallText {
+		return item
+	}
+	if strings.TrimSpace(item.Payload) != "" && item.Transport == gatewayTransportInlineDataURL {
+		return item
+	}
+	contentHash := strings.TrimSpace(item.ContentHash)
+	if contentHash == "" {
+		return item
+	}
+	dataURL, mime, err := s.inlineAssetAsDataURL(ctx, botID, contentHash, item.Type, item.Mime)
+	if err != nil {
+		if s != nil && s.logger != nil {
+			s.logger.Warn(
+				"inline gateway file attachment failed",
 				slog.Any("error", err),
 				slog.String("bot_id", botID),
 				slog.String("content_hash", contentHash),

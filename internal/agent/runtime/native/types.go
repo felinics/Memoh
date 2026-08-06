@@ -30,7 +30,10 @@ type SessionContext struct {
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string
-	IsSubagent          bool
+	// WorkdirPath is the session's immutable working directory, resolved
+	// once per run from the session's workdir binding.
+	WorkdirPath string
+	IsSubagent  bool
 }
 
 // BotInfo is service-owned bot metadata injected into the system prompt.
@@ -102,13 +105,20 @@ type RunConfig struct {
 	LiveToolStream              bool
 	CanRequestUserInput         bool
 	SupportsImageInput          bool
+	SupportsFileInput           bool
 	SupportsToolCall            bool
 	InlineImages                []sdk.ImagePart
-	Identity                    SessionContext
-	Bot                         BotInfo
-	Skills                      []SkillEntry
-	LoopDetection               LoopDetectionConfig
-	Retry                       RetryConfig
+	// InlineAttachments carries non-image native attachment parts (documents
+	// as sdk.FilePart, small text files as wrapped sdk.TextPart) appended to
+	// the current user message. Images stay in InlineImages, which also feeds
+	// the context-frag view; these parts are materialized by prepareRunConfig
+	// only.
+	InlineAttachments []sdk.MessagePart
+	Identity          SessionContext
+	Bot               BotInfo
+	Skills            []SkillEntry
+	LoopDetection     LoopDetectionConfig
+	Retry             RetryConfig
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier
@@ -132,6 +142,11 @@ type RunConfig struct {
 	// the complete step plus any user/read-media messages prepared immediately
 	// before it, with persistence-only tool metadata already attached.
 	OnStepCommitted func(ctx context.Context, stepIndex int, step *sdk.StepResult) error
+
+	// OnStepInterrupted persists text/reasoning emitted by the current model
+	// call when cancellation arrives before finish-step. Tool-call steps never
+	// use this path.
+	OnStepInterrupted func(ctx context.Context, stepIndex int, step *sdk.StepResult) error
 
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step
