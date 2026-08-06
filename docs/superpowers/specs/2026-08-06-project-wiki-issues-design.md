@@ -57,7 +57,7 @@ Project
 
 ## 3. 数据模型
 
-七张新表，迁移编号从 `0130` 起。全部按 `0129_bot_workdirs.up.sql` 的模板：`team_id` 默认取 `public.memoh_current_team_id()`、`UNIQUE (team_id, id)`、复合外键、`ENABLE` 与 `FORCE ROW LEVEL SECURITY` 加四条 team 策略。
+九张新表（projects、project_nodes、project_node_versions、project_issue_details、project_issue_activity、project_comments、project_node_links、project_labels、project_node_labels），迁移编号从 `0130` 起。全部按 `0129_bot_workdirs.up.sql` 的模板：`team_id` 默认取 `public.memoh_current_team_id()`、`UNIQUE (team_id, id)`、复合外键、`ENABLE` 与 `FORCE ROW LEVEL SECURITY` 加四条 team 策略。
 
 ### 3.1 核心结构选择：窄节点表 + Issue 扩展表
 
@@ -164,7 +164,9 @@ id, team_id, node_id, actor_user_id / actor_bot_id, field, old_value, new_value,
 
 ### 3.6 现在就为 Agent 预留 `_bot_id` 空列
 
-所有「user 或 bot」字段都建成两列 + `CHECK (num_nonnulls(user_col, bot_col) = 1)`，首版 `_bot_id` 恒为 NULL：
+所有「user 或 bot」字段都建成两列 + `CHECK (num_nonnulls(user_col, bot_col) <= 1)`，首版 `_bot_id` 恒为 NULL。
+
+> 实现修订：原设计写的是 exactly-one（`= 1`），实现时改为 `<= 1`。原因：平台约定用户引用使用 `ON DELETE SET NULL`，成员被移出团队时 SET NULL 会违反 exactly-one 导致无法移除成员。双 NULL 语义为「作者已不在团队」，与 `bot_workdirs.created_by_user_id` 可空的先例一致。
 
 - `project_nodes.created_by_* / updated_by_*`
 - `project_node_versions.editor_*`
@@ -319,7 +321,7 @@ apps/web/src/
 
 前端也要禁用非法落点，但**服务端是权威**：
 
-1. **环检测** —— 把节点移到自己的子孙底下必须返回 400。少了这条，一次误操作就能把整棵子树从树上摘掉。
+1. **环检测** —— 把节点移到自己的子孙底下必须返回 400。少了这条，一次误操作就能把整棵子树从树上摘掉。实现细节：sqlc 的分析器不支持在 SELECT 中引用递归 CTE，环检测改为服务层从候选父节点向根上溯（`GetProjectNodeParent` 逐级查询）；move 与 delete 事务内先取 `pg_advisory_xact_lock`（per-project），否则两个并发 move 可以各自通过环检测后共同提交出一个环。
 2. `type='issue'` 的节点不接受 `parent_id`，恒扁平。
 3. **跨 Project 移动子树首版禁止**（400）。递归改写整棵子树的 `project_id` 是事务内的批量更新，且跨 project 后「issue 关联文档」的语义会变模糊，而首版没有真实需求。将来支持时它是一个独立、可单独测试的改动。
 

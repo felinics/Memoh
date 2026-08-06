@@ -438,5 +438,55 @@ type Queries interface {
 	UpsertSnapshot(ctx context.Context, arg dbsqlc.UpsertSnapshotParams) (dbsqlc.Snapshot, error)
 	UpsertUserChannelBinding(ctx context.Context, arg dbsqlc.UpsertUserChannelBindingParams) (dbsqlc.UserChannelBinding, error)
 	UpsertUserProviderOAuthToken(ctx context.Context, arg dbsqlc.UpsertUserProviderOAuthTokenParams) (dbsqlc.UserProviderOauthToken, error)
+
+	// Project collaboration spaces (Wiki + Issues).
+	AcquireProjectTreeLock(ctx context.Context, projectID string) error
+	CreateProject(ctx context.Context, arg dbsqlc.CreateProjectParams) (dbsqlc.Project, error)
+	CreateProjectComment(ctx context.Context, arg dbsqlc.CreateProjectCommentParams) (dbsqlc.ProjectComment, error)
+	CreateProjectIssueDetails(ctx context.Context, arg dbsqlc.CreateProjectIssueDetailsParams) (dbsqlc.ProjectIssueDetail, error)
+	CreateProjectLabel(ctx context.Context, arg dbsqlc.CreateProjectLabelParams) (dbsqlc.ProjectLabel, error)
+	CreateProjectNode(ctx context.Context, arg dbsqlc.CreateProjectNodeParams) (dbsqlc.ProjectNode, error)
+	CreateProjectNodeLink(ctx context.Context, arg dbsqlc.CreateProjectNodeLinkParams) error
+	DeleteProjectLabel(ctx context.Context, arg dbsqlc.DeleteProjectLabelParams) (int64, error)
+	DeleteProjectNodeLabels(ctx context.Context, nodeID pgtype.UUID) error
+	DeleteProjectNodeLink(ctx context.Context, arg dbsqlc.DeleteProjectNodeLinkParams) (int64, error)
+	GetLatestProjectNodeVersion(ctx context.Context, nodeID pgtype.UUID) (dbsqlc.ProjectNodeVersion, error)
+	GetProject(ctx context.Context, projectID pgtype.UUID) (dbsqlc.Project, error)
+	GetProjectComment(ctx context.Context, commentID pgtype.UUID) (dbsqlc.ProjectComment, error)
+	GetProjectIssueDetails(ctx context.Context, nodeID pgtype.UUID) (dbsqlc.ProjectIssueDetail, error)
+	GetProjectNode(ctx context.Context, arg dbsqlc.GetProjectNodeParams) (dbsqlc.ProjectNode, error)
+	GetProjectNodeByID(ctx context.Context, nodeID pgtype.UUID) (dbsqlc.ProjectNode, error)
+	GetProjectNodeParent(ctx context.Context, nodeID pgtype.UUID) (dbsqlc.GetProjectNodeParentRow, error)
+	GetProjectNodeVersion(ctx context.Context, arg dbsqlc.GetProjectNodeVersionParams) (dbsqlc.ProjectNodeVersion, error)
+	InsertProjectIssueActivity(ctx context.Context, arg dbsqlc.InsertProjectIssueActivityParams) error
+	InsertProjectNodeLabel(ctx context.Context, arg dbsqlc.InsertProjectNodeLabelParams) error
+	InsertProjectNodeVersion(ctx context.Context, arg dbsqlc.InsertProjectNodeVersionParams) error
+	ListProjectComments(ctx context.Context, nodeID pgtype.UUID) ([]dbsqlc.ProjectComment, error)
+	ListProjectDocNodes(ctx context.Context, projectID pgtype.UUID) ([]dbsqlc.ListProjectDocNodesRow, error)
+	ListProjectDocSiblingRanks(ctx context.Context, arg dbsqlc.ListProjectDocSiblingRanksParams) ([]dbsqlc.ListProjectDocSiblingRanksRow, error)
+	ListProjectIssueActivity(ctx context.Context, nodeID pgtype.UUID) ([]dbsqlc.ProjectIssueActivity, error)
+	ListProjectIssueRanksByStatus(ctx context.Context, arg dbsqlc.ListProjectIssueRanksByStatusParams) ([]dbsqlc.ListProjectIssueRanksByStatusRow, error)
+	ListProjectIssues(ctx context.Context, projectID pgtype.UUID) ([]dbsqlc.ListProjectIssuesRow, error)
+	ListProjectLabels(ctx context.Context, projectID pgtype.UUID) ([]dbsqlc.ProjectLabel, error)
+	ListProjectNodeBacklinks(ctx context.Context, nodeID pgtype.UUID) ([]dbsqlc.ListProjectNodeBacklinksRow, error)
+	ListProjectNodeLabelsByProject(ctx context.Context, projectID pgtype.UUID) ([]dbsqlc.ListProjectNodeLabelsByProjectRow, error)
+	ListProjectNodeLabelsForNode(ctx context.Context, nodeID pgtype.UUID) ([]dbsqlc.ProjectLabel, error)
+	ListProjectNodeLinks(ctx context.Context, nodeID pgtype.UUID) ([]dbsqlc.ListProjectNodeLinksRow, error)
+	ListProjectNodeVersions(ctx context.Context, nodeID pgtype.UUID) ([]dbsqlc.ListProjectNodeVersionsRow, error)
+	ListProjects(ctx context.Context) ([]dbsqlc.Project, error)
+	MaxProjectDocSiblingRank(ctx context.Context, arg dbsqlc.MaxProjectDocSiblingRankParams) (string, error)
+	MaxProjectIssueRank(ctx context.Context, arg dbsqlc.MaxProjectIssueRankParams) (string, error)
+	MoveProjectNode(ctx context.Context, arg dbsqlc.MoveProjectNodeParams) (dbsqlc.ProjectNode, error)
+	RenumberProjectNodeVersion(ctx context.Context, arg dbsqlc.RenumberProjectNodeVersionParams) (int64, error)
+	SearchProjectNodes(ctx context.Context, arg dbsqlc.SearchProjectNodesParams) ([]dbsqlc.SearchProjectNodesRow, error)
+	SoftDeleteProject(ctx context.Context, projectID pgtype.UUID) (int64, error)
+	SoftDeleteProjectComment(ctx context.Context, commentID pgtype.UUID) (int64, error)
+	SoftDeleteProjectNodeSubtree(ctx context.Context, arg dbsqlc.SoftDeleteProjectNodeSubtreeParams) (int64, error)
+	UpdateProject(ctx context.Context, arg dbsqlc.UpdateProjectParams) (dbsqlc.Project, error)
+	UpdateProjectComment(ctx context.Context, arg dbsqlc.UpdateProjectCommentParams) (dbsqlc.ProjectComment, error)
+	UpdateProjectIssueDetails(ctx context.Context, arg dbsqlc.UpdateProjectIssueDetailsParams) (dbsqlc.ProjectIssueDetail, error)
+	UpdateProjectLabel(ctx context.Context, arg dbsqlc.UpdateProjectLabelParams) (dbsqlc.ProjectLabel, error)
+	UpdateProjectNodeContent(ctx context.Context, arg dbsqlc.UpdateProjectNodeContentParams) (dbsqlc.ProjectNode, error)
+	UpdateProjectNodeRank(ctx context.Context, arg dbsqlc.UpdateProjectNodeRankParams) (int64, error)
 	WithTx(tx pgx.Tx) Queries
 }

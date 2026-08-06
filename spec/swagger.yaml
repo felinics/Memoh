@@ -4331,6 +4331,343 @@ definitions:
       path:
         type: string
     type: object
+  project.Activity:
+    properties:
+      actor_bot_id:
+        type: string
+      actor_user_id:
+        type: string
+      created_at:
+        type: string
+      field:
+        type: string
+      id:
+        type: string
+      new_value:
+        type: string
+      node_id:
+        type: string
+      old_value:
+        type: string
+    type: object
+  project.Comment:
+    properties:
+      author_bot_id:
+        type: string
+      author_user_id:
+        type: string
+      body:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      node_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  project.CommentRequest:
+    properties:
+      body:
+        type: string
+    type: object
+  project.CreateNodeRequest:
+    properties:
+      body:
+        type: string
+      parent_id:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+      type:
+        type: string
+    type: object
+  project.CreateProjectRequest:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+  project.Issue:
+    properties:
+      assignee_bot_id:
+        type: string
+      assignee_user_id:
+        type: string
+      created_at:
+        type: string
+      due_at:
+        type: string
+      id:
+        type: string
+      labels:
+        items:
+          $ref: '#/definitions/project.Label'
+        type: array
+      priority:
+        type: string
+      project_id:
+        type: string
+      rank:
+        type: string
+      revision:
+        type: integer
+      status:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: integer
+    type: object
+  project.IssueDetails:
+    properties:
+      assignee_bot_id:
+        type: string
+      assignee_user_id:
+        type: string
+      due_at:
+        type: string
+      node_id:
+        type: string
+      priority:
+        type: string
+      revision:
+        type: integer
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  project.Label:
+    properties:
+      color:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      project_id:
+        type: string
+    type: object
+  project.LabelRequest:
+    properties:
+      color:
+        type: string
+      name:
+        type: string
+    type: object
+  project.LinkRequest:
+    properties:
+      target_node_id:
+        type: string
+    type: object
+  project.LinkedNode:
+    properties:
+      id:
+        type: string
+      project_id:
+        type: string
+      title:
+        type: string
+      type:
+        type: string
+    type: object
+  project.MoveNodeRequest:
+    properties:
+      parent_id:
+        type: string
+      rank:
+        type: string
+    type: object
+  project.Node:
+    properties:
+      body:
+        type: string
+      created_at:
+        type: string
+      created_by_bot_id:
+        type: string
+      created_by_user_id:
+        type: string
+      id:
+        type: string
+      parent_id:
+        type: string
+      project_id:
+        type: string
+      rank:
+        type: string
+      title:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+      updated_by_bot_id:
+        type: string
+      updated_by_user_id:
+        type: string
+      version:
+        type: integer
+    type: object
+  project.NodeDetail:
+    properties:
+      issue:
+        $ref: '#/definitions/project.IssueDetails'
+      labels:
+        items:
+          $ref: '#/definitions/project.Label'
+        type: array
+      links:
+        $ref: '#/definitions/project.NodeLinks'
+      node:
+        $ref: '#/definitions/project.Node'
+    type: object
+  project.NodeLinks:
+    properties:
+      incoming:
+        items:
+          $ref: '#/definitions/project.LinkedNode'
+        type: array
+      outgoing:
+        items:
+          $ref: '#/definitions/project.LinkedNode'
+        type: array
+    type: object
+  project.Project:
+    properties:
+      created_at:
+        type: string
+      created_by_user_id:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  project.SearchResult:
+    properties:
+      id:
+        type: string
+      project_id:
+        type: string
+      project_name:
+        type: string
+      snippet:
+        type: string
+      title:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  project.SetNodeLabelsRequest:
+    properties:
+      label_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  project.TreeNode:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      parent_id:
+        type: string
+      rank:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: integer
+    type: object
+  project.UpdateContentRequest:
+    properties:
+      body:
+        type: string
+      expected_version:
+        type: integer
+      title:
+        type: string
+    type: object
+  project.UpdateIssueRequest:
+    properties:
+      assignee_bot_id:
+        type: string
+      assignee_user_id:
+        type: string
+      due_at:
+        description: RFC3339, empty string clears.
+        type: string
+      expected_revision:
+        type: integer
+      priority:
+        type: string
+      rank:
+        type: string
+      status:
+        type: string
+    type: object
+  project.UpdateProjectRequest:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+  project.Version:
+    properties:
+      body:
+        type: string
+      created_at:
+        type: string
+      editor_bot_id:
+        type: string
+      editor_user_id:
+        type: string
+      node_id:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: integer
+    type: object
+  project.VersionMeta:
+    properties:
+      created_at:
+        type: string
+      editor_bot_id:
+        type: string
+      editor_user_id:
+        type: string
+      node_id:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: integer
+    type: object
   providers.CountResponse:
     properties:
       count:
@@ -4966,6 +5303,9 @@ definitions:
       heartbeat_interval:
         type: integer
       heartbeat_model_id:
+        description: |-
+          HeartbeatModelID joins the pointer group above (nil/""/value) so the
+          heartbeat tab's autosave can clear a model override.
         type: string
       image_model_id:
         type: string
@@ -13026,6 +13366,887 @@ paths:
       summary: Health check with server capabilities
       tags:
       - system
+  /projects:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/project.Project'
+            type: array
+      summary: List projects
+      tags:
+      - projects
+    post:
+      consumes:
+      - application/json
+      description: Creates a team-level collaboration space holding a Wiki doc tree
+        and an Issues kanban.
+      parameters:
+      - description: Project
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.CreateProjectRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/project.Project'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a project
+      tags:
+      - projects
+  /projects/{project_id}:
+    delete:
+      description: Soft-deletes the project; its nodes become unreachable with it.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a project
+      tags:
+      - projects
+    get:
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Project'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a project
+      tags:
+      - projects
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Patch
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.UpdateProjectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Project'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a project
+      tags:
+      - projects
+  /projects/{project_id}/issues:
+    get:
+      description: Every live issue with details and labels; the client groups by
+        status.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/project.Issue'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List the kanban board
+      tags:
+      - projects
+  /projects/{project_id}/labels:
+    get:
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/project.Label'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List labels
+      tags:
+      - projects
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Label
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.LabelRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/project.Label'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a label
+      tags:
+      - projects
+  /projects/{project_id}/labels/{label_id}:
+    delete:
+      description: Removes the definition; node assignments cascade away.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Label ID
+        in: path
+        name: label_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a label
+      tags:
+      - projects
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Label ID
+        in: path
+        name: label_id
+        required: true
+        type: string
+      - description: Label
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.LabelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Label'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a label
+      tags:
+      - projects
+  /projects/{project_id}/nodes:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.CreateNodeRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/project.NodeDetail'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a doc or issue node
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}:
+    delete:
+      description: Soft-deletes the node and its whole subtree.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a node
+      tags:
+      - projects
+    get:
+      description: Full node content plus issue details, labels and links.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.NodeDetail'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a node
+      tags:
+      - projects
+    patch:
+      consumes:
+      - application/json
+      description: Optimistic-locked content write. A stale expected_version returns
+        409 with the current node.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Content patch
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.UpdateContentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Node'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update node title/body
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/activity:
+    get:
+      description: Field-change history ("who dragged this to done"), oldest first.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/project.Activity'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List issue activity
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/comments:
+    get:
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/project.Comment'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List comments
+      tags:
+      - projects
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Comment
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.CommentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/project.Comment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Post a comment
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/comments/{comment_id}:
+    delete:
+      description: Author-only soft delete.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Comment ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete a comment
+      tags:
+      - projects
+    patch:
+      consumes:
+      - application/json
+      description: Author-only.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Comment ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: Comment
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.CommentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Comment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Edit a comment
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/issue:
+    patch:
+      consumes:
+      - application/json
+      description: Optimistic-locked issue-field write (status/assignee/priority/due_at)
+        with the kanban rank riding along, so dragging a card to another column is
+        one atomic call. A stale expected_revision returns 409 with the current fields.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Issue patch
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.UpdateIssueRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.IssueDetails'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update issue fields
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/labels:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Label IDs
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.SetNodeLabelsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/project.Label'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Replace a node's labels
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/links:
+    post:
+      consumes:
+      - application/json
+      description: Records a node → node reference; cross-project targets are allowed.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Target
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.LinkRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Add a node link
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/links/{target_node_id}:
+    delete:
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Target node ID
+        in: path
+        name: target_node_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Remove a node link
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/move:
+    post:
+      consumes:
+      - application/json
+      description: Re-parents and/or re-orders inside the doc tree. Cycles and cross-type
+        parents are rejected.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Move
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/project.MoveNodeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Node'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Move a doc node
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/versions:
+    get:
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/project.VersionMeta'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List version history
+      tags:
+      - projects
+  /projects/{project_id}/nodes/{node_id}/versions/{version}:
+    get:
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      - description: Node ID
+        in: path
+        name: node_id
+        required: true
+        type: string
+      - description: Version number
+        in: path
+        name: version
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Version'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get one version snapshot
+      tags:
+      - projects
+  /projects/{project_id}/tree:
+    get:
+      description: Flat listing of live doc nodes (no bodies); the client assembles
+        the hierarchy from parent_id + rank.
+      parameters:
+      - description: Project ID
+        in: path
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/project.TreeNode'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List the doc tree
+      tags:
+      - projects
+  /projects/search:
+    get:
+      description: Substring search over titles and bodies of docs and issues.
+      parameters:
+      - description: Query
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: Restrict to one project
+        in: query
+        name: project_id
+        type: string
+      - description: doc or issue
+        in: query
+        name: type
+        type: string
+      - description: Max results (default 50, cap 100)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/project.SearchResult'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Search across projects
+      tags:
+      - projects
   /provider-templates:
     get:
       description: List active global provider templates and whether the current tenant

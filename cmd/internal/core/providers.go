@@ -79,6 +79,7 @@ import (
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
 	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
+	projectpkg "github.com/memohai/memoh/internal/project"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/providertemplates"
 	"github.com/memohai/memoh/internal/registry"
@@ -214,6 +215,10 @@ func provideBotWorkdirStore(postgresStore *postgresstore.Store) (dbstore.BotWork
 		return nil, errors.New("postgres bot workdir store not configured")
 	}
 	return postgresStore, nil
+}
+
+func provideProjectService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries) *projectpkg.Service {
+	return projectpkg.NewService(log, conn, queries)
 }
 
 func provideUserRuntimeHub(lc fx.Lifecycle, log *slog.Logger) *userruntime.Hub {

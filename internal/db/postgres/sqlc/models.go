@@ -626,6 +626,108 @@ type ModelVariant struct {
 	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
+type Project struct {
+	ID              pgtype.UUID        `json:"id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectComment struct {
+	ID           pgtype.UUID        `json:"id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
+	NodeID       pgtype.UUID        `json:"node_id"`
+	AuthorUserID pgtype.UUID        `json:"author_user_id"`
+	AuthorBotID  pgtype.UUID        `json:"author_bot_id"`
+	Body         string             `json:"body"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectIssueActivity struct {
+	ID          pgtype.UUID        `json:"id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
+	NodeID      pgtype.UUID        `json:"node_id"`
+	ActorUserID pgtype.UUID        `json:"actor_user_id"`
+	ActorBotID  pgtype.UUID        `json:"actor_bot_id"`
+	Field       string             `json:"field"`
+	OldValue    pgtype.Text        `json:"old_value"`
+	NewValue    pgtype.Text        `json:"new_value"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProjectIssueDetail struct {
+	TeamID         pgtype.UUID        `json:"team_id"`
+	NodeID         pgtype.UUID        `json:"node_id"`
+	Status         string             `json:"status"`
+	AssigneeUserID pgtype.UUID        `json:"assignee_user_id"`
+	AssigneeBotID  pgtype.UUID        `json:"assignee_bot_id"`
+	Priority       pgtype.Text        `json:"priority"`
+	DueAt          pgtype.Timestamptz `json:"due_at"`
+	Revision       int32              `json:"revision"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectLabel struct {
+	ID        pgtype.UUID        `json:"id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
+	ProjectID pgtype.UUID        `json:"project_id"`
+	Name      string             `json:"name"`
+	Color     string             `json:"color"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProjectNode struct {
+	ID              pgtype.UUID        `json:"id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	Type            string             `json:"type"`
+	ParentID        pgtype.UUID        `json:"parent_id"`
+	Rank            string             `json:"rank"`
+	Title           string             `json:"title"`
+	Body            string             `json:"body"`
+	Version         int32              `json:"version"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	CreatedByBotID  pgtype.UUID        `json:"created_by_bot_id"`
+	UpdatedByUserID pgtype.UUID        `json:"updated_by_user_id"`
+	UpdatedByBotID  pgtype.UUID        `json:"updated_by_bot_id"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProjectNodeLabel struct {
+	TeamID    pgtype.UUID        `json:"team_id"`
+	NodeID    pgtype.UUID        `json:"node_id"`
+	LabelID   pgtype.UUID        `json:"label_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProjectNodeLink struct {
+	TeamID       pgtype.UUID        `json:"team_id"`
+	SourceNodeID pgtype.UUID        `json:"source_node_id"`
+	TargetNodeID pgtype.UUID        `json:"target_node_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProjectNodeVersion struct {
+	TeamID       pgtype.UUID        `json:"team_id"`
+	NodeID       pgtype.UUID        `json:"node_id"`
+	Version      int32              `json:"version"`
+	Title        string             `json:"title"`
+	Body         string             `json:"body"`
+	EditorUserID pgtype.UUID        `json:"editor_user_id"`
+	EditorBotID  pgtype.UUID        `json:"editor_bot_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Provider struct {
 	ID                 pgtype.UUID        `json:"id"`
 	ProviderTemplateID pgtype.UUID        `json:"provider_template_id"`

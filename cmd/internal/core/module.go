@@ -79,6 +79,7 @@ func ServerModule() fx.Option {
 			provideWikiStore,
 			provideWorkspaceManager,
 			workdir.NewService,
+			provideProjectService,
 			provideBridgeProvider,
 			providePluginBridgeProvider,
 			provideMemoryLLM,

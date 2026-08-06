@@ -2561,6 +2561,208 @@ export type PluginsSkillResource = {
     path?: string;
 };
 
+export type ProjectActivity = {
+    actor_bot_id?: string;
+    actor_user_id?: string;
+    created_at?: string;
+    field?: string;
+    id?: string;
+    new_value?: string;
+    node_id?: string;
+    old_value?: string;
+};
+
+export type ProjectComment = {
+    author_bot_id?: string;
+    author_user_id?: string;
+    body?: string;
+    created_at?: string;
+    id?: string;
+    node_id?: string;
+    updated_at?: string;
+};
+
+export type ProjectCommentRequest = {
+    body?: string;
+};
+
+export type ProjectCreateNodeRequest = {
+    body?: string;
+    parent_id?: string;
+    status?: string;
+    title?: string;
+    type?: string;
+};
+
+export type ProjectCreateProjectRequest = {
+    description?: string;
+    name?: string;
+};
+
+export type ProjectIssue = {
+    assignee_bot_id?: string;
+    assignee_user_id?: string;
+    created_at?: string;
+    due_at?: string;
+    id?: string;
+    labels?: Array<ProjectLabel>;
+    priority?: string;
+    project_id?: string;
+    rank?: string;
+    revision?: number;
+    status?: string;
+    title?: string;
+    updated_at?: string;
+    version?: number;
+};
+
+export type ProjectIssueDetails = {
+    assignee_bot_id?: string;
+    assignee_user_id?: string;
+    due_at?: string;
+    node_id?: string;
+    priority?: string;
+    revision?: number;
+    status?: string;
+    updated_at?: string;
+};
+
+export type ProjectLabel = {
+    color?: string;
+    created_at?: string;
+    id?: string;
+    name?: string;
+    project_id?: string;
+};
+
+export type ProjectLabelRequest = {
+    color?: string;
+    name?: string;
+};
+
+export type ProjectLinkRequest = {
+    target_node_id?: string;
+};
+
+export type ProjectLinkedNode = {
+    id?: string;
+    project_id?: string;
+    title?: string;
+    type?: string;
+};
+
+export type ProjectMoveNodeRequest = {
+    parent_id?: string;
+    rank?: string;
+};
+
+export type ProjectNode = {
+    body?: string;
+    created_at?: string;
+    created_by_bot_id?: string;
+    created_by_user_id?: string;
+    id?: string;
+    parent_id?: string;
+    project_id?: string;
+    rank?: string;
+    title?: string;
+    type?: string;
+    updated_at?: string;
+    updated_by_bot_id?: string;
+    updated_by_user_id?: string;
+    version?: number;
+};
+
+export type ProjectNodeDetail = {
+    issue?: ProjectIssueDetails;
+    labels?: Array<ProjectLabel>;
+    links?: ProjectNodeLinks;
+    node?: ProjectNode;
+};
+
+export type ProjectNodeLinks = {
+    incoming?: Array<ProjectLinkedNode>;
+    outgoing?: Array<ProjectLinkedNode>;
+};
+
+export type ProjectProject = {
+    created_at?: string;
+    created_by_user_id?: string;
+    description?: string;
+    id?: string;
+    name?: string;
+    updated_at?: string;
+};
+
+export type ProjectSearchResult = {
+    id?: string;
+    project_id?: string;
+    project_name?: string;
+    snippet?: string;
+    title?: string;
+    type?: string;
+    updated_at?: string;
+};
+
+export type ProjectSetNodeLabelsRequest = {
+    label_ids?: Array<string>;
+};
+
+export type ProjectTreeNode = {
+    created_at?: string;
+    id?: string;
+    parent_id?: string;
+    rank?: string;
+    title?: string;
+    updated_at?: string;
+    version?: number;
+};
+
+export type ProjectUpdateContentRequest = {
+    body?: string;
+    expected_version?: number;
+    title?: string;
+};
+
+export type ProjectUpdateIssueRequest = {
+    assignee_bot_id?: string;
+    assignee_user_id?: string;
+    /**
+     * RFC3339, empty string clears.
+     */
+    due_at?: string;
+    expected_revision?: number;
+    priority?: string;
+    rank?: string;
+    status?: string;
+};
+
+export type ProjectUpdateProjectRequest = {
+    description?: string;
+    name?: string;
+};
+
+export type ProjectVersion = {
+    body?: string;
+    created_at?: string;
+    editor_bot_id?: string;
+    editor_user_id?: string;
+    node_id?: string;
+    title?: string;
+    updated_at?: string;
+    version?: number;
+};
+
+export type ProjectVersionMeta = {
+    created_at?: string;
+    editor_bot_id?: string;
+    editor_user_id?: string;
+    node_id?: string;
+    title?: string;
+    updated_at?: string;
+    version?: number;
+};
+
 export type ProvidersCountResponse = {
     count?: number;
 };
@@ -2933,6 +3135,10 @@ export type SettingsUpsertRequest = {
     fetch_provider_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
+    /**
+     * HeartbeatModelID joins the pointer group above (nil/""/value) so the
+     * heartbeat tab's autosave can clear a model override.
+     */
     heartbeat_model_id?: string;
     image_model_id?: string;
     /**
@@ -12483,6 +12689,1007 @@ export type GetPingResponses = {
 };
 
 export type GetPingResponse = GetPingResponses[keyof GetPingResponses];
+
+export type GetProjectsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/projects';
+};
+
+export type GetProjectsResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProjectProject>;
+};
+
+export type GetProjectsResponse = GetProjectsResponses[keyof GetProjectsResponses];
+
+export type PostProjectsData = {
+    /**
+     * Project
+     */
+    body: ProjectCreateProjectRequest;
+    path?: never;
+    query?: never;
+    url: '/projects';
+};
+
+export type PostProjectsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+};
+
+export type PostProjectsError = PostProjectsErrors[keyof PostProjectsErrors];
+
+export type PostProjectsResponses = {
+    /**
+     * Created
+     */
+    201: ProjectProject;
+};
+
+export type PostProjectsResponse = PostProjectsResponses[keyof PostProjectsResponses];
+
+export type GetProjectsSearchData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Query
+         */
+        q: string;
+        /**
+         * Restrict to one project
+         */
+        project_id?: string;
+        /**
+         * doc or issue
+         */
+        type?: string;
+        /**
+         * Max results (default 50, cap 100)
+         */
+        limit?: number;
+    };
+    url: '/projects/search';
+};
+
+export type GetProjectsSearchErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+};
+
+export type GetProjectsSearchError = GetProjectsSearchErrors[keyof GetProjectsSearchErrors];
+
+export type GetProjectsSearchResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProjectSearchResult>;
+};
+
+export type GetProjectsSearchResponse = GetProjectsSearchResponses[keyof GetProjectsSearchResponses];
+
+export type DeleteProjectsByProjectIdData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}';
+};
+
+export type DeleteProjectsByProjectIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteProjectsByProjectIdError = DeleteProjectsByProjectIdErrors[keyof DeleteProjectsByProjectIdErrors];
+
+export type DeleteProjectsByProjectIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetProjectsByProjectIdData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}';
+};
+
+export type GetProjectsByProjectIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProjectsByProjectIdError = GetProjectsByProjectIdErrors[keyof GetProjectsByProjectIdErrors];
+
+export type GetProjectsByProjectIdResponses = {
+    /**
+     * OK
+     */
+    200: ProjectProject;
+};
+
+export type GetProjectsByProjectIdResponse = GetProjectsByProjectIdResponses[keyof GetProjectsByProjectIdResponses];
+
+export type PatchProjectsByProjectIdData = {
+    /**
+     * Patch
+     */
+    body: ProjectUpdateProjectRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}';
+};
+
+export type PatchProjectsByProjectIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PatchProjectsByProjectIdError = PatchProjectsByProjectIdErrors[keyof PatchProjectsByProjectIdErrors];
+
+export type PatchProjectsByProjectIdResponses = {
+    /**
+     * OK
+     */
+    200: ProjectProject;
+};
+
+export type PatchProjectsByProjectIdResponse = PatchProjectsByProjectIdResponses[keyof PatchProjectsByProjectIdResponses];
+
+export type GetProjectsByProjectIdIssuesData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/issues';
+};
+
+export type GetProjectsByProjectIdIssuesErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProjectsByProjectIdIssuesError = GetProjectsByProjectIdIssuesErrors[keyof GetProjectsByProjectIdIssuesErrors];
+
+export type GetProjectsByProjectIdIssuesResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProjectIssue>;
+};
+
+export type GetProjectsByProjectIdIssuesResponse = GetProjectsByProjectIdIssuesResponses[keyof GetProjectsByProjectIdIssuesResponses];
+
+export type GetProjectsByProjectIdLabelsData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/labels';
+};
+
+export type GetProjectsByProjectIdLabelsErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProjectsByProjectIdLabelsError = GetProjectsByProjectIdLabelsErrors[keyof GetProjectsByProjectIdLabelsErrors];
+
+export type GetProjectsByProjectIdLabelsResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProjectLabel>;
+};
+
+export type GetProjectsByProjectIdLabelsResponse = GetProjectsByProjectIdLabelsResponses[keyof GetProjectsByProjectIdLabelsResponses];
+
+export type PostProjectsByProjectIdLabelsData = {
+    /**
+     * Label
+     */
+    body: ProjectLabelRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/labels';
+};
+
+export type PostProjectsByProjectIdLabelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostProjectsByProjectIdLabelsError = PostProjectsByProjectIdLabelsErrors[keyof PostProjectsByProjectIdLabelsErrors];
+
+export type PostProjectsByProjectIdLabelsResponses = {
+    /**
+     * Created
+     */
+    201: ProjectLabel;
+};
+
+export type PostProjectsByProjectIdLabelsResponse = PostProjectsByProjectIdLabelsResponses[keyof PostProjectsByProjectIdLabelsResponses];
+
+export type DeleteProjectsByProjectIdLabelsByLabelIdData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Label ID
+         */
+        label_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/labels/{label_id}';
+};
+
+export type DeleteProjectsByProjectIdLabelsByLabelIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteProjectsByProjectIdLabelsByLabelIdError = DeleteProjectsByProjectIdLabelsByLabelIdErrors[keyof DeleteProjectsByProjectIdLabelsByLabelIdErrors];
+
+export type DeleteProjectsByProjectIdLabelsByLabelIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PatchProjectsByProjectIdLabelsByLabelIdData = {
+    /**
+     * Label
+     */
+    body: ProjectLabelRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Label ID
+         */
+        label_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/labels/{label_id}';
+};
+
+export type PatchProjectsByProjectIdLabelsByLabelIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PatchProjectsByProjectIdLabelsByLabelIdError = PatchProjectsByProjectIdLabelsByLabelIdErrors[keyof PatchProjectsByProjectIdLabelsByLabelIdErrors];
+
+export type PatchProjectsByProjectIdLabelsByLabelIdResponses = {
+    /**
+     * OK
+     */
+    200: ProjectLabel;
+};
+
+export type PatchProjectsByProjectIdLabelsByLabelIdResponse = PatchProjectsByProjectIdLabelsByLabelIdResponses[keyof PatchProjectsByProjectIdLabelsByLabelIdResponses];
+
+export type PostProjectsByProjectIdNodesData = {
+    /**
+     * Node
+     */
+    body: ProjectCreateNodeRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes';
+};
+
+export type PostProjectsByProjectIdNodesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostProjectsByProjectIdNodesError = PostProjectsByProjectIdNodesErrors[keyof PostProjectsByProjectIdNodesErrors];
+
+export type PostProjectsByProjectIdNodesResponses = {
+    /**
+     * Created
+     */
+    201: ProjectNodeDetail;
+};
+
+export type PostProjectsByProjectIdNodesResponse = PostProjectsByProjectIdNodesResponses[keyof PostProjectsByProjectIdNodesResponses];
+
+export type DeleteProjectsByProjectIdNodesByNodeIdData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}';
+};
+
+export type DeleteProjectsByProjectIdNodesByNodeIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteProjectsByProjectIdNodesByNodeIdError = DeleteProjectsByProjectIdNodesByNodeIdErrors[keyof DeleteProjectsByProjectIdNodesByNodeIdErrors];
+
+export type DeleteProjectsByProjectIdNodesByNodeIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}';
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdError = GetProjectsByProjectIdNodesByNodeIdErrors[keyof GetProjectsByProjectIdNodesByNodeIdErrors];
+
+export type GetProjectsByProjectIdNodesByNodeIdResponses = {
+    /**
+     * OK
+     */
+    200: ProjectNodeDetail;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdResponse = GetProjectsByProjectIdNodesByNodeIdResponses[keyof GetProjectsByProjectIdNodesByNodeIdResponses];
+
+export type PatchProjectsByProjectIdNodesByNodeIdData = {
+    /**
+     * Content patch
+     */
+    body: ProjectUpdateContentRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}';
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdError = PatchProjectsByProjectIdNodesByNodeIdErrors[keyof PatchProjectsByProjectIdNodesByNodeIdErrors];
+
+export type PatchProjectsByProjectIdNodesByNodeIdResponses = {
+    /**
+     * OK
+     */
+    200: ProjectNode;
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdResponse = PatchProjectsByProjectIdNodesByNodeIdResponses[keyof PatchProjectsByProjectIdNodesByNodeIdResponses];
+
+export type GetProjectsByProjectIdNodesByNodeIdActivityData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/activity';
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdActivityErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdActivityError = GetProjectsByProjectIdNodesByNodeIdActivityErrors[keyof GetProjectsByProjectIdNodesByNodeIdActivityErrors];
+
+export type GetProjectsByProjectIdNodesByNodeIdActivityResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProjectActivity>;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdActivityResponse = GetProjectsByProjectIdNodesByNodeIdActivityResponses[keyof GetProjectsByProjectIdNodesByNodeIdActivityResponses];
+
+export type GetProjectsByProjectIdNodesByNodeIdCommentsData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/comments';
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdCommentsErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdCommentsError = GetProjectsByProjectIdNodesByNodeIdCommentsErrors[keyof GetProjectsByProjectIdNodesByNodeIdCommentsErrors];
+
+export type GetProjectsByProjectIdNodesByNodeIdCommentsResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProjectComment>;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdCommentsResponse = GetProjectsByProjectIdNodesByNodeIdCommentsResponses[keyof GetProjectsByProjectIdNodesByNodeIdCommentsResponses];
+
+export type PostProjectsByProjectIdNodesByNodeIdCommentsData = {
+    /**
+     * Comment
+     */
+    body: ProjectCommentRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/comments';
+};
+
+export type PostProjectsByProjectIdNodesByNodeIdCommentsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostProjectsByProjectIdNodesByNodeIdCommentsError = PostProjectsByProjectIdNodesByNodeIdCommentsErrors[keyof PostProjectsByProjectIdNodesByNodeIdCommentsErrors];
+
+export type PostProjectsByProjectIdNodesByNodeIdCommentsResponses = {
+    /**
+     * Created
+     */
+    201: ProjectComment;
+};
+
+export type PostProjectsByProjectIdNodesByNodeIdCommentsResponse = PostProjectsByProjectIdNodesByNodeIdCommentsResponses[keyof PostProjectsByProjectIdNodesByNodeIdCommentsResponses];
+
+export type DeleteProjectsByProjectIdNodesByNodeIdCommentsByCommentIdData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+        /**
+         * Comment ID
+         */
+        comment_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/comments/{comment_id}';
+};
+
+export type DeleteProjectsByProjectIdNodesByNodeIdCommentsByCommentIdErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteProjectsByProjectIdNodesByNodeIdCommentsByCommentIdError = DeleteProjectsByProjectIdNodesByNodeIdCommentsByCommentIdErrors[keyof DeleteProjectsByProjectIdNodesByNodeIdCommentsByCommentIdErrors];
+
+export type DeleteProjectsByProjectIdNodesByNodeIdCommentsByCommentIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdCommentsByCommentIdData = {
+    /**
+     * Comment
+     */
+    body: ProjectCommentRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+        /**
+         * Comment ID
+         */
+        comment_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/comments/{comment_id}';
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdCommentsByCommentIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdCommentsByCommentIdError = PatchProjectsByProjectIdNodesByNodeIdCommentsByCommentIdErrors[keyof PatchProjectsByProjectIdNodesByNodeIdCommentsByCommentIdErrors];
+
+export type PatchProjectsByProjectIdNodesByNodeIdCommentsByCommentIdResponses = {
+    /**
+     * OK
+     */
+    200: ProjectComment;
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdCommentsByCommentIdResponse = PatchProjectsByProjectIdNodesByNodeIdCommentsByCommentIdResponses[keyof PatchProjectsByProjectIdNodesByNodeIdCommentsByCommentIdResponses];
+
+export type PatchProjectsByProjectIdNodesByNodeIdIssueData = {
+    /**
+     * Issue patch
+     */
+    body: ProjectUpdateIssueRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/issue';
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdIssueErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdIssueError = PatchProjectsByProjectIdNodesByNodeIdIssueErrors[keyof PatchProjectsByProjectIdNodesByNodeIdIssueErrors];
+
+export type PatchProjectsByProjectIdNodesByNodeIdIssueResponses = {
+    /**
+     * OK
+     */
+    200: ProjectIssueDetails;
+};
+
+export type PatchProjectsByProjectIdNodesByNodeIdIssueResponse = PatchProjectsByProjectIdNodesByNodeIdIssueResponses[keyof PatchProjectsByProjectIdNodesByNodeIdIssueResponses];
+
+export type PutProjectsByProjectIdNodesByNodeIdLabelsData = {
+    /**
+     * Label IDs
+     */
+    body: ProjectSetNodeLabelsRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/labels';
+};
+
+export type PutProjectsByProjectIdNodesByNodeIdLabelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PutProjectsByProjectIdNodesByNodeIdLabelsError = PutProjectsByProjectIdNodesByNodeIdLabelsErrors[keyof PutProjectsByProjectIdNodesByNodeIdLabelsErrors];
+
+export type PutProjectsByProjectIdNodesByNodeIdLabelsResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProjectLabel>;
+};
+
+export type PutProjectsByProjectIdNodesByNodeIdLabelsResponse = PutProjectsByProjectIdNodesByNodeIdLabelsResponses[keyof PutProjectsByProjectIdNodesByNodeIdLabelsResponses];
+
+export type PostProjectsByProjectIdNodesByNodeIdLinksData = {
+    /**
+     * Target
+     */
+    body: ProjectLinkRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/links';
+};
+
+export type PostProjectsByProjectIdNodesByNodeIdLinksErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostProjectsByProjectIdNodesByNodeIdLinksError = PostProjectsByProjectIdNodesByNodeIdLinksErrors[keyof PostProjectsByProjectIdNodesByNodeIdLinksErrors];
+
+export type PostProjectsByProjectIdNodesByNodeIdLinksResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type DeleteProjectsByProjectIdNodesByNodeIdLinksByTargetNodeIdData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+        /**
+         * Target node ID
+         */
+        target_node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/links/{target_node_id}';
+};
+
+export type DeleteProjectsByProjectIdNodesByNodeIdLinksByTargetNodeIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteProjectsByProjectIdNodesByNodeIdLinksByTargetNodeIdError = DeleteProjectsByProjectIdNodesByNodeIdLinksByTargetNodeIdErrors[keyof DeleteProjectsByProjectIdNodesByNodeIdLinksByTargetNodeIdErrors];
+
+export type DeleteProjectsByProjectIdNodesByNodeIdLinksByTargetNodeIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PostProjectsByProjectIdNodesByNodeIdMoveData = {
+    /**
+     * Move
+     */
+    body: ProjectMoveNodeRequest;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/move';
+};
+
+export type PostProjectsByProjectIdNodesByNodeIdMoveErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostProjectsByProjectIdNodesByNodeIdMoveError = PostProjectsByProjectIdNodesByNodeIdMoveErrors[keyof PostProjectsByProjectIdNodesByNodeIdMoveErrors];
+
+export type PostProjectsByProjectIdNodesByNodeIdMoveResponses = {
+    /**
+     * OK
+     */
+    200: ProjectNode;
+};
+
+export type PostProjectsByProjectIdNodesByNodeIdMoveResponse = PostProjectsByProjectIdNodesByNodeIdMoveResponses[keyof PostProjectsByProjectIdNodesByNodeIdMoveResponses];
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/versions';
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsError = GetProjectsByProjectIdNodesByNodeIdVersionsErrors[keyof GetProjectsByProjectIdNodesByNodeIdVersionsErrors];
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProjectVersionMeta>;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsResponse = GetProjectsByProjectIdNodesByNodeIdVersionsResponses[keyof GetProjectsByProjectIdNodesByNodeIdVersionsResponses];
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsByVersionData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Node ID
+         */
+        node_id: string;
+        /**
+         * Version number
+         */
+        version: number;
+    };
+    query?: never;
+    url: '/projects/{project_id}/nodes/{node_id}/versions/{version}';
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsByVersionErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsByVersionError = GetProjectsByProjectIdNodesByNodeIdVersionsByVersionErrors[keyof GetProjectsByProjectIdNodesByNodeIdVersionsByVersionErrors];
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsByVersionResponses = {
+    /**
+     * OK
+     */
+    200: ProjectVersion;
+};
+
+export type GetProjectsByProjectIdNodesByNodeIdVersionsByVersionResponse = GetProjectsByProjectIdNodesByNodeIdVersionsByVersionResponses[keyof GetProjectsByProjectIdNodesByNodeIdVersionsByVersionResponses];
+
+export type GetProjectsByProjectIdTreeData = {
+    body?: never;
+    path: {
+        /**
+         * Project ID
+         */
+        project_id: string;
+    };
+    query?: never;
+    url: '/projects/{project_id}/tree';
+};
+
+export type GetProjectsByProjectIdTreeErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetProjectsByProjectIdTreeError = GetProjectsByProjectIdTreeErrors[keyof GetProjectsByProjectIdTreeErrors];
+
+export type GetProjectsByProjectIdTreeResponses = {
+    /**
+     * OK
+     */
+    200: Array<ProjectTreeNode>;
+};
+
+export type GetProjectsByProjectIdTreeResponse = GetProjectsByProjectIdTreeResponses[keyof GetProjectsByProjectIdTreeResponses];
 
 export type GetProviderTemplatesData = {
     body?: never;
