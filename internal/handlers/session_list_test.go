@@ -123,12 +123,21 @@ func TestListSessionsDefaultsToUserFacingTypes(t *testing.T) {
 	if queries.pagedCallCount != 1 {
 		t.Fatalf("ListSessionsByBotPaged called %d times, want 1", queries.pagedCallCount)
 	}
+	// The default listing filters by stored visibility, not by a type list:
+	// the type predicate is widened to every known type so schedule-created
+	// sessions marked user-visible surface too.
 	got := append([]string(nil), queries.pagedCall.Types...)
 	sort.Strings(got)
-	want := session.UserFacingSessionTypes()
+	want := session.AllSessionTypes()
 	sort.Strings(want)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("default types = %v, want %v", got, want)
+	}
+	if !queries.pagedCall.UseVisibility {
+		t.Fatalf("default listing should filter by visibility")
+	}
+	if queries.pagedCall.Visibility != string(session.VisibilityUser) {
+		t.Fatalf("default visibility = %q, want %q", queries.pagedCall.Visibility, session.VisibilityUser)
 	}
 	if queries.pagedCall.LimitCount != sessionListDefaultLimit+1 {
 		t.Fatalf("default limit = %d, want %d (default+1 has-more probe)", queries.pagedCall.LimitCount, sessionListDefaultLimit+1)
@@ -145,6 +154,9 @@ func TestListSessionsPassesExplicitTypesFilter(t *testing.T) {
 
 	if _, err := callListSessions(handler, botID, "types=chat,discuss"); err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if queries.pagedCall.UseVisibility {
+		t.Fatalf("explicit types filter should not add a visibility predicate")
 	}
 	if got := strings.Join(queries.pagedCall.Types, ","); got != "chat,discuss" {
 		t.Fatalf("types filter = %q, want %q", got, "chat,discuss")
