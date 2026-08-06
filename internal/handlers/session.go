@@ -302,11 +302,14 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 			return err
 		}
 	}
-	types, err := parseSessionTypesParam(c.QueryParam("types"), parentSessionID != "")
+	types, defaultVisibility, err := parseSessionTypesParam(c.QueryParam("types"), parentSessionID != "")
 	if err != nil {
 		return err
 	}
 	filter := session.ListFilter{ParentThreadID: parentSessionID}
+	if defaultVisibility {
+		filter.Visibility = session.VisibilityUser
+	}
 	if workdirParam := strings.TrimSpace(c.QueryParam("workdir_id")); workdirParam != "" {
 		// The literal "none" selects the unassigned bucket so the sidebar can
 		// page ungrouped sessions with the same cursor machinery.
@@ -400,13 +403,17 @@ const (
 	sessionListMaxLimit     = 200
 )
 
-func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, error) {
+// parseSessionTypesParam resolves the types filter. The second return says
+// whether the default user-facing listing applies: no explicit types and no
+// parent filter. That default filters by stored visibility rather than by a
+// type list, so schedule-created sessions marked user-visible surface too.
+func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		if hasParentFilter {
-			return []string{session.TypeSubagent}, nil
+			return []string{session.TypeSubagent}, false, nil
 		}
-		return session.UserFacingSessionTypes(), nil
+		return session.AllSessionTypes(), true, nil
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
@@ -417,7 +424,7 @@ func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, error) 
 			continue
 		}
 		if !session.IsKnownType(token) {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("unknown session type %q", token))
+			return nil, false, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("unknown session type %q", token))
 		}
 		if _, ok := seen[token]; ok {
 			continue
@@ -426,9 +433,9 @@ func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, error) 
 		out = append(out, token)
 	}
 	if len(out) == 0 {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "types must contain at least one session type")
+		return nil, false, echo.NewHTTPError(http.StatusBadRequest, "types must contain at least one session type")
 	}
-	return out, nil
+	return out, false, nil
 }
 
 func parseSessionLimitParam(raw string) (int64, error) {

@@ -1330,6 +1330,9 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			Type:            legacyType,
 			SessionMode:     sessionMode,
 			RuntimeType:     runtimeType,
+			// Archives from before the visibility column carry an empty
+			// string; normalize against the session mode's default.
+			Visibility:      string(sessionpkg.NormalizeVisibility(item.Visibility, sessionMode)),
 			RuntimeMetadata: runtimeMetadata,
 			Title:           item.Title,
 			Metadata:        metadata,
