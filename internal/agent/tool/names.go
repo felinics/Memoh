@@ -38,6 +38,9 @@ func ToolSendMessage() ToolName    { return toolname.ToolSendMessage() }
 func ToolListAgents() ToolName     { return toolname.ToolListAgents() }
 func ToolListModels() ToolName     { return toolname.ToolListModels() }
 
+func ToolListWorkdirs() ToolName  { return toolname.ToolListWorkdirs() }
+func ToolListACPAgents() ToolName { return toolname.ToolListACPAgents() }
+
 func ToolListSchedule() ToolName   { return toolname.ToolListSchedule() }
 func ToolGetSchedule() ToolName    { return toolname.ToolGetSchedule() }
 func ToolCreateSchedule() ToolName { return toolname.ToolCreateSchedule() }
