@@ -12,25 +12,9 @@
       </div>
     </div>
 
-    <!-- Collapsed Projects panel: the expand control migrates to this slim
-         strip at the tab-strip corner — the same button that collapses it
-         lives in the panel's own header while the panel owns the space. -->
-    <div
-      v-if="!projectsPanelOpen"
-      class="flex w-9 shrink-0 flex-col items-center bg-background pt-1"
-    >
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        class="size-7 shrink-0 rounded-full p-0 text-muted-foreground"
-        :title="t('projects.expand')"
-        :aria-label="t('projects.expand')"
-        @click="projectsPanelOpen = true"
-      >
-        <PanelRightOpen class="size-[18px]" />
-      </Button>
-    </div>
-
+    <!-- Collapsed state has NO strip here: the expand control lives inside the
+         last group's tab bar (group-actions), mirroring how the left rail's
+         toggle sits in the first group's prefix actions. -->
     <ProjectPanel />
   </div>
 </template>
@@ -40,11 +24,9 @@ import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { PanelRightOpen } from 'lucide-vue-next'
 import { getBotsById } from '@memohai/sdk'
-import { Button, PanePlaceholder } from '@felinic/ui'
+import { PanePlaceholder } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
-import { useProjectsStore } from '@/store/projects'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
 import ChatWorkspace from './components/chat-workspace.vue'
@@ -56,8 +38,6 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
-const projectsStore = useProjectsStore()
-const { panelOpen: projectsPanelOpen } = storeToRefs(projectsStore)
 
 // Resolve a bot UUID from a URL name slug. Prefers the already-loaded bot list,
 // falling back to the API (which accepts both name and UUID identifiers).

@@ -218,7 +218,8 @@
     "supermarket": "Supermarket",
     "about": "About",
     "switchBot": "Switch bot",
-    "manageBots": "Manage Bots"
+    "manageBots": "Manage Bots",
+    "projects": "Projects"
   },
   "runtimes": {
     "title": "Computers",
@@ -3492,6 +3493,22 @@
       "assignee": "Assignee",
       "priority": "Priority",
       "due_at": "Due date"
+    },
+    "wiki": "Wiki",
+    "wikiEmpty": "No docs yet",
+    "projectDescription": "Description",
+    "projectDescriptionPlaceholder": "What is this project for?",
+    "createSuccess": "Project created",
+    "emptyTitle": "No projects yet",
+    "openIssues": "{count} open",
+    "closedIssues": "{count} closed",
+    "tabs": {
+      "overview": "Overview",
+      "member": "Members"
+    },
+    "tabPlaceholder": {
+      "overview": "Project overview lands here.",
+      "member": "Member management lands here."
     }
   }
 }

@@ -25,26 +25,19 @@
       <Button
         variant="ghost"
         size="icon-sm"
-        class="shrink-0 rounded-full text-muted-foreground"
+        shape="circle"
+        :class="headerButtonClass"
         :title="t('projects.newProject')"
         :aria-label="t('projects.newProject')"
         @click="beginCreateProject"
       >
-        <Plus class="size-[18px]" />
+        <Plus
+          :stroke-width="1.75"
+          class="size-4"
+        />
       </Button>
-      <!-- Collapse control lives in the panel header while the panel owns the
-           space; its expand twin renders in the tab-strip corner (home/index)
-           once the panel is gone. -->
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        class="shrink-0 rounded-full text-muted-foreground"
-        :title="t('projects.collapse')"
-        :aria-label="t('projects.collapse')"
-        @click="panelOpen = false"
-      >
-        <PanelRightClose class="size-[18px]" />
-      </Button>
+      <!-- No collapse control here: the rail toggle lives in the tab strip
+           (group-actions), same as the left sidebar's. -->
     </header>
 
     <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
@@ -73,27 +66,20 @@
         </Button>
       </div>
 
-      <div
+      <!-- A Project is a CATEGORY, not a tree row: its name is a quiet section
+           label, and the two things it actually contains — Issues and Wiki —
+           are the rows underneath. The doc tree hangs off Wiki, never beside
+           Issues. -->
+      <section
         v-for="project in store.projects"
         :key="project.id"
-        class="mt-1"
+        class="mt-3 first:mt-1"
       >
         <ContextMenu>
           <ContextMenuTrigger as-child>
-            <button
-              type="button"
-              :class="projectRowClass"
-              @click="toggleProject(project)"
-            >
-              <span class="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-                <ChevronRight
-                  class="size-3 transition-transform duration-150"
-                  :class="isProjectExpanded(project) ? 'rotate-90' : ''"
-                />
-              </span>
-              <Folder class="size-3.5 shrink-0 text-muted-foreground" />
+            <h2 :class="projectLabelClass">
               <span class="min-w-0 flex-1 truncate">{{ project.name }}</span>
-            </button>
+            </h2>
           </ContextMenuTrigger>
           <ContextMenuContent>
             <ContextMenuItem @select="beginCreateDoc(project, null)">
@@ -115,25 +101,59 @@
           </ContextMenuContent>
         </ContextMenu>
 
-        <template v-if="isProjectExpanded(project)">
-          <!-- Issues pseudo-node: not a tree row in the data — it opens the
-               kanban tab. Deliberately not expandable (issues would drown the
-               doc tree). -->
-          <button
-            type="button"
-            :class="issuesRowClass"
-            @click="openKanban(project)"
-          >
-            <SquareKanban class="size-3.5 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 flex-1 truncate">{{ t('projects.issues') }}</span>
-          </button>
+        <!-- Issues: opens the kanban tab. Deliberately not expandable —
+             issues would drown the doc tree. -->
+        <NavRow
+          :label="t('projects.issues')"
+          @activate="openKanban(project)"
+        >
+          <template #icon>
+            <SquareKanban class="size-3.5" />
+          </template>
+        </NavRow>
 
+        <!-- Wiki: the doc tree's root row. -->
+        <NavRow
+          :label="t('projects.wiki')"
+          expandable
+          :expanded="isWikiExpanded(project)"
+          @activate="toggleWiki(project)"
+          @toggle="toggleWiki(project)"
+        >
+          <template #icon>
+            <BookText class="size-3.5" />
+          </template>
+          <template #actions>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              shape="circle"
+              :class="rowActionClass"
+              :title="t('projects.newDoc')"
+              :aria-label="t('projects.newDoc')"
+              @click.stop="beginCreateDoc(project, null)"
+            >
+              <Plus
+                :stroke-width="1.75"
+                class="size-3.5"
+              />
+            </Button>
+          </template>
+        </NavRow>
+
+        <template v-if="isWikiExpanded(project)">
           <InlineLoadingRow
             v-if="store.treeLoading[project.id!] && !store.trees[project.id!]"
-            class="pl-6"
+            class="pl-8"
           >
             {{ t('common.loading') }}
           </InlineLoadingRow>
+          <p
+            v-else-if="(store.trees[project.id!]?.length ?? 0) === 0"
+            class="py-1 pl-8 text-body text-muted-foreground"
+          >
+            {{ t('projects.wikiEmpty') }}
+          </p>
           <TreeNode
             v-for="node in store.childrenOf(project.id!, null)"
             :key="node.id"
@@ -145,7 +165,7 @@
             @delete="deleteNodeTarget = { project, node: $event }"
           />
         </template>
-      </div>
+      </section>
     </div>
 
     <NameDialog
@@ -187,7 +207,7 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, Folder, PanelRightClose, Pencil, Plus, SquareKanban, Trash2 } from 'lucide-vue-next'
+import { BookText, Pencil, Plus, SquareKanban, Trash2 } from 'lucide-vue-next'
 import {
   Button,
   ConfirmDeleteDialog,
@@ -204,19 +224,24 @@ import { useProjectsStore } from '@/store/projects'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import NameDialog from './name-dialog.vue'
+import NavRow from './nav-row.vue'
 import TreeNode from './tree-node.vue'
+import { rowActionClass } from './row-chrome'
 
 const { t } = useI18n()
 const store = useProjectsStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { panelOpen, panelWidth } = storeToRefs(store)
 
-// Hand-rolled nav rows (no tree primitive in @felinic/ui): the hover fill is
-// the row's own chrome, same family as the sidebar session rows.
-const projectRowClass = 'group flex w-full min-w-0 cursor-pointer items-center gap-1 rounded-md py-1.5 pl-2 pr-2 text-left text-label font-medium text-foreground hover:bg-[color:var(--sidebar-hover)]' /* ui-allow-style */
+// A category label, not a control: no hover fill and no chevron — it names the
+// group of rows beneath it, the same role section labels play on settings pages.
+// Its left padding matches NavRow's depth-0 indent so label and rows share an edge.
+const projectLabelClass = 'flex min-w-0 items-center px-2 py-1 text-body font-medium text-muted-foreground'
 // Resize rail hover, mirroring the left sidebar's handle.
 const resizeRailClass = 'h-full w-full transition-colors group-hover:bg-border' /* ui-allow-style */
-const issuesRowClass = 'flex w-full min-w-0 cursor-pointer items-center gap-1 rounded-md py-1 pl-[1.375rem] pr-2 text-left text-label text-foreground hover:bg-[color:var(--sidebar-hover)]' /* ui-allow-style */
+// Same chrome as the tab strip's icon buttons (prefix cluster / group actions),
+// so the panel header and the strip read as one family.
+const headerButtonClass = 'size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground' /* ui-allow-style */
 
 const asideStyle = computed<Record<string, string>>(() => ({
   width: `${panelWidth.value}px`,
@@ -232,14 +257,21 @@ onMounted(() => {
   })
 })
 
-function isProjectExpanded(project: ProjectProject): boolean {
-  return !!project.id && store.isExpanded(project.id)
+// The Wiki row has no node id of its own (it is the tree's root, not a row in
+// the data), so its expansion is keyed by a synthetic id that can never
+// collide with a node UUID.
+function wikiKey(project: ProjectProject): string {
+  return `wiki:${project.id}`
 }
 
-function toggleProject(project: ProjectProject) {
+function isWikiExpanded(project: ProjectProject): boolean {
+  return !!project.id && store.isExpanded(wikiKey(project))
+}
+
+function toggleWiki(project: ProjectProject) {
   if (!project.id) return
-  store.toggleExpanded(project.id)
-  if (store.isExpanded(project.id)) {
+  store.toggleExpanded(wikiKey(project))
+  if (store.isExpanded(wikiKey(project))) {
     void store.loadTree(project.id).catch((error) => {
       toast.error(resolveApiErrorMessage(error, t('projects.loadFailed')))
     })
@@ -298,14 +330,20 @@ async function confirmNameDialog(value: string) {
   try {
     switch (state.kind) {
       case 'create-project': {
+        // A project renders as a category with its rows always visible, so
+        // nothing to expand — but open its Wiki so the empty-state hint (and
+        // the ＋ that fills it) is right there.
         const created = await store.createProject(value)
-        if (created.id) store.setExpanded(created.id, true)
+        if (created.id) store.setExpanded(wikiKey(created), true)
         break
       }
       case 'rename-project':
         await store.renameProject(state.project.id!, value)
         break
       case 'create-doc': {
+        // Reveal where the new doc lands: the Wiki row, and the parent when
+        // creating a sub-doc.
+        store.setExpanded(wikiKey(state.project), true)
         if (state.parent?.id) store.setExpanded(state.parent.id, true)
         const nodeId = await store.createDoc(state.project.id!, value, state.parent?.id)
         if (nodeId) {

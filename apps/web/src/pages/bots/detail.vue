@@ -23,196 +23,126 @@
           @close-detail="closeMobileDetail"
         >
           <template #sidebar-header>
-            <!-- Back: a full-width row at the very top — same position, size and
-                 style as the settings sidebar's < Settings — so returning lands
-                 the affordance in the exact same spot. Identity sits just below as
-                 a floating card, which anchors the header and keeps back from
-                 reading as a stray nav row — no hairline needed. -->
-            <div
-              v-if="macTrafficReserve"
-              class="h-12 shrink-0 [-webkit-app-region:drag]"
-              aria-hidden="true"
-            />
-            <div
-              class="px-4 pb-3 flex flex-col"
-              :class="macTrafficReserve ? undefined : 'pt-[18px]'"
+            <!-- Back row, search box and the grouped nav all live in the shared
+                 DetailNavSidebar; only the identity card below is bot-specific.
+                 The layout's header/content split means the shared component
+                 spans both slots — its own markup keeps them in one flow. -->
+            <DetailNavSidebar
+              :back-label="backLabel"
+              :groups="groupedTabs"
+              :active-value="activeTab"
+              :mac-traffic-reserve="macTrafficReserve"
+              :matches="tabMatchesSearch"
+              @back="goBack()"
+              @select="selectTab"
             >
-              <NavItem
-                class="[-webkit-app-region:no-drag]"
-                @click="goBack()"
-              >
-                <ChevronLeft class="size-3.5 shrink-0" />
-                <span class="min-w-0 truncate">{{ backLabel }}</span>
-              </NavItem>
-
-              <!-- Identity floats as a card — same recipe as the bots-list persona
-                   cards (bg-card + border + menu-shell radius), just tighter padding.
-                   Wrapping it gives the header a real visual anchor: the round avatar
-                   no longer sits bare against the nav-hover edge, so back + name read
-                   as one settled block instead of two misaligned centers. The card
-                   border replaces the old hairline, so no divider above or below. -->
-              <div class="mt-3 flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-3">
-                <!-- Avatar -->
-                <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
-                  <Avatar class="size-12 rounded-full">
-                    <AvatarImage
-                      v-if="bot?.avatar_url"
-                      :src="bot.avatar_url"
-                      :alt="bot.display_name"
-                    />
-                    <AvatarFallback class="text-lg">
-                      {{ avatarFallback }}
-                    </AvatarFallback>
-                  </Avatar>
-                  <!-- Edit Overlay -->
-                  <button
-                    type="button"
-                    class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
-                    :title="$t('common.edit')"
-                    :aria-label="$t('common.edit')"
-                    :disabled="!bot || botLifecyclePending"
-                    @click="handleEditAvatar"
-                  >
-                    <SquarePen class="size-4 text-white" />
-                  </button>
-                </div>
-              
-                <!-- Info Block -->
-                <div class="min-w-0 flex-1 flex flex-col justify-center">
-                  <div class="group/name flex items-center gap-1 relative min-w-0">
-                    <template v-if="isEditingBotName && bot">
-                      <Input
-                        ref="editNameInputRef"
-                        v-model="botNameDraft"
-                        class="h-7 w-full text-xs px-2 pr-6 shadow-none"
-                        :placeholder="$t('bots.displayNamePlaceholder')"
-                        :disabled="isSavingBotName"
-                        @keydown.enter.prevent="handleConfirmBotName"
-                        @keydown.esc.prevent="handleCancelBotName"
-                        @blur="handleConfirmBotName"
+              <template #identity>
+                <!-- Identity floats as a card — same recipe as the bots-list persona
+                     cards (bg-card + border + menu-shell radius), just tighter padding.
+                     Wrapping it gives the header a real visual anchor: the round avatar
+                     no longer sits bare against the nav-hover edge, so back + name read
+                     as one settled block instead of two misaligned centers. The card
+                     border replaces the old hairline, so no divider above or below. -->
+                <div class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-3">
+                  <!-- Avatar -->
+                  <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
+                    <Avatar class="size-12 rounded-full">
+                      <AvatarImage
+                        v-if="bot?.avatar_url"
+                        :src="bot.avatar_url"
+                        :alt="bot.display_name"
                       />
-                      <div class="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none">
-                        <Check class="size-3" />
-                      </div>
-                    </template>
-                    <template v-else>
-                      <h2 class="truncate text-sm font-semibold text-foreground">
-                        {{ botNameDraft.trim() || bot?.display_name || botId }}
-                      </h2>
-                      <button
-                        v-if="bot"
-                        type="button"
-                        class="opacity-0 group-hover/name:opacity-100 p-1 shrink-0"
-                        :disabled="botLifecyclePending"
-                        @click="handleStartEditBotName"
-                      >
-                        <SquarePen class="size-3 text-muted-foreground" />
-                      </button>
-                    </template>
+                      <AvatarFallback class="text-lg">
+                        {{ avatarFallback }}
+                      </AvatarFallback>
+                    </Avatar>
+                    <!-- Edit Overlay -->
+                    <button
+                      type="button"
+                      class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                      :title="$t('common.edit')"
+                      :aria-label="$t('common.edit')"
+                      :disabled="!bot || botLifecyclePending"
+                      @click="handleEditAvatar"
+                    >
+                      <SquarePen class="size-4 text-white" />
+                    </button>
                   </div>
+              
+                  <!-- Info Block -->
+                  <div class="min-w-0 flex-1 flex flex-col justify-center">
+                    <div class="group/name flex items-center gap-1 relative min-w-0">
+                      <template v-if="isEditingBotName && bot">
+                        <Input
+                          ref="editNameInputRef"
+                          v-model="botNameDraft"
+                          class="h-7 w-full text-xs px-2 pr-6 shadow-none"
+                          :placeholder="$t('bots.displayNamePlaceholder')"
+                          :disabled="isSavingBotName"
+                          @keydown.enter.prevent="handleConfirmBotName"
+                          @keydown.esc.prevent="handleCancelBotName"
+                          @blur="handleConfirmBotName"
+                        />
+                        <div class="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none">
+                          <Check class="size-3" />
+                        </div>
+                      </template>
+                      <template v-else>
+                        <h2 class="truncate text-sm font-semibold text-foreground">
+                          {{ botNameDraft.trim() || bot?.display_name || botId }}
+                        </h2>
+                        <button
+                          v-if="bot"
+                          type="button"
+                          class="opacity-0 group-hover/name:opacity-100 p-1 shrink-0"
+                          :disabled="botLifecyclePending"
+                          @click="handleStartEditBotName"
+                        >
+                          <SquarePen class="size-3 text-muted-foreground" />
+                        </button>
+                      </template>
+                    </div>
                 
-                  <!-- Status: an inline dot + label living inside the white identity
+                    <!-- Status: an inline dot + label living inside the white identity
                        card — no filled pill, so it never reads as a black blob on
                        white. A success dot for a healthy/active bot echoes the right
                        pane's green "Healthy"; an issue turns dot + label destructive;
                        a healthy-but-inactive bot dims to a muted dot; lifecycle shows
                        a spinner. Bot type trails as a muted footnote. All semantic
                        tokens, so light and dark stay in sync. -->
-                  <div class="mt-1 flex items-center gap-1.5 text-[11px]">
-                    <template v-if="bot">
-                      <LoaderCircle
-                        v-if="bot.status === 'creating' || bot.status === 'deleting'"
-                        class="size-2.5 shrink-0 animate-spin text-muted-foreground"
-                      />
-                      <span
-                        v-else
-                        class="size-1.5 shrink-0 rounded-full"
-                        :class="statusVariant === 'destructive'
-                          ? 'bg-destructive'
-                          : statusVariant === 'secondary'
-                            ? 'bg-muted-foreground/40'
-                            : 'bg-success'"
-                      />
-                      <span
-                        class="font-medium"
-                        :class="statusVariant === 'destructive' ? 'text-destructive' : 'text-muted-foreground'"
-                        :title="hasIssue ? issueTitle : undefined"
-                      >{{ statusLabel }}</span>
-                      <span
-                        v-if="bot.type"
-                        class="text-muted-foreground/60"
-                      >· {{ botTypeLabel }}</span>
-                    </template>
+                    <div class="mt-1 flex items-center gap-1.5 text-[11px]">
+                      <template v-if="bot">
+                        <LoaderCircle
+                          v-if="bot.status === 'creating' || bot.status === 'deleting'"
+                          class="size-2.5 shrink-0 animate-spin text-muted-foreground"
+                        />
+                        <span
+                          v-else
+                          class="size-1.5 shrink-0 rounded-full"
+                          :class="statusVariant === 'destructive'
+                            ? 'bg-destructive'
+                            : statusVariant === 'secondary'
+                              ? 'bg-muted-foreground/40'
+                              : 'bg-success'"
+                        />
+                        <span
+                          class="font-medium"
+                          :class="statusVariant === 'destructive' ? 'text-destructive' : 'text-muted-foreground'"
+                          :title="hasIssue ? issueTitle : undefined"
+                        >{{ statusLabel }}</span>
+                        <span
+                          v-if="bot.type"
+                          class="text-muted-foreground/60"
+                        >· {{ botTypeLabel }}</span>
+                      </template>
+                    </div>
                   </div>
                 </div>
-              </div>
-            
-              <!-- Search Input -->
-              <div class="mt-3 relative">
-                <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
-                <Input
-                  v-model="searchQuery"
-                  type="text"
-                  name="bot-settings-search"
-                  autocomplete="off"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck="false"
-                  class="pl-8 pr-8 h-8 text-xs"
-                  :placeholder="$t('common.search')"
-                />
-                <button
-                  v-if="searchQuery"
-                  type="button"
-                  class="absolute right-2 top-1/2 -translate-y-1/2 size-4 flex items-center justify-center rounded-full hover:bg-muted text-muted-foreground shrink-0"
-                  @click="searchQuery = ''"
-                >
-                  <X class="size-2.5" />
-                </button>
-              </div>
-            </div>
+              </template>
+            </DetailNavSidebar>
           </template>
 
-          <template #sidebar-content>
-            <!-- Same NavItem rows as the settings sidebar; search narrows the
-               groups in place instead of swapping to a separate result list. -->
-            <div class="px-2 pb-2">
-              <template v-if="displayGroups.length">
-                <div
-                  v-for="(group, idx) in displayGroups"
-                  :key="group.key"
-                  :class="idx > 0 ? 'mt-4' : ''"
-                >
-                  <SidebarMenu class="m-0 gap-1 p-0">
-                    <SidebarMenuItem
-                      v-for="tab in group.items"
-                      :key="tab.value"
-                    >
-                      <NavItem
-                        :active="activeTab === tab.value"
-                        :aria-current="activeTab === tab.value ? 'page' : undefined"
-                        @click="selectTab(tab.value)"
-                      >
-                        <component
-                          :is="tab.icon"
-                          v-if="tab.icon"
-                          :stroke-width="1.75"
-                          class="size-4 shrink-0"
-                        />
-                        <span class="whitespace-nowrap">{{ $t(tab.label) }}</span>
-                      </NavItem>
-                    </SidebarMenuItem>
-                  </SidebarMenu>
-                </div>
-              </template>
-              <div
-                v-else
-                class="px-3 py-6 text-center text-xs text-muted-foreground"
-              >
-                {{ $t('common.noData') }}
-              </div>
-            </div>
-          </template>
+          <template #sidebar-content />
 
           <template #sidebar-footer />
 
@@ -261,16 +191,16 @@
 <script setup lang="ts">
 import {
   Avatar, AvatarImage, AvatarFallback, Input,
-  SidebarMenu, SidebarMenuItem,
 } from '@felinic/ui'
 import {
-  SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
+  SquarePen, LoaderCircle, Check, LayoutDashboard, Settings, MessageSquare,
   BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft, Workflow, Laptop, Plug
+  Monitor, Globe, Bot as BotIcon, PackageOpen, Workflow, Laptop, Plug
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
-import { NavItem, toast } from '@felinic/ui'
+import { toast } from '@felinic/ui'
+import DetailNavSidebar from '@/components/detail-nav-sidebar/index.vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
@@ -431,8 +361,6 @@ const tabList = computed(() => {
   })
 })
 
-const searchQuery = ref('')
-
 const searchIndex = computed(() => {
   return [
     { tab: 'general', key: 'bots.settings.blocks.global', keywords: ['name', 'avatar', 'description', 'timezone'] },
@@ -465,16 +393,11 @@ const searchIndex = computed(() => {
   }))
 })
 
-const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
-
-// Match a tab against the search box: its title, its tab key, and the keyword
-// index so deep settings (e.g. "telegram", "pgvector") still surface the tab.
-function tabMatches(tab: { value: string, label: string }): boolean {
-  const q = normalizedQuery.value
-  if (!q) return true
-  if (t(tab.label).toLowerCase().includes(q)) return true
+// Extra search reach beyond the label/value match DetailNavSidebar already
+// does: the tab's own i18n key plus the keyword index, so deep settings
+// (e.g. "telegram", "pgvector") still surface their tab.
+function tabMatchesSearch(tab: { value: string, label: string }, q: string): boolean {
   if (t(`bots.tabs.${tab.value}`).toLowerCase().includes(q)) return true
-  if (tab.value.toLowerCase().includes(q)) return true
   return searchIndex.value.some(item =>
     item.tab === tab.value && (
       item.translatedTitle.toLowerCase().includes(q)
@@ -484,7 +407,6 @@ function tabMatches(tab: { value: string, label: string }): boolean {
 }
 
 function selectTab(value: string): void {
-  searchQuery.value = ''
   // Mobile: the tab list and a tab's content are two addressable levels —
   // bare path = list, ?tab=x = content — so the tap is a real push and the
   // system back button pops straight back to the list. The synced-param
@@ -539,13 +461,6 @@ const groupedTabs = computed(() => {
     { key: 'security', items: tabList.value.filter(t => securityKeys.includes(t.value)) },
   ].filter(g => g.items.length > 0)
 })
-
-// Narrow the grouped nav in place while searching; drop emptied groups.
-const displayGroups = computed(() =>
-  groupedTabs.value
-    .map(group => ({ ...group, items: group.items.filter(tabMatches) }))
-    .filter(group => group.items.length > 0),
-)
 
 const activeComponent = computed(() => {
   return tabList.value.find(tab => tab.value === activeTab.value)

@@ -1,27 +1,35 @@
 <template>
   <ContextMenu>
     <ContextMenuTrigger as-child>
-      <button
-        type="button"
-        :class="rowClass"
-        :style="{ paddingLeft: `${0.5 + depth * 0.875}rem` }"
-        @click="openDoc"
+      <NavRow
+        :label="node.title || t('projects.untitled')"
+        :depth="depth"
+        :expandable="hasChildren"
+        :expanded="expanded"
+        @activate="openDoc"
+        @toggle="toggle"
       >
-        <!-- Chevron doubles as the expand toggle; a leaf keeps the slot so
-             titles across rows stay on one column. -->
-        <span
-          class="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground"
-          :class="hasChildren ? chevronHoverClass : 'opacity-0'"
-          @click.stop="hasChildren && store.toggleExpanded(node.id!)"
-        >
-          <ChevronRight
-            class="size-3 transition-transform duration-150"
-            :class="expanded ? 'rotate-90' : ''"
-          />
-        </span>
-        <FileText class="size-3.5 shrink-0 text-muted-foreground" />
-        <span class="min-w-0 flex-1 truncate">{{ node.title || t('projects.untitled') }}</span>
-      </button>
+        <template #icon>
+          <FileText class="size-3.5" />
+        </template>
+        <template #actions>
+          <!-- Creation must be reachable without a right-click. -->
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            shape="circle"
+            :class="rowActionClass"
+            :title="t('projects.newSubDoc')"
+            :aria-label="t('projects.newSubDoc')"
+            @click.stop="emit('create-child', node)"
+          >
+            <Plus
+              :stroke-width="1.75"
+              class="size-3.5"
+            />
+          </Button>
+        </template>
+      </NavRow>
     </ContextMenuTrigger>
     <ContextMenuContent>
       <ContextMenuItem @select="emit('create-child', node)">
@@ -60,8 +68,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, FileText, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { FileText, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import {
+  Button,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -71,6 +80,8 @@ import {
 import type { ProjectTreeNode } from '@memohai/sdk'
 import { useProjectsStore } from '@/store/projects'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import NavRow from './nav-row.vue'
+import { rowActionClass } from './row-chrome'
 
 const props = defineProps<{
   projectId: string
@@ -88,14 +99,14 @@ const { t } = useI18n()
 const store = useProjectsStore()
 const workspaceTabs = useWorkspaceTabsStore()
 
-// Hand-rolled nav rows (no tree primitive in @felinic/ui): the hover fill is
-// the row's own chrome, same family as the sidebar session rows.
-const rowClass = 'group flex w-full min-w-0 cursor-pointer items-center gap-1 rounded-md py-1 pr-2 text-left text-label text-foreground hover:bg-[color:var(--sidebar-hover)]' /* ui-allow-style */
-const chevronHoverClass = 'hover:bg-[color:var(--ui-hover)] hover:text-foreground' /* ui-allow-style */
-
 const children = computed(() => store.childrenOf(props.projectId, props.node.id ?? null))
 const hasChildren = computed(() => children.value.length > 0)
 const expanded = computed(() => !!props.node.id && store.isExpanded(props.node.id))
+
+function toggle() {
+  if (!hasChildren.value || !props.node.id) return
+  store.toggleExpanded(props.node.id)
+}
 
 function openDoc() {
   if (!props.node.id) return

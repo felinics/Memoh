@@ -215,7 +215,8 @@
     "supermarket": "マーケットプレイス",
     "about": "Memoh について",
     "switchBot": "Botを切り替え",
-    "manageBots": "Botを管理"
+    "manageBots": "Botを管理",
+    "projects": "Projects"
   },
   "runtimes": {
     "title": "コンピューター",
@@ -3469,6 +3470,22 @@
       "assignee": "担当者",
       "priority": "優先度",
       "due_at": "期限"
+    },
+    "wiki": "Wiki",
+    "wikiEmpty": "Doc はまだありません",
+    "projectDescription": "説明",
+    "projectDescriptionPlaceholder": "このプロジェクトの用途は？",
+    "createSuccess": "プロジェクトを作成しました",
+    "emptyTitle": "プロジェクトはまだありません",
+    "openIssues": "未完了 {count} 件",
+    "closedIssues": "完了 {count} 件",
+    "tabs": {
+      "overview": "概要",
+      "member": "メンバー"
+    },
+    "tabPlaceholder": {
+      "overview": "プロジェクト概要はここに入ります。",
+      "member": "メンバー管理はここに入ります。"
     }
   }
 }

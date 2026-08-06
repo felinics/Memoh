@@ -11,24 +11,41 @@
       v-else
       class="flex h-full min-h-0 gap-3 overflow-x-auto bg-background p-3"
     >
+      <!-- Each column is a soft-tinted surface in its status hue, so the board
+           reads as four states at a glance instead of four identical lists.
+           Hue is the ONLY thing that varies between columns. -->
       <div
         v-for="column in columns"
         :key="column.status"
-        class="flex h-full w-64 shrink-0 flex-col"
+        class="flex h-full w-72 shrink-0 flex-col rounded-lg p-2"
+        :class="column.style.surface"
       >
-        <div class="flex shrink-0 items-center gap-1.5 px-1 pb-2">
-          <span class="text-label font-medium text-foreground">{{ column.label }}</span>
-          <span class="text-caption text-muted-foreground">{{ column.cards.length }}</span>
+        <div class="flex shrink-0 items-center gap-2 px-1 pb-2">
+          <span
+            class="inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 text-body font-medium"
+            :class="column.style.pill"
+          >
+            <span
+              class="size-1.5 rounded-full"
+              :class="column.style.dot"
+            />
+            {{ column.label }}
+          </span>
+          <span class="text-body text-muted-foreground">{{ column.cards.length }}</span>
           <div class="flex-1" />
           <Button
             variant="ghost"
             size="icon-sm"
-            class="size-6 rounded-sm p-0 text-muted-foreground"
+            shape="circle"
+            :class="columnActionClass"
             :title="t('projects.newIssue')"
             :aria-label="t('projects.newIssue')"
             @click="beginCreate(column.status)"
           >
-            <Plus class="size-3.5" />
+            <Plus
+              :stroke-width="1.75"
+              class="size-3.5"
+            />
           </Button>
         </div>
 
@@ -50,12 +67,22 @@
             :class="cardClass"
             @click="openIssue(card)"
           >
-            <div class="text-label text-foreground">
-              {{ card.title || t('projects.untitled') }}
+            <div class="flex items-start gap-2">
+              <!-- Status glyph: the card carries its own state, so a card
+                   dragged mid-flight still reads correctly. State-constant
+                   color per the accent contract. -->
+              <component
+                :is="column.style.icon"
+                class="mt-px size-4 shrink-0"
+                :class="column.style.glyph"
+              />
+              <span class="min-w-0 flex-1 text-label text-foreground">
+                {{ card.title || t('projects.untitled') }}
+              </span>
             </div>
             <div
               v-if="card.labels?.length || card.priority || card.due_at"
-              class="mt-2 flex flex-wrap items-center gap-1.5"
+              class="mt-2 flex flex-wrap items-center gap-1.5 pl-6"
             >
               <Badge
                 v-if="card.priority"
@@ -96,10 +123,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Sortable from 'sortablejs'
-import { Plus } from 'lucide-vue-next'
+import { Circle, CircleCheck, CircleDashed, CircleSlash, Plus } from 'lucide-vue-next'
 import { Badge, Button, PanePlaceholder, toast } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import {
@@ -130,9 +157,52 @@ const projectId = props.params.params.projectId
 const STATUSES = ['todo', 'in_progress', 'done', 'cancelled'] as const
 type IssueStatus = typeof STATUSES[number]
 
+// One accent hue per status, pulled from the palette's 6-role ramp — never a
+// hand-mixed color. `-soft` tints the column surface, `-soft-active` the
+// header pill, the base hue the dot and the card glyph (state-constant per
+// the accent contract). Glyphs follow the issue-tracker convention so a card
+// still reads its own state while dragged between columns.
+const STATUS_STYLE: Record<IssueStatus, {
+  icon: Component
+  surface: string
+  pill: string
+  dot: string
+  glyph: string
+}> = {
+  todo: {
+    icon: Circle,
+    surface: 'bg-accent-gray-soft',
+    pill: 'bg-accent-gray-soft-active text-accent-gray-deep',
+    dot: 'bg-accent-gray',
+    glyph: 'text-accent-gray',
+  },
+  in_progress: {
+    icon: CircleDashed,
+    surface: 'bg-accent-blue-soft',
+    pill: 'bg-accent-blue-soft-active text-accent-blue-deep',
+    dot: 'bg-accent-blue',
+    glyph: 'text-accent-blue',
+  },
+  done: {
+    icon: CircleCheck,
+    surface: 'bg-accent-green-soft',
+    pill: 'bg-accent-green-soft-active text-accent-green-deep',
+    dot: 'bg-accent-green',
+    glyph: 'text-accent-green',
+  },
+  cancelled: {
+    icon: CircleSlash,
+    surface: 'bg-accent-red-soft',
+    pill: 'bg-accent-red-soft-active text-accent-red-deep',
+    dot: 'bg-accent-red',
+    glyph: 'text-accent-red',
+  },
+}
+
 // Hand-rolled kanban card (no card-as-drag-item primitive): the whole card is
 // the click/drag target, so its hover fill is the card's own chrome.
 const cardClass = 'block w-full cursor-pointer rounded-md border border-border bg-card p-3 text-left hover:bg-[color:var(--ui-hover)]' /* ui-allow-style */
+const columnActionClass = 'size-6 shrink-0 p-0 text-muted-foreground' /* ui-allow-style */
 
 const issues = ref<ProjectIssue[]>([])
 const loading = ref(false)
@@ -141,6 +211,7 @@ const loaded = ref(false)
 const columns = computed(() => STATUSES.map(status => ({
   status,
   label: t(`projects.status.${status}`),
+  style: STATUS_STYLE[status],
   cards: issues.value
     .filter(issue => issue.status === status)
     .sort((a, b) => {

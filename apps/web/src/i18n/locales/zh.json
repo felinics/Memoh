@@ -218,7 +218,8 @@
     "supermarket": "应用市场",
     "about": "关于",
     "switchBot": "切换智能体",
-    "manageBots": "管理智能体"
+    "manageBots": "管理智能体",
+    "projects": "项目"
   },
   "runtimes": {
     "title": "电脑",
@@ -3492,6 +3493,22 @@
       "assignee": "执行人",
       "priority": "优先级",
       "due_at": "截止日期"
+    },
+    "wiki": "Wiki",
+    "wikiEmpty": "还没有文档",
+    "projectDescription": "描述",
+    "projectDescriptionPlaceholder": "这个项目用来做什么？",
+    "createSuccess": "项目已创建",
+    "emptyTitle": "还没有项目",
+    "openIssues": "{count} 个未完成",
+    "closedIssues": "{count} 个已完成",
+    "tabs": {
+      "overview": "概览",
+      "member": "成员"
+    },
+    "tabPlaceholder": {
+      "overview": "项目概览稍后放在这里。",
+      "member": "成员管理稍后放在这里。"
     }
   }
 }
