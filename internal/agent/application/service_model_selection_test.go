@@ -23,8 +23,20 @@ func TestOffEffortFor(t *testing.T) {
 		levels []string
 		want   string
 	}{
-		{"none wins", []string{models.ReasoningEffortNone, "low", "medium"}, models.ReasoningEffortNone},
-		{"minimal when no none", []string{models.ReasoningEffortMinimal, "low", "medium"}, models.ReasoningEffortMinimal},
+		{
+			"declaring disable yields the OpenAI wire spelling of off",
+			[]string{models.ReasoningEffortDisable, "low", "medium"},
+			models.ReasoningEffortNone,
+		},
+		{
+			// minimal reduces reasoning, it does not stop it, so standing in for off
+			// would make Off and the Minimal tier the same request. Upstream also
+			// never ships both: minimal is gpt-5.0's weakest tier and gpt-5.1
+			// replaced it with none.
+			"minimal is a tier, not a stand-in for off",
+			[]string{models.ReasoningEffortMinimal, "low", "medium"},
+			"",
+		},
 		{"empty when only real tiers (omit, do not enable)", []string{"medium", "high", "xhigh"}, ""},
 		{"legacy base yields empty (omit reasoning_effort)", []string{"low", "medium", "high"}, ""},
 		{"empty levels yield empty", nil, ""},
@@ -182,11 +194,12 @@ func TestResolveReasoningConfig(t *testing.T) {
 		},
 	}
 
-	noneEffortModel := models.GetResponse{
+	// A model that advertises it can be turned off, alongside its active tiers.
+	disablableModel := models.GetResponse{
 		Model: models.Model{
 			Config: models.ModelConfig{
 				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{"none", "minimal", "low", "medium", "high"},
+				ReasoningEfforts: []string{models.ReasoningEffortDisable, "minimal", "low", "medium", "high"},
 			},
 		},
 	}
@@ -236,18 +249,27 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
-			name:          "unsupported none effort falls back to bot default",
+			// A requested "none" is an off request, not an active tier. Treating it as
+			// a tier produced Active with Effort "none" — enabled at no strength —
+			// which wires to the same request as off.
+			name:          "requested none reads as off even when the model cannot be turned off",
 			model:         toggleModel,
 			botSettings:   settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: models.ReasoningEffortNone,
-			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
+			want:          &models.ReasoningConfig{Disabled: true},
 		},
 		{
-			name:          "explicit none effort is preserved when model supports it",
-			model:         noneEffortModel,
+			name:          "requested none reads as off, and a disablable model carries the wire value",
+			model:         disablableModel,
 			botSettings:   settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: models.ReasoningEffortNone,
-			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortNone},
+			want:          &models.ReasoningConfig{Disabled: true, OffEffort: models.ReasoningEffortNone},
+		},
+		{
+			name:          "explicit disable reads as off",
+			model:         disablableModel,
+			requestEffort: models.ReasoningEffortDisable,
+			want:          &models.ReasoningConfig{Disabled: true, OffEffort: models.ReasoningEffortNone},
 		},
 		{
 			name:          "explicit effort is trimmed",

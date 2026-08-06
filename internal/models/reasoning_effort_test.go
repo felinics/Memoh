@@ -52,8 +52,11 @@ func TestIsReasoningDisabled(t *testing.T) {
 	}{
 		{effort: ReasoningEffortDisable, want: true},
 		{effort: "  disable  ", want: true},
-		{effort: ReasoningEffortNone, want: false},
+		// Legacy spelling: "none" was declarable and storable before off was
+		// unified onto the disable token, so stored values must still read as off.
+		{effort: ReasoningEffortNone, want: true},
 		{effort: "", want: false},
+		{effort: ReasoningEffortMinimal, want: false},
 	} {
 		if got := IsReasoningDisabled(tt.effort); got != tt.want {
 			t.Errorf("IsReasoningDisabled(%q) = %v, want %v", tt.effort, got, tt.want)
@@ -61,12 +64,29 @@ func TestIsReasoningDisabled(t *testing.T) {
 	}
 }
 
-func TestIsValidReasoningEffortRejectsDisable(t *testing.T) {
+// A model declares whether it can be turned off, and "disable" is how it says so.
+// The OpenAI wire spelling of that state is not declarable — adaptors translate
+// into it — so accepting both would give one state two selectable tokens again.
+func TestIsValidReasoningEffortVocabulary(t *testing.T) {
 	t.Parallel()
 
-	// ModelConfig stores wire tiers only; "disable" is a settings-level value and
-	// must never be persisted as a model capability.
-	if IsValidReasoningEffort(ReasoningEffortDisable) {
-		t.Fatal("IsValidReasoningEffort accepted the disable sentinel")
+	if !IsValidReasoningEffort(ReasoningEffortDisable) {
+		t.Error("IsValidReasoningEffort rejected disable, which a model must be able to advertise")
+	}
+	if IsValidReasoningEffort(ReasoningEffortNone) {
+		t.Error("IsValidReasoningEffort accepted none, which is a provider wire value")
+	}
+}
+
+// The nearest-tier fallback must never resolve an active reasoning config to off,
+// which is why the disable token is kept out of the tier ordering.
+func TestNearestEffortToMediumNeverReturnsOff(t *testing.T) {
+	t.Parallel()
+
+	if got := NearestEffortToMedium([]string{ReasoningEffortDisable}); got != "" {
+		t.Errorf("NearestEffortToMedium([disable]) = %q, want empty", got)
+	}
+	if got := NearestEffortToMedium([]string{ReasoningEffortDisable, ReasoningEffortHigh}); got != ReasoningEffortHigh {
+		t.Errorf("NearestEffortToMedium([disable high]) = %q, want high", got)
 	}
 }

@@ -6,8 +6,19 @@ export const REASONING_EFFORT_ADAPTIVE = 'adaptive'
 
 export type ThinkingMode = 'toggle' | 'adaptive' | 'only_adaptive' | 'none'
 
-// Effort tiers the UI understands, ordered weakest → strongest.
-export const KNOWN_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+// Active effort tiers the UI understands, ordered weakest → strongest. "off" is
+// REASONING_EFFORT_DISABLE and deliberately absent: it is not a tier, and keeping
+// it out is what stops the nearest-tier fallback from resolving to "off".
+//
+// Keep in sync with orderedReasoningEfforts in internal/models/types.go.
+export const KNOWN_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+
+// Values a model may advertise: the active tiers plus the disable token, which
+// declares that the model can be turned off. OpenAI's wire spelling of off
+// ("none") is not declarable — provider adaptors translate into it.
+//
+// Keep in sync with validReasoningEfforts in internal/models/types.go.
+const DECLARABLE_EFFORTS: readonly string[] = [REASONING_EFFORT_DISABLE, ...KNOWN_EFFORTS]
 
 // Keep in sync with normalizesMaxReasoningEffort in internal/conversation/flow/resolver.go.
 // Generic OpenAI-format clients retain the existing max-to-xhigh compatibility
@@ -17,7 +28,9 @@ const MAX_NORMALIZED_CLIENT_TYPES = new Set(['openai-completions', 'openai-respo
 export const EFFORT_LABELS: Record<string, string> = {
   [REASONING_EFFORT_DISABLE]: 'chat.reasoningOff',
   [REASONING_EFFORT_ADAPTIVE]: 'chat.reasoningAdaptive',
-  none: 'chat.reasoningNone',
+  // Legacy spelling of off, kept so values stored before the two tokens were
+  // unified still render — under the same label, not a second one.
+  none: 'chat.reasoningOff',
   minimal: 'chat.reasoningMinimal',
   low: 'chat.reasoningLow',
   medium: 'chat.reasoningMedium',
@@ -29,7 +42,7 @@ export const EFFORT_LABELS: Record<string, string> = {
 export const EFFORT_OPACITY: Record<string, number> = {
   [REASONING_EFFORT_DISABLE]: 0.1,
   [REASONING_EFFORT_ADAPTIVE]: 0.25,
-  none: 0.15,
+  none: 0.1,
   minimal: 0.25,
   low: 0.4,
   medium: 0.6,
@@ -56,14 +69,16 @@ export function resolveThinkingMode(config?: ModelConfigLike | null): ThinkingMo
   return config?.compatibilities?.includes('reasoning') ? 'toggle' : 'none'
 }
 
-// resolveEffortLevels returns the model's supported effort tiers (filtered to
-// known ones), falling back to the common low/medium/high subset. Generic
-// OpenAI-format clients use xhigh as the highest effort tier, while Codex can
-// expose max directly.
+// resolveEffortLevels returns what the model advertises — its active tiers, plus
+// the disable token when the model can be turned off — falling back to the common
+// low/medium/high subset when nothing is advertised. Generic OpenAI-format clients
+// use xhigh as the highest effort tier, while Codex can expose max directly.
+//
+// The disable token stays in the result because that is how the picker learns
+// whether "off" is achievable at all. It is dropped from the tier ordering
+// instead (see KNOWN_EFFORTS), so it can never be chosen as an active effort.
 export function resolveEffortLevels(config?: ModelConfigLike | null, clientType?: string | null): string[] {
-  const efforts = (config?.reasoning_efforts ?? []).filter((e) =>
-    (KNOWN_EFFORTS as readonly string[]).includes(e),
-  )
+  const efforts = (config?.reasoning_efforts ?? []).filter((e) => DECLARABLE_EFFORTS.includes(e))
   const levels = efforts.length > 0 ? efforts : ['low', 'medium', 'high']
   if (MAX_NORMALIZED_CLIENT_TYPES.has(clientType ?? '')) {
     return levels.filter((e) => e !== 'max')
@@ -74,9 +89,9 @@ export function resolveEffortLevels(config?: ModelConfigLike | null, clientType?
 // nearestEffortToMedium picks the tier closest to medium from levels, breaking
 // ties toward the weaker tier. It is the fallback when a model does not
 // advertise medium: [minimal, low] -> low, [high, max] -> high, [low, high] -> low.
-// Values outside KNOWN_EFFORTS (including the "disable" sentinel that
-// availableEffortsForMode prepends) are ignored, so passing a selectable list
-// straight in never yields "off"; returns '' when no usable tier is present.
+// Values outside KNOWN_EFFORTS — including the disable token, which a model may
+// advertise — are ignored, so passing a selectable list straight in never yields
+// "off"; returns '' when no usable tier is present.
 //
 // Keep in sync with NearestEffortToMedium in internal/models/types.go.
 export function nearestEffortToMedium(levels: string[]): string {
@@ -101,10 +116,18 @@ export function nearestEffortToMedium(levels: string[]): string {
   return best
 }
 
-// availableEffortsForMode builds the selectable list for a thinking mode:
-//   - none:          nothing
-//   - adaptive/toggle: an explicit "off" plus the effort tiers
+// availableEffortsForMode builds the selectable list for a thinking mode. A model
+// with no thinking concept offers nothing; otherwise the options are exactly what
+// the model advertises, with "off" hoisted to the front when it is among them.
+//
+// Nothing is prepended unconditionally any more. Doing so offered "off" on models
+// that never declared they can be turned off, where picking it has no defined
+// effect: the provider adaptor has no off shape to send, so it omits the field and
+// the model's default thinking behavior stands.
 export function availableEffortsForMode(mode: ThinkingMode, levels: string[]): string[] {
   if (mode === 'none') return []
-  return [REASONING_EFFORT_DISABLE, ...levels]
+  const tiers = levels.filter((e) => e !== REASONING_EFFORT_DISABLE)
+  return levels.includes(REASONING_EFFORT_DISABLE)
+    ? [REASONING_EFFORT_DISABLE, ...tiers]
+    : tiers
 }

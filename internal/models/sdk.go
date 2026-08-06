@@ -49,10 +49,10 @@ type ReasoningConfig struct {
 	Adaptive bool
 	// Effort is the effort tier to send when active ("" lets the SDK default).
 	Effort string
-	// OffEffort is the effort an OpenAI-style provider should send when disabled:
-	// "none" when supported, else "minimal" when supported, else "" meaning the
-	// reasoning_effort field is omitted entirely. It is never a real tier
-	// (low/medium/high) because those enable thinking instead of disabling it.
+	// OffEffort is the effort an OpenAI-format provider should send when disabled:
+	// "none" when the model advertised that it can be turned off, else "" meaning
+	// the reasoning_effort field is omitted entirely. It is never a real tier
+	// (minimal/low/medium/high) because those enable thinking instead of disabling it.
 	OffEffort string
 }
 
@@ -228,8 +228,8 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 }
 
 // openAIEffortOptions maps a reasoning decision to OpenAI-style reasoning.effort.
-// OpenAI models have no real on/off switch, so "off" is approximated by the
-// lowest effort the model supports (none when available, otherwise minimal).
+// OpenAI expresses "off" as a member of the same enum ("none" from gpt-5.1 on),
+// so the off state travels in the very field that carries the tiers.
 func openAIEffortOptions(clientType ClientType, rc *ReasoningConfig) []sdk.GenerateOption {
 	switch {
 	case rc.Active:
@@ -239,12 +239,11 @@ func openAIEffortOptions(clientType ClientType, rc *ReasoningConfig) []sdk.Gener
 		}
 		return []sdk.GenerateOption{sdk.WithReasoningEffort(effort)}
 	case rc.Disabled:
-		// Approximate "off". Only "none"/"minimal" actually reduce/disable
-		// thinking; a real tier (low/medium/high) would turn thinking ON (e.g.
-		// OpenRouter maps reasoning_effort:"low" to Anthropic extended thinking).
-		// When the model advertises no such off-ish tier, OffEffort is empty and
-		// we omit reasoning_effort entirely so the provider default (no thinking
-		// for toggle/Anthropic-compat models) applies.
+		// OffEffort is "none" when the model advertised that it can be turned off,
+		// and "" when it cannot. Omitting the field in the latter case lets the
+		// provider default stand; sending a real tier instead would turn thinking
+		// ON (OpenRouter, for instance, maps reasoning_effort:"low" onto Anthropic
+		// extended thinking), which is the opposite of what the user asked for.
 		off := openAIWireEffort(clientType, rc.OffEffort)
 		if off == "" {
 			return nil

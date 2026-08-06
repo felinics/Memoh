@@ -878,13 +878,14 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 // anthropicEffortEra reports whether an Anthropic model uses the 4.6+
 // effort/adaptive thinking mechanism rather than the legacy
 // thinking{type:"enabled", budget_tokens:N} path. Pre-4.6 Claude advertises only
-// the implicit low/medium/high base; 4.6+ adds at least one of none/minimal/
-// xhigh/max. Detecting any of those tiers catches the cloud-provider variants
-// that the registry leaves without supports_adaptive_thinking.
+// the implicit low/medium/high base; 4.6+ adds at least one of disable (spelled
+// "none" on the OpenAI wire) / minimal / xhigh / max. Detecting any of those
+// catches the cloud-provider variants that the registry leaves without
+// supports_adaptive_thinking.
 func anthropicEffortEra(effortLevels []string) bool {
 	for _, e := range effortLevels {
 		switch e {
-		case models.ReasoningEffortNone, models.ReasoningEffortMinimal,
+		case models.ReasoningEffortDisable, models.ReasoningEffortMinimal,
 			models.ReasoningEffortXHigh, models.ReasoningEffortMax:
 			return true
 		}
@@ -960,21 +961,21 @@ func hasEffort(effortLevels []string, effort string) bool {
 	return false
 }
 
-// offEffortFor picks the effort an OpenAI-style provider should send to
-// approximate "off": "none" when advertised, else "minimal" when advertised,
-// else "" meaning the caller must omit reasoning_effort entirely. Returning a
-// real tier (low/medium/high) here would *enable* thinking instead of disabling
-// it — e.g. OpenRouter translates reasoning_effort:"low" into Anthropic extended
-// thinking, so a toggle model that advertises only low/medium/high would keep
-// reasoning on when the user selected Off. Omitting the field instead lets the
-// provider default (thinking off for toggle/Anthropic-compat models) take over
-// and also avoids sending an unsupported tier. effortLevels is ordered low→high.
+// offEffortFor translates "off" into the effort value an OpenAI-format provider
+// needs, or "" when the model cannot be turned off and the caller must omit
+// reasoning_effort entirely. A model that advertises ReasoningEffortDisable can be
+// switched off, and OpenAI spells that state "none".
+//
+// It deliberately never falls back to a real tier. "minimal" used to serve as a
+// second-best "off", but it enables reasoning rather than disabling it, so Off
+// would have resolved to the same request as the Minimal tier — one state, two
+// selectable options. The two are also mutually exclusive upstream: minimal is
+// gpt-5.0's weakest tier and gpt-5.1 replaced it with none, so "advertises minimal
+// but not none" describes a model that genuinely cannot be turned off. Omitting
+// the field is the honest answer there, and it lets the provider default stand.
 func offEffortFor(effortLevels []string) string {
-	if hasEffort(effortLevels, models.ReasoningEffortNone) {
+	if hasEffort(effortLevels, models.ReasoningEffortDisable) {
 		return models.ReasoningEffortNone
-	}
-	if hasEffort(effortLevels, models.ReasoningEffortMinimal) {
-		return models.ReasoningEffortMinimal
 	}
 	return ""
 }

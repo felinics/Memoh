@@ -43,8 +43,10 @@ type Capabilities struct {
 }
 
 // effortOrder is the canonical low→high ordering used to render effort lists.
+// "off" leads because it is the weakest thing a user can ask for, even though it
+// is not a tier.
 var effortOrder = []string{
-	models.ReasoningEffortNone,
+	models.ReasoningEffortDisable,
 	models.ReasoningEffortMinimal,
 	models.ReasoningEffortLow,
 	models.ReasoningEffortMedium,
@@ -103,8 +105,10 @@ func deriveEffortLevels(e litellmEntry) []string {
 	if e.SupportsLowReasoningEffort == nil || *e.SupportsLowReasoningEffort {
 		present[models.ReasoningEffortLow] = true
 	}
+	// The registry flag is named after OpenAI's wire value, but what it tells us is
+	// that the model can be turned off, so it lands on our neutral token.
 	if boolVal(e.SupportsNoneReasoningEffort) {
-		present[models.ReasoningEffortNone] = true
+		present[models.ReasoningEffortDisable] = true
 	}
 	if boolVal(e.SupportsMinimalReasoningEffort) {
 		present[models.ReasoningEffortMinimal] = true
