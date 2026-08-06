@@ -2955,3 +2955,21 @@ CREATE POLICY project_node_labels_team_update ON public.project_node_labels
     WITH CHECK (team_id = public.memoh_current_team_id());
 CREATE POLICY project_node_labels_team_delete ON public.project_node_labels
     FOR DELETE USING (team_id = public.memoh_current_team_id());
+
+-- ---------------------------------------------------------------------------
+-- Per-project issue numbers (0131). Appended as ALTER rather than inlined into
+-- the CREATE TABLE above so a fresh install and an upgraded database end up
+-- with the same physical column order (sqlc's SELECT * scans by position).
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE public.project_nodes
+    ADD COLUMN IF NOT EXISTS number INT;
+
+ALTER TABLE public.project_nodes
+    ADD CONSTRAINT project_nodes_number_check
+    CHECK ((type = 'issue') = (number IS NOT NULL))
+    NOT VALID;
+
+CREATE UNIQUE INDEX IF NOT EXISTS project_nodes_issue_number_unique
+    ON public.project_nodes (team_id, project_id, number)
+    WHERE type = 'issue';

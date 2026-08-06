@@ -4408,6 +4408,8 @@ definitions:
         items:
           $ref: '#/definitions/project.Label'
         type: array
+      number:
+        type: integer
       priority:
         type: string
       project_id:
@@ -4499,6 +4501,9 @@ definitions:
         type: string
       id:
         type: string
+      number:
+        description: 'Per-project issue handle (#1, #2, …). Zero for docs.'
+        type: integer
       parent_id:
         type: string
       project_id:

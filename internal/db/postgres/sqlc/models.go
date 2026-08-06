@@ -700,6 +700,7 @@ type ProjectNode struct {
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Number          pgtype.Int4        `json:"number"`
 }
 
 type ProjectNodeLabel struct {

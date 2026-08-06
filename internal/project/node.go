@@ -84,6 +84,21 @@ func (s *Service) CreateNode(ctx context.Context, projectID, userID string, req 
 
 	var detail NodeDetail
 	err = s.inTx(ctx, func(q dbstore.Queries) error {
+		// Issue numbers are allocated as MAX()+1, so two concurrent creates
+		// would otherwise read the same max and collide on the unique index.
+		// The per-project tree lock serializes them; docs skip it.
+		var number pgtype.Int4
+		if req.Type == NodeTypeIssue {
+			if err := q.AcquireProjectTreeLock(ctx, projectID); err != nil {
+				return err
+			}
+			next, err := q.NextProjectIssueNumber(ctx, pid)
+			if err != nil {
+				return err
+			}
+			number = pgtype.Int4{Int32: next, Valid: true}
+		}
+
 		var maxRank string
 		var err error
 		if req.Type == NodeTypeDoc {
@@ -112,6 +127,7 @@ func (s *Service) CreateNode(ctx context.Context, projectID, userID string, req 
 			Rank:            rank,
 			Title:           title,
 			Body:            req.Body,
+			Number:          number,
 			CreatedByUserID: userUUID,
 			UpdatedByUserID: userUUID,
 		})

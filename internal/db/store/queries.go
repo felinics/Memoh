@@ -477,6 +477,7 @@ type Queries interface {
 	MaxProjectDocSiblingRank(ctx context.Context, arg dbsqlc.MaxProjectDocSiblingRankParams) (string, error)
 	MaxProjectIssueRank(ctx context.Context, arg dbsqlc.MaxProjectIssueRankParams) (string, error)
 	MoveProjectNode(ctx context.Context, arg dbsqlc.MoveProjectNodeParams) (dbsqlc.ProjectNode, error)
+	NextProjectIssueNumber(ctx context.Context, projectID pgtype.UUID) (int32, error)
 	RenumberProjectNodeVersion(ctx context.Context, arg dbsqlc.RenumberProjectNodeVersionParams) (int64, error)
 	SearchProjectNodes(ctx context.Context, arg dbsqlc.SearchProjectNodesParams) ([]dbsqlc.SearchProjectNodesRow, error)
 	SoftDeleteProject(ctx context.Context, projectID pgtype.UUID) (int64, error)

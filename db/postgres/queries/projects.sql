@@ -48,14 +48,23 @@ UPDATE projects SET deleted_at = now(), updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(project_id) AND deleted_at IS NULL;
 
+-- name: NextProjectIssueNumber :one
+-- Deliberately counts soft-deleted issues too: a number is retired with its
+-- issue, never handed to a different one.
+SELECT (COALESCE(MAX(number), 0) + 1)::int AS next_number
+FROM project_nodes
+WHERE team_id = public.memoh_current_team_id()
+  AND project_id = sqlc.arg(project_id)
+  AND type = 'issue';
+
 -- name: CreateProjectNode :one
 INSERT INTO project_nodes (
-  project_id, type, parent_id, rank, title, body,
+  project_id, type, parent_id, rank, title, body, number,
   created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id
 )
 VALUES (
   sqlc.arg(project_id), sqlc.arg(type), sqlc.narg(parent_id)::uuid,
-  sqlc.arg(rank), sqlc.arg(title), sqlc.arg(body),
+  sqlc.arg(rank), sqlc.arg(title), sqlc.arg(body), sqlc.narg(number)::int,
   sqlc.narg(created_by_user_id)::uuid, sqlc.narg(created_by_bot_id)::uuid,
   sqlc.narg(updated_by_user_id)::uuid, sqlc.narg(updated_by_bot_id)::uuid
 )
@@ -188,7 +197,7 @@ ORDER BY n.rank ASC, n.id ASC;
 
 -- name: ListProjectIssues :many
 SELECT
-  n.id, n.project_id, n.rank, n.title, n.version, n.created_at, n.updated_at,
+  n.id, n.project_id, n.rank, n.title, n.number, n.version, n.created_at, n.updated_at,
   d.status, d.assignee_user_id, d.assignee_bot_id, d.priority, d.due_at, d.revision
 FROM project_nodes n
 JOIN project_issue_details d ON d.team_id = n.team_id AND d.node_id = n.id

@@ -169,16 +169,16 @@ func (q *Queries) CreateProjectLabel(ctx context.Context, arg CreateProjectLabel
 
 const createProjectNode = `-- name: CreateProjectNode :one
 INSERT INTO project_nodes (
-  project_id, type, parent_id, rank, title, body,
+  project_id, type, parent_id, rank, title, body, number,
   created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id
 )
 VALUES (
   $1, $2, $3::uuid,
-  $4, $5, $6,
-  $7::uuid, $8::uuid,
-  $9::uuid, $10::uuid
+  $4, $5, $6, $7::int,
+  $8::uuid, $9::uuid,
+  $10::uuid, $11::uuid
 )
-RETURNING id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at
+RETURNING id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at, number
 `
 
 type CreateProjectNodeParams struct {
@@ -188,6 +188,7 @@ type CreateProjectNodeParams struct {
 	Rank            string      `json:"rank"`
 	Title           string      `json:"title"`
 	Body            string      `json:"body"`
+	Number          pgtype.Int4 `json:"number"`
 	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
 	CreatedByBotID  pgtype.UUID `json:"created_by_bot_id"`
 	UpdatedByUserID pgtype.UUID `json:"updated_by_user_id"`
@@ -202,6 +203,7 @@ func (q *Queries) CreateProjectNode(ctx context.Context, arg CreateProjectNodePa
 		arg.Rank,
 		arg.Title,
 		arg.Body,
+		arg.Number,
 		arg.CreatedByUserID,
 		arg.CreatedByBotID,
 		arg.UpdatedByUserID,
@@ -225,6 +227,7 @@ func (q *Queries) CreateProjectNode(ctx context.Context, arg CreateProjectNodePa
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Number,
 	)
 	return i, err
 }
@@ -389,7 +392,7 @@ func (q *Queries) GetProjectIssueDetails(ctx context.Context, nodeID pgtype.UUID
 }
 
 const getProjectNode = `-- name: GetProjectNode :one
-SELECT id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at FROM project_nodes
+SELECT id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at, number FROM project_nodes
 WHERE team_id = public.memoh_current_team_id()
   AND project_id = $1
   AND id = $2 AND deleted_at IS NULL
@@ -420,12 +423,13 @@ func (q *Queries) GetProjectNode(ctx context.Context, arg GetProjectNodeParams) 
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Number,
 	)
 	return i, err
 }
 
 const getProjectNodeByID = `-- name: GetProjectNodeByID :one
-SELECT id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at FROM project_nodes
+SELECT id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at, number FROM project_nodes
 WHERE team_id = public.memoh_current_team_id()
   AND id = $1 AND deleted_at IS NULL
 `
@@ -452,6 +456,7 @@ func (q *Queries) GetProjectNodeByID(ctx context.Context, nodeID pgtype.UUID) (P
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Number,
 	)
 	return i, err
 }
@@ -788,7 +793,7 @@ func (q *Queries) ListProjectIssueRanksByStatus(ctx context.Context, arg ListPro
 
 const listProjectIssues = `-- name: ListProjectIssues :many
 SELECT
-  n.id, n.project_id, n.rank, n.title, n.version, n.created_at, n.updated_at,
+  n.id, n.project_id, n.rank, n.title, n.number, n.version, n.created_at, n.updated_at,
   d.status, d.assignee_user_id, d.assignee_bot_id, d.priority, d.due_at, d.revision
 FROM project_nodes n
 JOIN project_issue_details d ON d.team_id = n.team_id AND d.node_id = n.id
@@ -803,6 +808,7 @@ type ListProjectIssuesRow struct {
 	ProjectID      pgtype.UUID        `json:"project_id"`
 	Rank           string             `json:"rank"`
 	Title          string             `json:"title"`
+	Number         pgtype.Int4        `json:"number"`
 	Version        int32              `json:"version"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
@@ -828,6 +834,7 @@ func (q *Queries) ListProjectIssues(ctx context.Context, projectID pgtype.UUID) 
 			&i.ProjectID,
 			&i.Rank,
 			&i.Title,
+			&i.Number,
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1209,7 +1216,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND project_id = $3
   AND id = $4
   AND type = 'doc' AND deleted_at IS NULL
-RETURNING id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at
+RETURNING id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at, number
 `
 
 type MoveProjectNodeParams struct {
@@ -1246,8 +1253,26 @@ func (q *Queries) MoveProjectNode(ctx context.Context, arg MoveProjectNodeParams
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Number,
 	)
 	return i, err
+}
+
+const nextProjectIssueNumber = `-- name: NextProjectIssueNumber :one
+SELECT (COALESCE(MAX(number), 0) + 1)::int AS next_number
+FROM project_nodes
+WHERE team_id = public.memoh_current_team_id()
+  AND project_id = $1
+  AND type = 'issue'
+`
+
+// Deliberately counts soft-deleted issues too: a number is retired with its
+// issue, never handed to a different one.
+func (q *Queries) NextProjectIssueNumber(ctx context.Context, projectID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, nextProjectIssueNumber, projectID)
+	var next_number int32
+	err := row.Scan(&next_number)
+	return next_number, err
 }
 
 const renumberProjectNodeVersion = `-- name: RenumberProjectNodeVersion :execrows
@@ -1573,7 +1598,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND id = $6
   AND version = $7
   AND deleted_at IS NULL
-RETURNING id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at
+RETURNING id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at, number
 `
 
 type UpdateProjectNodeContentParams struct {
@@ -1616,6 +1641,7 @@ func (q *Queries) UpdateProjectNodeContent(ctx context.Context, arg UpdateProjec
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Number,
 	)
 	return i, err
 }

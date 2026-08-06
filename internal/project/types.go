@@ -95,13 +95,15 @@ type Project struct {
 
 // Node is a full node row: doc or issue, with current content.
 type Node struct {
-	ID              string    `json:"id"`
-	ProjectID       string    `json:"project_id"`
-	Type            string    `json:"type"`
-	ParentID        string    `json:"parent_id,omitempty"`
-	Rank            string    `json:"rank"`
-	Title           string    `json:"title"`
-	Body            string    `json:"body"`
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Type      string `json:"type"`
+	ParentID  string `json:"parent_id,omitempty"`
+	Rank      string `json:"rank"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	// Per-project issue handle (#1, #2, …). Zero for docs.
+	Number          int       `json:"number,omitempty"`
 	Version         int       `json:"version"`
 	CreatedByUserID string    `json:"created_by_user_id,omitempty"`
 	CreatedByBotID  string    `json:"created_by_bot_id,omitempty"`
@@ -140,6 +142,7 @@ type Issue struct {
 	ProjectID      string     `json:"project_id"`
 	Rank           string     `json:"rank"`
 	Title          string     `json:"title"`
+	Number         int        `json:"number"`
 	Version        int        `json:"version"`
 	Status         string     `json:"status"`
 	AssigneeUserID string     `json:"assignee_user_id,omitempty"`

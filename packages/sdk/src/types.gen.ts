@@ -2606,6 +2606,7 @@ export type ProjectIssue = {
     due_at?: string;
     id?: string;
     labels?: Array<ProjectLabel>;
+    number?: number;
     priority?: string;
     project_id?: string;
     rank?: string;
@@ -2662,6 +2663,10 @@ export type ProjectNode = {
     created_by_bot_id?: string;
     created_by_user_id?: string;
     id?: string;
+    /**
+     * Per-project issue handle (#1, #2, …). Zero for docs.
+     */
+    number?: number;
     parent_id?: string;
     project_id?: string;
     rank?: string;

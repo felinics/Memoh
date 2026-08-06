@@ -22456,6 +22456,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/project.Label"
                     }
                 },
+                "number": {
+                    "type": "integer"
+                },
                 "priority": {
                     "type": "string"
                 },
@@ -22595,6 +22598,10 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "number": {
+                    "description": "Per-project issue handle (#1, #2, …). Zero for docs.",
+                    "type": "integer"
                 },
                 "parent_id": {
                     "type": "string"
