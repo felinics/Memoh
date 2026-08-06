@@ -315,6 +315,22 @@ const scheduleTokenTTL = 10 * time.Minute
 // This prevents unbounded Generate() calls from hanging forever.
 const scheduleRunTimeout = 5 * time.Minute
 
+// scheduleACPRunTimeout is the cap for runs that may execute through an ACP
+// agent (an explicit ACP schedule, or an existing-session target whose
+// runtime is unknown until fire time). Coding-agent runs routinely outlast
+// the native chat cap.
+const scheduleACPRunTimeout = 30 * time.Minute
+
+// runTimeoutFor picks the execution cap for one fire. Existing-session
+// schedules get the generous cap because the pinned session may run an ACP
+// agent.
+func runTimeoutFor(sched Schedule) time.Duration {
+	if sched.RuntimeType == RuntimeACPAgent || sched.RunTarget == RunTargetExistingSession {
+		return scheduleACPRunTimeout
+	}
+	return scheduleRunTimeout
+}
+
 func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	if s.triggerer == nil {
 		return errors.New("schedule triggerer not configured")
@@ -626,9 +642,10 @@ func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error
 		return errors.New("schedule id missing")
 	}
 	job := func() {
-		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), scheduleRunTimeout)
+		item := toSchedule(schedule)
+		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), runTimeoutFor(item))
 		defer runCancel()
-		if err := s.runSchedule(runCtx, toSchedule(schedule)); err != nil {
+		if err := s.runSchedule(runCtx, item); err != nil {
 			s.logger.Error("scheduled job failed", slog.String("schedule_id", schedule.ID.String()), slog.Any("error", err))
 		}
 	}
