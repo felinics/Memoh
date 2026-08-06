@@ -144,6 +144,9 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if err := rejectSystemACPRuntime(targetMode, targetRuntimeType); err != nil {
+		return err
+	}
 	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, requiredPermissionForSessionRuntime(targetMode, targetRuntimeType))
 	if err != nil {
 		return err
@@ -407,6 +410,22 @@ const (
 // whether the default user-facing listing applies: no explicit types and no
 // parent filter. That default filters by stored visibility rather than by a
 // type list, so schedule-created sessions marked user-visible surface too.
+// rejectSystemACPRuntime keeps system-managed session modes out of the HTTP
+// session API's ACP surface. The thread domain itself allows
+// schedule+acp_agent — the schedule trigger path creates those sessions —
+// but interactive session creation stays limited to chat and discuss.
+func rejectSystemACPRuntime(mode, runtimeType string) error {
+	if runtimeType != session.RuntimeACPAgent {
+		return nil
+	}
+	switch mode {
+	case session.TypeChat, session.TypeDiscuss:
+		return nil
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("runtime type %q is only supported for %s or %s session modes", session.RuntimeACPAgent, session.TypeChat, session.TypeDiscuss))
+	}
+}
+
 func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -601,6 +620,9 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		targetType, targetMode, targetRuntime, err = session.ResolveDescriptor(targetType, targetMode, targetRuntime)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		if err := rejectSystemACPRuntime(targetMode, targetRuntime); err != nil {
+			return err
 		}
 		if !bots.HasPermission(perms, requiredPermissionForSessionRuntime(targetMode, targetRuntime)) {
 			return echo.NewHTTPError(http.StatusForbidden, "bot access denied")

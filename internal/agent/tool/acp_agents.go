@@ -9,18 +9,36 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/db"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
+// ACPRuntimeSummary is the tool-local projection of a booted ACP runtime's
+// state. Mirrored here instead of importing the acp packages: the acp client
+// test binary imports this package, so a real dependency would be an import
+// cycle.
+type ACPRuntimeSummary struct {
+	RuntimeID      string
+	DefaultModelID string
+	CurrentModelID string
+	Models         []ACPOptionInfo
+	CurrentEffort  string
+	Efforts        []ACPOptionInfo
+}
+
+// ACPOptionInfo is one selectable model or reasoning effort of an ACP agent.
+type ACPOptionInfo struct {
+	ID   string
+	Name string
+}
+
 // ACPRuntimePool is the slice of the ACP session pool the tool needs to
 // discover an agent's models and reasoning efforts. Those live only inside a
 // running agent process, so the deep listing boots a temporary runtime.
 type ACPRuntimePool interface {
-	CreateRuntime(ctx context.Context, input acpagent.CreateRuntimeInput) (acpagent.RuntimeStatus, error)
-	CloseRuntime(botID, runtimeID string) error
+	CreateAgentRuntime(ctx context.Context, botID, agentID, runtimeOwnerAccountID string) (ACPRuntimeSummary, error)
+	CloseAgentRuntime(botID, runtimeID string) error
 }
 
 // ACPAgentsProvider exposes the bot's ACP agents (Codex, Claude Code, ...)
@@ -123,16 +141,12 @@ func (p *ACPAgentsProvider) describeAgent(ctx context.Context, botID, agentID st
 	if runtimeOwner == "" {
 		return nil, errors.New("no runtime owner identity available for this session")
 	}
-	status, err := p.pool.CreateRuntime(ctx, acpagent.CreateRuntimeInput{
-		BotID:                 botID,
-		AgentID:               agentID,
-		RuntimeOwnerAccountID: runtimeOwner,
-	})
+	status, err := p.pool.CreateAgentRuntime(ctx, botID, agentID, runtimeOwner)
 	if err != nil {
 		return nil, fmt.Errorf("boot %s runtime: %w", agentID, err)
 	}
 	defer func() {
-		if closeErr := p.pool.CloseRuntime(botID, status.RuntimeID); closeErr != nil {
+		if closeErr := p.pool.CloseAgentRuntime(botID, status.RuntimeID); closeErr != nil {
 			p.logger.Warn("close temporary ACP runtime failed",
 				slog.String("bot_id", botID),
 				slog.String("runtime_id", status.RuntimeID),
@@ -140,33 +154,28 @@ func (p *ACPAgentsProvider) describeAgent(ctx context.Context, botID, agentID st
 		}
 	}()
 
-	out := map[string]any{
-		"agent_id": agentID,
+	models := make([]map[string]any, 0, len(status.Models))
+	for _, m := range status.Models {
+		models = append(models, map[string]any{
+			"acp_model_id": m.ID,
+			"name":         m.Name,
+			"current":      m.ID == status.CurrentModelID,
+		})
 	}
-	if status.Models != nil {
-		models := make([]map[string]any, 0, len(status.Models.Available))
-		for _, m := range status.Models.Available {
-			models = append(models, map[string]any{
-				"acp_model_id": m.ID,
-				"name":         m.Name,
-				"current":      m.ID == status.Models.CurrentModelID,
-			})
-		}
-		out["models"] = models
-		out["default_model_id"] = status.DefaultModelID
+	efforts := make([]map[string]any, 0, len(status.Efforts))
+	for _, e := range status.Efforts {
+		efforts = append(efforts, map[string]any{
+			"effort":  e.ID,
+			"name":    e.Name,
+			"current": e.ID == status.CurrentEffort,
+		})
 	}
-	if status.Reasoning != nil {
-		efforts := make([]map[string]any, 0, len(status.Reasoning.Available))
-		for _, e := range status.Reasoning.Available {
-			efforts = append(efforts, map[string]any{
-				"effort":  e.ID,
-				"name":    e.Name,
-				"current": e.ID == status.Reasoning.CurrentEffort,
-			})
-		}
-		out["reasoning_efforts"] = efforts
-	}
-	return out, nil
+	return map[string]any{
+		"agent_id":          agentID,
+		"models":            models,
+		"default_model_id":  status.DefaultModelID,
+		"reasoning_efforts": efforts,
+	}, nil
 }
 
 func (p *ACPAgentsProvider) botMetadata(ctx context.Context, botID string) ([]byte, error) {
