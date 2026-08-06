@@ -20,6 +20,12 @@ export const KNOWN_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'
 // Keep in sync with validReasoningEfforts in internal/models/types.go.
 const DECLARABLE_EFFORTS: readonly string[] = [REASONING_EFFORT_DISABLE, ...KNOWN_EFFORTS]
 
+// How "off" was spelled in declarations before the two tokens were unified.
+// Configs written under the old spelling are rewritten on read, not discarded.
+//
+// Keep in sync with normalizeAdvertisedEfforts in internal/models/types.go.
+const LEGACY_OFF_EFFORT = 'none'
+
 // Keep in sync with normalizesMaxReasoningEffort in internal/conversation/flow/resolver.go.
 // Generic OpenAI-format clients retain the existing max-to-xhigh compatibility
 // behavior; Codex uses the effort levels advertised by its catalog directly.
@@ -77,8 +83,14 @@ export function resolveThinkingMode(config?: ModelConfigLike | null): ThinkingMo
 // The disable token stays in the result because that is how the picker learns
 // whether "off" is achievable at all. It is dropped from the tier ordering
 // instead (see KNOWN_EFFORTS), so it can never be chosen as an active effort.
+//
+// The legacy spelling is rewritten rather than filtered out. A config that still
+// advertises "none" describes a model that can be turned off, so dropping it would
+// hide Off from a model that supports it — for as long as that row goes unwritten.
 export function resolveEffortLevels(config?: ModelConfigLike | null, clientType?: string | null): string[] {
-  const efforts = (config?.reasoning_efforts ?? []).filter((e) => DECLARABLE_EFFORTS.includes(e))
+  const advertised = (config?.reasoning_efforts ?? [])
+    .map(e => (e === LEGACY_OFF_EFFORT ? REASONING_EFFORT_DISABLE : e))
+  const efforts = advertised.filter((e, i) => DECLARABLE_EFFORTS.includes(e) && advertised.indexOf(e) === i)
   const levels = efforts.length > 0 ? efforts : ['low', 'medium', 'high']
   if (MAX_NORMALIZED_CLIENT_TYPES.has(clientType ?? '')) {
     return levels.filter((e) => e !== 'max')
