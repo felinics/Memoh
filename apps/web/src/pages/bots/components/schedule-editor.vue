@@ -203,7 +203,11 @@
         :class="showMore ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
       >
         <div class="min-h-0">
-          <div class="mt-3">
+          <div class="mt-3 space-y-4">
+            <ScheduleExecutionFields
+              :bot-id="botId"
+              :form="execution"
+            />
             <div class="flex items-center justify-between gap-3">
               <Label class="text-muted-foreground">
                 {{ t('bots.schedule.form.maxCalls') }}
@@ -294,6 +298,7 @@ import {
 } from '@memohai/sdk'
 import type { ScheduleCreateRequest, ScheduleSchedule, ScheduleUpdateRequest } from '@memohai/sdk'
 import { FieldStack } from '@felinic/ui'
+import ScheduleExecutionFields, { type ScheduleExecutionForm } from './schedule-execution-fields.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   describeCron,
@@ -345,6 +350,7 @@ const form = reactive<SchedulePlainForm>({
   enabled: true,
 })
 const patternState = ref<ScheduleFormState>(defaultScheduleFormState())
+const execution = reactive<ScheduleExecutionForm>(defaultExecutionForm())
 const manualCron = ref('')
 const showMore = ref(false)
 const isSaving = ref(false)
@@ -440,8 +446,54 @@ const canSubmit = computed(() => {
   if (!form.command.trim()) return false
   if (!manualCron.value || !isValidCron(manualCron.value)) return false
   if (!maxCallsUnlimited.value && (form.maxCalls === null || form.maxCalls < 1)) return false
+  if (execution.runTarget === 'existing_session' && !execution.targetSessionId) return false
   return true
 })
+
+function defaultExecutionForm(): ScheduleExecutionForm {
+  return {
+    runTarget: 'new_session',
+    targetSessionId: '',
+    runtimeType: '',
+    acpAgentId: '',
+    modelId: '',
+    acpModelId: '',
+    reasoningEffort: '',
+    workdirId: '',
+  }
+}
+
+function hydrateExecution(schedule: ScheduleSchedule) {
+  execution.runTarget = schedule.run_target === 'existing_session' ? 'existing_session' : 'new_session'
+  execution.targetSessionId = schedule.target_session_id ?? ''
+  execution.runtimeType = schedule.runtime_type === 'acp_agent' ? 'acp_agent' : ''
+  execution.acpAgentId = schedule.acp_agent_id ?? ''
+  execution.modelId = schedule.model_id ?? ''
+  execution.acpModelId = schedule.acp_model_id ?? ''
+  execution.reasoningEffort = schedule.reasoning_effort ?? ''
+  execution.workdirId = schedule.workdir_id ?? ''
+}
+
+// hasExecutionConfig says whether the stored schedule carries any execution
+// override — used to auto-expand the disclosure the fields live in.
+function hasExecutionConfig(schedule: ScheduleSchedule): boolean {
+  return schedule.run_target === 'existing_session'
+    || !!schedule.runtime_type || !!schedule.acp_agent_id || !!schedule.model_id
+    || !!schedule.acp_model_id || !!schedule.reasoning_effort || !!schedule.workdir_id
+}
+
+function executionRequestBlock() {
+  return {
+    run_target: execution.runTarget,
+    target_session_id: execution.targetSessionId || undefined,
+    runtime_type: execution.runTarget === 'new_session' && execution.runtimeType ? execution.runtimeType : undefined,
+    acp_agent_id: execution.runTarget === 'new_session' && execution.acpAgentId ? execution.acpAgentId : undefined,
+    model_id: execution.modelId || undefined,
+    acp_model_id: execution.acpModelId || undefined,
+    reasoning_effort: execution.reasoningEffort || undefined,
+    workdir_id: execution.runTarget === 'new_session' && execution.workdirId ? execution.workdirId : undefined,
+  }
+}
 
 function resetForm() {
   form.name = ''
@@ -451,6 +503,7 @@ function resetForm() {
   form.enabled = true
   patternState.value = defaultScheduleFormState()
   manualCron.value = toCron(patternState.value)
+  Object.assign(execution, defaultExecutionForm())
   submitError.value = null
   showMore.value = false
 }
@@ -464,8 +517,9 @@ function hydrateForm(schedule: ScheduleSchedule) {
   form.enabled = schedule.enabled ?? true
   patternState.value = fromCron(schedule.pattern ?? '')
   manualCron.value = schedule.pattern ?? ''
+  hydrateExecution(schedule)
   submitError.value = null
-  showMore.value = (typeof raw === 'number' && raw > 0)
+  showMore.value = (typeof raw === 'number' && raw > 0) || hasExecutionConfig(schedule)
 }
 
 function hydrateFromProps() {
@@ -501,11 +555,15 @@ async function handleSubmit() {
       max_calls: form.maxCalls ?? null,
     }
     if (props.mode === 'create') {
-      await postBotsByBotIdSchedule({ path: { bot_id: props.botId }, body: base as unknown as ScheduleCreateRequest, throwOnError: true })
+      // Create carries the execution block flat; update sends it as one
+      // nested unit that replaces the stored block wholesale.
+      const body = { ...base, ...executionRequestBlock() }
+      await postBotsByBotIdSchedule({ path: { bot_id: props.botId }, body: body as unknown as ScheduleCreateRequest, throwOnError: true })
     } else {
       const id = props.schedule?.id
       if (!id) throw new Error('schedule id missing')
-      await putBotsByBotIdScheduleById({ path: { bot_id: props.botId, id }, body: base as unknown as ScheduleUpdateRequest, throwOnError: true })
+      const body = { ...base, execution: executionRequestBlock() }
+      await putBotsByBotIdScheduleById({ path: { bot_id: props.botId, id }, body: body as unknown as ScheduleUpdateRequest, throwOnError: true })
     }
     emit('saved')
   } catch (error) {
