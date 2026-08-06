@@ -438,6 +438,8 @@ func (s *Service) convertToGetResponse(dbModel sqlc.Model) GetResponse {
 		if err := json.Unmarshal(dbModel.Config, &resp.Config); err != nil {
 			s.logger.Warn("failed to unmarshal model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
 		}
+		// Rows written before "off" was unified still advertise the legacy spelling.
+		resp.Config = normalizeModelConfig(resp.Config)
 	}
 
 	return resp

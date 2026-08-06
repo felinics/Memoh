@@ -8,10 +8,18 @@ describe('resolveEffortLevels', () => {
     }, 'openai-completions')).toEqual([REASONING_EFFORT_DISABLE, 'low', 'medium', 'high'])
   })
 
-  it('drops none, which is a provider wire value rather than a declaration', () => {
+  it('rewrites the legacy off spelling instead of dropping it', () => {
+    // A config still advertising "none" describes a model that can be turned off.
+    // Dropping it would hide Off from a model that supports it.
     expect(resolveEffortLevels({
       reasoning_efforts: ['none', 'low', 'medium', 'high'],
-    }, 'openai-completions')).toEqual(['low', 'medium', 'high'])
+    }, 'openai-completions')).toEqual([REASONING_EFFORT_DISABLE, 'low', 'medium', 'high'])
+  })
+
+  it('collapses both spellings of off into one entry', () => {
+    expect(resolveEffortLevels({
+      reasoning_efforts: ['none', REASONING_EFFORT_DISABLE, 'low', 'high'],
+    }, 'openai-completions')).toEqual([REASONING_EFFORT_DISABLE, 'low', 'high'])
   })
 
   it('preserves max for Codex and filters client-only efforts', () => {
