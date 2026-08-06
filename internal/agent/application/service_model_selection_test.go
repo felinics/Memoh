@@ -272,6 +272,21 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:          &models.ReasoningConfig{Disabled: true, OffEffort: models.ReasoningEffortNone},
 		},
 		{
+			// A bot parked on off, overridden for one message with a tier the model
+			// does not advertise. The stored value must not be picked up as the active
+			// tier: "disable" is advertisable now, so it would otherwise reach the
+			// provider wire, where no vendor knows the word.
+			name:          "a stored off never becomes the active tier",
+			model:         disablableModel,
+			botSettings:   settings.Settings{ReasoningEffort: models.ReasoningEffortDisable},
+			requestEffort: models.ReasoningEffortXHigh,
+			want: &models.ReasoningConfig{
+				Active:    true,
+				Effort:    models.ReasoningEffortMedium,
+				OffEffort: models.ReasoningEffortNone,
+			},
+		},
+		{
 			name:          "explicit effort is trimmed",
 			model:         toggleModel,
 			requestEffort: " low ",

@@ -903,7 +903,12 @@ func pickEffort(requested string, botSettings settings.Settings, effortLevels []
 			return e
 		}
 	}
-	if e := strings.TrimSpace(botSettings.ReasoningEffort); e != "" && hasEffort(effortLevels, e) {
+	// The stored effort is skipped when it means "off". pickEffort only runs once
+	// reasoning is on, and "off" is advertisable now, so without this guard a bot
+	// parked on off would hand the disable token back as an active tier and send it
+	// upstream, where no provider knows the word.
+	if e := strings.TrimSpace(botSettings.ReasoningEffort); e != "" &&
+		!models.IsReasoningDisabled(e) && hasEffort(effortLevels, e) {
 		return e
 	}
 	if hasEffort(effortLevels, models.ReasoningEffortMedium) {
