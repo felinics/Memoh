@@ -2709,12 +2709,87 @@ export type ProvidertemplatesModelResponse = {
 };
 
 export type ScheduleCreateRequest = {
+    /**
+     * ACPAgentID names the ACP agent when RuntimeType is acp_agent.
+     */
+    acp_agent_id?: string;
+    /**
+     * ACPModelID is an agent-reported model identifier override for ACP
+     * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+     */
+    acp_model_id?: string;
     command?: string;
     description?: string;
     enabled?: boolean;
     max_calls?: ScheduleNullableInt;
+    /**
+     * ModelID is a native model UUID override (models.id).
+     */
+    model_id?: string;
     name?: string;
     pattern?: string;
+    /**
+     * ReasoningEffort overrides the reasoning effort for this schedule.
+     */
+    reasoning_effort?: string;
+    /**
+     * RunTarget is new_session (default) or existing_session.
+     */
+    run_target?: string;
+    /**
+     * RuntimeType selects the runtime for new sessions: "" or "model" for
+     * the native model runtime, "acp_agent" for an ACP agent. Must be empty
+     * in existing_session mode (inherited from the target session).
+     */
+    runtime_type?: string;
+    /**
+     * TargetSessionID names the session reused by existing_session mode.
+     */
+    target_session_id?: string;
+    /**
+     * WorkdirID binds new sessions to a bot workdir. Must be empty in
+     * existing_session mode (inherited from the target session).
+     */
+    workdir_id?: string;
+};
+
+export type ScheduleExecutionConfig = {
+    /**
+     * ACPAgentID names the ACP agent when RuntimeType is acp_agent.
+     */
+    acp_agent_id?: string;
+    /**
+     * ACPModelID is an agent-reported model identifier override for ACP
+     * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+     */
+    acp_model_id?: string;
+    /**
+     * ModelID is a native model UUID override (models.id).
+     */
+    model_id?: string;
+    /**
+     * ReasoningEffort overrides the reasoning effort for this schedule.
+     */
+    reasoning_effort?: string;
+    /**
+     * RunTarget is new_session (default) or existing_session.
+     */
+    run_target?: string;
+    /**
+     * RuntimeType selects the runtime for new sessions: "" or "model" for
+     * the native model runtime, "acp_agent" for an ACP agent. Must be empty
+     * in existing_session mode (inherited from the target session).
+     */
+    runtime_type?: string;
+    /**
+     * TargetSessionID names the session reused by existing_session mode.
+     */
+    target_session_id?: string;
+    /**
+     * WorkdirID binds new sessions to a bot workdir. Must be empty in
+     * existing_session mode (inherited from the target session).
+     */
+    workdir_id?: string;
 };
 
 export type ScheduleListLogsResponse = {
@@ -2745,6 +2820,15 @@ export type ScheduleNullableInt = {
 };
 
 export type ScheduleSchedule = {
+    /**
+     * ACPAgentID names the ACP agent when RuntimeType is acp_agent.
+     */
+    acp_agent_id?: string;
+    /**
+     * ACPModelID is an agent-reported model identifier override for ACP
+     * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+     */
+    acp_model_id?: string;
     bot_id?: string;
     command?: string;
     created_at?: string;
@@ -2753,15 +2837,50 @@ export type ScheduleSchedule = {
     enabled?: boolean;
     id?: string;
     max_calls?: number;
+    /**
+     * ModelID is a native model UUID override (models.id).
+     */
+    model_id?: string;
     name?: string;
     pattern?: string;
+    /**
+     * ReasoningEffort overrides the reasoning effort for this schedule.
+     */
+    reasoning_effort?: string;
+    /**
+     * RunTarget is new_session (default) or existing_session.
+     */
+    run_target?: string;
+    /**
+     * RuntimeType selects the runtime for new sessions: "" or "model" for
+     * the native model runtime, "acp_agent" for an ACP agent. Must be empty
+     * in existing_session mode (inherited from the target session).
+     */
+    runtime_type?: string;
+    /**
+     * TargetSessionID names the session reused by existing_session mode.
+     */
+    target_session_id?: string;
     updated_at?: string;
+    /**
+     * WorkdirID binds new sessions to a bot workdir. Must be empty in
+     * existing_session mode (inherited from the target session).
+     */
+    workdir_id?: string;
 };
 
 export type ScheduleUpdateRequest = {
     command?: string;
     description?: string;
     enabled?: boolean;
+    /**
+     * Execution replaces the whole execution parameter block when present.
+     * Field-level patching is deliberately not offered: the block carries
+     * cross-field constraints (run target vs runtime vs workdir), so
+     * callers send the full desired state and the service validates it as
+     * one unit.
+     */
+    execution?: ScheduleExecutionConfig;
     max_calls?: ScheduleNullableInt;
     name?: string;
     pattern?: string;

@@ -21362,6 +21362,14 @@ const docTemplate = `{
         "schedule.CreateRequest": {
             "type": "object",
             "properties": {
+                "acp_agent_id": {
+                    "description": "ACPAgentID names the ACP agent when RuntimeType is acp_agent.",
+                    "type": "string"
+                },
+                "acp_model_id": {
+                    "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
                 "command": {
                     "type": "string"
                 },
@@ -21374,10 +21382,71 @@ const docTemplate = `{
                 "max_calls": {
                     "$ref": "#/definitions/schedule.NullableInt"
                 },
+                "model_id": {
+                    "description": "ModelID is a native model UUID override (models.id).",
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
                 "pattern": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort overrides the reasoning effort for this schedule.",
+                    "type": "string"
+                },
+                "run_target": {
+                    "description": "RunTarget is new_session (default) or existing_session.",
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "description": "RuntimeType selects the runtime for new sessions: \"\" or \"model\" for\nthe native model runtime, \"acp_agent\" for an ACP agent. Must be empty\nin existing_session mode (inherited from the target session).",
+                    "type": "string"
+                },
+                "target_session_id": {
+                    "description": "TargetSessionID names the session reused by existing_session mode.",
+                    "type": "string"
+                },
+                "workdir_id": {
+                    "description": "WorkdirID binds new sessions to a bot workdir. Must be empty in\nexisting_session mode (inherited from the target session).",
+                    "type": "string"
+                }
+            }
+        },
+        "schedule.ExecutionConfig": {
+            "type": "object",
+            "properties": {
+                "acp_agent_id": {
+                    "description": "ACPAgentID names the ACP agent when RuntimeType is acp_agent.",
+                    "type": "string"
+                },
+                "acp_model_id": {
+                    "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
+                "model_id": {
+                    "description": "ModelID is a native model UUID override (models.id).",
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort overrides the reasoning effort for this schedule.",
+                    "type": "string"
+                },
+                "run_target": {
+                    "description": "RunTarget is new_session (default) or existing_session.",
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "description": "RuntimeType selects the runtime for new sessions: \"\" or \"model\" for\nthe native model runtime, \"acp_agent\" for an ACP agent. Must be empty\nin existing_session mode (inherited from the target session).",
+                    "type": "string"
+                },
+                "target_session_id": {
+                    "description": "TargetSessionID names the session reused by existing_session mode.",
+                    "type": "string"
+                },
+                "workdir_id": {
+                    "description": "WorkdirID binds new sessions to a bot workdir. Must be empty in\nexisting_session mode (inherited from the target session).",
                     "type": "string"
                 }
             }
@@ -21454,6 +21523,14 @@ const docTemplate = `{
         "schedule.Schedule": {
             "type": "object",
             "properties": {
+                "acp_agent_id": {
+                    "description": "ACPAgentID names the ACP agent when RuntimeType is acp_agent.",
+                    "type": "string"
+                },
+                "acp_model_id": {
+                    "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
                 "bot_id": {
                     "type": "string"
                 },
@@ -21478,13 +21555,37 @@ const docTemplate = `{
                 "max_calls": {
                     "type": "integer"
                 },
+                "model_id": {
+                    "description": "ModelID is a native model UUID override (models.id).",
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
                 "pattern": {
                     "type": "string"
                 },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort overrides the reasoning effort for this schedule.",
+                    "type": "string"
+                },
+                "run_target": {
+                    "description": "RunTarget is new_session (default) or existing_session.",
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "description": "RuntimeType selects the runtime for new sessions: \"\" or \"model\" for\nthe native model runtime, \"acp_agent\" for an ACP agent. Must be empty\nin existing_session mode (inherited from the target session).",
+                    "type": "string"
+                },
+                "target_session_id": {
+                    "description": "TargetSessionID names the session reused by existing_session mode.",
+                    "type": "string"
+                },
                 "updated_at": {
+                    "type": "string"
+                },
+                "workdir_id": {
+                    "description": "WorkdirID binds new sessions to a bot workdir. Must be empty in\nexisting_session mode (inherited from the target session).",
                     "type": "string"
                 }
             }
@@ -21500,6 +21601,14 @@ const docTemplate = `{
                 },
                 "enabled": {
                     "type": "boolean"
+                },
+                "execution": {
+                    "description": "Execution replaces the whole execution parameter block when present.\nField-level patching is deliberately not offered: the block carries\ncross-field constraints (run target vs runtime vs workdir), so\ncallers send the full desired state and the service validates it as\none unit.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/schedule.ExecutionConfig"
+                        }
+                    ]
                 },
                 "max_calls": {
                     "$ref": "#/definitions/schedule.NullableInt"
