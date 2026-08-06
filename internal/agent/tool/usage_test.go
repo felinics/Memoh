@@ -202,6 +202,8 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 	exempt := map[ToolName]string{
 		ToolWebSearch():         "self-describing one-shot search tool",
 		ToolWebFetch():          "self-describing one-shot fetch tool",
+		ToolListWorkdirs():      "self-describing one-shot listing tool; schedule Usage references it",
+		ToolListACPAgents():     "self-describing two-tier listing tool; schedule Usage references it",
 		ToolGenerateVideo():     "self-describing media generation tool",
 		ToolTranscribeAudio():   "self-describing media transcription tool",
 		ToolListEmailAccounts(): "email tool descriptions carry account/read/write semantics",

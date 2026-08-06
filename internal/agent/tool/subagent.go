@@ -208,6 +208,9 @@ type subagentModelCatalogItem struct {
 	ModelID      string
 	ProviderName string
 	Description  string
+	// EffortLevels is the model's supported reasoning effort tiers (empty
+	// when the capability registry has no data for the model).
+	EffortLevels []string
 }
 
 type subagentModelResolver func(
@@ -607,10 +610,14 @@ func (p *SpawnProvider) execListModels(ctx context.Context, session SessionConte
 	items := make([]map[string]any, 0, len(catalog))
 	for _, item := range catalog {
 		items = append(items, map[string]any{
-			"model_id":    item.ModelID,
-			"provider":    item.ProviderName,
-			"description": item.Description,
-			"current":     item.UUID == session.CurrentModelUUID,
+			"model_id": item.ModelID,
+			// model_uuid is the stable reference used where a model is
+			// stored by id, e.g. create_schedule's model_id parameter.
+			"model_uuid":        item.UUID,
+			"provider":          item.ProviderName,
+			"description":       item.Description,
+			"reasoning_efforts": item.EffortLevels,
+			"current":           item.UUID == session.CurrentModelUUID,
 		})
 	}
 	return map[string]any{
@@ -1489,6 +1496,7 @@ func (p *SpawnProvider) listModelCatalog(ctx context.Context) ([]subagentModelCa
 			ModelID:      model.ModelID,
 			ProviderName: provider.Name,
 			Description:  description,
+			EffortLevels: append([]string(nil), model.Config.ReasoningEfforts...),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
