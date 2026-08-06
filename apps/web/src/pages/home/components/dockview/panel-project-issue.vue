@@ -7,86 +7,34 @@
       {{ t('common.loading') }}
     </PanePlaceholder>
 
+    <!-- Two columns: the issue itself reads as a document on the left, its
+         properties sit in a narrow rail on the right. The rail is a sibling,
+         not a card inside the content — properties belong to the issue, not to
+         its description. -->
     <div
       v-else-if="detail"
-      class="h-full w-full overflow-y-auto [scrollbar-gutter:stable]"
+      class="flex h-full min-h-0"
     >
-      <section class="mx-auto max-w-3xl px-6 pb-12 pt-8">
-        <input
-          v-model="titleDraft"
-          type="text"
-          class="w-full bg-transparent text-heading font-semibold text-foreground outline-none placeholder:text-muted-foreground"
-          :placeholder="t('projects.untitled')"
-          :aria-label="t('projects.issueTitle')"
-          @blur="commitTitle"
-          @keydown.enter.prevent="commitTitle"
-        >
+      <div class="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        <div class="mx-auto flex min-h-full max-w-2xl flex-col px-6 pb-6 pt-8">
+          <!-- Identifier line: the short handle people quote in conversation. -->
+          <p class="text-body text-muted-foreground">
+            {{ issueHandle }}
+          </p>
 
-        <!-- Field row: every control commits on change (auto-save, silent). -->
-        <div class="mt-4 flex flex-wrap items-center gap-2">
-          <Select
-            :model-value="issue?.status ?? 'todo'"
-            @update:model-value="(v) => updateIssue({ status: String(v) })"
+          <input
+            v-model="titleDraft"
+            type="text"
+            class="mt-2 w-full bg-transparent text-heading font-semibold text-foreground outline-none placeholder:text-muted-foreground"
+            :placeholder="t('projects.untitled')"
+            :aria-label="t('projects.issueTitle')"
+            @blur="commitTitle"
+            @keydown.enter.prevent="commitTitle"
           >
-            <SelectTrigger class="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="status in STATUSES"
-                :key="status"
-                :value="status"
-              >
-                {{ t(`projects.status.${status}`) }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
 
-          <Select
-            :model-value="issue?.priority || 'none'"
-            @update:model-value="(v) => updateIssue({ priority: v === 'none' ? '' : String(v) })"
-          >
-            <SelectTrigger class="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">
-                {{ t('projects.priority.none') }}
-              </SelectItem>
-              <SelectItem
-                v-for="priority in PRIORITIES"
-                :key="priority"
-                :value="priority"
-              >
-                {{ t(`projects.priority.${priority}`) }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-
-          <span
-            v-if="issue"
-            class="text-caption text-muted-foreground"
-          >
-            {{ t('projects.revision', { n: issue.revision }) }}
-          </span>
-        </div>
-
-        <!-- Description: markdown, same edit/preview split as the doc panel. -->
-        <div class="mt-6 space-y-2.5">
-          <div class="flex items-center gap-2">
-            <h2 class="text-label font-medium text-muted-foreground">
-              {{ t('projects.description') }}
-            </h2>
-            <div class="flex-1" />
-            <SegmentedControl
-              v-model="mode"
-              :items="modeItems"
-              :aria-label="t('projects.viewMode')"
-            />
-          </div>
           <div
             v-if="conflict"
-            class="flex items-center gap-2 rounded-md border border-destructive-border bg-destructive-soft px-3 py-2 text-body"
+            class="mt-4 flex items-center gap-2 rounded-md border border-destructive-border bg-destructive-soft px-3 py-2 text-body"
           >
             <span class="min-w-0 flex-1">{{ t('projects.conflictHint') }}</span>
             <Button
@@ -97,60 +45,78 @@
               {{ t('projects.reload') }}
             </Button>
           </div>
-          <div
-            v-if="mode === 'edit'"
-            class="h-64 overflow-hidden rounded-md border border-border"
-          >
-            <MonacoEditor
-              v-model="bodyDraft"
-              language="markdown"
-            />
-          </div>
-          <MarkdownPreview
-            v-else-if="bodyDraft.trim()"
-            :content="bodyDraft"
-            class="rounded-md"
-          />
-          <p
-            v-else
-            class="text-body text-muted-foreground"
-          >
-            {{ t('projects.noDescription') }}
-          </p>
-        </div>
 
-        <!-- Comments + field activity, one chronological surface. -->
-        <div class="mt-8 space-y-2.5">
-          <h2 class="text-label font-medium text-muted-foreground">
-            {{ t('projects.activityTitle') }}
-          </h2>
-          <div class="space-y-3">
+          <!-- Description reads inline; the edit affordance appears on hover so
+               a reader is never looking at a toolbar they did not ask for. -->
+          <div class="group/desc mt-5">
+            <div class="mb-1.5 flex h-6 items-center">
+              <span class="text-label font-medium text-muted-foreground">
+                {{ t('projects.description') }}
+              </span>
+              <div class="flex-1" />
+              <TextButton
+                variant="ghost"
+                :class="editToggleClass"
+                @click="mode = mode === 'edit' ? 'preview' : 'edit'"
+              >
+                {{ mode === 'edit' ? t('projects.preview') : t('common.edit') }}
+              </TextButton>
+            </div>
+            <div
+              v-if="mode === 'edit'"
+              class="h-64 overflow-hidden rounded-md border border-border"
+            >
+              <MonacoEditor
+                v-model="bodyDraft"
+                language="markdown"
+              />
+            </div>
+            <MarkdownPreview
+              v-else-if="bodyDraft.trim()"
+              :content="bodyDraft"
+            />
+            <p
+              v-else
+              class="text-body text-muted-foreground"
+            >
+              {{ t('projects.noDescription') }}
+            </p>
+          </div>
+
+          <!-- Comments and field activity share one chronological surface. -->
+          <div class="mt-8 space-y-3">
+            <span class="text-label font-medium text-muted-foreground">
+              {{ t('projects.activityTitle') }}
+            </span>
             <div
               v-for="entry in timeline"
               :key="entry.key"
-              class="flex items-start gap-2 text-body"
+              class="text-body"
             >
-              <template v-if="entry.kind === 'comment'">
-                <div class="min-w-0 flex-1 rounded-md border border-border bg-card px-3 py-2">
-                  <p class="whitespace-pre-wrap text-body text-foreground">
-                    {{ entry.comment.body }}
-                  </p>
-                  <p class="mt-1 text-caption text-muted-foreground">
-                    {{ formatTime(entry.at) }}
-                  </p>
-                </div>
-              </template>
-              <template v-else>
-                <p class="min-w-0 flex-1 text-body text-muted-foreground">
-                  {{ activityLine(entry.activity) }}
-                  <span class="text-caption"> · {{ formatTime(entry.at) }}</span>
+              <div
+                v-if="entry.kind === 'comment'"
+                class="rounded-md border border-border bg-card px-3 py-2"
+              >
+                <p class="whitespace-pre-wrap text-body text-foreground">
+                  {{ entry.comment.body }}
                 </p>
-              </template>
+                <p class="mt-1 text-caption text-muted-foreground">
+                  {{ formatTime(entry.at) }}
+                </p>
+              </div>
+              <p
+                v-else
+                class="text-body text-muted-foreground"
+              >
+                {{ activityLine(entry.activity) }}
+                <span class="text-caption"> · {{ formatTime(entry.at) }}</span>
+              </p>
             </div>
           </div>
 
+          <!-- Composer pinned to the bottom of the column, like the reference. -->
           <form
-            class="flex items-start gap-2 pt-1"
+            class="mt-4 flex items-start gap-2"
             @submit.prevent="submitComment"
           >
             <Textarea
@@ -168,7 +134,105 @@
             </Button>
           </form>
         </div>
-      </section>
+      </div>
+
+      <!-- Properties rail. The card carries the only edge here — a border on
+           the rail as well would stack two strokes on one visual unit. -->
+      <aside class="w-80 shrink-0 overflow-y-auto p-4">
+        <div class="rounded-xl border border-border bg-card p-4">
+          <h3 class="text-label font-medium text-foreground">
+            {{ t('projects.properties') }}
+          </h3>
+
+          <dl class="mt-3 space-y-3">
+            <div class="flex items-center gap-2">
+              <dt class="w-16 shrink-0 text-body text-muted-foreground">
+                {{ t('projects.field.status') }}
+              </dt>
+              <dd class="min-w-0 flex-1">
+                <Select
+                  :model-value="issue?.status ?? 'todo'"
+                  @update:model-value="(v) => updateIssue({ status: String(v) })"
+                >
+                  <SelectTrigger class="h-8 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="status in STATUSES"
+                      :key="status"
+                      :value="status"
+                    >
+                      {{ t(`projects.status.${status}`) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </dd>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <dt class="w-16 shrink-0 text-body text-muted-foreground">
+                {{ t('projects.field.priority') }}
+              </dt>
+              <dd class="min-w-0 flex-1">
+                <Select
+                  :model-value="issue?.priority || 'none'"
+                  @update:model-value="(v) => updateIssue({ priority: v === 'none' ? '' : String(v) })"
+                >
+                  <SelectTrigger class="h-8 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      {{ t('projects.priority.none') }}
+                    </SelectItem>
+                    <SelectItem
+                      v-for="priority in PRIORITIES"
+                      :key="priority"
+                      :value="priority"
+                    >
+                      {{ t(`projects.priority.${priority}`) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </dd>
+            </div>
+          </dl>
+
+          <!-- Read-only metadata: same card, its own group, separated by
+               spacing rather than a divider (a full-bleed rule inside a card
+               would slice the surface into stacked tiles). -->
+          <h3 class="mt-6 text-label font-medium text-foreground">
+            {{ t('projects.details') }}
+          </h3>
+          <dl class="mt-3 space-y-2">
+            <div class="flex items-baseline gap-2">
+              <dt class="w-16 shrink-0 text-body text-muted-foreground">
+                {{ t('projects.createdAt') }}
+              </dt>
+              <dd class="min-w-0 flex-1 truncate text-body text-foreground">
+                {{ detail.node?.created_at ? formatDate(detail.node.created_at) : '—' }}
+              </dd>
+            </div>
+            <div class="flex items-baseline gap-2">
+              <dt class="w-16 shrink-0 text-body text-muted-foreground">
+                {{ t('projects.updatedAt') }}
+              </dt>
+              <dd class="min-w-0 flex-1 truncate text-body text-foreground">
+                {{ detail.node?.updated_at ? formatDate(detail.node.updated_at) : '—' }}
+              </dd>
+            </div>
+            <div class="flex items-baseline gap-2">
+              <dt class="w-16 shrink-0 text-body text-muted-foreground">
+                {{ t('projects.revisionLabel') }}
+              </dt>
+              <dd class="min-w-0 flex-1 truncate text-body text-foreground">
+                {{ issue?.revision ?? 1 }}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </aside>
     </div>
 
     <PanePlaceholder v-else>
@@ -183,13 +247,13 @@ import { useI18n } from 'vue-i18n'
 import {
   Button,
   PanePlaceholder,
-  SegmentedControl,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
   Spinner,
+  TextButton,
   Textarea,
   toast,
 } from '@felinic/ui'
@@ -233,20 +297,27 @@ const loading = ref(false)
 const conflict = ref(false)
 
 const issue = computed(() => detail.value?.issue ?? null)
+const issueNumber = computed(() => detail.value?.node?.number ?? 0)
+const issueHandle = computed(() => (issueNumber.value ? `#${issueNumber.value}` : ''))
 
 const titleDraft = ref(props.params.params.title ?? '')
 const bodyDraft = ref('')
 const mode = ref<'edit' | 'preview'>('preview')
-const modeItems = computed(() => [
-  { label: t('projects.preview'), value: 'preview' as const },
-  { label: t('projects.edit'), value: 'edit' as const },
-])
+
+// The edit toggle is a text affordance, revealed on hover of the description
+// block so a reader sees prose, not chrome.
+const editToggleClass = 'opacity-0 transition-opacity focus-visible:opacity-100 group-hover/desc:opacity-100' /* ui-allow-style */
 
 let ackTitle = ''
 let ackBody = ''
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let saving = false
 const AUTOSAVE_DEBOUNCE_MS = 2000
+
+function panelTitle(): string {
+  const name = ackTitle || t('projects.untitled')
+  return issueNumber.value ? `#${issueNumber.value} ${name}` : name
+}
 
 async function load() {
   loading.value = true
@@ -274,7 +345,7 @@ async function load() {
       ackBody = node.body ?? ''
       titleDraft.value = ackTitle
       bodyDraft.value = ackBody
-      props.params.api.setTitle(ackTitle || t('projects.untitled'))
+      props.params.api.setTitle(panelTitle())
     }
   } catch (error) {
     detail.value = null
@@ -325,7 +396,7 @@ async function saveContent(): Promise<void> {
       detail.value = { ...detail.value, node: data }
       ackTitle = data.title ?? ''
       ackBody = data.body ?? ''
-      props.params.api.setTitle(ackTitle || t('projects.untitled'))
+      props.params.api.setTitle(panelTitle())
     }
   } catch (error) {
     if (isConflict(error)) {
@@ -365,7 +436,6 @@ async function updateIssue(patch: { status?: string, priority?: string }) {
     if (data && detail.value) {
       detail.value = { ...detail.value, issue: data }
     }
-    // Field changes append to the activity stream — refresh it quietly.
     void refreshActivity()
   } catch (error) {
     if (isConflict(error)) {
@@ -431,6 +501,12 @@ function formatTime(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(date)
 }
 
 const commentDraft = ref('')

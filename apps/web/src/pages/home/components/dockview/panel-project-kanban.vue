@@ -80,6 +80,11 @@
                 {{ card.title || t('projects.untitled') }}
               </span>
             </div>
+            <!-- The short handle people quote in conversation. -->
+            <span
+              v-if="card.number"
+              class="mt-1 block pl-6 text-caption text-muted-foreground"
+            >#{{ card.number }}</span>
             <div
               v-if="card.labels?.length || card.priority || card.due_at"
               class="mt-2 flex flex-wrap items-center gap-1.5 pl-6"
@@ -254,7 +259,8 @@ function formatDueDate(value: string): string {
 
 function openIssue(card: ProjectIssue) {
   if (!card.id) return
-  workspaceTabs.openProjectIssue({ projectId, nodeId: card.id, title: card.title })
+  const title = card.number ? `#${card.number} ${card.title ?? ''}`.trim() : card.title
+  workspaceTabs.openProjectIssue({ projectId, nodeId: card.id, title })
 }
 
 // ---- drag and drop ---------------------------------------------------------

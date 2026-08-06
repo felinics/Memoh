@@ -3509,6 +3509,11 @@
     "tabPlaceholder": {
       "overview": "项目概览稍后放在这里。",
       "member": "成员管理稍后放在这里。"
-    }
+    },
+    "properties": "属性",
+    "details": "详情",
+    "createdAt": "创建时间",
+    "updatedAt": "更新时间",
+    "revisionLabel": "修订号"
   }
 }

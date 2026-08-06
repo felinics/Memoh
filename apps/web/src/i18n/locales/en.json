@@ -3509,6 +3509,11 @@
     "tabPlaceholder": {
       "overview": "Project overview lands here.",
       "member": "Member management lands here."
-    }
+    },
+    "properties": "Properties",
+    "details": "Details",
+    "createdAt": "Created",
+    "updatedAt": "Updated",
+    "revisionLabel": "Revision"
   }
 }

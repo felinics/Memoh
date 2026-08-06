@@ -3486,6 +3486,11 @@
     "tabPlaceholder": {
       "overview": "プロジェクト概要はここに入ります。",
       "member": "メンバー管理はここに入ります。"
-    }
+    },
+    "properties": "プロパティ",
+    "details": "詳細",
+    "createdAt": "作成日",
+    "updatedAt": "更新日",
+    "revisionLabel": "リビジョン"
   }
 }
