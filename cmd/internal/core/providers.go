@@ -694,7 +694,7 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewContactsProvider(log, channelcontactadapter.NewSource(routeService)),
 		agenttools.NewScheduleProvider(log, scheduleService),
 		agenttools.NewWorkdirProvider(log, workdirService),
-		agenttools.NewACPAgentsProvider(log, acpPool, queries),
+		agenttools.NewACPAgentsProvider(log, &acpRuntimePoolAdapter{pool: acpPool}, queries),
 		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
@@ -712,6 +712,46 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewFederationProvider(log, fedSource),
 		agenttools.NewHistoryProvider(log, channelthreadadapter.NewLister(sessionService, routeService), messageService, queries),
 	}
+}
+
+// acpRuntimePoolAdapter maps the ACP session pool onto the tool package's
+// local ACPRuntimePool interface. The tool package deliberately does not
+// import the acp packages (the acp client test binary imports the tool
+// package), so the projection to tool-local DTOs happens here.
+type acpRuntimePoolAdapter struct {
+	pool *acpagent.SessionPool
+}
+
+func (a *acpRuntimePoolAdapter) CreateAgentRuntime(ctx context.Context, botID, agentID, runtimeOwnerAccountID string) (agenttools.ACPRuntimeSummary, error) {
+	status, err := a.pool.CreateRuntime(ctx, acpagent.CreateRuntimeInput{
+		BotID:                 botID,
+		AgentID:               agentID,
+		RuntimeOwnerAccountID: runtimeOwnerAccountID,
+	})
+	if err != nil {
+		return agenttools.ACPRuntimeSummary{}, err
+	}
+	summary := agenttools.ACPRuntimeSummary{
+		RuntimeID:      status.RuntimeID,
+		DefaultModelID: status.DefaultModelID,
+	}
+	if status.Models != nil {
+		summary.CurrentModelID = status.Models.CurrentModelID
+		for _, m := range status.Models.Available {
+			summary.Models = append(summary.Models, agenttools.ACPOptionInfo{ID: m.ID, Name: m.Name})
+		}
+	}
+	if status.Reasoning != nil {
+		summary.CurrentEffort = status.Reasoning.CurrentEffort
+		for _, e := range status.Reasoning.Available {
+			summary.Efforts = append(summary.Efforts, agenttools.ACPOptionInfo{ID: e.ID, Name: e.Name})
+		}
+	}
+	return summary, nil
+}
+
+func (a *acpRuntimePoolAdapter) CloseAgentRuntime(botID, runtimeID string) error {
+	return a.pool.CloseRuntime(botID, runtimeID)
 }
 
 func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) *media.Service {
