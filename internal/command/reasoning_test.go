@@ -45,10 +45,15 @@ func TestReasoningChoicesIncludeFullBackendEffortLadder(t *testing.T) {
 	for _, c := range res.Interactive.Choices.Choices {
 		labels[c.Label] = true
 	}
-	for _, want := range []string{"off", "none", "low", "medium", "high", "xhigh"} {
+	for _, want := range []string{"off", "low", "medium", "high", "xhigh"} {
 		if !labels[want] {
 			t.Errorf("reasoning choices missing %q", want)
 		}
+	}
+	// "off" is the only disabled choice. Listing "none" alongside it offered the
+	// same state twice, and picking either stored a value that reads as off.
+	if labels[models.ReasoningEffortNone] {
+		t.Error("reasoning choices still offer none, a second name for off")
 	}
 }
 

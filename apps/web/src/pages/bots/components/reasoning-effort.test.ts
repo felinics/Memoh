@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { REASONING_EFFORT_DISABLE, availableEffortsForMode, nearestEffortToMedium, resolveEffortLevels } from './reasoning-effort'
 
 describe('resolveEffortLevels', () => {
+  it('keeps disable, which declares that off is achievable', () => {
+    expect(resolveEffortLevels({
+      reasoning_efforts: [REASONING_EFFORT_DISABLE, 'low', 'medium', 'high'],
+    }, 'openai-completions')).toEqual([REASONING_EFFORT_DISABLE, 'low', 'medium', 'high'])
+  })
+
+  it('drops none, which is a provider wire value rather than a declaration', () => {
+    expect(resolveEffortLevels({
+      reasoning_efforts: ['none', 'low', 'medium', 'high'],
+    }, 'openai-completions')).toEqual(['low', 'medium', 'high'])
+  })
+
   it('preserves max for Codex and filters client-only efforts', () => {
     expect(resolveEffortLevels({
       reasoning_efforts: ['low', 'xhigh', 'max', 'ultra'],
@@ -12,6 +24,28 @@ describe('resolveEffortLevels', () => {
     expect(resolveEffortLevels({
       reasoning_efforts: ['low', 'xhigh', 'max'],
     }, 'openai-responses')).toEqual(['low', 'xhigh'])
+  })
+})
+
+describe('availableEffortsForMode', () => {
+  it('offers off once, at the front, when the model advertises it', () => {
+    const selectable = availableEffortsForMode('adaptive', resolveEffortLevels({
+      reasoning_efforts: ['low', REASONING_EFFORT_DISABLE, 'medium', 'high'],
+    }, 'openai-completions'))
+    expect(selectable).toEqual([REASONING_EFFORT_DISABLE, 'low', 'medium', 'high'])
+  })
+
+  it('offers no off for a model that cannot be turned off', () => {
+    // A model that never declared it can be turned off has no off shape to send,
+    // so showing Off there is a control that does nothing.
+    const selectable = availableEffortsForMode('adaptive', resolveEffortLevels({
+      reasoning_efforts: ['low', 'medium', 'high'],
+    }, 'openai-completions'))
+    expect(selectable).toEqual(['low', 'medium', 'high'])
+  })
+
+  it('offers nothing for a model with no thinking concept', () => {
+    expect(availableEffortsForMode('none', ['low', 'medium'])).toEqual([])
   })
 })
 
@@ -33,10 +67,10 @@ describe('nearestEffortToMedium', () => {
     expect(nearestEffortToMedium(['max', 'high', 'low', 'none'])).toBe('low')
   })
 
-  it('never returns the disable sentinel that availableEffortsForMode prepends', () => {
-    // The old fallback took efforts[0], which is always "disable" — silently
+  it('never returns off, so an active config cannot resolve to disabled', () => {
+    // The old fallback took efforts[0], which was always "disable" — silently
     // turning reasoning off whenever a model lacked the selected tier.
-    const selectable = availableEffortsForMode('toggle', ['low', 'high'])
+    const selectable = availableEffortsForMode('toggle', [REASONING_EFFORT_DISABLE, 'low', 'high'])
     expect(selectable[0]).toBe(REASONING_EFFORT_DISABLE)
     expect(nearestEffortToMedium(selectable)).toBe('low')
   })

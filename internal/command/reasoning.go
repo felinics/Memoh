@@ -10,19 +10,21 @@ import (
 )
 
 // reasoningChoices are the selectable reasoning levels. "off" disables thinking;
-// the rest enable it at that effort.
+// the rest enable it at that effort. Only "off" represents the disabled state —
+// listing "none" here too offered the same state under a second name.
 var reasoningChoices = []string{
 	"off",
-	models.ReasoningEffortNone,
 	models.ReasoningEffortLow,
 	models.ReasoningEffortMedium,
 	models.ReasoningEffortHigh,
 	models.ReasoningEffortXHigh,
 }
 
+// validEffort accepts the tiers that turn reasoning on. The disabled state is
+// handled by its own branch before this is consulted.
 func validEffort(v string) bool {
 	switch v {
-	case models.ReasoningEffortNone, models.ReasoningEffortLow, models.ReasoningEffortMedium, models.ReasoningEffortHigh, models.ReasoningEffortXHigh:
+	case models.ReasoningEffortLow, models.ReasoningEffortMedium, models.ReasoningEffortHigh, models.ReasoningEffortXHigh:
 		return true
 	}
 	return false
