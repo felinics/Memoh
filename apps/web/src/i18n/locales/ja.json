@@ -746,8 +746,8 @@
       "generic": "ツール",
       "approve": "許可する",
       "reject": "拒否する",
-    "pendingApproval": "承認待ち",
-    "executionLocation": "実行場所",
+      "pendingApproval": "承認待ち",
+      "executionLocation": "実行場所",
       "pendingUserInput": "入力を待っています",
       "userInputSubmitted": "答えた",
       "userInputCanceled": "キャンセル",
@@ -1620,27 +1620,27 @@
       "resetDefaults": "デフォルトにリセット",
       "confirmReset": "すべてのツール承認ルールをデフォルト状態に戻しますか?",
       "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
-    "title": "ツール呼び出しの承認",
-    "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。",
-    "loading": "承認ルールを読み込んでいます...",
-    "loadFailed": "Tool の承認設定を読み込めませんでした",
+      "title": "ツール呼び出しの承認",
+      "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。",
+      "loading": "承認ルールを読み込んでいます...",
+      "loadFailed": "Tool の承認設定を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
-    "saveFailed": "Tool の承認設定を保存できませんでした",
-    "enabled": "Tool の承認",
-    "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
-    "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
-    "target": {
-      "title": "承認対象",
-      "label": "Workspace またはコンピューター",
-      "description": "ルールは選択した Workspace またはコンピューターにのみ適用されます。"
-    },
-    "modes": {
-      "allow": "許可",
-      "ask": "確認",
-      "deny": "拒否"
+      "saveFailed": "Tool の承認設定を保存できませんでした",
+      "enabled": "Tool の承認",
+      "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
+      "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
+      "target": {
+        "title": "承認対象",
+        "label": "Workspace またはコンピューター",
+        "description": "ルールは選択した Workspace またはコンピューターにのみ適用されます。"
       },
-    "rules": {
-      "title": "ツールルール",
+      "modes": {
+        "allow": "許可",
+        "ask": "確認",
+        "deny": "拒否"
+      },
+      "rules": {
+        "title": "ツールルール",
         "reset": "推奨設定にリセット"
       },
       "behavior": {
@@ -1656,15 +1656,15 @@
         "pathsTitle": "常にレビューを要求",
         "commandsTitle": "常にレビューを要求"
       },
-    "toolNames": {
-      "read": "ファイル読み取り",
-      "write": "ファイル書き込み",
-      "exec": "シェルコマンド"
-    },
-    "tools": {
-      "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
-      "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
-      "exec": "Workspace 内でシェルコマンドを実行する"
+      "toolNames": {
+        "read": "ファイル読み取り",
+        "write": "ファイル書き込み",
+        "exec": "シェルコマンド"
+      },
+      "tools": {
+        "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
+        "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
+        "exec": "Workspace 内でシェルコマンドを実行する"
       },
       "toolDisabledHint": "この操作では現在、承認は要求されていません。以下のルールは、スイッチを有効にした後に適用されます。",
       "bypass": "バイパス (許可リスト)",
@@ -3409,5 +3409,66 @@
     "expiresIn": "{time}で期限切れになります",
     "codeExpired": "コードは期限切れです",
     "copyFailed": "コードをコピーできませんでした"
+  },
+  "projects": {
+    "title": "Projects",
+    "newProject": "新規プロジェクト",
+    "renameProject": "プロジェクト名を変更",
+    "projectName": "プロジェクト名",
+    "projectNamePlaceholder": "プロジェクト名を入力",
+    "deleteProjectTitle": "プロジェクトを削除",
+    "deleteProjectConfirm": "「{name}」とその内容をすべて削除しますか？中の Doc と Issue にアクセスできなくなります。",
+    "newDoc": "新規 Doc",
+    "newSubDoc": "新規サブ Doc",
+    "renameDoc": "Doc 名を変更",
+    "docTitle": "Doc タイトル",
+    "docTitlePlaceholder": "Doc タイトルを入力",
+    "deleteDocTitle": "Doc を削除",
+    "deleteDocConfirm": "「{name}」とサブ Doc を削除しますか？",
+    "issues": "Issues",
+    "newIssue": "新規 Issue",
+    "issueTitle": "Issue タイトル",
+    "issueTitlePlaceholder": "Issue タイトルを入力",
+    "untitled": "無題",
+    "collapse": "プロジェクトパネルを折りたたむ",
+    "expand": "プロジェクトパネルを開く",
+    "emptyHint": "チーム共有の Doc と Issue ボードはここにあります。",
+    "loadFailed": "プロジェクトの読み込みに失敗しました",
+    "saveFailed": "保存に失敗しました",
+    "deleteFailed": "削除に失敗しました",
+    "preview": "プレビュー",
+    "edit": "編集",
+    "viewMode": "表示モード",
+    "conflictHint": "他の人がこの Doc を更新しました。下書きはエディタに残っています。再読み込みで最新版を表示できます。",
+    "reload": "再読み込み",
+    "docGone": "この Doc は利用できません",
+    "boardConflict": "他の人がこの Issue を変更したため、ボードを更新しました。",
+    "description": "説明",
+    "noDescription": "説明はまだありません。",
+    "activityTitle": "コメントとアクティビティ",
+    "comment": "コメント",
+    "commentPlaceholder": "コメントを入力…",
+    "revision": "rev {n}",
+    "activityChanged": "{field}：{from} → {to}",
+    "valueNone": "なし",
+    "status": {
+      "todo": "未着手",
+      "in_progress": "進行中",
+      "done": "完了",
+      "cancelled": "キャンセル"
+    },
+    "priority": {
+      "none": "優先度なし",
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "urgent": "緊急"
+    },
+    "field": {
+      "status": "ステータス",
+      "assignee": "担当者",
+      "priority": "優先度",
+      "due_at": "期限"
+    }
   }
 }
