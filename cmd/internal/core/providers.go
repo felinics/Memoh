@@ -408,7 +408,8 @@ func provideHeartbeatTriggerer(service *application.Service) heartbeat.Triggerer
 }
 
 type sessionCreatorAdapter struct {
-	svc *sessionpkg.Service
+	svc      *sessionpkg.Service
+	workdirs *workdir.Service
 }
 
 func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessionType string) (string, error) {
@@ -422,12 +423,52 @@ func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessio
 	return sess.ID, nil
 }
 
+// CreateScheduleSession creates the user-visible session one schedule fire
+// runs in. The schedule domain states intent (runtime, agent, workdir); this
+// adapter resolves the workdir path and shapes the thread-create input the
+// same way the interactive session-create handler does.
+func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec schedule.SessionSpec) (string, error) {
+	input := sessionpkg.CreateInput{
+		BotID:           spec.BotID,
+		Type:            sessionpkg.TypeSchedule,
+		Title:           spec.Title,
+		CreatedByUserID: spec.OwnerUserID,
+		// Schedule sessions surface in the sidebar so the user can open the
+		// produced conversation and continue it; the schedule session mode
+		// is preserved for prompt and tool gating.
+		Visibility: sessionpkg.VisibilityUser,
+	}
+	if strings.TrimSpace(spec.ACPAgentID) != "" {
+		input.RuntimeType = sessionpkg.RuntimeACPAgent
+		// The thread service derives the ACP runtime owner from
+		// CreatedByUserID and applies project-path defaults; the workdir
+		// override below wins when a workdir is bound.
+		input.Metadata = map[string]any{"acp_agent_id": spec.ACPAgentID}
+	}
+	if strings.TrimSpace(spec.WorkdirID) != "" {
+		if a.workdirs == nil {
+			return "", errors.New("workdir service not configured")
+		}
+		wd, err := a.workdirs.RequireActive(ctx, spec.BotID, spec.WorkdirID)
+		if err != nil {
+			return "", fmt.Errorf("resolve schedule workdir: %w", err)
+		}
+		input.WorkdirID = wd.ID
+		input.WorkdirPath = wd.Path
+	}
+	sess, err := a.svc.Create(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	return sess.ID, nil
+}
+
 func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbeat.SessionCreator {
 	return &sessionCreatorAdapter{svc: sessionService}
 }
 
-func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.SessionCreator {
-	return &sessionCreatorAdapter{svc: sessionService}
+func provideScheduleSessionCreator(sessionService *sessionpkg.Service, workdirService *workdir.Service) schedule.SessionCreator {
+	return &sessionCreatorAdapter{svc: sessionService, workdirs: workdirService}
 }
 
 func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *native.Agent {

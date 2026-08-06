@@ -41,7 +41,7 @@ func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, dbstore.Quer
 	mock := &mockTriggerer{}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	cfg := &boot.RuntimeConfig{JwtSecret: "integration-test-jwt-secret"}
-	svc := schedule.NewService(logger, queries, mock, nil, cfg)
+	svc := schedule.NewService(logger, queries, mock, nil, nil, cfg)
 
 	return svc, queries, pool, mock, func() { pool.Close() }
 }

@@ -5,6 +5,51 @@ import (
 	"time"
 )
 
+// Run targets: where one fire of a schedule executes.
+const (
+	// RunTargetNewSession creates a fresh user-visible session per fire.
+	RunTargetNewSession = "new_session"
+	// RunTargetExistingSession reuses one stored session for every fire.
+	// The target session pins runtime and workdir; only model and
+	// reasoning effort stay overridable per schedule.
+	RunTargetExistingSession = "existing_session"
+)
+
+// Runtime types mirror the bot_sessions vocabulary. The values are stable DB
+// vocabulary shared with internal/chat/thread; duplicated here so the
+// schedule domain does not import the chat packages.
+const (
+	RuntimeModel    = "model"
+	RuntimeACPAgent = "acp_agent"
+)
+
+// ExecutionConfig is the per-schedule execution parameter block: where a
+// fire runs and with which runtime/model/effort/workdir. The zero value
+// means "new session with all bot defaults" — exactly the pre-parameter
+// behavior.
+type ExecutionConfig struct {
+	// RunTarget is new_session (default) or existing_session.
+	RunTarget string `json:"run_target,omitempty"`
+	// TargetSessionID names the session reused by existing_session mode.
+	TargetSessionID string `json:"target_session_id,omitempty"`
+	// RuntimeType selects the runtime for new sessions: "" or "model" for
+	// the native model runtime, "acp_agent" for an ACP agent. Must be empty
+	// in existing_session mode (inherited from the target session).
+	RuntimeType string `json:"runtime_type,omitempty"`
+	// ACPAgentID names the ACP agent when RuntimeType is acp_agent.
+	ACPAgentID string `json:"acp_agent_id,omitempty"`
+	// ModelID is a native model UUID override (models.id).
+	ModelID string `json:"model_id,omitempty"`
+	// ACPModelID is an agent-reported model identifier override for ACP
+	// runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+	ACPModelID string `json:"acp_model_id,omitempty"`
+	// ReasoningEffort overrides the reasoning effort for this schedule.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// WorkdirID binds new sessions to a bot workdir. Must be empty in
+	// existing_session mode (inherited from the target session).
+	WorkdirID string `json:"workdir_id,omitempty"`
+}
+
 type Schedule struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
@@ -17,6 +62,7 @@ type Schedule struct {
 	Enabled      bool      `json:"enabled"`
 	Command      string    `json:"command"`
 	BotID        string    `json:"bot_id"`
+	ExecutionConfig
 }
 
 type NullableInt struct {
@@ -56,6 +102,7 @@ type CreateRequest struct {
 	MaxCalls    NullableInt `json:"max_calls,omitempty"`
 	Command     string      `json:"command"`
 	Enabled     *bool       `json:"enabled,omitempty"`
+	ExecutionConfig
 }
 
 type UpdateRequest struct {
@@ -65,6 +112,12 @@ type UpdateRequest struct {
 	MaxCalls    NullableInt `json:"max_calls,omitempty"`
 	Command     *string     `json:"command,omitempty"`
 	Enabled     *bool       `json:"enabled,omitempty"`
+	// Execution replaces the whole execution parameter block when present.
+	// Field-level patching is deliberately not offered: the block carries
+	// cross-field constraints (run target vs runtime vs workdir), so
+	// callers send the full desired state and the service validates it as
+	// one unit.
+	Execution *ExecutionConfig `json:"execution,omitempty"`
 }
 
 type ListResponse struct {

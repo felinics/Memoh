@@ -12,6 +12,12 @@ type TriggerPayload struct {
 	Command     string
 	OwnerUserID string
 	SessionID   string
+	// ModelID / ACPModelID / ReasoningEffort are the schedule's per-run
+	// overrides. Which runtime executes the run is decided by the session
+	// itself (its runtime_type and metadata), never by the payload.
+	ModelID         string
+	ACPModelID      string
+	ReasoningEffort string
 }
 
 // TriggerResult carries execution metadata back from the resolver.

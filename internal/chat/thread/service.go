@@ -1380,8 +1380,11 @@ func normalizeDescriptor(legacyType, sessionMode, runtimeType string, metadata, 
 	if !IsKnownRuntimeType(runtimeType) {
 		return descriptor{}, fmt.Errorf("unknown runtime type %q", runtimeType)
 	}
-	if runtimeType == RuntimeACPAgent && sessionMode != TypeChat && sessionMode != TypeDiscuss {
-		return descriptor{}, fmt.Errorf("runtime type %q is only supported for %s or %s session modes", RuntimeACPAgent, TypeChat, TypeDiscuss)
+	// Schedule mode joined the ACP-capable modes when schedules gained an
+	// ACP runtime option: a schedule-created session keeps its schedule
+	// mode for prompt/tool gating while an ACP agent executes the turns.
+	if runtimeType == RuntimeACPAgent && sessionMode != TypeChat && sessionMode != TypeDiscuss && sessionMode != TypeSchedule {
+		return descriptor{}, fmt.Errorf("runtime type %q is only supported for %s, %s, or %s session modes", RuntimeACPAgent, TypeChat, TypeDiscuss, TypeSchedule)
 	}
 	out := descriptor{
 		LegacyType:      legacyTypeForDescriptor(sessionMode, runtimeType),

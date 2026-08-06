@@ -141,6 +141,7 @@ type Queries interface {
 	DeleteProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteProviderOAuthToken(ctx context.Context, providerID pgtype.UUID) error
 	DeleteSchedule(ctx context.Context, id pgtype.UUID) error
+	DisableSchedule(ctx context.Context, id pgtype.UUID) (dbsqlc.Schedule, error)
 	DeleteScheduleLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) error
 	DeleteSearchProvider(ctx context.Context, id pgtype.UUID) error
