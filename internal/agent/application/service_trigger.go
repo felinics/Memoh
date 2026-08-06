@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/agent/event"
+	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/heartbeat"
@@ -42,15 +46,27 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	defer func() { finish(err) }()
 	ctx = runCtx
 
+	// Sessions with an ACP runtime execute through the session pool; the
+	// schedule's model/effort overrides ride the per-prompt input.
+	acpInfo, err := s.ACPSessionExecutionInfo(ctx, payload.SessionID)
+	if err != nil {
+		return schedule.TriggerResult{}, err
+	}
+	if acpInfo.IsACP {
+		return s.triggerScheduleACP(ctx, botID, payload, token, admission.RunID, acpInfo)
+	}
+
 	req := ChatRequest{
-		BotID:       botID,
-		ChatID:      botID,
-		ThreadID:    payload.SessionID,
-		RunID:       admission.RunID,
-		Query:       payload.Command,
-		UserID:      payload.OwnerUserID,
-		Token:       token,
-		SessionType: sessionmode.Schedule,
+		BotID:           botID,
+		ChatID:          botID,
+		ThreadID:        payload.SessionID,
+		RunID:           admission.RunID,
+		Query:           payload.Command,
+		UserID:          payload.OwnerUserID,
+		Token:           token,
+		Model:           payload.ModelID,
+		ReasoningEffort: payload.ReasoningEffort,
+		SessionType:     sessionmode.Schedule,
 	}
 	rc, req, err := s.resolve(ctx, req)
 	if err != nil {
@@ -89,6 +105,97 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		UsageBytes: totalUsageJSON,
 		ModelID:    rc.model.ID,
 	}, storeErr
+}
+
+// triggerScheduleACP runs one schedule fire through the ACP session pool.
+// The run is non-interactive: no user input requests, no streaming consumer
+// — events are dropped and only the final result is reported back to the
+// schedule log. The round persists into the session history exactly like an
+// interactive ACP turn so the produced conversation can be opened and
+// continued.
+func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload schedule.TriggerPayload, token, runID string, info ACPSessionExecutionInfo) (schedule.TriggerResult, error) {
+	if s.acpPool == nil {
+		return schedule.TriggerResult{}, errors.New("ACP session pool is not configured")
+	}
+	runtimeOwner := strings.TrimSpace(info.RuntimeOwnerAccountID)
+	if runtimeOwner == "" {
+		return schedule.TriggerResult{}, errors.New("ACP runtime owner is missing; recreate the schedule or its session")
+	}
+	if err := s.requireACPRuntimeOwnerWorkspaceExec(ctx, botID, runtimeOwner); err != nil {
+		return schedule.TriggerResult{}, err
+	}
+
+	req := ChatRequest{
+		BotID:           botID,
+		ChatID:          botID,
+		ThreadID:        payload.SessionID,
+		RunID:           runID,
+		Query:           payload.Command,
+		RawQuery:        payload.Command,
+		UserID:          payload.OwnerUserID,
+		Token:           token,
+		Model:           payload.ACPModelID,
+		ReasoningEffort: payload.ReasoningEffort,
+		SessionType:     sessionmode.Schedule,
+	}
+
+	schedulePrompt := native.GenerateSchedulePrompt(native.Schedule{
+		ID:          payload.ID,
+		Name:        payload.Name,
+		Description: payload.Description,
+		Pattern:     payload.Pattern,
+		MaxCalls:    payload.MaxCalls,
+		Command:     payload.Command,
+	})
+	contextMarkdown := s.buildACPContextMarkdown(ctx, req, info.AgentID, info.ProjectPath)
+
+	req, _ = s.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
+
+	result, promptErr := s.acpPool.Prompt(ctx, acpagent.PromptInput{
+		BotID:             botID,
+		ChatID:            botID,
+		SessionID:         payload.SessionID,
+		RunID:             runID,
+		SessionType:       sessionmode.Schedule,
+		AgentID:           info.AgentID,
+		ProjectPath:       info.ProjectPath,
+		ModelID:           strings.TrimSpace(payload.ACPModelID),
+		ReasoningEffort:   strings.TrimSpace(payload.ReasoningEffort),
+		Prompt:            schedulePrompt,
+		ChannelIdentityID: strings.TrimSpace(payload.OwnerUserID),
+		SessionToken:      token,
+		// Nobody is on the other end of a scheduled run.
+		CanRequestUserInput:   false,
+		SupportsImageInput:    false,
+		ToolOutputLimit:       s.toolOutputLimit(),
+		ContextURI:            acpContextURI,
+		ContextMarkdown:       contextMarkdown,
+		RuntimeOwnerAccountID: runtimeOwner,
+		Sink:                  acpclient.EventSinkFunc(func(event.StreamEvent) {}),
+	})
+	if promptErr != nil {
+		s.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the scheduled run ended before a decision arrived")
+		failedResult, _ := acpFailureResult(ensureACPPromptOutput(result), promptErr)
+		if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, failedResult, promptErr); err != nil {
+			s.logger.Error("ACP schedule failure persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
+		}
+		return schedule.TriggerResult{}, promptErr
+	}
+
+	result = ensureACPPromptOutput(result)
+	if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, result, nil); err != nil {
+		s.logger.Error("ACP schedule persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
+	}
+
+	var usageJSON []byte
+	if result.Usage != nil {
+		usageJSON, _ = json.Marshal(result.Usage)
+	}
+	return schedule.TriggerResult{
+		Status:     "ok",
+		Text:       strings.TrimSpace(result.Text),
+		UsageBytes: usageJSON,
+	}, nil
 }
 
 // TriggerHeartbeat executes a heartbeat check via the internal agent.
