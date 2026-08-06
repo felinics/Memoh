@@ -568,6 +568,11 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'heartbeat', 'schedule', 'subagent')),
   runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
   runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- visibility says whether the session belongs in user-facing session
+  -- lists. Distinct from session_mode on purpose: schedule-created sessions
+  -- keep session_mode='schedule' for prompt/tool gating but can be 'user'
+  -- visible so they surface in the sidebar and can be continued.
+  visibility TEXT NOT NULL DEFAULT 'internal' CHECK (visibility IN ('user', 'internal')),
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   next_turn_position BIGINT NOT NULL DEFAULT 1,
@@ -905,7 +910,39 @@ CREATE TABLE IF NOT EXISTS schedule (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   enabled BOOLEAN NOT NULL DEFAULT true,
   command TEXT NOT NULL,
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  -- Execution parameters. run_target says where a fire runs; existing_session
+  -- pins runtime and workdir via the target session (those columns must stay
+  -- NULL), while model/effort overrides stay available in both modes. Model
+  -- is two columns on purpose: native models are FK-able UUIDs, ACP models
+  -- are agent-reported strings with no backing table. workdir_id gains its
+  -- composite team FK later, next to the bot_workdirs table.
+  run_target TEXT NOT NULL DEFAULT 'new_session' CHECK (run_target IN ('new_session', 'existing_session')),
+  target_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  runtime_type TEXT CHECK (runtime_type IS NULL OR runtime_type IN ('model', 'acp_agent')),
+  acp_agent_id TEXT,
+  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  acp_model_id TEXT,
+  reasoning_effort TEXT,
+  workdir_id UUID,
+  -- target_session_id is deliberately not required in existing_session mode:
+  -- the FK degrades it to NULL when the target session is hard-deleted, and
+  -- the trigger path reports that and disables the schedule.
+  CONSTRAINT schedule_existing_session_check CHECK (
+    run_target <> 'existing_session'
+    OR (runtime_type IS NULL AND acp_agent_id IS NULL AND workdir_id IS NULL)
+  ),
+  CONSTRAINT schedule_new_session_check CHECK (
+    run_target <> 'new_session' OR target_session_id IS NULL
+  ),
+  CONSTRAINT schedule_acp_fields_check CHECK (
+    run_target <> 'new_session'
+    OR (runtime_type = 'acp_agent' AND acp_agent_id IS NOT NULL AND model_id IS NULL)
+    OR (COALESCE(runtime_type, 'model') = 'model' AND acp_agent_id IS NULL AND acp_model_id IS NULL)
+  ),
+  CONSTRAINT schedule_model_exclusive_check CHECK (
+    NOT (model_id IS NOT NULL AND acp_model_id IS NOT NULL)
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_schedule_bot_id ON schedule(bot_id);
@@ -2475,3 +2512,10 @@ ALTER TABLE public.bot_sessions
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_workdir_active_updated
     ON public.bot_sessions (team_id, bot_id, workdir_id, updated_at DESC, id DESC)
     WHERE deleted_at IS NULL AND workdir_id IS NOT NULL;
+
+-- Schedule workdir binding (the column lives in the schedule CREATE TABLE;
+-- bot_workdirs did not exist yet at that point in this script).
+ALTER TABLE public.schedule
+    ADD CONSTRAINT schedule_workdir_id_fkey
+    FOREIGN KEY (team_id, workdir_id)
+    REFERENCES public.bot_workdirs(team_id, id) ON DELETE SET NULL (workdir_id);
