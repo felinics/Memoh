@@ -473,7 +473,7 @@ type Queries interface {
 	ListProjectNodeLabelsForNode(ctx context.Context, nodeID pgtype.UUID) ([]dbsqlc.ProjectLabel, error)
 	ListProjectNodeLinks(ctx context.Context, nodeID pgtype.UUID) ([]dbsqlc.ListProjectNodeLinksRow, error)
 	ListProjectNodeVersions(ctx context.Context, nodeID pgtype.UUID) ([]dbsqlc.ListProjectNodeVersionsRow, error)
-	ListProjects(ctx context.Context) ([]dbsqlc.Project, error)
+	ListProjects(ctx context.Context) ([]dbsqlc.ListProjectsRow, error)
 	MaxProjectDocSiblingRank(ctx context.Context, arg dbsqlc.MaxProjectDocSiblingRankParams) (string, error)
 	MaxProjectIssueRank(ctx context.Context, arg dbsqlc.MaxProjectIssueRankParams) (string, error)
 	MoveProjectNode(ctx context.Context, arg dbsqlc.MoveProjectNodeParams) (dbsqlc.ProjectNode, error)

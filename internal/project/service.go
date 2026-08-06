@@ -92,7 +92,7 @@ func (s *Service) ListProjects(ctx context.Context) ([]Project, error) {
 	}
 	projects := make([]Project, 0, len(rows))
 	for _, row := range rows {
-		projects = append(projects, toProject(row))
+		projects = append(projects, toProjectWithCounts(row))
 	}
 	return projects, nil
 }

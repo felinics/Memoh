@@ -9,9 +9,25 @@ VALUES (sqlc.arg(name), sqlc.arg(description), sqlc.narg(created_by_user_id)::uu
 RETURNING *;
 
 -- name: ListProjects :many
-SELECT * FROM projects
-WHERE team_id = public.memoh_current_team_id() AND deleted_at IS NULL
-ORDER BY created_at ASC, id ASC;
+-- Carries the issue tallies the project cards render, so a list of N projects
+-- stays one query instead of N board fetches. Buckets follow the
+-- issue-tracker convention: cancelled counts as closed, not as open work.
+SELECT p.*,
+  COALESCE(c.open_count, 0)::bigint AS open_issue_count,
+  COALESCE(c.closed_count, 0)::bigint AS closed_issue_count
+FROM projects p
+LEFT JOIN (
+  SELECT n.project_id,
+    COUNT(*) FILTER (WHERE d.status IN ('todo', 'in_progress')) AS open_count,
+    COUNT(*) FILTER (WHERE d.status IN ('done', 'cancelled')) AS closed_count
+  FROM project_nodes n
+  JOIN project_issue_details d ON d.team_id = n.team_id AND d.node_id = n.id
+  WHERE n.team_id = public.memoh_current_team_id()
+    AND n.type = 'issue' AND n.deleted_at IS NULL
+  GROUP BY n.project_id
+) c ON c.project_id = p.id
+WHERE p.team_id = public.memoh_current_team_id() AND p.deleted_at IS NULL
+ORDER BY p.created_at ASC, p.id ASC;
 
 -- name: GetProject :one
 SELECT * FROM projects

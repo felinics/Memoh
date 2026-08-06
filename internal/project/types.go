@@ -79,14 +79,18 @@ func (e *RevisionConflictError) Error() string {
 	return fmt.Sprintf("issue fields changed concurrently (current revision %d)", e.Current.Revision)
 }
 
-// Project is the collaboration space container.
+// Project is the collaboration space container. The issue tallies are filled
+// by the list endpoint only (the card view needs them); single-project reads
+// leave them at zero rather than paying for the aggregate.
 type Project struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description"`
-	CreatedByUserID string    `json:"created_by_user_id,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	CreatedByUserID  string    `json:"created_by_user_id,omitempty"`
+	OpenIssueCount   int       `json:"open_issue_count"`
+	ClosedIssueCount int       `json:"closed_issue_count"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // Node is a full node row: doc or issue, with current content.

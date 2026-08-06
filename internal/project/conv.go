@@ -42,6 +42,19 @@ func toProject(row dbsqlc.Project) Project {
 	}
 }
 
+func toProjectWithCounts(row dbsqlc.ListProjectsRow) Project {
+	return Project{
+		ID:               row.ID.String(),
+		Name:             row.Name,
+		Description:      row.Description,
+		CreatedByUserID:  uuidString(row.CreatedByUserID),
+		OpenIssueCount:   int(row.OpenIssueCount),
+		ClosedIssueCount: int(row.ClosedIssueCount),
+		CreatedAt:        db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:        db.TimeFromPg(row.UpdatedAt),
+	}
+}
+
 func toNode(row dbsqlc.ProjectNode) Node {
 	return Node{
 		ID:              row.ID.String(),

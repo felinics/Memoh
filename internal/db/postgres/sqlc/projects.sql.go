@@ -1090,20 +1090,49 @@ func (q *Queries) ListProjectNodeVersions(ctx context.Context, nodeID pgtype.UUI
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, team_id, name, description, created_by_user_id, deleted_at, created_at, updated_at FROM projects
-WHERE team_id = public.memoh_current_team_id() AND deleted_at IS NULL
-ORDER BY created_at ASC, id ASC
+SELECT p.id, p.team_id, p.name, p.description, p.created_by_user_id, p.deleted_at, p.created_at, p.updated_at,
+  COALESCE(c.open_count, 0)::bigint AS open_issue_count,
+  COALESCE(c.closed_count, 0)::bigint AS closed_issue_count
+FROM projects p
+LEFT JOIN (
+  SELECT n.project_id,
+    COUNT(*) FILTER (WHERE d.status IN ('todo', 'in_progress')) AS open_count,
+    COUNT(*) FILTER (WHERE d.status IN ('done', 'cancelled')) AS closed_count
+  FROM project_nodes n
+  JOIN project_issue_details d ON d.team_id = n.team_id AND d.node_id = n.id
+  WHERE n.team_id = public.memoh_current_team_id()
+    AND n.type = 'issue' AND n.deleted_at IS NULL
+  GROUP BY n.project_id
+) c ON c.project_id = p.id
+WHERE p.team_id = public.memoh_current_team_id() AND p.deleted_at IS NULL
+ORDER BY p.created_at ASC, p.id ASC
 `
 
-func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
+type ListProjectsRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description"`
+	CreatedByUserID  pgtype.UUID        `json:"created_by_user_id"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	OpenIssueCount   int64              `json:"open_issue_count"`
+	ClosedIssueCount int64              `json:"closed_issue_count"`
+}
+
+// Carries the issue tallies the project cards render, so a list of N projects
+// stays one query instead of N board fetches. Buckets follow the
+// issue-tracker convention: cancelled counts as closed, not as open work.
+func (q *Queries) ListProjects(ctx context.Context) ([]ListProjectsRow, error) {
 	rows, err := q.db.Query(ctx, listProjects)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Project
+	var items []ListProjectsRow
 	for rows.Next() {
-		var i Project
+		var i ListProjectsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TeamID,
@@ -1113,6 +1142,8 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OpenIssueCount,
+			&i.ClosedIssueCount,
 		); err != nil {
 			return nil, err
 		}

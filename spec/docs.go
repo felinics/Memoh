@@ -22665,6 +22665,9 @@ const docTemplate = `{
         "project.Project": {
             "type": "object",
             "properties": {
+                "closed_issue_count": {
+                    "type": "integer"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -22679,6 +22682,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "open_issue_count": {
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"

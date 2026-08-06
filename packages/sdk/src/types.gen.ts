@@ -2686,11 +2686,13 @@ export type ProjectNodeLinks = {
 };
 
 export type ProjectProject = {
+    closed_issue_count?: number;
     created_at?: string;
     created_by_user_id?: string;
     description?: string;
     id?: string;
     name?: string;
+    open_issue_count?: number;
     updated_at?: string;
 };
 

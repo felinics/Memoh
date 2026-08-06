@@ -22656,6 +22656,9 @@
         "project.Project": {
             "type": "object",
             "properties": {
+                "closed_issue_count": {
+                    "type": "integer"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -22670,6 +22673,9 @@
                 },
                 "name": {
                     "type": "string"
+                },
+                "open_issue_count": {
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
