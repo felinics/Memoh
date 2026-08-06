@@ -745,8 +745,8 @@
       "generic": "ツール",
       "approve": "許可する",
       "reject": "拒否する",
-    "pendingApproval": "承認待ち",
-    "executionLocation": "実行場所",
+      "pendingApproval": "承認待ち",
+      "executionLocation": "実行場所",
       "pendingUserInput": "入力を待っています",
       "userInputSubmitted": "答えた",
       "userInputCanceled": "キャンセル",
@@ -1607,29 +1607,29 @@
       "resetDefaults": "デフォルトにリセット",
       "confirmReset": "すべてのツール承認ルールをデフォルト状態に戻しますか?",
       "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
-    "title": "ツール呼び出しの承認",
-    "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。",
-    "loading": "承認ルールを読み込んでいます...",
-    "loadFailed": "Tool の承認設定を読み込めませんでした",
+      "title": "ツール呼び出しの承認",
+      "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。",
+      "loading": "承認ルールを読み込んでいます...",
+      "loadFailed": "Tool の承認設定を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
-    "saveFailed": "Tool の承認設定を保存できませんでした",
-    "saveSuccess": "Tool の承認設定を保存しました",
-    "partialSaveFailed": "一部の変更は保存されましたが、{count} 件の場所で失敗しました。失敗した下書きは保持されています。",
-    "enabled": "Tool の承認",
-    "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
-    "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
-    "target": {
-      "title": "承認対象",
-      "label": "Workspace またはコンピューター",
-      "description": "ルールは選択した Workspace またはコンピューターにのみ適用されます。"
-    },
-    "modes": {
-      "allow": "許可",
-      "ask": "確認",
-      "deny": "拒否"
+      "saveFailed": "Tool の承認設定を保存できませんでした",
+      "saveSuccess": "Tool の承認設定を保存しました",
+      "partialSaveFailed": "一部の変更は保存されましたが、{count} 件の場所で失敗しました。失敗した下書きは保持されています。",
+      "enabled": "Tool の承認",
+      "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
+      "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
+      "target": {
+        "title": "承認対象",
+        "label": "Workspace またはコンピューター",
+        "description": "ルールは選択した Workspace またはコンピューターにのみ適用されます。"
       },
-    "rules": {
-      "title": "ツールルール",
+      "modes": {
+        "allow": "許可",
+        "ask": "確認",
+        "deny": "拒否"
+      },
+      "rules": {
+        "title": "ツールルール",
         "reset": "推奨設定にリセット"
       },
       "behavior": {
@@ -1645,15 +1645,15 @@
         "pathsTitle": "常にレビューを要求",
         "commandsTitle": "常にレビューを要求"
       },
-    "toolNames": {
-      "read": "ファイル読み取り",
-      "write": "ファイル書き込み",
-      "exec": "シェルコマンド"
-    },
-    "tools": {
-      "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
-      "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
-      "exec": "Workspace 内でシェルコマンドを実行する"
+      "toolNames": {
+        "read": "ファイル読み取り",
+        "write": "ファイル書き込み",
+        "exec": "シェルコマンド"
+      },
+      "tools": {
+        "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
+        "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
+        "exec": "Workspace 内でシェルコマンドを実行する"
       },
       "toolDisabledHint": "この操作では現在、承認は要求されていません。以下のルールは、スイッチを有効にした後に適用されます。",
       "bypass": "バイパス (許可リスト)",
@@ -3073,6 +3073,28 @@
         "oct": "10月",
         "nov": "11月",
         "dec": "12月"
+      },
+      "execution": {
+        "runsIn": "実行先",
+        "newSession": "毎回新しいセッション",
+        "existingSession": "既存のセッション",
+        "session": "セッション",
+        "sessionPlaceholder": "セッションを選択",
+        "untitledSession": "無題（{id}）",
+        "sessionRuntimeNative": "このセッションは内蔵モデルランタイムを使用し、フォルダを引き継ぎます。",
+        "sessionRuntimeAcp": "このセッションは {agent} で実行され、フォルダを引き継ぎます。",
+        "model": "モデル",
+        "botDefault": "Bot デフォルト",
+        "sessionDefault": "セッションのデフォルト",
+        "models": "モデル",
+        "acpAgents": "コーディング Agent",
+        "agentDefaultModel": "Agent デフォルト",
+        "loadingAgentModels": "Agent を起動してモデルを取得中…",
+        "agentModelsFailed": "Agent のモデルを取得できませんでした",
+        "reasoning": "推論強度",
+        "defaultEffort": "デフォルト",
+        "workdir": "フォルダ",
+        "noWorkdir": "フォルダを指定しない"
       }
     },
     "history": {
