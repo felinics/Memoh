@@ -125,6 +125,16 @@ WHERE team_id = public.memoh_current_team_id()
 -- and commit a parent loop.
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(project_id)::text, 42));
 
+-- name: GetProjectIssueByNumber :one
+-- Short-handle lookup ("#12"). Soft-deleted rows are excluded: a retired
+-- number resolves to nothing rather than to a deleted issue.
+SELECT * FROM project_nodes
+WHERE team_id = public.memoh_current_team_id()
+  AND project_id = sqlc.arg(project_id)
+  AND type = 'issue'
+  AND number = sqlc.arg(number)
+  AND deleted_at IS NULL;
+
 -- name: GetProjectNodeByID :one
 -- Project-agnostic lookup: link targets may live in another project
 -- (cross-project references are allowed and render permission-gated).

@@ -83,13 +83,12 @@ func pgTime(t time.Time) pgtype.Timestamptz {
 }
 
 func TestLandSnapshotMergesWithinWindow(t *testing.T) {
-	editor := pgtype.UUID{}
-	_ = editor.Scan(uuidA)
+	editor := User(uuidA)
 	fq := &fakeQueries{
 		latestVersion: dbsqlc.ProjectNodeVersion{
 			NodeID:       pgtype.UUID{},
 			Version:      7,
-			EditorUserID: editor,
+			EditorUserID: editor.userUUID(),
 			UpdatedAt:    pgTime(time.Date(2026, 8, 6, 11, 58, 0, 0, time.UTC)), // 2 min ago
 		},
 	}
@@ -108,12 +107,11 @@ func TestLandSnapshotMergesWithinWindow(t *testing.T) {
 }
 
 func TestLandSnapshotNewRowWhenWindowClosed(t *testing.T) {
-	editor := pgtype.UUID{}
-	_ = editor.Scan(uuidA)
+	editor := User(uuidA)
 	fq := &fakeQueries{
 		latestVersion: dbsqlc.ProjectNodeVersion{
 			Version:      7,
-			EditorUserID: editor,
+			EditorUserID: editor.userUUID(),
 			UpdatedAt:    pgTime(time.Date(2026, 8, 6, 11, 40, 0, 0, time.UTC)), // 20 min ago
 		},
 	}
@@ -132,13 +130,11 @@ func TestLandSnapshotNewRowWhenWindowClosed(t *testing.T) {
 }
 
 func TestLandSnapshotNewRowForDifferentEditor(t *testing.T) {
-	editorA, editorB := pgtype.UUID{}, pgtype.UUID{}
-	_ = editorA.Scan(uuidA)
-	_ = editorB.Scan(uuidB)
+	editorA, editorB := User(uuidA), User(uuidB)
 	fq := &fakeQueries{
 		latestVersion: dbsqlc.ProjectNodeVersion{
 			Version:      7,
-			EditorUserID: editorA,
+			EditorUserID: editorA.userUUID(),
 			UpdatedAt:    pgTime(time.Date(2026, 8, 6, 11, 59, 0, 0, time.UTC)),
 		},
 	}
@@ -154,12 +150,11 @@ func TestLandSnapshotNewRowForDifferentEditor(t *testing.T) {
 }
 
 func TestLandSnapshotNewRowOnVersionSkew(t *testing.T) {
-	editor := pgtype.UUID{}
-	_ = editor.Scan(uuidA)
+	editor := User(uuidA)
 	fq := &fakeQueries{
 		latestVersion: dbsqlc.ProjectNodeVersion{
 			Version:      5, // latest snapshot lags the expected version
-			EditorUserID: editor,
+			EditorUserID: editor.userUUID(),
 			UpdatedAt:    pgTime(time.Date(2026, 8, 6, 11, 59, 0, 0, time.UTC)),
 		},
 	}
@@ -258,8 +253,7 @@ func TestResolveIssueFieldsPartialSemantics(t *testing.T) {
 func TestRecordIssueActivityDiffs(t *testing.T) {
 	fq := &fakeQueries{}
 	s := newTestService(fq)
-	actor := pgtype.UUID{}
-	_ = actor.Scan(uuidA)
+	actor := User(uuidA)
 	assignee := pgtype.UUID{}
 	_ = assignee.Scan(uuidB)
 
@@ -290,7 +284,7 @@ func TestRecordIssueActivityNoChangesNoRows(t *testing.T) {
 	fq := &fakeQueries{}
 	s := newTestService(fq)
 	row := dbsqlc.ProjectIssueDetail{Status: StatusTodo}
-	if err := s.recordIssueActivity(context.Background(), fq, pgtype.UUID{}, pgtype.UUID{}, row, row); err != nil {
+	if err := s.recordIssueActivity(context.Background(), fq, pgtype.UUID{}, Actor{}, row, row); err != nil {
 		t.Fatalf("recordIssueActivity: %v", err)
 	}
 	if len(fq.activities) != 0 {

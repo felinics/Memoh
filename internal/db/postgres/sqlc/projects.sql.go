@@ -368,6 +368,47 @@ func (q *Queries) GetProjectComment(ctx context.Context, commentID pgtype.UUID) 
 	return i, err
 }
 
+const getProjectIssueByNumber = `-- name: GetProjectIssueByNumber :one
+SELECT id, team_id, project_id, type, parent_id, rank, title, body, version, created_by_user_id, created_by_bot_id, updated_by_user_id, updated_by_bot_id, deleted_at, created_at, updated_at, number FROM project_nodes
+WHERE team_id = public.memoh_current_team_id()
+  AND project_id = $1
+  AND type = 'issue'
+  AND number = $2
+  AND deleted_at IS NULL
+`
+
+type GetProjectIssueByNumberParams struct {
+	ProjectID pgtype.UUID `json:"project_id"`
+	Number    pgtype.Int4 `json:"number"`
+}
+
+// Short-handle lookup ("#12"). Soft-deleted rows are excluded: a retired
+// number resolves to nothing rather than to a deleted issue.
+func (q *Queries) GetProjectIssueByNumber(ctx context.Context, arg GetProjectIssueByNumberParams) (ProjectNode, error) {
+	row := q.db.QueryRow(ctx, getProjectIssueByNumber, arg.ProjectID, arg.Number)
+	var i ProjectNode
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.ProjectID,
+		&i.Type,
+		&i.ParentID,
+		&i.Rank,
+		&i.Title,
+		&i.Body,
+		&i.Version,
+		&i.CreatedByUserID,
+		&i.CreatedByBotID,
+		&i.UpdatedByUserID,
+		&i.UpdatedByBotID,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+	)
+	return i, err
+}
+
 const getProjectIssueDetails = `-- name: GetProjectIssueDetails :one
 SELECT team_id, node_id, status, assignee_user_id, assignee_bot_id, priority, due_at, revision, created_at, updated_at FROM project_issue_details
 WHERE team_id = public.memoh_current_team_id() AND node_id = $1

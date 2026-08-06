@@ -455,6 +455,7 @@ type Queries interface {
 	GetProjectComment(ctx context.Context, commentID pgtype.UUID) (dbsqlc.ProjectComment, error)
 	GetProjectIssueDetails(ctx context.Context, nodeID pgtype.UUID) (dbsqlc.ProjectIssueDetail, error)
 	GetProjectNode(ctx context.Context, arg dbsqlc.GetProjectNodeParams) (dbsqlc.ProjectNode, error)
+	GetProjectIssueByNumber(ctx context.Context, arg dbsqlc.GetProjectIssueByNumberParams) (dbsqlc.ProjectNode, error)
 	GetProjectNodeByID(ctx context.Context, nodeID pgtype.UUID) (dbsqlc.ProjectNode, error)
 	GetProjectNodeParent(ctx context.Context, nodeID pgtype.UUID) (dbsqlc.GetProjectNodeParentRow, error)
 	GetProjectNodeVersion(ctx context.Context, arg dbsqlc.GetProjectNodeVersionParams) (dbsqlc.ProjectNodeVersion, error)

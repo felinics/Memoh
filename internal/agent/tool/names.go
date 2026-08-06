@@ -57,6 +57,14 @@ func ToolGenerateVideo() ToolName   { return toolname.ToolGenerateVideo() }
 func ToolTranscribeAudio() ToolName { return toolname.ToolTranscribeAudio() }
 func ToolAskUser() ToolName         { return toolname.ToolAskUser() }
 
+func ToolProjectList() ToolName        { return toolname.ToolProjectList() }
+func ToolProjectSearch() ToolName      { return toolname.ToolProjectSearch() }
+func ToolProjectRead() ToolName        { return toolname.ToolProjectRead() }
+func ToolProjectCreate() ToolName      { return toolname.ToolProjectCreate() }
+func ToolProjectEdit() ToolName        { return toolname.ToolProjectEdit() }
+func ToolProjectIssueUpdate() ToolName { return toolname.ToolProjectIssueUpdate() }
+func ToolProjectComment() ToolName     { return toolname.ToolProjectComment() }
+
 func ToolListEmailAccounts() ToolName { return toolname.ToolListEmailAccounts() }
 func ToolSendEmail() ToolName         { return toolname.ToolSendEmail() }
 func ToolListEmail() ToolName         { return toolname.ToolListEmail() }

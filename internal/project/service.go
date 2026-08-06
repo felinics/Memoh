@@ -68,7 +68,7 @@ func notFound(err error) bool {
 }
 
 // CreateProject creates a collaboration space.
-func (s *Service) CreateProject(ctx context.Context, userID string, req CreateProjectRequest) (Project, error) {
+func (s *Service) CreateProject(ctx context.Context, actor Actor, req CreateProjectRequest) (Project, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		return Project{}, ErrNameRequired
@@ -76,7 +76,7 @@ func (s *Service) CreateProject(ctx context.Context, userID string, req CreatePr
 	row, err := s.queries.CreateProject(ctx, dbsqlc.CreateProjectParams{
 		Name:            name,
 		Description:     strings.TrimSpace(req.Description),
-		CreatedByUserID: db.ParseUUIDOrEmpty(userID),
+		CreatedByUserID: actor.userUUID(),
 	})
 	if err != nil {
 		return Project{}, err

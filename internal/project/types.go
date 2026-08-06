@@ -8,6 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/db"
 )
 
 // Node types.
@@ -77,6 +81,37 @@ type RevisionConflictError struct {
 
 func (e *RevisionConflictError) Error() string {
 	return fmt.Sprintf("issue fields changed concurrently (current revision %d)", e.Current.Revision)
+}
+
+// Actor is who is writing: a human, or a bot acting on its own behalf. Every
+// write path records exactly one of the two into the matching `_user_id` /
+// `_bot_id` column pair, so "who changed this" survives into the version
+// history and the issue activity stream.
+type Actor struct {
+	UserID string
+	BotID  string
+}
+
+// User builds a human actor.
+func User(userID string) Actor { return Actor{UserID: userID} }
+
+// Bot builds an agent actor.
+func Bot(botID string) Actor { return Actor{BotID: botID} }
+
+func (a Actor) userUUID() pgtype.UUID { return db.ParseUUIDOrEmpty(a.UserID) }
+func (a Actor) botUUID() pgtype.UUID  { return db.ParseUUIDOrEmpty(a.BotID) }
+
+// sameAs reports whether two actors are the same principal. Used for the
+// author-only comment edit rule, which must not let a bot edit a human's
+// comment just because both ids happen to be empty.
+func (a Actor) sameAs(userID, botID pgtype.UUID) bool {
+	if a.BotID != "" {
+		return botID.Valid && a.botUUID().Bytes == botID.Bytes
+	}
+	if a.UserID != "" {
+		return userID.Valid && a.userUUID().Bytes == userID.Bytes
+	}
+	return false
 }
 
 // Project is the collaboration space container. The issue tallies are filled

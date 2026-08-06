@@ -9,6 +9,10 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
+func int32ToPg(v int) pgtype.Int4 {
+	return pgtype.Int4{Int32: int32(v), Valid: true} //nolint:gosec // caller-bounded issue number
+}
+
 func uuidString(id pgtype.UUID) string {
 	if !id.Valid {
 		return ""

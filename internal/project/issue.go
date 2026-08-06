@@ -61,7 +61,7 @@ type resolvedIssueFields struct {
 // UpdateIssue patches issue fields (and optionally the card rank) under
 // the revision optimistic lock, logging one activity row per changed
 // field.
-func (s *Service) UpdateIssue(ctx context.Context, projectID, nodeID, userID string, req UpdateIssueRequest) (IssueDetails, error) {
+func (s *Service) UpdateIssue(ctx context.Context, projectID, nodeID string, actor Actor, req UpdateIssueRequest) (IssueDetails, error) {
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return IssueDetails{}, err
 	}
@@ -84,7 +84,6 @@ func (s *Service) UpdateIssue(ctx context.Context, projectID, nodeID, userID str
 	if err != nil {
 		return IssueDetails{}, err
 	}
-	actor := db.ParseUUIDOrEmpty(userID)
 
 	var updated dbsqlc.ProjectIssueDetail
 	err = s.inTx(ctx, func(q dbstore.Queries) error {
@@ -196,7 +195,7 @@ func resolveIssueFields(current dbsqlc.ProjectIssueDetail, req UpdateIssueReques
 
 // recordIssueActivity diffs the pre/post rows and writes one activity row
 // per changed field, inside the update transaction.
-func (*Service) recordIssueActivity(ctx context.Context, q dbstore.Queries, nodeID, actor pgtype.UUID, before, after dbsqlc.ProjectIssueDetail) error {
+func (*Service) recordIssueActivity(ctx context.Context, q dbstore.Queries, nodeID pgtype.UUID, actor Actor, before, after dbsqlc.ProjectIssueDetail) error {
 	type change struct {
 		field    string
 		old, new string
@@ -221,7 +220,8 @@ func (*Service) recordIssueActivity(ctx context.Context, q dbstore.Queries, node
 	for _, c := range changes {
 		if err := q.InsertProjectIssueActivity(ctx, dbsqlc.InsertProjectIssueActivityParams{
 			NodeID:      nodeID,
-			ActorUserID: actor,
+			ActorUserID: actor.userUUID(),
+			ActorBotID:  actor.botUUID(),
 			Field:       c.field,
 			OldValue:    pgtype.Text{String: c.old, Valid: c.old != ""},
 			NewValue:    pgtype.Text{String: c.new, Valid: c.new != ""},

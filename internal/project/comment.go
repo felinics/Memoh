@@ -9,7 +9,7 @@ import (
 )
 
 // CreateComment posts a comment on a doc or issue node.
-func (s *Service) CreateComment(ctx context.Context, projectID, nodeID, userID string, req CommentRequest) (Comment, error) {
+func (s *Service) CreateComment(ctx context.Context, projectID, nodeID string, actor Actor, req CommentRequest) (Comment, error) {
 	body := strings.TrimSpace(req.Body)
 	if body == "" {
 		return Comment{}, ErrBodyRequired
@@ -23,7 +23,8 @@ func (s *Service) CreateComment(ctx context.Context, projectID, nodeID, userID s
 	}
 	row, err := s.queries.CreateProjectComment(ctx, dbsqlc.CreateProjectCommentParams{
 		NodeID:       node.ID,
-		AuthorUserID: db.ParseUUIDOrEmpty(userID),
+		AuthorUserID: actor.userUUID(),
+		AuthorBotID:  actor.botUUID(),
 		Body:         body,
 	})
 	if err != nil {
@@ -53,12 +54,12 @@ func (s *Service) ListComments(ctx context.Context, projectID, nodeID string) ([
 }
 
 // UpdateComment edits a comment body; author-only.
-func (s *Service) UpdateComment(ctx context.Context, projectID, nodeID, commentID, userID string, req CommentRequest) (Comment, error) {
+func (s *Service) UpdateComment(ctx context.Context, projectID, nodeID, commentID string, actor Actor, req CommentRequest) (Comment, error) {
 	body := strings.TrimSpace(req.Body)
 	if body == "" {
 		return Comment{}, ErrBodyRequired
 	}
-	comment, err := s.requireOwnComment(ctx, projectID, nodeID, commentID, userID)
+	comment, err := s.requireOwnComment(ctx, projectID, nodeID, commentID, actor)
 	if err != nil {
 		return Comment{}, err
 	}
@@ -76,8 +77,8 @@ func (s *Service) UpdateComment(ctx context.Context, projectID, nodeID, commentI
 }
 
 // DeleteComment soft-deletes a comment; author-only.
-func (s *Service) DeleteComment(ctx context.Context, projectID, nodeID, commentID, userID string) error {
-	comment, err := s.requireOwnComment(ctx, projectID, nodeID, commentID, userID)
+func (s *Service) DeleteComment(ctx context.Context, projectID, nodeID, commentID string, actor Actor) error {
+	comment, err := s.requireOwnComment(ctx, projectID, nodeID, commentID, actor)
 	if err != nil {
 		return err
 	}
@@ -93,7 +94,7 @@ func (s *Service) DeleteComment(ctx context.Context, projectID, nodeID, commentI
 
 // requireOwnComment loads a live comment, checks it hangs off the given
 // node in the given project, and that the caller wrote it.
-func (s *Service) requireOwnComment(ctx context.Context, projectID, nodeID, commentID, userID string) (dbsqlc.ProjectComment, error) {
+func (s *Service) requireOwnComment(ctx context.Context, projectID, nodeID, commentID string, actor Actor) (dbsqlc.ProjectComment, error) {
 	if err := s.requireProject(ctx, projectID); err != nil {
 		return dbsqlc.ProjectComment{}, err
 	}
@@ -115,8 +116,7 @@ func (s *Service) requireOwnComment(ctx context.Context, projectID, nodeID, comm
 	if comment.NodeID != node.ID {
 		return dbsqlc.ProjectComment{}, ErrCommentNotFound
 	}
-	author := db.ParseUUIDOrEmpty(userID)
-	if !author.Valid || !comment.AuthorUserID.Valid || comment.AuthorUserID.Bytes != author.Bytes {
+	if !actor.sameAs(comment.AuthorUserID, comment.AuthorBotID) {
 		return dbsqlc.ProjectComment{}, ErrNotCommentAuthor
 	}
 	return comment, nil

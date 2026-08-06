@@ -40,7 +40,7 @@ func (s *Service) Tree(ctx context.Context, projectID string) ([]TreeNode, error
 // CreateNode creates a doc (optionally under a parent) or an issue
 // (optionally straight into a kanban column). The initial version snapshot
 // and, for issues, the details row commit atomically with the node.
-func (s *Service) CreateNode(ctx context.Context, projectID, userID string, req CreateNodeRequest) (NodeDetail, error) {
+func (s *Service) CreateNode(ctx context.Context, projectID string, actor Actor, req CreateNodeRequest) (NodeDetail, error) {
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
 		return NodeDetail{}, ErrTitleRequired
@@ -80,7 +80,6 @@ func (s *Service) CreateNode(ctx context.Context, projectID, userID string, req 
 	if err != nil {
 		return NodeDetail{}, ErrProjectNotFound
 	}
-	userUUID := db.ParseUUIDOrEmpty(userID)
 
 	var detail NodeDetail
 	err = s.inTx(ctx, func(q dbstore.Queries) error {
@@ -128,8 +127,10 @@ func (s *Service) CreateNode(ctx context.Context, projectID, userID string, req 
 			Title:           title,
 			Body:            req.Body,
 			Number:          number,
-			CreatedByUserID: userUUID,
-			UpdatedByUserID: userUUID,
+			CreatedByUserID: actor.userUUID(),
+			CreatedByBotID:  actor.botUUID(),
+			UpdatedByUserID: actor.userUUID(),
+			UpdatedByBotID:  actor.botUUID(),
 		})
 		if err != nil {
 			return err
@@ -139,7 +140,8 @@ func (s *Service) CreateNode(ctx context.Context, projectID, userID string, req 
 			Version:      node.Version,
 			Title:        node.Title,
 			Body:         node.Body,
-			EditorUserID: userUUID,
+			EditorUserID: actor.userUUID(),
+			EditorBotID:  actor.botUUID(),
 		}); err != nil {
 			return err
 		}
@@ -204,7 +206,7 @@ func (s *Service) GetNode(ctx context.Context, projectID, nodeID string) (NodeDe
 // UpdateContent writes title/body under the content optimistic lock and
 // lands the snapshot — merged into the newest one inside the merge window,
 // appended as a new immutable row otherwise.
-func (s *Service) UpdateContent(ctx context.Context, projectID, nodeID, userID string, req UpdateContentRequest) (Node, error) {
+func (s *Service) UpdateContent(ctx context.Context, projectID, nodeID string, actor Actor, req UpdateContentRequest) (Node, error) {
 	if req.Title == nil && req.Body == nil {
 		return Node{}, ErrTitleRequired
 	}
@@ -226,7 +228,6 @@ func (s *Service) UpdateContent(ctx context.Context, projectID, nodeID, userID s
 	if req.Body != nil {
 		body = *req.Body
 	}
-	userUUID := db.ParseUUIDOrEmpty(userID)
 
 	var updated dbsqlc.ProjectNode
 	err = s.inTx(ctx, func(q dbstore.Queries) error {
@@ -234,7 +235,8 @@ func (s *Service) UpdateContent(ctx context.Context, projectID, nodeID, userID s
 		updated, err = q.UpdateProjectNodeContent(ctx, dbsqlc.UpdateProjectNodeContentParams{
 			Title:           title,
 			Body:            body,
-			UpdatedByUserID: userUUID,
+			UpdatedByUserID: actor.userUUID(),
+			UpdatedByBotID:  actor.botUUID(),
 			ProjectID:       current.ProjectID,
 			NodeID:          current.ID,
 			ExpectedVersion: safeInt32(req.ExpectedVersion),
@@ -245,7 +247,7 @@ func (s *Service) UpdateContent(ctx context.Context, projectID, nodeID, userID s
 			}
 			return err
 		}
-		return s.landSnapshot(ctx, q, updated, req.ExpectedVersion, userUUID)
+		return s.landSnapshot(ctx, q, updated, req.ExpectedVersion, actor)
 	})
 	if err != nil {
 		return Node{}, err
@@ -267,15 +269,17 @@ func (s *Service) contentConflict(ctx context.Context, q dbstore.Queries, projec
 // saving inside the merge window, and appends a new immutable row
 // otherwise. Runs inside the content-update transaction: the row lock from
 // the guarded UPDATE serializes concurrent editors.
-func (s *Service) landSnapshot(ctx context.Context, q dbstore.Queries, node dbsqlc.ProjectNode, expectedVersion int, editor pgtype.UUID) error {
+func (s *Service) landSnapshot(ctx context.Context, q dbstore.Queries, node dbsqlc.ProjectNode, expectedVersion int, editor Actor) error {
 	latest, err := q.GetLatestProjectNodeVersion(ctx, node.ID)
 	if err != nil && !notFound(err) {
 		return err
 	}
+	// "Same editor" means the same PRINCIPAL: a bot's save must never merge
+	// into a human's snapshot (or the reverse), or the history would credit
+	// one for the other's text.
 	if err == nil &&
 		int(latest.Version) == expectedVersion &&
-		latest.EditorUserID.Valid == editor.Valid && latest.EditorUserID.Bytes == editor.Bytes &&
-		!latest.EditorBotID.Valid &&
+		editor.sameAs(latest.EditorUserID, latest.EditorBotID) &&
 		s.now().Sub(db.TimeFromPg(latest.UpdatedAt)) < s.mergeWindow {
 		_, err := q.RenumberProjectNodeVersion(ctx, dbsqlc.RenumberProjectNodeVersionParams{
 			NewVersion: node.Version,
@@ -291,7 +295,8 @@ func (s *Service) landSnapshot(ctx context.Context, q dbstore.Queries, node dbsq
 		Version:      node.Version,
 		Title:        node.Title,
 		Body:         node.Body,
-		EditorUserID: editor,
+		EditorUserID: editor.userUUID(),
+		EditorBotID:  editor.botUUID(),
 	})
 }
 

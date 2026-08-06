@@ -158,7 +158,7 @@ func (h *ProjectHandler) CreateProject(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	created, err := h.service.CreateProject(c.Request().Context(), userID, req)
+	created, err := h.service.CreateProject(c.Request().Context(), project.User(userID), req)
 	if err != nil {
 		return projectHTTPError(c, err)
 	}
@@ -329,7 +329,7 @@ func (h *ProjectHandler) CreateNode(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	detail, err := h.service.CreateNode(c.Request().Context(), projectID, userID, req)
+	detail, err := h.service.CreateNode(c.Request().Context(), projectID, project.User(userID), req)
 	if err != nil {
 		return projectHTTPError(c, err)
 	}
@@ -396,7 +396,7 @@ func (h *ProjectHandler) UpdateContent(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	node, err := h.service.UpdateContent(c.Request().Context(), projectID, nodeID, userID, req)
+	node, err := h.service.UpdateContent(c.Request().Context(), projectID, nodeID, project.User(userID), req)
 	if err != nil {
 		return projectHTTPError(c, err)
 	}
@@ -497,7 +497,7 @@ func (h *ProjectHandler) UpdateIssue(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	details, err := h.service.UpdateIssue(c.Request().Context(), projectID, nodeID, userID, req)
+	details, err := h.service.UpdateIssue(c.Request().Context(), projectID, nodeID, project.User(userID), req)
 	if err != nil {
 		return projectHTTPError(c, err)
 	}
@@ -651,7 +651,7 @@ func (h *ProjectHandler) CreateComment(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	comment, err := h.service.CreateComment(c.Request().Context(), projectID, nodeID, userID, req)
+	comment, err := h.service.CreateComment(c.Request().Context(), projectID, nodeID, project.User(userID), req)
 	if err != nil {
 		return projectHTTPError(c, err)
 	}
@@ -694,7 +694,7 @@ func (h *ProjectHandler) UpdateComment(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	comment, err := h.service.UpdateComment(c.Request().Context(), projectID, nodeID, commentID, userID, req)
+	comment, err := h.service.UpdateComment(c.Request().Context(), projectID, nodeID, commentID, project.User(userID), req)
 	if err != nil {
 		return projectHTTPError(c, err)
 	}
@@ -729,7 +729,7 @@ func (h *ProjectHandler) DeleteComment(c echo.Context) error {
 	if commentID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "comment_id is required")
 	}
-	if err := h.service.DeleteComment(c.Request().Context(), projectID, nodeID, commentID, userID); err != nil {
+	if err := h.service.DeleteComment(c.Request().Context(), projectID, nodeID, commentID, project.User(userID)); err != nil {
 		return projectHTTPError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
