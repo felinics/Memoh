@@ -6,7 +6,7 @@
        transitioned, so the resize handle still tracks the pointer 1:1. `inert`
        while closed so focus can't tab into the parked-off-screen rail. -->
   <aside
-    class="workspace-divider-r relative flex shrink-0 flex-col bg-sidebar"
+    class="workspace-divider-r relative flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-sidebar"
     data-native-sidebar-surface
     data-native-sidebar-tint
     data-native-sidebar-seam
@@ -112,7 +112,7 @@
          the footer so Settings reads as floating just below it — instead of a
          hard rule above Settings, which would be lopsided since the nav above
          the list has no divider of its own. -->
-    <div class="relative min-h-0 flex-1">
+    <div class="relative min-h-0 flex-1 overflow-hidden">
       <PanelSessions
         v-show="sidebarView === 'sessions'"
         class="h-full"
@@ -132,10 +132,9 @@
       />
     </div>
 
-    <!-- Settings, pinned to the bottom. Same action-row owner as New Session /
-         Bot Settings above (SidebarNavButton owns the icon-column geometry).
-         No top border — the list above fades into it instead. -->
-    <div class="shrink-0 px-2 pt-1 pb-2">
+    <!-- Settings, pinned below the scrollable panel. Solid bg + z-index so a
+         short viewport never paints list rows over the footer. -->
+    <div class="relative z-1 shrink-0 bg-sidebar px-2 pt-1 pb-2">
       <SidebarNavButton
         :active="isSettingsActive"
         :aria-label="t('sidebar.settings')"

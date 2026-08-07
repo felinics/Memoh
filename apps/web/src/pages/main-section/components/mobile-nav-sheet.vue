@@ -17,7 +17,7 @@
         <SheetTitle>{{ t('chat.mobileNav.title') }}</SheetTitle>
         <SheetDescription>{{ t('chat.mobileNav.description') }}</SheetDescription>
       </SheetHeader>
-      <div class="flex h-full w-full flex-col">
+      <div class="flex h-full w-full min-h-0 flex-col overflow-hidden">
         <header class="flex h-11 shrink-0 items-center pl-3 pr-2">
           <div class="min-w-0 flex-1">
             <BotSwitcher full-width />
@@ -44,7 +44,7 @@
 
         <!-- Same panels the desktop rail hosts, with the same bottom fade into
              the Settings row. -->
-        <div class="relative min-h-0 flex-1">
+        <div class="relative min-h-0 flex-1 overflow-hidden">
           <PanelSessions
             v-show="sidebarView === 'sessions'"
             class="h-full"
@@ -61,7 +61,7 @@
           <div class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-sidebar to-transparent" />
         </div>
 
-        <div class="shrink-0 px-2 pt-1 pb-2">
+        <div class="relative z-1 shrink-0 bg-sidebar px-2 pt-1 pb-2">
           <SidebarNavButton
             :aria-label="t('sidebar.settings')"
             @click="goSettings"

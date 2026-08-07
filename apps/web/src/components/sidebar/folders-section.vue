@@ -5,7 +5,7 @@
        squeeze the Recents list out of the panel. -->
   <div
     v-if="currentBotId"
-    class="flex min-h-0 shrink-0 flex-col px-2 pb-0.5"
+    class="flex min-h-0 max-h-[min(14rem,45%)] shrink flex-col overflow-hidden px-2 pb-0.5"
   >
     <div class="flex items-center pt-1 pr-1">
       <!-- Same header affordance as the Recents mode switcher: the label is a
@@ -37,7 +37,7 @@
     <div
       v-if="!sectionCollapsed"
       ref="foldersScrollEl"
-      class="sidebar-scroll max-h-56 overflow-y-auto pr-1 pt-0.5"
+      class="sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1 pt-0.5"
     >
       <template
         v-for="folder in liveFolders"
