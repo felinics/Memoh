@@ -127,7 +127,7 @@ const sessionDialogs = ref<InstanceType<typeof SessionDialogs> | null>(null)
 
 const SIDEBAR_SESSION_MODES = new Set(['chat', 'discuss', 'schedule'])
 
-const sessionSkeletonBarClass = 'h-4 max-w-full !rounded-xs'
+const sessionSkeletonBarClass = 'h-4 max-w-full rounded-xs!'
 
 /** Slightly above text-control cap height (14px → 16px bar). */
 const SESSION_SKELETON_WIDTHS = [

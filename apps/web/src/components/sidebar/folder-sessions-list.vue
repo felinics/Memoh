@@ -30,6 +30,22 @@
       <Spinner class="size-4" />
     </div>
 
+    <!-- Auto-prefetch stops after a failed page (it made no progress) and a
+         folder short of its viewport has no sentinel to kick it again — this
+         row is the only way forward. -->
+    <div
+      v-else-if="paging.error"
+      class="pb-0.5 pl-4"
+    >
+      <TextButton
+        class="text-xs"
+        :data-testid="`folder-load-retry-${workdirId}`"
+        @click="retryLoad"
+      >
+        {{ t('chat.retry') }}
+      </TextButton>
+    </div>
+
     <div
       v-else-if="paging.loaded && sessions.length === 0"
       class="px-3 py-2 pl-4 text-xs text-muted-foreground"
@@ -43,7 +59,7 @@
 import { computed, toRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { Spinner } from '@felinic/ui'
+import { Spinner, TextButton } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import type { SessionSummary } from '@/composables/api/useChat'
 import SessionItem from './session-item.vue'
@@ -75,6 +91,14 @@ const { loadMoreSentinel, showSentinel } = useSidebarInfiniteScroll({
   hasMore: computed(() => paging.value.hasMore),
   loading: computed(() => paging.value.loading),
   loadMore: () => chatStore.loadMoreWorkdirSessions(props.workdirId),
+  // A permission-filtered page can return zero rows with an advanced cursor —
+  // count/height alone would read that as "no progress" and stall paging.
+  progressCursor: computed(() => paging.value.cursor),
   itemCount: computed(() => sessions.value.length),
 })
+
+function retryLoad() {
+  if (paging.value.loaded) void chatStore.loadMoreWorkdirSessions(props.workdirId)
+  else void chatStore.ensureWorkdirSessions(props.workdirId)
+}
 </script>

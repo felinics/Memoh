@@ -8,8 +8,6 @@ export function createSessionListSnapshot(deps: {
   replaceSessions: (items: SessionSummary[]) => SessionSummary[]
   sessionsCursor: Ref<string | null>
   hasMoreSessions: Ref<boolean>
-  fetchSessions: (botId: string) => Promise<FetchSessionsResult>
-  currentBotId: () => string | null
 }) {
   function applySessionsSnapshot(response: FetchSessionsResult) {
     deps.replaceSessions(response.items)
@@ -17,37 +15,48 @@ export function createSessionListSnapshot(deps: {
     deps.hasMoreSessions.value = response.nextCursor !== null
   }
 
-  async function recoverSessionsListAfterInitializeFailure(botId: string, error: unknown) {
-    const bid = botId.trim()
-    if (!bid) return
-    console.error('Chat initialize failed; retrying session list fetch:', error)
-    try {
-      const response = await deps.fetchSessions(bid)
-      if ((deps.currentBotId() ?? '').trim() !== bid) return
-      applySessionsSnapshot(response)
-    } catch (retryError) {
-      console.error('Failed to load sessions after initialize retry:', retryError)
-      toast.error(resolveApiErrorMessage(
-        retryError,
-        i18n.global.t('chat.sessionsLoadFailed'),
-      ))
-    }
-  }
-
-  return { applySessionsSnapshot, recoverSessionsListAfterInitializeFailure }
+  return { applySessionsSnapshot }
 }
 
 export function bindBotIdInitializeWatch(deps: {
   currentBotId: Ref<string | null>
   initialize: () => Promise<void>
-  recoverSessionsListAfterInitializeFailure: (botId: string, error: unknown) => Promise<void>
   resetUserScopedState: () => void
 }) {
   watch(deps.currentBotId, (newId) => {
-    if (newId) {
-      void deps.initialize().catch(error => {
-        void deps.recoverSessionsListAfterInitializeFailure(newId, error)
-      })
-    } else deps.resetUserScopedState()
+    if (newId) void initializeWithRetry(deps, newId.trim())
+    else deps.resetUserScopedState()
   }, { immediate: true })
+}
+
+// Recovery must rerun the FULL bootstrap, not hand-patch the sessions list:
+// initialize() stops the WebSocket / activity streams before its first request
+// and restarts them (plus session selection and the session runtime) only on
+// the success path — a list-only retry would look recovered while realtime
+// stays dead. The bootstrap's reentrancy guard resets before its promise
+// rejects, so the second call below is a clean, idempotent rerun.
+async function initializeWithRetry(
+  deps: { currentBotId: Ref<string | null>; initialize: () => Promise<void> },
+  botId: string,
+) {
+  if (!botId) return
+  try {
+    await deps.initialize()
+    return
+  } catch (error) {
+    console.error('Chat initialize failed; retrying once:', error)
+  }
+  // A bot switch during the failed run owns its own initialize — never retry
+  // for a bot the user has already left.
+  if ((deps.currentBotId.value ?? '').trim() !== botId) return
+  try {
+    await deps.initialize()
+  } catch (retryError) {
+    if ((deps.currentBotId.value ?? '').trim() !== botId) return
+    console.error('Chat initialize retry failed:', retryError)
+    toast.error(resolveApiErrorMessage(
+      retryError,
+      i18n.global.t('chat.sessionsLoadFailed'),
+    ))
+  }
 }

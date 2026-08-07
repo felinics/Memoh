@@ -37,6 +37,12 @@ import {
   createSessionListSnapshot,
 } from './chat/session-list-init-recovery'
 
+import type {
+  ChatAssistantTurn,
+  ChatMessage,
+  ChatUserTurn,
+} from './chat/types'
+
 export type {
   ACPAgentSessionInput, ActiveChatTarget, AttachmentBlock, AttachmentItem,
   BackgroundTask, ChatAssistantTurn, ChatMessage, ChatSystemTurn, ChatUserTurn,
@@ -132,12 +138,8 @@ export const useChatStore = defineStore('chat', () => {
     userScopeGeneration: () => userScopeGeneration,
     knownSession: knownSessionSummary,
   })
-  const {
-    applySessionsSnapshot,
-    recoverSessionsListAfterInitializeFailure,
-  } = createSessionListSnapshot({
-    replaceSessions, sessionsCursor, hasMoreSessions, fetchSessions,
-    currentBotId: () => currentBotId.value,
+  const { applySessionsSnapshot } = createSessionListSnapshot({
+    replaceSessions, sessionsCursor, hasMoreSessions,
   })
   const refreshCoordinator = createChatRefreshCoordinator({
     currentBotId,
@@ -167,6 +169,12 @@ export const useChatStore = defineStore('chat', () => {
     updateKnownSessionTitle,
     refreshSessionsList,
   })
+  // `loadingChats` covers the bot-level boot path (sessions list fetch), so
+  // the sidebar can show its skeleton + suppress its empty-state placeholder
+  // exactly while the sessions list is in flight.
+  // `loadingMessages` covers the per-session transcript fetch — the sidebar
+  // never reacts to it, only the chat pane uses it to keep its own empty
+  // placeholders hidden while a fresh transcript is on its way.
   const {
     bots, ensureBot, refreshBots, reset: resetBots,
   } = createChatBots({
@@ -481,7 +489,7 @@ export const useChatStore = defineStore('chat', () => {
   })
 
   bindBotIdInitializeWatch({
-    currentBotId, initialize, recoverSessionsListAfterInitializeFailure, resetUserScopedState,
+    currentBotId, initialize, resetUserScopedState,
   })
 
   const stopAuthSessionListener = onAuthSessionCleared(() => {
@@ -578,7 +586,10 @@ export const useChatStore = defineStore('chat', () => {
     pendingACPRuntimeEnsuring, pendingACPStateFor,
     sessionId, hasExplicitSessionSelection, currentBotId, bots,
     activeChatTarget, isSessionStreaming,
-    loadingChats, loadingMessages, loadingOlder, hasMoreOlder, _hasLoadedOlder: hasLoadedOlder,
+    loadingChats, loadingMessages, loadingOlder, hasMoreOlder,
+    // Exposed for tests only — do not branch on this in components. The
+    // leading underscore reflects the test-only contract at the call site.
+    _hasLoadedOlder: hasLoadedOlder,
     overrideModelId, overrideReasoningEffort,
     startupSendFailure, startupSendFailureFor,
     commandEvent, commandEventForScope, showCommandError,

@@ -60,6 +60,34 @@ describe('workdir sessions paging', () => {
       loading: false,
       hasMore: false,
       loaded: true,
+      cursor: null,
+      error: false,
+    })
+  })
+
+  it('flags a failed load as error and clears it on retry', async () => {
+    fetchSessions.mockRejectedValueOnce(new Error('boom'))
+    const { store } = harness()
+
+    await store.ensureWorkdirSessions('workdir-1')
+
+    expect(store.workdirSessionsState('workdir-1')).toEqual({
+      loading: false,
+      hasMore: false,
+      loaded: false,
+      cursor: null,
+      error: true,
+    })
+
+    fetchSessions.mockResolvedValue({ items: [session('a')], nextCursor: 'c2' })
+    await store.ensureWorkdirSessions('workdir-1')
+
+    expect(store.workdirSessionsState('workdir-1')).toEqual({
+      loading: false,
+      hasMore: true,
+      loaded: true,
+      cursor: 'c2',
+      error: false,
     })
   })
 
