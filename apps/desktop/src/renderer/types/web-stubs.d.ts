@@ -300,9 +300,18 @@ declare module '@memohai/web/lib/auth-session' {
 }
 
 declare module '@memohai/web/lib/query-cache-persistence' {
-  import type { UseQueryEntryFilter } from '@pinia/colada'
+  import type { PiniaColadaPlugin, QueryCache, UseQueryEntryFilter } from '@pinia/colada'
   export const QUERY_CACHE_STORAGE_KEY: string
-  export const queryCachePersistFilter: UseQueryEntryFilter
+  export const persistableQueryFilter: UseQueryEntryFilter
+  export function createQueryCachePersistencePlugin(options?: {
+    key?: string
+    storage?: Storage
+    debounce?: number
+  }): PiniaColadaPlugin
+  export function whenQueryCacheRestored(): Promise<void>
+  export function saveQueryCacheToDiskNow(queryCache: QueryCache, storage?: Storage): void
+  export function removeQueryCacheFromDisk(storage?: Storage): void
+  export function cancelPendingQueryCacheSave(): void
 }
 
 declare module '@memohai/web/pages/login/transition' {
