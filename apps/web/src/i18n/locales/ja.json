@@ -828,6 +828,7 @@
     "sessionTitle": "セッション",
     "untitledSession": "無題のセッション",
     "noSessions": "セッションはまだありません",
+    "sessionsLoadFailed": "会話一覧の読み込みに失敗しました",
     "recents": "最近",
     "quickActions": "クイックアクション",
     "scheduledJobs": "スケジュールされたジョブ",

@@ -857,6 +857,7 @@
     "sessionTitle": "Session",
     "untitledSession": "Untitled Session",
     "noSessions": "No sessions yet",
+    "sessionsLoadFailed": "Failed to load conversations",
     "recents": "Recents",
     "quickActions": "Quick Actions",
     "scheduledJobs": "Scheduled Jobs",

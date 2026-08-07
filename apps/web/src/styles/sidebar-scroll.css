@@ -13,8 +13,8 @@
  *
  * overflow-anchor is OFF here on purpose. Chat panes keep the browser default
  * so history prepend stays visually pinned; sidebar lists grow downward from
- * an empty/short first paint (virtualizer spacer + load-more), and anchoring
- * would walk scrollTop down with that growth — Recents opening mid-list. */
+ * a short first paint (load-more append), and anchoring would walk scrollTop
+ * down with that growth — Recents opening mid-list. */
 .sidebar-scroll {
   overflow-anchor: none;
   scrollbar-width: thin;
@@ -31,4 +31,12 @@
   background-clip: padding-box;
   border: 2px solid transparent;
   border-radius: 9999px;
+}
+
+/* Session title skeletons are short (~40–70% of ~240px). The global tile is 640px
+ * / 2s, so the seam flashes past in a blink then the bar sits flat for most of the
+ * cycle. Reuse --skeleton-tile with a narrower value + shorter period — no new token. */
+.sidebar-scroll [data-slot="skeleton"] {
+  --skeleton-tile: 260px;
+  animation-duration: 1.1s;
 }

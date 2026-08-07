@@ -857,6 +857,7 @@
     "sessionTitle": "会话",
     "untitledSession": "未命名会话",
     "noSessions": "暂无会话",
+    "sessionsLoadFailed": "会话列表加载失败",
     "recents": "最近",
     "quickActions": "快捷操作",
     "scheduledJobs": "定时任务",

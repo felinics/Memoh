@@ -1,5 +1,5 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { computed, onScopeDispose, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import { toast } from '@felinic/ui'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useWorkdirsStore } from '@/store/workdirs'
@@ -31,36 +31,18 @@ import {
 import {
   createBackgroundTaskTracker,
 } from './chat/background-tasks'
-import type {
-  ChatAssistantTurn,
-  ChatMessage,
-  ChatUserTurn,
-} from './chat/types'
 import { fetchSessions } from '@/composables/api/useChat'
+import {
+  bindBotIdInitializeWatch,
+  createSessionListSnapshot,
+} from './chat/session-list-init-recovery'
 
 export type {
-  ACPAgentSessionInput,
-  ActiveChatTarget,
-  AttachmentBlock,
-  AttachmentItem,
-  BackgroundTask,
-  ChatAssistantTurn,
-  ChatMessage,
-  ChatSystemTurn,
-  ChatUserTurn,
-  ChatWorkspaceTargetSnapshot,
-  ContentBlock,
-  ErrorBlock,
-  SendMessageOptions,
-  SendMessageResult,
-  SendMessageStage,
-  TextBlock,
-  ThinkingBlock,
-  ToolCallBlock,
+  ACPAgentSessionInput, ActiveChatTarget, AttachmentBlock, AttachmentItem,
+  BackgroundTask, ChatAssistantTurn, ChatMessage, ChatSystemTurn, ChatUserTurn,
+  ChatWorkspaceTargetSnapshot, ContentBlock, ErrorBlock, SendMessageOptions,
+  SendMessageResult, SendMessageStage, TextBlock, ThinkingBlock, ToolCallBlock,
 } from './chat/types'
-
-// fs-change beacon lives in ./chat/fs-beacon; types re-exported so existing
-// consumers keep importing them from the store module.
 export type { FsChangeBatch, FsChangeEvent, FsToolKind } from './chat/fs-beacon'
 export type { ChatViewEntry, ChatViewTarget } from './chat/view-registry'
 
@@ -130,7 +112,6 @@ export const useChatStore = defineStore('chat', () => {
 
   let userScopeGeneration = 0
   let selectSessionRequestId = 0
-  // Sessions-list bookkeeping + fork-anchor tracking (see ./chat/session-list).
   const sessionList = createSessionList({ currentBotId, sessionId, messages })
   const {
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,
@@ -143,9 +124,6 @@ export const useChatStore = defineStore('chat', () => {
     touchKnownSession, fallbackSessionAfterDelete, markSessionDeleted,
     clearDeletedSessionIds, clearRememberedSessions,
   } = sessionList
-  // Sidebar folders page the workdir-filtered endpoint themselves —
-  // filtering the globally paged `sessions` list hides a folder's older
-  // chats (see ./chat/workdir-sessions).
   const {
     workdirSessionsFor, workdirSessionsState, ensureWorkdirSessions,
     loadMoreWorkdirSessions, reset: resetWorkdirSessions,
@@ -154,15 +132,18 @@ export const useChatStore = defineStore('chat', () => {
     userScopeGeneration: () => userScopeGeneration,
     knownSession: knownSessionSummary,
   })
+  const {
+    applySessionsSnapshot,
+    recoverSessionsListAfterInitializeFailure,
+  } = createSessionListSnapshot({
+    replaceSessions, sessionsCursor, hasMoreSessions, fetchSessions,
+    currentBotId: () => currentBotId.value,
+  })
   const refreshCoordinator = createChatRefreshCoordinator({
     currentBotId,
     fetchSessions,
     currentSessionListRevision,
-    applySessionsSnapshot: (response) => {
-      replaceSessions(response.items)
-      sessionsCursor.value = response.nextCursor
-      hasMoreSessions.value = response.nextCursor !== null
-    },
+    applySessionsSnapshot,
   })
   const { refreshSessionsList, resetRefreshCoordinator } = refreshCoordinator
   const {
@@ -186,12 +167,6 @@ export const useChatStore = defineStore('chat', () => {
     updateKnownSessionTitle,
     refreshSessionsList,
   })
-  // `loadingChats` covers the bot-level boot path (sessions list fetch), so
-  // the sidebar can show its skeleton + suppress its empty-state placeholder
-  // exactly while the sessions list is in flight.
-  // `loadingMessages` covers the per-session transcript fetch — the sidebar
-  // never reacts to it, only the chat pane uses it to keep its own empty
-  // placeholders hidden while a fresh transcript is on its way.
   const {
     bots, ensureBot, refreshBots, reset: resetBots,
   } = createChatBots({
@@ -211,16 +186,11 @@ export const useChatStore = defineStore('chat', () => {
     focusedViewId: focusedChatViewId,
     normalizeTarget: normalizedChatViewTarget,
   })
-  // Slash-command event registry (see ./chat/command-events for scoping rules).
   const commandEventRegistry = createCommandEventRegistry({ currentBotId, sessionId })
   const {
     commandEvent, commandEventForScope, rememberCommandEvent, showCommandError,
     clearCommandEvent, rescopeSessionCommandEventToComposer, resetCommandEvents,
   } = commandEventRegistry
-  // Bumps when the user sends a message, carrying the resolved session id and
-  // whether that send just promoted a draft (created the session). The workspace
-  // tab store watches this to pin the chat tab — a session you have sent in is no
-  // longer an ephemeral "preview" tab. seq forces the watch to fire on repeats.
   const userSentInSession = ref<{
     id: string
     botId: string
@@ -510,10 +480,9 @@ export const useChatStore = defineStore('chat', () => {
     forkFailedMessage,
   })
 
-  watch(currentBotId, (newId) => {
-    if (newId) void initialize()
-    else resetUserScopedState()
-  }, { immediate: true })
+  bindBotIdInitializeWatch({
+    currentBotId, initialize, recoverSessionsListAfterInitializeFailure, resetUserScopedState,
+  })
 
   const stopAuthSessionListener = onAuthSessionCleared(() => {
     resetUserScopedState({ clearSelection: true })
@@ -609,10 +578,7 @@ export const useChatStore = defineStore('chat', () => {
     pendingACPRuntimeEnsuring, pendingACPStateFor,
     sessionId, hasExplicitSessionSelection, currentBotId, bots,
     activeChatTarget, isSessionStreaming,
-    loadingChats, loadingMessages, loadingOlder, hasMoreOlder,
-    // Exposed for tests only — do not branch on this in components. The
-    // leading underscore reflects the test-only contract at the call site.
-    _hasLoadedOlder: hasLoadedOlder,
+    loadingChats, loadingMessages, loadingOlder, hasMoreOlder, _hasLoadedOlder: hasLoadedOlder,
     overrideModelId, overrideReasoningEffort,
     startupSendFailure, startupSendFailureFor,
     commandEvent, commandEventForScope, showCommandError,
@@ -624,8 +590,7 @@ export const useChatStore = defineStore('chat', () => {
     resetToEmptyComposer, ensurePendingACPRuntime,
     setPendingACPModel, setPendingACPReasoning, clearPendingACPSession,
     createACPSession, updateCurrentSessionAgent, updateCurrentSessionToMemoh,
-    acpRuntimeKey, ensureACPRuntime, setACPRuntimeModel,
-    setACPRuntimeReasoning,
+    acpRuntimeKey, ensureACPRuntime, setACPRuntimeModel, setACPRuntimeReasoning,
     removeSession, renameSession, forkMessage,
     sendMessage, retryLatestAssistant, editLatestUser,
     respondToolApproval, respondUserInput,
