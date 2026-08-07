@@ -18,7 +18,8 @@ import {
  * recursively removes secret-bearing fields (api_key, token, …) so provider
  * configs and bot metadata never reach disk, while display fields (id, name,
  * provider, memory_mode, …) survive and hydrate the first paint. Only keys on
- * EXCLUDED_QUERY_KEY_HEADS (entire-payload secrets, volatile state) skip disk.
+ * EXCLUDED_QUERY_KEY_HEADS (entire-payload credentials, volatile state,
+ * opaque workspace file reads such as bot-hooks-config) skip disk.
  *
  * After a successful save in-app, call `saveQueryCacheToDiskNow()` so a quick
  * reload does not show a pre-save value (see bot-settings autosave).
@@ -35,6 +36,9 @@ const SAVE_TO_DISK_DEBOUNCE_MS = 1000
 const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   'remote-runtimes',
   'session-status',
+  // Raw workspace file text (hooks.json env map may contain API keys); deepStripSecrets
+  // only walks objects/arrays and cannot redact secrets inside an opaque string.
+  'bot-hooks-config',
 ])
 
 /**

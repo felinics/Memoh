@@ -53,8 +53,8 @@ describe('persistableQueryFilter', () => {
     }
   })
 
-  it('excludes whole-payload secrets and volatile state', () => {
-    for (const key of [['remote-runtimes'], ['session-status', 'b', 's']]) {
+  it('excludes whole-payload secrets, volatile state, and opaque workspace files', () => {
+    for (const key of [['remote-runtimes'], ['session-status', 'b', 's'], ['bot-hooks-config', 'bot-1']]) {
       expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
     }
   })
@@ -150,6 +150,7 @@ describe('saveQueryCacheToDiskNow', () => {
     const entries = [
       entryWith(['remote-runtimes'], 'success', { key: 'runtime-key' }),
       entryWith(['session-status', 'b', 's']),
+      entryWith(['bot-hooks-config', 'bot-1'], 'success', '{"env":{"OPENAI_API_KEY":"sk-1"}}'),
     ]
 
     saveQueryCacheToDiskNow(cacheWith(entries), storage)
