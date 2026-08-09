@@ -66,8 +66,10 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "conflicts with runtime_type") {
 		t.Fatalf("error = %v, want a 'conflicts with runtime_type' message", err)
 	}
-	if _, _, _, err := ResolveDescriptor(TypeSchedule, "", RuntimeACPAgent); err == nil {
-		t.Fatal("ResolveDescriptor(schedule, acp_agent) = nil error, want an unsupported combination error")
+	// Schedule mode supports the ACP runtime (schedules can run through an
+	// ACP agent), but internal loop modes like heartbeat still reject it.
+	if _, _, _, err := ResolveDescriptor(TypeHeartbeat, "", RuntimeACPAgent); err == nil {
+		t.Fatal("ResolveDescriptor(heartbeat, acp_agent) = nil error, want an unsupported combination error")
 	} else if !strings.Contains(err.Error(), "only supported") {
 		t.Fatalf("error = %v, want an 'only supported' message", err)
 	}
@@ -82,6 +84,7 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 		{"concordant acp_agent+acp_agent", TypeACPAgent, "", RuntimeACPAgent, TypeACPAgent, TypeChat, RuntimeACPAgent},
 		{"chat + acp_agent -> chat ACP", TypeChat, "", RuntimeACPAgent, TypeACPAgent, TypeChat, RuntimeACPAgent},
 		{"discuss + acp_agent -> discuss ACP", TypeDiscuss, "", RuntimeACPAgent, TypeDiscuss, TypeDiscuss, RuntimeACPAgent},
+		{"schedule + acp_agent -> schedule ACP", TypeSchedule, "", RuntimeACPAgent, TypeSchedule, TypeSchedule, RuntimeACPAgent},
 		{"plain chat", TypeChat, "", "", TypeChat, TypeChat, RuntimeModel},
 	}
 	for _, c := range cases {

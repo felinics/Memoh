@@ -407,7 +407,8 @@ func provideHeartbeatTriggerer(service *application.Service) heartbeat.Triggerer
 }
 
 type sessionCreatorAdapter struct {
-	svc *sessionpkg.Service
+	svc      *sessionpkg.Service
+	workdirs *workdir.Service
 }
 
 func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessionType string) (string, error) {
@@ -421,12 +422,52 @@ func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessio
 	return sess.ID, nil
 }
 
+// CreateScheduleSession creates the user-visible session one schedule fire
+// runs in. The schedule domain states intent (runtime, agent, workdir); this
+// adapter resolves the workdir path and shapes the thread-create input the
+// same way the interactive session-create handler does.
+func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec schedule.SessionSpec) (string, error) {
+	input := sessionpkg.CreateInput{
+		BotID:           spec.BotID,
+		Type:            sessionpkg.TypeSchedule,
+		Title:           spec.Title,
+		CreatedByUserID: spec.OwnerUserID,
+		// Schedule sessions surface in the sidebar so the user can open the
+		// produced conversation and continue it; the schedule session mode
+		// is preserved for prompt and tool gating.
+		Visibility: sessionpkg.VisibilityUser,
+	}
+	if strings.TrimSpace(spec.ACPAgentID) != "" {
+		input.RuntimeType = sessionpkg.RuntimeACPAgent
+		// The thread service derives the ACP runtime owner from
+		// CreatedByUserID and applies project-path defaults; the workdir
+		// override below wins when a workdir is bound.
+		input.Metadata = map[string]any{"acp_agent_id": spec.ACPAgentID}
+	}
+	if strings.TrimSpace(spec.WorkdirID) != "" {
+		if a.workdirs == nil {
+			return "", errors.New("workdir service not configured")
+		}
+		wd, err := a.workdirs.RequireActive(ctx, spec.BotID, spec.WorkdirID)
+		if err != nil {
+			return "", fmt.Errorf("resolve schedule workdir: %w", err)
+		}
+		input.WorkdirID = wd.ID
+		input.WorkdirPath = wd.Path
+	}
+	sess, err := a.svc.Create(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	return sess.ID, nil
+}
+
 func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbeat.SessionCreator {
 	return &sessionCreatorAdapter{svc: sessionService}
 }
 
-func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.SessionCreator {
-	return &sessionCreatorAdapter{svc: sessionService}
+func provideScheduleSessionCreator(sessionService *sessionpkg.Service, workdirService *workdir.Service) schedule.SessionCreator {
+	return &sessionCreatorAdapter{svc: sessionService, workdirs: workdirService}
 }
 
 func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *native.Agent {
@@ -640,7 +681,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -652,6 +693,8 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewMessageProvider(log, channelMessaging, channelMessaging, channelMessaging, assetResolver),
 		agenttools.NewContactsProvider(log, channelcontactadapter.NewSource(routeService)),
 		agenttools.NewScheduleProvider(log, scheduleService),
+		agenttools.NewWorkdirProvider(log, workdirService),
+		agenttools.NewACPAgentsProvider(log, &acpRuntimePoolAdapter{pool: acpPool}, queries),
 		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
@@ -669,6 +712,46 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewFederationProvider(log, fedSource),
 		agenttools.NewHistoryProvider(log, channelthreadadapter.NewLister(sessionService, routeService), messageService, queries),
 	}
+}
+
+// acpRuntimePoolAdapter maps the ACP session pool onto the tool package's
+// local ACPRuntimePool interface. The tool package deliberately does not
+// import the acp packages (the acp client test binary imports the tool
+// package), so the projection to tool-local DTOs happens here.
+type acpRuntimePoolAdapter struct {
+	pool *acpagent.SessionPool
+}
+
+func (a *acpRuntimePoolAdapter) CreateAgentRuntime(ctx context.Context, botID, agentID, runtimeOwnerAccountID string) (agenttools.ACPRuntimeSummary, error) {
+	status, err := a.pool.CreateRuntime(ctx, acpagent.CreateRuntimeInput{
+		BotID:                 botID,
+		AgentID:               agentID,
+		RuntimeOwnerAccountID: runtimeOwnerAccountID,
+	})
+	if err != nil {
+		return agenttools.ACPRuntimeSummary{}, err
+	}
+	summary := agenttools.ACPRuntimeSummary{
+		RuntimeID:      status.RuntimeID,
+		DefaultModelID: status.DefaultModelID,
+	}
+	if status.Models != nil {
+		summary.CurrentModelID = status.Models.CurrentModelID
+		for _, m := range status.Models.Available {
+			summary.Models = append(summary.Models, agenttools.ACPOptionInfo{ID: m.ID, Name: m.Name})
+		}
+	}
+	if status.Reasoning != nil {
+		summary.CurrentEffort = status.Reasoning.CurrentEffort
+		for _, e := range status.Reasoning.Available {
+			summary.Efforts = append(summary.Efforts, agenttools.ACPOptionInfo{ID: e.ID, Name: e.Name})
+		}
+	}
+	return summary, nil
+}
+
+func (a *acpRuntimePoolAdapter) CloseAgentRuntime(botID, runtimeID string) error {
+	return a.pool.CloseRuntime(botID, runtimeID)
 }
 
 func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) *media.Service {

@@ -1325,11 +1325,14 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			workdirID = state.workdirMap[item.WorkdirID.String()]
 		}
 		created, err := q.CreateSession(ctx, sqlc.CreateSessionParams{
-			BotID:           pgBotID,
-			ChannelType:     item.ChannelType,
-			Type:            legacyType,
-			SessionMode:     sessionMode,
-			RuntimeType:     runtimeType,
+			BotID:       pgBotID,
+			ChannelType: item.ChannelType,
+			Type:        legacyType,
+			SessionMode: sessionMode,
+			RuntimeType: runtimeType,
+			// Archives from before the visibility column carry an empty
+			// string; normalize against the session mode's default.
+			Visibility:      string(sessionpkg.NormalizeVisibility(item.Visibility, sessionMode)),
 			RuntimeMetadata: runtimeMetadata,
 			Title:           item.Title,
 			Metadata:        metadata,

@@ -85,6 +85,13 @@ func UserFacingSessionTypes() []string {
 	return out
 }
 
+// AllSessionTypes returns every known session type. The paged list queries
+// always demand an explicit type filter; callers that filter by visibility
+// instead pass this list to make the type predicate a no-op.
+func AllSessionTypes() []string {
+	return []string{TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent}
+}
+
 var (
 	ErrACPAgentIDRequired     = errors.New("acp_agent_id is required for acp_agent sessions")
 	ErrACPProjectPathMissing  = errors.New("project_path is required for acp_agent sessions")
@@ -111,6 +118,25 @@ func IsKnownType(typ string) bool {
 // session list endpoints should return by default.
 func IsUserFacingType(typ string) bool {
 	return slices.Contains(userFacingSessionTypes, strings.TrimSpace(typ))
+}
+
+// NormalizeVisibility resolves a possibly-absent stored visibility value
+// against the session mode's default. Exported for restore paths that replay
+// archived session rows which may predate the visibility column.
+func NormalizeVisibility(stored string, mode string) Visibility {
+	return storedVisibility(stored, mode)
+}
+
+// storedVisibility trusts the persisted visibility column and only falls
+// back to the mode-derived default for rows that predate the column (empty
+// string can only appear if a migration path skipped the backfill).
+func storedVisibility(stored string, mode string) Visibility {
+	switch Visibility(stored) {
+	case VisibilityUser, VisibilityInternal:
+		return Visibility(stored)
+	default:
+		return visibilityForMode(mode)
+	}
 }
 
 func visibilityForMode(mode string) Visibility {
@@ -144,6 +170,11 @@ type CreateInput struct {
 	// project_path so the runtime works in that directory; it also
 	// leaves a creation-time path snapshot in the metadata for history.
 	WorkdirPath string
+	// Visibility overrides the default visibility derived from the session
+	// mode. Schedule-created sessions use this to surface in user-facing
+	// session lists while keeping session_mode='schedule' for prompt and
+	// tool gating. Empty means "derive from mode".
+	Visibility Visibility
 }
 
 // SubagentConfig is the persisted runtime selection for a managed subagent.
@@ -356,6 +387,15 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 		return Thread{}, fmt.Errorf("invalid workdir id: %w", err)
 	}
 
+	visibility := input.Visibility
+	switch visibility {
+	case "":
+		visibility = visibilityForMode(desc.SessionMode)
+	case VisibilityUser, VisibilityInternal:
+	default:
+		return Thread{}, fmt.Errorf("unknown session visibility %q", visibility)
+	}
+
 	row, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
 		BotID:           pgBotID,
 		RouteID:         pgRouteID,
@@ -363,6 +403,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 		Type:            sessionType,
 		SessionMode:     desc.SessionMode,
 		RuntimeType:     desc.RuntimeType,
+		Visibility:      string(visibility),
 		RuntimeMetadata: runtimeMetaBytes,
 		Title:           input.Title,
 		Metadata:        metaBytes,
@@ -810,6 +851,11 @@ type ListFilter struct {
 	// WorkdirUnassigned filters to sessions with no workdir binding — the
 	// sidebar's ungrouped bucket.
 	WorkdirUnassigned bool
+	// Visibility filters to sessions with the given stored visibility.
+	// Empty means no visibility predicate. The default session listing
+	// passes VisibilityUser so schedule-created sessions surface by
+	// visibility rather than by widening the legacy type filter.
+	Visibility Visibility
 }
 
 // IsZero reports whether the cursor carries neither half — the start-of-list
@@ -841,6 +887,10 @@ func (s *Service) ListByBotPagedWithFilter(ctx context.Context, botID string, ty
 	if err != nil {
 		return nil, err
 	}
+	visibility, useVisibility, err := pagedVisibilityParam(filter)
+	if err != nil {
+		return nil, err
+	}
 	cursorUpdatedAt, cursorID, useCursor, err := pagedCursorParams(cursor)
 	if err != nil {
 		return nil, err
@@ -857,6 +907,8 @@ func (s *Service) ListByBotPagedWithFilter(ctx context.Context, botID string, ty
 		UseWorkdir:        useWorkdir,
 		WorkdirUnassigned: workdirUnassigned,
 		WorkdirID:         workdirID,
+		UseVisibility:     useVisibility,
+		Visibility:        visibility,
 		UseCursor:         useCursor,
 		CursorUpdatedAt:   cursorUpdatedAt,
 		CursorID:          cursorID,
@@ -894,6 +946,10 @@ func (s *Service) ListByBotAndCreatedByUserPagedWithFilter(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
+	visibility, useVisibility, err := pagedVisibilityParam(filter)
+	if err != nil {
+		return nil, err
+	}
 	cursorUpdatedAt, cursorID, useCursor, err := pagedCursorParams(cursor)
 	if err != nil {
 		return nil, err
@@ -911,6 +967,8 @@ func (s *Service) ListByBotAndCreatedByUserPagedWithFilter(ctx context.Context, 
 		UseWorkdir:        useWorkdir,
 		WorkdirUnassigned: workdirUnassigned,
 		WorkdirID:         workdirID,
+		UseVisibility:     useVisibility,
+		Visibility:        visibility,
 		UseCursor:         useCursor,
 		CursorUpdatedAt:   cursorUpdatedAt,
 		CursorID:          cursorID,
@@ -948,6 +1006,20 @@ func pagedParentSessionParam(filter ListFilter) (pgtype.UUID, bool, error) {
 		return pgtype.UUID{}, false, fmt.Errorf("invalid parent session id: %w", err)
 	}
 	return parsed, true, nil
+}
+
+// pagedVisibilityParam maps the optional visibility filter onto the SQL
+// binds, rejecting values outside the stored vocabulary so a typo can never
+// silently return an empty listing.
+func pagedVisibilityParam(filter ListFilter) (string, bool, error) {
+	switch filter.Visibility {
+	case "":
+		return "", false, nil
+	case VisibilityUser, VisibilityInternal:
+		return string(filter.Visibility), true, nil
+	default:
+		return "", false, fmt.Errorf("session: unknown visibility filter %q", filter.Visibility)
+	}
 }
 
 // pagedWorkdirParams maps the three-state workdir filter (off / one workdir /
@@ -1190,7 +1262,7 @@ func toThread(row sqlc.BotSession) Thread {
 		WorkdirID:       workdirID,
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
-		Visibility:      visibilityForMode(sessionMode),
+		Visibility:      storedVisibility(row.Visibility, sessionMode),
 	}
 }
 
@@ -1308,8 +1380,11 @@ func normalizeDescriptor(legacyType, sessionMode, runtimeType string, metadata, 
 	if !IsKnownRuntimeType(runtimeType) {
 		return descriptor{}, fmt.Errorf("unknown runtime type %q", runtimeType)
 	}
-	if runtimeType == RuntimeACPAgent && sessionMode != TypeChat && sessionMode != TypeDiscuss {
-		return descriptor{}, fmt.Errorf("runtime type %q is only supported for %s or %s session modes", RuntimeACPAgent, TypeChat, TypeDiscuss)
+	// Schedule mode joined the ACP-capable modes when schedules gained an
+	// ACP runtime option: a schedule-created session keeps its schedule
+	// mode for prompt/tool gating while an ACP agent executes the turns.
+	if runtimeType == RuntimeACPAgent && sessionMode != TypeChat && sessionMode != TypeDiscuss && sessionMode != TypeSchedule {
+		return descriptor{}, fmt.Errorf("runtime type %q is only supported for %s, %s, or %s session modes", RuntimeACPAgent, TypeChat, TypeDiscuss, TypeSchedule)
 	}
 	out := descriptor{
 		LegacyType:      legacyTypeForDescriptor(sessionMode, runtimeType),
@@ -1521,7 +1596,7 @@ func toThreadFromListRow(row sqlc.ListSessionsByBotRow) Thread {
 		WorkdirID:       workdirID,
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
-		Visibility:      visibilityForMode(sessionMode),
+		Visibility:      storedVisibility(row.Visibility, sessionMode),
 	}
 }
 
@@ -1555,14 +1630,14 @@ func toThreadFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Thre
 		WorkdirID:       workdirID,
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
-		Visibility:      visibilityForMode(sessionMode),
+		Visibility:      storedVisibility(row.Visibility, sessionMode),
 	}
 }
 
 func toThreadFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Thread {
 	return threadFromPagedColumns(pagedColumns{
 		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
-		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, RuntimeMetadata: row.RuntimeMetadata,
+		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, Visibility: row.Visibility, RuntimeMetadata: row.RuntimeMetadata,
 		Title: row.Title, Metadata: row.Metadata,
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
@@ -1572,7 +1647,7 @@ func toThreadFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Thread {
 func toThreadFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow) Thread {
 	return threadFromPagedColumns(pagedColumns{
 		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
-		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, RuntimeMetadata: row.RuntimeMetadata,
+		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, Visibility: row.Visibility, RuntimeMetadata: row.RuntimeMetadata,
 		Title: row.Title, Metadata: row.Metadata,
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
@@ -1591,6 +1666,7 @@ type pagedColumns struct {
 	Type            string
 	SessionMode     string
 	RuntimeType     string
+	Visibility      string
 	RuntimeMetadata []byte
 	Title           string
 	Metadata        []byte
@@ -1631,6 +1707,6 @@ func threadFromPagedColumns(c pagedColumns) Thread {
 		WorkdirID:       workdirID,
 		CreatedAt:       c.CreatedAt.Time,
 		UpdatedAt:       c.UpdatedAt.Time,
-		Visibility:      visibilityForMode(sessionMode),
+		Visibility:      storedVisibility(c.Visibility, sessionMode),
 	}
 }

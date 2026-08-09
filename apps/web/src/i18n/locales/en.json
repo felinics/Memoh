@@ -528,6 +528,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "selectSession": "Select a session",
     "welcome": {
       "folder": "What can I do in {name}?",
       "g1": "Where should we begin?",
@@ -774,8 +775,8 @@
       "generic": "Tool",
       "approve": "Allow",
       "reject": "Reject",
-    "pendingApproval": "pending approval",
-    "executionLocation": "Execution location",
+      "pendingApproval": "pending approval",
+      "executionLocation": "Execution location",
       "pendingUserInput": "waiting for input",
       "userInputSubmitted": "answered",
       "userInputCanceled": "canceled",
@@ -3017,6 +3018,7 @@
       "title": "Schedule",
       "loadFailed": "Load failed",
       "empty": "No tasks scheduled",
+      "emptyDescription": "Give this bot a prompt to run on its own, on a schedule you set.",
       "name": "Name",
       "pattern": "Pattern",
       "enabled": "Enabled",
@@ -3041,6 +3043,7 @@
       "sortName": "By name",
       "sortStatus": "By status",
       "sortNextRun": "By next run",
+      "nextRun": "Next run {time}",
       "picker": {
         "every": "Every",
         "minutes": "minutes",
@@ -3103,6 +3106,24 @@
         "oct": "October",
         "nov": "November",
         "dec": "December"
+      },
+      "execution": {
+        "runsIn": "Runs in",
+        "newSession": "A new session each run",
+        "existingSession": "An existing session",
+        "session": "Session",
+        "sessionPlaceholder": "Pick a session",
+        "sessionRuntimeNative": "This session uses the built-in model runtime; its workdir is kept.",
+        "sessionRuntimeAcp": "This session runs through {agent}; its workdir is kept.",
+        "model": "Model",
+        "botDefault": "Bot default",
+        "sessionDefault": "Session default",
+        "acpAgents": "Coding agents",
+        "agentDefaultModel": "Agent default",
+        "loadingAgentModels": "Starting agent to load models…",
+        "agentModelsFailed": "Could not load the agent's models",
+        "workdir": "Folder",
+        "noWorkdir": "No folder"
       }
     },
     "history": {

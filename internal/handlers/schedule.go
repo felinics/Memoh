@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/schedule"
+	"github.com/memohai/memoh/internal/workdir"
 )
 
 type ScheduleHandler struct {
@@ -68,7 +70,7 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 	}
 	resp, err := h.service.Create(c.Request().Context(), botID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return scheduleServiceError(err)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -175,7 +177,7 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return scheduleServiceError(err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -320,4 +322,17 @@ func (*ScheduleHandler) requireUserID(c echo.Context) (string, error) {
 
 func (h *ScheduleHandler) authorizeBotAccess(ctx context.Context, userID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccess(ctx, h.botService, h.accountService, userID, botID)
+}
+
+// scheduleServiceError maps schedule domain errors onto HTTP status codes:
+// user-correctable validation failures answer 400, everything else stays 500.
+func scheduleServiceError(err error) error {
+	var invalid schedule.InvalidRequestError
+	if errors.As(err, &invalid) {
+		return echo.NewHTTPError(http.StatusBadRequest, invalid.Error())
+	}
+	if errors.Is(err, workdir.ErrWorkdirNotFound) || errors.Is(err, workdir.ErrWorkdirArchived) {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 }

@@ -144,6 +144,9 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if err := rejectSystemACPRuntime(targetMode, targetRuntimeType); err != nil {
+		return err
+	}
 	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, requiredPermissionForSessionRuntime(targetMode, targetRuntimeType))
 	if err != nil {
 		return err
@@ -302,11 +305,14 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 			return err
 		}
 	}
-	types, err := parseSessionTypesParam(c.QueryParam("types"), parentSessionID != "")
+	types, defaultVisibility, err := parseSessionTypesParam(c.QueryParam("types"), parentSessionID != "")
 	if err != nil {
 		return err
 	}
 	filter := session.ListFilter{ParentThreadID: parentSessionID}
+	if defaultVisibility {
+		filter.Visibility = session.VisibilityUser
+	}
 	if workdirParam := strings.TrimSpace(c.QueryParam("workdir_id")); workdirParam != "" {
 		// The literal "none" selects the unassigned bucket so the sidebar can
 		// page ungrouped sessions with the same cursor machinery.
@@ -400,13 +406,33 @@ const (
 	sessionListMaxLimit     = 200
 )
 
-func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, error) {
+// parseSessionTypesParam resolves the types filter. The second return says
+// whether the default user-facing listing applies: no explicit types and no
+// parent filter. That default filters by stored visibility rather than by a
+// type list, so schedule-created sessions marked user-visible surface too.
+// rejectSystemACPRuntime keeps system-managed session modes out of the HTTP
+// session API's ACP surface. The thread domain itself allows
+// schedule+acp_agent — the schedule trigger path creates those sessions —
+// but interactive session creation stays limited to chat and discuss.
+func rejectSystemACPRuntime(mode, runtimeType string) error {
+	if runtimeType != session.RuntimeACPAgent {
+		return nil
+	}
+	switch mode {
+	case session.TypeChat, session.TypeDiscuss:
+		return nil
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("runtime type %q is only supported for %s or %s session modes", session.RuntimeACPAgent, session.TypeChat, session.TypeDiscuss))
+	}
+}
+
+func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		if hasParentFilter {
-			return []string{session.TypeSubagent}, nil
+			return []string{session.TypeSubagent}, false, nil
 		}
-		return session.UserFacingSessionTypes(), nil
+		return session.AllSessionTypes(), true, nil
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
@@ -417,7 +443,7 @@ func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, error) 
 			continue
 		}
 		if !session.IsKnownType(token) {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("unknown session type %q", token))
+			return nil, false, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("unknown session type %q", token))
 		}
 		if _, ok := seen[token]; ok {
 			continue
@@ -426,9 +452,9 @@ func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, error) 
 		out = append(out, token)
 	}
 	if len(out) == 0 {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "types must contain at least one session type")
+		return nil, false, echo.NewHTTPError(http.StatusBadRequest, "types must contain at least one session type")
 	}
-	return out, nil
+	return out, false, nil
 }
 
 func parseSessionLimitParam(raw string) (int64, error) {
@@ -594,6 +620,9 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		targetType, targetMode, targetRuntime, err = session.ResolveDescriptor(targetType, targetMode, targetRuntime)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		if err := rejectSystemACPRuntime(targetMode, targetRuntime); err != nil {
+			return err
 		}
 		if !bots.HasPermission(perms, requiredPermissionForSessionRuntime(targetMode, targetRuntime)) {
 			return echo.NewHTTPError(http.StatusForbidden, "bot access denied")

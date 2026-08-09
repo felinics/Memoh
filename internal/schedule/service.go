@@ -20,11 +20,39 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/workdir"
 )
+
+// SessionSpec describes the session one schedule fire runs in. The creator
+// (wired in the composition root) resolves the workdir path and assembles
+// ACP runtime metadata; the schedule domain only states intent.
+type SessionSpec struct {
+	BotID string
+	// Title labels the session in user-facing lists (the schedule name).
+	Title string
+	// RuntimeType is RuntimeModel ("" means model) or RuntimeACPAgent.
+	RuntimeType string
+	// ACPAgentID names the agent when RuntimeType is RuntimeACPAgent.
+	ACPAgentID string
+	// WorkdirID optionally binds the session to a bot workdir.
+	WorkdirID string
+	// OwnerUserID becomes the session creator and, for ACP sessions, the
+	// runtime owner account.
+	OwnerUserID string
+}
 
 // SessionCreator creates sessions for schedule runs.
 type SessionCreator interface {
 	CreateSession(ctx context.Context, botID, sessionType string) (string, error)
+	// CreateScheduleSession creates the user-visible session one fire of a
+	// schedule runs in, honoring the schedule's runtime and workdir.
+	CreateScheduleSession(ctx context.Context, spec SessionSpec) (string, error)
+}
+
+// WorkdirValidator is the slice of the workdir domain the schedule service
+// needs to validate a workdir binding at create/update time.
+type WorkdirValidator interface {
+	RequireActive(ctx context.Context, botID, workdirID string) (workdir.Workdir, error)
 }
 
 type Service struct {
@@ -33,6 +61,7 @@ type Service struct {
 	parser          cron.Parser
 	triggerer       Triggerer
 	sessionCreator  SessionCreator
+	workdirs        WorkdirValidator
 	jwtSecret       string
 	logger          *slog.Logger
 	defaultLocation *time.Location
@@ -40,19 +69,24 @@ type Service struct {
 	jobs            map[string]cron.EntryID
 }
 
-func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, sessionCreator SessionCreator, workdirService *workdir.Service, runtimeConfig *boot.RuntimeConfig) *Service {
 	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	location := time.UTC
 	if runtimeConfig != nil && runtimeConfig.TimezoneLocation != nil {
 		location = runtimeConfig.TimezoneLocation
 	}
 	c := cron.New(cron.WithParser(parser), cron.WithLocation(location))
+	var workdirs WorkdirValidator
+	if workdirService != nil {
+		workdirs = workdirService
+	}
 	service := &Service{
 		queries:         queries,
 		cron:            c,
 		parser:          parser,
 		triggerer:       triggerer,
 		sessionCreator:  sessionCreator,
+		workdirs:        workdirs,
 		jwtSecret:       runtimeConfig.JwtSecret,
 		logger:          log.With(slog.String("service", "schedule")),
 		defaultLocation: location,
@@ -103,14 +137,26 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	exec, err := s.normalizeExecution(ctx, botID, req.ExecutionConfig)
+	if err != nil {
+		return Schedule{}, err
+	}
 	row, err := s.queries.CreateSchedule(ctx, sqlc.CreateScheduleParams{
-		Name:        req.Name,
-		Description: req.Description,
-		Pattern:     req.Pattern,
-		MaxCalls:    maxCalls,
-		Enabled:     enabled,
-		Command:     req.Command,
-		BotID:       pgBotID,
+		Name:            req.Name,
+		Description:     req.Description,
+		Pattern:         req.Pattern,
+		MaxCalls:        maxCalls,
+		Enabled:         enabled,
+		Command:         req.Command,
+		BotID:           pgBotID,
+		RunTarget:       exec.RunTarget,
+		TargetSessionID: db.ParseUUIDOrEmpty(exec.TargetSessionID),
+		RuntimeType:     optionalText(exec.RuntimeType),
+		AcpAgentID:      optionalText(exec.ACPAgentID),
+		ModelID:         db.ParseUUIDOrEmpty(exec.ModelID),
+		AcpModelID:      optionalText(exec.ACPModelID),
+		ReasoningEffort: optionalText(exec.ReasoningEffort),
+		WorkdirID:       db.ParseUUIDOrEmpty(exec.WorkdirID),
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -197,14 +243,36 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	// Validate only when the caller sends a new execution block. The stored
+	// block is deliberately not re-validated on unrelated updates: its
+	// references may have gone stale (deleted target session, archived
+	// workdir), and blocking a rename or disable on that would prevent the
+	// exact fixes a user reaches for; the trigger path reports stale
+	// references at fire time instead.
+	exec := executionFromRow(existing)
+	if req.Execution != nil {
+		normalized, execErr := s.normalizeExecution(ctx, existing.BotID.String(), *req.Execution)
+		if execErr != nil {
+			return Schedule{}, execErr
+		}
+		exec = normalized
+	}
 	updated, err := s.queries.UpdateSchedule(ctx, sqlc.UpdateScheduleParams{
-		ID:          pgID,
-		Name:        name,
-		Description: description,
-		Pattern:     pattern,
-		MaxCalls:    maxCalls,
-		Enabled:     enabled,
-		Command:     command,
+		ID:              pgID,
+		Name:            name,
+		Description:     description,
+		Pattern:         pattern,
+		MaxCalls:        maxCalls,
+		Enabled:         enabled,
+		Command:         command,
+		RunTarget:       exec.RunTarget,
+		TargetSessionID: db.ParseUUIDOrEmpty(exec.TargetSessionID),
+		RuntimeType:     optionalText(exec.RuntimeType),
+		AcpAgentID:      optionalText(exec.ACPAgentID),
+		ModelID:         db.ParseUUIDOrEmpty(exec.ModelID),
+		AcpModelID:      optionalText(exec.ACPModelID),
+		ReasoningEffort: optionalText(exec.ReasoningEffort),
+		WorkdirID:       db.ParseUUIDOrEmpty(exec.WorkdirID),
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -247,6 +315,22 @@ const scheduleTokenTTL = 10 * time.Minute
 // This prevents unbounded Generate() calls from hanging forever.
 const scheduleRunTimeout = 5 * time.Minute
 
+// scheduleACPRunTimeout is the cap for runs that may execute through an ACP
+// agent (an explicit ACP schedule, or an existing-session target whose
+// runtime is unknown until fire time). Coding-agent runs routinely outlast
+// the native chat cap.
+const scheduleACPRunTimeout = 30 * time.Minute
+
+// runTimeoutFor picks the execution cap for one fire. Existing-session
+// schedules get the generous cap because the pinned session may run an ACP
+// agent.
+func runTimeoutFor(sched Schedule) time.Duration {
+	if sched.RuntimeType == RuntimeACPAgent || sched.RunTarget == RunTargetExistingSession {
+		return scheduleACPRunTimeout
+	}
+	return scheduleRunTimeout
+}
+
 func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	if s.triggerer == nil {
 		return errors.New("schedule triggerer not configured")
@@ -264,17 +348,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		return fmt.Errorf("resolve bot owner: %w", err)
 	}
 
-	var sessionID string
-	var pgSessionID pgtype.UUID
-	if s.sessionCreator != nil {
-		sid, err := s.sessionCreator.CreateSession(ctx, sched.BotID, "schedule")
-		if err != nil {
-			s.logger.Error("create schedule session failed", slog.String("bot_id", sched.BotID), slog.Any("error", err))
-		} else {
-			sessionID = sid
-			pgSessionID = db.ParseUUIDOrEmpty(sid)
-		}
-	}
+	sessionID, sessionErr := s.resolveRunSession(ctx, sched, ownerUserID)
 
 	pgScheduleID := toUUID(sched.ID)
 	pgBotID := toUUID(sched.BotID)
@@ -282,10 +356,23 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	logRow, err := s.queries.CreateScheduleLog(ctx, sqlc.CreateScheduleLogParams{
 		ScheduleID: pgScheduleID,
 		BotID:      pgBotID,
-		SessionID:  pgSessionID,
+		SessionID:  db.ParseUUIDOrEmpty(sessionID),
 	})
 	if err != nil {
 		s.logger.Error("create schedule log failed", slog.String("schedule_id", sched.ID), slog.Any("error", err))
+	}
+
+	if errors.Is(sessionErr, ErrTargetSessionGone) {
+		// The session this schedule was pinned to no longer exists. Every
+		// future fire would fail identically, so disable the schedule after
+		// recording one error log instead of failing every tick.
+		s.completeLog(ctx, logRow.ID, "error", "", sessionErr.Error(), nil, pgtype.UUID{})
+		s.disableGoneSchedule(ctx, sched.ID)
+		return sessionErr
+	}
+	if sessionErr != nil {
+		s.completeLog(ctx, logRow.ID, "error", "", sessionErr.Error(), nil, pgtype.UUID{})
+		return sessionErr
 	}
 
 	token, err := s.generateTriggerToken(ownerUserID)
@@ -295,14 +382,17 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	}
 
 	result, triggerErr := s.triggerer.TriggerSchedule(ctx, sched.BotID, TriggerPayload{
-		ID:          sched.ID,
-		Name:        sched.Name,
-		Description: sched.Description,
-		Pattern:     sched.Pattern,
-		MaxCalls:    sched.MaxCalls,
-		Command:     sched.Command,
-		OwnerUserID: ownerUserID,
-		SessionID:   sessionID,
+		ID:              sched.ID,
+		Name:            sched.Name,
+		Description:     sched.Description,
+		Pattern:         sched.Pattern,
+		MaxCalls:        sched.MaxCalls,
+		Command:         sched.Command,
+		OwnerUserID:     ownerUserID,
+		SessionID:       sessionID,
+		ModelID:         sched.ModelID,
+		ACPModelID:      sched.ACPModelID,
+		ReasoningEffort: sched.ReasoningEffort,
 	}, token)
 	if triggerErr != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", triggerErr.Error(), nil, pgtype.UUID{})
@@ -313,6 +403,67 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	s.completeLog(ctx, logRow.ID, result.Status, result.Text, "", result.UsageBytes, modelID)
 	s.logger.Info("schedule completed", slog.String("schedule_id", sched.ID), slog.String("status", result.Status))
 	return nil
+}
+
+// resolveRunSession decides which session this fire runs in. new_session
+// mode creates a fresh user-visible session honoring the schedule's runtime
+// and workdir; existing_session mode re-checks the pinned session and maps
+// a vanished target to ErrTargetSessionGone so the caller can disable the
+// schedule.
+func (s *Service) resolveRunSession(ctx context.Context, sched Schedule, ownerUserID string) (string, error) {
+	if sched.RunTarget == RunTargetExistingSession {
+		target := strings.TrimSpace(sched.TargetSessionID)
+		if target == "" {
+			// The FK degraded the reference to NULL when the session was
+			// hard-deleted (or it was never written, which validation
+			// prevents).
+			return "", ErrTargetSessionGone
+		}
+		pgSessionID, err := db.ParseUUID(target)
+		if err != nil {
+			return "", fmt.Errorf("invalid target session id: %w", err)
+		}
+		sess, err := s.queries.GetSessionByID(ctx, pgSessionID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Soft-deleted sessions keep their row, so the FK cannot
+				// catch this path.
+				return "", ErrTargetSessionGone
+			}
+			return "", err
+		}
+		if sess.BotID.String() != sched.BotID {
+			return "", ErrTargetSessionGone
+		}
+		return target, nil
+	}
+	if s.sessionCreator == nil {
+		return "", errors.New("schedule session creator not configured")
+	}
+	sessionID, err := s.sessionCreator.CreateScheduleSession(ctx, SessionSpec{
+		BotID:       sched.BotID,
+		Title:       sched.Name,
+		RuntimeType: sched.RuntimeType,
+		ACPAgentID:  sched.ACPAgentID,
+		WorkdirID:   sched.WorkdirID,
+		OwnerUserID: ownerUserID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("create schedule session: %w", err)
+	}
+	return sessionID, nil
+}
+
+// disableGoneSchedule turns off a schedule whose target session vanished and
+// unhooks its cron job.
+func (s *Service) disableGoneSchedule(ctx context.Context, scheduleID string) {
+	if _, err := s.queries.DisableSchedule(ctx, toUUID(scheduleID)); err != nil {
+		s.logger.Error("disable schedule with deleted target session failed",
+			slog.String("schedule_id", scheduleID), slog.Any("error", err))
+		return
+	}
+	s.removeJob(scheduleID)
+	s.logger.Warn("schedule disabled: target session was deleted", slog.String("schedule_id", scheduleID))
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText, errorMessage string, usageBytes []byte, modelID pgtype.UUID) {
@@ -491,9 +642,10 @@ func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error
 		return errors.New("schedule id missing")
 	}
 	job := func() {
-		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), scheduleRunTimeout)
+		item := toSchedule(schedule)
+		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), runTimeoutFor(item))
 		defer runCancel()
-		if err := s.runSchedule(runCtx, toSchedule(schedule)); err != nil {
+		if err := s.runSchedule(runCtx, item); err != nil {
 			s.logger.Error("scheduled job failed", slog.String("schedule_id", schedule.ID.String()), slog.Any("error", err))
 		}
 	}
@@ -536,14 +688,15 @@ func (s *Service) removeJob(id string) {
 
 func toSchedule(row sqlc.Schedule) Schedule {
 	item := Schedule{
-		ID:           row.ID.String(),
-		Name:         row.Name,
-		Description:  row.Description,
-		Pattern:      row.Pattern,
-		CurrentCalls: int(row.CurrentCalls),
-		Enabled:      row.Enabled,
-		Command:      row.Command,
-		BotID:        row.BotID.String(),
+		ID:              row.ID.String(),
+		Name:            row.Name,
+		Description:     row.Description,
+		Pattern:         row.Pattern,
+		CurrentCalls:    int(row.CurrentCalls),
+		Enabled:         row.Enabled,
+		Command:         row.Command,
+		BotID:           row.BotID.String(),
+		ExecutionConfig: executionFromRow(row),
 	}
 	if row.MaxCalls.Valid {
 		maxCalls := int(row.MaxCalls.Int32)
@@ -556,6 +709,33 @@ func toSchedule(row sqlc.Schedule) Schedule {
 		item.UpdatedAt = row.UpdatedAt.Time
 	}
 	return item
+}
+
+func executionFromRow(row sqlc.Schedule) ExecutionConfig {
+	exec := ExecutionConfig{
+		RunTarget:       row.RunTarget,
+		RuntimeType:     row.RuntimeType.String,
+		ACPAgentID:      row.AcpAgentID.String,
+		ACPModelID:      row.AcpModelID.String,
+		ReasoningEffort: row.ReasoningEffort.String,
+	}
+	if row.TargetSessionID.Valid {
+		exec.TargetSessionID = row.TargetSessionID.String()
+	}
+	if row.ModelID.Valid {
+		exec.ModelID = row.ModelID.String()
+	}
+	if row.WorkdirID.Valid {
+		exec.WorkdirID = row.WorkdirID.String()
+	}
+	return exec
+}
+
+func optionalText(value string) pgtype.Text {
+	if value == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: value, Valid: true}
 }
 
 func toUUID(id string) pgtype.UUID {
