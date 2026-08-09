@@ -214,6 +214,17 @@ func TestResolveReasoningConfig(t *testing.T) {
 			},
 		},
 	}
+	// Legacy Anthropic that also declares it can be turned off. Being turn-off
+	// capable says nothing about which thinking wire the model speaks, so this one
+	// must stay on the budget path.
+	disablableLegacyAnthropicModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{models.ReasoningEffortDisable, "low", "medium", "high"},
+			},
+		},
+	}
 	// Cloud-variant Claude 4.6+: the registry left it toggle (no
 	// supports_adaptive_thinking) but it advertises 4.6+ effort tiers, so the
 	// Anthropic wire promotes it to adaptive to stay off the legacy budget path.
@@ -346,6 +357,13 @@ func TestResolveReasoningConfig(t *testing.T) {
 		{
 			name:        "legacy anthropic stays non-adaptive for budget path",
 			model:       legacyAnthropicModel,
+			botSettings: settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
+			clientType:  string(models.ClientTypeAnthropicMessages),
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:        "declaring off does not promote a legacy anthropic model to adaptive",
+			model:       disablableLegacyAnthropicModel,
 			botSettings: settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
 			clientType:  string(models.ClientTypeAnthropicMessages),
 			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},

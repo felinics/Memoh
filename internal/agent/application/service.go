@@ -878,15 +878,18 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 // anthropicEffortEra reports whether an Anthropic model uses the 4.6+
 // effort/adaptive thinking mechanism rather than the legacy
 // thinking{type:"enabled", budget_tokens:N} path. Pre-4.6 Claude advertises only
-// the implicit low/medium/high base; 4.6+ adds at least one of disable (spelled
-// "none" on the OpenAI wire) / minimal / xhigh / max. Detecting any of those
-// catches the cloud-provider variants that the registry leaves without
-// supports_adaptive_thinking.
+// the implicit low/medium/high base; 4.6+ adds at least one of minimal/xhigh/max.
+// Detecting any of those catches the cloud-provider variants that the registry
+// leaves without supports_adaptive_thinking.
+//
+// The disable token is deliberately not a signal. It declares that a model can be
+// turned off, which every Claude generation can do, so reading it as "4.6+" would
+// put a legacy model on the adaptive wire that it rejects.
 func anthropicEffortEra(effortLevels []string) bool {
 	for _, e := range effortLevels {
 		switch e {
-		case models.ReasoningEffortDisable, models.ReasoningEffortMinimal,
-			models.ReasoningEffortXHigh, models.ReasoningEffortMax:
+		case models.ReasoningEffortMinimal, models.ReasoningEffortXHigh,
+			models.ReasoningEffortMax:
 			return true
 		}
 	}
