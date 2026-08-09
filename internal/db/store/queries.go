@@ -76,6 +76,13 @@ type Queries interface {
 	ListBotUserGrants(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListBotUserGrantsRow, error)
 	ListBotUserGrantsForUser(ctx context.Context, arg dbsqlc.ListBotUserGrantsForUserParams) ([]dbsqlc.ListBotUserGrantsForUserRow, error)
 	UpdateBotUserGrantPermissions(ctx context.Context, arg dbsqlc.UpdateBotUserGrantPermissionsParams) (dbsqlc.BotUserGrant, error)
+	CreateBotPeerGrant(ctx context.Context, arg dbsqlc.CreateBotPeerGrantParams) (dbsqlc.CreateBotPeerGrantRow, error)
+	DeleteBotPeerGrantByID(ctx context.Context, id pgtype.UUID) error
+	GetBotPeerGrantByID(ctx context.Context, id pgtype.UUID) (dbsqlc.GetBotPeerGrantByIDRow, error)
+	ListBotPeerGrants(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListBotPeerGrantsRow, error)
+	ListBotPeerGrantsForCaller(ctx context.Context, arg dbsqlc.ListBotPeerGrantsForCallerParams) ([]dbsqlc.ListBotPeerGrantsForCallerRow, error)
+	ListBotPeerGrantsForSubject(ctx context.Context, callerBotID pgtype.UUID) ([]dbsqlc.ListBotPeerGrantsForSubjectRow, error)
+	UpdateBotPeerGrantPermissions(ctx context.Context, arg dbsqlc.UpdateBotPeerGrantPermissionsParams) (dbsqlc.UpdateBotPeerGrantPermissionsRow, error)
 	ListAccessibleBots(ctx context.Context, ownerUserID pgtype.UUID) ([]dbsqlc.ListAccessibleBotsRow, error)
 	CreateBotEmailBinding(ctx context.Context, arg dbsqlc.CreateBotEmailBindingParams) (dbsqlc.BotEmailBinding, error)
 	CreateChannelIdentity(ctx context.Context, arg dbsqlc.CreateChannelIdentityParams) (dbsqlc.ChannelIdentity, error)

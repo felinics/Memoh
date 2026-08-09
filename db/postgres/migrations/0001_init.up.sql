@@ -2973,3 +2973,67 @@ ALTER TABLE public.project_nodes
 CREATE UNIQUE INDEX IF NOT EXISTS project_nodes_issue_number_unique
     ON public.project_nodes (team_id, project_id, number)
     WHERE type = 'issue';
+
+-- ---------------------------------------------------------------------------
+-- Bot-to-bot access grants (0132). Appended rather than placed next to
+-- bot_user_grants above so a fresh install and an upgraded database end up
+-- with the same physical column order (sqlc's SELECT * scans by position).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.bot_peer_grants (
+    id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    team_id            UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                                   REFERENCES public.teams(id) ON DELETE RESTRICT,
+    bot_id             UUID        NOT NULL,
+    subject_type       TEXT        NOT NULL,
+    subject_bot_id     UUID,
+    permissions        JSONB       NOT NULL DEFAULT '[]'::jsonb,
+    created_by_user_id UUID,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT bot_peer_grants_team_key UNIQUE (team_id, id),
+    CONSTRAINT bot_peer_grants_bot_id_fkey
+        FOREIGN KEY (team_id, bot_id)
+        REFERENCES public.bots(team_id, id) ON DELETE CASCADE,
+    CONSTRAINT bot_peer_grants_subject_bot_id_fkey
+        FOREIGN KEY (team_id, subject_bot_id)
+        REFERENCES public.bots(team_id, id) ON DELETE CASCADE,
+    CONSTRAINT bot_peer_grants_created_by_user_id_fkey
+        FOREIGN KEY (team_id, created_by_user_id)
+        REFERENCES public.team_members(team_id, user_id) ON DELETE SET NULL (created_by_user_id),
+    CONSTRAINT bot_peer_grants_subject_type_check
+        CHECK (subject_type IN ('bot', 'any_bot')),
+    CONSTRAINT bot_peer_grants_subject_value_check CHECK (
+        (subject_type = 'bot' AND subject_bot_id IS NOT NULL AND subject_bot_id <> bot_id)
+        OR (subject_type = 'any_bot' AND subject_bot_id IS NULL)
+    ),
+    CONSTRAINT bot_peer_grants_permissions_check CHECK (
+        jsonb_typeof(permissions) = 'array'
+        AND jsonb_array_length(permissions) > 0
+        AND permissions <@ '["discover", "contact", "delegate"]'::jsonb
+    ),
+    CONSTRAINT bot_peer_grants_unique_subject
+        UNIQUE NULLS NOT DISTINCT (team_id, bot_id, subject_bot_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_peer_grants_subject
+    ON public.bot_peer_grants (team_id, subject_bot_id);
+
+ALTER TABLE public.bot_peer_grants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_peer_grants FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS bot_peer_grants_team_select ON public.bot_peer_grants;
+DROP POLICY IF EXISTS bot_peer_grants_team_insert ON public.bot_peer_grants;
+DROP POLICY IF EXISTS bot_peer_grants_team_update ON public.bot_peer_grants;
+DROP POLICY IF EXISTS bot_peer_grants_team_delete ON public.bot_peer_grants;
+
+CREATE POLICY bot_peer_grants_team_select ON public.bot_peer_grants
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_peer_grants_team_insert ON public.bot_peer_grants
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_peer_grants_team_update ON public.bot_peer_grants
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_peer_grants_team_delete ON public.bot_peer_grants
+    FOR DELETE USING (team_id = public.memoh_current_team_id());

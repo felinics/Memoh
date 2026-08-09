@@ -2563,7 +2563,7 @@
       "title": "访问控制",
       "subtitle": "控制谁能访问和管理此 Bot —— 包括 IM 渠道和工作区两侧。",
       "channelTab": "渠道成员",
-      "workspaceTab": "工作区成员",
+      "workspaceTab": "成员与 Bot",
       "userAccess": {
         "title": "工作区成员",
         "subtitle": "控制哪些平台注册用户可以在网页端管理或配置此 Bot。",
@@ -2589,6 +2589,29 @@
         "saveFailed": "更新访问权限失败",
         "removed": "已移除访问权限",
         "removeFailed": "移除访问权限失败"
+      },
+      "peerAccess": {
+        "title": "Bot 访问",
+        "subtitle": "控制哪些其他 Bot 可以联系这个 Bot。Bot 的权限种类与成员不同，永远不包含工作区与管理权限。",
+        "addBot": "添加",
+        "subjectQuestion": "哪个 Bot 可以联系它",
+        "anyBot": "任何 Bot",
+        "specificBot": "指定 Bot",
+        "botQuestion": "Bot",
+        "selectBot": "选择一个 Bot",
+        "searchBot": "搜索 Bot……",
+        "noBotCandidates": "没有可添加的 Bot。只能添加你有管理权限的 Bot。",
+        "permissionsQuestion": "权限",
+        "permissionDiscover": "可被发现",
+        "permissionContact": "可发消息",
+        "permissionDelegate": "可委托任务",
+        "empty": "还没有其他 Bot 可以联系这个 Bot。",
+        "removeConfirm": "移除这个 Bot 的访问权限？",
+        "atLeastOnePermission": "至少需要一项权限。",
+        "saved": "Bot 访问权限已更新",
+        "saveFailed": "更新 Bot 访问权限失败",
+        "removed": "已移除 Bot 访问权限",
+        "removeFailed": "移除 Bot 访问权限失败"
       },
       "members": {
         "title": "成员",

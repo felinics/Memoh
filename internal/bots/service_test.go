@@ -30,6 +30,7 @@ func (r *fakeRow) Scan(dest ...any) error {
 // fakeDBTX implements sqlc.DBTX for unit testing.
 type fakeDBTX struct {
 	queryRowFunc func(ctx context.Context, sql string, args ...any) pgx.Row
+	queryFunc    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	execFunc     func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
@@ -40,7 +41,10 @@ func (d *fakeDBTX) Exec(ctx context.Context, sql string, args ...interface{}) (p
 	return pgconn.CommandTag{}, nil
 }
 
-func (*fakeDBTX) Query(context.Context, string, ...interface{}) (pgx.Rows, error) {
+func (d *fakeDBTX) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	if d.queryFunc != nil {
+		return d.queryFunc(ctx, sql, args...)
+	}
 	return nil, nil
 }
 

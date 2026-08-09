@@ -2,7 +2,6 @@ package bots
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -22,6 +21,27 @@ const (
 	PermissionWorkspaceWrite = "workspace_write"
 	PermissionWorkspaceExec  = "workspace_exec"
 	PermissionManage         = "manage"
+)
+
+// userVocabulary is the permission vocabulary for human subjects. It is
+// disjoint from peerVocabulary by construction; see permissions.go.
+var userVocabulary = newVocabulary(
+	[]string{
+		PermissionChat,
+		PermissionWorkspaceRead,
+		PermissionWorkspaceWrite,
+		PermissionWorkspaceExec,
+		PermissionManage,
+	},
+	map[string][]string{
+		PermissionManage: {
+			PermissionChat,
+			PermissionWorkspaceRead,
+			PermissionWorkspaceWrite,
+			PermissionWorkspaceExec,
+		},
+		PermissionWorkspaceWrite: {PermissionWorkspaceRead},
+	},
 )
 
 // Grant subject types.
@@ -74,13 +94,7 @@ type UpdateUserGrantRequest struct {
 
 // allPermissions returns the full permission set (owner/admin level).
 func allPermissions() []string {
-	return []string{
-		PermissionChat,
-		PermissionWorkspaceRead,
-		PermissionWorkspaceWrite,
-		PermissionWorkspaceExec,
-		PermissionManage,
-	}
+	return userVocabulary.all()
 }
 
 // HasPermission reports whether the granted set satisfies the required scope.
@@ -89,103 +103,28 @@ func HasPermission(granted []string, required string) bool {
 }
 
 func hasPermission(granted []string, required string) bool {
-	required = strings.ToLower(strings.TrimSpace(required))
-	if required == "" {
+	if strings.TrimSpace(required) == "" {
 		required = PermissionManage
 	}
-	perms := expandPermissions(granted)
-	for _, p := range perms {
-		if p == required {
-			return true
-		}
-	}
-	return false
+	return userVocabulary.has(granted, required)
 }
 
 // normalizePermissions validates and de-duplicates a permission list, preserving
 // a stable canonical order.
 func normalizePermissions(raw []string) ([]string, error) {
-	seen := map[string]bool{}
-	for _, p := range raw {
-		key := strings.ToLower(strings.TrimSpace(p))
-		switch key {
-		case PermissionChat, PermissionWorkspaceRead, PermissionWorkspaceWrite, PermissionWorkspaceExec, PermissionManage:
-			seen[key] = true
-		case "":
-			continue
-		default:
-			return nil, ErrInvalidPermission
-		}
-	}
-	out := expandPermissionSet(seen)
-	if len(out) == 0 {
-		return nil, ErrInvalidPermission
-	}
-	return out, nil
-}
-
-func isKnownPermission(permission string) bool {
-	switch permission {
-	case PermissionChat, PermissionWorkspaceRead, PermissionWorkspaceWrite, PermissionWorkspaceExec, PermissionManage:
-		return true
-	default:
-		return false
-	}
+	return userVocabulary.normalize(raw)
 }
 
 func expandPermissions(perms []string) []string {
-	seen := make(map[string]bool, len(perms))
-	for _, p := range perms {
-		key := strings.ToLower(strings.TrimSpace(p))
-		if isKnownPermission(key) {
-			seen[key] = true
-		}
-	}
-	return expandPermissionSet(seen)
-}
-
-func expandPermissionSet(seen map[string]bool) []string {
-	if seen[PermissionManage] {
-		for _, p := range allPermissions() {
-			seen[p] = true
-		}
-	}
-	if seen[PermissionWorkspaceWrite] {
-		seen[PermissionWorkspaceRead] = true
-	}
-
-	out := make([]string, 0, len(seen))
-	for _, p := range allPermissions() {
-		if seen[p] {
-			out = append(out, p)
-		}
-	}
-	return out
+	return userVocabulary.expand(perms)
 }
 
 func decodePermissions(payload []byte) []string {
-	if len(payload) == 0 {
-		return nil
-	}
-	var perms []string
-	if err := json.Unmarshal(payload, &perms); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(perms))
-	for _, p := range perms {
-		key := strings.ToLower(strings.TrimSpace(p))
-		if isKnownPermission(key) {
-			out = append(out, key)
-		}
-	}
-	return expandPermissions(out)
+	return userVocabulary.decode(payload)
 }
 
 func encodePermissions(perms []string) ([]byte, error) {
-	if perms == nil {
-		perms = []string{}
-	}
-	return json.Marshal(perms)
+	return userVocabulary.encode(perms)
 }
 
 // ResolveUserPermissions returns the effective permissions for userID on botID.
@@ -240,13 +179,11 @@ func (s *Service) ResolveUserPermissionsForBot(ctx context.Context, bot Bot, use
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
+	union := make([]string, 0, len(grants))
 	for _, g := range grants {
-		for _, p := range decodePermissions(g.Permissions) {
-			seen[p] = true
-		}
+		union = append(union, decodePermissions(g.Permissions)...)
 	}
-	return expandPermissionSet(seen), nil
+	return expandPermissions(union), nil
 }
 
 // AuthorizeAccessWithPermission checks whether userID may access the bot with the

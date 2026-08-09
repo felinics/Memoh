@@ -1108,6 +1108,17 @@ definitions:
       wait_for_ready:
         type: boolean
     type: object
+  bots.CreatePeerGrantRequest:
+    properties:
+      permissions:
+        items:
+          type: string
+        type: array
+      subject_bot_id:
+        type: string
+      subject_type:
+        type: string
+    type: object
   bots.CreateUserGrantRequest:
     properties:
       permissions:
@@ -1140,6 +1151,31 @@ definitions:
       reason:
         type: string
     type: object
+  bots.PeerGrant:
+    properties:
+      bot_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      permissions:
+        items:
+          type: string
+        type: array
+      subject_bot_avatar_url:
+        type: string
+      subject_bot_display_name:
+        type: string
+      subject_bot_id:
+        type: string
+      subject_bot_name:
+        type: string
+      subject_type:
+        type: string
+      updated_at:
+        type: string
+    type: object
   bots.TransferBotRequest:
     properties:
       owner_user_id:
@@ -1160,6 +1196,13 @@ definitions:
         type: string
       timezone:
         type: string
+    type: object
+  bots.UpdatePeerGrantRequest:
+    properties:
+      permissions:
+        items:
+          type: string
+        type: array
     type: object
   bots.UpdateUserGrantRequest:
     properties:
@@ -2447,6 +2490,31 @@ definitions:
       ids:
         items:
           type: string
+        type: array
+    type: object
+  handlers.BotPeerCandidate:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  handlers.BotPeerCandidateListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.BotPeerCandidate'
+        type: array
+    type: object
+  handlers.BotPeerGrantListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/bots.PeerGrant'
         type: array
     type: object
   handlers.BotUserCandidate:
@@ -6582,6 +6650,191 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Summarize what a bot would export
+      tags:
+      - bots
+  /bots/{bot_id}/bot-access:
+    get:
+      description: List the bot-to-bot access grants configured on a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.BotPeerGrantListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List bot peer access grants
+      tags:
+      - bots
+    post:
+      description: Let another bot (or any bot in the team) reach this bot with a
+        peer permission set
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Grant payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/bots.CreatePeerGrantRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/bots.PeerGrant'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create bot peer access grant
+      tags:
+      - bots
+  /bots/{bot_id}/bot-access/{grant_id}:
+    delete:
+      description: Remove a bot-to-bot access grant from a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Grant ID
+        in: path
+        name: grant_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete bot peer access grant
+      tags:
+      - bots
+    put:
+      description: Update the peer permission set of a bot access grant
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Grant ID
+        in: path
+        name: grant_id
+        required: true
+        type: string
+      - description: Grant payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/bots.UpdatePeerGrantRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/bots.PeerGrant'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update bot peer access grant
+      tags:
+      - bots
+  /bots/{bot_id}/bot-access/candidates:
+    get:
+      description: 'List bots that can be granted access to this bot: bots the caller
+        manages, minus this bot and the ones already granted'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Max results
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.BotPeerCandidateListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List grantable peer bots
       tags:
       - bots
   /bots/{bot_id}/channel-managers:

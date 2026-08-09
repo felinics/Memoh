@@ -609,6 +609,7 @@
         class="space-y-8"
       >
         <BotUserAccess :bot-id="botId" />
+        <BotPeerAccess :bot-id="botId" />
       </TabsContent>
     </Tabs>
   </PageShell>
@@ -665,6 +666,7 @@ import {
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import BotUserAccess from './bot-user-access.vue'
+import BotPeerAccess from './bot-peer-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import type { AclObservedConversationCandidate, AclRule, AclSourceScope, ChannelaccessManager, HandlersChannelMeta } from '@memohai/sdk'

@@ -2563,7 +2563,7 @@
       "title": "Access Control",
       "subtitle": "Control who can reach and manage this bot — from IM channels and from your workspace.",
       "channelTab": "Channel Members",
-      "workspaceTab": "Workspace Members",
+      "workspaceTab": "Members & Bots",
       "userAccess": {
         "title": "Workspace Members",
         "subtitle": "Control which registered platform users can manage or configure this bot from the web app.",
@@ -2589,6 +2589,29 @@
         "saveFailed": "Failed to update access",
         "removed": "Access removed",
         "removeFailed": "Failed to remove access"
+      },
+      "peerAccess": {
+        "title": "Bot Access",
+        "subtitle": "Control which other bots may reach this bot. Bot scopes are separate from member scopes: they never grant workspace or manage rights.",
+        "addBot": "Add",
+        "subjectQuestion": "Which bot can reach this one",
+        "anyBot": "Any bot",
+        "specificBot": "Specific bot",
+        "botQuestion": "Bot",
+        "selectBot": "Select a bot",
+        "searchBot": "Search bots...",
+        "noBotCandidates": "No bots available. You can only add bots you manage.",
+        "permissionsQuestion": "Permissions",
+        "permissionDiscover": "Can discover",
+        "permissionContact": "Can message",
+        "permissionDelegate": "Can delegate",
+        "empty": "No other bot can reach this bot yet.",
+        "removeConfirm": "Remove this bot's access?",
+        "atLeastOnePermission": "At least one permission is required.",
+        "saved": "Bot access updated",
+        "saveFailed": "Failed to update bot access",
+        "removed": "Bot access removed",
+        "removeFailed": "Failed to remove bot access"
       },
       "members": {
         "title": "Members",

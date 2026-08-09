@@ -2560,7 +2560,7 @@
       "title": "アクセス制御",
       "subtitle": "このBotにアクセスして管理できるユーザーを制御します — からIMChannelやWorkspaceから。",
       "channelTab": "Channelメンバー",
-      "workspaceTab": "Workspaceのメンバー",
+      "workspaceTab": "メンバーとBot",
       "userAccess": {
         "title": "Workspaceのメンバー",
         "subtitle": "どの登録プラットフォーム ユーザーが Web アプリからこのBotを管理または構成できるかを制御します。",
@@ -2585,6 +2585,29 @@
         "saveFailed": "アクセス権の更新に失敗しました",
         "removed": "アクセスが削除されました",
         "removeFailed": "アクセス権の削除に失敗しました"
+      },
+      "peerAccess": {
+        "title": "Botアクセス",
+        "subtitle": "どのBotがこのBotに連絡できるかを制御します。Botの権限はメンバーの権限とは別で、WorkspaceやManageの権限は含まれません。",
+        "addBot": "追加",
+        "subjectQuestion": "どのBotが連絡できるか",
+        "anyBot": "すべてのBot",
+        "specificBot": "特定のBot",
+        "botQuestion": "Bot",
+        "selectBot": "Botを選択",
+        "searchBot": "Botを検索...",
+        "noBotCandidates": "追加できるBotがありません。管理権限を持つBotのみ追加できます。",
+        "permissionsQuestion": "権限",
+        "permissionDiscover": "発見可能",
+        "permissionContact": "メッセージ送信可",
+        "permissionDelegate": "委任可",
+        "empty": "このBotに連絡できるBotはまだありません。",
+        "removeConfirm": "このBotのアクセスを削除しますか？",
+        "atLeastOnePermission": "少なくとも1つの権限が必要です。",
+        "saved": "Botアクセスを更新しました",
+        "saveFailed": "Botアクセスの更新に失敗しました",
+        "removed": "Botアクセスを削除しました",
+        "removeFailed": "Botアクセスの削除に失敗しました"
       },
       "members": {
         "title": "メンバー",

@@ -214,6 +214,18 @@ type BotHistoryMessageCompact struct {
 	TeamID          pgtype.UUID        `json:"team_id"`
 }
 
+type BotPeerGrant struct {
+	ID              pgtype.UUID        `json:"id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	SubjectType     string             `json:"subject_type"`
+	SubjectBotID    pgtype.UUID        `json:"subject_bot_id"`
+	Permissions     []byte             `json:"permissions"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotPluginInstallation struct {
 	ID          pgtype.UUID        `json:"id"`
 	BotID       pgtype.UUID        `json:"bot_id"`
