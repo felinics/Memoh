@@ -460,6 +460,7 @@ const nativeAvailableEfforts = computed(() => {
   return availableEffortsForMode(
     resolveThinkingMode(activeModel.value.config),
     resolveEffortLevels(activeModel.value.config, activeClientType.value),
+    activeClientType.value,
   )
 })
 

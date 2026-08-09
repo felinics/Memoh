@@ -52,6 +52,26 @@ describe('availableEffortsForMode', () => {
     expect(selectable).toEqual(['low', 'medium', 'high'])
   })
 
+  it('offers off on the Anthropic wire, where off needs no declared token', () => {
+    // Claude never advertises the token, but a toggle model is off whenever the
+    // thinking field is absent — which is what the adaptor sends when disabled.
+    const selectable = availableEffortsForMode('toggle', resolveEffortLevels({
+      thinking_mode: 'toggle',
+      reasoning_efforts: ['low', 'medium', 'high'],
+    }, 'anthropic-messages'), 'anthropic-messages')
+    expect(selectable).toEqual([REASONING_EFFORT_DISABLE, 'low', 'medium', 'high'])
+  })
+
+  it('offers no off for adaptive Anthropic models, where omission is not off', () => {
+    // Adaptive models think on their own, so omitting the field leaves that
+    // default in charge instead of turning thinking off.
+    const selectable = availableEffortsForMode('adaptive', resolveEffortLevels({
+      thinking_mode: 'adaptive',
+      reasoning_efforts: ['low', 'medium', 'high', 'max'],
+    }, 'anthropic-messages'), 'anthropic-messages')
+    expect(selectable).toEqual(['low', 'medium', 'high', 'max'])
+  })
+
   it('offers nothing for a model with no thinking concept', () => {
     expect(availableEffortsForMode('none', ['low', 'medium'])).toEqual([])
   })

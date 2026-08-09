@@ -31,6 +31,14 @@ const LEGACY_OFF_EFFORT = 'none'
 // behavior; Codex uses the effort levels advertised by its catalog directly.
 const MAX_NORMALIZED_CLIENT_TYPES = new Set(['openai-completions', 'openai-responses'])
 
+// Clients whose wire format expresses "off" by omission rather than by a value.
+// Anthropic's Messages API has no off token: thinking is off when the field is
+// absent, which is exactly what the adaptor sends for a disabled toggle model.
+// No catalog advertises the disable token for Claude either — the capability
+// registry never marks an Anthropic entry as supporting the off effort — so
+// gating on the declaration alone would hide a control that works.
+const IMPLICIT_OFF_CLIENT_TYPES = new Set(['anthropic-messages'])
+
 export const EFFORT_LABELS: Record<string, string> = {
   [REASONING_EFFORT_DISABLE]: 'chat.reasoningOff',
   [REASONING_EFFORT_ADAPTIVE]: 'chat.reasoningAdaptive',
@@ -129,17 +137,25 @@ export function nearestEffortToMedium(levels: string[]): string {
 }
 
 // availableEffortsForMode builds the selectable list for a thinking mode. A model
-// with no thinking concept offers nothing; otherwise the options are exactly what
-// the model advertises, with "off" hoisted to the front when it is among them.
+// with no thinking concept offers nothing; otherwise the options are the model's
+// active tiers, with "off" hoisted to the front when off is actually reachable.
 //
-// Nothing is prepended unconditionally any more. Doing so offered "off" on models
-// that never declared they can be turned off, where picking it has no defined
-// effect: the provider adaptor has no off shape to send, so it omits the field and
-// the model's default thinking behavior stands.
-export function availableEffortsForMode(mode: ThinkingMode, levels: string[]): string[] {
+// Off is no longer prepended unconditionally. Doing so offered it on models that
+// cannot be turned off, where picking it has no defined effect: the adaptor has no
+// off shape to send, so it omits the field and the model's default thinking stands.
+export function availableEffortsForMode(mode: ThinkingMode, levels: string[], clientType?: string | null): string[] {
   if (mode === 'none') return []
   const tiers = levels.filter((e) => e !== REASONING_EFFORT_DISABLE)
-  return levels.includes(REASONING_EFFORT_DISABLE)
-    ? [REASONING_EFFORT_DISABLE, ...tiers]
-    : tiers
+  return canTurnOff(mode, levels, clientType) ? [REASONING_EFFORT_DISABLE, ...tiers] : tiers
+}
+
+// canTurnOff reports whether picking "off" reaches the model: either the model
+// advertises the token, or its client expresses off by omitting the field.
+//
+// The omission rule is limited to toggle models, where thinking only happens when
+// asked for. Under adaptive thinking the model decides on its own, so omitting the
+// field leaves that default in charge rather than turning thinking off.
+function canTurnOff(mode: ThinkingMode, levels: string[], clientType?: string | null): boolean {
+  if (levels.includes(REASONING_EFFORT_DISABLE)) return true
+  return mode === 'toggle' && IMPLICIT_OFF_CLIENT_TYPES.has(clientType ?? '')
 }
