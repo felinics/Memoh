@@ -104,12 +104,16 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 			return ExecutionConfig{}, err
 		}
 	}
-	// Native efforts come from a fixed tier vocabulary. ACP efforts are
+	// Native efforts come from a fixed tier vocabulary, plus the "disable"
+	// sentinel that turns reasoning off for the run — the same on/off value
+	// bot settings and the chat composer store. ACP efforts are
 	// agent-defined (each agent reports its own set at runtime), so only a
 	// shape check applies here; the agent rejects unknown values at run
 	// time with a stable error.
 	acpRun := out.RuntimeType == RuntimeACPAgent || targetIsACP
-	if out.ReasoningEffort != "" && !acpRun && !models.IsValidReasoningEffort(out.ReasoningEffort) {
+	if out.ReasoningEffort != "" && !acpRun &&
+		!models.IsValidReasoningEffort(out.ReasoningEffort) &&
+		!models.IsReasoningDisabled(out.ReasoningEffort) {
 		return ExecutionConfig{}, invalidRequestf("unknown reasoning_effort %q", out.ReasoningEffort)
 	}
 	return out, nil
