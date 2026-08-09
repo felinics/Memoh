@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <FormStack>
     <FieldStack :label="t('bots.schedule.execution.runsIn')">
       <Select v-model="runTargetModel">
         <SelectTrigger class="w-full">
@@ -20,20 +20,15 @@
       v-if="form.runTarget === 'existing_session'"
       :label="t('bots.schedule.execution.session')"
     >
-      <Select v-model="sessionModel">
-        <SelectTrigger class="w-full">
-          <SelectValue :placeholder="t('bots.schedule.execution.sessionPlaceholder')" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem
-            v-for="session in sessions"
-            :key="session.id"
-            :value="session.id ?? ''"
-          >
-            {{ sessionLabel(session) }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
+      <!-- Only chat and schedule sessions can host a scheduled run; heartbeat,
+           discuss and subagent threads back their own loops. -->
+      <SessionSelect
+        v-model="sessionModel"
+        :bot-id="botId"
+        :modes="TARGET_SESSION_MODES"
+        :placeholder="t('bots.schedule.execution.sessionPlaceholder')"
+        @update:session="selectedSession = $event"
+      />
       <p
         v-if="selectedSession"
         class="text-caption text-muted-foreground"
@@ -44,60 +39,31 @@
 
     <FieldStack :label="t('bots.schedule.execution.model')">
       <!-- Existing-session mode inherits the runtime; only the matching model
-           column is offered. New-session mode picks the runtime here. -->
-      <Select
+           column is offered. New-session mode picks the runtime here. Reasoning
+           rides inside the picker that owns the model, the same way the chat
+           composer folds the two into one decision. -->
+      <ModelSelect
         v-if="form.runTarget === 'new_session'"
         v-model="runtimeModel"
-      >
-        <SelectTrigger class="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="default">
-            {{ t('bots.schedule.execution.botDefault') }}
-          </SelectItem>
-          <SelectGroup v-if="chatModels.length > 0">
-            <SelectLabel>{{ t('bots.schedule.execution.models') }}</SelectLabel>
-            <SelectItem
-              v-for="model in chatModels"
-              :key="model.id"
-              :value="`model:${model.id}`"
-            >
-              {{ model.name || model.model_id }}
-            </SelectItem>
-          </SelectGroup>
-          <SelectGroup v-if="enabledAgents.length > 0">
-            <SelectLabel>{{ t('bots.schedule.execution.acpAgents') }}</SelectLabel>
-            <SelectItem
-              v-for="agent in enabledAgents"
-              :key="agent.id"
-              :value="`acp:${agent.id}`"
-            >
-              {{ agent.display_name || agent.id }}
-            </SelectItem>
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-      <Select
+        v-model:reasoning-effort="effortModel"
+        :models="runtimePickerModels"
+        :providers="runtimePickerProviders"
+        model-type="chat"
+        :placeholder="t('bots.schedule.execution.botDefault')"
+        :show-reasoning="!acpAgentInPlay && nativeReasoningOptions.length > 0"
+        :reasoning-options="nativeReasoningOptions"
+      />
+      <ModelSelect
         v-else-if="!selectedSessionIsACP"
         v-model="nativeModelModel"
-      >
-        <SelectTrigger class="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="default">
-            {{ t('bots.schedule.execution.sessionDefault') }}
-          </SelectItem>
-          <SelectItem
-            v-for="model in chatModels"
-            :key="model.id"
-            :value="model.id ?? ''"
-          >
-            {{ model.name || model.model_id }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
+        v-model:reasoning-effort="effortModel"
+        :models="chatModels"
+        :providers="providers"
+        model-type="chat"
+        :placeholder="t('bots.schedule.execution.sessionDefault')"
+        :show-reasoning="nativeReasoningOptions.length > 0"
+        :reasoning-options="nativeReasoningOptions"
+      />
       <template v-if="acpAgentInPlay">
         <InlineLoadingRow v-if="acpCatalogLoading">
           {{ t('bots.schedule.execution.loadingAgentModels') }}
@@ -108,54 +74,22 @@
         >
           {{ acpCatalogError }}
         </p>
-        <Select
+        <ModelSelect
           v-else-if="acpCatalog"
           v-model="acpModelModel"
-        >
-          <SelectTrigger class="w-full">
-            <SelectValue :placeholder="t('bots.schedule.execution.agentDefaultModel')" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="default">
-              {{ t('bots.schedule.execution.agentDefaultModel') }}
-            </SelectItem>
-            <SelectItem
-              v-for="model in acpCatalog.models"
-              :key="model.id"
-              :value="model.id ?? ''"
-            >
-              {{ model.name || model.id }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+          v-model:reasoning-effort="effortModel"
+          :models="acpPickerModels"
+          :providers="NO_PROVIDERS"
+          model-type="chat"
+          :placeholder="t('bots.schedule.execution.agentDefaultModel')"
+          :show-reasoning="acpReasoningOptions.length > 0"
+          :reasoning-options="acpReasoningOptions"
+        />
       </template>
     </FieldStack>
 
     <FieldStack
-      v-if="effortOptions.length > 0"
-      :label="t('bots.schedule.execution.reasoning')"
-    >
-      <Select v-model="effortModel">
-        <SelectTrigger class="w-full">
-          <SelectValue :placeholder="t('bots.schedule.execution.defaultEffort')" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="default">
-            {{ t('bots.schedule.execution.defaultEffort') }}
-          </SelectItem>
-          <SelectItem
-            v-for="effort in effortOptions"
-            :key="effort.value"
-            :value="effort.value"
-          >
-            {{ effort.label }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
-    </FieldStack>
-
-    <FieldStack
-      v-if="form.runTarget === 'new_session' && workdirs.length > 0"
+      v-if="form.runTarget === 'new_session' && selectableWorkdirs.length > 0"
       :label="t('bots.schedule.execution.workdir')"
     >
       <Select v-model="workdirModel">
@@ -176,7 +110,7 @@
         </SelectContent>
       </Select>
     </FieldStack>
-  </div>
+  </FormStack>
 </template>
 
 <script setup lang="ts">
@@ -186,22 +120,20 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FieldStack,
+  FormStack,
   InlineLoadingRow,
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@felinic/ui'
 import {
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getAcpProfiles,
-  getBotsByBotIdSessions,
-  getBotsByBotIdWorkdirs,
   getBotsById,
   getModels,
+  getProviders,
   postBotsByBotIdAcpRuntimes,
 } from '@memohai/sdk'
 import type {
@@ -209,12 +141,23 @@ import type {
   AcpclientReasoningEffortInfo,
   AcpprofilePublicProfile,
   ModelsGetResponse,
+  ProvidersGetResponse,
   SessionSession,
-  WorkdirWorkdir,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isACPAgentEnabled, normalizeACPAgentID } from '@/utils/acp'
-import { EFFORT_LABELS, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
+import { normalizedRuntimeType } from '@/store/chat-list.utils'
+import { useWorkdirsStore } from '@/store/workdirs'
+import SessionSelect from '@/components/session-select/index.vue'
+import ModelSelect from './model-select.vue'
+import {
+  EFFORT_LABELS,
+  REASONING_EFFORT_DISABLE,
+  availableEffortsForMode,
+  nearestEffortToMedium,
+  resolveEffortLevels,
+  resolveThinkingMode,
+} from './reasoning-effort'
 
 // ScheduleExecutionForm is the editor-owned execution state this component
 // mutates in place; the editor serializes it into the API execution block.
@@ -235,10 +178,23 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const workdirsStore = useWorkdirsStore()
 
-const sessions = ref<SessionSession[]>([])
+// The backend only lets a schedule append to chat and schedule threads.
+const TARGET_SESSION_MODES = ['chat', 'schedule']
+
+// ACP agents ride the model picker as a synthetic provider group, so choosing
+// a runtime and choosing a model stay one decision (and one search box).
+const ACP_PROVIDER_ID = '__acp_agents__'
+const ACP_VALUE_PREFIX = 'acp:'
+
+// An agent's own models carry no Memoh provider, so their picker groups by
+// nothing. Hoisted so the prop identity is stable across renders.
+const NO_PROVIDERS: ProvidersGetResponse[] = []
+
+const selectedSession = ref<SessionSession | null>(null)
 const models = ref<ModelsGetResponse[]>([])
-const workdirs = ref<WorkdirWorkdir[]>([])
+const providers = ref<ProvidersGetResponse[]>([])
 const acpProfiles = ref<AcpprofilePublicProfile[]>([])
 const botMetadata = ref<Record<string, unknown> | undefined>(undefined)
 
@@ -246,6 +202,7 @@ interface ACPCatalog {
   agentId: string
   models: AcpclientModelInfo[]
   efforts: AcpclientReasoningEffortInfo[]
+  currentEffort: string
 }
 const acpCatalog = ref<ACPCatalog | null>(null)
 const acpCatalogLoading = ref(false)
@@ -259,24 +216,27 @@ const enabledAgents = computed(() =>
   acpProfiles.value.filter((profile) => isACPAgentEnabled(botMetadata.value, profile.id)),
 )
 
-const selectableWorkdirs = computed(() =>
+const selectableWorkdirs = computed(() => {
+  const live = workdirsStore.workdirsFor(props.botId).filter((wd) => !wd.archived && !!wd.id)
   // The ACP runtime lives in the native workspace; remote workdirs cannot
   // host it (same policy as session creation).
-  props.form.runtimeType === 'acp_agent'
-    ? workdirs.value.filter((wd) => wd.target_kind !== 'remote')
-    : workdirs.value,
-)
+  return props.form.runtimeType === 'acp_agent'
+    ? live.filter((wd) => wd.target_kind !== 'remote')
+    : live
+})
 
-const selectedSession = computed(() =>
-  sessions.value.find((s) => s.id === props.form.targetSessionId) ?? null,
+// Legacy rows carry the runtime in `type` with no `runtime_type`; resolve it
+// the same way the backend does, or the form would offer the native model
+// column for a session the API then rejects.
+const selectedSessionIsACP = computed(() =>
+  !!selectedSession.value && normalizedRuntimeType(selectedSession.value) === 'acp_agent',
 )
-
-const selectedSessionIsACP = computed(() => selectedSession.value?.runtime_type === 'acp_agent')
 
 const selectedSessionAgentID = computed(() => {
   if (!selectedSessionIsACP.value) return ''
-  const meta = selectedSession.value?.metadata as Record<string, unknown> | undefined
-  return normalizeACPAgentID(meta?.acp_agent_id)
+  return normalizeACPAgentID(
+    selectedSession.value?.runtime_metadata?.acp_agent_id ?? selectedSession.value?.metadata?.acp_agent_id,
+  )
 })
 
 const selectedSessionSummary = computed(() => {
@@ -315,7 +275,7 @@ const runTargetModel = computed({
     props.form.acpModelId = ''
     props.form.reasoningEffort = ''
     props.form.workdirId = ''
-    if (next === 'existing_session') void fetchSessions()
+    selectedSession.value = null
   },
 })
 
@@ -330,48 +290,87 @@ const sessionModel = computed({
   },
 })
 
-// runtimeModel folds runtime + model + agent into one picker for new
-// sessions: 'default' | 'model:<uuid>' | 'acp:<agent_id>'.
+// The new-session picker folds runtime + model + agent into one list:
+// '' (bot default) | '<model uuid>' | 'acp:<agent id>'.
+const runtimePickerModels = computed<ModelsGetResponse[]>(() => [
+  ...chatModels.value,
+  ...enabledAgents.value.flatMap<ModelsGetResponse>((agent) => {
+    const id = agent.id?.trim() ?? ''
+    if (!id) return []
+    return [{
+      id: `${ACP_VALUE_PREFIX}${id}`,
+      model_id: id,
+      name: agent.display_name || id,
+      provider_id: ACP_PROVIDER_ID,
+      type: 'chat',
+    }]
+  }),
+])
+
+const runtimePickerProviders = computed<ProvidersGetResponse[]>(() => [
+  ...providers.value,
+  { id: ACP_PROVIDER_ID, name: t('bots.schedule.execution.acpAgents') },
+])
+
 const runtimeModel = computed({
   get: () => {
-    if (props.form.runtimeType === 'acp_agent' && props.form.acpAgentId) return `acp:${props.form.acpAgentId}`
-    if (props.form.modelId) return `model:${props.form.modelId}`
-    return 'default'
+    if (props.form.runtimeType === 'acp_agent' && props.form.acpAgentId) return `${ACP_VALUE_PREFIX}${props.form.acpAgentId}`
+    return props.form.modelId || ''
   },
   set: (value: string) => {
     props.form.modelId = ''
     props.form.acpModelId = ''
     props.form.reasoningEffort = ''
-    if (value.startsWith('acp:')) {
+    if (value.startsWith(ACP_VALUE_PREFIX)) {
       props.form.runtimeType = 'acp_agent'
-      props.form.acpAgentId = value.slice('acp:'.length)
-      return
+      props.form.acpAgentId = value.slice(ACP_VALUE_PREFIX.length)
+    } else {
+      props.form.runtimeType = ''
+      props.form.acpAgentId = ''
+      props.form.modelId = value
     }
-    props.form.runtimeType = ''
-    props.form.acpAgentId = ''
-    if (value.startsWith('model:')) props.form.modelId = value.slice('model:'.length)
+    // A remote workdir cannot host the ACP runtime, so switching to an agent
+    // can leave the current selection outside the offered list.
+    if (props.form.workdirId && !selectableWorkdirs.value.some((wd) => wd.id === props.form.workdirId)) {
+      props.form.workdirId = ''
+    }
   },
 })
 
 const nativeModelModel = computed({
-  get: () => props.form.modelId || 'default',
+  get: () => props.form.modelId || '',
   set: (value: string) => {
-    props.form.modelId = value === 'default' ? '' : value
+    props.form.modelId = value
     props.form.reasoningEffort = ''
   },
 })
 
+const acpPickerModels = computed<ModelsGetResponse[]>(() =>
+  (acpCatalog.value?.models ?? []).flatMap<ModelsGetResponse>((model) => {
+    const id = model.id?.trim() ?? ''
+    if (!id) return []
+    return [{
+      id,
+      model_id: id,
+      name: model.name?.trim() || id,
+      provider_id: '',
+      type: 'chat',
+      config: { description: model.description?.trim() || undefined },
+    }]
+  }),
+)
+
 const acpModelModel = computed({
-  get: () => props.form.acpModelId || 'default',
+  get: () => props.form.acpModelId || '',
   set: (value: string) => {
-    props.form.acpModelId = value === 'default' ? '' : value
+    props.form.acpModelId = value
   },
 })
 
 const effortModel = computed({
-  get: () => props.form.reasoningEffort || 'default',
+  get: () => props.form.reasoningEffort,
   set: (value: string) => {
-    props.form.reasoningEffort = value === 'default' ? '' : value
+    props.form.reasoningEffort = value
   },
 })
 
@@ -382,46 +381,64 @@ const workdirModel = computed({
   },
 })
 
-const effortOptions = computed<{ value: string; label: string }[]>(() => {
-  if (acpAgentInPlay.value) {
-    if (!acpCatalog.value) return []
-    return acpCatalog.value.efforts
-      .filter((effort) => effort.id)
-      .map((effort) => ({ value: effort.id ?? '', label: effort.name || effort.id || '' }))
-  }
-  // Native efforts follow the selected model's advertised tiers; without an
-  // explicit model the bot default applies and its own effort rides along,
-  // so no selector is shown.
-  if (!props.form.modelId) return []
+// The selected native model's advertised tiers, plus the explicit "off" the
+// composer offers. Without a model the bot/session default applies whole —
+// there is nothing to override, so the picker shows no reasoning footer.
+const nativeEffortTiers = computed<string[]>(() => {
+  if (acpAgentInPlay.value || !props.form.modelId) return []
   const model = chatModels.value.find((m) => m.id === props.form.modelId)
   if (!model) return []
   const config = model.config as Parameters<typeof resolveThinkingMode>[0]
   if (resolveThinkingMode(config) === 'none') return []
-  return resolveEffortLevels(config).map((effort) => ({
-    value: effort,
-    label: EFFORT_LABELS[effort] ? t(EFFORT_LABELS[effort]) : effort,
-  }))
+  const clientType = providers.value.find((p) => p.id === model.provider_id)?.client_type
+  return availableEffortsForMode(resolveThinkingMode(config), resolveEffortLevels(config, clientType))
 })
 
-function sessionLabel(session: SessionSession): string {
-  const title = session.title?.trim()
-  if (title) return title
-  return t('bots.schedule.execution.untitledSession', { id: (session.id ?? '').slice(0, 8) })
-}
+const nativeReasoningOptions = computed<{ value: string; label: string }[]>(() =>
+  nativeEffortTiers.value.map((effort) => ({
+    value: effort,
+    label: EFFORT_LABELS[effort] ? t(EFFORT_LABELS[effort]) : effort,
+  })),
+)
 
-async function fetchSessions() {
-  if (sessions.value.length > 0 || !props.botId) return
-  try {
-    const { data } = await getBotsByBotIdSessions({
-      path: { bot_id: props.botId },
-      query: { limit: 50 },
-      throwOnError: true,
-    })
-    sessions.value = data.items ?? []
-  } catch {
-    sessions.value = []
-  }
-}
+// ACP efforts are agent-defined; the agent reports its own set, and "off" is
+// not part of that vocabulary.
+const acpReasoningOptions = computed<{ value: string; label: string; description?: string }[]>(() =>
+  (acpCatalog.value?.efforts ?? []).flatMap((effort) => {
+    const value = effort.id?.trim() ?? ''
+    if (!value) return []
+    return [{
+      value,
+      label: effort.name?.trim() || value,
+      description: effort.description?.trim() || undefined,
+    }]
+  }),
+)
+
+// The menus carry no "inherit" row, so whatever they show has to be what the
+// schedule stores: an unset effort would render as the "off" tier and save as
+// "follow the default". Seeding on the model/agent that owns the tiers keeps
+// the two in step — the same thing the chat composer does when its model
+// changes.
+watch(nativeReasoningOptions, (options) => {
+  if (options.length === 0) return
+  const current = props.form.reasoningEffort
+  if (current && options.some((option) => option.value === current)) return
+  const tiers = nativeEffortTiers.value.filter((effort) => effort !== REASONING_EFFORT_DISABLE)
+  props.form.reasoningEffort = tiers.includes('medium')
+    ? 'medium'
+    : nearestEffortToMedium(tiers) || REASONING_EFFORT_DISABLE
+}, { immediate: true })
+
+watch([acpReasoningOptions, acpAgentInPlay] as const, ([options, inPlay]) => {
+  if (!inPlay || options.length === 0) return
+  const current = props.form.reasoningEffort
+  if (current && options.some((option) => option.value === current)) return
+  const agentCurrent = (acpCatalog.value?.currentEffort ?? '').trim()
+  props.form.reasoningEffort = options.some((option) => option.value === agentCurrent)
+    ? agentCurrent
+    : options[0].value
+}, { immediate: true })
 
 // loadACPCatalog boots a temporary pre-session runtime — the only place an
 // ACP agent's model and effort lists exist — reads them, and closes it.
@@ -441,6 +458,7 @@ async function loadACPCatalog(agentID: string) {
       agentId: agentID,
       models: data.models?.available_models ?? [],
       efforts: data.reasoning?.available_efforts ?? [],
+      currentEffort: data.reasoning?.current_effort ?? '',
     }
     if (data.runtime_id) {
       void deleteBotsByBotIdAcpRuntimesByRuntimeId({
@@ -459,7 +477,7 @@ watch(activeAgentID, (agentID) => {
 }, { immediate: true })
 
 onMounted(async () => {
-  if (props.form.runTarget === 'existing_session') void fetchSessions()
+  void workdirsStore.ensureWorkdirs(props.botId)
   await Promise.all([
     (async () => {
       try {
@@ -469,9 +487,9 @@ onMounted(async () => {
     })(),
     (async () => {
       try {
-        const { data } = await getBotsByBotIdWorkdirs({ path: { bot_id: props.botId }, throwOnError: true })
-        workdirs.value = data.workdirs ?? []
-      } catch { workdirs.value = [] }
+        const { data } = await getProviders({ throwOnError: true })
+        providers.value = data ?? []
+      } catch { providers.value = [] }
     })(),
     (async () => {
       try {

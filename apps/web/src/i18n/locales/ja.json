@@ -525,6 +525,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "selectSession": "セッションを選択",
     "welcome": {
       "folder": "{name} で何をしましょうか？"
     },
@@ -2987,6 +2988,7 @@
       "title": "スケジュール",
       "loadFailed": "ロードに失敗しました",
       "empty": "スケジュールされたタスクはありません",
+      "emptyDescription": "設定した時刻に Bot が自分でプロンプトを実行します。",
       "name": "名前",
       "pattern": "パターン",
       "enabled": "有効",
@@ -3011,6 +3013,7 @@
       "sortName": "名前で",
       "sortStatus": "ステータス別",
       "sortNextRun": "次回の実行までに",
+      "nextRun": "次回実行 {time}",
       "picker": {
         "every": "毎",
         "minutes": "分",
@@ -3080,19 +3083,15 @@
         "existingSession": "既存のセッション",
         "session": "セッション",
         "sessionPlaceholder": "セッションを選択",
-        "untitledSession": "無題（{id}）",
         "sessionRuntimeNative": "このセッションは内蔵モデルランタイムを使用し、フォルダを引き継ぎます。",
         "sessionRuntimeAcp": "このセッションは {agent} で実行され、フォルダを引き継ぎます。",
         "model": "モデル",
         "botDefault": "Bot デフォルト",
         "sessionDefault": "セッションのデフォルト",
-        "models": "モデル",
         "acpAgents": "コーディング Agent",
         "agentDefaultModel": "Agent デフォルト",
         "loadingAgentModels": "Agent を起動してモデルを取得中…",
         "agentModelsFailed": "Agent のモデルを取得できませんでした",
-        "reasoning": "推論強度",
-        "defaultEffort": "デフォルト",
         "workdir": "フォルダ",
         "noWorkdir": "フォルダを指定しない"
       }
