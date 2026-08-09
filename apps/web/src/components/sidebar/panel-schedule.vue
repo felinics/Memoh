@@ -69,11 +69,10 @@
 
           <!-- Cards in group -->
           <div class="px-2 pb-1 space-y-1.5">
-            <ScheduleListItem
+            <ScheduleItem
               v-for="item in group.tasks"
               :key="item.id"
               :item="item"
-              variant="sidebar"
               :description="item.description?.trim() || describeItem(item.pattern) || item.pattern || ''"
               :time-label="nextRunTimeLabel(item)"
               :busy="busyIds.has(item.id ?? '')"
@@ -116,7 +115,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
-import ScheduleListItem from '@/pages/bots/components/schedule-list-item.vue'
+import ScheduleItem from './schedule-item.vue'
 import SidebarPanelHeader from './panel-header.vue'
 // The narrow native scrollbar this template's `sidebar-scroll` class relies on.
 // Without this import the class was silently inert (it used to be defined only
