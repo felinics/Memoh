@@ -224,6 +224,15 @@ func TestNormalizeExecutionNewSessionRules(t *testing.T) {
 	if _, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{ReasoningEffort: "extreme"}); err == nil {
 		t.Fatal("expected error: unknown native reasoning effort")
 	}
+	// "disable" is not a wire tier, so it is absent from the tier list, but it
+	// is the stored on/off value everywhere else reasoning is configured.
+	disabled, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{ReasoningEffort: "disable"})
+	if err != nil {
+		t.Fatalf("normalizeExecution() error = %v", err)
+	}
+	if disabled.ReasoningEffort != "disable" {
+		t.Fatalf("unexpected normalized exec: %+v", disabled)
+	}
 
 	exec, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{RuntimeType: RuntimeACPAgent, ACPAgentID: "codex", ACPModelID: "gpt-5-codex", ReasoningEffort: "anything-agent-defined"})
 	if err != nil {
