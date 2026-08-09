@@ -2050,6 +2050,12 @@ definitions:
       turn_id:
         format: uuid
         type: string
+      turn_position:
+        description: |-
+          TurnPosition is the immutable turn-level sequence reserved at admission.
+          The frontend uses it to order turns and reconcile the settled list
+          against live/optimistic turns; never derived from text or timestamps.
+        type: integer
       user_message_kind:
         type: string
     required:

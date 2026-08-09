@@ -1179,6 +1179,12 @@ export type ConversationUiTurn = {
     text?: string;
     timestamp: Date;
     turn_id: string;
+    /**
+     * TurnPosition is the immutable turn-level sequence reserved at admission.
+     * The frontend uses it to order turns and reconcile the settled list
+     * against live/optimistic turns; never derived from text or timestamps.
+     */
+    turn_position?: number;
     user_message_kind?: string;
 };
 

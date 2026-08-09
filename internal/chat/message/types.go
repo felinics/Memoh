@@ -59,14 +59,18 @@ type Message struct {
 	Metadata                map[string]any  `json:"metadata,omitempty"`
 	RawMetadata             json.RawMessage `json:"-"`
 	TurnID                  string          `json:"turn_id,omitempty"`
-	Usage                   json.RawMessage `json:"usage,omitempty"`
-	SessionMode             string          `json:"session_mode,omitempty"`
-	RuntimeType             string          `json:"runtime_type,omitempty"`
-	Assets                  []MessageAsset  `json:"assets,omitempty"`
-	CompactID               string          `json:"compact_id,omitempty"`
-	EventID                 string          `json:"event_id,omitempty"`
-	DisplayContent          string          `json:"display_content,omitempty"`
-	CreatedAt               time.Time       `json:"created_at"`
+	// TurnPosition is the immutable turn-level sequence reserved at admission
+	// (SR-TURN-001). It is loaded on the UI read path so the frontend can
+	// order and reconcile turns without guessing from text or timestamps.
+	TurnPosition   *int64          `json:"turn_position,omitempty"`
+	Usage          json.RawMessage `json:"usage,omitempty"`
+	SessionMode    string          `json:"session_mode,omitempty"`
+	RuntimeType    string          `json:"runtime_type,omitempty"`
+	Assets         []MessageAsset  `json:"assets,omitempty"`
+	CompactID      string          `json:"compact_id,omitempty"`
+	EventID        string          `json:"event_id,omitempty"`
+	DisplayContent string          `json:"display_content,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 type HistoryTurn struct {

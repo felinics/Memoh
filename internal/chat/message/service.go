@@ -1837,6 +1837,7 @@ func toMessageFromLatestUIBySessionRow(row sqlc.ListMessagesLatestUIBySessionRow
 		false,
 	)
 	message.TurnID = uuidString(row.TurnID)
+	message.TurnPosition = int8Ptr(row.TurnPosition)
 	return message
 }
 
@@ -1887,6 +1888,7 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 		row.CreatedAt,
 	)
 	message.TurnID = uuidString(row.TurnID)
+	message.TurnPosition = int8Ptr(row.TurnPosition)
 	return message
 }
 
@@ -1913,6 +1915,7 @@ func toMessageFromBeforeCursorBySessionRow(row sqlc.ListMessagesBeforeCursorBySe
 		row.CreatedAt,
 	)
 	message.TurnID = uuidString(row.TurnID)
+	message.TurnPosition = int8Ptr(row.TurnPosition)
 	return message
 }
 
@@ -2327,6 +2330,15 @@ func toPgInt8(value *int64) pgtype.Int8 {
 		return pgtype.Int8{}
 	}
 	return pgtype.Int8{Int64: *value, Valid: true}
+}
+
+// int8Ptr is the read-side mirror of toPgInt8: NULL means "position unknown"
+// (rows outside the UI turn read model), so nil is preserved instead of zero.
+func int8Ptr(value pgtype.Int8) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Int64
 }
 
 func nonNilMap(m map[string]any) map[string]any {

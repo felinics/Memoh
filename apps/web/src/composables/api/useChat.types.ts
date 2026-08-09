@@ -268,6 +268,10 @@ export interface UISkillActivation {
 
 export interface UIUserTurn {
   turn_id: string
+  // Immutable turn-level sequence reserved at admission. Present on the
+  // settled (REST history) path; live runtime turns learn their identity
+  // from run_accepted instead.
+  turn_position?: number
   role: 'user'
   text: string
   user_message_kind?: string
@@ -286,6 +290,7 @@ export interface UIUserTurn {
 
 export interface UIAssistantTurn {
   turn_id: string
+  turn_position?: number
   role: 'assistant'
   messages: UIMessage[]
   timestamp: string
@@ -296,6 +301,7 @@ export interface UIAssistantTurn {
 
 export interface UISystemTurn {
   turn_id: string
+  turn_position?: number
   role: 'system'
   kind?: 'background_task' | string
   background_task?: UIBackgroundTask

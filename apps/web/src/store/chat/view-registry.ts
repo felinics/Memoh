@@ -112,6 +112,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       bumpFsChangedAtIfFsMutation: deps.bumpFsChangedAtIfFsMutation,
       fetchMessages: deps.fetchMessages,
       locateMessage: deps.locateMessage,
+      isTurnLive: deps.isTurnLive,
     })
     const view: ChatViewEntry = {
       key: chatViewKey({ botId, sessionId, viewId }),

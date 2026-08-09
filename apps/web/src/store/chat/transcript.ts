@@ -19,6 +19,7 @@ import type {
   ToolCallBlock,
 } from './types'
 import type { RuntimeTranscriptSlice } from './runtime-projection'
+import { createRuntimeSliceBuffer } from './runtime-slice-buffer'
 import { createTranscriptHistory } from './transcript-history'
 import { createTranscriptDecisions } from './transcript-decisions'
 import { createTranscriptQueries } from './transcript-queries'
@@ -31,6 +32,10 @@ export interface TranscriptDeps {
   bumpFsChangedAtIfFsMutation: (message: UIMessage) => void
   fetchMessages: (botId: string, sessionId: string, options?: FetchMessagesOptions) => Promise<UITurn[]>
   locateMessage: (botId: string, sessionId: string, externalMessageId: string, before?: number, after?: number) => Promise<LocateMessageResult>
+  // Wired from the session runtime projection: does an active run still own
+  // this turn? Settled reconciliation uses it to tell an in-flight boundary
+  // turn (retain) from a vanished one (drop).
+  isTurnLive?: (sessionId: string, turnId: string) => boolean
 }
 
 type RefreshAppliedHook = (targetSessionId: string, latestTimestamp?: string) => void
@@ -54,6 +59,7 @@ export function createTranscriptController({
   bumpFsChangedAtIfFsMutation,
   fetchMessages,
   locateMessage,
+  isTurnLive: isTurnLiveDep,
 }: TranscriptDeps) {
   const messages = reactive<ChatMessage[]>([])
   const loadingMessages = ref(false)
@@ -82,6 +88,11 @@ export function createTranscriptController({
     messages,
     rememberBackgroundTask,
     applyPendingBackgroundEventsToTool,
+    isTurnLive: (turnId) => {
+      const sid = sessionId.value?.trim()
+      if (!sid || !isTurnLiveDep) return false
+      return isTurnLiveDep(sid, turnId)
+    },
   })
   const {
     normalizeUIMessage,
@@ -113,7 +124,8 @@ export function createTranscriptController({
     loadingMessagesVersion += 1
     loadingOlderVersion += 1
     refreshPromise = null
-    replaceMessages([])
+    runtimeSliceBuffer.clear()
+    replaceMessages([], undefined, { preserveLive: false })
     hasMoreOlder.value = options.hasMoreOlder === true
     hasLoadedOlder.value = false
     loadingMessages.value = false
@@ -125,6 +137,7 @@ export function createTranscriptController({
     loadingMessagesVersion += 1
     loadingOlderVersion += 1
     refreshPromise = null
+    runtimeSliceBuffer.clear()
     hasLoadedOlder.value = false
     loadingMessages.value = false
     loadingOlder.value = false
@@ -139,7 +152,8 @@ export function createTranscriptController({
     historyGeneration += 1
     loadingOlderVersion += 1
     refreshPromise = null
-    replaceMessages(items, targetSessionId)
+    runtimeSliceBuffer.clear()
+    replaceMessages(items, targetSessionId, { preserveLive: false })
     hasMoreOlder.value = true
     hasLoadedOlder.value = false
     loadingOlder.value = false
@@ -438,6 +452,9 @@ export function createTranscriptController({
       message.turnId = turn
       message.runtimeRunId = run
     }
+    // The acceptance names the turn; any projection frame buffered ahead of
+    // it can now merge into the just-bound optimistic turns.
+    runtimeSliceBuffer.flush(turn)
   }
 
   function runtimeMessage(
@@ -451,8 +468,26 @@ export function createTranscriptController({
     return normalized
   }
 
-  function applyRuntimeTranscript(slice: RuntimeTranscriptSlice): boolean {
+  // Buffers projection frames that arrive before their run_accepted; see
+  // runtime-slice-buffer.ts for the race this guards.
+  const runtimeSliceBuffer = createRuntimeSliceBuffer({
+    hasUnboundOptimisticTurn: () => messages.some(turn =>
+      turn.role !== 'system'
+      && turn.__optimistic === true
+      && !(turn.turnId?.trim()),
+    ),
+    hasTurnWithId: turnId => messages.some(turn =>
+      turn.role !== 'system' && turn.turnId === turnId,
+    ),
+    applyStandalone: slice => applyRuntimeTranscript(slice, { forceStandalone: true }),
+  })
+
+  function applyRuntimeTranscript(
+    slice: RuntimeTranscriptSlice,
+    options?: { forceStandalone?: boolean },
+  ): boolean {
     if (!slice.turnId || slice.turns.length === 0) return true
+    if (!options?.forceStandalone && runtimeSliceBuffer.maybeBuffer(slice)) return true
     const incoming = slice.turns
       .map(normalizeTurn)
       .filter((turn): turn is ChatUserTurn | ChatAssistantTurn => turn.role !== 'system')

@@ -122,6 +122,11 @@ export function skillActivationTextFromRaw(text: string, activation: UISkillActi
 
 export function sortChatMessages(items: ChatMessage[]): ChatMessage[] {
   return [...items].sort((a, b) => {
+    // Turn positions are the authoritative order once both sides carry one;
+    // timestamps stay as the fallback for live turns that do not.
+    const ap = a.turnPosition
+    const bp = b.turnPosition
+    if (ap !== undefined && bp !== undefined && ap !== bp) return ap - bp
     const at = Date.parse(a.timestamp)
     const bt = Date.parse(b.timestamp)
     if (!Number.isNaN(at) && !Number.isNaN(bt) && at !== bt) return at - bt

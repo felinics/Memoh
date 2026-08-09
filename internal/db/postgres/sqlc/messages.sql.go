@@ -3542,6 +3542,7 @@ SELECT
   m.content,
   m.metadata,
   m.turn_id,
+  m.turn_position,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -3582,6 +3583,7 @@ type ListMessagesBeforeBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	Usage                   []byte             `json:"usage"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
@@ -3614,6 +3616,7 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 			&i.Content,
 			&i.Metadata,
 			&i.TurnID,
+			&i.TurnPosition,
 			&i.Usage,
 			&i.SessionMode,
 			&i.RuntimeType,
@@ -3647,6 +3650,7 @@ SELECT
   m.content,
   m.metadata,
   m.turn_id,
+  m.turn_position,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -3696,6 +3700,7 @@ type ListMessagesBeforeCursorBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	Usage                   []byte             `json:"usage"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
@@ -3735,6 +3740,7 @@ func (q *Queries) ListMessagesBeforeCursorBySession(ctx context.Context, arg Lis
 			&i.Content,
 			&i.Metadata,
 			&i.TurnID,
+			&i.TurnPosition,
 			&i.Usage,
 			&i.SessionMode,
 			&i.RuntimeType,
@@ -4284,6 +4290,7 @@ SELECT
   m.content,
   m.metadata,
   m.turn_id,
+  m.turn_position,
   m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -4318,6 +4325,7 @@ type ListMessagesLatestUIBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
@@ -4346,6 +4354,7 @@ func (q *Queries) ListMessagesLatestUIBySession(ctx context.Context, arg ListMes
 			&i.Content,
 			&i.Metadata,
 			&i.TurnID,
+			&i.TurnPosition,
 			&i.DisplayText,
 			&i.CreatedAt,
 			&i.SenderDisplayName,

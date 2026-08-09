@@ -91,7 +91,11 @@ type UIUserInput struct {
 
 // UITurn is the normalized chat turn used by the web frontend.
 type UITurn struct {
-	TurnID            string                `json:"turn_id" validate:"required" format:"uuid"`
+	TurnID string `json:"turn_id" validate:"required" format:"uuid"`
+	// TurnPosition is the immutable turn-level sequence reserved at admission.
+	// The frontend uses it to order turns and reconcile the settled list
+	// against live/optimistic turns; never derived from text or timestamps.
+	TurnPosition      *int64                `json:"turn_position,omitempty"`
 	Role              string                `json:"role" validate:"required" enums:"user,assistant,system"`
 	Kind              string                `json:"kind,omitempty"`
 	Messages          []UIMessage           `json:"messages,omitempty"`

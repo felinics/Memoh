@@ -17561,6 +17561,10 @@ const docTemplate = `{
                     "type": "string",
                     "format": "uuid"
                 },
+                "turn_position": {
+                    "description": "TurnPosition is the immutable turn-level sequence reserved at admission.\nThe frontend uses it to order turns and reconcile the settled list\nagainst live/optimistic turns; never derived from text or timestamps.",
+                    "type": "integer"
+                },
                 "user_message_kind": {
                     "type": "string"
                 }

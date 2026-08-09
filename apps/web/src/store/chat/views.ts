@@ -50,6 +50,14 @@ export function createChatViews(deps: ChatViewsDeps) {
     fetchMessages: fetchMessagesUI,
     locateMessage: locateMessageUI,
     isSessionStreaming: (botId, sessionId) => isSessionStreaming(botId, sessionId),
+    isTurnLive: (sessionId, turnId) => {
+      const run = runtimeProjectionProbe(sessionId)?.currentRunView
+      return Boolean(
+        run
+        && run.turn_id === turnId
+        && isRuntimeRunActive(run.status),
+      )
+    },
     onRefreshApplied: (view, sessionId, latestTimestamp) => {
       refreshAppliedHook(view, sessionId, latestTimestamp)
     },

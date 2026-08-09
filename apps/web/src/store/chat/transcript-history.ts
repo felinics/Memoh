@@ -29,6 +29,12 @@ export function createTranscriptHistory(deps: {
   messages: ChatMessage[]
   rememberBackgroundTask: (task: BackgroundTask) => BackgroundTask
   applyPendingBackgroundEventsToTool: (block: ToolCallBlock) => void
+  // Reports whether the session runtime still has an active run for this
+  // turn. Settled reconciliation keeps unpersisted live turns on screen, but
+  // a turn whose run ended AND that never landed in the settled page has
+  // vanished (aborted before any visible output) and must be dropped, not
+  // retained. Without this predicate those two cases are indistinguishable.
+  isTurnLive?: (turnId: string) => boolean
 }) {
   function normalizeUIMessage(msg: UIMessage): ContentBlock {
     switch (msg.type) {
@@ -70,6 +76,7 @@ export function createTranscriptHistory(deps: {
       return {
         id: String(turn.id ?? nextId()),
         turnId: turn.turn_id,
+        turnPosition: turn.turn_position ?? undefined,
         role: 'user',
         text: turn.skill_activation
           ? skillActivationTextFromRaw(turn.text ?? '', turn.skill_activation)
@@ -96,6 +103,7 @@ export function createTranscriptHistory(deps: {
       return {
         id: String(turn.id ?? `system-${latest.taskId}`),
         turnId: turn.turn_id,
+        turnPosition: turn.turn_position ?? undefined,
         role: 'system',
         kind: 'background_task',
         backgroundTask: latest,
@@ -107,6 +115,7 @@ export function createTranscriptHistory(deps: {
     return {
       id: String(turn.id ?? nextId()),
       turnId: turn.turn_id,
+      turnPosition: turn.turn_position ?? undefined,
       role: 'assistant',
       messages: (turn.messages ?? []).map(normalizeUIMessage),
       timestamp: normalizeTimestamp(turn.timestamp),
@@ -122,24 +131,73 @@ export function createTranscriptHistory(deps: {
     return normalized
   }
 
+  // A turn's entity identity is (turnId, role): the user turn and the
+  // assistant turn of one round share turnId, so role must disambiguate.
+  function turnIdentityKey(turn: ChatMessage): string {
+    if (turn.role === 'system') return ''
+    const turnId = turn.turnId?.trim() ?? ''
+    return turnId ? `${turnId}:${turn.role}` : ''
+  }
+
+  // Render identity (the Vue key) and entity identity (who the turn is) are
+  // orthogonal: the render key is born with the on-screen turn and never
+  // changes, while the settled twin arrives under the database id. Adoption
+  // matches twins by entity identity and hands the prior's render key to the
+  // incoming twin, so a live → settled handover never remounts the component.
+  // The database id survives on serverId for pagination cursors.
   function adoptRenderIdentity(incoming: ChatMessage[]) {
     if (deps.messages.length === 0 || incoming.length === 0) return
-    const byServerId = new Map<string, ChatMessage>()
+    const byIdentity = new Map<string, ChatMessage>()
     for (const existing of deps.messages) {
-      if (existing.serverId) byServerId.set(existing.serverId, existing)
+      const key = turnIdentityKey(existing)
+      if (key && !byIdentity.has(key)) byIdentity.set(key, existing)
     }
     for (const twin of incoming) {
-      const prior = byServerId.get(twin.serverId ?? twin.id)
+      const key = turnIdentityKey(twin)
+      if (!key) continue
+      const prior = byIdentity.get(key)
       if (!prior || twin.id === prior.id) continue
       twin.serverId = twin.serverId ?? twin.id
       twin.id = prior.id
     }
   }
 
-  function replaceMessages(items: UITurn[], targetSessionId?: string) {
+  // An on-screen turn survives a settled replacement only while it is the
+  // moving boundary: a local optimistic turn the server has not named yet, or
+  // backed by a run the runtime still reports as active. A streaming flag
+  // alone does not retain: a failed turn can stay streaming:true forever, and
+  // retaining it would resurrect a zombie the settled page already rejected.
+  // Anything else not present in the settled page is either already settled
+  // (its twin replaces it) or vanished, and must not linger.
+  function isLiveBoundaryTurn(turn: ChatMessage): boolean {
+    if (turn.role === 'system') return false
+    const turnId = turn.turnId?.trim() ?? ''
+    // No turnId yet: a local optimistic turn mid-send that the server has not
+    // named. The settled page cannot know it, so it is always retained.
+    if (!turnId) return turn.__optimistic === true
+    return deps.isTurnLive?.(turnId) === true
+  }
+
+  function replaceMessages(
+    items: UITurn[],
+    targetSessionId?: string,
+    options?: { preserveLive?: boolean },
+  ) {
     const next = normalizeTurns(items, targetSessionId)
     adoptRenderIdentity(next)
-    deps.messages.splice(0, deps.messages.length, ...next)
+    if (options?.preserveLive === false) {
+      deps.messages.splice(0, deps.messages.length, ...next)
+      return
+    }
+    const settledKeys = new Set(
+      next.map(turnIdentityKey).filter(key => key !== ''),
+    )
+    const retained = deps.messages.filter(turn =>
+      isLiveBoundaryTurn(turn) && !settledKeys.has(turnIdentityKey(turn)),
+    )
+    // The boundary turn is always the newest: one active run per session, and
+    // the settled page ends at the last persisted turn.
+    deps.messages.splice(0, deps.messages.length, ...next, ...retained)
   }
 
   function mergeMessages(items: UITurn[], targetSessionId?: string) {

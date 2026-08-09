@@ -109,6 +109,9 @@ export interface ChatUserTurn {
   isSelf: boolean
   invocationId?: string
   turnId?: string
+  // Immutable turn-level sequence from the settled (REST history) path.
+  // Live turns do not carry one until their settled twin arrives.
+  turnPosition?: number
   runtimeRunId?: string
   // Set by createOptimisticUserTurn / createOptimisticAssistantTurn and
   // cleared as soon as the server twin replaces the optimistic row in
@@ -129,6 +132,7 @@ export interface ChatAssistantTurn {
   streaming: boolean
   invocationId?: string
   turnId?: string
+  turnPosition?: number
   runtimeRunId?: string
   // See ChatUserTurn.__optimistic.
   __optimistic?: boolean
@@ -144,6 +148,7 @@ export interface ChatSystemTurn {
   platform?: string
   streaming: boolean
   turnId?: string
+  turnPosition?: number
 }
 
 export type ChatMessage = ChatUserTurn | ChatAssistantTurn | ChatSystemTurn
