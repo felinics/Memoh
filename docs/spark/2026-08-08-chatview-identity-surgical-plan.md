@@ -102,3 +102,7 @@
 3. **保留判定不认 `streaming` 标志。** 实测发现失败轮的 `streaming:true` 会永久残留（僵尸轮），整屏替换时把它当活轮保留、顶掉落库真身。最终判定收敛为：无 turnId 只看 `__optimistic === true`；有 turnId 只看 `isTurnLive(turnId)`（runtime 运行态是否仍持有该轮）。
 
 另：切口 3 的赛跑缓冲区落在独立模块 `apps/web/src/store/chat/runtime-slice-buffer.ts`（transcript.ts 触 max-lines 红线抽出），语义与方案一致：按 turnId 排队、750ms 绑定宽限、超时 standalone 落屏。
+
+## 实施补记二（2026-08-10，对抗测试轮）
+
+4. **R1 慢接受窗口：绑定改为收养。** 新增的对抗时序测试（`apps/web/src/store/chat/transcript-race.test.ts`，fake timers 逐一枚举 run_accepted 与投影帧的交错）实证了一处方案未预演的边界：standalone flush 之后迟到的 run_accepted 若仍绑定乐观轮，同一 turnId 会在屏上出现两对。修复为 `bindRuntimeTurn` 发现屏上已有非本 invocation 的轮携带该 turnId 时，收养 standalone 孪生、退役本 invocation 全部轮次。两个非显而易见的约束，均由测试抓到现行：`bindRunId` 在 `bindRuntimeTurn` 之前已把 turnId 打到本 invocation 的 assistant 轮上（run_accepted 处理序），所以收养判定必须排除本 invocation 的轮——否则每次正常接受都误触发，编辑/重试失败的尾部恢复会因锚点对象被退役而失灵（chat-list 既有用例捕获）；退役也必须包含那轮已打标记的 assistant，否则它作为第三条消息残留在孪生对旁。
