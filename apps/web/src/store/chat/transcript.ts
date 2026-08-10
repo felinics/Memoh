@@ -447,6 +447,19 @@ export function createTranscriptController({
     const turn = turnId.trim()
     const run = runId.trim()
     if (!invocation || !turn || !run) return
+    // Late acceptance: the projection twin already flushed standalone and owns
+    // this turnId's render identity. Binding the optimistic pair now would put
+    // two pairs of the same turn on screen, so the twin is adopted and every
+    // turn of this invocation is retired instead. The guard must ignore the
+    // invocation's own turns: bindRunId stamps this turnId onto the
+    // invocation's assistant turn before bindRuntimeTurn runs (run_accepted
+    // handler order), so counting it would fire on every normal acceptance —
+    // and for the same reason the retirement must include that pre-stamped
+    // assistant turn, or it survives as a third message next to the twin pair.
+    if (messages.some(message => message.role !== 'system' && message.turnId === turn && message.invocationId !== invocation)) {
+      messages.splice(0, messages.length, ...messages.filter(message => message.role === 'system' || message.invocationId !== invocation))
+      return
+    }
     for (const message of messages) {
       if (message.role === 'system' || message.invocationId !== invocation) continue
       message.turnId = turn
