@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -183,6 +184,15 @@ func applyToModel(model *yaml.Node, mode string, efforts []string) bool {
 	wantEfforts := efforts
 	if len(wantEfforts) == 0 {
 		wantEfforts = []string{"low", "medium", "high"}
+	}
+	// A hand-maintained disable token is preserved, not overwritten. LiteLLM's
+	// only off signal is the OpenAI-wire supports_none_reasoning_effort flag, so
+	// for providers whose off travels another way (DeepSeek/MiniMax toggle via
+	// chat_completions_compat) the token can only ever come from the template.
+	// Registry silence must not strip what the registry cannot know about.
+	if existing := mapValue(cfg, "reasoning_efforts"); seqContains(existing, "disable") &&
+		!slices.Contains(wantEfforts, "disable") {
+		wantEfforts = append([]string{"disable"}, wantEfforts...)
 	}
 
 	changed := false
