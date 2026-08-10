@@ -1,69 +1,65 @@
-import { describe, expect, it } from 'vitest'
-import type { UseQueryEntry } from '@pinia/colada'
-import { QUERY_CACHE_STORAGE_KEY, queryCachePersistFilter } from './query-cache-persistence'
+import { describe, expect, it, vi } from 'vitest'
+import type { QueryCache, UseQueryEntry } from '@pinia/colada'
+import {
+  QUERY_CACHE_STORAGE_KEY,
+  cancelPendingQueryCacheSave,
+  persistableQueryFilter,
+  removeQueryCacheFromDisk,
+  saveQueryCacheToDiskNow,
+} from './query-cache-persistence'
 
-// The predicate only reads entry.key[0] and entry.state.value.status, so a
-// minimal stub beats constructing a full UseQueryEntry.
-function entryWith(key: readonly unknown[], status: 'success' | 'pending' | 'error' = 'success') {
-  return { key, state: { value: { status } } } as unknown as UseQueryEntry
+function entryWith(
+  key: readonly unknown[],
+  status: 'success' | 'pending' | 'error' = 'success',
+  data: unknown = { id: 'x' },
+) {
+  return { key, keyHash: JSON.stringify(key), state: { value: { status, data } } } as unknown as UseQueryEntry
 }
 
-const { predicate } = queryCachePersistFilter as {
+function memoryStorage(initial?: Record<string, string>) {
+  return {
+    data: new Map<string, string>(Object.entries(initial ?? {})),
+    setItem(k: string, v: string) { this.data.set(k, v) },
+    removeItem(k: string) { this.data.delete(k) },
+    getItem(k: string) { return this.data.get(k) ?? null },
+  } as unknown as Storage
+}
+
+function cacheWith(entries: UseQueryEntry[]) {
+  return { getEntries: vi.fn(() => entries) } as unknown as QueryCache
+}
+
+const { predicate } = persistableQueryFilter as {
   predicate: (entry: UseQueryEntry) => boolean
 }
 
-describe('queryCachePersistFilter', () => {
-  it('persists whitelisted catalog and config namespaces', () => {
-    const allowed = [
+describe('persistableQueryFilter', () => {
+  it('persists every successful query by default, catalogs and providers included', () => {
+    const persisted = [
       ['models'],
       ['providers'],
-      ['provider-models', 'provider-1'],
-      ['memory-providers'],
-      ['search-providers-meta'],
-      ['speech-provider-models', 'sp-1'],
-      ['transcription-providers'],
-      ['video-provider-detail', 'vp-1'],
-      ['acp-profiles'],
-      ['channels'],
-      ['connectors-catalog'],
-      ['remote-runtimes'],
-      ['platform'],
-      ['bot', 'bot-1'],
       ['bot-settings', 'bot-1'],
-    ]
-    for (const key of allowed) {
-      expect(predicate(entryWith(key)), `expected ${key[0]} to persist`).toBe(true)
-    }
-  })
-
-  it('persists the SDK-object bots list key', () => {
-    expect(predicate(entryWith([{ _id: 'getBots', baseUrl: 'http://x' }]))).toBe(true)
-  })
-
-  it('rejects volatile and unknown namespaces', () => {
-    const rejected = [
-      ['session-status', 'b', 's'],
-      ['session-subagents', 'b', 's'],
-      ['token-usage', 'b'],
-      ['bot-email-outbox', 'b'],
-      ['bot-container-overview', 'b'],
-      ['bot-display-info', 'b'],
-      ['bot-network-status', 'b'],
-      ['bot-memory-status', 'b'],
-      ['my-channel-identities'],
-      ['user-has-im-bot'],
+      ['bot', 'qf-2'],
+      ['fetch-providers'],
+      ['memory-providers'],
+      ['search-providers'],
+      ['speech-providers'],
+      ['video-providers'],
+      [{ _id: 'getBots', baseUrl: 'http://x' }],
       ['something-new'],
     ]
-    for (const key of rejected) {
-      expect(predicate(entryWith(key)), `expected ${key[0]} to be excluded`).toBe(false)
+    for (const key of persisted) {
+      expect(predicate(entryWith(key)), `expected ${String(key[0])} to persist`).toBe(true)
     }
   })
 
-  it('rejects object keys with other operations', () => {
-    expect(predicate(entryWith([{ _id: 'getBotsByBotIdSessions', baseUrl: 'http://x' }]))).toBe(false)
+  it('excludes whole-payload secrets, volatile state, and opaque workspace files', () => {
+    for (const key of [['remote-runtimes'], ['session-status', 'b', 's'], ['bot-hooks-config', 'bot-1']]) {
+      expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
+    }
   })
 
-  it('rejects non-success entries even for whitelisted keys', () => {
+  it('rejects non-success entries', () => {
     expect(predicate(entryWith(['models'], 'pending'))).toBe(false)
     expect(predicate(entryWith(['models'], 'error'))).toBe(false)
   })
@@ -72,5 +68,112 @@ describe('queryCachePersistFilter', () => {
 describe('QUERY_CACHE_STORAGE_KEY', () => {
   it('is the contract auth-session.ts clears on auth changes', () => {
     expect(QUERY_CACHE_STORAGE_KEY).toBe('memoh:query-cache')
+  })
+})
+
+describe('saveQueryCacheToDiskNow', () => {
+  it('persists provider lists and strips secrets recursively', () => {
+    const storage = memoryStorage()
+    const fetchProviders = entryWith(['fetch-providers'], 'success', [
+      { id: 'p1', name: 'WeakReference', provider: 'native', config: { api_key: 'sk-1', timeout: 30 } },
+    ])
+    const memoryProviders = entryWith(['memory-providers'], 'success', [
+      { id: 'm1', name: 'MemoryProvider', provider: 'builtin', config: { memory_mode: 'graph', token: 't-1' } },
+    ])
+
+    saveQueryCacheToDiskNow(cacheWith([fetchProviders, memoryProviders]), storage)
+    const raw = storage.getItem(QUERY_CACHE_STORAGE_KEY)
+    expect(raw).toBeTruthy()
+    // Display fields survive…
+    expect(raw).toContain('WeakReference')
+    expect(raw).toContain('MemoryProvider')
+    expect(raw).toContain('memory_mode')
+    expect(raw).toContain('timeout')
+    // …secrets do not.
+    expect(raw).not.toContain('sk-1')
+    expect(raw).not.toContain('t-1')
+    expect(raw).not.toContain('api_key')
+    expect(raw).not.toContain('token')
+  })
+
+  it('strips nested bot metadata secrets but keeps display fields', () => {
+    const storage = memoryStorage()
+    const bot = entryWith(['bot', 'qf-2'], 'success', {
+      id: 'bot-uuid',
+      name: 'qf-2',
+      metadata: { acp: { api_key: 'secret', agent: 'claude' } },
+    })
+
+    saveQueryCacheToDiskNow(cacheWith([bot]), storage)
+    const raw = storage.getItem(QUERY_CACHE_STORAGE_KEY)
+    expect(raw).toContain('bot-uuid')
+    expect(raw).toContain('qf-2')
+    expect(raw).toContain('agent')
+    expect(raw).not.toContain('secret')
+    expect(raw).not.toContain('api_key')
+  })
+
+  it('never strips look-alike display fields (author, oauth_provider)', () => {
+    const storage = memoryStorage()
+    const entry = entryWith(['models'], 'success', [
+      { id: 'm1', name: 'gpt', author: 'openai', oauth_provider: 'github' },
+    ])
+
+    saveQueryCacheToDiskNow(cacheWith([entry]), storage)
+    const raw = storage.getItem(QUERY_CACHE_STORAGE_KEY)
+    expect(raw).toContain('author')
+    expect(raw).toContain('oauth_provider')
+  })
+
+  it('strips real-world secret variants (bot_token, appSecret, secret_key, OPENAI_API_KEY)', () => {
+    const storage = memoryStorage()
+    const entry = entryWith(['channels'], 'success', {
+      credentials: { bot_token: 'tg-1', appSecret: 'wx-1', secret_key: 'tx-1' },
+      env: { OPENAI_API_KEY: 'sk-1' },
+      usage: { token_count: 12, total_tokens: 30 },
+      client_id: 'public-id',
+    })
+
+    saveQueryCacheToDiskNow(cacheWith([entry]), storage)
+    const raw = storage.getItem(QUERY_CACHE_STORAGE_KEY)
+    for (const leaked of ['tg-1', 'wx-1', 'tx-1', 'sk-1', 'bot_token', 'appSecret', 'secret_key', 'OPENAI_API_KEY']) {
+      expect(raw).not.toContain(leaked)
+    }
+    // Token *statistics* and public identifiers are display data, not secrets.
+    expect(raw).toContain('token_count')
+    expect(raw).toContain('total_tokens')
+    expect(raw).toContain('client_id')
+  })
+
+  it('does not persist excluded keys', () => {
+    const storage = memoryStorage()
+    const entries = [
+      entryWith(['remote-runtimes'], 'success', { key: 'runtime-key' }),
+      entryWith(['session-status', 'b', 's']),
+      entryWith(['bot-hooks-config', 'bot-1'], 'success', '{"env":{"OPENAI_API_KEY":"sk-1"}}'),
+    ]
+
+    saveQueryCacheToDiskNow(cacheWith(entries), storage)
+    expect(storage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
+  })
+
+  it('removes the storage key when nothing qualifies', () => {
+    const storage = memoryStorage({ [QUERY_CACHE_STORAGE_KEY]: '{}' })
+    saveQueryCacheToDiskNow(cacheWith([entryWith(['remote-runtimes'])]), storage)
+    expect(storage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
+  })
+})
+
+describe('removeQueryCacheFromDisk', () => {
+  it('drops the on-disk copy', () => {
+    const storage = memoryStorage({ [QUERY_CACHE_STORAGE_KEY]: '{}' })
+    removeQueryCacheFromDisk(storage)
+    expect(storage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
+  })
+})
+
+describe('cancelPendingQueryCacheSave', () => {
+  it('is callable without throwing', () => {
+    expect(() => cancelPendingQueryCacheSave()).not.toThrow()
   })
 })

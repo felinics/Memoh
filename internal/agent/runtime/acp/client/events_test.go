@@ -87,20 +87,44 @@ func TestACPGenericExecuteCompletionWithoutStartEmitsStartThenEnd(t *testing.T) 
 	}
 }
 
-func TestACPGenericExecuteTerminalTitleWithoutCommandIsIgnored(t *testing.T) {
+func TestACPGenericExecuteTerminalTitles(t *testing.T) {
 	t.Parallel()
 
-	mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
-	events := mapper.eventsFromNotification(acp.SessionNotification{
-		Update: acp.StartToolCall(
-			acp.ToolCallId("call-1"),
-			"Terminal",
-			acp.WithStartKind(acp.ToolKindExecute),
-			acp.WithStartStatus(acp.ToolCallStatusInProgress),
-		),
-	})
-	if len(events) != 0 {
-		t.Fatalf("events = %#v, want none", events)
+	tests := []struct {
+		title       string
+		rawInput    any
+		wantCommand string
+	}{
+		{title: "Terminal"},
+		{title: "terminal: pwd", rawInput: map[string]any{}, wantCommand: "pwd"},
+	}
+	for _, test := range tests {
+		t.Run(test.title, func(t *testing.T) {
+			t.Parallel()
+			mapper := newACPToolEventMapper(acpprofile.QuirksFor(acpprofile.AgentHermesID))
+			events := mapper.eventsFromNotification(acp.SessionNotification{
+				Update: acp.StartToolCall(
+					acp.ToolCallId("call-1"),
+					test.title,
+					acp.WithStartKind(acp.ToolKindExecute),
+					acp.WithStartStatus(acp.ToolCallStatusInProgress),
+					acp.WithStartRawInput(test.rawInput),
+				),
+			})
+			if test.wantCommand == "" {
+				if len(events) != 0 {
+					t.Fatalf("events = %#v, want none", events)
+				}
+				return
+			}
+			if len(events) != 1 || events[0].ToolName != "exec" {
+				t.Fatalf("events = %#v, want one exec event", events)
+			}
+			input, ok := events[0].Input.(map[string]any)
+			if !ok || input["command"] != test.wantCommand {
+				t.Fatalf("input = %#v, want command %q", events[0].Input, test.wantCommand)
+			}
+		})
 	}
 }
 

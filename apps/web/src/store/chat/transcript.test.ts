@@ -149,28 +149,45 @@ describe('chat transcript controller', () => {
     expect(transcript.messages[1]?.id).toBe('assistant-1')
   })
 
-  it('keeps a local approval decision when a stale pending tool snapshot arrives', () => {
+  it('restores approval state after runtime projection replaces its block', () => {
     const { transcript } = makeTranscript()
     transcript.replaceMessages([rawAssistant('assistant-1', [approvalMessage()])], 'session-1')
     const turn = transcript.messages[0] as ChatAssistantTurn
+    const block = turn.messages[0] as ToolCallBlock
     const snapshots = transcript.snapshotToolApprovalStates('approval-1')
 
     transcript.markToolApprovalDecision('approval-1', 'approved')
-    transcript.upsertAssistantUIMessage(turn, approvalMessage('pending'))
-    const block = turn.messages[0] as ToolCallBlock
-    expect(block.approval?.status).toBe('approved')
+    const pendingProjection = rawAssistant('runtime-assistant', [approvalMessage('pending')])
+    pendingProjection.turn_id = 'turn-assistant-1'
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-assistant-1',
+      status: 'waiting_decision',
+      operation: null,
+      turns: [pendingProjection],
+      streaming: true,
+    })
+    const currentBlock = (transcript.messages[0] as ChatAssistantTurn).messages[0] as ToolCallBlock
+    expect(currentBlock).not.toBe(block)
+    transcript.markToolApprovalDecision('approval-1', 'approved')
+    expect(currentBlock.approval?.status).toBe('approved')
 
     transcript.restoreToolApprovalStates(snapshots)
-    expect(block.approval?.status).toBe('pending')
+    expect(currentBlock.approval?.status).toBe('pending')
   })
 
-  it('snapshots and restores optimistic user-input state', () => {
+  it('restores optimistic user-input state after runtime projection replaces its block', () => {
     const { transcript } = makeTranscript()
     const userInput = {
       user_input_id: 'input-1',
       status: 'pending',
       can_respond: true,
-      questions: [{ id: 'q1', text: 'Pick', kind: 'text' as const }],
+      questions: [{
+        id: 'q1',
+        text: 'Pick',
+        kind: 'single_select' as const,
+        options: [{ id: 'a', label: 'A' }],
+      }],
     }
     const message: UIMessage = {
       id: 1,
@@ -184,12 +201,31 @@ describe('chat transcript controller', () => {
     transcript.replaceMessages([rawAssistant('assistant-1', [message])], 'session-1')
     const block = (transcript.messages[0] as ChatAssistantTurn).messages[0] as ToolCallBlock
     const snapshots = transcript.snapshotUserInputStates('input-1')
-    transcript.markUserInputDecision('input-1', 'submitted')
-    expect(block.userInput).toMatchObject({ status: 'submitted', can_respond: false })
+    transcript.markUserInputDecision('input-1', 'submitted', [{ question_id: 'q1', option_ids: ['a'] }])
+    expect(block.userInput).toMatchObject({
+      status: 'submitted',
+      can_respond: false,
+      answers: [{ question_id: 'q1', question: 'Pick', selected: [{ id: 'a', label: 'A' }] }],
+    })
+
+    const pendingProjection = rawAssistant('runtime-assistant', [message])
+    pendingProjection.turn_id = 'turn-assistant-1'
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-assistant-1',
+      status: 'waiting_decision',
+      operation: null,
+      turns: [pendingProjection],
+      streaming: true,
+    })
+    const currentBlock = (transcript.messages[0] as ChatAssistantTurn).messages[0] as ToolCallBlock
+    expect(currentBlock).not.toBe(block)
+    transcript.markUserInputDecision('input-1', 'submitted', [{ question_id: 'q1', option_ids: ['a'] }])
 
     transcript.restoreUserInputStates(snapshots)
 
-    expect(block.userInput).toMatchObject({ status: 'pending', can_respond: true })
+    expect(currentBlock.userInput).toMatchObject({ status: 'pending', can_respond: true })
+    expect(currentBlock.userInput?.answers).toBeUndefined()
   })
 
   it('does not inject browser-memory stream errors into authoritative history', () => {

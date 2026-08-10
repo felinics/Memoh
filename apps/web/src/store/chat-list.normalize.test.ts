@@ -75,6 +75,8 @@ describe('record pickers', () => {
 
   it('structuredToolResult prefers structuredContent when non-empty', () => {
     expect(structuredToolResult({ structuredContent: { v: 1 }, other: 2 })).toEqual({ v: 1 })
+    expect(structuredToolResult({ structured_content: { v: 2 }, other: 3 })).toEqual({ v: 2 })
+    expect(structuredToolResult({ structuredContent: {}, structured_content: { v: 3 } })).toEqual({ v: 3 })
     expect(structuredToolResult({ structuredContent: {}, other: 2 })).toEqual({ structuredContent: {}, other: 2 })
   })
 })
@@ -131,16 +133,19 @@ describe('mergeApprovalState', () => {
 })
 
 describe('cloneUserInputState', () => {
-  it('deep-clones questions and options', () => {
+  it('deep-clones questions, options, and answers', () => {
     const input = {
       user_input_id: 'ui1',
       status: 'pending',
       questions: [{ id: 'q1', options: [{ id: 'o1' }] }],
+      answers: [{ question_id: 'q1', question: 'Pick', selected: [{ id: 'o1', label: 'One' }] }],
     }
     const clone = cloneUserInputState(input as never)
     expect(clone).toEqual(input)
     expect(clone.questions?.[0]).not.toBe(input.questions[0])
     expect(clone.questions?.[0]?.options?.[0]).not.toBe(input.questions[0]!.options[0])
+    expect(clone.answers?.[0]).not.toBe(input.answers[0])
+    expect(clone.answers?.[0]?.selected?.[0]).not.toBe(input.answers[0]!.selected[0])
   })
 })
 

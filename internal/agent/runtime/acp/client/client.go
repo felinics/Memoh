@@ -30,6 +30,9 @@ import (
 const (
 	DefaultRunTimeout          = 20 * time.Minute
 	maxWriteToolContentPreview = 64 * 1024
+	// permissionStateWaitTimeout bounds request/notification correlation so a
+	// missing session update cannot hold the agent prompt open indefinitely.
+	permissionStateWaitTimeout = 30 * time.Second
 	// approvalGrantTTL bounds how long a RequestPermission grant stays
 	// consumable by the follow-up client-capability callback. Deliberately its
 	// own constant: it is unrelated to how long the approval flow waits for a
@@ -254,6 +257,9 @@ func (c *clientCallbacks) close() {
 func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSink, toolSession ToolSessionContext, limits ...ToolOutputLimit) {
 	if c == nil {
 		return
+	}
+	if c.toolMapper != nil {
+		c.toolMapper.setPromptActive(collector != nil)
 	}
 	var limit ToolOutputLimit
 	if len(limits) > 0 {
@@ -499,7 +505,19 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		}
 		return resp, nil
 	}
-	if err := c.validatePermissionScope(p); err != nil {
+	state := c.permissionState(p)
+	if isMCPToolApprovalRequest(p) && !mcpPermissionStateReady(state) && c.toolMapper != nil {
+		// acp-go-sdk v0.13.5 dispatches inbound requests concurrently with its
+		// ordered notification queue, so this request can overtake the earlier
+		// session/update that carries the MCP identity. Correlate the exact
+		// prompt/session/tool call until that state arrives or the request is
+		// cancelled. Keep a generous upper bound so a missing update fails closed
+		// instead of holding the prompt open indefinitely.
+		waitCtx, cancelWait := context.WithTimeout(ctx, permissionStateWaitTimeout)
+		state = c.toolMapper.waitForPermissionState(waitCtx, p.SessionId, p.ToolCall, mcpPermissionStateReady)
+		cancelWait()
+	}
+	if err := c.validatePermissionScope(state); err != nil {
 		// Security-relevant rejection: an agent asked to act outside the
 		// workspace root. Log it (an agent probing the boundary is exactly what
 		// we want visibility into) before cancelling.
@@ -508,26 +526,39 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		}
 		return cancelledPermission(), nil
 	}
-	toolCallID, toolName, input, native := permissionNativeTool(p, c.quirks)
-	if !native {
-		if !c.allowUnmappedPermission(ctx, p) {
+	if preflight, ok := mcpPermissionPreflightFromState(state); ok {
+		if !c.allowsMemohMCPToolPreflight(ctx, preflight) {
 			if c.logger != nil {
-				title, kind := permissionToolIdentity(p)
-				c.logger.Warn("cancelling unmapped ACP permission request",
-					slog.String("tool_call_id", strings.TrimSpace(string(p.ToolCall.ToolCallId))),
-					slog.String("title", title),
-					slog.String("kind", kind),
-					slog.String("raw_input", permissionRawInputSummary(p.ToolCall.RawInput)))
+				c.logger.Warn("cancelling untrusted ACP MCP permission request",
+					slog.String("tool_call_id", state.id),
+					slog.String("server_name", preflight.serverName),
+					slog.String("tool_name", preflight.toolName),
+					slog.String("shape", preflight.shape))
 			}
 			return cancelledPermission(), nil
 		}
-		// Only protocol-level ACP permissions and confirmed Memoh native MCP
-		// tool preflights are allowed here. Unknown shapes fail closed above so
-		// a new write/exec encoding cannot bypass Memoh's approval policy.
+		return allowWithGuard()
+	}
+	toolCallID, toolName, input, native := permissionNativeToolState(state, c.quirks)
+	if !native {
+		if !allowUnmappedPermission(state) {
+			if c.logger != nil {
+				title, kind := permissionToolIdentityFromState(state)
+				c.logger.Warn("cancelling unmapped ACP permission request",
+					slog.String("tool_call_id", state.id),
+					slog.String("title", title),
+					slog.String("kind", kind),
+					slog.String("raw_input", permissionRawInputSummary(state.input)))
+			}
+			return cancelledPermission(), nil
+		}
+		// Only protocol-level ACP permissions are allowed here. MCP preflights
+		// were classified and checked against the scoped gateway above. Unknown
+		// shapes fail closed so a new write/exec encoding cannot bypass policy.
 		if c.logger != nil {
-			title, kind := permissionToolIdentity(p)
+			title, kind := permissionToolIdentityFromState(state)
 			c.logger.Info("allowing ACP permission request that maps to no policy-gated tool",
-				slog.String("tool_call_id", strings.TrimSpace(string(p.ToolCall.ToolCallId))),
+				slog.String("tool_call_id", state.id),
 				slog.String("title", title),
 				slog.String("kind", kind))
 		}
@@ -568,6 +599,28 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 	}
 	c.rememberApprovalGrant(toolCallID, toolName, input)
 	return resp, nil
+}
+
+func (c *clientCallbacks) permissionState(p acp.RequestPermissionRequest) *acpToolState {
+	if c != nil && c.toolMapper != nil {
+		return c.toolMapper.permissionState(p.SessionId, p.ToolCall)
+	}
+	state := &acpToolState{
+		sessionID: strings.TrimSpace(string(p.SessionId)),
+		id:        strings.TrimSpace(string(p.ToolCall.ToolCallId)),
+	}
+	mergePermissionToolUpdate(state, p.ToolCall)
+	return state
+}
+
+func isMCPToolApprovalRequest(p acp.RequestPermissionRequest) bool {
+	marked, ok := p.Meta["is_mcp_tool_approval"].(bool)
+	return ok && marked
+}
+
+func mcpPermissionStateReady(state *acpToolState) bool {
+	preflight, ok := mcpPermissionPreflightFromState(state)
+	return ok && strings.TrimSpace(preflight.serverName) != ""
 }
 
 func allowOncePermission(p acp.RequestPermissionRequest) acp.RequestPermissionResponse {
@@ -732,26 +785,13 @@ func (c *clientCallbacks) currentToolSession() ToolSessionContext {
 	return mcp.MergeToolSessionContext(base, prompt)
 }
 
-func permissionNativeTool(p acp.RequestPermissionRequest, quirks acpprofile.ToolQuirks) (toolCallID, toolName string, input map[string]any, ok bool) {
-	toolCallID = strings.TrimSpace(string(p.ToolCall.ToolCallId))
+func permissionNativeToolState(state *acpToolState, quirks acpprofile.ToolQuirks) (toolCallID, toolName string, input map[string]any, ok bool) {
+	if state == nil {
+		return "", "", nil, false
+	}
+	toolCallID = strings.TrimSpace(state.id)
 	if toolCallID == "" {
 		toolCallID = "acp-permission-" + uuid.NewString()
-	}
-	state := &acpToolState{
-		id:        toolCallID,
-		input:     p.ToolCall.RawInput,
-		output:    p.ToolCall.RawOutput,
-		locations: append([]acp.ToolCallLocation(nil), p.ToolCall.Locations...),
-		content:   append([]acp.ToolCallContent(nil), p.ToolCall.Content...),
-	}
-	if p.ToolCall.Title != nil {
-		state.title = strings.TrimSpace(*p.ToolCall.Title)
-	}
-	if p.ToolCall.Kind != nil {
-		state.kind = strings.TrimSpace(string(*p.ToolCall.Kind))
-	}
-	if p.ToolCall.Status != nil {
-		state.status = strings.TrimSpace(string(*p.ToolCall.Status))
 	}
 	// nativeToolFromACPState now applies the edit->write title reclassification
 	// itself, so the approval name here always matches the streamed tool-event
@@ -763,30 +803,21 @@ func permissionNativeTool(p acp.RequestPermissionRequest, quirks acpprofile.Tool
 	return toolCallID, toolName, input, true
 }
 
-func (c *clientCallbacks) allowUnmappedPermission(ctx context.Context, p acp.RequestPermissionRequest) bool {
-	_, kind := permissionToolIdentity(p)
+func allowUnmappedPermission(state *acpToolState) bool {
+	_, kind := permissionToolIdentityFromState(state)
 	switch kind {
 	case string(acp.ToolKindRead), string(acp.ToolKindSearch), string(acp.ToolKindFetch), string(acp.ToolKindThink), string(acp.ToolKindSwitchMode):
 		return true
-	case string(acp.ToolKindOther), "":
-		preflight, ok := mcpPermissionPreflightFromRequest(p)
-		if !ok {
-			return false
-		}
-		return c.allowsMemohMCPToolPreflight(ctx, preflight)
 	default:
 		return false
 	}
 }
 
-func permissionToolIdentity(p acp.RequestPermissionRequest) (title, kind string) {
-	if p.ToolCall.Title != nil {
-		title = strings.TrimSpace(*p.ToolCall.Title)
+func permissionToolIdentityFromState(state *acpToolState) (title, kind string) {
+	if state == nil {
+		return "", ""
 	}
-	if p.ToolCall.Kind != nil {
-		kind = strings.ToLower(strings.TrimSpace(string(*p.ToolCall.Kind)))
-	}
-	return title, kind
+	return strings.TrimSpace(state.title), strings.ToLower(strings.TrimSpace(state.kind))
 }
 
 func isGenericMCPToolPermissionTitle(title string) bool {
@@ -808,10 +839,16 @@ const (
 	// Claude Code ACP asks permission with title "mcp__<server>__<tool>" and
 	// puts the actual tool arguments directly in RawInput.
 	mcpPermissionShapeStructuredTitle = "structured_title"
+	// Codex ACP reports MCP calls as execute-kind tool updates with a title of
+	// "mcp.<server>.<tool>" and structured server/tool/arguments raw input.
+	mcpPermissionShapeStructuredState = "structured_state"
 )
 
-func mcpPermissionPreflightFromRequest(p acp.RequestPermissionRequest) (mcpPermissionPreflight, bool) {
-	title, _ := permissionToolIdentity(p)
+func mcpPermissionPreflightFromState(state *acpToolState) (mcpPermissionPreflight, bool) {
+	if state == nil {
+		return mcpPermissionPreflight{}, false
+	}
+	title, _ := permissionToolIdentityFromState(state)
 	if toolName, serverName, ok := mcpToolCallFromStructuredTitle(title); ok {
 		return mcpPermissionPreflight{
 			toolName:        toolName,
@@ -821,16 +858,26 @@ func mcpPermissionPreflightFromRequest(p acp.RequestPermissionRequest) (mcpPermi
 			shape:           mcpPermissionShapeStructuredTitle,
 		}, true
 	}
-	if !isGenericMCPToolPermissionTitle(title) {
+	if isGenericMCPToolPermissionTitle(title) {
+		toolName, serverName, hasToolName, supportedMethod := mcpToolCallFromRawInput(state.input)
+		return mcpPermissionPreflight{
+			toolName:        toolName,
+			serverName:      serverName,
+			hasToolName:     hasToolName,
+			supportedMethod: supportedMethod,
+			shape:           mcpPermissionShapeGenericTitle,
+		}, true
+	}
+	toolName, serverName, hasToolName, supportedMethod := mcpToolCallFromRawInput(state.input)
+	if !supportedMethod || !hasToolName || serverName == "" || title != "mcp."+serverName+"."+toolName {
 		return mcpPermissionPreflight{}, false
 	}
-	toolName, serverName, hasToolName, supportedMethod := mcpToolCallFromRawInput(p.ToolCall.RawInput)
 	return mcpPermissionPreflight{
 		toolName:        toolName,
 		serverName:      serverName,
-		hasToolName:     hasToolName,
-		supportedMethod: supportedMethod,
-		shape:           mcpPermissionShapeGenericTitle,
+		hasToolName:     true,
+		supportedMethod: true,
+		shape:           mcpPermissionShapeStructuredState,
 	}, true
 }
 
@@ -940,7 +987,7 @@ func mcpToolCallFromRawInputDepth(raw any, depth int) (toolName, serverName stri
 			return name, serverName, true, true
 		}
 	}
-	for _, key := range []string{"name", "tool_name", "toolName"} {
+	for _, key := range []string{"name", "tool", "tool_name", "toolName"} {
 		name := strings.TrimSpace(stringFromAny(input[key]))
 		if name != "" {
 			return name, serverName, true, true
@@ -1090,8 +1137,11 @@ var scopePathKeys = []string{
 	"old_path", "new_path",
 }
 
-func (c *clientCallbacks) validatePermissionScope(p acp.RequestPermissionRequest) error {
-	for _, loc := range p.ToolCall.Locations {
+func (c *clientCallbacks) validatePermissionScope(state *acpToolState) error {
+	if state == nil {
+		return nil
+	}
+	for _, loc := range state.locations {
 		if strings.TrimSpace(loc.Path) == "" {
 			continue
 		}
@@ -1099,7 +1149,7 @@ func (c *clientCallbacks) validatePermissionScope(p acp.RequestPermissionRequest
 			return err
 		}
 	}
-	if raw, ok := p.ToolCall.RawInput.(map[string]any); ok {
+	if raw, ok := state.input.(map[string]any); ok {
 		for _, key := range scopePathKeys {
 			value, ok := raw[key].(string)
 			if !ok || strings.TrimSpace(value) == "" {
@@ -1112,7 +1162,7 @@ func (c *clientCallbacks) validatePermissionScope(p acp.RequestPermissionRequest
 	}
 	// Edit permissions can carry their target path only inside a content
 	// diff (editToolFromACPState falls back to it), so validate those too.
-	for _, content := range p.ToolCall.Content {
+	for _, content := range state.content {
 		if content.Diff == nil || strings.TrimSpace(content.Diff.Path) == "" {
 			continue
 		}

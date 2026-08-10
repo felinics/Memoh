@@ -29,6 +29,8 @@ func NewFederationProvider(log *slog.Logger, source mcp.ToolSource) *FederationP
 	}
 }
 
+func (*FederationProvider) ProviderLabel() string { return "mcp" }
+
 func (f *FederationProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
 	if f.source == nil {
 		return nil, nil

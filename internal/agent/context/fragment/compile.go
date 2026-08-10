@@ -15,21 +15,30 @@ const (
 
 // CompileInput contains the legacy RunConfig fields used as phase-1 sources.
 type CompileInput struct {
-	Source          string
-	Scope           Scope
-	System          string
-	Messages        []sdk.Message
-	Query           string
-	InlineImages    []sdk.ImagePart
-	ToolUsage       string
-	View            ManifestView
-	DynamicMutators []DynamicMutator
-	Existing        []ContextFrag
+	Source   string
+	Scope    Scope
+	System   string
+	Messages []sdk.Message
+	// CurrentUserMessageIndex identifies a current request already carried in
+	// Messages so legacy manifests retain its typed slot.
+	CurrentUserMessageIndex *int
+	// MemoryMessageIndex identifies materialized memory recall that remains in
+	// Messages for byte-equivalent provider ordering.
+	MemoryMessageIndex *int
+	Query              string
+	InlineImages       []sdk.ImagePart
+	ToolUsage          string
+	View               ManifestView
+	DynamicMutators    []DynamicMutator
+	Existing           []ContextFrag
 }
 
-// Compile builds typed fragments from the current SDK-shaped fields, preserving
-// explicit non-derived fragments such as tool usage.
-func Compile(input CompileInput) AssembledContext {
+// CompileFrags builds the typed fragment list from the current SDK-shaped
+// fields, preserving explicit non-derived fragments such as tool usage — the
+// same fragment-construction `Compile` does, without also rendering the
+// legacy System/Messages view or building the provenance manifest. For
+// callers that only need the fragments themselves.
+func CompileFrags(input CompileInput) []ContextFrag {
 	source := strings.TrimSpace(input.Source)
 	if source == "" {
 		source = SourceRunConfig
@@ -61,18 +70,37 @@ func Compile(input CompileInput) AssembledContext {
 			frags = append(frags, frag)
 			continue
 		}
+		kind := kindForMessage(msg)
+		slot := SlotHistory
+		cacheClass := cacheForMessage(msg)
+		trust := trustForMessage(msg)
+		budget := BudgetPolicy{}
+		messageScope := scope
+		if isMemoryMessage(input.MemoryMessageIndex, i, msg) {
+			kind = KindMemoryRecall
+			cacheClass = CacheNever
+			trust = TrustWorkspace
+		}
+		if isCurrentUserMessage(input.CurrentUserMessageIndex, i, msg) {
+			kind = KindCurrentUserMessage
+			slot = SlotCurrentUser
+			cacheClass = CacheNever
+			trust = TrustUser
+			budget.Overflow = OverflowKeep
+		}
 		frags = append(frags, MessageFrag(MessageFragInput{
 			ID:         id,
 			Message:    msg,
-			Kind:       kindForMessage(msg),
-			Slot:       SlotHistory,
+			Kind:       kind,
+			Slot:       slot,
 			Priority:   PriorityForMessage(msg),
-			CacheClass: cacheForMessage(msg),
-			Trust:      trustForMessage(msg),
-			Scope:      scope,
+			CacheClass: cacheClass,
+			Trust:      trust,
+			Scope:      messageScope,
 			Source:     source,
 			Collector:  CollectorRunConfigFields,
 			Index:      i,
+			Budget:     budget,
 		}))
 	}
 	if strings.TrimSpace(input.Query) != "" {
@@ -98,7 +126,21 @@ func Compile(input CompileInput) AssembledContext {
 		}
 	}
 
-	frags = normalizeContextRefs(frags)
+	return normalizeContextRefs(frags)
+}
+
+func isCurrentUserMessage(index *int, candidate int, msg sdk.Message) bool {
+	return index != nil && *index == candidate && msg.Role == sdk.MessageRoleUser
+}
+
+func isMemoryMessage(index *int, candidate int, msg sdk.Message) bool {
+	return index != nil && *index == candidate && msg.Role == sdk.MessageRoleUser
+}
+
+// Compile builds typed fragments from the current SDK-shaped fields, preserving
+// explicit non-derived fragments such as tool usage.
+func Compile(input CompileInput) AssembledContext {
+	frags := CompileFrags(input)
 	assembled := Render(frags)
 	assembled.Frags = frags
 	assembled.Manifest = BuildManifest(frags)
@@ -166,36 +208,38 @@ func systemTextFrag(id string, kind Kind, text string, priority int, cacheClass 
 
 // TextFragInput describes a text fragment to construct.
 type TextFragInput struct {
-	ID         string
-	Kind       Kind
-	Role       sdk.MessageRole
-	Slot       Slot
-	Text       string
-	Priority   int
-	CacheClass CacheClass
-	Trust      TrustLevel
-	Scope      Scope
-	Source     string
-	SourceID   string
-	Collector  string
-	Index      int
-	Render     RenderPolicy
-	Budget     BudgetPolicy
+	ID          string
+	Kind        Kind
+	Role        sdk.MessageRole
+	Slot        Slot
+	Text        string
+	Priority    int
+	CacheClass  CacheClass
+	Trust       TrustLevel
+	Scope       Scope
+	Source      string
+	SourceID    string
+	Collector   string
+	Index       int
+	Render      RenderPolicy
+	Budget      BudgetPolicy
+	ConflictKey string
 }
 
 // TextFrag creates a text-backed fragment.
 func TextFrag(input TextFragInput) ContextFrag {
 	return ContextFrag{
-		ID:         strings.TrimSpace(input.ID),
-		Kind:       input.Kind,
-		Role:       input.Role,
-		Slot:       input.Slot,
-		Priority:   input.Priority,
-		CacheClass: input.CacheClass,
-		Trust:      input.Trust,
-		Scope:      normalizeScope(input.Scope),
-		Budget:     input.Budget,
-		Render:     input.Render,
+		ID:          strings.TrimSpace(input.ID),
+		Kind:        input.Kind,
+		Role:        input.Role,
+		Slot:        input.Slot,
+		Priority:    input.Priority,
+		CacheClass:  input.CacheClass,
+		Trust:       input.Trust,
+		Scope:       normalizeScope(input.Scope),
+		Budget:      input.Budget,
+		Render:      input.Render,
+		ConflictKey: input.ConflictKey,
 		Provenance: Provenance{
 			Source:    strings.TrimSpace(input.Source),
 			SourceID:  strings.TrimSpace(input.SourceID),
@@ -211,33 +255,37 @@ func TextFrag(input TextFragInput) ContextFrag {
 
 // MessageFragInput describes an SDK message fragment.
 type MessageFragInput struct {
-	ID         string
-	Message    sdk.Message
-	Kind       Kind
-	Slot       Slot
-	Priority   int
-	CacheClass CacheClass
-	Trust      TrustLevel
-	Scope      Scope
-	Source     string
-	SourceID   string
-	Collector  string
-	Index      int
+	ID            string
+	Message       sdk.Message
+	Kind          Kind
+	Slot          Slot
+	Priority      int
+	CacheClass    CacheClass
+	Trust         TrustLevel
+	Scope         Scope
+	Source        string
+	SourceID      string
+	Collector     string
+	Index         int
+	TokenEstimate int
+	Budget        BudgetPolicy
 }
 
 // MessageFrag creates a message-backed fragment.
 func MessageFrag(input MessageFragInput) ContextFrag {
 	msg := cloneMessage(input.Message)
 	return ContextFrag{
-		ID:         strings.TrimSpace(input.ID),
-		Kind:       input.Kind,
-		Role:       input.Message.Role,
-		Slot:       input.Slot,
-		Priority:   input.Priority,
-		CacheClass: input.CacheClass,
-		Trust:      input.Trust,
-		Scope:      normalizeScope(input.Scope),
-		Render:     RenderPolicy{Format: RenderSDKMessage},
+		TokenEstimate: input.TokenEstimate,
+		Budget:        input.Budget,
+		ID:            strings.TrimSpace(input.ID),
+		Kind:          input.Kind,
+		Role:          input.Message.Role,
+		Slot:          input.Slot,
+		Priority:      input.Priority,
+		CacheClass:    input.CacheClass,
+		Trust:         input.Trust,
+		Scope:         normalizeScope(input.Scope),
+		Render:        RenderPolicy{Format: RenderSDKMessage},
 		Provenance: Provenance{
 			Source:    strings.TrimSpace(input.Source),
 			SourceID:  strings.TrimSpace(input.SourceID),
@@ -372,7 +420,7 @@ func cacheForMessage(msg sdk.Message) CacheClass {
 	case sdk.MessageRoleSystem:
 		return CacheDynamic
 	case sdk.MessageRoleUser, sdk.MessageRoleAssistant, sdk.MessageRoleTool:
-		return CacheNever
+		return CacheStable
 	default:
 		return CacheNever
 	}

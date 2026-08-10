@@ -33,13 +33,13 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import { structuredToolResult } from '@/store/chat-list.normalize'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
 
-// Shape of one result entry, from the backend's submittedResult: the tool
-// result already carries the question text and human-readable answer, so the
-// card never touches the raw input JSON (that dump was #868).
+// Both the canonical user-input projection and the legacy tool result use this
+// display-safe shape, so the card never touches the raw input JSON (#868).
 type ResultAnswer = {
   question?: string
   selected?: { label?: string }[]
@@ -49,27 +49,34 @@ type ResultAnswer = {
 }
 
 const entries = computed(() => {
-  const result = props.block.result as { status?: string; answers?: ResultAnswer[] } | null
-  if (Array.isArray(result?.answers)) {
-    return result.answers.map((a, i) => ({
+  const result = structuredToolResult(props.block.result) as { status?: string; answers?: ResultAnswer[] }
+  const answers = props.block.userInput?.answers?.length
+    ? props.block.userInput.answers
+    : result?.answers
+  if (Array.isArray(answers) && answers.length > 0) {
+    return answers.map((a, i) => ({
       id: `a${i}`,
       question: a.question ?? '',
       answer: answerText(a),
       unanswered: a.skipped === true,
     }))
   }
-  // canceled / expired / failed: no answers recorded — show what was asked
-  // with an unanswered marker (questions from the live request state, or the
-  // tool input for pre-v2 history). The terminal status can live in either
-  // the result OR userInput.status (a canceled request may end result-less).
+  // Terminal requests without an answer payload are legacy or non-submitted
+  // outcomes. Show their actual state instead of incorrectly calling them
+  // unanswered while a canonical answer projection is still arriving.
   const questions = props.block.userInput?.questions?.map(q => q.text)
     ?? legacyQuestions(props.block.input)
-  const status = result?.status ?? props.block.userInput?.status
-  const note = status === 'canceled'
-    ? t('chat.answers.cancelled')
-    : t('chat.answers.unanswered')
+  const status = props.block.userInput?.status ?? result?.status
+  const note = terminalNote(status)
   return questions.map((q, i) => ({ id: `q${i}`, question: q, answer: note, unanswered: true }))
 })
+
+function terminalNote(status?: string): string {
+  if (status === 'canceled') return t('chat.answers.cancelled')
+  if (status === 'expired') return t('chat.tools.userInputExpired')
+  if (status === 'failed') return t('chat.tools.userInputFailed')
+  return t('chat.tools.userInputSubmitted')
+}
 
 function answerText(a: ResultAnswer): string {
   if (a.skipped) return t('chat.answers.skipped')

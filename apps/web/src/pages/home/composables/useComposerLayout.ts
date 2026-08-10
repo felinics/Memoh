@@ -19,19 +19,16 @@ export interface ComposerLayoutDeps {
   // ALWAYS expanded — the single-row pill is desktop-only affordance, too
   // cramped a touch target on a phone.
   mobileMultiline: Ref<boolean>
-  // Right-cluster label sources; a change re-runs the width fit.
+  // Right-cluster label source; a change re-runs the width fit.
   modelTriggerLabel: ComputedRef<string>
-  activeIsACP: ComputedRef<boolean>
-  activeACPProjectLabel: ComputedRef<string>
 }
 
 export function useComposerLayout(deps: ComposerLayoutDeps) {
-  const { inputText, isActive, showAttachmentGrid, mobileMultiline, modelTriggerLabel, activeIsACP, activeACPProjectLabel } = deps
+  const { inputText, isActive, showAttachmentGrid, mobileMultiline, modelTriggerLabel } = deps
 
   const textareaEl = ref<HTMLTextAreaElement | null>(null)
   const composerEl = ref<HTMLElement | null>(null)
   const modelLabelEl = ref<HTMLElement | null>(null)
-  const acpProjectLabelEl = ref<HTMLElement | null>(null)
   // The composer lifts to its multiline layout (textarea on its own row, controls
   // below) for three independent reasons: the shell is in mobile mode
   // (mobileMultiline — the pill is a desktop affordance and never the default on
@@ -137,10 +134,7 @@ export function useComposerLayout(deps: ComposerLayoutDeps) {
     const modelWidth = modelLabel > 0
       ? Math.min(MODEL_TRIGGER_MAX, modelLabel + MODEL_CHROME)
       : MODEL_TRIGGER_MAX
-    let width = modelWidth + CLUSTER_GAP + SEND_SLOT
-    const acpLabel = acpProjectLabelEl.value?.scrollWidth ?? 0
-    if (acpLabel > 0) width += Math.min(160, acpLabel + 28) + CLUSTER_GAP
-    return width
+    return modelWidth + CLUSTER_GAP + SEND_SLOT
   }
 
   function recomputeComposerFit() {
@@ -158,15 +152,13 @@ export function useComposerLayout(deps: ComposerLayoutDeps) {
   // The model trigger inherits the Button's `shrink-0`, so it won't yield in a
   // flex row — a long name would push past the box instead of truncating. A hard
   // max-width clamps it regardless of flex-shrink (the min-w-0 label then ellipses
-  // within), sized to whatever the controls row can spare after the ＋, send, and
-  // any project pill. It only bites when space is tight; otherwise it rests at the
-  // 240px cap and the button still hugs a short name.
+  // within), sized to whatever the controls row can spare after the ＋ and send.
+  // It only bites when space is tight; otherwise it rests at the 240px cap and
+  // the button still hugs a short name.
   const modelTriggerMaxWidth = computed(() => {
     const inner = composerInnerWidth.value
     if (inner <= 1) return MODEL_TRIGGER_MAX
-    let reserved = PLUS_SLOT + ROW_GAPS + CLUSTER_GAP + SEND_SLOT
-    const acpLabel = acpProjectLabelEl.value?.scrollWidth ?? 0
-    if (acpLabel > 0) reserved += Math.min(160, acpLabel + 28) + CLUSTER_GAP
+    const reserved = PLUS_SLOT + ROW_GAPS + CLUSTER_GAP + SEND_SLOT
     return Math.max(72, Math.min(MODEL_TRIGGER_MAX, inner - reserved))
   })
 
@@ -187,9 +179,9 @@ export function useComposerLayout(deps: ComposerLayoutDeps) {
     }
   })
 
-  // A different model name (or switching to/from an ACP project pill) changes the
-  // right cluster's natural width, so re-run the fit check when the labels change.
-  watch([modelTriggerLabel, activeIsACP, activeACPProjectLabel], () => {
+  // A different model name changes the right cluster's natural width, so re-run
+  // the fit check when the label changes.
+  watch(modelTriggerLabel, () => {
     void nextTick(recomputeComposerFit)
   })
   onBeforeUnmount(() => {
@@ -348,7 +340,6 @@ export function useComposerLayout(deps: ComposerLayoutDeps) {
     textareaEl,
     composerEl,
     modelLabelEl,
-    acpProjectLabelEl,
     isMultiline,
     composerRadiusMs,
     composerRadiusEase,

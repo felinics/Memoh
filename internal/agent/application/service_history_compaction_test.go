@@ -43,6 +43,78 @@ func TestReplaceCompactedHistoryRecordsPreservesOnlyRequiredSourceGroupAcrossRes
 	}
 }
 
+func TestReplaceCompactedHistoryRecordsFoldsFusedParentsAroundMustKeepIsland(t *testing.T) {
+	t.Parallel()
+
+	const (
+		parentAID = "artifact-a"
+		parentBID = "artifact-b"
+		rollupID  = "artifact-rollup"
+	)
+	scope := contextfrag.Scope{BotID: "bot-1", SessionID: "session-1"}
+	owner := compaction.ArtifactOwner{BotID: scope.BotID, SessionID: scope.SessionID, SessionIDKnown: true}
+	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	timed := func(record historyfrag.HistoryRecord, at time.Time) historyfrag.HistoryRecord {
+		record.CreatedAt = at
+		return record
+	}
+	records := []historyfrag.HistoryRecord{
+		timed(historyRecord("a-1", ModelMessage{Role: "user", Content: newTextContent("a question")}, func(record *historyfrag.HistoryRecord) {
+			record.CompactID = parentAID
+		}), base.Add(time.Minute)),
+		timed(historyRecord("a-2", ModelMessage{Role: "assistant", Content: newTextContent("a answer")}, func(record *historyfrag.HistoryRecord) {
+			record.CompactID = parentAID
+		}), base.Add(2*time.Minute)),
+		timed(historyRecord("island-call", ModelMessage{Role: "assistant", Content: newTextContent("ask you something")}, func(record *historyfrag.HistoryRecord) {
+			record.Required = true
+		}), base.Add(3*time.Minute)),
+		timed(historyRecord("island-result", ModelMessage{Role: "tool", Content: newTextContent("answered")}, nil), base.Add(4*time.Minute)),
+		timed(historyRecord("b-1", ModelMessage{Role: "user", Content: newTextContent("b question")}, func(record *historyfrag.HistoryRecord) {
+			record.CompactID = parentBID
+		}), base.Add(5*time.Minute)),
+		timed(historyRecord("b-2", ModelMessage{Role: "assistant", Content: newTextContent("b answer")}, func(record *historyfrag.HistoryRecord) {
+			record.CompactID = parentBID
+		}), base.Add(6*time.Minute)),
+	}
+
+	coverage := make([]compaction.CoveredSource, 0, 4)
+	for _, index := range []int{0, 1, 4, 5} {
+		record := records[index]
+		coverage = append(coverage, compaction.CoveredSource{
+			Ref:                    record.Ref,
+			ExternalMessageID:      record.ExternalMessageID,
+			SourceReplyToMessageID: record.SourceReplyToMessageID,
+			CreatedAtMs:            record.CreatedAt.UnixMilli(),
+		})
+	}
+	rollup := compaction.Artifact{
+		ID:            rollupID,
+		BotID:         scope.BotID,
+		SessionID:     scope.SessionID,
+		Status:        "ok",
+		Summary:       "fused earlier context",
+		Coverage:      coverage,
+		AnchorStartMs: coverage[0].CreatedAtMs,
+		AnchorEndMs:   coverage[len(coverage)-1].CreatedAtMs,
+	}
+	catalog := compaction.NewArtifactCatalog()
+	catalog.Add(owner, compaction.NewArtifactAliasFrontier(parentAID, rollup))
+	catalog.Add(owner, compaction.NewArtifactAliasFrontier(parentBID, rollup))
+
+	got := replaceCompactedHistoryRecordsWithService(records, scope, func(record historyfrag.HistoryRecord) (compaction.Artifact, bool) {
+		return resolveCatalogArtifact(catalog, recordArtifactOwner(record, scope), record)
+	})
+
+	wantIDs := []string{rollupID, "island-call", "island-result"}
+	if gotIDs := recordSequenceIDs(got); !reflect.DeepEqual(gotIDs, wantIDs) {
+		t.Fatalf("fused-parent replacement ids = %#v, want %#v", gotIDs, wantIDs)
+	}
+	wantTexts := []string{"<summary>\nfused earlier context\n</summary>", "ask you something", "answered"}
+	if gotTexts := recordTexts(got); !reflect.DeepEqual(gotTexts, wantTexts) {
+		t.Fatalf("fused-parent replacement texts = %#v, want %#v", gotTexts, wantTexts)
+	}
+}
+
 func TestResolveCatalogArtifactRejectsDurableCoverageHashMismatch(t *testing.T) {
 	t.Parallel()
 

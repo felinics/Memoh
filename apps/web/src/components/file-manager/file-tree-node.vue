@@ -8,7 +8,6 @@ import {
   File,
   FileArchive,
   FolderPlus,
-  LoaderCircle,
   SplitSquareHorizontal,
   SquarePen,
   Trash2,
@@ -21,11 +20,20 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
+  Spinner,
 } from '@felinic/ui'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { isArchiveFile, sortDirsFirst } from './utils'
 import { resolveFileIcon } from './file-icon'
 import { FileTreeKey } from './file-tree-context'
+import {
+  treeAsideClass,
+  treeGlyphSlotClass,
+  treeIndentClass,
+  treeRowClass,
+  treeRowIdleClass,
+  treeRowSelectedClass,
+} from './tree-row'
 
 const props = defineProps<{
   entry: HandlersFsFileInfo
@@ -116,16 +124,13 @@ function onCheckbox(checked: boolean | 'indeterminate') {
     <ContextMenuTrigger as-child>
       <div
         ref="rowEl"
-        class="group/row flex min-h-[1.6875rem] cursor-pointer items-center mx-1 mb-px pl-1 pr-1 rounded-sm text-[0.84375rem] tracking-normal font-[350] select-none [-webkit-font-smoothing:auto]"
-        :class="isActive
-          ? 'bg-sidebar-accent text-foreground'
-          : 'text-foreground/80 hover:bg-[color:var(--sidebar-hover)]'"
+        :class="[treeRowClass, isActive ? treeRowSelectedClass : treeRowIdleClass]"
         @click="onRowClick"
       >
         <span
           v-for="g in depth"
           :key="g"
-          class="h-full w-2 shrink-0 self-stretch"
+          :class="treeIndentClass"
         />
 
         <Checkbox
@@ -137,7 +142,7 @@ function onCheckbox(checked: boolean | 'indeterminate') {
           @update:model-value="onCheckbox"
         />
 
-        <span class="flex size-6 shrink-0 items-center justify-center">
+        <span :class="treeGlyphSlotClass">
           <ChevronRight
             v-if="entry.isDir"
             :stroke-width="1.53"
@@ -213,15 +218,15 @@ function onCheckbox(checked: boolean | 'indeterminate') {
        browser can composite the animation layer correctly. -->
   <div
     v-if="entry.isDir && expanded && loading && children.length === 0"
-    class="flex min-h-[1.6875rem] items-center mx-1 mb-px pl-1 pr-1 text-[0.84375rem] tracking-normal font-[350] text-muted-foreground [-webkit-font-smoothing:auto]"
+    :class="treeAsideClass"
   >
     <span
       v-for="g in depth + 1"
       :key="g"
-      class="h-full w-2 shrink-0 self-stretch"
+      :class="treeIndentClass"
     />
-    <span class="flex size-6 shrink-0 items-center justify-center">
-      <LoaderCircle class="size-3.5 animate-spin" />
+    <span :class="treeGlyphSlotClass">
+      <Spinner class="size-3.5" />
     </span>
   </div>
 

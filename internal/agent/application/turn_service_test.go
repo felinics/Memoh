@@ -11,8 +11,10 @@ import (
 	"time"
 
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 type fakeRunner struct {
@@ -45,8 +47,10 @@ type scriptedAdmitter struct {
 	// replay of a run owned elsewhere or already finished.
 	started bool
 
-	inputs   []sessionruntime.AdmitInput
-	finishes []recordedFinish
+	inputs     []sessionruntime.AdmitInput
+	finishes   []recordedFinish
+	published  []native.StreamEvent
+	publishErr error
 }
 
 type recordedFinish struct {
@@ -91,6 +95,17 @@ func (a *scriptedAdmitter) FinishRun(_ context.Context, handle sessionruntime.Ru
 	return nil
 }
 
+func (a *scriptedAdmitter) PublishAgentEvent(
+	_ context.Context,
+	_ sessionruntime.RunHandle,
+	event native.StreamEvent,
+) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.published = append(a.published, event)
+	return a.publishErr
+}
+
 func (a *scriptedAdmitter) admitted() []sessionruntime.AdmitInput {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -124,7 +139,8 @@ func newTurnTestService(streamer testChatStreamer) *Service {
 func newAdmittedTurnTestService(streamer testChatStreamer) (*Service, *scriptedAdmitter) {
 	admitter := newScriptedAdmitter()
 	return &Service{
-		sessionRuntime: admitter,
+		sessionRuntime:   admitter,
+		publishTurnEvent: admitter.PublishAgentEvent,
 		turnHooks: &turnRuntimeHooks{
 			streamChat: streamer.StreamChat,
 		},
@@ -218,6 +234,90 @@ func TestStartTurnStreamsEvents(t *testing.T) {
 		t.Fatalf("ChatRequest not translated: %+v", r.gotReq)
 	}
 	for range h.Errs() {
+	}
+}
+
+func TestStartTurnPublishesNativeEventsBeforeCleanFinish(t *testing.T) {
+	a, admitter := newAdmittedTurnTestService(&fakeRunner{chunks: []string{
+		`{"type":"tool_approval_request","approval_id":"approval-1","status":"pending"}`,
+		`{"type":"agent_end","approval_id":"approval-1","status":"pending"}`,
+	}})
+	h, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
+		TeamID: "t", Mode: turn.ModeChat, BotID: "b", ThreadID: "s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainHandle(h)
+
+	admitter.mu.Lock()
+	published := append([]native.StreamEvent(nil), admitter.published...)
+	admitter.mu.Unlock()
+	if len(published) != 2 ||
+		published[0].Type != native.EventToolApprovalRequest ||
+		published[1].Type != native.EventAgentEnd {
+		t.Fatalf("published events = %#v, want approval request then agent end", published)
+	}
+	if got := admitter.awaitFinish(t); got.status != "" {
+		t.Fatalf("clean deferred finish status = %q, want unnamed runtime-derived status", got.status)
+	}
+}
+
+func TestStartTurnFailsWhenRuntimeEventPublicationFails(t *testing.T) {
+	cancelObserved := make(chan struct{})
+	releaseCleanup := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCleanup) }) }
+	t.Cleanup(release)
+	streamer := testChatStreamerFunc(func(ctx context.Context, _ ChatRequest) (<-chan StreamChunk, <-chan error) {
+		chunks := make(chan StreamChunk, 1)
+		errs := make(chan error)
+		chunks <- StreamChunk(`{"type":"text_delta","delta":"hello"}`)
+		go func() {
+			<-ctx.Done()
+			close(cancelObserved)
+			<-releaseCleanup
+			close(chunks)
+			close(errs)
+		}()
+		return chunks, errs
+	})
+	a, admitter := newAdmittedTurnTestService(streamer)
+	publishErr := errors.New("private runtime publication failure")
+	admitter.publishErr = publishErr
+	h, err := a.StartTurn(context.Background(), turn.StartTurnCommand{
+		TeamID: "t", Mode: turn.ModeChat, BotID: "b", ThreadID: "s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-cancelObserved:
+	case <-time.After(time.Second):
+		t.Fatal("publication failure did not cancel the stream")
+	}
+	admitter.mu.Lock()
+	finishedEarly := len(admitter.finishes) != 0
+	admitter.mu.Unlock()
+	if finishedEarly {
+		t.Fatal("run finalized before publication-failure cleanup completed")
+	}
+	release()
+	for range h.Events() {
+	}
+	var publicErr error
+	for streamErr := range h.Errs() {
+		publicErr = streamErr
+	}
+
+	if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusErrored {
+		t.Fatalf("publication failure status = %q, want %q", got.status, sessionruntime.RunStatusErrored)
+	}
+	if got := apperror.CodeOf(publicErr); got != apperror.CodeSessionHistoryInconsistent {
+		t.Fatalf("publication failure code = %q, want %q", got, apperror.CodeSessionHistoryInconsistent)
+	}
+	if got := apperror.CauseOf(publicErr); !errors.Is(got, publishErr) {
+		t.Fatalf("private publication cause = %v, want %v", got, publishErr)
 	}
 }
 
@@ -617,6 +717,34 @@ func (f *errRunner) StreamChat(ctx context.Context, _ ChatRequest) (<-chan Strea
 	return ch, errCh
 }
 
+type canceledRunReporter struct{}
+
+func (*canceledRunReporter) StreamChat(ctx context.Context, _ ChatRequest) (<-chan StreamChunk, <-chan error) {
+	ch := make(chan StreamChunk)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(ch)
+		defer close(errCh)
+		<-ctx.Done()
+		errCh <- context.Cause(ctx)
+	}()
+	return ch, errCh
+}
+
+type canceledRunTerminalReporter struct{}
+
+func (*canceledRunTerminalReporter) StreamChat(ctx context.Context, _ ChatRequest) (<-chan StreamChunk, <-chan error) {
+	ch := make(chan StreamChunk, 1)
+	errCh := make(chan error)
+	go func() {
+		defer close(ch)
+		defer close(errCh)
+		<-ctx.Done()
+		ch <- StreamChunk(`{"type":"agent_abort"}`)
+	}()
+	return ch, errCh
+}
+
 func drainHandle(h turn.RunHandle) {
 	for range h.Events() {
 	}
@@ -666,6 +794,18 @@ func TestRunEndRecordsTerminalState(t *testing.T) {
 		}
 	})
 
+	t.Run("unsolicited context cancellation", func(t *testing.T) {
+		a, admitter := newAdmittedTurnTestService(&errRunner{err: context.Canceled})
+		h, err := a.StartTurn(context.Background(), cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		drainHandle(h)
+		if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusErrored {
+			t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusErrored)
+		}
+	})
+
 	t.Run("cancellation", func(t *testing.T) {
 		a, admitter := newAdmittedTurnTestService(&fakeRunner{
 			chunks: []string{`{"type":"done"}`},
@@ -684,6 +824,50 @@ func TestRunEndRecordsTerminalState(t *testing.T) {
 		}
 	})
 
+	t.Run("cancellation reported by stream", func(t *testing.T) {
+		a, admitter := newAdmittedTurnTestService(&canceledRunReporter{})
+		h, err := a.StartTurn(context.Background(), cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.Cancel()
+		for range h.Events() {
+		}
+		for streamErr := range h.Errs() {
+			t.Fatalf("canceled run exposed stream error: %v", streamErr)
+		}
+		if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusAborted {
+			t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusAborted)
+		}
+	})
+
+	t.Run("cancellation reported by detached terminal event", func(t *testing.T) {
+		a, admitter := newAdmittedTurnTestService(&canceledRunTerminalReporter{})
+		a.publishTurnEvent = func(
+			ctx context.Context,
+			handle sessionruntime.RunHandle,
+			event native.StreamEvent,
+		) error {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
+			return admitter.PublishAgentEvent(ctx, handle, event)
+		}
+		h, err := a.StartTurn(context.Background(), cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.Cancel()
+		for range h.Events() {
+		}
+		for streamErr := range h.Errs() {
+			t.Fatalf("canceled run exposed stream error: %v", streamErr)
+		}
+		if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusAborted {
+			t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusAborted)
+		}
+	})
+
 	t.Run("completion", func(t *testing.T) {
 		a, admitter := newAdmittedTurnTestService(&fakeRunner{chunks: []string{`{"type":"done"}`}})
 		h, err := a.StartTurn(context.Background(), cmd)
@@ -692,13 +876,75 @@ func TestRunEndRecordsTerminalState(t *testing.T) {
 		}
 		drainHandle(h)
 		got := admitter.awaitFinish(t)
-		if got.status != sessionruntime.RunStatusCompleted {
-			t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusCompleted)
+		if got.status != "" {
+			t.Fatalf("status = %q, want unnamed runtime-derived completion", got.status)
 		}
 		if got.handle.FencingToken == 0 {
 			t.Fatal("terminal write carried no fencing token: a superseded owner could close this run")
 		}
 	})
+}
+
+func TestRecordStreamFailureClassifiesOnlyExplicitCancellationAsAborted(t *testing.T) {
+	providerErr := errors.New("provider failed")
+	tests := []struct {
+		name         string
+		contextCause error
+		err          error
+		wantStored   bool
+	}{
+		{
+			name:         "explicit cancellation",
+			contextCause: context.Canceled,
+			err:          context.Canceled,
+		},
+		{
+			name:         "wrapped explicit cancellation",
+			contextCause: context.Canceled,
+			err:          runtimeHistoryError(context.Canceled),
+		},
+		{
+			name:       "provider cancellation with active context",
+			err:        context.Canceled,
+			wantStored: true,
+		},
+		{
+			name:         "ownership loss",
+			contextCause: sessionruntime.ErrRunOwnershipLost,
+			err:          context.Canceled,
+			wantStored:   true,
+		},
+		{
+			name:       "provider failure",
+			err:        providerErr,
+			wantStored: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tt.contextCause != nil {
+				var cancel context.CancelCauseFunc
+				ctx, cancel = context.WithCancelCause(ctx)
+				cancel(tt.contextCause)
+			}
+			h := &runHandle{ctx: ctx}
+			reported := h.recordStreamFailure(tt.err)
+
+			if !h.failed.Load() {
+				t.Fatal("stream failure did not mark the run failed")
+			}
+			if tt.wantStored && !errors.Is(h.streamErr, tt.err) {
+				t.Fatalf("stored error = %v, want %v", h.streamErr, tt.err)
+			}
+			if !tt.wantStored && h.streamErr != nil {
+				t.Fatalf("stored error = %v, want explicit cancellation suppressed", h.streamErr)
+			}
+			if reported != tt.wantStored {
+				t.Fatalf("reported = %v, want %v", reported, tt.wantStored)
+			}
+		})
+	}
 }
 
 // TestDiscussInjectFailsFast: discuss handles have no inject reader, so

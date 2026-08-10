@@ -243,12 +243,16 @@ func userInputTranscriptMetadata(ev event.StreamEvent) map[string]any {
 			userInputID = strings.TrimSpace(value)
 		}
 	}
-	return map[string]any{
+	metadata := map[string]any{
 		"user_input_id": userInputID,
 		"short_id":      ev.ShortID,
 		"status":        status,
 		"ui_payload":    ev.Metadata["ui_payload"],
 	}
+	if answers := userinput.AnswersFromStored(ev.Metadata["answers"]); len(answers) > 0 {
+		metadata["answers"] = answers
+	}
+	return metadata
 }
 
 func approvalTranscriptMetadata(ev event.StreamEvent) map[string]any {

@@ -2,13 +2,17 @@ package application
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/contextview"
+	"github.com/memohai/memoh/internal/hooks"
 )
 
 func TestBuildContextFragScopePreservesIMTopology(t *testing.T) {
@@ -90,9 +94,16 @@ func TestPrepareRunConfigDoesNotDoubleCountPipelineInlineImages(t *testing.T) {
 
 	image := sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"}
 	resolver := &Service{}
+	currentIndex := 0
+	memoryIndex := 1
 	cfg := native.RunConfig{
-		Messages:     []sdk.Message{sdk.UserMessage("pipeline current user")},
-		InlineImages: []sdk.ImagePart{image},
+		Messages: []sdk.Message{
+			sdk.UserMessage("pipeline current user"),
+			sdk.UserMessage("memory recall"),
+		},
+		InlineImages:                   []sdk.ImagePart{image},
+		ContextCurrentUserMessageIndex: &currentIndex,
+		ContextMemoryMessageIndex:      &memoryIndex,
 	}
 
 	got := resolver.prepareRunConfig(context.Background(), cfg)
@@ -106,6 +117,158 @@ func TestPrepareRunConfigDoesNotDoubleCountPipelineInlineImages(t *testing.T) {
 	}
 	if !messagesContainImage(got.Messages) {
 		t.Fatalf("prepared messages do not contain injected image: %#v", got.Messages)
+	}
+	if got.ContextCurrentUserMessageIndex == nil || *got.ContextCurrentUserMessageIndex != 0 {
+		t.Fatalf("current user index = %#v, want pipeline current 0", got.ContextCurrentUserMessageIndex)
+	}
+	if got.ContextMemoryMessageIndex == nil || *got.ContextMemoryMessageIndex != 1 {
+		t.Fatalf("memory index = %#v, want 1", got.ContextMemoryMessageIndex)
+	}
+	wantMessages := []sdk.Message{
+		sdk.UserMessage("pipeline current user"),
+		sdk.UserMessage("memory recall", image),
+	}
+	if !reflect.DeepEqual(got.Messages, wantMessages) {
+		t.Fatalf("provider messages changed: got %#v want %#v", got.Messages, wantMessages)
+	}
+	if len(got.ContextSourceFrags) == 0 {
+		t.Fatal("prepared config did not build authoritative source fragments")
+	}
+}
+
+func TestPrepareRunConfigPreservesPipelineFileAttachmentBytes(t *testing.T) {
+	t.Parallel()
+
+	file := sdk.FilePart{
+		Data:      "JVBERi0xLjQ=",
+		MediaType: "application/pdf",
+		Filename:  "report.pdf",
+	}
+	currentIndex := 0
+	cfg := native.RunConfig{
+		Messages:                       []sdk.Message{sdk.UserMessage("pipeline current user")},
+		InlineAttachments:              []sdk.MessagePart{file},
+		ContextCurrentUserMessageIndex: &currentIndex,
+	}
+
+	prepared := (&Service{}).prepareRunConfig(context.Background(), cfg)
+	got := contextview.ApplyProviderRunConfig(context.Background(), nil, prepared)
+	want := []sdk.Message{sdk.UserMessage("pipeline current user", file)}
+
+	if !reflect.DeepEqual(got.Messages, want) {
+		t.Fatalf("provider messages changed: got %#v want %#v", got.Messages, want)
+	}
+}
+
+func TestNormalizeContextMessagesRemapsCurrentAndMemory(t *testing.T) {
+	t.Parallel()
+
+	webCall := sdkMessagesToModelMessages([]sdk.Message{{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "web-call", ToolName: "web_fetch",
+		}},
+	}})[0]
+	webResult := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(sdk.ToolResultPart{
+		ToolCallID: "web-call", ToolName: "web_fetch", Result: "discarded",
+	})})[0]
+	askCall := sdkMessagesToModelMessages([]sdk.Message{{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "ask-call", ToolName: "ask_user",
+		}},
+	}})[0]
+	messages := []ModelMessage{
+		{Content: newTextContent("missing role")},
+		{Role: "user", Content: newTextContent("history 0")},
+		{Role: "assistant", Content: newTextContent("answer 0")},
+		{Role: "user", Content: newTextContent("history 1")},
+		webCall,
+		webResult,
+		{Role: "assistant", Content: newTextContent("answer 1")},
+		{Role: "user", Content: newTextContent("history 2")},
+		{Role: "assistant", Content: newTextContent("answer 2")},
+		{Role: "user", Content: newTextContent("history 3")},
+		askCall,
+		{Role: "user", Content: newTextContent("pipeline current")},
+		{Role: "user", Content: newTextContent("memory recall")},
+	}
+	currentIndex := 11
+	memoryIndex := 12
+
+	want := sanitizeMessages(messages)
+	if len(want) <= 10 {
+		t.Fatalf("fixture did not activate tool stripping: %d messages", len(want))
+	}
+	want = stripToolMessages(want)
+	want = repairToolCallClosures(want, syntheticToolClosureError)
+	got, gotCurrent, gotMemory := normalizeContextMessages(messages, &currentIndex, &memoryIndex)
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalized messages changed: got %#v want %#v", got, want)
+	}
+	if gotCurrent == nil || *gotCurrent != 9 || got[*gotCurrent].TextContent() != "pipeline current" {
+		t.Fatalf("current index = %#v in %#v, want pipeline current at 9", gotCurrent, got)
+	}
+	if gotMemory == nil || *gotMemory != 10 || got[*gotMemory].TextContent() != "memory recall" {
+		t.Fatalf("memory index = %#v in %#v, want memory recall at 10", gotMemory, got)
+	}
+}
+
+func TestPrependContextMessagesShiftsTrackedCurrentUser(t *testing.T) {
+	t.Parallel()
+
+	prefix := []ModelMessage{
+		{Role: "user", Content: newTextContent("parent fork context")},
+		{Role: "assistant", Content: newTextContent("parent answer")},
+	}
+	messages := []ModelMessage{
+		{Role: "assistant", Content: newTextContent("thread history")},
+		{Role: "user", Content: newTextContent("pipeline current")},
+	}
+	currentIndex := 1
+
+	got, gotCurrent := prependContextMessages(prefix, messages, &currentIndex)
+
+	if gotCurrent == nil || *gotCurrent != 3 {
+		t.Fatalf("current index = %#v, want shifted index 3", gotCurrent)
+	}
+	if got[*gotCurrent].TextContent() != "pipeline current" {
+		t.Fatalf("tracked message = %q, want pipeline current", got[*gotCurrent].TextContent())
+	}
+}
+
+func TestBuildProviderSourceFragsPreservesLegacyPromptHookAndMemoryBytes(t *testing.T) {
+	t.Parallel()
+	params := native.SystemPromptParams{SessionType: sessionmode.Chat, Timezone: "UTC"}
+	hookTexts := []string{
+		formatServiceHookContext(hooks.EventBeforePromptBuild, "before bytes"),
+		formatServiceHookContext(hooks.EventAfterPromptBuild, "after bytes"),
+	}
+	system := native.GenerateSystemPrompt(params) + "\n\n" + hookTexts[0] + "\n\n" + hookTexts[1]
+	messages := []sdk.Message{
+		sdk.UserMessage("raw memory recall\n\n[Hook Context: AfterMemorySearch]\nraw memory hook"),
+		sdk.UserMessage("  current request  "),
+	}
+	index := 1
+	cfg := native.RunConfig{
+		System: system, Messages: messages, ContextCurrentUserMessageIndex: &index,
+		ContextQueryMaterialized: true, ContextScope: contextfrag.Scope{BotID: "bot-1"},
+	}
+	cfg.ContextSourceFrags = buildProviderSourceFrags(context.Background(), cfg, native.GenerateSystemSections(params), hookTexts)
+
+	hookCount := 0
+	for _, frag := range cfg.ContextSourceFrags {
+		if frag.Kind == contextfrag.KindHookContext {
+			hookCount++
+		}
+	}
+	if hookCount != 1 {
+		t.Fatalf("hook fragment count = %d, want one combined system tail", hookCount)
+	}
+	got := contextview.ApplyProviderRunConfig(context.Background(), nil, cfg)
+	if got.System != system || !reflect.DeepEqual(got.Messages, messages) {
+		t.Fatalf("provider bytes changed: system=%q messages=%#v", got.System, got.Messages)
 	}
 }
 

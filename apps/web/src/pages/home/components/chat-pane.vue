@@ -508,11 +508,37 @@
                         />
                       </DropdownMenuItem>
                     </template>
-                    <!-- Folder-bound chats pin the workspace target for the
-                       session's whole life, so the computer switcher gives way
-                       to a read-only folder entry; a draft can still opt out
-                       before the session exists. -->
-                    <template v-if="composerFolderLocked">
+                    <!-- Folder binding. A draft picks where it lands here, the
+                       same choice the sidebar's per-folder ＋ makes, so a new
+                       chat isn't stuck folderless just because it was started
+                       from the composer. Once the session exists the binding
+                       pins its workspace target for life, so the picker gives
+                       way to a read-only entry. -->
+                    <template v-if="composerFolderPickable">
+                      <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuLabel>{{ $t('chat.folder') }}</DropdownMenuLabel>
+                      <DropdownMenuItem @select="clearWorkingFolder">
+                        <X class="size-4 shrink-0" />
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.folderDetachDraft') }}</span>
+                        <Check
+                          v-if="!draftWorkingFolder"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-for="folder in selectableFolders"
+                        :key="folder.id"
+                        @select="selectWorkingFolder(folder)"
+                      >
+                        <FolderOpen class="size-4 shrink-0" />
+                        <span class="min-w-0 flex-1 truncate">{{ folder.name }}</span>
+                        <Check
+                          v-if="draftWorkingFolder?.id === folder.id"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                    </template>
+                    <template v-else-if="composerFolderLocked">
                       <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
                       <DropdownMenuLabel>{{ $t('chat.folder') }}</DropdownMenuLabel>
                       <DropdownMenuItem disabled>
@@ -529,7 +555,7 @@
                       </DropdownMenuItem>
                     </template>
                     <template v-if="showComputersMenu">
-                      <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComposerFolderSection" />
                       <DropdownMenuLabel>{{ $t('chat.computers') }}</DropdownMenuLabel>
                       <DropdownMenuItem
                         v-if="workspaceTargetsInitialLoading"
@@ -585,7 +611,7 @@
                         />
                       </DropdownMenuItem>
                     </template>
-                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu || composerFolderLocked" />
+                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu || showComposerFolderSection" />
                     <DropdownMenuItem
                       :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
                       @select="fileInput?.click()"
@@ -655,20 +681,6 @@
                       </div>
                     </PopoverContent>
                   </Popover>
-
-                  <Button
-                    v-if="activeIsACP"
-                    type="button"
-                    variant="ghost"
-                    class="h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
-                    disabled
-                  >
-                    <FolderOpen class="size-3.5 shrink-0" />
-                    <span
-                      ref="acpProjectLabelEl"
-                      class="min-w-0 truncate text-label"
-                    >{{ activeACPProjectLabel }}</span>
-                  </Button>
 
                   <div class="relative size-9 max-md:size-11 shrink-0">
                     <SessionInfoRing
@@ -757,6 +769,7 @@ import {
 import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Spinner, menuChromeClass, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkdirsStore } from '@/store/workdirs'
+import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
@@ -791,7 +804,7 @@ import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
 import { useIsMobile } from '@/composables/useIsMobile'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { findLatestPendingChatDecision } from './chat-pending-decision'
@@ -1131,6 +1144,21 @@ const composerFolderName = computed(() => {
   }
   return draftWorkingFolder.value?.name?.trim() || t('chat.folderUnavailable')
 })
+// Folders a draft may bind to. ACP runs only in the native workspace, so a
+// remote folder is left out rather than offered as a choice that binds nothing.
+const selectableFolders = computed(() => {
+  const folders = workdirsStore.workdirsFor(currentBotId.value).filter(folder => !folder.archived && !!folder.id)
+  if (activeUsesACPComposer.value) return folders.filter(folder => folder.target_kind !== 'remote')
+  return folders
+})
+// The picker only makes sense before the session exists; an empty folder list
+// falls through to the locked entry (or to nothing at all).
+const composerFolderPickable = computed(() => !activeSession.value && selectableFolders.value.length > 0)
+const showComposerFolderSection = computed(() => composerFolderPickable.value || composerFolderLocked.value)
+
+function selectWorkingFolder(folder: BotWorkdir) {
+  workdirsStore.setWorkingWorkdir(currentBotId.value, folder.id ?? null)
+}
 
 function clearWorkingFolder() {
   workdirsStore.setWorkingWorkdir(currentBotId.value, null)
@@ -1271,12 +1299,6 @@ const acpOperationScope = computed(() => JSON.stringify([
   activeACPProjectMode.value,
 ]))
 const acpConfigChanging = computed(() => acpConfigChangeScope.value === acpOperationScope.value)
-const activeACPProjectLabel = computed(() => {
-  if (isACPNoProject(activeSessionMetadata.value)) return t('chat.noProject')
-  const path = activeACPProjectPath.value
-  const parts = path.split('/').filter(Boolean)
-  return path ? parts[parts.length - 1] ?? path : t('chat.noProject')
-})
 function messageMatchesForkSource(message: ChatMessage): boolean {
   const forkMessageId = forkSource.value?.forkMessageId?.trim()
   if (!forkMessageId) return false
@@ -2174,7 +2196,6 @@ const {
   textareaEl,
   composerEl,
   modelLabelEl,
-  acpProjectLabelEl,
   isMultiline,
   composerRadiusMs,
   composerRadiusEase,
@@ -2187,8 +2208,6 @@ const {
   showAttachmentGrid,
   mobileMultiline: isMobile,
   modelTriggerLabel,
-  activeIsACP,
-  activeACPProjectLabel,
 })
 
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0 || requestedSkills.value.length > 0)

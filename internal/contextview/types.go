@@ -1,0 +1,90 @@
+package contextview
+
+import contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+
+type BuildInput struct {
+	Scope           contextfrag.Scope
+	Intent          contextfrag.Intent
+	Sources         []SourceSpec
+	Targets         []contextfrag.RenderTarget
+	Budget          BudgetEnvelope
+	DynamicMutators []contextfrag.DynamicMutator
+	Options         BuildOptions
+}
+
+type SourceSpec struct {
+	Name   string
+	Config any
+}
+
+// BudgetEnvelope carries independently configured fragment policies. The
+// caller remains responsible for the already-materialized history window.
+type BudgetEnvelope struct {
+	ToolExchange *contextfrag.ToolExchangePolicy
+}
+
+type BuildOptions struct {
+	DryRun bool
+}
+
+type ContextView struct {
+	Intent      contextfrag.Intent
+	SourceFrags []contextfrag.ContextFrag
+	Selected    []contextfrag.ContextFrag
+	Placement   PlacementPlan
+	Manifest    contextfrag.Manifest
+	Rendered    map[contextfrag.RenderTarget]RenderedPayload
+	Trace       BuildTrace
+}
+
+type RenderedPayload struct {
+	Target      contextfrag.RenderTarget
+	ContentHash string
+	Data        any
+}
+
+type PlacementPlan struct {
+	StablePrefixHash   string
+	FirstVolatileIndex int
+	Items              []PlacementItem
+}
+
+type PlacementItem struct {
+	FragID    string
+	Slot      contextfrag.Slot
+	Position  int
+	CacheHint contextfrag.CacheClass
+	Ref       contextfrag.ContextRef
+}
+
+type BuildTrace struct {
+	CollectDurations map[string]int64
+	SelectionSummary SelectionSummary
+	PlacementSummary PlacementSummary
+	RenderSummaries  map[contextfrag.RenderTarget]RenderSummary
+	Warnings         []contextfrag.ValidationWarning
+}
+
+type SelectionSummary struct {
+	TotalCollected int
+	TotalSelected  int
+	TotalDropped   int
+	DropReasons    []DropRecord
+}
+
+type DropRecord struct {
+	FragID string
+	Ref    contextfrag.ContextRef
+	Reason string
+}
+
+type PlacementSummary struct {
+	StablePrefixFrags int
+	DynamicFrags      int
+}
+
+type RenderSummary struct {
+	Target      contextfrag.RenderTarget
+	ContentHash string
+	ItemCount   int
+}

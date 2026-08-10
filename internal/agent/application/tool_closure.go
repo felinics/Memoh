@@ -13,10 +13,16 @@ type pendingToolCall struct {
 	ToolName string
 }
 
+type projectedToolCallKey struct {
+	segment int
+	callID  string
+}
+
 func repairToolCallClosures(messages []ModelMessage, reason string) []ModelMessage {
 	if len(messages) == 0 {
 		return messages
 	}
+	messages = normalizeDecisionProjectionResults(messages)
 	if strings.TrimSpace(reason) == "" {
 		reason = syntheticToolClosureError
 	}
@@ -64,13 +70,14 @@ func repairToolCallClosures(messages []ModelMessage, reason string) []ModelMessa
 			}
 
 		case "tool":
-			filtered := filterToolMessageToPending(msg, pending)
+			filtered := filterToolMessageToPendingCalls(msg, pending)
 			if filtered == nil {
 				continue
 			}
 			repaired = append(repaired, *filtered)
 			for _, result := range extractToolResultParts(*filtered) {
-				delete(pending, strings.TrimSpace(result.ToolCallID))
+				callID := strings.TrimSpace(result.ToolCallID)
+				delete(pending, callID)
 			}
 			if len(pending) == 0 && len(pendingOrder) > 0 {
 				pendingOrder = pendingOrder[:0]
@@ -132,7 +139,7 @@ func extractToolResultParts(msg ModelMessage) []sdk.ToolResultPart {
 	return results
 }
 
-func filterToolMessageToPending(msg ModelMessage, pending map[string]pendingToolCall) *ModelMessage {
+func filterToolMessageToPendingCalls(msg ModelMessage, pending map[string]pendingToolCall) *ModelMessage {
 	results := extractToolResultParts(msg)
 	if len(results) == 0 {
 		return nil
@@ -140,7 +147,8 @@ func filterToolMessageToPending(msg ModelMessage, pending map[string]pendingTool
 
 	filtered := make([]sdk.ToolResultPart, 0, len(results))
 	for _, result := range results {
-		if _, ok := pending[strings.TrimSpace(result.ToolCallID)]; !ok {
+		callID := strings.TrimSpace(result.ToolCallID)
+		if _, ok := pending[callID]; !ok {
 			continue
 		}
 		filtered = append(filtered, result)
@@ -156,6 +164,115 @@ func filterToolMessageToPending(msg ModelMessage, pending map[string]pendingTool
 	filteredMsg := converted[0]
 	filteredMsg.Usage = msg.Usage
 	return &filteredMsg
+}
+
+// normalizeDecisionProjectionResults repairs the one ordering exception made
+// by ACP decision persistence. The projection is stored while the turn is
+// waiting, before earlier narration is flushed; move its real result directly
+// behind the projection and drop duplicate legacy projection rows. IDs are
+// scoped to one user turn so adapter-local counters can safely restart.
+func normalizeDecisionProjectionResults(messages []ModelMessage) []ModelMessage {
+	projected := map[projectedToolCallKey]struct{}{}
+	results := map[projectedToolCallKey]sdk.ToolResultPart{}
+	segment := 0
+	for _, msg := range messages {
+		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
+		case "assistant":
+			for _, call := range extractAssistantToolCallParts(msg) {
+				if isDecisionProjection(call) {
+					projected[projectedToolCallKey{segment, strings.TrimSpace(call.ToolCallID)}] = struct{}{}
+				}
+			}
+		case "tool":
+			for _, result := range extractToolResultParts(msg) {
+				key := projectedToolCallKey{segment, strings.TrimSpace(result.ToolCallID)}
+				if _, ok := projected[key]; ok {
+					if _, exists := results[key]; !exists {
+						results[key] = result
+					}
+				}
+			}
+		default:
+			segment++
+		}
+	}
+	if len(results) == 0 {
+		return messages
+	}
+
+	out := make([]ModelMessage, 0, len(messages))
+	emitted := map[projectedToolCallKey]struct{}{}
+	segment = 0
+	for _, msg := range messages {
+		sdkMsg := modelMessageToSDKMessage(msg)
+		parts := make([]sdk.MessagePart, 0, len(sdkMsg.Content))
+		pulled := make([]sdk.ToolResultPart, 0, 1)
+		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
+		case "assistant":
+			for _, part := range sdkMsg.Content {
+				call, ok := part.(sdk.ToolCallPart)
+				if !ok || !isDecisionProjection(call) {
+					parts = append(parts, part)
+					continue
+				}
+				key := projectedToolCallKey{segment, strings.TrimSpace(call.ToolCallID)}
+				result, hasResult := results[key]
+				if !hasResult {
+					parts = append(parts, part)
+					continue
+				}
+				if _, duplicate := emitted[key]; duplicate {
+					continue
+				}
+				emitted[key] = struct{}{}
+				parts = append(parts, part)
+				pulled = append(pulled, result)
+			}
+		case "tool":
+			for _, part := range sdkMsg.Content {
+				result, ok := part.(sdk.ToolResultPart)
+				if ok {
+					key := projectedToolCallKey{segment, strings.TrimSpace(result.ToolCallID)}
+					if _, moved := results[key]; moved {
+						continue
+					}
+				}
+				parts = append(parts, part)
+			}
+		default:
+			parts = append(parts, sdkMsg.Content...)
+			segment++
+		}
+		if normalized := modelMessageWithParts(msg, sdkMsg, parts); normalized != nil {
+			out = append(out, *normalized)
+		}
+		if len(pulled) > 0 {
+			out = append(out, sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(pulled...)})...)
+		}
+	}
+	return out
+}
+
+func isDecisionProjection(call sdk.ToolCallPart) bool {
+	if strings.TrimSpace(call.ToolCallID) == "" || call.ProviderMetadata == nil {
+		return false
+	}
+	_, userInput := call.ProviderMetadata["user_input"]
+	_, approval := call.ProviderMetadata["approval"]
+	return userInput || approval
+}
+
+func modelMessageWithParts(original ModelMessage, sdkMsg sdk.Message, parts []sdk.MessagePart) *ModelMessage {
+	if len(parts) == 0 {
+		return nil
+	}
+	sdkMsg.Content = parts
+	converted := sdkMessagesToModelMessages([]sdk.Message{sdkMsg})
+	if len(converted) == 0 {
+		return nil
+	}
+	converted[0].Usage = original.Usage
+	return &converted[0]
 }
 
 func syntheticToolResultMessage(toolCallID, toolName, reason string) ModelMessage {

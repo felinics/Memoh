@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	tools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/agent/turn"
@@ -41,6 +42,10 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 	}
 	s.sessionRuntime = manager
 	s.decisionRuntime = manager
+	s.publishTurnEvent = func(ctx context.Context, handle sessionruntime.RunHandle, event native.StreamEvent) error {
+		_, err := manager.HandleAgentEvent(ctx, handle, event)
+		return err
+	}
 	manager.SetDecisionStore(s)
 	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
 }

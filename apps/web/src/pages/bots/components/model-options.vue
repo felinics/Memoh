@@ -173,6 +173,7 @@ import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 import ModelDescriptionTooltip from '@/components/model-description-tooltip/index.vue'
 import { getModelDescription, matchesModelSearch } from '@/utils/model-description'
+import { measureVirtualRow } from '@/utils/virtual-row-measure'
 import {
   EFFORT_LABELS,
   EFFORT_OPACITY,
@@ -392,6 +393,9 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     gap: 2,
     overscan: 8,
     getItemKey: (index: number) => rows.value[index]?.key ?? index,
+    // Rows measured while hidden or mid-unmount report height 0; keep the
+    // last real size so the virtualizer's offset never desyncs.
+    measureElement: measureVirtualRow,
   })),
 )
 

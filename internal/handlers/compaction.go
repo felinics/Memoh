@@ -218,11 +218,18 @@ func (h *CompactionHandler) buildTriggerConfig(ctx context.Context, botID, sessi
 		PromptCacheTTL:        providers.ProviderConfigString(resolution.Provider, "prompt_cache_ttl"),
 		WindowTokens:          resolution.WindowTokens,
 	})
+	if chatModelID := strings.TrimSpace(botSettings.ChatModelID); chatModelID != "" {
+		chatModel, chatErr := h.modelsService.GetByID(ctx, chatModelID)
+		if chatErr == nil && chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
+			cfg.ContextWindowTokens = *chatModel.Config.ContextWindow
+		}
+	}
 	cfg.BotID = botID
 	cfg.SessionID = sessionID
 	cfg.Ratio = 100
 	cfg.TotalInputTokens = 1
 	cfg.Manual = true
+	cfg.AllowFrontierFusion = true
 	return cfg, nil
 }
 

@@ -105,30 +105,7 @@ func selectModeTemplate(sessionType string) string {
 
 // GenerateSystemPrompt builds the complete system prompt from files, skills, and context.
 func GenerateSystemPrompt(params SystemPromptParams) string {
-	home := "/data"
-	timezoneName := strings.TrimSpace(params.Timezone)
-	if timezoneName == "" {
-		timezoneName = "UTC"
-	}
-
-	botInfoSection := buildBotInfoSection(params.Bot)
-
-	skillsSection := buildSkillsSection(params.Skills)
-
-	fileSections := buildFileSections(params.Files, params.MaxFilesBytes)
-
-	tmpl := strings.TrimSpace(systemCommonTmpl + "\n\n" + selectModeTemplate(params.SessionType))
-
-	return render(tmpl, map[string]string{
-		"home":                      home,
-		"timezone":                  timezoneName,
-		"botInfoSection":            botInfoSection,
-		"skillsSection":             skillsSection,
-		"platformIdentitiesSection": strings.TrimSpace(params.PlatformIdentitiesSection),
-		"mainAgentSections":         buildMainAgentSections(strings.TrimSpace(params.PlatformIdentitiesSection), skillsSection, fileSections),
-		"subagentSections":          buildSubagentSections(strings.TrimSpace(params.PlatformIdentitiesSection)),
-		"fileSections":              fileSections,
-	})
+	return renderSystemSections(GenerateSystemSections(params))
 }
 
 // SystemPromptParams holds all inputs for system prompt generation.
@@ -299,40 +276,6 @@ func splitHeadTail(maxBytes int) (int, int) {
 		return maxBytes, 0
 	}
 	return headBytes, tailBytes
-}
-
-func buildMainAgentSections(platformIdentitiesSection string, skillsSection, fileSections string) string {
-	identitiesSection := render(includes["_identities"], map[string]string{
-		"platformIdentitiesSection": platformIdentitiesSection,
-	})
-	sections := []string{
-		includes["_memory"],
-		identitiesSection,
-		skillsSection,
-		fileSections,
-	}
-	return joinPromptSections(sections...)
-}
-
-func buildSubagentSections(platformIdentitiesSection string) string {
-	return strings.TrimSpace(render(includes["_identities"], map[string]string{
-		"platformIdentitiesSection": platformIdentitiesSection,
-	}))
-}
-
-func joinPromptSections(sections ...string) string {
-	var sb strings.Builder
-	for _, section := range sections {
-		section = strings.TrimSpace(section)
-		if section == "" {
-			continue
-		}
-		if sb.Len() > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(section)
-	}
-	return sb.String()
 }
 
 func formatSystemFile(file SystemFile) string {

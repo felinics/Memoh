@@ -21,7 +21,6 @@ import (
 	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
-	chatview "github.com/memohai/memoh/internal/agent/view"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
@@ -388,8 +387,9 @@ func TestStreamACPAgentWSRechecksRuntimeOwnerWorkspaceExecBeforePrompt(t *testin
 	}
 }
 
-func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testing.T) {
+func TestStreamChatWSPersistsACPUserInputProjectionOnceBeforePromptReturns(t *testing.T) {
 	t.Parallel()
+	turnPosition := int64(7)
 
 	streamed := []event.StreamEvent{
 		{
@@ -492,11 +492,17 @@ func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testin
 		}),
 		streamEvents: streamed,
 		afterEvents: func() {
-			if len(messages.persisted) != 3 {
-				t.Fatalf("persisted before ACP prompt returned = %d, want user + pending + terminal decision projections", len(messages.persisted))
+			if len(messages.persisted) != 2 {
+				t.Fatalf("persisted before ACP prompt returned = %d, want user + initial decision projection", len(messages.persisted))
 			}
-			if messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" || messages.persisted[2].Role != "assistant" {
-				t.Fatalf("leading persisted roles = %q, %q, %q", messages.persisted[0].Role, messages.persisted[1].Role, messages.persisted[2].Role)
+			if messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" {
+				t.Fatalf("leading persisted roles = %q, %q", messages.persisted[0].Role, messages.persisted[1].Role)
+			}
+			if got := messages.persisted[0]; got.RunID != "run-1" || got.TurnID != "turn-1" || got.TurnPosition == nil || *got.TurnPosition != turnPosition {
+				t.Fatalf("leading user run/turn identity = (%q, %q, %v), want (run-1, turn-1, %d)", got.RunID, got.TurnID, got.TurnPosition, turnPosition)
+			}
+			if got := messages.persisted[1]; got.RunID != "run-1" || got.TurnRequestMessageID != "message-id" {
+				t.Fatalf("decision projection run/request identity = (%q, %q), want (run-1, message-id)", got.RunID, got.TurnRequestMessageID)
 			}
 		},
 	}
@@ -526,6 +532,9 @@ func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testin
 		ChatRequest{
 			BotID:          "bot-1",
 			ThreadID:       "session-1",
+			RunID:          "run-1",
+			TurnID:         "turn-1",
+			TurnPosition:   &turnPosition,
 			Query:          "inspect the app",
 			CurrentChannel: "web",
 		},
@@ -535,8 +544,8 @@ func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testin
 		t.Fatalf("StreamChatWS() error = %v", err)
 	}
 
-	if len(messages.persisted) != 4 {
-		t.Fatalf("persisted %d messages, want user + pending projection + terminal projection + final assistant", len(messages.persisted))
+	if len(messages.persisted) != 5 {
+		t.Fatalf("persisted %d messages, want user + temporary projection + complete ACP transcript", len(messages.persisted))
 	}
 	pendingProjection := persistedModelMessage(t, messages.persisted[1].Content)
 	pendingCalls := extractAssistantToolCallParts(pendingProjection)
@@ -546,41 +555,207 @@ func TestStreamChatWSPersistsACPUserInputProjectionBeforePromptReturns(t *testin
 	if got := toolCallMetadataStatus(pendingCalls[0], "user_input"); got != userinput.StatusPending {
 		t.Fatalf("pending projection status = %q, want pending", got)
 	}
-	terminalProjection := persistedModelMessage(t, messages.persisted[2].Content)
-	terminalCalls := extractAssistantToolCallParts(terminalProjection)
+	terminalCall := persistedModelMessage(t, messages.persisted[2].Content)
+	terminalCalls := extractAssistantToolCallParts(terminalCall)
 	if len(terminalCalls) != 1 || terminalCalls[0].ToolCallID != "ask-1" {
-		t.Fatalf("terminal projected tool calls = %#v, want ask-1", terminalCalls)
+		t.Fatalf("terminal tool calls = %#v, want ask-1", terminalCalls)
 	}
 	if got := toolCallMetadataStatus(terminalCalls[0], "user_input"); got != userinput.StatusCanceled {
 		t.Fatalf("terminal projection status = %q, want canceled", got)
 	}
-	final := persistedModelMessage(t, messages.persisted[3].Content)
+	results := extractToolResultParts(persistedModelMessage(t, messages.persisted[3].Content))
+	if len(results) != 1 || results[0].ToolCallID != "ask-1" || !results[0].IsError {
+		t.Fatalf("terminal synthetic result = %#v, want canceled ask-1 closure", results)
+	}
+	final := persistedModelMessage(t, messages.persisted[4].Content)
 	if got := final.TextContent(); got != "done" {
 		t.Fatalf("final assistant text = %q, want done", got)
 	}
-	if calls := extractAssistantToolCallParts(final); len(calls) != 0 {
-		t.Fatalf("final assistant duplicated projected tool calls: %#v", calls)
-	}
-	turns := chatview.ConvertMessagesToUITurns(recordedMessages(messages.persisted))
-	if len(turns) != 2 || turns[1].Role != "assistant" {
-		t.Fatalf("restored UI turns = %#v, want user + assistant", turns)
-	}
-	toolBlocks := 0
-	for _, block := range turns[1].Messages {
-		if block.Type != chatview.UIMessageTool {
-			continue
-		}
-		toolBlocks++
-		if block.ToolCallID != "ask-1" || block.UserInput == nil || block.UserInput.Status != userinput.StatusCanceled || block.UserInput.CanRespond {
-			t.Fatalf("restored tool block = %#v, want canceled ask_user", block)
-		}
-	}
-	if toolBlocks != 1 {
-		t.Fatalf("restored tool block count = %d, want 1", toolBlocks)
+	if len(messages.deleted) != 1 || len(messages.deleted[0]) != 1 {
+		t.Fatalf("temporary projection cleanup = %#v, want one deleted message", messages.deleted)
 	}
 }
 
-func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
+func TestStreamChatWSPersistsACPSubmittedUserInputResult(t *testing.T) {
+	t.Parallel()
+
+	questionInput := map[string]any{
+		"questions": []any{
+			map[string]any{
+				"text": "Which dynasty?",
+				"kind": "single_select",
+				"options": []any{
+					map[string]any{"label": "Xia"},
+					map[string]any{"label": "Qin"},
+				},
+			},
+		},
+	}
+	uiPayload := map[string]any{
+		"version": 2,
+		"questions": []any{
+			map[string]any{
+				"id":   "q1",
+				"text": "Which dynasty?",
+				"kind": "single_select",
+				"options": []any{
+					map[string]any{"id": "q1.o1", "label": "Xia"},
+					map[string]any{"id": "q1.o2", "label": "Qin"},
+				},
+			},
+		},
+	}
+	submitted := map[string]any{
+		"status": userinput.StatusSubmitted,
+		"answers": []any{
+			map[string]any{
+				"question_id": "q1",
+				"question":    "Which dynasty?",
+				"selected": []any{
+					map[string]any{"id": "q1.o1", "label": "Xia"},
+				},
+			},
+		},
+	}
+	userInputEvent := func(status string) event.StreamEvent {
+		metadata := map[string]any{
+			"user_input_id": "input-1",
+			"short_id":      1,
+			"status":        status,
+			"ui_payload":    uiPayload,
+		}
+		if status == userinput.StatusSubmitted {
+			metadata["answers"] = userinput.AnswersFromResult(submitted)
+		}
+		return event.StreamEvent{
+			Type:        event.UserInputRequest,
+			ToolCallID:  "ask-1",
+			ToolName:    userinput.ToolNameAskUser,
+			UserInputID: "input-1",
+			ShortID:     1,
+			Status:      status,
+			Input:       questionInput,
+			Metadata:    metadata,
+		}
+	}
+	toolResult := map[string]any{
+		"content": []any{
+			map[string]any{"type": "text", "text": `{"status":"submitted"}`},
+		},
+		"structuredContent": submitted,
+	}
+	streamed := []event.StreamEvent{
+		{Type: event.TextDelta, Delta: "Let me quiz you on Chinese history."},
+		{
+			Type:       event.ToolCallStart,
+			ToolCallID: "ask-1",
+			ToolName:   userinput.ToolNameAskUser,
+			Input:      questionInput,
+		},
+		userInputEvent(userinput.StatusPending),
+		userInputEvent(userinput.StatusSubmitted),
+		{
+			Type:       event.ToolCallEnd,
+			ToolCallID: "ask-1",
+			ToolName:   userinput.ToolNameAskUser,
+			Result:     toolResult,
+		},
+		{Type: event.TextDelta, Delta: "Qin is correct."},
+	}
+	messages := &recordingMessageService{}
+	pool := &recordingACPPrompter{
+		result:       withTranscriptOutput(acpclient.PromptResult{Events: streamed}),
+		streamEvents: streamed,
+	}
+	resolver := &Service{
+		messageService: messages,
+		acpPool:        pool,
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: acpRuntimeSessionServiceForTest("user-1"),
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	if err := resolver.StreamChatWS(
+		context.Background(),
+		ChatRequest{
+			BotID:          "bot-1",
+			ThreadID:       "session-1",
+			Query:          "quiz me",
+			CurrentChannel: "web",
+		},
+		make(chan WSStreamEvent, 16),
+		make(chan struct{}),
+	); err != nil {
+		t.Fatalf("StreamChatWS() error = %v", err)
+	}
+
+	if len(messages.persisted) != 5 {
+		t.Fatalf("persisted %d messages, want user + projection + narration + tool result + final assistant", len(messages.persisted))
+	}
+	if got := persistedModelMessage(t, messages.persisted[2].Content).TextContent(); got != "Let me quiz you on Chinese history." {
+		t.Fatalf("persisted leading narration = %q", got)
+	}
+	ordered := modelMessageToSDKMessage(persistedModelMessage(t, messages.persisted[2].Content)).Content
+	if len(ordered) != 2 {
+		t.Fatalf("narration/tool content = %#v, want two ordered parts", ordered)
+	}
+	if text, ok := ordered[0].(sdk.TextPart); !ok || text.Text != "Let me quiz you on Chinese history." {
+		t.Fatalf("first persisted part = %#v, want narration", ordered[0])
+	}
+	if call, ok := ordered[1].(sdk.ToolCallPart); !ok || call.ToolCallID != "ask-1" {
+		t.Fatalf("second persisted part = %#v, want ask_user card", ordered[1])
+	}
+	if got := messages.persisted[3].Role; got != "tool" {
+		t.Fatalf("submitted result role = %q, want tool", got)
+	}
+	results := extractToolResultParts(persistedModelMessage(t, messages.persisted[3].Content))
+	if len(results) != 1 || results[0].ToolCallID != "ask-1" {
+		t.Fatalf("persisted submitted results = %#v, want ask-1", results)
+	}
+
+	if len(messages.deleted) != 1 || len(messages.deleted[0]) != 1 {
+		t.Fatalf("temporary projection cleanup = %#v, want one deleted message", messages.deleted)
+	}
+	history := make([]ModelMessage, 0, len(messages.persisted)-1)
+	for index, persisted := range messages.persisted {
+		if index == 1 { // The temporary waiting projection was deleted.
+			continue
+		}
+		history = append(history, persistedModelMessage(t, persisted.Content))
+	}
+	repaired := repairToolCallClosures(nonNilModelMessages(sanitizeMessages(history)), syntheticToolClosureError)
+	projectionIndex := -1
+	var repairedCalls, repairedResults int
+	for index, message := range repaired {
+		for _, call := range extractAssistantToolCallParts(message) {
+			if call.ToolCallID == "ask-1" {
+				repairedCalls++
+				projectionIndex = index
+			}
+		}
+		for _, result := range extractToolResultParts(message) {
+			if result.ToolCallID != "ask-1" {
+				continue
+			}
+			repairedResults++
+			if result.IsError {
+				t.Fatalf("next-turn history synthesized an error for submitted ask_user: %#v", result)
+			}
+		}
+	}
+	if repairedCalls != 1 || repairedResults != 1 {
+		t.Fatalf("next-turn ask_user call/result count = %d/%d, want 1/1; history=%#v", repairedCalls, repairedResults, repaired)
+	}
+	if projectionIndex < 0 || projectionIndex+1 >= len(repaired) {
+		t.Fatalf("projected call position %d leaves no room for its result", projectionIndex)
+	}
+	following := extractToolResultParts(repaired[projectionIndex+1])
+	if len(following) != 1 || following[0].ToolCallID != "ask-1" {
+		t.Fatalf("message after projection = %#v, want the genuine ask-1 result before narration", repaired[projectionIndex+1])
+	}
+}
+
+func TestStreamChatWSPersistsACPApprovalProjectionOnce(t *testing.T) {
 	t.Parallel()
 
 	streamed := []event.StreamEvent{
@@ -656,8 +831,8 @@ func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
 		t.Fatalf("StreamChatWS() error = %v", err)
 	}
 
-	if len(messages.persisted) != 4 {
-		t.Fatalf("persisted %d messages, want user + pending approval projection + terminal approval projection + final assistant", len(messages.persisted))
+	if len(messages.persisted) != 5 {
+		t.Fatalf("persisted %d messages, want user + temporary projection + complete ACP transcript", len(messages.persisted))
 	}
 	pendingProjection := persistedModelMessage(t, messages.persisted[1].Content)
 	pendingCalls := extractAssistantToolCallParts(pendingProjection)
@@ -667,37 +842,25 @@ func TestStreamChatWSPersistsACPApprovalProjectionTerminalState(t *testing.T) {
 	if got := toolCallMetadataStatus(pendingCalls[0], "approval"); got != toolapproval.StatusPending {
 		t.Fatalf("pending projection status = %q, want pending", got)
 	}
-	terminalProjection := persistedModelMessage(t, messages.persisted[2].Content)
-	terminalCalls := extractAssistantToolCallParts(terminalProjection)
+	terminalCall := persistedModelMessage(t, messages.persisted[2].Content)
+	terminalCalls := extractAssistantToolCallParts(terminalCall)
 	if len(terminalCalls) != 1 || terminalCalls[0].ToolCallID != "write-1" {
-		t.Fatalf("terminal projected tool calls = %#v, want write-1", terminalCalls)
+		t.Fatalf("terminal approval tool calls = %#v, want write-1", terminalCalls)
 	}
 	if got := toolCallMetadataStatus(terminalCalls[0], "approval"); got != toolapproval.StatusApproved {
-		t.Fatalf("terminal projection status = %q, want approved", got)
+		t.Fatalf("terminal approval status = %q, want approved", got)
 	}
-	final := persistedModelMessage(t, messages.persisted[3].Content)
+	toolResult := persistedModelMessage(t, messages.persisted[3].Content)
+	results := extractToolResultParts(toolResult)
+	if len(results) != 1 || results[0].ToolCallID != "write-1" {
+		t.Fatalf("persisted approval tool result = %#v, want write-1", results)
+	}
+	final := persistedModelMessage(t, messages.persisted[4].Content)
 	if got := final.TextContent(); got != "done" {
 		t.Fatalf("final assistant text = %q, want done", got)
 	}
-	if calls := extractAssistantToolCallParts(final); len(calls) != 0 {
-		t.Fatalf("final assistant duplicated projected approval tool calls: %#v", calls)
-	}
-	turns := chatview.ConvertMessagesToUITurns(recordedMessages(messages.persisted))
-	if len(turns) != 2 || turns[1].Role != "assistant" {
-		t.Fatalf("restored UI turns = %#v, want user + assistant", turns)
-	}
-	toolBlocks := 0
-	for _, block := range turns[1].Messages {
-		if block.Type != chatview.UIMessageTool {
-			continue
-		}
-		toolBlocks++
-		if block.ToolCallID != "write-1" || block.Approval == nil || block.Approval.Status != toolapproval.StatusApproved || block.Approval.CanApprove {
-			t.Fatalf("restored tool block = %#v, want approved write", block)
-		}
-	}
-	if toolBlocks != 1 {
-		t.Fatalf("restored tool block count = %d, want 1", toolBlocks)
+	if len(messages.deleted) != 1 || len(messages.deleted[0]) != 1 {
+		t.Fatalf("temporary approval projection cleanup = %#v, want one deleted message", messages.deleted)
 	}
 }
 
@@ -965,46 +1128,6 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 	after := persistedModelMessage(t, messages.persisted[3].Content)
 	if got := after.TextContent(); got != "After" {
 		t.Fatalf("last assistant text = %q, want After", got)
-	}
-}
-
-func TestFilterACPProjectedOutputKeepsToolResults(t *testing.T) {
-	t.Parallel()
-
-	filtered := filterACPProjectedOutput([]sdk.Message{
-		{
-			Role: sdk.MessageRoleAssistant,
-			Content: []sdk.MessagePart{
-				sdk.ToolCallPart{ToolCallID: "ask-1", ToolName: "ask_user"},
-				sdk.TextPart{Text: "done"},
-			},
-		},
-		{
-			Role: sdk.MessageRoleTool,
-			Content: []sdk.MessagePart{
-				sdk.ToolResultPart{
-					ToolCallID: "ask-1",
-					ToolName:   userinput.ToolNameAskUser,
-					Result:     "answer: A",
-				},
-			},
-		},
-	}, map[string]struct{}{"ask-1": {}})
-
-	if len(filtered) != 2 {
-		t.Fatalf("filtered messages = %d, want assistant + tool result", len(filtered))
-	}
-	for _, part := range filtered[0].Content {
-		if _, ok := part.(sdk.ToolCallPart); ok {
-			t.Fatalf("projected assistant tool call was not filtered: %#v", filtered[0].Content)
-		}
-	}
-	if len(filtered[1].Content) != 1 {
-		t.Fatalf("tool message content = %#v, want one result", filtered[1].Content)
-	}
-	result, ok := filtered[1].Content[0].(sdk.ToolResultPart)
-	if !ok || result.ToolCallID != "ask-1" || result.Result != "answer: A" {
-		t.Fatalf("tool result was not preserved: %#v", filtered[1].Content[0])
 	}
 }
 

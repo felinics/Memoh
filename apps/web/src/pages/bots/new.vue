@@ -170,23 +170,40 @@
 
       <Separator class="my-6" />
 
-      <!-- Model -->
+      <!-- Model / Agent -->
       <div>
         <h3 class="text-sm font-medium mb-4">
-          {{ $t('bots.steps.model') }}
+          {{ selectedAcpProfile ? $t('bots.steps.agent') : $t('bots.steps.model') }}
         </h3>
         <p class="text-xs text-muted-foreground mb-3">
-          {{ $t('bots.steps.modelDesc') }}
+          {{ selectedAcpProfile ? $t('bots.steps.agentDesc') : $t('bots.steps.modelDesc') }}
         </p>
-        <Label class="mb-2">{{ $t('bots.settings.chatModel') }}</Label>
-        <ModelSelect
-          v-model="form.chat_model_id"
-          v-model:reasoning-effort="form.reasoning_effort"
-          :models="models"
-          :providers="providers"
-          model-type="chat"
-          :placeholder="$t('common.none')"
-          show-reasoning
+        <!-- Agent-kind chooser (ACP 提权): hides itself when the server
+             publishes no hosted agents — the form then matches the pre-chooser
+             behavior exactly. -->
+        <AgentTypePill
+          v-model="agentType"
+          :profiles="acpProfiles"
+          class="mb-3"
+        />
+        <template v-if="!selectedAcpProfile">
+          <Label class="mb-2">{{ $t('bots.settings.chatModel') }}</Label>
+          <ModelSelect
+            v-model="form.chat_model_id"
+            v-model:reasoning-effort="form.reasoning_effort"
+            :models="models"
+            :providers="providers"
+            model-type="chat"
+            :placeholder="$t('common.none')"
+            show-reasoning
+          />
+        </template>
+        <AcpSetupPanel
+          v-else
+          ref="acpSetupPanelRef"
+          v-model:error-message="acpError"
+          :profile="selectedAcpProfile"
+          :oauth-hint="$t('bots.agentCreate.oauthSettingsHint')"
         />
       </div>
 
@@ -287,14 +304,18 @@ import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
-import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability } from '@memohai/sdk'
-import type { BotsCreateBotRequest } from '@memohai/sdk'
+import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
+import type { BotsCreateBotRequest, AcpprofilePublicProfile } from '@memohai/sdk'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
+import { normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import ModelSelect from './components/model-select.vue'
+import AgentTypePill from './components/agent-type-pill.vue'
+import AcpSetupPanel from './components/acp-setup-panel.vue'
+import { MEMOH_AGENT_VALUE } from './components/agent-type'
 import MemoryProviderSelect from './components/memory-provider-select.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import BotImportPanel from './components/bot-import-panel.vue'
@@ -427,6 +448,27 @@ watch(memoryProviders, (list) => {
   }
 }, { immediate: true })
 
+const { data: acpProfileData } = useQuery({
+  key: ['acp-profiles'],
+  query: async () => {
+    const { data } = await getAcpProfiles({ throwOnError: true })
+    return data
+  },
+})
+
+const acpProfiles = computed(() => acpProfileData.value?.items ?? [])
+
+const agentType = ref(MEMOH_AGENT_VALUE)
+const acpError = ref('')
+const acpSetupPanelRef = ref<InstanceType<typeof AcpSetupPanel> | null>(null)
+
+// Null for the built-in agent; the panel + metadata only exist when a hosted
+// agent is picked.
+const selectedAcpProfile = computed<AcpprofilePublicProfile | null>(() => {
+  if (agentType.value === MEMOH_AGENT_VALUE) return null
+  return acpProfiles.value.find(profile => normalizeACPAgentID(profile.id) === agentType.value) ?? null
+})
+
 // ACL description
 const aclDescription = computed(() => {
   const opt = aclPresetOptions.find(o => o.value === form.acl_preset)
@@ -454,6 +496,24 @@ function handleImported(botId: string) {
   }
 }
 
+// A hosted agent travels as bot metadata (same shape the onboarding bot step
+// builds); the built-in Memoh agent carries none.
+function buildAcpMetadata(): Record<string, unknown> | undefined {
+  const panel = acpSetupPanelRef.value
+  if (!selectedAcpProfile.value || !panel) return undefined
+  const selection = panel.selection()
+  const acpForm: ACPForm = {
+    agents: {
+      [selection.agentId]: {
+        enabled: true,
+        setup_mode: selection.setupMode,
+        managed: selection.setupMode === 'api_key' ? selection.managed : {},
+      },
+    },
+  }
+  return withACPMetadata({}, acpForm, acpProfiles.value)
+}
+
 function buildCreatePayload(): BotsCreateBotRequest {
   const tz = form.timezone === emptyTimezoneValue ? undefined : form.timezone || undefined
 
@@ -464,6 +524,7 @@ function buildCreatePayload(): BotsCreateBotRequest {
     timezone: tz,
     is_active: true,
     acl_preset: form.acl_preset,
+    metadata: buildAcpMetadata(),
     wait_for_ready: true,
   }
 }
@@ -487,6 +548,15 @@ function createStartOptions() {
 
 async function handleSubmit() {
   if (!canSubmit.value || isCreateFlowBlocked.value) return
+
+  // Submit-time validation, not on-blur: the first empty required field is
+  // named inline inside the panel and nothing nags while typing.
+  const missing = selectedAcpProfile.value ? acpSetupPanelRef.value?.missingRequiredField() : null
+  if (missing) {
+    acpError.value = t('bots.agentCreate.requiredError', { field: missing.label || missing.id || '' })
+    return
+  }
+
   submitLoading.value = true
 
   const payload = buildCreatePayload()

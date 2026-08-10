@@ -1,6 +1,7 @@
 package contextfrag
 
 import (
+	"sort"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -21,18 +22,19 @@ func BuildManifest(frags []ContextFrag) Manifest {
 		}
 		manifest.ValidationWarnings = append(manifest.ValidationWarnings, ContextRefWarnings(ref)...)
 		item := ManifestItem{
-			ID:         frag.ID,
-			Ref:        ref,
-			Kind:       frag.Kind,
-			Slot:       frag.Slot,
-			Role:       frag.Role,
-			Priority:   frag.Priority,
-			CacheClass: frag.CacheClass,
-			Trust:      frag.Trust,
-			Source:     frag.Provenance.Source,
-			SourceID:   frag.Provenance.SourceID,
-			Collector:  frag.Provenance.Collector,
-			Scope:      frag.Scope,
+			ID:          frag.ID,
+			Ref:         ref,
+			Kind:        frag.Kind,
+			Slot:        frag.Slot,
+			Role:        frag.Role,
+			Priority:    frag.Priority,
+			CacheClass:  frag.CacheClass,
+			Trust:       frag.Trust,
+			Source:      frag.Provenance.Source,
+			SourceID:    frag.Provenance.SourceID,
+			Collector:   frag.Provenance.Collector,
+			ConflictKey: frag.ConflictKey,
+			Scope:       frag.Scope,
 		}
 		for _, part := range frag.Parts {
 			item.PartTypes = append(item.PartTypes, part.Type)
@@ -47,16 +49,82 @@ func BuildManifest(frags []ContextFrag) Manifest {
 				item.ImageCount++
 			}
 		}
+		item.TokenEstimate = ResolveFragTokens(frag)
 		manifest.Counts.TextBytes += item.TextBytes
 		manifest.Counts.Images += item.ImageCount
+		manifest.Counts.TokenEstimate += item.TokenEstimate
 		if frag.Coverage != nil {
 			manifest.CoverageTrace = append(manifest.CoverageTrace, *frag.Coverage)
 		}
 		manifest.Items = append(manifest.Items, item)
 	}
 	manifest.Counts.Fragments = len(frags)
+	manifest.Breakdown = breakdownFromItems(manifest.Items)
+	manifest.TrustBreakdown = trustBreakdownFromItems(manifest.Items)
 	manifest.RenderedOutputs = renderedOutputRefs(frags)
 	return manifest
+}
+
+// trustBreakdownFromItems rolls manifest items up by TrustLevel, ordered by
+// descending token estimate with Trust as the tie-breaker.
+func trustBreakdownFromItems(items []ManifestItem) []TrustBreakdown {
+	if len(items) == 0 {
+		return nil
+	}
+	byTrust := make(map[TrustLevel]*TrustBreakdown, 4)
+	for _, item := range items {
+		entry, ok := byTrust[item.Trust]
+		if !ok {
+			entry = &TrustBreakdown{Trust: item.Trust}
+			byTrust[item.Trust] = entry
+		}
+		entry.Fragments++
+		entry.TokenEstimate += item.TokenEstimate
+		entry.TextBytes += item.TextBytes
+		entry.Images += item.ImageCount
+	}
+	out := make([]TrustBreakdown, 0, len(byTrust))
+	for _, entry := range byTrust {
+		out = append(out, *entry)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TokenEstimate != out[j].TokenEstimate {
+			return out[i].TokenEstimate > out[j].TokenEstimate
+		}
+		return out[i].Trust < out[j].Trust
+	})
+	return out
+}
+
+// breakdownFromItems rolls manifest items up by Kind, ordered by descending
+// token estimate with Kind as the tie-breaker so the output is deterministic.
+func breakdownFromItems(items []ManifestItem) []KindBreakdown {
+	if len(items) == 0 {
+		return nil
+	}
+	byKind := make(map[Kind]*KindBreakdown, len(items))
+	for _, item := range items {
+		entry, ok := byKind[item.Kind]
+		if !ok {
+			entry = &KindBreakdown{Kind: item.Kind}
+			byKind[item.Kind] = entry
+		}
+		entry.Fragments++
+		entry.TokenEstimate += item.TokenEstimate
+		entry.TextBytes += item.TextBytes
+		entry.Images += item.ImageCount
+	}
+	out := make([]KindBreakdown, 0, len(byKind))
+	for _, entry := range byKind {
+		out = append(out, *entry)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].TokenEstimate != out[j].TokenEstimate {
+			return out[i].TokenEstimate > out[j].TokenEstimate
+		}
+		return out[i].Kind < out[j].Kind
+	})
+	return out
 }
 
 // Render builds the legacy SDK-shaped view from fragments.

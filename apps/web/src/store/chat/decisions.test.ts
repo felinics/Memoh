@@ -268,7 +268,43 @@ describe('chat decisions', () => {
       decision_id: 'input-1',
       control_id: 'control-1',
     })])
-    expect(transcript.markUserInputDecision).toHaveBeenCalledWith('input-1', 'submitted')
+    expect(transcript.markUserInputDecision).toHaveBeenCalledWith(
+      'input-1',
+      'submitted',
+      [{ question_id: 'q1', option_ids: ['yes'] }],
+    )
+  })
+
+  it('keeps a user-input decision optimistic while the run waits for it', async () => {
+    const current = run([{
+      id: 1,
+      type: 'tool',
+      name: 'ask_user',
+      input: {},
+      tool_call_id: 'call-input',
+      running: false,
+      user_input: {
+        user_input_id: 'input-1',
+        status: 'pending',
+        can_respond: true,
+      },
+    }])
+    current.status = 'waiting_decision'
+    const { decisions, sent, transcript } = setup(current)
+    const userInput: UIUserInput = {
+      user_input_id: 'input-1',
+      status: 'pending',
+      can_respond: true,
+    }
+    const answer = [{ question_id: 'q1', option_ids: ['yes'] }]
+
+    await decisions.respondUserInput(userInput, { answers: answer }, target)
+    decisions.observeRun('session-1', current)
+    await decisions.respondUserInput(userInput, { answers: answer }, target)
+
+    expect(sent).toHaveLength(1)
+    expect(transcript.markUserInputDecision).toHaveBeenCalledTimes(2)
+    expect(transcript.restoreUserInputStates).not.toHaveBeenCalled()
   })
 
   it('marks canceled user input optimistically on the existing run', async () => {
@@ -286,7 +322,7 @@ describe('chat decisions', () => {
       run_id: 'run-1',
       canceled: true,
     })])
-    expect(transcript.markUserInputDecision).toHaveBeenCalledWith('input-1', 'canceled')
+    expect(transcript.markUserInputDecision).toHaveBeenCalledWith('input-1', 'canceled', undefined)
   })
 
   it('does not create a decision command without an authoritative current run', async () => {

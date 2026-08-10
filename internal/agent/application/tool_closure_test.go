@@ -104,3 +104,65 @@ func TestRepairToolCallClosures_PreservesValidAssistantToolPair(t *testing.T) {
 		t.Fatalf("unexpected repaired tool results: %#v", results)
 	}
 }
+
+func projectedAskUserCall(id string) sdk.Message {
+	return sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.ToolCallPart{
+				ToolCallID: id,
+				ToolName:   "ask_user",
+				Input:      map[string]any{"questions": []any{}},
+				ProviderMetadata: map[string]any{
+					"user_input": map[string]any{"user_input_id": "input-1", "status": "pending"},
+				},
+			},
+		},
+	}
+}
+
+func TestRepairToolCallClosures_DoesNotMatchReusedIDAcrossUserTurns(t *testing.T) {
+	t.Parallel()
+
+	messages := sdkMessagesToModelMessages([]sdk.Message{
+		sdk.UserMessage("first turn"),
+		projectedAskUserCall("ask-1"),
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "first turn ended"}}},
+		sdk.UserMessage("second turn"),
+		// Older rows can contain both pending and terminal projections. They
+		// still collapse within this turn, but must not match the first turn.
+		projectedAskUserCall("ask-1"),
+		projectedAskUserCall("ask-1"),
+		sdk.ToolMessage(sdk.ToolResultPart{
+			ToolCallID: "ask-1",
+			ToolName:   "ask_user",
+			Result:     map[string]any{"status": "submitted"},
+		}),
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "second turn done"}}},
+	})
+
+	repaired := repairToolCallClosures(messages, syntheticToolClosureError)
+	callIndexes := make([]int, 0, 2)
+	for index, msg := range repaired {
+		for _, call := range extractAssistantToolCallParts(msg) {
+			if call.ToolCallID == "ask-1" {
+				callIndexes = append(callIndexes, index)
+			}
+		}
+	}
+	if len(callIndexes) != 2 {
+		t.Fatalf("ask-1 call count = %d, want one per turn: %#v", len(callIndexes), repaired)
+	}
+	for index, callIndex := range callIndexes {
+		if callIndex+1 >= len(repaired) {
+			t.Fatalf("ask-1 call at %d has no following result", callIndex)
+		}
+		results := extractToolResultParts(repaired[callIndex+1])
+		if len(results) != 1 || results[0].ToolCallID != "ask-1" {
+			t.Fatalf("result after ask-1 call %d = %#v", index+1, repaired[callIndex+1])
+		}
+		if got, want := results[0].IsError, index == 0; got != want {
+			t.Fatalf("ask-1 result %d IsError = %v, want %v", index+1, got, want)
+		}
+	}
+}

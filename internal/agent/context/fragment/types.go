@@ -18,6 +18,7 @@ const (
 	KindCurrentUserMessage   Kind = "current_user_message"
 	KindAttachmentRef        Kind = "attachment_ref"
 	KindNativeImage          Kind = "native_image"
+	KindSkillsCatalog        Kind = "skills_catalog"
 	KindHookContext          Kind = "hook_context"
 	KindBackgroundSummary    Kind = "background_summary"
 	KindACPContext           Kind = "acp_context"
@@ -27,6 +28,13 @@ const (
 	KindMemoryRecall        Kind = "memory_recall"
 	KindConversationSummary Kind = "conversation_summary"
 )
+
+// WorkspaceInstructionAnchor is the heading that marks where the workspace
+// instruction section begins in a flattened system prompt string; it must
+// stay byte-identical to the heading system_common.md renders. Reverse-parse
+// paths (the discuss pipeline and the legacy-fields fallback) search for it
+// to splice tool usage before it or split it into its own fragment.
+const WorkspaceInstructionAnchor = "\n## Workspace instruction files"
 
 // v1 keeps all context schema versions in lockstep; future migrations can
 // split this into per-schema supported ranges without changing manifest shape.
@@ -125,8 +133,9 @@ const (
 	OverflowDrop      OverflowAction = "drop"
 )
 
-// BudgetPolicy captures the planned budget behavior for a fragment. Phase 1
-// records policy only; enforcement remains in the existing trimming paths.
+// BudgetPolicy captures the budget behavior for a fragment: the selector
+// enforces MaxTokens/MaxChars via Trim or Drop, Summarize is not implemented
+// (deferred to compaction), and Keep marks the fragment as must-keep.
 type BudgetPolicy struct {
 	MaxTokens int            `json:"max_tokens,omitempty"`
 	MaxChars  int            `json:"max_chars,omitempty"`
@@ -224,20 +233,25 @@ type Part struct {
 
 // ContextFrag is the typed context fragment abstraction.
 type ContextFrag struct {
-	ID         string           `json:"id"`
-	Ref        ContextRef       `json:"ref,omitempty"`
-	Kind       Kind             `json:"kind"`
-	Role       sdk.MessageRole  `json:"role,omitempty"`
-	Slot       Slot             `json:"slot"`
-	Priority   int              `json:"priority,omitempty"`
-	CacheClass CacheClass       `json:"cache_class,omitempty"`
-	Trust      TrustLevel       `json:"trust,omitempty"`
-	Scope      Scope            `json:"scope,omitempty"`
-	Budget     BudgetPolicy     `json:"budget,omitempty"`
-	Render     RenderPolicy     `json:"render,omitempty"`
-	Provenance Provenance       `json:"provenance,omitempty"`
-	Coverage   *SummaryCoverage `json:"coverage,omitempty"`
-	Parts      []Part           `json:"parts,omitempty"`
+	ID            string          `json:"id"`
+	Ref           ContextRef      `json:"ref,omitempty"`
+	Kind          Kind            `json:"kind"`
+	Role          sdk.MessageRole `json:"role,omitempty"`
+	Slot          Slot            `json:"slot"`
+	Priority      int             `json:"priority,omitempty"`
+	CacheClass    CacheClass      `json:"cache_class,omitempty"`
+	Trust         TrustLevel      `json:"trust,omitempty"`
+	Scope         Scope           `json:"scope,omitempty"`
+	Budget        BudgetPolicy    `json:"budget,omitempty"`
+	Render        RenderPolicy    `json:"render,omitempty"`
+	Provenance    Provenance      `json:"provenance,omitempty"`
+	TokenEstimate int             `json:"token_estimate,omitempty"`
+	// ConflictKey groups fragments that are alternatives of one another: the
+	// selector keeps only the highest-precedence member (closest scope, then
+	// trust, then latest collected) and drops the rest.
+	ConflictKey string           `json:"conflict_key,omitempty"`
+	Coverage    *SummaryCoverage `json:"coverage,omitempty"`
+	Parts       []Part           `json:"parts,omitempty"`
 }
 
 // AssembledContext is the compiled view produced from fragments.
@@ -262,7 +276,13 @@ type Manifest struct {
 	ContinuityGroups   []ContinuityGroup   `json:"continuity_groups,omitempty"`
 	ValidationWarnings []ValidationWarning `json:"validation_warnings,omitempty"`
 	Counts             ManifestCounts      `json:"counts"`
+	Breakdown          []KindBreakdown     `json:"breakdown,omitempty"`
+	TrustBreakdown     []TrustBreakdown    `json:"trust_breakdown,omitempty"`
+	ToolDefs           []ToolDefAccounting `json:"tool_defs,omitempty"`
 	Items              []ManifestItem      `json:"items,omitempty"`
+	Selection          *SelectionTrace     `json:"selection,omitempty"`
+	CachePlan          *CachePlan          `json:"cache_plan,omitempty"`
+	Mutations          *MutationLedger     `json:"mutations,omitempty"`
 }
 
 // ManifestView names the exact view represented by a manifest.
@@ -286,29 +306,69 @@ const (
 
 // ManifestCounts summarizes fragment composition.
 type ManifestCounts struct {
-	Fragments int `json:"fragments"`
-	Messages  int `json:"messages"`
-	Images    int `json:"images"`
-	TextBytes int `json:"text_bytes"`
+	Fragments     int `json:"fragments"`
+	Messages      int `json:"messages"`
+	Images        int `json:"images"`
+	TextBytes     int `json:"text_bytes"`
+	TokenEstimate int `json:"token_estimate"`
+}
+
+// KindBreakdown aggregates manifest items of one Kind so consumers can show
+// where the context window went without walking every item.
+type KindBreakdown struct {
+	Kind          Kind `json:"kind"`
+	Fragments     int  `json:"fragments"`
+	TokenEstimate int  `json:"token_estimate"`
+	TextBytes     int  `json:"text_bytes,omitempty"`
+	Images        int  `json:"images,omitempty"`
+}
+
+// TrustBreakdown aggregates manifest items of one TrustLevel so consumers
+// can measure how much of the context window is attacker-influenceable
+// (external) versus Memoh-controlled, per turn.
+type TrustBreakdown struct {
+	Trust         TrustLevel `json:"trust"`
+	Fragments     int        `json:"fragments"`
+	TokenEstimate int        `json:"token_estimate"`
+	TextBytes     int        `json:"text_bytes,omitempty"`
+	Images        int        `json:"images,omitempty"`
+}
+
+// ToolDefAccounting records the serialized size of one tool definition sent
+// to the provider. Tool schemas never render as fragments, so without this
+// entry the manifest understates the real prompt by the whole tool roster.
+type ToolDefAccounting struct {
+	Provider      string `json:"provider"`
+	Name          string `json:"name"`
+	Bytes         int    `json:"bytes"`
+	TokenEstimate int    `json:"token_estimate"`
+}
+
+type SelectionTrace struct {
+	Selected    int            `json:"selected"`
+	Dropped     int            `json:"dropped"`
+	DropReasons map[string]int `json:"drop_reasons,omitempty"`
 }
 
 // ManifestItem is one non-sensitive fragment entry.
 type ManifestItem struct {
-	ID         string          `json:"id"`
-	Ref        ContextRef      `json:"ref,omitempty"`
-	Kind       Kind            `json:"kind"`
-	Slot       Slot            `json:"slot"`
-	Role       sdk.MessageRole `json:"role,omitempty"`
-	Priority   int             `json:"priority,omitempty"`
-	CacheClass CacheClass      `json:"cache_class,omitempty"`
-	Trust      TrustLevel      `json:"trust,omitempty"`
-	Source     string          `json:"source,omitempty"`
-	SourceID   string          `json:"source_id,omitempty"`
-	Collector  string          `json:"collector,omitempty"`
-	PartTypes  []PartType      `json:"part_types,omitempty"`
-	TextBytes  int             `json:"text_bytes,omitempty"`
-	ImageCount int             `json:"image_count,omitempty"`
-	Scope      Scope           `json:"scope,omitempty"`
+	ID            string          `json:"id"`
+	Ref           ContextRef      `json:"ref,omitempty"`
+	Kind          Kind            `json:"kind"`
+	Slot          Slot            `json:"slot"`
+	Role          sdk.MessageRole `json:"role,omitempty"`
+	Priority      int             `json:"priority,omitempty"`
+	CacheClass    CacheClass      `json:"cache_class,omitempty"`
+	Trust         TrustLevel      `json:"trust,omitempty"`
+	Source        string          `json:"source,omitempty"`
+	SourceID      string          `json:"source_id,omitempty"`
+	Collector     string          `json:"collector,omitempty"`
+	ConflictKey   string          `json:"conflict_key,omitempty"`
+	PartTypes     []PartType      `json:"part_types,omitempty"`
+	TextBytes     int             `json:"text_bytes,omitempty"`
+	ImageCount    int             `json:"image_count,omitempty"`
+	TokenEstimate int             `json:"token_estimate,omitempty"`
+	Scope         Scope           `json:"scope,omitempty"`
 }
 
 type SlotRenderPolicy struct {
@@ -398,4 +458,23 @@ type ContextConflict struct {
 	Key      string       `json:"key,omitempty"`
 	Expected string       `json:"expected,omitempty"`
 	Actual   string       `json:"actual,omitempty"`
+}
+
+// ToolExchangePolicy asks the selector to strip bulky tool interactions from
+// history: tool results and non-conversational tool calls are removed while
+// ask_user exchanges survive because the question and answer are part of the
+// visible conversation. MinMessages gates the policy: it applies only when
+// the history holds more message fragments than the threshold (zero applies
+// it unconditionally).
+type ToolExchangePolicy struct {
+	MinMessages int
+}
+
+const defaultToolExchangeMinMessages = 10
+
+// DefaultToolExchangePolicy returns the package's shared default
+// tool-exchange stripping policy. Returns a fresh pointer on every call so
+// callers never share (and risk mutating) the same underlying struct.
+func DefaultToolExchangePolicy() *ToolExchangePolicy {
+	return &ToolExchangePolicy{MinMessages: defaultToolExchangeMinMessages}
 }
