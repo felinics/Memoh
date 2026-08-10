@@ -19,12 +19,9 @@
           <template #sidebar-header>
             <DetailNavSidebar
               :back-label="t('projects.title')"
-              :groups="navGroups"
-              :active-value="activeTab"
               :mac-traffic-reserve="macTrafficReserve"
               :searchable="false"
               @back="goBack"
-              @select="(v: string) => (activeTab = v)"
             >
               <template #identity>
                 <div class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-3">
@@ -47,7 +44,13 @@
             </DetailNavSidebar>
           </template>
 
-          <template #sidebar-content />
+          <template #sidebar-content>
+            <DetailNavMenu
+              :groups="navGroups"
+              :active-value="activeTab"
+              @select="(v: string) => (activeTab = v)"
+            />
+          </template>
           <template #sidebar-footer />
 
           <template #detail>
@@ -85,6 +88,7 @@ import { PageShell, SettingsSection, toast } from '@felinic/ui'
 import { getProjectsByProjectId, type ProjectProject } from '@memohai/sdk'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 import DetailNavSidebar from '@/components/detail-nav-sidebar/index.vue'
+import DetailNavMenu from '@/components/detail-nav-sidebar/menu.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { resolveApiErrorMessage } from '@/utils/api-error'

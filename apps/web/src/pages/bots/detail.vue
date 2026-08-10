@@ -23,18 +23,15 @@
           @close-detail="closeMobileDetail"
         >
           <template #sidebar-header>
-            <!-- Back row, search box and the grouped nav all live in the shared
-                 DetailNavSidebar; only the identity card below is bot-specific.
-                 The layout's header/content split means the shared component
-                 spans both slots — its own markup keeps them in one flow. -->
+            <!-- Fixed head of the detail sidebar: back row, search box and the
+                 bot-specific identity card. The scrollable grouped nav is
+                 DetailNavMenu in the content slot below; the two parts share
+                 the search query via v-model/query. -->
             <DetailNavSidebar
+              v-model="navSearchQuery"
               :back-label="backLabel"
-              :groups="groupedTabs"
-              :active-value="activeTab"
               :mac-traffic-reserve="macTrafficReserve"
-              :matches="tabMatchesSearch"
               @back="goBack()"
-              @select="selectTab"
             >
               <template #identity>
                 <!-- Identity floats as a card — same recipe as the bots-list persona
@@ -142,7 +139,15 @@
             </DetailNavSidebar>
           </template>
 
-          <template #sidebar-content />
+          <template #sidebar-content>
+            <DetailNavMenu
+              :groups="groupedTabs"
+              :query="navSearchQuery"
+              :active-value="activeTab"
+              :matches="tabMatchesSearch"
+              @select="onNavSelect"
+            />
+          </template>
 
           <template #sidebar-footer />
 
@@ -201,6 +206,7 @@ import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { toast } from '@felinic/ui'
 import DetailNavSidebar from '@/components/detail-nav-sidebar/index.vue'
+import DetailNavMenu from '@/components/detail-nav-sidebar/menu.vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
@@ -393,7 +399,7 @@ const searchIndex = computed(() => {
   }))
 })
 
-// Extra search reach beyond the label/value match DetailNavSidebar already
+// Extra search reach beyond the label/value match DetailNavMenu already
 // does: the tab's own i18n key plus the keyword index, so deep settings
 // (e.g. "telegram", "pgvector") still surface their tab.
 function tabMatchesSearch(tab: { value: string, label: string }, q: string): boolean {
@@ -404,6 +410,17 @@ function tabMatchesSearch(tab: { value: string, label: string }, q: string): boo
       || item.keywords.some(k => k.toLowerCase().includes(q))
     ),
   )
+}
+
+// Search text for the detail sidebar, shared between the fixed head
+// (DetailNavSidebar, v-model) and the scrollable nav (DetailNavMenu, query
+// prop). Selecting a row consumes the narrowing — the pre-split component
+// cleared the query inside its own select().
+const navSearchQuery = ref('')
+
+function onNavSelect(value: string): void {
+  navSearchQuery.value = ''
+  selectTab(value)
 }
 
 function selectTab(value: string): void {

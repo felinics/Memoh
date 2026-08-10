@@ -37,7 +37,7 @@
     >
       <Search class="absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
       <Input
-        v-model="searchQuery"
+        v-model="query"
         type="text"
         name="detail-nav-search"
         autocomplete="off"
@@ -48,71 +48,40 @@
         :placeholder="searchPlaceholder ?? t('common.search')"
       />
       <button
-        v-if="searchQuery"
+        v-if="query"
         type="button"
         :class="clearButtonClass"
         :title="t('common.clear')"
         :aria-label="t('common.clear')"
-        @click="searchQuery = ''"
+        @click="query = ''"
       >
         <X class="size-2.5" />
       </button>
     </div>
   </div>
-
-  <!-- Grouped nav rows; search narrows the groups in place rather than
-       swapping to a separate result list. -->
-  <div class="px-2 pb-2">
-    <template v-if="displayGroups.length">
-      <div
-        v-for="(group, idx) in displayGroups"
-        :key="group.key"
-        :class="idx > 0 ? 'mt-4' : ''"
-      >
-        <SidebarMenu class="m-0 gap-1 p-0">
-          <SidebarMenuItem
-            v-for="item in group.items"
-            :key="item.value"
-          >
-            <NavItem
-              :active="activeValue === item.value"
-              :aria-current="activeValue === item.value ? 'page' : undefined"
-              @click="select(item.value)"
-            >
-              <component
-                :is="item.icon"
-                v-if="item.icon"
-                :stroke-width="1.75"
-                class="size-4 shrink-0"
-              />
-              <span class="whitespace-nowrap">{{ t(item.label) }}</span>
-            </NavItem>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </div>
-    </template>
-    <div
-      v-else
-      class="px-3 py-6 text-center text-xs text-muted-foreground"
-    >
-      {{ t('common.noData') }}
-    </div>
-  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, type Component } from 'vue'
+import { type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronLeft, Search, X } from 'lucide-vue-next'
-import { Input, NavItem, SidebarMenu, SidebarMenuItem } from '@felinic/ui'
+import { Input, NavItem } from '@felinic/ui'
 
-// The left bar shared by every detail surface that configures ONE entity
-// (a bot, a project): back row → identity → search → grouped nav. It owns the
-// chrome and the in-place search narrowing; the caller owns what the rows mean
-// and how selecting one navigates.
+// The fixed head of the left bar shared by every detail surface that
+// configures ONE entity (a bot, a project): back row → identity → search.
+// The grouped nav is a SEPARATE component (./menu.vue) on purpose: the
+// layout renders its header slot in a bare non-scrolling container and its
+// content slot inside a ScrollArea, so the head goes to #sidebar-header and
+// the menu to #sidebar-content. Collapsing the two into one component placed
+// in a single slot either loses scrolling (header slot) or scrolls the back
+// row away (content slot) — both were shipped once and reverted.
+//
+// The search query is the one piece of state the two parts share, so it is
+// lifted to the caller via v-model and handed to the menu as the `query`
+// prop. Filtering itself lives in the menu.
 export interface DetailNavItem {
   value: string
-  /** i18n key, resolved here. */
+  /** i18n key, resolved by the menu. */
   label: string
   icon?: Component
 }
@@ -122,56 +91,28 @@ export interface DetailNavGroup {
   items: DetailNavItem[]
 }
 
-const props = withDefaults(defineProps<{
+withDefaults(defineProps<{
   backLabel: string
-  groups: DetailNavGroup[]
-  activeValue: string
   searchable?: boolean
   searchPlaceholder?: string
+  // When true, the sidebar reserves a draggable macOS traffic-light strip above
+  // its visible controls.
   macTrafficReserve?: boolean
-  /**
-   * Extra match test for the search box, on top of the label/value match
-   * every caller gets. Lets a caller surface a row by the settings buried
-   * inside it (e.g. "telegram" finding the Channels tab).
-   */
-  matches?: (item: DetailNavItem, query: string) => boolean
 }>(), {
   searchable: true,
   searchPlaceholder: undefined,
   macTrafficReserve: false,
-  matches: undefined,
 })
 
 const emit = defineEmits<{
   back: []
-  select: [value: string]
 }>()
 
-const { t } = useI18n()
+const query = defineModel<string>({ default: '' })
 
-const searchQuery = ref('')
-const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
+const { t } = useI18n()
 
 // Hand-rolled clear affordance inside the field (an in-field control, not a
 // standalone button) — same shape the bot detail sidebar shipped.
 const clearButtonClass = 'absolute right-2 top-1/2 flex size-4 shrink-0 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted' /* ui-allow-style */
-
-function itemMatches(item: DetailNavItem): boolean {
-  const query = normalizedQuery.value
-  if (!query) return true
-  if (t(item.label).toLowerCase().includes(query)) return true
-  if (item.value.toLowerCase().includes(query)) return true
-  return props.matches?.(item, query) ?? false
-}
-
-const displayGroups = computed(() =>
-  props.groups
-    .map(group => ({ ...group, items: group.items.filter(itemMatches) }))
-    .filter(group => group.items.length > 0),
-)
-
-function select(value: string) {
-  searchQuery.value = ''
-  emit('select', value)
-}
 </script>
