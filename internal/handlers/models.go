@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -13,18 +14,57 @@ import (
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthctx"
+	"github.com/memohai/memoh/internal/providers"
 )
 
 type ModelsHandler struct {
-	service *models.Service
-	logger  *slog.Logger
+	service   *models.Service
+	providers *providers.Service
+	logger    *slog.Logger
 }
 
-func NewModelsHandler(log *slog.Logger, service *models.Service) *ModelsHandler {
+func NewModelsHandler(log *slog.Logger, service *models.Service, providerSvc *providers.Service) *ModelsHandler {
 	return &ModelsHandler{
-		service: service,
-		logger:  log.With(slog.String("handler", "models")),
+		service:   service,
+		providers: providerSvc,
+		logger:    log.With(slog.String("handler", "models")),
 	}
+}
+
+// withReasoning fills each model's resolved reasoning options. It is computed
+// here rather than stored because it depends on the provider's client type,
+// which lives one join away from the model row — and because it is a projection
+// of the catalog, not a fact about it.
+//
+// A provider that cannot be read yields options resolved with an empty client
+// type: the model's own tiers still come through, only the wire policy is
+// missing. That is strictly better than omitting the field and sending the
+// frontend back to deriving it.
+func (h *ModelsHandler) withReasoning(ctx context.Context, list []models.GetResponse) []models.GetResponse {
+	clientTypes := make(map[string]string, 4)
+	for i := range list {
+		if list[i].Type != models.ModelTypeChat {
+			continue
+		}
+		providerID := list[i].ProviderID
+		clientType, cached := clientTypes[providerID]
+		if !cached {
+			if h.providers != nil {
+				if p, err := h.providers.Get(ctx, providerID); err == nil {
+					clientType = p.ClientType
+				}
+			}
+			clientTypes[providerID] = clientType
+		}
+		opts := list[i].ReasoningOptions(clientType)
+		list[i].Reasoning = &opts
+	}
+	return list
+}
+
+// withReasoningOne is withReasoning for a single model.
+func (h *ModelsHandler) withReasoningOne(ctx context.Context, m models.GetResponse) models.GetResponse {
+	return h.withReasoning(ctx, []models.GetResponse{m})[0]
 }
 
 func (h *ModelsHandler) Register(e *echo.Echo) {
@@ -99,7 +139,7 @@ func (h *ModelsHandler) List(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, h.withReasoning(c.Request().Context(), resp))
 }
 
 // GetByID godoc
@@ -122,7 +162,7 @@ func (h *ModelsHandler) GetByID(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
 
 // GetByModelID godoc
@@ -156,7 +196,7 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
 
 // UpdateByID godoc

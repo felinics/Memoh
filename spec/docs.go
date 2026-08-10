@@ -20572,6 +20572,14 @@ const docTemplate = `{
                 "provider_id": {
                     "type": "string"
                 },
+                "reasoning": {
+                    "description": "Reasoning is the model's resolved thinking options, filled by the API layer\n(it depends on the provider's client type). Clients render this rather than\nderiving their own answer from ThinkingMode and ReasoningEfforts — the\nduplication that let the web picker and the wire disagree.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/reasoning.Options"
+                        }
+                    ]
+                },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
                 }
@@ -21368,6 +21376,30 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                }
+            }
+        },
+        "reasoning.Options": {
+            "type": "object",
+            "properties": {
+                "can_disable": {
+                    "description": "CanDisable reports whether picking \"off\" actually reaches the model.",
+                    "type": "boolean"
+                },
+                "default_effort": {
+                    "description": "DefaultEffort is the tier to use when nothing is stored, and the tier to fall\nback to when a stored value is no longer offered by the model.",
+                    "type": "string"
+                },
+                "efforts": {
+                    "description": "Efforts are the selectable active tiers, weakest to strongest as advertised.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "supported": {
+                    "description": "Supported is false when the model has no thinking concept; the other fields\nare then empty and no control should be rendered at all.",
+                    "type": "boolean"
                 }
             }
         },

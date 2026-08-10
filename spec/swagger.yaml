@@ -4031,6 +4031,14 @@ definitions:
         type: string
       provider_id:
         type: string
+      reasoning:
+        allOf:
+        - $ref: '#/definitions/reasoning.Options'
+        description: |-
+          Reasoning is the model's resolved thinking options, filled by the API layer
+          (it depends on the provider's client type). Clients render this rather than
+          deriving their own answer from ThinkingMode and ReasoningEfforts — the
+          duplication that let the web picker and the wire disagree.
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
@@ -4565,6 +4573,29 @@ definitions:
         type: integer
       type:
         type: string
+    type: object
+  reasoning.Options:
+    properties:
+      can_disable:
+        description: CanDisable reports whether picking "off" actually reaches the
+          model.
+        type: boolean
+      default_effort:
+        description: |-
+          DefaultEffort is the tier to use when nothing is stored, and the tier to fall
+          back to when a stored value is no longer offered by the model.
+        type: string
+      efforts:
+        description: Efforts are the selectable active tiers, weakest to strongest
+          as advertised.
+        items:
+          type: string
+        type: array
+      supported:
+        description: |-
+          Supported is false when the model has no thinking concept; the other fields
+          are then empty and no control should be rendered at all.
+        type: boolean
     type: object
   schedule.CreateRequest:
     properties:

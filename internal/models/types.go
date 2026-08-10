@@ -238,6 +238,11 @@ type GetResponse struct {
 	ID      string `json:"id"`
 	ModelID string `json:"model_id"`
 	Model
+	// Reasoning is the model's resolved thinking options, filled by the API layer
+	// (it depends on the provider's client type). Clients render this rather than
+	// deriving their own answer from ThinkingMode and ReasoningEfforts — the
+	// duplication that let the web picker and the wire disagree.
+	Reasoning *reasoning.Options `json:"reasoning,omitempty"`
 }
 
 // UpdateRequest is the payload for updating an existing model. Enable is a

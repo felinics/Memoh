@@ -12,14 +12,14 @@ package reasoning
 type Options struct {
 	// Supported is false when the model has no thinking concept; the other fields
 	// are then empty and no control should be rendered at all.
-	Supported bool
+	Supported bool `json:"supported"`
 	// CanDisable reports whether picking "off" actually reaches the model.
-	CanDisable bool
+	CanDisable bool `json:"can_disable"`
 	// Efforts are the selectable active tiers, weakest to strongest as advertised.
-	Efforts []string
+	Efforts []string `json:"efforts,omitempty"`
 	// DefaultEffort is the tier to use when nothing is stored, and the tier to fall
 	// back to when a stored value is no longer offered by the model.
-	DefaultEffort string
+	DefaultEffort string `json:"default_effort,omitempty"`
 }
 
 // Client types whose wire expresses "off" by omitting the field rather than by
