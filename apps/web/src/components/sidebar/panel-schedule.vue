@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col h-full min-w-0">
+  <div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
     <!-- No bot -->
     <p
       v-if="!currentBotId"

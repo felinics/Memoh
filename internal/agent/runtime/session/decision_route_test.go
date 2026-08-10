@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,24 @@ import (
 	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
 	chatview "github.com/memohai/memoh/internal/agent/view"
 )
+
+func TestRunControlCommandContextPreservesOwnershipLossCause(t *testing.T) {
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	ctrl := &runControl{
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
+	}
+	ctx, cancel := ctrl.commandContext(context.Background())
+	defer cancel()
+
+	ctrl.revokeOwnership(ErrRunOwnershipLost)
+	ctrl.stopCommands()
+
+	<-ctx.Done()
+	if cause := context.Cause(ctx); !errors.Is(cause, ErrRunOwnershipLost) {
+		t.Fatalf("command context cause = %v, want %v", cause, ErrRunOwnershipLost)
+	}
+}
 
 type fakeDecisionStore struct {
 	mu     sync.Mutex

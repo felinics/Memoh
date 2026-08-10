@@ -265,7 +265,7 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
   }
 
   // patchSessionInList applies a partial update to one session in BOTH the
-  // reactive `sessions` array (reassigned so the sidebar virtualizer and any
+  // reactive `sessions` array (reassigned so the sidebar list and any
   // `sessions`-derived computed re-run) and the `sessionById` lookup map. SSE
   // title/touch handlers must route through this: mutating the map's stored
   // object in place (`target.title = ...`) writes the raw object but never

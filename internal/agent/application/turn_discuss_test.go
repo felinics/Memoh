@@ -11,6 +11,7 @@ import (
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
@@ -35,6 +36,8 @@ type fakeDiscussService struct {
 	resolveResult ResolveRunConfigResult
 	inlineFn      func(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart
 	storeCalls    int
+	storeErr      error
+	storeFn       func() error
 }
 
 func (f *fakeDiscussService) ResolveRunConfig(_ context.Context, _, _, _, _, _, _, _ string) (ResolveRunConfigResult, error) {
@@ -50,7 +53,10 @@ func (f *fakeDiscussService) InlineImageAttachments(ctx context.Context, botID s
 
 func (f *fakeDiscussService) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
 	f.storeCalls++
-	return nil
+	if f.storeFn != nil {
+		return f.storeFn()
+	}
+	return f.storeErr
 }
 
 type testAgentStreamer interface {
@@ -279,10 +285,19 @@ func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 
 func TestDiscussRefreshesContextFragWithoutLateBindingMessage(t *testing.T) {
 	agent := &fakeAgentStreamer{}
+	staleIndex := 0
+	staleMemoryIndex := 0
 	resolver := &fakeDiscussService{
 		resolveResult: ResolveRunConfigResult{
-			RunConfig: native.RunConfig{System: "base system"},
-			ModelID:   "model-1",
+			RunConfig: native.RunConfig{
+				System:                         "base system",
+				ContextCurrentUserMessageIndex: &staleIndex,
+				ContextMemoryMessageIndex:      &staleMemoryIndex,
+				ContextSourceFrags: []contextfrag.ContextFrag{{
+					ID: "stale-system-only-source", Slot: contextfrag.SlotSystem,
+				}},
+			},
+			ModelID: "model-1",
 		},
 	}
 	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
@@ -304,6 +319,12 @@ func TestDiscussRefreshesContextFragWithoutLateBindingMessage(t *testing.T) {
 	}
 	if len(cfg.Messages) != 1 {
 		t.Fatalf("messages = %d, want only composed discuss context", len(cfg.Messages))
+	}
+	if cfg.ContextSourceFrags != nil {
+		t.Fatalf("discuss retained stale authoritative source: %#v", cfg.ContextSourceFrags)
+	}
+	if cfg.ContextCurrentUserMessageIndex != nil || cfg.ContextMemoryMessageIndex != nil {
+		t.Fatalf("discuss retained stale message markers: current=%#v memory=%#v", cfg.ContextCurrentUserMessageIndex, cfg.ContextMemoryMessageIndex)
 	}
 	if lastMessageFragContains(cfg.ContextFrags, "Current time:") ||
 		lastMessageFragContains(cfg.ContextFrags, "MUST use the `send` tool") {
@@ -377,6 +398,7 @@ func TestDiscussCancelUnblocksFullEventBuffer(t *testing.T) {
 		resolveResult: ResolveRunConfigResult{ModelID: "model-1"},
 	}
 	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	admitter := a.sessionRuntime.(*scriptedAdmitter)
 	h, err := a.StartTurn(context.Background(), discussCommand())
 	if err != nil {
 		t.Fatal(err)
@@ -389,6 +411,9 @@ func TestDiscussCancelUnblocksFullEventBuffer(t *testing.T) {
 		case _, ok := <-h.Events():
 			if !ok {
 				for range h.Errs() {
+				}
+				if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusAborted {
+					t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusAborted)
 				}
 				return
 			}

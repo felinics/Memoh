@@ -381,6 +381,98 @@ func TestReplaceCompactedMessagesResolvesSupersededGroupToActiveArtifact(t *test
 	}
 }
 
+func TestReplaceCompactedMessagesInsertsMissingFusedArtifactOnceAtAnchor(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID      = "00000000-0000-0000-0000-00000000b020"
+		sessionID  = "00000000-0000-0000-0000-00000000f020"
+		parentAID  = "00000000-0000-0000-0000-00000000c020"
+		parentBID  = "00000000-0000-0000-0000-00000000c021"
+		rollupID   = "00000000-0000-0000-0000-00000000c022"
+		coveredAID = "00000000-0000-0000-0000-000000000201"
+		coveredBID = "00000000-0000-0000-0000-000000000202"
+	)
+	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	coveredSource := func(id string, at time.Time) compaction.CoveredSource {
+		record := historyRecord(id, ModelMessage{Role: "user", Content: newTextContent("outside loaded window")}, nil)
+		return compaction.CoveredSource{Ref: record.Ref, CreatedAtMs: at.UnixMilli()}
+	}
+	marshalCoverage := func(covered []compaction.CoveredSource) []byte {
+		raw, err := json.Marshal(covered)
+		if err != nil {
+			t.Fatalf("marshal coverage: %v", err)
+		}
+		return raw
+	}
+	parentACoverage := []compaction.CoveredSource{coveredSource(coveredAID, base.Add(10*time.Minute))}
+	parentBCoverage := []compaction.CoveredSource{coveredSource(coveredBID, base.Add(20*time.Minute))}
+	rollupCoverage := append(append([]compaction.CoveredSource(nil), parentACoverage...), parentBCoverage...)
+	supersededAt := pgtype.Timestamptz{Time: base.Add(30 * time.Minute), Valid: true}
+	queries := &recordingCompactionLogQueries{logs: []sqlc.BotHistoryMessageCompact{
+		{
+			ID:            mustPGUUID(t, parentAID),
+			BotID:         mustPGUUID(t, botID),
+			SessionID:     mustPGUUID(t, sessionID),
+			Status:        "ok",
+			Summary:       "parent a summary",
+			Coverage:      marshalCoverage(parentACoverage),
+			AnchorStartMs: parentACoverage[0].CreatedAtMs,
+			AnchorEndMs:   parentACoverage[0].CreatedAtMs,
+			SupersededBy:  mustPGUUID(t, rollupID),
+			SupersededAt:  supersededAt,
+		},
+		{
+			ID:            mustPGUUID(t, parentBID),
+			BotID:         mustPGUUID(t, botID),
+			SessionID:     mustPGUUID(t, sessionID),
+			Status:        "ok",
+			Summary:       "parent b summary",
+			Coverage:      marshalCoverage(parentBCoverage),
+			AnchorStartMs: parentBCoverage[0].CreatedAtMs,
+			AnchorEndMs:   parentBCoverage[0].CreatedAtMs,
+			SupersededBy:  mustPGUUID(t, rollupID),
+			SupersededAt:  supersededAt,
+		},
+		{
+			ID:            mustPGUUID(t, rollupID),
+			BotID:         mustPGUUID(t, botID),
+			SessionID:     mustPGUUID(t, sessionID),
+			Status:        "ok",
+			Summary:       "fused earlier context",
+			Coverage:      marshalCoverage(rollupCoverage),
+			AnchorStartMs: rollupCoverage[0].CreatedAtMs,
+			AnchorEndMs:   rollupCoverage[len(rollupCoverage)-1].CreatedAtMs,
+			ParentIds:     []pgtype.UUID{mustPGUUID(t, parentAID), mustPGUUID(t, parentBID)},
+		},
+	}}
+	scope := contextfrag.Scope{BotID: botID, SessionID: sessionID}
+	recent := []historyfrag.HistoryRecord{
+		historyRecord("before-row", ModelMessage{Role: "user", Content: newTextContent("before")}, func(record *historyfrag.HistoryRecord) {
+			record.CreatedAt = base.Add(5 * time.Minute)
+		}),
+		historyRecord("after-row", ModelMessage{Role: "user", Content: newTextContent("after")}, func(record *historyfrag.HistoryRecord) {
+			record.CreatedAt = base.Add(25 * time.Minute)
+		}),
+	}
+
+	got := mustReplaceCompactedMessages(t, &Service{queries: queries}, sessionID, scope, recent)
+
+	wantIDs := []string{"before-row", rollupID, "after-row"}
+	if gotIDs := recordSequenceIDs(got); !reflect.DeepEqual(gotIDs, wantIDs) {
+		t.Fatalf("missing fused artifact placement = %#v, want %#v", gotIDs, wantIDs)
+	}
+	rollupSummaries := 0
+	for _, record := range got {
+		if record.SourceKind == historyfrag.SourceCompactionLog && record.Ref.ID == rollupID {
+			rollupSummaries++
+		}
+	}
+	if rollupSummaries != 1 {
+		t.Fatalf("fused summaries = %d, want exactly 1: %#v", rollupSummaries, got)
+	}
+}
+
 func TestReplaceCompactedMessagesReconcilesStaleRawRowsByDurableCoverage(t *testing.T) {
 	t.Parallel()
 

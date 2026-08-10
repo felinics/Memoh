@@ -171,11 +171,18 @@ func (c *runControl) commandContext(parent context.Context) (context.Context, co
 			parent = runtimefence.WithContext(parent, fence)
 		}
 	}
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancelCause := context.WithCancelCause(parent)
+	cancel := func() { cancelCause(context.Canceled) }
 	if c == nil || c.lifecycleCtx == nil {
 		return ctx, cancel
 	}
-	stop := context.AfterFunc(c.lifecycleCtx, cancel)
+	stop := context.AfterFunc(c.lifecycleCtx, func() {
+		if c.ownershipWasLost() {
+			cancelCause(ErrRunOwnershipLost)
+			return
+		}
+		cancelCause(context.Canceled)
+	})
 	return ctx, func() {
 		stop()
 		cancel()

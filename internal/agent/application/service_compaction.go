@@ -123,6 +123,8 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		return
 	}
 	cfg.TargetTokens = compactionTargetTokens(botSettings.CompactionTargetPercent, rc.contextTokenBudget)
+	cfg.AllowFrontierFusion = true
+	cfg.ContextWindowTokens = rc.contextTokenBudget
 	if err := s.drainCompactionBacklog(ctx, cfg); err != nil {
 		s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
 	}
@@ -187,6 +189,7 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		return compaction.Result{}
 	}
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
+	cfg.ContextWindowTokens = contextTokenBudget
 
 	s.logger.Info("compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),

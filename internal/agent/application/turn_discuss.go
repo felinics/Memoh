@@ -40,6 +40,7 @@ func (s *Service) startDiscussTurn(runCtx context.Context, cmd turn.StartTurnCom
 		return nil, errors.New("turn: discuss runtime not configured")
 	}
 	h := newDiscussHandle(runCtx, cmd, cancel, admission.RunID, s.turnRunFinisher(runCtx, admission))
+	h.publishAgentEvent = s.turnAgentEventPublisher(admission.Handle)
 	go s.pumpDiscuss(runCtx, cmd, h)
 	return h, nil
 }
@@ -96,14 +97,11 @@ func (h *discussHandle) emit(kind string, payload []byte) bool {
 	}
 }
 
-// emitErr mirrors emit for the error channel. Any reported error marks the
-// run failed so finish releases the idempotency claim.
+// emitErr mirrors emit for the error channel. Any reported error marks the run
+// failed; recordStreamFailure preserves explicit cancellation as an abort.
 func (h *discussHandle) emitErr(err error) bool {
-	h.failed.Store(true)
-	if h.streamErr == nil {
-		// Keep the first error: without it the terminal record cannot tell a
-		// discuss turn that broke from one that was stopped.
-		h.streamErr = err
+	if !h.recordStreamFailure(err) {
+		return false
 	}
 	select {
 	case h.errs <- err:
@@ -154,6 +152,9 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	runConfig.Messages = discussMessagesToSDK(cmd.DiscussMessages)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
+	runConfig.ContextCurrentUserMessageIndex = nil
+	runConfig.ContextMemoryMessageIndex = nil
+	runConfig.ContextSourceFrags = nil
 
 	// Inline image attachments from new RC segments so the model receives
 	// them as native vision input (ImagePart) on the first encounter.
@@ -170,9 +171,23 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	eventCh := s.streamDiscussAgent(ctx, runConfig)
 
 	var finalMessages json.RawMessage
+	var terminalEvent native.StreamEvent
+	var terminalPayload []byte
+	var hasTerminalEvent bool
 	for event := range eventCh {
-		if event.Type == native.EventAgentEnd || event.Type == native.EventAgentAbort {
+		terminal := event.Type == native.EventAgentEnd || event.Type == native.EventAgentAbort
+		if terminal {
 			finalMessages = event.Messages
+			terminalEvent = event
+			terminalPayload, _ = json.Marshal(event)
+			hasTerminalEvent = true
+			continue
+		}
+		if h.publishAgentEvent != nil {
+			if publishErr := h.publishAgentEvent(ctx, event); publishErr != nil {
+				h.emitErr(publishErr)
+				return
+			}
 		}
 		payload, marshalErr := json.Marshal(event)
 		if marshalErr != nil {
@@ -190,9 +205,20 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 				cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
 				sdkMsgs, resolved.ModelID,
 			); storeErr != nil {
-				h.emitErr(storeErr)
+				h.emitErr(runtimeHistoryError(storeErr))
+				return
 			}
 		}
+	}
+	if hasTerminalEvent && h.publishAgentEvent != nil {
+		if publishErr := h.publishAgentEvent(ctx, terminalEvent); publishErr != nil {
+			h.emitErr(publishErr)
+			return
+		}
+		h.terminalPublished = true
+	}
+	if len(terminalPayload) > 0 && !h.emit(string(terminalEvent.Type), terminalPayload) {
+		return
 	}
 
 	// Compute pressure on this goroutine so the detached trigger holds a few

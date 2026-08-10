@@ -501,7 +501,12 @@ func TestConvertMessagesToUITurnsKeepsUserInputMetadata(t *testing.T) {
 					"user_input": map[string]any{
 						"user_input_id": "input-1",
 						"short_id":      2,
-						"status":        "pending",
+						"status":        "submitted",
+						"answers": []any{map[string]any{
+							"question_id": "q1",
+							"question":    "Which plan?",
+							"selected":    []any{map[string]any{"id": "q1.o2", "label": "Plan B"}},
+						}},
 						"ui_payload": map[string]any{
 							"version": 2,
 							"questions": []any{map[string]any{
@@ -531,6 +536,9 @@ func TestConvertMessagesToUITurnsKeepsUserInputMetadata(t *testing.T) {
 	}
 	if len(block.UserInput.Questions) != 1 || block.UserInput.Questions[0].Kind != "single_select" {
 		t.Fatalf("unexpected questions: %#v", block.UserInput.Questions)
+	}
+	if len(block.UserInput.Answers) != 1 || block.UserInput.Answers[0].Selected[0].Label != "Plan B" {
+		t.Fatalf("unexpected answers: %#v", block.UserInput.Answers)
 	}
 }
 

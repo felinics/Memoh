@@ -354,6 +354,7 @@ import type {
   ThinkingBlock as ThinkingBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
+import { structuredToolResult } from '@/store/chat-list.normalize'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'
@@ -750,11 +751,9 @@ function isCompletedAskUser(block: ContentBlock): boolean {
   if (block.type !== 'tool') return false
   const b = block as ToolCallBlockType
   if (b.toolName !== 'ask_user') return false
-  const r = b.result as { status?: unknown; answers?: unknown } | null
-  if (r && typeof r === 'object') {
-    if (Array.isArray(r.answers)) return true
-    if (typeof r.status === 'string' && ASK_USER_TERMINAL_STATUSES.has(r.status)) return true
-  }
+  const result = structuredToolResult(b.result)
+  if (Array.isArray(result.answers)) return true
+  if (typeof result.status === 'string' && ASK_USER_TERMINAL_STATUSES.has(result.status)) return true
   const s = b.userInput?.status
   return typeof s === 'string' && ASK_USER_TERMINAL_STATUSES.has(s)
 }

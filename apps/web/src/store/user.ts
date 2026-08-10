@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { useQueryCache } from '@pinia/colada'
 import { getUsersMe } from '@memohai/sdk'
 import { notifyAuthSessionCleared, onAuthSessionCleared, type AuthSessionClearReason } from '@/lib/auth-session'
+import { cancelPendingQueryCacheSave, removeQueryCacheFromDisk } from '@/lib/query-cache-persistence'
 import { resetOnboardingState } from '@/composables/useOnboarding'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { safeLocalRemove, safeSessionRemove } from '@/utils/safe-storage'
@@ -87,8 +88,10 @@ export const useUserStore = defineStore(
     }
 
     const clearFrontendSessionState = (reason: AuthSessionClearReason) => {
+      cancelPendingQueryCacheSave()
       clearQueryCache()
       notifyAuthSessionCleared(reason)
+      removeQueryCacheFromDisk()
     }
 
     const login = (userData: UserInfo, token: string) => {

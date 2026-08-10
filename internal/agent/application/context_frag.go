@@ -1,13 +1,34 @@
 package application
 
 import (
+	"context"
 	"strings"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/contextview"
 )
+
+func buildProviderSourceFrags(
+	ctx context.Context,
+	cfg native.RunConfig,
+	sections []native.SystemSection,
+	promptHookTexts []string,
+) []contextfrag.ContextFrag {
+	frags := native.SystemSectionFrags(sections, cfg.ContextScope)
+	if hookText := strings.Join(promptHookTexts, "\n\n"); hookText != "" {
+		hookFrags, err := (&contextview.HookContextCollector{}).Collect(ctx, contextview.CollectRequest{
+			Scope: cfg.ContextScope, Intent: contextfrag.IntentRunConfigPreProvider,
+			Config: contextview.HookContextConfig{Text: hookText},
+		})
+		if err == nil {
+			frags = append(frags, hookFrags...)
+		}
+	}
+	return append(frags, contextview.CollectNonSystemProviderSourceFrags(ctx, cfg)...)
+}
 
 func buildContextFragScope(req ChatRequest, displayName string, identity native.SessionContext) contextfrag.Scope {
 	channelIdentityID := firstNonEmpty(req.SourceChannelIdentityID, identity.ChannelIdentityID)

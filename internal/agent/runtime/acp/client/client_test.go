@@ -1479,7 +1479,7 @@ func testACPToolGateway(toolNames ...string) *mcp.ToolGatewayService {
 	return mcp.NewToolGatewayService(nil, []mcp.ToolSource{fakeACPToolSource{tools: tools}})
 }
 
-func TestMCPPermissionPreflightFromRequestShapes(t *testing.T) {
+func TestMCPPermissionPreflightFromStateShapes(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -1544,7 +1544,9 @@ func TestMCPPermissionPreflightFromRequestShapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, ok := mcpPermissionPreflightFromRequest(tc.request)
+			state := &acpToolState{}
+			mergePermissionToolUpdate(state, tc.request.ToolCall)
+			got, ok := mcpPermissionPreflightFromState(state)
 			if ok != tc.wantParsed {
 				t.Fatalf("parsed = %v, want %v", ok, tc.wantParsed)
 			}
@@ -1555,6 +1557,135 @@ func TestMCPPermissionPreflightFromRequestShapes(t *testing.T) {
 				t.Fatalf("preflight = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRequestPermissionCorrelatesSparseCodexMCPUpdate(t *testing.T) {
+	t.Parallel()
+
+	const toolCallID = "exec-ask-user"
+	sessionID := acp.SessionId("acp-session-1")
+	approval := &fakeACPToolApproval{}
+	callbacks := &clientCallbacks{
+		root:        "/data",
+		cwd:         "/data",
+		approval:    approval,
+		toolGateway: testACPToolGateway("ask_user"),
+		baseSession: ToolSessionContext{
+			BotID:             "bot-1",
+			SessionID:         "session-1",
+			RunID:             "run-1",
+			ChannelIdentityID: "channel-1",
+		},
+		events:     &toolEventEmitter{},
+		toolMapper: newACPToolEventMapper(acpprofile.DefaultToolQuirks()),
+	}
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	request := acp.RequestPermissionRequest{
+		Meta:      map[string]any{"is_mcp_tool_approval": true},
+		SessionId: sessionID,
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId(toolCallID),
+			Kind:       acp.Ptr(acp.ToolKindExecute),
+			Status:     acp.Ptr(acp.ToolCallStatusPending),
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+		},
+	}
+	type permissionResult struct {
+		response acp.RequestPermissionResponse
+		err      error
+	}
+	resultCh := make(chan permissionResult, 1)
+	go func() {
+		resp, err := callbacks.RequestPermission(context.Background(), request)
+		resultCh <- permissionResult{response: resp, err: err}
+	}()
+
+	// Reproduce the SDK ordering race: the inbound request handler starts
+	// before the earlier session/update notification is processed.
+	key := acpToolStateKey{sessionID: string(sessionID), toolCallID: toolCallID}
+	deadline := time.NewTimer(time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer deadline.Stop()
+	defer ticker.Stop()
+	for {
+		callbacks.toolMapper.mu.Lock()
+		state := callbacks.toolMapper.tools[key]
+		waiting := state != nil && state.title == "" && state.input == nil
+		callbacks.toolMapper.mu.Unlock()
+		if waiting {
+			break
+		}
+		select {
+		case result := <-resultCh:
+			t.Fatalf("RequestPermission returned before matching session update: response=%#v err=%v", result.response, result.err)
+		case <-deadline.C:
+			t.Fatal("RequestPermission did not register sparse tool state")
+		case <-ticker.C:
+		}
+	}
+
+	err := callbacks.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: sessionID,
+		Update: acp.StartToolCall(
+			acp.ToolCallId(toolCallID),
+			"mcp.Memoh_Tools.ask_user",
+			acp.WithStartKind(acp.ToolKindExecute),
+			acp.WithStartStatus(acp.ToolCallStatusInProgress),
+			acp.WithStartRawInput(map[string]any{
+				"server":    memohToolsMCPServerSlug,
+				"tool":      "ask_user",
+				"arguments": map[string]any{"questions": []any{}},
+			}),
+		),
+	})
+	if err != nil {
+		t.Fatalf("SessionUpdate error = %v", err)
+	}
+	if events := collector.result().Events; len(events) != 0 {
+		t.Fatalf("MCP wrapper events = %#v, want none; the gateway owns the real tool event", events)
+	}
+
+	var result permissionResult
+	select {
+	case result = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RequestPermission did not resume after matching session update")
+	}
+	if result.err != nil {
+		t.Fatalf("RequestPermission error = %v", result.err)
+	}
+	resp := result.response
+	if resp.Outcome.Selected == nil || resp.Outcome.Selected.OptionId != acp.PermissionOptionId("allow") {
+		t.Fatalf("permission outcome = %#v, want allow once", resp.Outcome)
+	}
+	if got := approval.createdCount(); got != 0 {
+		t.Fatalf("pending approvals created = %d, want 0 for scoped MCP gateway preflight", got)
+	}
+
+	callbacks.setPromptState(nil, nil, ToolSessionContext{})
+	stale, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		Meta:      map[string]any{"is_mcp_tool_approval": true},
+		SessionId: sessionID,
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId(toolCallID),
+			Kind:       acp.Ptr(acp.ToolKindExecute),
+			Status:     acp.Ptr(acp.ToolCallStatusPending),
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("stale RequestPermission error = %v", err)
+	}
+	if stale.Outcome.Cancelled == nil {
+		t.Fatalf("stale permission outcome = %#v, want cancelled after prompt reset", stale.Outcome)
 	}
 }
 
@@ -2595,6 +2726,58 @@ func TestRequestPermissionScopeRejectsOutOfRootPaths(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("path from correlated tool state outside root", func(t *testing.T) {
+		approval := &fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}}
+		callbacks := &clientCallbacks{
+			root:     "/data",
+			cwd:      "/data",
+			approval: approval,
+			baseSession: ToolSessionContext{
+				BotID:             "bot-1",
+				SessionID:         "session-1",
+				RunID:             "run-1",
+				ChannelIdentityID: "channel-1",
+			},
+			events:     &toolEventEmitter{},
+			toolMapper: newACPToolEventMapper(acpprofile.DefaultToolQuirks()),
+		}
+		callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+		sessionID := acp.SessionId("acp-session-scope")
+		if err := callbacks.SessionUpdate(context.Background(), acp.SessionNotification{
+			SessionId: sessionID,
+			Update: acp.StartToolCall(
+				acp.ToolCallId("write-cached-escape"),
+				"Write file",
+				acp.WithStartKind(acp.ToolKindEdit),
+				acp.WithStartStatus(acp.ToolCallStatusInProgress),
+				acp.WithStartRawInput(map[string]any{"file_path": "/etc/passwd", "content": "x"}),
+			),
+		}); err != nil {
+			t.Fatalf("SessionUpdate error = %v", err)
+		}
+
+		resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+			SessionId: sessionID,
+			ToolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("write-cached-escape"),
+				Kind:       acp.Ptr(acp.ToolKindEdit),
+				Status:     acp.Ptr(acp.ToolCallStatusPending),
+			},
+			Options: []acp.PermissionOption{
+				{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			},
+		})
+		if err != nil {
+			t.Fatalf("RequestPermission error = %v", err)
+		}
+		if resp.Outcome.Cancelled == nil {
+			t.Fatalf("permission outcome = %#v, want cancelled for cached out-of-root path", resp.Outcome)
+		}
+		if got := approval.createdCount(); got != 0 {
+			t.Fatalf("pending approvals created = %d, want 0", got)
+		}
+	})
 }
 
 func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
@@ -2861,9 +3044,11 @@ func TestPermissionNativeToolMapsClaudeCodeShapes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			toolCallID, toolName, input, ok := permissionNativeTool(tc.request, acpprofile.DefaultToolQuirks())
+			state := &acpToolState{id: strings.TrimSpace(string(tc.request.ToolCall.ToolCallId))}
+			mergePermissionToolUpdate(state, tc.request.ToolCall)
+			toolCallID, toolName, input, ok := permissionNativeToolState(state, acpprofile.DefaultToolQuirks())
 			if !ok {
-				t.Fatalf("permissionNativeTool() failed to map %s request", tc.name)
+				t.Fatalf("permissionNativeToolState() failed to map %s request", tc.name)
 			}
 			if toolCallID != strings.TrimSpace(string(tc.request.ToolCall.ToolCallId)) {
 				t.Fatalf("toolCallID = %q, want %q", toolCallID, tc.request.ToolCall.ToolCallId)

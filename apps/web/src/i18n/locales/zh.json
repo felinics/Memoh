@@ -858,6 +858,7 @@
     "sessionTitle": "会话",
     "untitledSession": "未命名会话",
     "noSessions": "暂无会话",
+    "sessionsLoadFailed": "会话列表加载失败",
     "recents": "最近",
     "quickActions": "快捷操作",
     "scheduledJobs": "定时任务",
@@ -878,7 +879,6 @@
     "agentSwitchTimeout": "切换耗时过长，请重试。",
     "modelOptions": "选项",
     "modelEffort": "强度",
-    "noProject": "不在项目中",
     "noModels": "暂无可用模型",
     "defaultACPLoading": "默认 Agent 仍在加载，请稍后重试。",
     "defaultACPNoWorkspaceExec": "已启用默认 Agent，但你没有执行工作区命令的权限。",
@@ -1748,10 +1748,17 @@
       "securityDesc": "访问控制",
       "model": "模型",
       "modelDesc": "选择聊天模型（可选）",
+      "agent": "Agent",
+      "agentDesc": "托管 Agent 自带模型。",
       "memory": "记忆",
       "memoryDesc": "记忆提供者（可选）",
       "settings": "设置",
       "settingsDesc": "时区等"
+    },
+    "agentCreate": {
+      "typeAriaLabel": "Agent 类型",
+      "oauthSettingsHint": "授权在创建后进行，可随时在 Bot 设置中完成。",
+      "requiredError": "请填写「{field}」"
     },
     "createBotLocalHint": "Local Bot 会使用这台电脑上的文件夹，且不提供沙箱隔离。",
     "create": {
@@ -2003,7 +2010,7 @@
     "folders": {
       "create": "新建文件夹",
       "createTitle": "新建文件夹",
-      "createDescription": "选择这个文件夹使用的目录，目录必须已经存在。",
+      "createDescription": "文件夹的名称就是它的目录。选一个已有目录，或输入一个新名称。",
       "created": "文件夹已创建",
       "createFailed": "创建文件夹失败",
       "rename": "重命名",
@@ -2018,13 +2025,13 @@
       "targetRemote": "已连接的电脑",
       "form": {
         "name": "名称",
-        "namePlaceholder": "如：官网重构",
+        "namePlaceholder": "如：website-revamp",
         "target": "位置",
-        "directory": "目录",
-        "directoryHelp": "会话将在 {path} 中工作",
-        "directoryUp": "上一级",
-        "noSubdirectories": "没有子文件夹",
+        "parent": "目录",
+        "parentHelp": "文件夹名称会成为 {path} 下的一个目录",
+        "directoryTarget": "会话将在 {path} 中工作；目录不存在时会自动创建",
         "browseFailed": "无法加载文件夹",
+        "browseRetry": "重试",
         "path": "目录路径",
         "remotePathHelp": "该电脑上的绝对路径，目录必须已经存在。",
         "remotePathPlaceholder": "/Users/you/code/project"
@@ -3359,17 +3366,6 @@
         "manualAddBtn": "添加",
         "manualAddedCount": "已添加 {count} 个模型",
         "removeModel": "移除"
-      },
-      "acp": {
-        "setupMode": "接入方式",
-        "modeApiKey": "API 密钥",
-        "modeChatGPT": "使用 ChatGPT 登录",
-        "modeClaude": "使用 Claude 登录",
-        "modeOAuth": "OAuth 授权",
-        "modeSelf": "使用本地配置",
-        "oauthDeferredHint": "授权将在下一步创建 Bot 并准备好工作区后进行。",
-        "selfHint": "沿用工作区中已配置好的 Agent。",
-        "requiredError": "请填写「{field}」"
       }
     },
     "bot": {
@@ -3381,7 +3377,7 @@
         "hint": "选择 Bot 回复时使用的模型。建议现在选择，之后也可随时在设置中更改。"
       },
       "acp": {
-        "banner": "该 Bot 将以 {agent} 作为主要智能体",
+        "deferredHint": "授权将在下一步创建 Bot 并准备好工作区后进行。",
         "oauthTitle": "授权 {agent}",
         "oauthAuthorized": "已授权",
         "oauthNotAuthorized": "尚未授权",

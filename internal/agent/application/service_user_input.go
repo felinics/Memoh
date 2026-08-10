@@ -395,6 +395,9 @@ func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Re
 			}
 		}
 	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
 	return nil
 }
 

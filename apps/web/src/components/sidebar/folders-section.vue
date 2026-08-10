@@ -5,7 +5,7 @@
        squeeze the Recents list out of the panel. -->
   <div
     v-if="currentBotId"
-    class="flex min-h-0 shrink-0 flex-col px-2 pb-0.5"
+    class="flex min-h-0 max-h-[min(14rem,45%)] shrink flex-col overflow-hidden px-2 pb-0.5"
   >
     <div class="flex items-center pt-1 pr-1">
       <!-- Same header affordance as the Recents mode switcher: the label is a
@@ -36,7 +36,8 @@
 
     <div
       v-if="!sectionCollapsed"
-      class="sidebar-scroll max-h-56 overflow-y-auto pr-1 pt-0.5"
+      ref="foldersScrollEl"
+      class="sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1 pt-0.5"
     >
       <template
         v-for="folder in liveFolders"
@@ -97,49 +98,15 @@
             </div>
           </div>
         </div>
-        <template v-if="isExpanded(folder.id ?? '')">
-          <div
-            v-for="session in sessionsOf(folder.id ?? '')"
-            :key="session.id"
-            class="pb-0.5 pl-4"
-          >
-            <SessionItem
-              :session="session"
-              :is-active="sessionId === session.id"
-              :streaming="chatStore.isSessionStreaming(currentBotId, session.id)"
-              @select="handleSelect"
-              @open-new-tab="handleOpenNewTab"
-              @rename="sessionDialogs?.openRename($event)"
-              @delete="sessionDialogs?.openDelete($event, { fallbackMode: 'recent' })"
-            />
-          </div>
-          <!-- The folder pages the workdir-filtered endpoint, so an old
-               folder's chats stay reachable even when they fall outside the
-               Recents timeline's loaded pages. -->
-          <div
-            v-if="pagingState(folder.id ?? '').loading"
-            class="flex justify-center py-2 pl-4"
-          >
-            <Spinner class="size-4" />
-          </div>
-          <div
-            v-else-if="pagingState(folder.id ?? '').hasMore"
-            class="pb-0.5 pl-4"
-          >
-            <TextButton
-              class="text-xs"
-              @click="chatStore.loadMoreWorkdirSessions(folder.id ?? '')"
-            >
-              {{ t('chat.showMore') }}
-            </TextButton>
-          </div>
-          <div
-            v-else-if="pagingState(folder.id ?? '').loaded && sessionsOf(folder.id ?? '').length === 0"
-            class="px-3 py-2 pl-4 text-xs text-muted-foreground"
-          >
-            {{ t('chat.noSessions') }}
-          </div>
-        </template>
+        <FolderSessionsList
+          v-if="isExpanded(folder.id ?? '')"
+          :workdir-id="folder.id ?? ''"
+          :scroll-el="foldersScrollEl"
+          @select="handleSelect"
+          @open-new-tab="handleOpenNewTab"
+          @rename="sessionDialogs?.openRename($event)"
+          @delete="sessionDialogs?.openDelete($event, { fallbackMode: 'recent' })"
+        />
       </template>
     </div>
 
@@ -216,7 +183,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   Input,
-  Spinner,
   TextButton,
   toast,
 } from '@felinic/ui'
@@ -226,8 +192,8 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { archiveWorkdir, renameWorkdir, type BotWorkdir } from '@/composables/api/useWorkdirs'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import SessionItem from './session-item.vue'
 import SessionDialogs from './session-dialogs.vue'
+import FolderSessionsList from './folder-sessions-list.vue'
 import FolderCreateDialog from './folder-create-dialog.vue'
 import '@/styles/sidebar-scroll.css'
 
@@ -235,7 +201,7 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const workdirsStore = useWorkdirsStore()
 const workspaceTabs = useWorkspaceTabsStore()
-const { sessionId, currentBotId } = storeToRefs(chatStore)
+const { currentBotId } = storeToRefs(chatStore)
 
 // Same header type as the Recents mode switcher so the two sibling section
 // titles read identically; the 11px inset aligns the sidebar's 19px
@@ -251,6 +217,7 @@ const sectionTrailingClass = 'flex shrink-0 items-center pr-[11px]' /* ui-allow-
 const folderRowClass = 'group/folder relative flex w-full min-h-[2.125rem] cursor-pointer select-none items-center rounded-[9px] px-[11px] text-left transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-px: matches session-item.vue's 11px sidebar row gutter */ /* ui-allow-style: sidebar rows are a deliberately local row system (see ui-owners) — same hover token as session-item.vue */
 
 const sessionDialogs = ref<InstanceType<typeof SessionDialogs> | null>(null)
+const foldersScrollEl = ref<HTMLElement | null>(null)
 
 watch(currentBotId, (botId) => {
   if (botId) void workdirsStore.ensureWorkdirs(botId)
@@ -259,17 +226,6 @@ watch(currentBotId, (botId) => {
 const liveFolders = computed(() => (
   workdirsStore.workdirsFor(currentBotId.value).filter(folder => !folder.archived && !!folder.id)
 ))
-
-// Folder rows come from the store's per-workdir paging, not from filtering the
-// shared Recents list — that list pages the whole bot timeline, so a folder
-// older than the loaded pages would read as empty with nothing to expand into.
-function sessionsOf(workdirId: string): SessionSummary[] {
-  return chatStore.workdirSessionsFor(workdirId)
-}
-
-function pagingState(workdirId: string) {
-  return chatStore.workdirSessionsState(workdirId)
-}
 
 // Section fold + per-folder expand state, per bot. Persisted: both are
 // reading preferences, not transient UI state. Folders start collapsed.

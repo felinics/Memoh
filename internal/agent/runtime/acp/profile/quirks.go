@@ -15,8 +15,9 @@ type ToolQuirks struct {
 	// write when its title contains one of them (case-insensitive).
 	WriteTitleKeywords []string
 	// GenericExecTitles are execute-kind titles that name the shell itself
-	// rather than the command ("Shell", "Run command", ...). Such a title is
-	// useless as a command fallback and must be ignored.
+	// rather than the command ("Shell", "Run command", ...). An exact match is
+	// ignored; when the label prefixes a title ("Terminal: pwd"), only the
+	// suffix is used as the command fallback.
 	GenericExecTitles []string
 }
 
@@ -79,16 +80,24 @@ func (q ToolQuirks) TitleIndicatesWrite(title string) bool {
 }
 
 // CommandFromTitle extracts a usable command from an execute-kind tool call's
-// title: generic shell labels yield "", anything else is the command text.
+// title: generic shell labels yield "", a generic "label: command" title
+// yields the command suffix, and anything else is returned unchanged.
 func (q ToolQuirks) CommandFromTitle(title string) string {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return ""
 	}
-	lowered := strings.ToLower(title)
+	label, command, hasLabel := strings.Cut(title, ":")
 	for _, generic := range q.genericExecTitles() {
-		if lowered == strings.ToLower(strings.TrimSpace(generic)) {
+		generic = strings.TrimSpace(generic)
+		if generic == "" {
+			continue
+		}
+		if strings.EqualFold(title, generic) {
 			return ""
+		}
+		if hasLabel && strings.EqualFold(strings.TrimSpace(label), generic) {
+			return strings.TrimSpace(command)
 		}
 	}
 	return title
