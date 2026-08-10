@@ -30,13 +30,13 @@
                branch was chosen to avoid. -->
           <MainLayout>
             <template #sidebar>
-              <!-- Desktop-only rail. On a single bot's detail page the bot's own
-                   nav (rendered by bots/detail.vue) takes over this column, so the
-                   settings nav steps aside instead of stacking a second sidebar
-                   beside it. Below the JS breakpoint the nav becomes the list
-                   overlay inside #main instead. -->
+              <!-- Desktop-only rail. On an entity detail page (a bot, a project)
+                   that page's own nav takes over this column, so the settings nav
+                   steps aside instead of stacking a second sidebar beside it.
+                   Below the JS breakpoint the nav becomes the list overlay inside
+                   #main instead. -->
               <SettingsSidebar
-                v-if="!isMobile && !isBotDetail"
+                v-if="!isMobile && !isEntityDetail"
                 :mac-traffic-reserve="macTrafficReserve"
               />
             </template>
@@ -45,20 +45,20 @@
                 <!-- Top drag strip over the content pane only (not full-width), so
                      the window stays draggable up here while the sidebar's vertical
                      edge reads as the single continuous divider. No border/fill —
-                     it shares --background with the content below. Skipped for bot
-                     detail: that route renders its OWN full-height sidebar inside
-                     #main (MasterDetailSidebarLayout), so a strip here would sit
-                     ON TOP of it and push its divider down — bot detail handles its
-                     own top drag/traffic clearance instead. -->
+                     it shares --background with the content below. Skipped for an
+                     entity detail route: it renders its OWN full-height sidebar
+                     inside #main (MasterDetailSidebarLayout), so a strip here would
+                     sit ON TOP of it and push its divider down — those pages handle
+                     their own top drag/traffic clearance instead. -->
                 <div
-                  v-if="desktopShell && !isMobile && !isBotDetail"
+                  v-if="desktopShell && !isMobile && !isEntityDetail"
                   class="h-8 shrink-0 [-webkit-app-region:drag]"
                 />
-                <!-- Mobile CONTENT bar: bot detail renders its own master-detail
-                     chrome, so the shell bar steps aside there; the LIST overlay
-                     carries the list-mode bar itself. -->
+                <!-- Mobile CONTENT bar: an entity detail route renders its own
+                     master-detail chrome, so the shell bar steps aside there; the
+                     LIST overlay carries the list-mode bar itself. -->
                 <MobileTopBar
-                  v-if="isMobile && !isBotDetail && !isListView"
+                  v-if="isMobile && !isEntityDetail && !isListView"
                   mode="content"
                   @back="onContentBack"
                 />
@@ -140,10 +140,12 @@ const macTrafficReserve = computed(() =>
   && navigator.platform.toLowerCase().includes('mac'),
 )
 
-// On a single bot's detail page the bot's own nav owns the left column, so we
-// drop the settings nav here to avoid two stacked sidebars (the "three-column"
-// nesting). Every other settings route keeps the settings nav.
-const isBotDetail = computed(() => route.name === 'bot-detail')
+// Routes that render their OWN full-height master-detail shell (their own left
+// nav, their own top drag/traffic clearance). The settings chrome steps aside
+// for them entirely, or their nav would stack beside the settings nav (the
+// "three-column" nesting). Every other settings route keeps the settings nav.
+const ENTITY_DETAIL_ROUTES = new Set(['bot-detail', 'project-detail'])
+const isEntityDetail = computed(() => ENTITY_DETAIL_ROUTES.has(String(route.name ?? '')))
 
 // The mobile list lives AT bare /settings; anything deeper is content.
 const isListView = computed(() => route.path === '/settings')

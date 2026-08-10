@@ -45,7 +45,7 @@ const DEFAULT_CHAT_TITLE = 'New Session'
 // (≈554:269) — enough room to work in without burying the conversation.
 const TERMINAL_PANEL_HEIGHT_RATIO = 1 / 3
 
-export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display' | 'schedule'
+export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display' | 'schedule' | 'projectDoc' | 'projectKanban' | 'projectIssue'
 
 interface BotLayoutState {
   layout: SerializedDockview | null
@@ -92,6 +92,11 @@ function panelComponentOf(id: string): WorkspacePanelComponent | null {
   if (id.startsWith('browser:')) return 'browser'
   if (id.startsWith('display:')) return 'display'
   if (id.startsWith('schedule:')) return 'schedule'
+  // Team-level Project tabs: `project-doc:<projectId>:<nodeId>`,
+  // `project-kanban:<projectId>`, `project-issue:<projectId>:<nodeId>`.
+  if (id.startsWith('project-doc:')) return 'projectDoc'
+  if (id.startsWith('project-kanban:')) return 'projectKanban'
+  if (id.startsWith('project-issue:')) return 'projectIssue'
   return null
 }
 
@@ -370,6 +375,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         return numberedFallbackTitle('Desktop', panel.id)
       case 'schedule':
         return 'Schedule'
+      case 'projectDoc':
+      case 'projectIssue': {
+        const title = params.title
+        return typeof title === 'string' && title.trim() ? title.trim() : 'Untitled'
+      }
+      case 'projectKanban': {
+        const name = params.projectName
+        return typeof name === 'string' && name.trim() ? `${name.trim()} · Issues` : 'Issues'
+      }
       default:
         return panel.id
     }
@@ -1651,6 +1665,48 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // ---- team-level Project tabs ---------------------------------------------
+  // Panel ids are stable keys (same node → same panel), so clicking the same
+  // doc twice focuses the existing tab instead of opening a second one —
+  // mirroring DISPLAY_PANEL_ID's approach. Docs open into the ephemeral
+  // preview slot (VS Code-style single-click preview); the doc panel pins
+  // itself on the first edit. The kanban is a pinned singleton per project.
+
+  function openProjectDoc(opts: { projectId: string, nodeId: string, title?: string }) {
+    const projectId = opts.projectId.trim()
+    const nodeId = opts.nodeId.trim()
+    if (!projectId || !nodeId) return
+    openEphemeral({
+      id: `project-doc:${projectId}:${nodeId}`,
+      component: 'projectDoc',
+      title: opts.title?.trim() || 'Untitled',
+      params: { projectId, nodeId, title: opts.title },
+    })
+  }
+
+  function openProjectKanban(opts: { projectId: string, projectName?: string }) {
+    const projectId = opts.projectId.trim()
+    if (!projectId) return
+    focusOrAdd({
+      id: `project-kanban:${projectId}`,
+      component: 'projectKanban',
+      title: opts.projectName?.trim() ? `${opts.projectName.trim()} · Issues` : 'Issues',
+      params: { projectId, projectName: opts.projectName },
+    })
+  }
+
+  function openProjectIssue(opts: { projectId: string, nodeId: string, title?: string }) {
+    const projectId = opts.projectId.trim()
+    const nodeId = opts.nodeId.trim()
+    if (!projectId || !nodeId) return
+    openEphemeral({
+      id: `project-issue:${projectId}:${nodeId}`,
+      component: 'projectIssue',
+      title: opts.title?.trim() || 'Untitled',
+      params: { projectId, nodeId, title: opts.title },
+    })
+  }
+
   function openTerminal(groupId?: string) {
     if (!hasCurrentPermission('workspace_exec')) return
     const bid = (currentBotId.value ?? '').trim()
@@ -2151,6 +2207,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       case 'display':
       case 'schedule':
         return hasCurrentPermission('manage')
+      case 'projectDoc':
+      case 'projectKanban':
+      case 'projectIssue':
+        // Team-level Project tabs are visible to every team member in the
+        // first version (no ACL yet) and carry no bot permission.
+        return true
       default:
         return false
     }
@@ -2531,6 +2593,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openFileToSide,
     openPreview,
     openAsset,
+    openProjectDoc,
+    openProjectKanban,
+    openProjectIssue,
     openFilesAt,
     consumePendingFilesPath,
     openTerminal,

@@ -171,6 +171,7 @@ import {
   Info,
   Keyboard,
   Laptop,
+  FolderKanban,
   Mail,
   MousePointer2,
   Store,
@@ -291,6 +292,7 @@ function filterItems(items: NavItem[]): NavItem[] {
 
 const coreNavItems = computed<NavItem[]>(() => filterItems([
   { title: t('sidebar.bots'), name: 'bots', icon: MousePointer2, flipX: true },
+  { title: t('sidebar.projects'), name: 'projects', icon: FolderKanban },
   { title: t('sidebar.runtimes'), name: 'runtimes', icon: Laptop },
   { title: t('sidebar.providers'), name: 'providers', icon: Box },
   { title: t('sidebar.memory'), name: 'memory', icon: Database },
