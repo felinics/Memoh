@@ -1,14 +1,21 @@
 <template>
   <div class="flex h-full overflow-hidden">
-    <ChatWorkspace v-if="currentBotId" />
-    <div
-      v-else
-      class="flex-1 bg-card"
-    >
-      <PanePlaceholder :title="t('chat.selectBot')">
-        {{ t('chat.selectBotHint') }}
-      </PanePlaceholder>
+    <div class="flex min-w-0 flex-1 flex-col">
+      <ChatWorkspace v-if="currentBotId" />
+      <div
+        v-else
+        class="flex-1 bg-card"
+      >
+        <PanePlaceholder :title="t('chat.selectBot')">
+          {{ t('chat.selectBotHint') }}
+        </PanePlaceholder>
+      </div>
     </div>
+
+    <!-- Collapsed state has NO strip here: the expand control lives inside the
+         last group's tab bar (group-actions), mirroring how the left rail's
+         toggle sits in the first group's prefix actions. -->
+    <ProjectPanel />
   </div>
 </template>
 
@@ -23,6 +30,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
 import ChatWorkspace from './components/chat-workspace.vue'
+import ProjectPanel from '@/components/project-panel/index.vue'
 
 const route = useRoute()
 const router = useRouter()

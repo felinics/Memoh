@@ -106,6 +106,33 @@ const routes = [
         ],
       },
       {
+        path: 'projects',
+        component: { render: () => h(RouterView) },
+        meta: {
+          breadcrumb: i18nRef('projects.title'),
+        },
+        children: [
+          {
+            name: 'projects',
+            path: '',
+            component: () => import('@/pages/projects/index.vue'),
+          },
+          {
+            name: 'project-new',
+            path: 'new',
+            component: () => import('@/pages/projects/new.vue'),
+            meta: {
+              breadcrumb: i18nRef('projects.newProject'),
+            },
+          },
+          {
+            name: 'project-detail',
+            path: ':projectId',
+            component: () => import('@/pages/projects/detail.vue'),
+          },
+        ],
+      },
+      {
         name: 'providers',
         path: 'providers',
         component: () => import('@/pages/providers/index.vue'),
