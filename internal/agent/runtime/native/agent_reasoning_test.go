@@ -57,7 +57,7 @@ func TestBuildGenerateOptionsPreservesDeepSeekReasoningDisabled(t *testing.T) {
 			Provider: provider,
 			Type:     sdk.ModelTypeChat,
 		},
-		ReasoningDisabled:     true,
+		ReasoningConfig:       &models.ReasoningConfig{Disabled: true},
 		ChatCompletionsCompat: models.ChatCompletionsCompatDeepSeek,
 	}
 

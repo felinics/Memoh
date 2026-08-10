@@ -141,7 +141,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if effect := strings.TrimSpace(req.AclDefaultEffect); effect != "" {
 		current.AclDefaultEffect = effect
 	}
-	if req.ReasoningEffort != nil && isValidReasoningEffort(*req.ReasoningEffort) {
+	if req.ReasoningEffort != nil && hasReasoningEffortValue(*req.ReasoningEffort) {
 		current.ReasoningEffort = *req.ReasoningEffort
 	}
 	if req.HeartbeatEnabled != nil {
@@ -473,7 +473,7 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 	if settings.AclDefaultEffect == "" {
 		settings.AclDefaultEffect = "allow"
 	}
-	if !isValidReasoningEffort(settings.ReasoningEffort) {
+	if !hasReasoningEffortValue(settings.ReasoningEffort) {
 		settings.ReasoningEffort = DefaultReasoningEffort
 	}
 	if settings.HeartbeatInterval <= 0 {
@@ -518,7 +518,7 @@ func nullableCompactionTargetPercent(value *int) pgtype.Int4 {
 // free-form tier string (models expose their own supported levels via capability
 // discovery), so we only reject empty/whitespace values here; the specific tiers
 // a given model accepts are enforced upstream, not by this generic setting.
-func isValidReasoningEffort(effort string) bool {
+func hasReasoningEffortValue(effort string) bool {
 	return strings.TrimSpace(effort) != ""
 }
 

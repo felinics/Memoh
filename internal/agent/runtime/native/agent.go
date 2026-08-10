@@ -915,13 +915,7 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 	opts = append(opts, models.BuildReasoningOptions(models.SDKModelConfig{
 		ClientType:            models.ResolveClientType(cfg.Model),
 		ChatCompletionsCompat: cfg.ChatCompletionsCompat,
-		ReasoningConfig: &models.ReasoningConfig{
-			Active:    cfg.ReasoningActive,
-			Disabled:  cfg.ReasoningDisabled,
-			Adaptive:  cfg.ReasoningAdaptive,
-			Effort:    cfg.ReasoningEffort,
-			OffEffort: cfg.ReasoningOffEffort,
-		},
+		ReasoningConfig:       cfg.ReasoningConfig,
 	})...)
 	return opts
 }

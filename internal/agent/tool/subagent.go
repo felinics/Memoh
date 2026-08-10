@@ -37,17 +37,20 @@ type SpawnAgent interface {
 
 // SpawnRunConfig mirrors agent.RunConfig fields needed by subagent controls.
 type SpawnRunConfig struct {
-	Model                 *sdk.Model
-	ModelUUID             string
-	ModelID               string
-	ModelProvider         string
-	System                string
-	Query                 string
-	SessionType           string
-	Identity              SpawnIdentity
-	LoopDetection         SpawnLoopConfig
-	Messages              []sdk.Message
-	ReasoningEffort       string
+	Model         *sdk.Model
+	ModelUUID     string
+	ModelID       string
+	ModelProvider string
+	System        string
+	Query         string
+	SessionType   string
+	Identity      SpawnIdentity
+	LoopDetection SpawnLoopConfig
+	Messages      []sdk.Message
+	// ReasoningConfig is the thinking decision resolved for the subagent's own
+	// model. It replaces a lone effort string that was never assigned, which is
+	// how subagents came to run with no reasoning configuration at all (#983).
+	ReasoningConfig       *models.ReasoningConfig
 	PromptCacheTTL        string
 	ChatCompletionsCompat string
 	SupportsImageInput    bool
