@@ -92,6 +92,138 @@ func TestCoverageIncludesRequiresExactPersistedHash(t *testing.T) {
 	}
 }
 
+func TestRollupCoverageBuildsValidMultiParentLineage(t *testing.T) {
+	t.Parallel()
+
+	parentA := testArtifact("parent-a")
+	parentA.Level = 1
+	parentA.Coverage = []CoveredSource{
+		strictTestCoveredSource("row-a1", 1000),
+		strictTestCoveredSource("row-a2", 2000),
+	}
+	parentB := testArtifact("parent-b")
+	parentB.Level = 3
+	parentB.Coverage = []CoveredSource{
+		strictTestCoveredSource("row-b1", 3000),
+		strictTestCoveredSource("row-b2", 4000),
+	}
+	currentCoverage := []CoveredSource{
+		strictTestCoveredSource("row-new-1", 5000),
+		strictTestCoveredSource("row-new-2", 6000),
+	}
+	current := artifactMetadata{
+		Coverage:      mustMarshalCoverage(t, currentCoverage...),
+		AnchorStartMs: 5000,
+		AnchorEndMs:   6000,
+	}
+
+	merged, err := rollupArtifactMetadata([]Artifact{parentA, parentB}, current)
+	if err != nil {
+		t.Fatalf("rollupArtifactMetadata: %v", err)
+	}
+	coverage, err := DecodeArtifactCoverage(merged.Coverage)
+	if err != nil {
+		t.Fatalf("DecodeArtifactCoverage: %v", err)
+	}
+	if len(coverage) != 6 || merged.AnchorStartMs != 1000 || merged.AnchorEndMs != 6000 {
+		t.Fatalf("merged coverage = %#v anchor=%d..%d, want six chronological entries at 1000..6000", coverage, merged.AnchorStartMs, merged.AnchorEndMs)
+	}
+
+	rollup := testArtifact("rollup")
+	rollup.Level = rollupArtifactLevel([]Artifact{parentA, parentB})
+	rollup.ParentIDs = []string{parentA.ID, parentB.ID}
+	rollup.Coverage = coverage
+	rollup.AnchorStartMs = merged.AnchorStartMs
+	rollup.AnchorEndMs = merged.AnchorEndMs
+	parentA.SupersededBy, parentA.SupersededAt = rollup.ID, time.Unix(1, 0)
+	parentB.SupersededBy, parentB.SupersededAt = rollup.ID, time.Unix(1, 0)
+
+	frontier := buildArtifactFrontier([]Artifact{parentA, parentB, rollup})
+	if len(frontier.Issues) != 0 {
+		t.Fatalf("valid rollup lineage issues = %#v", frontier.Issues)
+	}
+	if len(frontier.Artifacts) != 1 || frontier.Artifacts[0].ID != rollup.ID {
+		t.Fatalf("frontier = %#v, want only rollup %q", frontier.Artifacts, rollup.ID)
+	}
+	for _, id := range []string{parentA.ID, parentB.ID, rollup.ID} {
+		resolved, ok := frontier.Resolve(id)
+		if !ok || resolved.ID != rollup.ID {
+			t.Fatalf("Resolve(%q) = %#v, %t; want %q", id, resolved, ok, rollup.ID)
+		}
+	}
+}
+
+func TestArtifactFrontierAcceptsPartialRollupStraddlingKeptArtifacts(t *testing.T) {
+	t.Parallel()
+
+	absorbedOldest := testArtifact("absorbed-oldest")
+	absorbedOldest.Coverage = []CoveredSource{strictTestCoveredSource("row-oldest", 1000)}
+	absorbedOldest.AnchorStartMs = 1000
+	absorbedOldest.AnchorEndMs = 1000
+
+	absorbedNext := testArtifact("absorbed-next")
+	absorbedNext.Level = 1
+	absorbedNext.Coverage = []CoveredSource{strictTestCoveredSource("row-next", 1500)}
+	absorbedNext.AnchorStartMs = 1500
+	absorbedNext.AnchorEndMs = 1500
+
+	keptMiddle := testArtifact("kept-middle")
+	keptMiddle.Coverage = []CoveredSource{strictTestCoveredSource("row-middle", 2000)}
+	keptMiddle.AnchorStartMs = 2000
+	keptMiddle.AnchorEndMs = 2000
+
+	keptNewest := testArtifact("kept-newest")
+	keptNewest.Coverage = []CoveredSource{strictTestCoveredSource("row-newest", 3000)}
+	keptNewest.AnchorStartMs = 3000
+	keptNewest.AnchorEndMs = 3000
+
+	fused := testArtifact("partial-rollup")
+	absorbed := []Artifact{absorbedOldest, absorbedNext}
+	fused.Level = rollupArtifactLevel(absorbed)
+	fused.ParentIDs = []string{absorbedOldest.ID, absorbedNext.ID}
+	fused.Coverage = []CoveredSource{
+		absorbedOldest.Coverage[0],
+		absorbedNext.Coverage[0],
+		strictTestCoveredSource("row-current-pass", 4000),
+	}
+	fused.AnchorStartMs = 1000
+	fused.AnchorEndMs = 4000
+	absorbedOldest.SupersededBy = fused.ID
+	absorbedOldest.SupersededAt = time.Unix(1, 0)
+	absorbedNext.SupersededBy = fused.ID
+	absorbedNext.SupersededAt = time.Unix(1, 0)
+
+	frontier := buildArtifactFrontier([]Artifact{absorbedOldest, absorbedNext, keptMiddle, keptNewest, fused})
+	if len(frontier.Issues) != 0 {
+		t.Fatalf("partial rollup lineage issues = %#v", frontier.Issues)
+	}
+	if len(frontier.Artifacts) != 3 {
+		t.Fatalf("active frontier = %#v, want fused checkpoint plus two kept artifacts", frontier.Artifacts)
+	}
+	for _, id := range []string{absorbedOldest.ID, absorbedNext.ID, fused.ID} {
+		resolved, ok := frontier.Resolve(id)
+		if !ok || resolved.ID != fused.ID {
+			t.Fatalf("Resolve(%q) = %#v, %t; want fused checkpoint %q", id, resolved, ok, fused.ID)
+		}
+	}
+	for _, parent := range absorbed {
+		resolved, ok := frontier.ResolveCoveredRef(parent.Coverage[0].Ref)
+		if !ok || resolved.ID != fused.ID {
+			t.Fatalf("ResolveCoveredRef(%q) = %#v, %t; want fused checkpoint %q", parent.ID, resolved, ok, fused.ID)
+		}
+	}
+	for _, kept := range []Artifact{keptMiddle, keptNewest} {
+		resolved, ok := frontier.Resolve(kept.ID)
+		if !ok || resolved.ID != kept.ID {
+			t.Fatalf("Resolve(%q) = %#v, %t; want kept artifact to resolve to itself", kept.ID, resolved, ok)
+		}
+		resolved, ok = frontier.ResolveCoveredRef(kept.Coverage[0].Ref)
+		if !ok || resolved.ID != kept.ID {
+			t.Fatalf("ResolveCoveredRef(%q) = %#v, %t; want kept artifact to resolve to itself", kept.ID, resolved, ok)
+		}
+	}
+}
+
 func TestArtifactFrontierRejectsDerivedCoverageThatReordersParentSources(t *testing.T) {
 	t.Parallel()
 

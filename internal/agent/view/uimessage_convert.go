@@ -827,6 +827,7 @@ func extractUserInputMetadata(metadata map[string]any) *UIUserInput {
 		intFromAny(obj["short_id"]),
 		status,
 		obj["ui_payload"],
+		obj["answers"],
 		status == "pending",
 	)
 }

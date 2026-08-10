@@ -80,34 +80,41 @@ type InjectMessage struct {
 
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
-	Model                       *sdk.Model
-	CurrentModelUUID            string
-	CurrentModelID              string
-	CurrentModelProvider        string
-	ForkContext                 *tools.MessageSnapshot
-	ForkContextSourceMessageIDs []string
-	ReasoningEffort             string
-	ReasoningActive             bool
-	ReasoningDisabled           bool
-	ReasoningAdaptive           bool
-	ReasoningOffEffort          string
-	ChatCompletionsCompat       string
-	Messages                    []sdk.Message
-	Query                       string
-	System                      string
-	ContextFrags                []contextfrag.ContextFrag
-	ContextManifest             contextfrag.Manifest
-	ContextScope                contextfrag.Scope
-	ContextQueryMaterialized    bool
-	ContextToolUsage            string
-	ContextDynamicMutators      []contextfrag.DynamicMutator
-	SessionType                 string
-	LiveToolStream              bool
-	CanRequestUserInput         bool
-	SupportsImageInput          bool
-	SupportsFileInput           bool
-	SupportsToolCall            bool
-	InlineImages                []sdk.ImagePart
+	Model                          *sdk.Model
+	CurrentModelUUID               string
+	CurrentModelID                 string
+	CurrentModelProvider           string
+	ForkContext                    *tools.MessageSnapshot
+	ForkContextSourceMessageIDs    []string
+	ReasoningEffort                string
+	ReasoningActive                bool
+	ReasoningDisabled              bool
+	ReasoningAdaptive              bool
+	ReasoningOffEffort             string
+	ChatCompletionsCompat          string
+	Messages                       []sdk.Message
+	Query                          string
+	System                         string
+	ContextFrags                   []contextfrag.ContextFrag
+	ContextSourceFrags             []contextfrag.ContextFrag
+	ContextManifest                contextfrag.Manifest
+	ContextScope                   contextfrag.Scope
+	ContextCurrentUserMessageIndex *int
+	ContextMemoryMessageIndex      *int
+	ContextQueryMaterialized       bool
+	ContextToolUsage               string
+	ContextToolDefs                []contextfrag.ToolDefAccounting
+	ContextToolExchangePolicy      *contextfrag.ToolExchangePolicy
+	ContextCachePlan               contextfrag.CachePlan
+	ContextMutations               *contextfrag.MutationLedger
+	ContextDynamicMutators         []contextfrag.DynamicMutator
+	SessionType                    string
+	LiveToolStream                 bool
+	CanRequestUserInput            bool
+	SupportsImageInput             bool
+	SupportsFileInput              bool
+	SupportsToolCall               bool
+	InlineImages                   []sdk.ImagePart
 	// InlineAttachments carries non-image native attachment parts (documents
 	// as sdk.FilePart, small text files as wrapped sdk.TextPart) appended to
 	// the current user message. Images stay in InlineImages, which also feeds

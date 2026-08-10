@@ -829,6 +829,7 @@
     "sessionTitle": "セッション",
     "untitledSession": "無題のセッション",
     "noSessions": "セッションはまだありません",
+    "sessionsLoadFailed": "会話一覧の読み込みに失敗しました",
     "recents": "最近",
     "quickActions": "クイックアクション",
     "scheduledJobs": "スケジュールされたジョブ",
@@ -846,7 +847,6 @@
     "agentSwitchFailed": "エージェントの切り替えに失敗しました",
     "modelSwitchFailed": "モデルの切り替えに失敗しました",
     "reasoningSwitchFailed": "推論強度の切り替えに失敗しました",
-    "noProject": "プロジェクトに含まれていません",
     "noModels": "利用可能なモデルはありません",
     "defaultACPLoading": "デフォルトAgentはまだ読み込み中です。少し待ってからもう一度お試しください。",
     "defaultACPNoWorkspaceExec": "デフォルトAgentは有効ですが、Workspaceコマンドを実行する権限がありません。",
@@ -1737,10 +1737,17 @@
       "securityDesc": "アクセス制御",
       "model": "Model",
       "modelDesc": "チャット Modelを選択します (オプション)",
+      "agent": "エージェント",
+      "agentDesc": "ホステッドエージェントは独自のモデルを使用します。",
       "memory": "Memory",
       "memoryDesc": "MemoryProvider (オプション)",
       "settings": "設定",
       "settingsDesc": "タイムゾーンなど"
+    },
+    "agentCreate": {
+      "typeAriaLabel": "エージェントの種類",
+      "oauthSettingsHint": "認可は作成後に行います。Bot の設定でいつでも完了できます。",
+      "requiredError": "「{field}」を入力してください"
     },
     "createBotLocalHint": "ローカル Botはこのコンピューター上のフォルダーを使用し、サンドボックス化されていません。",
     "create": {
@@ -1992,7 +1999,7 @@
     "folders": {
       "create": "新しいフォルダ",
       "createTitle": "新しいフォルダ",
-      "createDescription": "このフォルダが作業するディレクトリを選択してください。ディレクトリはすでに存在している必要があります。",
+      "createDescription": "フォルダの名前がそのままディレクトリになります。既存のものを選ぶか、新しい名前を入力してください。",
       "created": "フォルダを作成しました",
       "createFailed": "フォルダの作成に失敗しました",
       "rename": "名前を変更",
@@ -2007,13 +2014,13 @@
       "targetRemote": "接続済みのコンピューター",
       "form": {
         "name": "名前",
-        "namePlaceholder": "例：サイトリニューアル",
+        "namePlaceholder": "例：website-revamp",
         "target": "場所",
-        "directory": "ディレクトリ",
-        "directoryHelp": "セッションは {path} で作業します",
-        "directoryUp": "1 つ上へ",
-        "noSubdirectories": "サブフォルダはありません",
+        "parent": "ディレクトリ",
+        "parentHelp": "フォルダ名は {path} 直下のディレクトリになります",
+        "directoryTarget": "セッションは {path} で作業します（存在しない場合は作成されます）",
         "browseFailed": "フォルダを読み込めませんでした",
+        "browseRetry": "再試行",
         "path": "ディレクトリパス",
         "remotePathHelp": "そのコンピューター上の絶対パス。すでに存在している必要があります。",
         "remotePathPlaceholder": "/Users/you/code/project"
@@ -3336,17 +3343,6 @@
         "manualAddBtn": "追加",
         "manualAddedCount": "{count}件のモデルを追加しました",
         "removeModel": "削除"
-      },
-      "acp": {
-        "setupMode": "設定方法",
-        "modeApiKey": "APIキー",
-        "modeChatGPT": "ChatGPT でサインインする",
-        "modeClaude": "クロードでサインイン",
-        "modeOAuth": "OAuth",
-        "modeSelf": "ローカル構成",
-        "oauthDeferredHint": "認可は、Bot とワークスペースの準備ができた後の次のステップで行われます。",
-        "selfHint": "ワークスペースですでに設定されているエージェントを再利用します。",
-        "requiredError": "「{field}」と入力してください"
       }
     },
     "bot": {
@@ -3358,7 +3354,7 @@
         "hint": "Bot が応答に使用するモデルを選択します。推奨項目ですが、設定でいつでも変更できます。"
       },
       "acp": {
-        "banner": "このBotはプライマリ エージェントとして {agent} を使用します",
+        "deferredHint": "認可は、Bot とワークスペースの準備ができた後の次のステップで行われます。",
         "oauthTitle": "{agent}を承認する",
         "oauthAuthorized": "認可された",
         "oauthNotAuthorized": "まだ認可されていません",

@@ -123,6 +123,7 @@ import type { Ref } from 'vue'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
 import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
+import { saveQueryCacheToDiskNow } from '@/lib/query-cache-persistence'
 
 const props = defineProps<{
   botId: string
@@ -547,10 +548,28 @@ function buildJobs(changed: (keyof SettingsForm)[]): AutosaveJob<SettingsForm>[]
   return jobs
 }
 
+function patchFromAutosavedFields(savedKeys: Set<keyof SettingsForm>): SettingsSettings {
+  const patch: SettingsSettings = {}
+  for (const key of SETTINGS_FIELD_KEYS) {
+    if (savedKeys.has(key)) {
+      ;(patch as Record<string, unknown>)[key] = synced[key]
+    }
+  }
+  return patch
+}
+
 function onDrained(savedKeys: Set<keyof SettingsForm>) {
   const saved = [...savedKeys]
   if (saved.some((key) => key !== 'name' && key !== 'timezone')) {
-    queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
+    const patch = patchFromAutosavedFields(savedKeys)
+    if (Object.keys(patch).length > 0) {
+      queryCache.setQueryData(['bot-settings', botIdRef.value], (current) => ({
+        ...(current ?? {}),
+        ...patch,
+      }))
+      saveQueryCacheToDiskNow(queryCache)
+    }
+    void queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
   }
   if (savedKeys.has('name') || savedKeys.has('timezone')) {
     queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })

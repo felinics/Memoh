@@ -211,7 +211,17 @@ export interface UIUserInput {
   short_id?: number
   status: string
   questions?: UIUserInputQuestion[]
+  answers?: UIUserInputAnswer[]
   can_respond?: boolean
+}
+
+export interface UIUserInputAnswer {
+  question_id: string
+  question: string
+  selected?: UIUserInputOption[]
+  custom_text?: string
+  text?: string
+  skipped?: boolean
 }
 
 export interface UIUserInputQuestion {

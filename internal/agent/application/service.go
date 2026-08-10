@@ -139,6 +139,7 @@ type Service struct {
 	allowedTeam         string
 	sessionRuntime      turnAdmitter
 	decisionRuntime     *sessionruntime.Manager
+	publishTurnEvent    func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
 	turnHooks           *turnRuntimeHooks
 }
 
@@ -397,8 +398,10 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	var estimatedTokens int
 	var compactableTokens int
 	var compactableTokensKnown bool
+	var currentMessageIndex *int
 	if usePipeline {
 		messages = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+		currentMessageIndex = latestModelUserMessageIndex(messages)
 	} else {
 		historyFallback := historyScopeFallbackFromChatRequest(req)
 		prepared, loadErr := s.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
@@ -455,13 +458,15 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	if forkContext := s.subagentForkContextModelMessages(ctx, req); len(forkContext) > 0 {
 		// The inherited parent snapshot precedes the thread's own transcript,
 		// exactly as parent-driven subagent tasks assemble it.
-		messages = append(forkContext, messages...)
+		messages, currentMessageIndex = prependContextMessages(forkContext, messages, currentMessageIndex)
 	}
 	if notice := s.currentWorkspaceContextMessage(ctx, req); notice != nil {
 		messages = append(messages, *notice)
 	}
+	var memoryMessageIndex *int
 	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
+		memoryMessageIndex = intPointer(len(messages) - 1)
 	}
 	if requestedSkillMsg := buildRequestedSkillContextMessage(req.RequestedSkills); requestedSkillMsg != nil {
 		messages = append(messages, *requestedSkillMsg)
@@ -469,14 +474,11 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	if !usePipeline && !req.ReusePersistedUserMessage {
 		messages = append(messages, reqMessages...)
 	}
-	messages = sanitizeMessages(messages)
-	// Strip tool messages and tool-call-only assistant messages from context.
-	// Tool outputs are large and waste tokens; the LLM doesn't need raw tool
-	// results when summaries and memory tools are available for lookup.
-	if len(messages) > 10 {
-		messages = stripToolMessages(messages)
-	}
-	messages = repairToolCallClosures(messages, syntheticToolClosureError)
+	messages, currentMessageIndex, memoryMessageIndex = normalizeContextMessages(
+		messages,
+		currentMessageIndex,
+		memoryMessageIndex,
+	)
 
 	displayName := s.resolveDisplayName(ctx, req)
 	mergedAttachments := s.routeAndMergeAttachments(ctx, chatModel, req)
@@ -509,6 +511,10 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	forkMessages := nonNilModelMessages(messages)
 	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
 	runCfg.Messages = modelMessagesToSDKMessages(forkMessages)
+	runCfg.ContextMemoryMessageIndex = memoryMessageIndex
+	if usePipeline {
+		runCfg.ContextCurrentUserMessageIndex = currentMessageIndex
+	}
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
@@ -1296,7 +1302,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 			platformIdentitiesSection = buildPlatformIdentitiesSection(identities)
 		}
 	}
-	cfg.System = native.GenerateSystemPrompt(native.SystemPromptParams{
+	systemParams := native.SystemPromptParams{
 		SessionType:               cfg.SessionType,
 		Bot:                       cfg.Bot,
 		Skills:                    cfg.Skills,
@@ -1304,9 +1310,13 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		MaxFilesBytes:             limits.SystemFilesMaxBytes,
 		Timezone:                  cfg.Identity.Timezone,
 		PlatformIdentitiesSection: platformIdentitiesSection,
-	})
+	}
+	cfg.System = native.GenerateSystemPrompt(systemParams)
+	var promptHookTexts []string
 	if beforePromptContext != "" {
-		cfg.System += "\n\n" + formatServiceHookContext(hooks.EventBeforePromptBuild, beforePromptContext)
+		text := formatServiceHookContext(hooks.EventBeforePromptBuild, beforePromptContext)
+		cfg.System += "\n\n" + text
+		promptHookTexts = append(promptHookTexts, text)
 	}
 	afterPromptContext := s.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
@@ -1317,7 +1327,9 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		SystemBytes:  len(cfg.System),
 	}, hooks.EventAfterPromptBuild)
 	if afterPromptContext != "" {
-		cfg.System += "\n\n" + formatServiceHookContext(hooks.EventAfterPromptBuild, afterPromptContext)
+		text := formatServiceHookContext(hooks.EventAfterPromptBuild, afterPromptContext)
+		cfg.System += "\n\n" + text
+		promptHookTexts = append(promptHookTexts, text)
 	}
 
 	if cfg.Query != "" {
@@ -1330,6 +1342,8 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		extra = append(extra, cfg.InlineAttachments...)
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query, extra...))
 		cfg.ForkContextSourceMessageIDs = append(cfg.ForkContextSourceMessageIDs, "")
+		index := len(cfg.Messages) - 1
+		cfg.ContextCurrentUserMessageIndex = &index
 		cfg.ContextQueryMaterialized = true
 	} else if len(cfg.InlineImages) > 0 || len(cfg.InlineAttachments) > 0 {
 		// Pipeline path: the user query is already embedded in the RC messages,
@@ -1343,6 +1357,11 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		}
 		imageParts = append(imageParts, cfg.InlineAttachments...)
 		if len(imageParts) > 0 {
+			currentIndex := validCurrentUserMessageIndex(
+				cfg.Messages,
+				cfg.ContextCurrentUserMessageIndex,
+				cfg.ContextMemoryMessageIndex,
+			)
 			injected := false
 			for i := len(cfg.Messages) - 1; i >= 0; i-- {
 				if cfg.Messages[i].Role == sdk.MessageRoleUser {
@@ -1357,13 +1376,104 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 			if !injected {
 				cfg.Messages = append(cfg.Messages, sdk.UserMessage("", imageParts...))
 				cfg.ForkContextSourceMessageIDs = append(cfg.ForkContextSourceMessageIDs, "")
+				index := len(cfg.Messages) - 1
+				currentIndex = &index
 			}
+			cfg.ContextCurrentUserMessageIndex = currentIndex
 			cfg.ContextQueryMaterialized = true
 		}
 	}
 
+	cfg.ContextSourceFrags = buildProviderSourceFrags(ctx, cfg, native.GenerateSystemSections(systemParams), promptHookTexts)
 	return cfg.RefreshContextFrag()
 }
+
+func normalizeContextMessages(messages []ModelMessage, currentIndex, memoryIndex *int) ([]ModelMessage, *int, *int) {
+	cleaned := sanitizeMessages(messages)
+	stripTools := len(cleaned) > 10
+	if stripTools {
+		// Tool outputs are large and waste tokens; the LLM doesn't need raw
+		// tool results when summaries and memory tools are available for lookup.
+		cleaned = stripToolMessages(cleaned)
+	}
+	cleaned = repairToolCallClosures(cleaned, syntheticToolClosureError)
+	return cleaned,
+		remapContextMessageIndex(messages, currentIndex, stripTools),
+		remapContextMessageIndex(messages, memoryIndex, stripTools)
+}
+
+func prependContextMessages(prefix, messages []ModelMessage, trackedIndex *int) ([]ModelMessage, *int) {
+	if len(prefix) == 0 {
+		return messages, trackedIndex
+	}
+	if trackedIndex != nil {
+		if *trackedIndex < 0 || *trackedIndex >= len(messages) {
+			trackedIndex = nil
+		} else {
+			trackedIndex = intPointer(*trackedIndex + len(prefix))
+		}
+	}
+	return append(prefix, messages...), trackedIndex
+}
+
+func remapContextMessageIndex(messages []ModelMessage, index *int, stripTools bool) *int {
+	if index == nil || *index < 0 || *index >= len(messages) || !strings.EqualFold(strings.TrimSpace(messages[*index].Role), "user") {
+		return nil
+	}
+	prefix := sanitizeMessages(messages[:*index+1])
+	if stripTools {
+		prefix = stripToolMessages(prefix)
+	}
+	prefix = repairToolCallClosures(prefix, syntheticToolClosureError)
+	if len(prefix) == 0 || !strings.EqualFold(strings.TrimSpace(prefix[len(prefix)-1].Role), "user") {
+		return nil
+	}
+	return intPointer(len(prefix) - 1)
+}
+
+func latestModelUserMessageIndex(messages []ModelMessage) *int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "user") {
+			return intPointer(i)
+		}
+	}
+	return nil
+}
+
+func validCurrentUserMessageIndex(messages []sdk.Message, currentIndex, memoryIndex *int) *int {
+	if currentIndex != nil && *currentIndex >= 0 && *currentIndex < len(messages) &&
+		messages[*currentIndex].Role == sdk.MessageRoleUser && (memoryIndex == nil || *currentIndex != *memoryIndex) {
+		return intPointer(*currentIndex)
+	}
+	return latestUserMessageIndex(messages, optionalIndex(memoryIndex)...)
+}
+
+func latestUserMessageIndex(messages []sdk.Message, excluded ...int) *int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == sdk.MessageRoleUser && !containsIndex(excluded, i) {
+			return intPointer(i)
+		}
+	}
+	return nil
+}
+
+func optionalIndex(index *int) []int {
+	if index == nil {
+		return nil
+	}
+	return []int{*index}
+}
+
+func containsIndex(indexes []int, target int) bool {
+	for _, index := range indexes {
+		if index == target {
+			return true
+		}
+	}
+	return false
+}
+
+func intPointer(value int) *int { return &value }
 
 func normalizeGatewaySkill(entry SkillEntry) (native.SkillEntry, bool) {
 	name := strings.TrimSpace(entry.Name)

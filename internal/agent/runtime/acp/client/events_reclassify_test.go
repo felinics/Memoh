@@ -83,21 +83,8 @@ func TestPerAgentQuirksReachToolMapping(t *testing.T) {
 	if len(events) == 0 || events[0].ToolName != "write" {
 		t.Fatalf("mapper with custom quirks first event = %+v, want ToolName=write", events)
 	}
-	// And the permission path: the same call classified through
-	// permissionNativeTool follows the same per-agent quirks.
-	req := acp.RequestPermissionRequest{
-		ToolCall: acp.ToolCallUpdate{
-			ToolCallId: acp.ToolCallId("tc-quirk"),
-			Title:      acp.Ptr("Replace config.yaml"),
-			Kind:       acp.Ptr(acp.ToolKindEdit),
-			RawInput: map[string]any{
-				"file_path":  "config.yaml",
-				"old_string": "a",
-				"new_string": "b",
-			},
-		},
-	}
-	if _, name, _, ok := permissionNativeTool(req, custom); !ok || name != "write" {
-		t.Fatalf("permissionNativeTool with custom quirks = %q/%v, want write/true", name, ok)
+	// And the permission path follows the same per-agent quirks.
+	if _, name, _, ok := permissionNativeToolState(state(), custom); !ok || name != "write" {
+		t.Fatalf("permissionNativeToolState with custom quirks = %q/%v, want write/true", name, ok)
 	}
 }

@@ -94,8 +94,10 @@ export function pickRawString(obj: Record<string, unknown>, ...keys: string[]): 
 
 export function structuredToolResult(result: unknown): Record<string, unknown> {
   const record = asRecord(result)
-  const structured = asRecord(record.structuredContent)
-  return Object.keys(structured).length > 0 ? structured : record
+  const camel = asRecord(record.structuredContent)
+  if (Object.keys(camel).length > 0) return camel
+  const snake = asRecord(record.structured_content)
+  return Object.keys(snake).length > 0 ? snake : record
 }
 
 export function taskIdFromToolBlock(block: ToolCallBlock): string {
@@ -169,6 +171,10 @@ export function cloneUserInputState(userInput: UIUserInput): UIUserInput {
     questions: userInput.questions?.map(question => ({
       ...question,
       options: question.options?.map(option => ({ ...option })),
+    })),
+    answers: userInput.answers?.map(answer => ({
+      ...answer,
+      selected: answer.selected?.map(option => ({ ...option })),
     })),
   }
 }

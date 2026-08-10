@@ -15,18 +15,29 @@ func (cfg RunConfig) RefreshContextFrag() RunConfig {
 		inlineImages = nil
 	}
 	assembled := contextfrag.Compile(contextfrag.CompileInput{
-		Source:          contextfrag.SourceRunConfig,
-		Scope:           cfg.ContextScope,
-		System:          cfg.System,
-		Messages:        cfg.Messages,
-		Query:           query,
-		InlineImages:    inlineImages,
-		ToolUsage:       cfg.ContextToolUsage,
-		DynamicMutators: cfg.ContextDynamicMutators,
-		Existing:        cfg.ContextFrags,
+		Source:                  contextfrag.SourceRunConfig,
+		Scope:                   cfg.ContextScope,
+		System:                  cfg.System,
+		Messages:                cfg.Messages,
+		CurrentUserMessageIndex: cfg.ContextCurrentUserMessageIndex,
+		MemoryMessageIndex:      cfg.ContextMemoryMessageIndex,
+		Query:                   query,
+		InlineImages:            inlineImages,
+		ToolUsage:               cfg.ContextToolUsage,
+		DynamicMutators:         cfg.ContextDynamicMutators,
+		Existing:                cfg.ContextFrags,
 	})
 	cfg.ContextFrags = assembled.Frags
-	cfg.ContextManifest = assembled.Manifest
+	manifest := assembled.Manifest
+	manifest.ToolDefs = cfg.ContextToolDefs
+	if cfg.ContextManifest.CachePlan != nil && manifest.CachePlan == nil {
+		plan := *cfg.ContextManifest.CachePlan
+		manifest.CachePlan = &plan
+	}
+	if cfg.ContextManifest.Mutations != nil && manifest.Mutations == nil {
+		manifest.Mutations = cfg.ContextManifest.Mutations
+	}
+	cfg.ContextManifest = manifest
 	return cfg
 }
 

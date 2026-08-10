@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
-
 	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
 	"github.com/memohai/memoh/internal/agent/event"
 	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
@@ -155,49 +153,55 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 
 	var (
 		projectedMu       sync.Mutex
-		projectedStatuses = map[string]string{}
+		projectedMessages = map[string]*messagepkg.Message{}
 	)
-	recordProjectionStatus := func(ev native.StreamEvent) bool {
+	recordProjection := func(ev native.StreamEvent) bool {
 		toolCallID := strings.TrimSpace(ev.ToolCallID)
 		if toolCallID == "" {
 			return false
 		}
-		status := acpDecisionProjectionStatus(ev)
 		projectedMu.Lock()
 		defer projectedMu.Unlock()
-		if projectedStatuses[toolCallID] == status {
+		if _, exists := projectedMessages[toolCallID]; exists {
 			return false
 		}
-		projectedStatuses[toolCallID] = status
+		projectedMessages[toolCallID] = nil
 		return true
 	}
-	releaseProjection := func(toolCallID string) {
+	completeProjection := func(toolCallID string, message *messagepkg.Message) {
 		toolCallID = strings.TrimSpace(toolCallID)
 		if toolCallID == "" {
 			return
 		}
 		projectedMu.Lock()
-		delete(projectedStatuses, toolCallID)
+		if message == nil {
+			delete(projectedMessages, toolCallID)
+		} else {
+			projectedMessages[toolCallID] = message
+		}
 		projectedMu.Unlock()
 	}
-	projectedSnapshot := func() map[string]struct{} {
+	projectedSnapshot := func() []messagepkg.Message {
 		projectedMu.Lock()
 		defer projectedMu.Unlock()
-		if len(projectedStatuses) == 0 {
+		if len(projectedMessages) == 0 {
 			return nil
 		}
-		out := make(map[string]struct{}, len(projectedStatuses))
-		for id := range projectedStatuses {
-			out[id] = struct{}{}
+		out := make([]messagepkg.Message, 0, len(projectedMessages))
+		for _, message := range projectedMessages {
+			if message != nil {
+				out = append(out, *message)
+			}
 		}
 		return out
 	}
+	cleanupProjections := func() {
+		s.cleanupReplacementMessages(context.WithoutCancel(ctx), projectedSnapshot())
+	}
 
 	emit := func(ev native.StreamEvent) {
-		if isACPDecisionProjectionEvent(ev) && recordProjectionStatus(ev) {
-			if !s.persistACPDecisionProjection(context.WithoutCancel(ctx), req, ev) {
-				releaseProjection(ev.ToolCallID)
-			}
+		if isACPDecisionProjectionEvent(ev) && recordProjection(ev) {
+			completeProjection(ev.ToolCallID, s.persistACPDecisionProjection(context.WithoutCancel(ctx), req, ev))
 		}
 		if activePrompt != nil {
 			activePrompt.emit(ev)
@@ -258,26 +262,29 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		s.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the turn ended before a decision arrived")
 		var feedbackErr *acpfeedback.Error
 		if errors.As(err, &feedbackErr) {
+			cleanupProjections()
 			cleanupLeadingUser()
 			return err
 		}
 		if appErr := acpPromptConfigAppError(err); appErr != nil {
+			cleanupProjections()
 			cleanupLeadingUser()
 			return appErr
 		}
 		if feedbackErr := acpPromptInputFeedback(err); feedbackErr != nil {
+			cleanupProjections()
 			cleanupLeadingUser()
 			return feedbackErr
 		}
 		result = ensureACPPromptOutput(result)
 		failedResult, failureDelta := acpFailureResult(result, err)
-		projected := projectedSnapshot()
-		failedResult.Output = filterACPProjectedOutput(failedResult.Output, projected)
 		if failureDelta != "" {
 			emit(native.StreamEvent{Type: native.EventTextDelta, Delta: failureDelta})
 		}
 		if err := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err); err != nil {
 			s.logger.Error("ACP failure persist failed", slog.Any("error", err), slog.String("session_id", req.ThreadID))
+		} else {
+			cleanupProjections()
 		}
 		emit(native.StreamEvent{Type: native.EventTextEnd})
 		emit(acpTerminalStreamEvent(native.EventAbort, failedResult))
@@ -285,11 +292,11 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	}
 
 	emit(native.StreamEvent{Type: native.EventTextEnd})
-	projected := projectedSnapshot()
 	result = ensureACPPromptOutput(result)
-	result.Output = filterACPProjectedOutput(result.Output, projected)
 	if err := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil); err != nil {
 		s.logger.Error("ACP persist failed", slog.Any("error", err), slog.String("session_id", req.ThreadID))
+	} else {
+		cleanupProjections()
 	}
 	emit(acpTerminalStreamEvent(native.EventEnd, result))
 	return nil
@@ -551,14 +558,6 @@ func isACPDecisionProjectionEvent(ev native.StreamEvent) bool {
 	}
 }
 
-func acpDecisionProjectionStatus(ev native.StreamEvent) string {
-	status := strings.ToLower(strings.TrimSpace(ev.Status))
-	if status == "" {
-		return "pending"
-	}
-	return status
-}
-
 func (s *Service) persistACPLeadingUserMessage(ctx context.Context, req ChatRequest) (ChatRequest, *messagepkg.Message) {
 	if req.UserMessagePersisted || s == nil || s.messageService == nil || strings.TrimSpace(req.BotID) == "" {
 		return req, nil
@@ -599,6 +598,9 @@ func (s *Service) persistACPLeadingUserMessage(ctx context.Context, req ChatRequ
 		DisplayText:             displayText,
 		SessionMode:             sessionMode,
 		RuntimeType:             runtimeType,
+		RunID:                   req.RunID,
+		TurnID:                  req.TurnID,
+		TurnPosition:            req.TurnPosition,
 	})
 	if err != nil {
 		s.logger.Warn("persist ACP leading user message failed",
@@ -612,9 +614,9 @@ func (s *Service) persistACPLeadingUserMessage(ctx context.Context, req ChatRequ
 	return req, &persisted
 }
 
-func (s *Service) persistACPDecisionProjection(ctx context.Context, req ChatRequest, ev native.StreamEvent) bool {
+func (s *Service) persistACPDecisionProjection(ctx context.Context, req ChatRequest, ev native.StreamEvent) *messagepkg.Message {
 	if s == nil || s.messageService == nil || strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.ThreadID) == "" {
-		return false
+		return nil
 	}
 	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents([]event.StreamEvent{ev}, ""))
 	sessionMode, runtimeType := s.persistSessionRuntimeSnapshot(ctx, req)
@@ -627,9 +629,9 @@ func (s *Service) persistACPDecisionProjection(ctx context.Context, req ChatRequ
 			s.logger.Warn("persist ACP decision projection: marshal failed",
 				slog.String("tool_call_id", ev.ToolCallID),
 				slog.Any("error", err))
-			return false
+			return nil
 		}
-		if _, err := s.messageService.Persist(ctx, messagepkg.PersistInput{
+		persisted, err := s.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.ThreadID,
 			SenderChannelIdentityID: "",
@@ -638,52 +640,20 @@ func (s *Service) persistACPDecisionProjection(ctx context.Context, req ChatRequ
 			Metadata:                buildRouteMetadata(req),
 			SessionMode:             sessionMode,
 			RuntimeType:             runtimeType,
-		}); err != nil {
+			TurnRequestMessageID:    req.PersistedUserMessageID,
+			RunID:                   req.RunID,
+		})
+		if err != nil {
 			s.logger.Warn("persist ACP decision projection failed",
 				slog.String("bot_id", req.BotID),
 				slog.String("session_id", req.ThreadID),
 				slog.String("tool_call_id", ev.ToolCallID),
 				slog.Any("error", err))
-			return false
+			return nil
 		}
-		return true
+		return &persisted
 	}
-	return false
-}
-
-func filterACPProjectedOutput(messages []sdk.Message, projected map[string]struct{}) []sdk.Message {
-	if len(messages) == 0 || len(projected) == 0 {
-		return messages
-	}
-	out := make([]sdk.Message, 0, len(messages))
-	for _, msg := range messages {
-		if msg.Role != sdk.MessageRoleAssistant {
-			out = append(out, msg)
-			continue
-		}
-		content := make([]sdk.MessagePart, 0, len(msg.Content))
-		changed := false
-		for _, part := range msg.Content {
-			call, ok := part.(sdk.ToolCallPart)
-			if !ok {
-				content = append(content, part)
-				continue
-			}
-			if _, skip := projected[strings.TrimSpace(call.ToolCallID)]; skip {
-				changed = true
-				continue
-			}
-			content = append(content, part)
-		}
-		if changed {
-			if len(content) == 0 {
-				continue
-			}
-			msg.Content = content
-		}
-		out = append(out, msg)
-	}
-	return out
+	return nil
 }
 
 // cancelPendingACPApprovals closes the residual approval window when a turn
@@ -761,6 +731,7 @@ func (s *Service) persistACPRound(ctx context.Context, req ChatRequest, agentID,
 		SkipMemory:              skipMemory,
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex:  metadataByIndex,
+		RequireCompletePersist:  true,
 	})
 	if err == nil && promptErr == nil && req.UserMessagePersisted && !req.SkipMemoryExtraction {
 		go s.storeMemory(context.WithoutCancel(ctx), req, round)

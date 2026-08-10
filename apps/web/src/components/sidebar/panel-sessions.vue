@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col h-full min-w-0">
+  <div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
     <SidebarPanelHeader
       :label="t('chat.quickActions')"
       label-class="pl-[11px]"
@@ -72,10 +72,13 @@
     -->
 
     <!-- Folders is a SIBLING section of Recents: folders of workdir-bound
-         chats above, the ungrouped timeline below. -->
-    <FoldersSection />
+         chats above, the ungrouped timeline below. The wrapper owns the
+         remaining height so neither section can spill into the sidebar footer. -->
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <FoldersSection />
 
-    <Recents class="flex-1 min-h-0" />
+      <Recents class="min-h-0 flex-1 overflow-hidden" />
+    </div>
   </div>
 </template>
 

@@ -122,6 +122,37 @@ func artifactMetadataFor(items []CompactionCandidate, ids []pgtype.UUID) (artifa
 	return metadata, nil
 }
 
+func rollupArtifactMetadata(parents []Artifact, current artifactMetadata) (artifactMetadata, error) {
+	currentCoverage, err := DecodeArtifactCoverage(current.Coverage)
+	if err != nil {
+		return artifactMetadata{}, err
+	}
+	covered := make([]CoveredSource, 0, len(currentCoverage))
+	for _, parent := range parents {
+		if len(parent.Coverage) == 0 {
+			return artifactMetadata{}, fmt.Errorf("%w: artifact_id=%s", errIncompleteAbsorbedCoverage, parent.ID)
+		}
+		covered = append(covered, parent.Coverage...)
+	}
+	covered = append(covered, currentCoverage...)
+	sort.SliceStable(covered, func(i, j int) bool {
+		return covered[i].CreatedAtMs < covered[j].CreatedAtMs
+	})
+	if err := validatePersistedArtifactCoverage(covered); err != nil {
+		return artifactMetadata{}, fmt.Errorf("validate compaction rollup coverage: %w", err)
+	}
+	encoded, err := json.Marshal(covered)
+	if err != nil {
+		return artifactMetadata{}, fmt.Errorf("encode compaction rollup coverage: %w", err)
+	}
+	metadata := artifactMetadata{Coverage: encoded}
+	if len(covered) > 0 {
+		metadata.AnchorStartMs = covered[0].CreatedAtMs
+		metadata.AnchorEndMs = covered[len(covered)-1].CreatedAtMs
+	}
+	return metadata, nil
+}
+
 func DecodeArtifactCoverage(raw []byte) ([]CoveredSource, error) {
 	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil, nil

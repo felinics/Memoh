@@ -18,6 +18,21 @@ For tool results, only include key outcomes; ignore intermediate steps or errors
 
 Output ONLY the summary of the new conversation segment. No preamble, no headers.`
 
+const fusionSystemPrompt = `You are a conversation summarizer. Given absorbed earlier context and a new conversation segment, produce a concise summary that preserves:
+- Key facts, decisions, and agreements
+- User preferences and requests
+- Important context needed for continuing the conversation
+- Names, dates, numbers, and specific details
+- Tool usage outcomes and their results
+
+If <prior_context> is provided, it contains summaries that remain active after this pass. Use them ONLY to understand the conversation flow and maintain continuity. Do NOT include, repeat, or rephrase any content from <prior_context> in your output.
+
+The output summary REPLACES every earlier summary in <absorbed_context> entirely. Integrate all still-relevant information from the absorbed context and the new conversation segment. Do not write references like "see prior summary" or otherwise depend on an earlier summary remaining available.
+
+For tool results, only include key outcomes; ignore intermediate steps or errors.
+
+Output ONLY the replacement summary. No preamble, no headers.`
+
 type messageEntry struct {
 	Role    string
 	Content string
@@ -38,6 +53,39 @@ func buildUserPrompt(priorSummaries []string, messages []messageEntry) string {
 		fmt.Fprintf(&sb, "%s: %s\n", m.Role, m.Content)
 	}
 	return sb.String()
+}
+
+func buildFusionUserPrompt(priorSummaries []string, absorbed []absorbedSegment, messages []messageEntry) string {
+	var sb strings.Builder
+	if len(priorSummaries) > 0 {
+		sb.WriteString("<prior_context>\n")
+		sb.WriteString("The following are summaries of earlier parts of this conversation. They are provided ONLY as reference context to help you understand the conversation flow. Do NOT include or repeat any of this content in your output summary.\n\n")
+		sb.WriteString(strings.Join(priorSummaries, "\n---\n"))
+		sb.WriteString("\n</prior_context>\n\n")
+	}
+	sb.WriteString("<absorbed_context>\n")
+	for i, segment := range absorbed {
+		if i > 0 {
+			sb.WriteString("\n---\n")
+		}
+		sb.WriteString(absorbedSegmentHeader(segment.Source))
+		sb.WriteByte('\n')
+		sb.WriteString(strings.TrimSpace(segment.Content))
+		sb.WriteByte('\n')
+	}
+	sb.WriteString("</absorbed_context>\n\n")
+	sb.WriteString("Now summarize the following conversation segment:\n")
+	for _, message := range messages {
+		fmt.Fprintf(&sb, "%s: %s\n", message.Role, message.Content)
+	}
+	return sb.String()
+}
+
+func absorbedSegmentHeader(source absorbedSegmentSource) string {
+	if source == absorbedSourceRawTranscript {
+		return "[raw transcript segment]"
+	}
+	return "[earlier summary segment]"
 }
 
 // priorSeparatorTokens covers the "\n---\n" joiner buildUserPrompt places

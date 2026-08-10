@@ -171,6 +171,17 @@ type UIOption struct {
 	Description string `json:"description,omitempty"`
 } // @name userinput.UIOption
 
+// UIAnswer is the public, display-safe projection of one submitted answer.
+// Model-only instructions remain in Request.Result and are never exposed here.
+type UIAnswer struct {
+	QuestionID string     `json:"question_id"`
+	Question   string     `json:"question"`
+	Selected   []UIOption `json:"selected,omitempty"`
+	CustomText string     `json:"custom_text,omitempty"`
+	Text       string     `json:"text,omitempty"`
+	Skipped    bool       `json:"skipped,omitempty"`
+} // @name userinput.UIAnswer
+
 func (p UIPayload) Question(id string) (UIQuestion, bool) {
 	for _, question := range p.Questions {
 		if question.ID == id {

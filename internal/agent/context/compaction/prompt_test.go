@@ -5,6 +5,79 @@ import (
 	"testing"
 )
 
+func TestNonFusionPromptRemainsByteIdentical(t *testing.T) {
+	t.Parallel()
+
+	wantSystem := `You are a conversation summarizer. Given a conversation history, produce a concise summary that preserves:
+- Key facts, decisions, and agreements
+- User preferences and requests
+- Important context needed for continuing the conversation
+- Names, dates, numbers, and specific details
+- Tool usage outcomes and their results
+
+If <prior_context> is provided, it contains summaries of earlier conversation segments. Use them ONLY to understand the conversation flow and maintain continuity. Do NOT include, repeat, or rephrase any content from <prior_context> in your output.
+
+For tool results, only include key outcomes; ignore intermediate steps or errors.
+
+Output ONLY the summary of the new conversation segment. No preamble, no headers.`
+	if systemPrompt != wantSystem {
+		t.Fatalf("non-fusion system prompt changed:\n%s", systemPrompt)
+	}
+
+	wantUser := "<prior_context>\n" +
+		"The following are summaries of earlier parts of this conversation. They are provided ONLY as reference context to help you understand the conversation flow. Do NOT include or repeat any of this content in your output summary.\n\n" +
+		"first summary\n---\nsecond summary\n" +
+		"</prior_context>\n\n" +
+		"Now summarize the following conversation segment:\n" +
+		"user: new question\nassistant: new answer\n"
+	gotUser := buildUserPrompt(
+		[]string{"first summary", "second summary"},
+		[]messageEntry{{Role: "user", Content: "new question"}, {Role: "assistant", Content: "new answer"}},
+	)
+	if gotUser != wantUser {
+		t.Fatalf("non-fusion user prompt changed:\n%s", gotUser)
+	}
+}
+
+func TestFusionPromptRendersAbsorbedContextWithoutPriorContext(t *testing.T) {
+	t.Parallel()
+
+	absorbed := []absorbedSegment{
+		{Source: absorbedSourceRawTranscript, Content: "user: canonical raw"},
+		{Source: absorbedSourceEarlierSummary, Content: "earlier condensed state"},
+	}
+	prompt := buildFusionUserPrompt(
+		nil,
+		absorbed,
+		[]messageEntry{{Role: "user", Content: "new conversation"}},
+	)
+
+	for _, want := range []string{
+		"<absorbed_context>",
+		"[raw transcript segment]",
+		"[earlier summary segment]",
+		"user: canonical raw",
+		"earlier condensed state",
+		"user: new conversation\n",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("fusion user prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "<prior_context>") {
+		t.Fatalf("whole-frontier fusion prompt retained prior context:\n%s", prompt)
+	}
+	for _, want := range []string{
+		"REPLACES",
+		"Integrate all still-relevant information",
+		"see prior summary",
+	} {
+		if !strings.Contains(fusionSystemPrompt, want) {
+			t.Fatalf("fusion system prompt missing %q:\n%s", want, fusionSystemPrompt)
+		}
+	}
+}
+
 func TestCapPriorSummariesKeepsNewestWithinBudget(t *testing.T) {
 	t.Parallel()
 

@@ -671,7 +671,7 @@ func normalizeToolCallIDs(ids []string) []string {
 }
 
 func DeferredMetadata(req Request) map[string]any {
-	return map[string]any{
+	metadata := map[string]any{
 		"kind":          DeferredKind,
 		"user_input_id": req.ID,
 		"short_id":      req.ShortID,
@@ -680,6 +680,36 @@ func DeferredMetadata(req Request) map[string]any {
 		"tool_name":     req.ToolName,
 		"ui_payload":    req.UIPayload,
 	}
+	if answers := AnswersFromResult(req.Result); len(answers) > 0 {
+		metadata["answers"] = answers
+	}
+	return metadata
+}
+
+// AnswersFromResult returns only the display-safe answer fields from a
+// persisted tool result. Internal instructions and failure diagnostics stay
+// private to the runtime/model boundary.
+func AnswersFromResult(result map[string]any) []UIAnswer {
+	if len(result) == 0 {
+		return nil
+	}
+	return AnswersFromStored(result["answers"])
+}
+
+// AnswersFromStored normalizes either in-memory or JSON-decoded answer data.
+func AnswersFromStored(value any) []UIAnswer {
+	if value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var answers []UIAnswer
+	if err := json.Unmarshal(data, &answers); err != nil || len(answers) == 0 {
+		return nil
+	}
+	return answers
 }
 
 // submittedResult validates the user's answers against the stored payload and

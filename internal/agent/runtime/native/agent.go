@@ -13,6 +13,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	tools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/hooks"
@@ -22,12 +23,13 @@ import (
 
 // Agent is the core agent that handles LLM interactions.
 type Agent struct {
-	client         *sdk.Client
-	toolProviders  []tools.ToolProvider
-	bridgeProvider bridge.Provider
-	hookService    *hooks.Service
-	logger         *slog.Logger
-	limits         Limits
+	client             *sdk.Client
+	toolProviders      []tools.ToolProvider
+	bridgeProvider     bridge.Provider
+	hookService        *hooks.Service
+	logger             *slog.Logger
+	limits             Limits
+	contextViewApplier ContextViewApplier
 }
 
 const streamCancelDrainGrace = 250 * time.Millisecond
@@ -39,12 +41,23 @@ func New(deps Deps) *Agent {
 		logger = slog.Default()
 	}
 	return &Agent{
-		client:         sdk.NewClient(),
-		bridgeProvider: deps.BridgeProvider,
-		hookService:    deps.HookService,
-		logger:         logger.With(slog.String("service", "agent/runtime/native")),
-		limits:         deps.Limits.Normalize(),
+		client:             sdk.NewClient(),
+		bridgeProvider:     deps.BridgeProvider,
+		hookService:        deps.HookService,
+		logger:             logger.With(slog.String("service", "agent/runtime/native")),
+		limits:             deps.Limits.Normalize(),
+		contextViewApplier: deps.ContextViewApplier,
 	}
+}
+
+// applyContextView compiles the provider-facing fields from authoritative
+// fragments when the application installed the PR1 compiler. Direct Agent
+// users retain the legacy refresh path.
+func (a *Agent) applyContextView(ctx context.Context, cfg RunConfig) RunConfig {
+	if a != nil && a.contextViewApplier != nil {
+		return a.contextViewApplier(ctx, cfg)
+	}
+	return cfg.RefreshContextFrag()
 }
 
 // BridgeProvider returns the underlying bridge provider (workspace manager).
@@ -81,7 +94,7 @@ func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, e
 }
 
 func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCall) (sdk.ToolResultPart, error) {
-	sdkTools, _, err := a.assembleTools(ctx, cfg, nil, false)
+	sdkTools, _, _, err := a.assembleTools(ctx, cfg, nil, false)
 	if err != nil {
 		return sdk.ToolResultPart{}, fmt.Errorf("assemble tools: %w", err)
 	}
@@ -160,13 +173,15 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
 		var toolUsage string
+		var toolDefs []contextfrag.ToolDefAccounting
 		var err error
-		sdkTools, toolUsage, err = a.assembleTools(streamCtx, cfg, streamEmitter, cfg.LiveToolStream)
+		sdkTools, toolUsage, toolDefs, err = a.assembleTools(streamCtx, cfg, streamEmitter, cfg.LiveToolStream)
 		if err != nil {
 			turnError = fmt.Sprintf("assemble tools: %v", err)
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 			return
 		}
+		cfg.ContextToolDefs = toolDefs
 		if toolUsage != "" {
 			// Must run before buildGenerateOptions so prompt caching and
 			// background task summaries see the usage-augmented text.
@@ -176,7 +191,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
-	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, true)
+	cfg.ContextDynamicMutators = cfg.contextDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, true)
+	cfg = a.applyContextView(streamCtx, cfg)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
@@ -278,7 +294,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 		return
 	}
-	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, true)
 	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
 	modelStepIndex := 0
 	opts = append(opts, sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
@@ -743,11 +758,13 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	var sdkTools []sdk.Tool
 	if cfg.SupportsToolCall {
 		var toolUsage string
+		var toolDefs []contextfrag.ToolDefAccounting
 		var err error
-		sdkTools, toolUsage, err = a.assembleTools(genCtx, cfg, collectEmitter, false)
+		sdkTools, toolUsage, toolDefs, err = a.assembleTools(genCtx, cfg, collectEmitter, false)
 		if err != nil {
 			return nil, fmt.Errorf("assemble tools: %w", err)
 		}
+		cfg.ContextToolDefs = toolDefs
 		if toolUsage != "" {
 			// Must run before buildGenerateOptions so prompt caching and
 			// background task summaries see the usage-augmented text.
@@ -757,7 +774,8 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	}
 	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
-	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, false)
+	cfg.ContextDynamicMutators = cfg.contextDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, false)
+	cfg = a.applyContextView(genCtx, cfg)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
@@ -788,7 +806,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	if err != nil {
 		return nil, err
 	}
-	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, false)
 	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
 	modelStepIndex := 0
 	opts = append(opts,
@@ -871,6 +888,8 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 	system, messages, tools := models.ApplyPromptCache(
 		cfg.Model, cfg.PromptCacheTTL, cfg.System, cfg.Messages, tools,
 	)
+	finalHash, _ := contextfrag.ProviderPayloadHashAndBytes(system, messages, tools)
+	cfg.ContextMutations.SetFinalInputHash(finalHash)
 	if cfg.ForkContext != nil {
 		_ = cfg.ForkContext.Store(messages)
 	}
@@ -908,6 +927,7 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 	}
 
 	prepareStep = wrapPrepareStepWithForkSnapshot(prepareStep, cfg.ForkContext)
+	prepareStep = wrapPrepareStepWithFinalInputHash(prepareStep, cfg.ContextMutations)
 	if prepareStep != nil {
 		opts = append(opts, sdk.WithPrepareStep(prepareStep))
 	}
@@ -933,9 +953,9 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 // (see tools.ToolUsage). emitter is injected into the session context so that
 // tools targeting the current conversation can push side-effect events
 // (attachments, reactions, speech) directly into the agent stream.
-func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.StreamEmitter, liveStream bool) ([]sdk.Tool, string, error) {
+func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.StreamEmitter, liveStream bool) ([]sdk.Tool, string, []contextfrag.ToolDefAccounting, error) {
 	if len(a.toolProviders) == 0 {
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
 	skillsMap := make(map[string]tools.SkillDetail, len(cfg.Skills))
 	for _, s := range cfg.Skills {
@@ -975,6 +995,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 	}
 
 	var allTools []sdk.Tool
+	var toolDefs []contextfrag.ToolDefAccounting
 	type usageRegistration struct {
 		provider tools.ToolUsage
 	}
@@ -1008,6 +1029,15 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		if len(providerTools) == 0 {
 			continue
 		}
+		label := "native"
+		if labeler, ok := provider.(tools.ProviderLabeler); ok {
+			if providerLabel := strings.TrimSpace(labeler.ProviderLabel()); providerLabel != "" {
+				label = providerLabel
+			}
+		}
+		for _, tool := range providerTools {
+			toolDefs = append(toolDefs, contextfrag.ToolDefAccountingFor(label, tool))
+		}
 		allTools = append(allTools, providerTools...)
 		// Collect group-level usage guidance only from providers that actually
 		// contributed tools this session, so guidance and registration share
@@ -1029,7 +1059,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 	if len(usageSections) > 0 {
 		usage = "## Tool usage\n\n" + strings.Join(usageSections, "\n\n")
 	}
-	return allTools, usage, nil
+	return allTools, usage, toolDefs, nil
 }
 
 func appendToolUsageToSystem(system, toolUsage string) string {
@@ -1328,6 +1358,29 @@ func wrapPrepareStepWithForkSnapshot(
 		}
 		_ = forkContext.Store(p.Messages)
 		return p
+	}
+}
+
+func wrapPrepareStepWithFinalInputHash(
+	prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams,
+	ledger *contextfrag.MutationLedger,
+) func(*sdk.GenerateParams) *sdk.GenerateParams {
+	if ledger == nil {
+		return prepareStep
+	}
+	return func(p *sdk.GenerateParams) *sdk.GenerateParams {
+		var override *sdk.GenerateParams
+		if prepareStep != nil {
+			override = prepareStep(p)
+			if override != nil {
+				p = override
+			}
+		}
+		if p != nil {
+			hash, _ := contextfrag.ProviderPayloadHashAndBytes(p.System, p.Messages, p.Tools)
+			ledger.SetFinalInputHash(hash)
+		}
+		return override
 	}
 }
 

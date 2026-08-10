@@ -1,7 +1,9 @@
 import type {
   UIToolApproval,
   UIUserInput,
+  UIUserInputAnswer,
 } from '@/composables/api/useChat.types'
+import type { WSUserInputAnswer } from '@/composables/api/useChat.ws'
 import {
   cloneToolApprovalState,
   cloneUserInputState,
@@ -13,13 +15,39 @@ import type {
 } from './types'
 
 interface UserInputStateSnapshot {
-  block: ToolCallBlock
+  toolCallId: string
   userInput: UIUserInput
 }
 
 interface ToolApprovalStateSnapshot {
-  block: ToolCallBlock
+  toolCallId: string
   approval: UIToolApproval
+}
+
+function projectSubmittedAnswers(
+  userInput: UIUserInput,
+  submitted: WSUserInputAnswer[] | undefined,
+): UIUserInputAnswer[] {
+  const questions = new Map(userInput.questions?.map(question => [question.id, question]) ?? [])
+  return (submitted ?? []).flatMap((answer) => {
+    const questionId = answer.question_id.trim()
+    if (!questionId) return []
+    const question = questions.get(questionId)
+    const selected = (answer.option_ids ?? []).flatMap((optionId) => {
+      const id = optionId.trim()
+      if (!id) return []
+      const option = question?.options?.find(candidate => candidate.id === id)
+      return [{ id, label: option?.label ?? id }]
+    })
+    const projected: UIUserInputAnswer = {
+      question_id: questionId,
+      question: question?.text ?? questionId,
+    }
+    if (selected.length > 0) projected.selected = selected
+    if (answer.custom_text?.trim()) projected.custom_text = answer.custom_text.trim()
+    if (answer.text?.trim()) projected.text = answer.text.trim()
+    return [projected]
+  })
 }
 
 export function createTranscriptDecisions(messages: ChatMessage[]) {
@@ -39,7 +67,7 @@ export function createTranscriptDecisions(messages: ChatMessage[]) {
     forEachToolBlock((block) => {
       if (block.approval?.approval_id === id) {
         snapshots.push({
-          block,
+          toolCallId: block.toolCallId,
           approval: cloneToolApprovalState(block.approval),
         })
       }
@@ -58,13 +86,16 @@ export function createTranscriptDecisions(messages: ChatMessage[]) {
   }
 
   function restoreToolApprovalStates(snapshots: ToolApprovalStateSnapshot[]) {
-    for (const snapshot of snapshots) {
-      if (
-        snapshot.block.approval?.approval_id
-        !== snapshot.approval.approval_id
-      ) continue
-      snapshot.block.approval = cloneToolApprovalState(snapshot.approval)
-    }
+    forEachToolBlock((block) => {
+      const current = block.approval
+      if (!current) return
+      const snapshot = snapshots.find(candidate =>
+        candidate.toolCallId === block.toolCallId
+        && candidate.approval.approval_id === current.approval_id,
+      )
+      if (!snapshot) return
+      block.approval = cloneToolApprovalState(snapshot.approval)
+    })
   }
 
   function snapshotUserInputStates(userInputId: string) {
@@ -74,7 +105,7 @@ export function createTranscriptDecisions(messages: ChatMessage[]) {
     forEachToolBlock((block) => {
       if (block.userInput?.user_input_id === id) {
         snapshots.push({
-          block,
+          toolCallId: block.toolCallId,
           userInput: cloneUserInputState(block.userInput),
         })
       }
@@ -93,13 +124,16 @@ export function createTranscriptDecisions(messages: ChatMessage[]) {
   }
 
   function restoreUserInputStates(snapshots: UserInputStateSnapshot[]) {
-    for (const snapshot of snapshots) {
-      if (
-        snapshot.block.userInput?.user_input_id
-        !== snapshot.userInput.user_input_id
-      ) continue
-      snapshot.block.userInput = cloneUserInputState(snapshot.userInput)
-    }
+    forEachToolBlock((block) => {
+      const current = block.userInput
+      if (!current) return
+      const snapshot = snapshots.find(candidate =>
+        candidate.toolCallId === block.toolCallId
+        && candidate.userInput.user_input_id === current.user_input_id,
+      )
+      if (!snapshot) return
+      block.userInput = cloneUserInputState(snapshot.userInput)
+    })
   }
 
   function markToolApprovalDecision(
@@ -122,12 +156,20 @@ export function createTranscriptDecisions(messages: ChatMessage[]) {
   function markUserInputDecision(
     userInputId: string,
     status: 'submitted' | 'canceled',
+    answers?: WSUserInputAnswer[],
   ) {
     const id = userInputId.trim()
     if (!id) return
     forEachToolBlock((block) => {
       if (block.userInput?.user_input_id === id) {
-        block.userInput = { ...block.userInput, status, can_respond: false }
+        block.userInput = {
+          ...block.userInput,
+          status,
+          answers: status === 'submitted'
+            ? projectSubmittedAnswers(block.userInput, answers)
+            : undefined,
+          can_respond: false,
+        }
       }
     })
   }
