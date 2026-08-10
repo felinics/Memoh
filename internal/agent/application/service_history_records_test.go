@@ -16,6 +16,7 @@ import (
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/memohai/memoh/internal/contextview"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -243,6 +244,30 @@ func TestHistoryContextFragsForMessagesCarriesActiveSummaryCoverage(t *testing.T
 	}
 	if summaryItems != 1 {
 		t.Fatalf("run config manifest summary items = %d, want 1: %#v", summaryItems, cfg.ContextManifest.Items)
+	}
+
+	cfg.ContextQueryMaterialized = true
+	cfg.ContextSourceFrags = buildProviderSourceFrags(context.Background(), cfg, nil, nil)
+	providerCfg := contextview.ApplyProviderRunConfig(context.Background(), nil, cfg)
+	if !reflect.DeepEqual(providerCfg.Messages, cfg.Messages) {
+		t.Fatalf("provider messages changed: got %#v want %#v", providerCfg.Messages, cfg.Messages)
+	}
+	if len(providerCfg.ContextManifest.CoverageTrace) != 1 {
+		t.Fatalf("provider manifest lost summary coverage: %#v", providerCfg.ContextManifest)
+	}
+	providerSummaryItems := 0
+	for _, item := range providerCfg.ContextManifest.Items {
+		if item.Kind == contextfrag.KindConversationSummary {
+			providerSummaryItems++
+			if item.Ref.Namespace != summary.Ref.Namespace || item.Ref.ID != summary.Ref.ID ||
+				item.Ref.Version != summary.Ref.Version || item.Ref.Durability != contextfrag.RefDurable ||
+				item.Ref.ContentHash == "" {
+				t.Fatalf("provider summary ref lost durable identity: got %#v source %#v", item.Ref, summary.Ref)
+			}
+		}
+	}
+	if providerSummaryItems != 1 {
+		t.Fatalf("provider manifest summary items = %d, want 1: %#v", providerSummaryItems, providerCfg.ContextManifest.Items)
 	}
 }
 

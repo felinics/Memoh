@@ -37,6 +37,8 @@ func (s *Service) prepareContinuationRunConfig(
 	// provider-valid. Applies to every continuation path that resumes after a
 	// deferred tool call.
 	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
+	base.ContextCurrentUserMessageIndex = nil
+	base.ContextMemoryMessageIndex = nil
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)

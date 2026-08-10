@@ -18,7 +18,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { FieldStack, InlineLoadingRow, toast, useClipboard } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, getMemoryProviders, getAcpProfiles, type AcpprofilePublicProfile } from '@memohai/sdk'
+import { getModels, getProviders, getMemoryProviders, getAcpProfiles } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
@@ -26,14 +26,17 @@ import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import { safeSessionSet } from '@/utils/safe-storage'
-import { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent, withACPMetadata, type ACPForm } from '@/utils/acp'
+import { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent, normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
+import AgentTypePill from '@/pages/bots/components/agent-type-pill.vue'
+import AcpSetupPanel from '@/pages/bots/components/acp-setup-panel.vue'
+import { MEMOH_AGENT_VALUE } from '@/pages/bots/components/agent-type'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
-import { clearACPSelection, readACPSelection, type OnboardingACPSelection } from './useACPSetup'
+import { clearACPSelection, writeACPSelection, type OnboardingACPSelection } from './useACPSetup'
 import StepFrame from '../components/step-frame.vue'
 import StepExitShell from '../components/step-exit-shell.vue'
 import HintBox from '../components/hint-box.vue'
@@ -50,10 +53,30 @@ const submitting = ref(false)
 const store = useBotCreateProgressStore()
 const { lines: terminalLines, status: createStatus } = storeToRefs(store)
 
-const acpSelection = ref<OnboardingACPSelection | null>(null)
-const acpProfiles = ref<AcpprofilePublicProfile[]>([])
+const agentType = ref(MEMOH_AGENT_VALUE)
+const acpError = ref('')
+const acpSetupPanelRef = ref<InstanceType<typeof AcpSetupPanel> | null>(null)
 
-const isACPSelected = computed(() => !!acpSelection.value)
+const { data: acpProfileData } = useQuery({
+  key: ['acp-profiles'],
+  query: async () => {
+    const { data } = await getAcpProfiles({ throwOnError: true })
+    return data
+  },
+})
+const acpProfiles = computed(() => acpProfileData.value?.items ?? [])
+
+// Null while the built-in Memoh agent is picked — model select stays, no ACP
+// setup, no metadata.
+const selectedAcpProfile = computed(() => {
+  if (agentType.value === MEMOH_AGENT_VALUE) return null
+  return acpProfiles.value.find(profile => normalizeACPAgentID(profile.id) === agentType.value) ?? null
+})
+
+// Snapshot pulled from the setup panel at submit — drives the create metadata,
+// the sessionStorage selection Step5 reads, and the post-create OAuth phase.
+// The pill (agentType) is the choice; this is the committed form of it.
+const acpSelection = ref<OnboardingACPSelection | null>(null)
 const acpAgentId = computed(() => acpSelection.value?.agentId ?? '')
 const acpAgentName = computed(() => acpAgentDisplayName(acpAgentId.value))
 
@@ -86,17 +109,9 @@ const {
 } = useACPOAuth(() => oauthBotId.value)
 
 onMounted(() => {
-  acpSelection.value = readACPSelection()
-  if (acpSelection.value) {
-    void (async () => {
-      try {
-        const { data } = await getAcpProfiles({ throwOnError: true })
-        acpProfiles.value = data?.items ?? []
-      } catch {
-        acpProfiles.value = []
-      }
-    })()
-  }
+  // A selection is only (re)written at submit on this step — drop any stale
+  // one from an abandoned run so Step5's hasProvider can't pick it up.
+  clearACPSelection()
 })
 
 const form = reactive({
@@ -179,6 +194,23 @@ function buildMetadata(): Record<string, unknown> | undefined {
 
 async function handleSubmit() {
   if (!canSubmit.value || submitting.value) return
+
+  // Submit-time validation, not on-blur: the first empty required field is
+  // named inline inside the panel and nothing nags while typing.
+  if (selectedAcpProfile.value) {
+    const panel = acpSetupPanelRef.value
+    const missing = panel?.missingRequiredField()
+    if (missing) {
+      acpError.value = t('bots.agentCreate.requiredError', { field: missing.label || missing.id || '' })
+      return
+    }
+    const sel = panel?.selection()
+    // The panel renders together with the selection, so a missing ref means
+    // "not mounted yet" — there is nothing valid to submit against.
+    if (!sel) return
+    acpSelection.value = sel
+  }
+
   submitting.value = true
 
   // The store drives the inline terminal reactively while we await completion.
@@ -212,6 +244,11 @@ async function handleSubmit() {
   const botId = store.bot?.id
   if (botId) {
     safeSessionSet(ONBOARDING_KEYS.createdBotId, botId)
+  }
+  // Step5 reads this for its hasProvider gate and the ?acp= completion
+  // redirect; skipping OAuth below clears it again on purpose.
+  if (acpSelection.value) {
+    writeACPSelection(acpSelection.value)
   }
   if (store.setupError) {
     toast.error(store.setupError)
@@ -420,50 +457,50 @@ function skipOAuth() {
               <Separator class="my-6" />
             </div>
 
-            <!-- ACP 身份横幅:带品牌图标的 text-sm 状态行,不是 HintBox 那种
-                 text-xs 表单提示 —— 关系不同,留在本地。 -->
             <div
-              v-if="isACPSelected"
-              class="flex items-center gap-3 rounded-lg border border-border bg-muted-soft px-3 py-2.5 transition-all duration-[350ms] ease-out delay-[120ms]"
-              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-            >
-              <component
-                :is="acpAgentIcon(acpAgentId, true)"
-                class="size-5 shrink-0"
-              />
-              <p class="text-sm text-muted-foreground">
-                {{ t('onboarding.bot.acp.banner', { agent: acpAgentName }) }}
-              </p>
-            </div>
-            <div
-              v-else
               class="transition-all duration-[350ms] ease-out delay-[120ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
-              <div class="mb-2 flex items-center gap-2">
-                <Label>{{ $t('bots.settings.chatModel') }}</Label>
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      class="size-5 text-muted-foreground hover:text-foreground"
-                    >
-                      <CircleHelp class="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent class="max-w-80 text-left leading-relaxed">
-                    {{ $t('onboarding.bot.model.hint') }}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <ModelSelect
-                v-model="form.chat_model_id"
-                :models="models"
-                :providers="providers"
-                model-type="chat"
-                :placeholder="$t('onboarding.bot.model.selectPlaceholder')"
+              <!-- The chooser hides itself on servers with no hosted agents —
+                   the step then matches the pre-chooser behavior exactly. -->
+              <AgentTypePill
+                v-model="agentType"
+                :profiles="acpProfiles"
+                class="mb-3"
+              />
+              <template v-if="!selectedAcpProfile">
+                <div class="mb-2 flex items-center gap-2">
+                  <Label>{{ $t('bots.settings.chatModel') }}</Label>
+                  <Tooltip>
+                    <TooltipTrigger as-child>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        class="size-5 text-muted-foreground hover:text-foreground"
+                      >
+                        <CircleHelp class="size-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent class="max-w-80 text-left leading-relaxed">
+                      {{ $t('onboarding.bot.model.hint') }}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <ModelSelect
+                  v-model="form.chat_model_id"
+                  :models="models"
+                  :providers="providers"
+                  model-type="chat"
+                  :placeholder="$t('onboarding.bot.model.selectPlaceholder')"
+                />
+              </template>
+              <AcpSetupPanel
+                v-else
+                ref="acpSetupPanelRef"
+                v-model:error-message="acpError"
+                :profile="selectedAcpProfile"
+                :oauth-hint="t('onboarding.bot.acp.deferredHint')"
               />
             </div>
 

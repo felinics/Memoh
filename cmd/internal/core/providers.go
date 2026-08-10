@@ -53,6 +53,7 @@ import (
 	"github.com/memohai/memoh/internal/connectors"
 	ctr "github.com/memohai/memoh/internal/container"
 	containerprovider "github.com/memohai/memoh/internal/container/provider"
+	"github.com/memohai/memoh/internal/contextview"
 	"github.com/memohai/memoh/internal/db"
 	pgvectordb "github.com/memohai/memoh/internal/db/pgvector"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
@@ -436,10 +437,11 @@ func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.
 
 func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *native.Agent {
 	return native.New(native.Deps{
-		BridgeProvider: provider,
-		HookService:    hookService,
-		Logger:         log,
-		Limits:         agentLimitsFromConfig(cfg.Agent),
+		BridgeProvider:     provider,
+		HookService:        hookService,
+		Logger:             log,
+		Limits:             agentLimitsFromConfig(cfg.Agent),
+		ContextViewApplier: contextview.ProviderRunConfigApplier(log),
 	})
 }
 

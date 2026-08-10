@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/event"
 )
 
@@ -103,6 +104,39 @@ func TestTranscriptMCPErrorResultSetsToolResultError(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Fatalf("tool result IsError = false, want true for MCP isError result")
+	}
+}
+
+func TestTranscriptKeepsSubmittedUserInputAnswers(t *testing.T) {
+	t.Parallel()
+
+	recorder := NewTranscriptRecorder()
+	recorder.Add(event.StreamEvent{
+		Type:       event.ToolCallStart,
+		ToolCallID: "call-ask",
+		ToolName:   "ask_user",
+	})
+	recorder.Add(event.StreamEvent{
+		Type:        event.UserInputRequest,
+		ToolCallID:  "call-ask",
+		ToolName:    "ask_user",
+		UserInputID: "input-1",
+		Status:      userinput.StatusSubmitted,
+		Metadata: map[string]any{
+			"answers": []userinput.UIAnswer{{
+				QuestionID: "q1",
+				Question:   "Continue?",
+				Selected:   []userinput.UIOption{{ID: "yes", Label: "Yes"}},
+			}},
+		},
+	})
+
+	messages := recorder.Messages("")
+	toolCall := messages[0].Content[0].(sdk.ToolCallPart)
+	metadata := toolCall.ProviderMetadata["user_input"].(map[string]any)
+	answers := metadata["answers"].([]userinput.UIAnswer)
+	if len(answers) != 1 || answers[0].Selected[0].Label != "Yes" {
+		t.Fatalf("submitted answers = %#v", answers)
 	}
 }
 

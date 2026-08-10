@@ -137,6 +137,7 @@ import {
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
+import { measureVirtualRow } from '@/utils/virtual-row-measure'
 
 export interface SearchableSelectOption {
   value: string
@@ -275,6 +276,9 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
     gap: 2,
     overscan: 8,
     getItemKey: (index: number) => rows.value[index]?.key ?? index,
+    // Rows measured while hidden or mid-unmount report height 0; keep the
+    // last real size so the virtualizer's offset never desyncs.
+    measureElement: measureVirtualRow,
   })),
 )
 

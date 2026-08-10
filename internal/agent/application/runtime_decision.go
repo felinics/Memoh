@@ -16,6 +16,7 @@ import (
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
@@ -242,8 +243,11 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 		})
 		go func() {
 			defer runCancel()
-			s.continueRuntimeDecision(runCtx, command, func(eventCh chan<- WSStreamEvent) error {
-				return s.ContinueCommittedUserInputResponse(runCtx, committed, eventCh)
+			s.continueRuntimeDecision(runCtx, command, func(
+				continuationCtx context.Context,
+				eventCh chan<- WSStreamEvent,
+			) error {
+				return s.ContinueCommittedUserInputResponse(continuationCtx, committed, eventCh)
 			})
 		}()
 		return nil
@@ -281,8 +285,11 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 		})
 		go func() {
 			defer runCancel()
-			s.continueRuntimeDecision(runCtx, command, func(eventCh chan<- WSStreamEvent) error {
-				return s.ContinueCommittedToolApprovalResponse(runCtx, committed, eventCh)
+			s.continueRuntimeDecision(runCtx, command, func(
+				continuationCtx context.Context,
+				eventCh chan<- WSStreamEvent,
+			) error {
+				return s.ContinueCommittedToolApprovalResponse(continuationCtx, committed, eventCh)
 			})
 		}()
 		return nil
@@ -316,7 +323,11 @@ func (s *Service) publishCommittedRuntimeDecision(ctx context.Context, command s
 	}
 }
 
-func (s *Service) continueRuntimeDecision(ctx context.Context, command sessionruntime.Command, continueRun func(chan<- WSStreamEvent) error) {
+func (s *Service) continueRuntimeDecision(
+	ctx context.Context,
+	command sessionruntime.Command,
+	continueRun func(context.Context, chan<- WSStreamEvent) error,
+) {
 	handle := sessionruntime.RunHandle{
 		BotID:      command.BotID,
 		SessionID:  command.SessionID,
@@ -324,7 +335,7 @@ func (s *Service) continueRuntimeDecision(ctx context.Context, command sessionru
 		Generation: command.Generation,
 	}
 	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
-		_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, sessionruntime.RunStatusErrored, err.Error())
+		s.finishRuntimeDecision(ctx, handle, err)
 		return
 	}
 	eventCh := make(chan WSStreamEvent, 64)
@@ -332,7 +343,7 @@ func (s *Service) continueRuntimeDecision(ctx context.Context, command sessionru
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
-		runDone <- continueRun(eventCh)
+		runDone <- continueRun(runCtx, eventCh)
 		close(eventCh)
 	}()
 
@@ -352,10 +363,24 @@ func (s *Service) continueRuntimeDecision(ctx context.Context, command sessionru
 	if publishErr != nil {
 		runErr = publishErr
 	}
-	finishCtx := context.WithoutCancel(ctx)
 	if runErr != nil {
-		_ = s.decisionRuntime.FinishRun(finishCtx, handle, sessionruntime.RunStatusErrored, runErr.Error())
+		s.finishRuntimeDecision(ctx, handle, runErr)
 		return
 	}
-	_ = s.decisionRuntime.FinishRun(finishCtx, handle, "", "")
+	_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "", "")
+}
+
+func (s *Service) finishRuntimeDecision(ctx context.Context, handle sessionruntime.RunHandle, cause error) {
+	status, message := runtimeDecisionTerminal(ctx, cause)
+	_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, status, message)
+}
+
+func runtimeDecisionTerminal(ctx context.Context, cause error) (string, string) {
+	explicitlyCanceled := ctx != nil &&
+		errors.Is(cause, context.Canceled) &&
+		errors.Is(context.Cause(ctx), context.Canceled)
+	if cause != nil && !explicitlyCanceled {
+		return sessionruntime.RunStatusErrored, string(apperror.CodeOf(cause))
+	}
+	return "", ""
 }

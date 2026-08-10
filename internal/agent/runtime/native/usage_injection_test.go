@@ -50,6 +50,14 @@ func (plainTestProvider) Tools(_ context.Context, _ tools.SessionContext) ([]sdk
 	return []sdk.Tool{{Name: tools.ToolRead().String(), Description: "plain"}}, nil
 }
 
+type labeledTestProvider struct{ label string }
+
+func (p labeledTestProvider) ProviderLabel() string { return p.label }
+
+func (labeledTestProvider) Tools(_ context.Context, _ tools.SessionContext) ([]sdk.Tool, error) {
+	return []sdk.Tool{{Name: "remote_tool", Description: "remote"}}, nil
+}
+
 func newTestAgent(providers ...tools.ToolProvider) *Agent {
 	a := New(Deps{})
 	a.SetToolProviders(providers)
@@ -276,12 +284,15 @@ func TestAssembleToolsInjectsUsageWhenProviderEmitsTools(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(&usageTestProvider{emitTool: true, usage: usageMarker})
 
-	gotTools, usage, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, toolDefs, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
 	if len(gotTools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(gotTools))
+	}
+	if len(toolDefs) != 1 || toolDefs[0].Provider != "native" || toolDefs[0].Name != "fake_tool" {
+		t.Fatalf("tool definitions = %#v, want native fake_tool", toolDefs)
 	}
 	if !strings.Contains(usage, usageMarker) {
 		t.Fatalf("expected usage to contain %q, got %q", usageMarker, usage)
@@ -295,7 +306,7 @@ func TestAssembleToolsOmitsUsageWhenProviderEmitsNoTools(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(&usageTestProvider{emitTool: false, usage: usageMarker})
 
-	gotTools, usage, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
@@ -307,11 +318,28 @@ func TestAssembleToolsOmitsUsageWhenProviderEmitsNoTools(t *testing.T) {
 	}
 }
 
+func TestAssembleToolsUsesProviderAccountingLabel(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ label, want string }{
+		{label: " mcp ", want: "mcp"},
+		{label: " ", want: "native"},
+	} {
+		a := newTestAgent(labeledTestProvider{label: tc.label})
+		_, _, toolDefs, err := a.assembleTools(context.Background(), RunConfig{}, nil, false)
+		if err != nil {
+			t.Fatalf("assembleTools error: %v", err)
+		}
+		if len(toolDefs) != 1 || toolDefs[0].Provider != tc.want || toolDefs[0].Name != "remote_tool" {
+			t.Fatalf("tool definitions = %#v, want %s remote_tool", toolDefs, tc.want)
+		}
+	}
+}
+
 func TestAssembleToolsDoesNotExposeAskUserWithoutCapability(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(&tools.AskUserProvider{})
 
-	gotTools, usage, err := a.assembleTools(context.Background(), RunConfig{
+	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{
 		SessionType: sessionmode.Chat,
 	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
@@ -324,7 +352,7 @@ func TestAssembleToolsDoesNotExposeAskUserWithoutCapability(t *testing.T) {
 		t.Fatalf("expected no ask_user usage without user input capability, got %q", usage)
 	}
 
-	gotTools, usage, err = a.assembleTools(context.Background(), RunConfig{
+	gotTools, usage, _, err = a.assembleTools(context.Background(), RunConfig{
 		SessionType:         sessionmode.Chat,
 		CanRequestUserInput: true,
 	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
@@ -343,7 +371,7 @@ func TestAssembleToolsIgnoresProvidersWithoutUsage(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(plainTestProvider{})
 
-	gotTools, usage, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
@@ -371,7 +399,7 @@ func TestAssembleToolsGatesUsagePerProvider(t *testing.T) {
 		plainTestProvider{},
 	)
 
-	gotTools, usage, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
@@ -397,7 +425,7 @@ func TestAssembleToolsKeepsFirstDuplicateToolAndItsUsage(t *testing.T) {
 		&usageTestProvider{emitTool: true, usage: secondUsage},
 	)
 
-	gotTools, usage, err := a.assembleTools(
+	gotTools, usage, toolDefs, err := a.assembleTools(
 		context.Background(),
 		RunConfig{},
 		tools.StreamEmitter(func(tools.ToolStreamEvent) {}),
@@ -408,6 +436,9 @@ func TestAssembleToolsKeepsFirstDuplicateToolAndItsUsage(t *testing.T) {
 	}
 	if len(gotTools) != 1 || gotTools[0].Name != "fake_tool" {
 		t.Fatalf("expected only the first duplicate tool, got %#v", gotTools)
+	}
+	if len(toolDefs) != 1 || toolDefs[0].Provider != "native" || toolDefs[0].Name != "fake_tool" {
+		t.Fatalf("tool definitions = %#v, want only the retained native fake_tool", toolDefs)
 	}
 	if !strings.Contains(usage, firstUsage) {
 		t.Fatalf("expected usage from the retained provider, got %q", usage)
@@ -433,7 +464,7 @@ func TestAssembleToolsPassesCompleteAvailableToolSetToUsage(t *testing.T) {
 		plainTestProvider{},
 	)
 
-	gotTools, usage, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}

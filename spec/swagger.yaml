@@ -2059,6 +2059,10 @@ definitions:
     type: object
   conversation.UIUserInput:
     properties:
+      answers:
+        items:
+          $ref: '#/definitions/userinput.UIAnswer'
+        type: array
       can_respond:
         type: boolean
       questions:
@@ -5362,6 +5366,23 @@ definitions:
       source_kind:
         type: string
       state:
+        type: string
+    type: object
+  userinput.UIAnswer:
+    properties:
+      custom_text:
+        type: string
+      question:
+        type: string
+      question_id:
+        type: string
+      selected:
+        items:
+          $ref: '#/definitions/userinput.UIOption'
+        type: array
+      skipped:
+        type: boolean
+      text:
         type: string
     type: object
   userinput.UIOption:

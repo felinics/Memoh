@@ -3,10 +3,10 @@ import {
   didLoadMoreMakeProgress,
   shouldPrefetchToFillViewport,
   shouldShowLoadMoreSentinel,
-} from './recents-scroll'
+} from './use-sidebar-infinite-scroll'
 
 describe('shouldShowLoadMoreSentinel', () => {
-  it('stays off while the virtualizer spacer is still short of the viewport', () => {
+  it('stays off while scroll content is still short of the viewport', () => {
     expect(shouldShowLoadMoreSentinel({
       hasMore: true,
       contentHeight: 0,
@@ -79,8 +79,6 @@ describe('shouldPrefetchToFillViewport', () => {
   })
 
   it('keeps paging when the active filter yields zero visible rows', () => {
-    // Mixed-type API page + Schedule/Agent client filter: spacer stays 0 while
-    // hasMore is still true. Stopping here would strand an empty Recents list.
     expect(shouldPrefetchToFillViewport({
       hasMore: true,
       loading: false,
@@ -92,8 +90,6 @@ describe('shouldPrefetchToFillViewport', () => {
 
 describe('didLoadMoreMakeProgress', () => {
   it('stops prefetch after a settled load that did not advance cursor or height', () => {
-    // Failed request (or no-op): loadingMore flipped false with nothing else
-    // changed — tight-looping here would hammer the sessions API.
     expect(didLoadMoreMakeProgress({
       wasLoadingMore: true,
       isLoadingMore: false,
@@ -105,7 +101,6 @@ describe('didLoadMoreMakeProgress', () => {
   })
 
   it('continues after cursor advances even when visible height stays zero', () => {
-    // Schedule/Agent filter: a page can add zero visible rows while nextCursor moves.
     expect(didLoadMoreMakeProgress({
       wasLoadingMore: true,
       isLoadingMore: false,
@@ -132,6 +127,19 @@ describe('didLoadMoreMakeProgress', () => {
       currentCursor: 'cursor-2',
       previousContentHeight: 180,
       currentContentHeight: 180,
+    })).toBe(true)
+  })
+
+  it('continues when item count advances without cursor or height change', () => {
+    expect(didLoadMoreMakeProgress({
+      wasLoadingMore: true,
+      isLoadingMore: false,
+      previousCursor: null,
+      currentCursor: null,
+      previousContentHeight: 180,
+      currentContentHeight: 180,
+      previousItemCount: 2,
+      currentItemCount: 5,
     })).toBe(true)
   })
 })

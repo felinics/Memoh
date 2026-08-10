@@ -1,5 +1,5 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { computed, onScopeDispose, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import { toast } from '@felinic/ui'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useWorkdirsStore } from '@/store/workdirs'
@@ -31,36 +31,24 @@ import {
 import {
   createBackgroundTaskTracker,
 } from './chat/background-tasks'
+import { fetchSessions } from '@/composables/api/useChat'
+import {
+  bindBotIdInitializeWatch,
+  createSessionListSnapshot,
+} from './chat/session-list-init-recovery'
+
 import type {
   ChatAssistantTurn,
   ChatMessage,
   ChatUserTurn,
 } from './chat/types'
-import { fetchSessions } from '@/composables/api/useChat'
 
 export type {
-  ACPAgentSessionInput,
-  ActiveChatTarget,
-  AttachmentBlock,
-  AttachmentItem,
-  BackgroundTask,
-  ChatAssistantTurn,
-  ChatMessage,
-  ChatSystemTurn,
-  ChatUserTurn,
-  ChatWorkspaceTargetSnapshot,
-  ContentBlock,
-  ErrorBlock,
-  SendMessageOptions,
-  SendMessageResult,
-  SendMessageStage,
-  TextBlock,
-  ThinkingBlock,
-  ToolCallBlock,
+  ACPAgentSessionInput, ActiveChatTarget, AttachmentBlock, AttachmentItem,
+  BackgroundTask, ChatAssistantTurn, ChatMessage, ChatSystemTurn, ChatUserTurn,
+  ChatWorkspaceTargetSnapshot, ContentBlock, ErrorBlock, SendMessageOptions,
+  SendMessageResult, SendMessageStage, TextBlock, ThinkingBlock, ToolCallBlock,
 } from './chat/types'
-
-// fs-change beacon lives in ./chat/fs-beacon; types re-exported so existing
-// consumers keep importing them from the store module.
 export type { FsChangeBatch, FsChangeEvent, FsToolKind } from './chat/fs-beacon'
 export type { ChatViewEntry, ChatViewTarget } from './chat/view-registry'
 
@@ -130,7 +118,6 @@ export const useChatStore = defineStore('chat', () => {
 
   let userScopeGeneration = 0
   let selectSessionRequestId = 0
-  // Sessions-list bookkeeping + fork-anchor tracking (see ./chat/session-list).
   const sessionList = createSessionList({ currentBotId, sessionId, messages })
   const {
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,
@@ -143,9 +130,6 @@ export const useChatStore = defineStore('chat', () => {
     touchKnownSession, fallbackSessionAfterDelete, markSessionDeleted,
     clearDeletedSessionIds, clearRememberedSessions,
   } = sessionList
-  // Sidebar folders page the workdir-filtered endpoint themselves —
-  // filtering the globally paged `sessions` list hides a folder's older
-  // chats (see ./chat/workdir-sessions).
   const {
     workdirSessionsFor, workdirSessionsState, ensureWorkdirSessions,
     loadMoreWorkdirSessions, reset: resetWorkdirSessions,
@@ -154,15 +138,14 @@ export const useChatStore = defineStore('chat', () => {
     userScopeGeneration: () => userScopeGeneration,
     knownSession: knownSessionSummary,
   })
+  const { applySessionsSnapshot } = createSessionListSnapshot({
+    replaceSessions, sessionsCursor, hasMoreSessions,
+  })
   const refreshCoordinator = createChatRefreshCoordinator({
     currentBotId,
     fetchSessions,
     currentSessionListRevision,
-    applySessionsSnapshot: (response) => {
-      replaceSessions(response.items)
-      sessionsCursor.value = response.nextCursor
-      hasMoreSessions.value = response.nextCursor !== null
-    },
+    applySessionsSnapshot,
   })
   const { refreshSessionsList, resetRefreshCoordinator } = refreshCoordinator
   const {
@@ -211,16 +194,11 @@ export const useChatStore = defineStore('chat', () => {
     focusedViewId: focusedChatViewId,
     normalizeTarget: normalizedChatViewTarget,
   })
-  // Slash-command event registry (see ./chat/command-events for scoping rules).
   const commandEventRegistry = createCommandEventRegistry({ currentBotId, sessionId })
   const {
     commandEvent, commandEventForScope, rememberCommandEvent, showCommandError,
     clearCommandEvent, rescopeSessionCommandEventToComposer, resetCommandEvents,
   } = commandEventRegistry
-  // Bumps when the user sends a message, carrying the resolved session id and
-  // whether that send just promoted a draft (created the session). The workspace
-  // tab store watches this to pin the chat tab — a session you have sent in is no
-  // longer an ephemeral "preview" tab. seq forces the watch to fire on repeats.
   const userSentInSession = ref<{
     id: string
     botId: string
@@ -510,10 +488,9 @@ export const useChatStore = defineStore('chat', () => {
     forkFailedMessage,
   })
 
-  watch(currentBotId, (newId) => {
-    if (newId) void initialize()
-    else resetUserScopedState()
-  }, { immediate: true })
+  bindBotIdInitializeWatch({
+    currentBotId, initialize, resetUserScopedState,
+  })
 
   const stopAuthSessionListener = onAuthSessionCleared(() => {
     resetUserScopedState({ clearSelection: true })
@@ -624,8 +601,7 @@ export const useChatStore = defineStore('chat', () => {
     resetToEmptyComposer, ensurePendingACPRuntime,
     setPendingACPModel, setPendingACPReasoning, clearPendingACPSession,
     createACPSession, updateCurrentSessionAgent, updateCurrentSessionToMemoh,
-    acpRuntimeKey, ensureACPRuntime, setACPRuntimeModel,
-    setACPRuntimeReasoning,
+    acpRuntimeKey, ensureACPRuntime, setACPRuntimeModel, setACPRuntimeReasoning,
     removeSession, renameSession, forkMessage,
     sendMessage, retryLatestAssistant, editLatestUser,
     respondToolApproval, respondUserInput,

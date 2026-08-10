@@ -8,6 +8,7 @@ import type {
 } from '@/composables/api/useChat'
 import type { ChatViewTarget } from './types'
 import type { createTranscriptController } from './transcript'
+import { isRuntimeRunActive } from './runtime-projection'
 
 type Transcript = ReturnType<typeof createTranscriptController>
 type DecisionKind = 'tool_approval_response' | 'user_input_response'
@@ -124,7 +125,7 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
         finish(pending.controlId, false)
         continue
       }
-      if (!['admitting', 'running', 'aborting'].includes(run.status)) {
+      if (!isRuntimeRunActive(run.status)) {
         finish(pending.controlId, false)
         continue
       }
@@ -236,12 +237,14 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
       optimistic: () => transcript.markUserInputDecision(
         decisionId,
         payload.canceled ? 'canceled' : 'submitted',
+        payload.answers,
       ),
     })) return
 
     transcript.markUserInputDecision(
       decisionId,
       payload.canceled ? 'canceled' : 'submitted',
+      payload.answers,
     )
     try {
       if (!deps.send(botId, {

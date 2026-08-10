@@ -34,6 +34,7 @@ type Queries interface {
 	ClearBotRuntimeData(ctx context.Context, botID pgtype.UUID) error
 	ClearMCPOAuthTokens(ctx context.Context, connectionID pgtype.UUID) error
 	CompleteCompactionLog(ctx context.Context, arg dbsqlc.CompleteCompactionLogParams) (dbsqlc.BotHistoryMessageCompact, error)
+	CompleteCompactionRollup(ctx context.Context, arg dbsqlc.CompleteCompactionRollupParams) (dbsqlc.BotHistoryMessageCompact, error)
 	CompleteHeartbeatLog(ctx context.Context, arg dbsqlc.CompleteHeartbeatLogParams) (dbsqlc.BotHeartbeatLog, error)
 	CompleteScheduleLog(ctx context.Context, arg dbsqlc.CompleteScheduleLogParams) (dbsqlc.ScheduleLog, error)
 	CountAccounts(ctx context.Context) (int64, error)
@@ -294,6 +295,7 @@ type Queries interface {
 	ListMessagesBeforeCursorBySession(ctx context.Context, arg dbsqlc.ListMessagesBeforeCursorBySessionParams) ([]dbsqlc.ListMessagesBeforeCursorBySessionRow, error)
 	ListMessagesBeforeMessageBySession(ctx context.Context, arg dbsqlc.ListMessagesBeforeMessageBySessionParams) ([]dbsqlc.ListMessagesBeforeMessageBySessionRow, error)
 	ListMessageRefsByCompactID(ctx context.Context, compactID pgtype.UUID) ([]dbsqlc.ListMessageRefsByCompactIDRow, error)
+	ListMessagesByCompactID(ctx context.Context, compactID pgtype.UUID) ([]dbsqlc.ListMessagesByCompactIDRow, error)
 	ListMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.ListMessagesBySessionRow, error)
 	ListSubagentForkContext(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.ListSubagentForkContextRow, error)
 	ListMessagesLatest(ctx context.Context, arg dbsqlc.ListMessagesLatestParams) ([]dbsqlc.ListMessagesLatestRow, error)

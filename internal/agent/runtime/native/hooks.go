@@ -9,6 +9,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -205,10 +206,21 @@ func (a *Agent) applyBeforeModelCallHook(ctx context.Context, cfg RunConfig, ste
 		return cfg, fmt.Errorf("before model call hook failed: %w", err)
 	}
 	if strings.TrimSpace(res.AppendContext) != "" {
-		cfg.Messages = append(cfg.Messages, sdk.UserMessage(formatHookContext(hooks.EventBeforeModelCall, res.AppendContext)))
-		cfg = cfg.RefreshContextFrag()
+		cfg = applyBeforeModelCallAppendContext(cfg, res.AppendContext)
+		if a.contextViewApplier == nil {
+			cfg = cfg.RefreshContextFrag()
+		}
 	}
 	return cfg, nil
+}
+
+func applyBeforeModelCallAppendContext(cfg RunConfig, appendContext string) RunConfig {
+	if strings.TrimSpace(appendContext) == "" {
+		return cfg
+	}
+	cfg.Messages = append(cfg.Messages, sdk.UserMessage(formatHookContext(hooks.EventBeforeModelCall, appendContext)))
+	cfg.ContextMutations.Record(contextfrag.MutationBeforeModelCallHook, fmt.Sprintf("append_bytes=%d", len(appendContext)))
+	return cfg
 }
 
 func (a *Agent) wrapPrepareStepWithModelHook(ctx context.Context, cfg RunConfig, base func(*sdk.GenerateParams) *sdk.GenerateParams) func(*sdk.GenerateParams) *sdk.GenerateParams {

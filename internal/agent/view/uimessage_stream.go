@@ -234,6 +234,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			event.ShortID,
 			status,
 			event.Metadata["ui_payload"],
+			event.Metadata["answers"],
 			status == "pending",
 		)
 		return []UIMessage{cloneToolStreamMessage(state.Message)}

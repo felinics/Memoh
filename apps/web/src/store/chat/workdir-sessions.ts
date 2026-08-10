@@ -19,9 +19,14 @@ export interface WorkdirSessionsState {
   loading: boolean
   hasMore: boolean
   loaded: boolean
+  /** Exposed so pagination callers can treat a cursor advance (e.g. an empty
+      permission-filtered page) as progress. */
+  cursor: string | null
+  /** True after the last load attempt failed; cleared on the next attempt. */
+  error: boolean
 }
 
-const EMPTY_STATE: WorkdirSessionsState = { loading: false, hasMore: false, loaded: false }
+const EMPTY_STATE: WorkdirSessionsState = { loading: false, hasMore: false, loaded: false, cursor: null, error: false }
 
 export function createWorkdirSessions(deps: {
   currentBotId: Ref<string | null>
@@ -35,6 +40,7 @@ export function createWorkdirSessions(deps: {
   const cursorByWorkdir = ref<Record<string, string | null>>({})
   const loadingByWorkdir = ref<Record<string, boolean>>({})
   const loadedByWorkdir = ref<Record<string, boolean>>({})
+  const errorByWorkdir = ref<Record<string, boolean>>({})
   // Bumped by reset() so a response that lands after a bot switch (which also
   // clears the remembered sessions its ids point at) is discarded.
   let generation = 0
@@ -46,6 +52,8 @@ export function createWorkdirSessions(deps: {
       loading: loadingByWorkdir.value[pid] === true,
       hasMore: (cursorByWorkdir.value[pid] ?? null) !== null,
       loaded: loadedByWorkdir.value[pid] === true,
+      cursor: cursorByWorkdir.value[pid] ?? null,
+      error: errorByWorkdir.value[pid] === true,
     }
   }
 
@@ -77,6 +85,7 @@ export function createWorkdirSessions(deps: {
     const resetGeneration = generation
     const userGeneration = deps.userScopeGeneration()
     loadingByWorkdir.value = { ...loadingByWorkdir.value, [pid]: true }
+    errorByWorkdir.value = { ...errorByWorkdir.value, [pid]: false }
     try {
       const response = await fetchSessions(botId, {
         workdirId: pid,
@@ -100,6 +109,9 @@ export function createWorkdirSessions(deps: {
       loadedByWorkdir.value = { ...loadedByWorkdir.value, [pid]: true }
     } catch (error) {
       console.error('Failed to load workdir sessions:', error)
+      if (resetGeneration === generation) {
+        errorByWorkdir.value = { ...errorByWorkdir.value, [pid]: true }
+      }
     } finally {
       if (resetGeneration === generation) {
         loadingByWorkdir.value = { ...loadingByWorkdir.value, [pid]: false }
@@ -118,6 +130,7 @@ export function createWorkdirSessions(deps: {
       cursorByWorkdir.value = {}
       loadingByWorkdir.value = {}
       loadedByWorkdir.value = {}
+      errorByWorkdir.value = {}
     },
   }
 }

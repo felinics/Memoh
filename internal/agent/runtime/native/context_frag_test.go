@@ -53,6 +53,63 @@ func TestRefreshContextFragOmitsMaterializedInlineImages(t *testing.T) {
 	}
 }
 
+func TestRefreshContextFragMarksMaterializedCurrentMessage(t *testing.T) {
+	t.Parallel()
+	index := 1
+	cfg := RunConfig{
+		System:                         "base system",
+		Messages:                       []sdk.Message{sdk.AssistantMessage("history"), sdk.UserMessage("current")},
+		ContextCurrentUserMessageIndex: &index,
+		ContextQueryMaterialized:       true,
+	}
+	cfg = cfg.RefreshContextFrag()
+	if !manifestHasAgentKind(cfg.ContextManifest, contextfrag.KindCurrentUserMessage) {
+		t.Fatalf("manifest items = %#v", cfg.ContextManifest.Items)
+	}
+	if cfg.ContextFrags[index+1].Slot != contextfrag.SlotCurrentUser {
+		t.Fatalf("current fragment = %#v", cfg.ContextFrags[index+1])
+	}
+}
+
+func TestRefreshContextFragKeepsMemoryDistinctFromCurrentMessage(t *testing.T) {
+	t.Parallel()
+	currentIndex := 0
+	memoryIndex := 1
+	cfg := RunConfig{
+		Messages:                       []sdk.Message{sdk.UserMessage("current"), sdk.UserMessage("memory recall")},
+		ContextCurrentUserMessageIndex: &currentIndex,
+		ContextMemoryMessageIndex:      &memoryIndex,
+		ContextQueryMaterialized:       true,
+	}
+
+	cfg = cfg.RefreshContextFrag()
+	if cfg.ContextFrags[currentIndex].Kind != contextfrag.KindCurrentUserMessage || cfg.ContextFrags[currentIndex].Slot != contextfrag.SlotCurrentUser {
+		t.Fatalf("current fragment = %#v", cfg.ContextFrags[currentIndex])
+	}
+	if cfg.ContextFrags[memoryIndex].Kind != contextfrag.KindMemoryRecall || cfg.ContextFrags[memoryIndex].Slot != contextfrag.SlotHistory || cfg.ContextFrags[memoryIndex].CacheClass != contextfrag.CacheNever {
+		t.Fatalf("memory fragment = %#v", cfg.ContextFrags[memoryIndex])
+	}
+}
+
+func TestRefreshContextFragPreservesProviderAccounting(t *testing.T) {
+	t.Parallel()
+	ledger := contextfrag.NewMutationLedger()
+	plan := contextfrag.CachePlan{StablePrefixHash: "prefix", StableMessageCount: 2}
+	cfg := RunConfig{
+		System:          "base system",
+		Messages:        []sdk.Message{sdk.UserMessage("hi")},
+		ContextToolDefs: []contextfrag.ToolDefAccounting{{Provider: "native", Name: "read", Bytes: 40, TokenEstimate: 10}},
+		ContextManifest: contextfrag.Manifest{CachePlan: &plan, Mutations: ledger},
+	}
+	cfg = cfg.RefreshContextFrag()
+	if cfg.ContextManifest.CachePlan == nil || cfg.ContextManifest.CachePlan.StablePrefixHash != "prefix" || cfg.ContextManifest.Mutations != ledger {
+		t.Fatalf("manifest accounting = %#v", cfg.ContextManifest)
+	}
+	if len(cfg.ContextManifest.ToolDefs) != 1 || cfg.ContextManifest.ToolDefs[0].Name != "read" {
+		t.Fatalf("tool definitions = %#v", cfg.ContextManifest.ToolDefs)
+	}
+}
+
 func TestRefreshContextFragMarksToolUsageBeforeWorkspaceInstructions(t *testing.T) {
 	t.Parallel()
 
@@ -104,8 +161,8 @@ func TestSpawnRunConfigCarriesContextScopeAndMaterializedQuery(t *testing.T) {
 		t.Fatal("spawn query should be marked materialized because it is appended to Messages")
 	}
 	rc = rc.RefreshContextFrag()
-	if manifestHasAgentKind(rc.ContextManifest, contextfrag.KindCurrentUserMessage) {
-		t.Fatalf("manifest should not include duplicate pending current user query: %#v", rc.ContextManifest.Items)
+	if !manifestHasAgentKind(rc.ContextManifest, contextfrag.KindCurrentUserMessage) {
+		t.Fatalf("manifest should classify the materialized query as current user: %#v", rc.ContextManifest.Items)
 	}
 	if rc.ContextManifest.Counts.Messages != 2 {
 		t.Fatalf("manifest message count = %d, want history + materialized query", rc.ContextManifest.Counts.Messages)

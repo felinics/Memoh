@@ -857,6 +857,7 @@
     "sessionTitle": "Session",
     "untitledSession": "Untitled Session",
     "noSessions": "No sessions yet",
+    "sessionsLoadFailed": "Failed to load conversations",
     "recents": "Recents",
     "quickActions": "Quick Actions",
     "scheduledJobs": "Scheduled Jobs",
@@ -877,7 +878,6 @@
     "agentSwitchTimeout": "Switching is taking too long. Try again.",
     "modelOptions": "Options",
     "modelEffort": "Effort",
-    "noProject": "Not in a project",
     "noModels": "No models available",
     "defaultACPLoading": "Default Agent is still loading. Try again in a moment.",
     "defaultACPNoWorkspaceExec": "Default Agent is enabled, but you do not have permission to run workspace commands.",
@@ -1747,10 +1747,17 @@
       "securityDesc": "Access control",
       "model": "Model",
       "modelDesc": "Choose a chat model (optional)",
+      "agent": "Agent",
+      "agentDesc": "The hosted agent brings its own model.",
       "memory": "Memory",
       "memoryDesc": "Memory provider (optional)",
       "settings": "Settings",
       "settingsDesc": "Timezone and more"
+    },
+    "agentCreate": {
+      "typeAriaLabel": "Agent type",
+      "oauthSettingsHint": "Authorization happens after creation — finish it anytime in the bot's settings.",
+      "requiredError": "Please fill in \"{field}\""
     },
     "createBotLocalHint": "Local bots use a folder on this computer and are not sandboxed.",
     "create": {
@@ -2002,7 +2009,7 @@
     "folders": {
       "create": "New folder",
       "createTitle": "New folder",
-      "createDescription": "Pick the directory this folder works in. It must already exist.",
+      "createDescription": "A folder's name is its directory. Pick an existing one, or type a new name.",
       "created": "Folder created",
       "createFailed": "Failed to create folder",
       "rename": "Rename",
@@ -2017,13 +2024,13 @@
       "targetRemote": "Connected computer",
       "form": {
         "name": "Name",
-        "namePlaceholder": "e.g. Website revamp",
+        "namePlaceholder": "e.g. website-revamp",
         "target": "Location",
-        "directory": "Directory",
-        "directoryHelp": "Sessions will work in {path}",
-        "directoryUp": "Up one level",
-        "noSubdirectories": "No subfolders",
+        "parent": "Directory",
+        "parentHelp": "The folder name becomes a directory under {path}",
+        "directoryTarget": "Sessions will work in {path} — created if it doesn’t exist yet",
         "browseFailed": "Couldn’t load folders",
+        "browseRetry": "Retry",
         "path": "Directory path",
         "remotePathHelp": "Absolute path on that computer. It must already exist.",
         "remotePathPlaceholder": "/Users/you/code/project"
@@ -3358,17 +3365,6 @@
         "manualAddBtn": "Add",
         "manualAddedCount": "{count} model(s) added",
         "removeModel": "Remove"
-      },
-      "acp": {
-        "setupMode": "Setup method",
-        "modeApiKey": "API key",
-        "modeChatGPT": "Sign in with ChatGPT",
-        "modeClaude": "Sign in with Claude",
-        "modeOAuth": "OAuth",
-        "modeSelf": "Local config",
-        "oauthDeferredHint": "Authorization happens in the next step, after the bot and its workspace are ready.",
-        "selfHint": "Reuses the agent already configured in the workspace.",
-        "requiredError": "Please fill in \"{field}\""
       }
     },
     "bot": {
@@ -3380,7 +3376,7 @@
         "hint": "Pick the model your bot replies with. Recommended, but you can change it anytime in settings."
       },
       "acp": {
-        "banner": "This bot will use {agent} as its primary agent",
+        "deferredHint": "Authorization happens in the next step, after the bot and its workspace are ready.",
         "oauthTitle": "Authorize {agent}",
         "oauthAuthorized": "Authorized",
         "oauthNotAuthorized": "Not authorized yet",

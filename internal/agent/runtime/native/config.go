@@ -1,12 +1,17 @@
 package native
 
 import (
+	"context"
 	"log/slog"
 
 	agenttools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
+
+// ContextViewApplier rebuilds provider-facing fields from the authoritative
+// context fragments immediately before generate options are assembled.
+type ContextViewApplier func(context.Context, RunConfig) RunConfig
 
 const (
 	DefaultToolOutputMaxBytes  = 64 * 1024
@@ -22,10 +27,11 @@ type Limits struct {
 
 // Deps holds all service dependencies for the Agent.
 type Deps struct {
-	BridgeProvider bridge.Provider
-	HookService    *hooks.Service
-	Logger         *slog.Logger
-	Limits         Limits
+	BridgeProvider     bridge.Provider
+	HookService        *hooks.Service
+	Logger             *slog.Logger
+	Limits             Limits
+	ContextViewApplier ContextViewApplier
 }
 
 func DefaultLimits() Limits {

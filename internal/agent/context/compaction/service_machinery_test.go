@@ -89,25 +89,34 @@ func decodePromptMessages(body []byte) string {
 }
 
 type fakeQueries struct {
-	dbstore.Queries // embedded interface; unimplemented methods would panic if called
-	uncompacted     []sqlc.ListUncompactedMessagesBySessionRow
-	priorLogs       []sqlc.BotHistoryMessageCompact
-	completeErr     error
-	listPanic       bool
-	listStarted     chan struct{}
-	listRelease     <-chan struct{}
-	onComplete      func()
-	markedRowCount  *int64
+	dbstore.Queries  // embedded interface; unimplemented methods would panic if called
+	uncompacted      []sqlc.ListUncompactedMessagesBySessionRow
+	priorLogs        []sqlc.BotHistoryMessageCompact
+	absorbedRows     map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow
+	absorbedRowErrs  map[pgtype.UUID]error
+	completeErr      error
+	rollupErr        error
+	listPanic        bool
+	listStarted      chan struct{}
+	listRelease      <-chan struct{}
+	onComplete       func()
+	markedRowCount   *int64
+	createdLogID     pgtype.UUID
+	claims           map[pgtype.UUID]pgtype.UUID
+	logStatuses      map[pgtype.UUID]string
+	parentSuccessors map[pgtype.UUID]pgtype.UUID
 
-	created        bool
-	createArg      sqlc.CreateCompactionLogParams
-	createErr      error
-	markedIDs      []pgtype.UUID
-	markArg        sqlc.MarkMessagesCompactedParams
-	queryCalls     []string
-	completed      sqlc.CompleteCompactionLogParams
-	completeCalls  []sqlc.CompleteCompactionLogParams
-	completeErrors []error
+	created         bool
+	createArg       sqlc.CreateCompactionLogParams
+	createErr       error
+	markedIDs       []pgtype.UUID
+	markArg         sqlc.MarkMessagesCompactedParams
+	queryCalls      []string
+	completed       sqlc.CompleteCompactionLogParams
+	completeCalls   []sqlc.CompleteCompactionLogParams
+	completeErrors  []error
+	rollupCompleted sqlc.CompleteCompactionRollupParams
+	rollupCalls     []sqlc.CompleteCompactionRollupParams
 }
 
 func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
@@ -116,7 +125,13 @@ func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateComp
 	if f.createErr != nil {
 		return sqlc.BotHistoryMessageCompact{}, f.createErr
 	}
-	return sqlc.BotHistoryMessageCompact{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}}, nil
+	logID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	f.createdLogID = logID
+	if f.logStatuses == nil {
+		f.logStatuses = make(map[pgtype.UUID]string)
+	}
+	f.logStatuses[logID] = "pending"
+	return sqlc.BotHistoryMessageCompact{ID: logID}, nil
 }
 
 func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.ListUncompactedMessagesBySessionRow, error) {
@@ -141,12 +156,25 @@ func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, 
 	return f.priorLogs, nil
 }
 
+func (f *fakeQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {
+	if err := f.absorbedRowErrs[compactID]; err != nil {
+		return nil, err
+	}
+	return f.absorbedRows[compactID], nil
+}
+
 func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
 	f.queryCalls = append(f.queryCalls, "mark")
 	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
 	f.markArg = arg
 	f.markArg.MessageIds = append([]pgtype.UUID(nil), arg.MessageIds...)
 	f.markArg.ExpectedCompactIds = append([]pgtype.UUID(nil), arg.ExpectedCompactIds...)
+	if f.claims == nil {
+		f.claims = make(map[pgtype.UUID]pgtype.UUID)
+	}
+	for _, id := range arg.MessageIds {
+		f.claims[id] = arg.CompactID
+	}
 	if f.markedRowCount != nil {
 		return *f.markedRowCount, nil
 	}
@@ -169,6 +197,29 @@ func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.Complete
 		return sqlc.BotHistoryMessageCompact{}, f.completeErr
 	}
 	f.completed = arg
+	if f.logStatuses == nil {
+		f.logStatuses = make(map[pgtype.UUID]string)
+	}
+	f.logStatuses[arg.ID] = arg.Status
+	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
+}
+
+func (f *fakeQueries) CompleteCompactionRollup(_ context.Context, arg sqlc.CompleteCompactionRollupParams) (sqlc.BotHistoryMessageCompact, error) {
+	f.rollupCalls = append(f.rollupCalls, arg)
+	if f.rollupErr != nil {
+		return sqlc.BotHistoryMessageCompact{}, f.rollupErr
+	}
+	f.rollupCompleted = arg
+	if f.logStatuses == nil {
+		f.logStatuses = make(map[pgtype.UUID]string)
+	}
+	f.logStatuses[arg.ID] = arg.Status
+	if f.parentSuccessors == nil {
+		f.parentSuccessors = make(map[pgtype.UUID]pgtype.UUID)
+	}
+	for _, parentID := range arg.Parents {
+		f.parentSuccessors[parentID] = arg.ID
+	}
 	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
 }
 

@@ -22,6 +22,7 @@ type storeRoundOptions struct {
 	SkipMemory              bool
 	AllowEmptyAssistantText bool
 	MessageMetadataByIndex  map[int]map[string]any
+	RequireCompletePersist  bool
 }
 
 func (s *Service) storeRoundWithOptions(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) error {
@@ -67,6 +68,9 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 	}
 
 	persisted := s.storeMessages(ctx, req, filtered, modelID, opts)
+	if opts.RequireCompletePersist && len(persisted) != len(filtered) {
+		return persisted, fmt.Errorf("persisted %d of %d messages", len(persisted), len(filtered))
+	}
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
 		go s.storeMemory(context.WithoutCancel(ctx), req, filtered)
 	}

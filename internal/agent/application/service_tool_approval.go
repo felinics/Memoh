@@ -382,6 +382,9 @@ func (s *Service) continueToolApprovalSession(ctx context.Context, approval tool
 			}
 		}
 	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
 	return nil
 }
 

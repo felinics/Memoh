@@ -428,6 +428,14 @@ func TestServiceSubmitLifecycleNotifiesWaiter(t *testing.T) {
 	if !ok || len(answers) != 1 {
 		t.Fatalf("unexpected result answers: %#v", submitted.Result)
 	}
+	metadata := DeferredMetadata(submitted)
+	publicAnswers, ok := metadata["answers"].([]UIAnswer)
+	if !ok || len(publicAnswers) != 1 || publicAnswers[0].Selected[0].Label != "Plan B" {
+		t.Fatalf("unexpected public answers: %#v", metadata["answers"])
+	}
+	if _, exposed := metadata["instruction"]; exposed {
+		t.Fatalf("model instruction leaked into public metadata: %#v", metadata)
+	}
 
 	// The wait context is shorter than the fallback ticker, so a timely return
 	// here proves the Submit broadcast woke the waiter, not the polling safety

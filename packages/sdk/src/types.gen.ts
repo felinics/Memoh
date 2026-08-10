@@ -1183,6 +1183,7 @@ export type ConversationUiTurn = {
 };
 
 export type ConversationUiUserInput = {
+    answers?: Array<UserinputUiAnswer>;
     can_respond?: boolean;
     questions?: Array<UserinputUiQuestion>;
     short_id?: number;
@@ -3176,6 +3177,15 @@ export type SkillsSafeCatalogItem = {
     name?: string;
     source_kind?: string;
     state?: string;
+};
+
+export type UserinputUiAnswer = {
+    custom_text?: string;
+    question?: string;
+    question_id?: string;
+    selected?: Array<UserinputUiOption>;
+    skipped?: boolean;
+    text?: string;
 };
 
 export type UserinputUiOption = {

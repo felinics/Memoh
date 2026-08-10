@@ -1,96 +1,202 @@
-import type { UseQueryEntryFilter } from '@pinia/colada'
+import {
+  _queryEntry_toJSON as queryEntryToJSON,
+  hydrateQueryCache,
+  type PiniaColadaPlugin,
+  type QueryCache,
+  type UseQueryEntryFilter,
+} from '@pinia/colada'
 
 /**
- * Cross-reload persistence for the Pinia Colada query cache.
+ * Persist Pinia Colada query results to localStorage across reloads (#936 / #950).
  *
- * The cache is memory-only by default, so a hard refresh cold-starts every
- * useQuery and settings pages render placeholders for at least one RTT
- * (visible against any remote server, and on every desktop app launch).
- * The persister plugin snapshots WHITELISTED entries to localStorage and
- * rehydrates them on boot. Hydrated entries are always older than the
- * default 5s staleTime, so colada revalidates them in the background on
- * mount (SWR) — the snapshot only owes the first paint; correctness always
- * comes from the network.
+ * Three layers to keep in mind:
+ * 1. In-memory query cache — live API results inside the SPA session.
+ * 2. localStorage (`memoh:query-cache`) — display-safe copy that survives Cmd+R.
+ * 3. Server — source of truth; Colada revalidates stale entries in the background.
  *
- * Whitelist, never blacklist: a query is only persisted when named here, so
- * newly added queries default to safe. Only semi-static catalog/config data
- * qualifies — its writes flow through this app's mutations (which re-persist
- * via the plugin), and out-of-band writes (channel slash commands, other
- * devices) converge on the next mount revalidation. Volatile data (sessions,
- * usage, container/status, outbox) stays out: freshness matters more than
- * first paint there, and its invalidation surface is much larger.
+ * Every successful query persists by default; on write, `deepStripSecrets`
+ * recursively removes secret-bearing fields (api_key, token, …) so provider
+ * configs and bot metadata never reach disk, while display fields (id, name,
+ * provider, memory_mode, …) survive and hydrate the first paint. Only keys on
+ * EXCLUDED_QUERY_KEY_HEADS (entire-payload credentials, volatile state,
+ * opaque workspace file reads such as bot-hooks-config) skip disk.
+ *
+ * After a successful save in-app, call `saveQueryCacheToDiskNow()` so a quick
+ * reload does not show a pre-save value (see bot-settings autosave).
  */
 
-/**
- * localStorage key shared by the web app and the desktop renderer. Cleared
- * with the other user-scoped keys on login/logout/token-cleared/unauthorized
- * — see USER_SCOPED_STORAGE_KEYS in lib/auth-session.ts.
- */
 export const QUERY_CACHE_STORAGE_KEY = 'memoh:query-cache'
 
+const SAVE_TO_DISK_DEBOUNCE_MS = 1000
+
 /**
- * First key segment (the string namespace) of every query allowed to
- * persist. Keep in sync with the real call sites: a name no query uses is a
- * harmless no-op, a missing name means that query never persists.
+ * Keys that never touch disk: either the whole payload is a credential
+ * (remote-runtimes) or the data is volatile session state, not display data.
  */
-const PERSISTED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
-  // Global catalogs
-  'models',
-  'providers',
-  'provider-models',
-  'provider-templates',
-  'provider-template-models',
-  'memory-providers',
-  'memory-providers-meta',
-  'email-providers',
-  'email-providers-meta',
-  'search-providers',
-  'search-providers-meta',
-  'fetch-providers',
-  'fetch-providers-meta',
-  'speech-providers',
-  'speech-providers-meta',
-  'speech-provider-detail',
-  'speech-provider-models',
-  'transcription-providers',
-  'transcription-providers-meta',
-  'transcription-provider-detail',
-  'transcription-provider-models',
-  'video-providers',
-  'video-providers-meta',
-  'video-provider-detail',
-  'video-provider-models',
-  'acp-profiles',
-  'channels',
-  'connectors-catalog',
-  'network-providers-meta',
+const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   'remote-runtimes',
-  'platform',
-  // Per-bot identity + settings — the Bot Settings cold-start flash reads
-  // its model UUID from 'bot-settings' and the display name from 'models'.
-  'bot',
-  'bot-settings',
+  'session-status',
+  // Raw workspace file text (hooks.json env map may contain API keys); deepStripSecrets
+  // only walks objects/arrays and cannot redact secrets inside an opaque string.
+  'bot-hooks-config',
 ])
 
 /**
- * The bots list is the one query keyed by the SDK-generated object form
- * ([{ _id: 'getBots', baseUrl, … }]) instead of a string namespace.
+ * Suffix/segment match on the normalized (snake_case, lowercase) key, so
+ * real-world variants — bot_token, app_secret, secret_key, OPENAI_API_KEY,
+ * appSecret — all strip, while display fields like `author`, `oauth_provider`,
+ * `token_count`, `total_tokens`, `public_key` survive untouched.
  */
-function isBotsListKeyHead(head: unknown): boolean {
-  return typeof head === 'object' && head !== null
-    && (head as { _id?: unknown })._id === 'getBots'
+const SECRET_FIELD_PATTERN = /(^|_)(api_?key|apikey|token|password|passwd|private_?key|credentials?|authorization|auth_?token|bearer)$|^secret(_|$)|_secret(_|$)/
+
+function isSecretField(key: string): boolean {
+  const normalized = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+  return SECRET_FIELD_PATTERN.test(normalized)
 }
 
-/**
- * Persistence filter for PiniaColadaCachePersister: which entries are
- * written to and restored from the snapshot. Error/pending entries are
- * excluded so a transient failure never gets frozen into the snapshot.
- */
-export const queryCachePersistFilter: UseQueryEntryFilter = {
+function deepStripSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(deepStripSecrets)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => !isSecretField(key))
+        .map(([key, val]) => [key, deepStripSecrets(val)]),
+    )
+  }
+  return value
+}
+
+export const persistableQueryFilter: UseQueryEntryFilter = {
   predicate: (entry) => {
     if (entry.state.value.status !== 'success') return false
     const head = entry.key[0]
-    if (typeof head === 'string') return PERSISTED_QUERY_KEY_HEADS.has(head)
-    return isBotsListKeyHead(head)
+    // SDK object keys ({ _id: 'getBots', … }) persist like everything else;
+    // their secrets are stripped on write, not filtered here.
+    if (typeof head !== 'string') return true
+    return !EXCLUDED_QUERY_KEY_HEADS.has(head)
   },
+}
+
+function serializeEntryForDisk(entry: { key: readonly unknown[]; keyHash: string; state: { value: { status: string } } }): [string, unknown] {
+  const json = queryEntryToJSON(entry as Parameters<typeof queryEntryToJSON>[0]) as unknown[]
+  if (json.length === 0) return [entry.keyHash, json]
+  return [entry.keyHash, [deepStripSecrets(json[0]), ...json.slice(1)]]
+}
+
+function serializePersistableEntries(queryCache: QueryCache): Record<string, unknown> {
+  const entries = queryCache.getEntries({ status: 'success' })
+  const { predicate } = persistableQueryFilter as { predicate?: (entry: (typeof entries)[number]) => boolean }
+  const persistable = predicate ? entries.filter(predicate) : entries
+  return Object.fromEntries(
+    persistable.map((entry) => serializeEntryForDisk(entry)),
+  )
+}
+
+/** Write the in-memory cache (secrets stripped) to localStorage immediately, skipping debounce. */
+export function saveQueryCacheToDiskNow(
+  queryCache: QueryCache,
+  storage: Storage | undefined = typeof localStorage !== 'undefined' ? localStorage : undefined,
+) {
+  if (!storage) return
+  const serialized = serializePersistableEntries(queryCache)
+  if (Object.keys(serialized).length === 0) {
+    storage.removeItem(QUERY_CACHE_STORAGE_KEY)
+    return
+  }
+  storage.setItem(QUERY_CACHE_STORAGE_KEY, JSON.stringify(serialized))
+}
+
+/** Remove the on-disk copy; in-memory query cache is untouched. */
+export function removeQueryCacheFromDisk(
+  storage: Storage | undefined = typeof localStorage !== 'undefined' ? localStorage : undefined,
+) {
+  storage?.removeItem(QUERY_CACHE_STORAGE_KEY)
+}
+
+let restoreResolve: (() => void) | undefined
+let restorePromise: Promise<void> = new Promise((resolve) => {
+  restoreResolve = resolve
+})
+
+/** Resolves after localStorage has been read into the in-memory query cache. */
+export function whenQueryCacheRestored(): Promise<void> {
+  return restorePromise
+}
+
+/** @internal Vitest-only reset for whenQueryCacheRestored(). */
+export function resetQueryCacheRestoreForTests() {
+  restorePromise = new Promise((resolve) => {
+    restoreResolve = resolve
+  })
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+let saveAgainAfterCurrent = false
+let activeStorage: Storage | undefined
+let activeQueryCache: QueryCache | undefined
+
+function scheduleDebouncedSaveToDisk() {
+  if (!activeStorage || !activeQueryCache) return
+  if (saveTimer) {
+    saveAgainAfterCurrent = true
+    return
+  }
+  saveTimer = setTimeout(() => {
+    saveQueryCacheToDiskNow(activeQueryCache!, activeStorage)
+    saveTimer = undefined
+    if (saveAgainAfterCurrent) {
+      saveAgainAfterCurrent = false
+      scheduleDebouncedSaveToDisk()
+    }
+  }, SAVE_TO_DISK_DEBOUNCE_MS)
+}
+
+/** Cancel a pending debounced save (call before logout clears disk). */
+export function cancelPendingQueryCacheSave() {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = undefined
+  }
+  saveAgainAfterCurrent = false
+}
+
+/**
+ * Pinia Colada plugin: restore from localStorage on boot, debounce-save on change.
+ * Inlined from @pinia/colada-plugin-cache-persister so we can flush/cancel on demand.
+ */
+export function createQueryCachePersistencePlugin(options?: {
+  key?: string
+  storage?: Storage
+  debounce?: number
+}): PiniaColadaPlugin {
+  const key = options?.key ?? QUERY_CACHE_STORAGE_KEY
+  const storage = options?.storage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined)
+  void options?.debounce // fixed at SAVE_TO_DISK_DEBOUNCE_MS; kept for API compat
+
+  return ({ queryCache }) => {
+    activeStorage = storage
+    activeQueryCache = queryCache
+
+    async function restoreFromDisk() {
+      if (!storage) {
+        restoreResolve?.()
+        return
+      }
+      try {
+        const stored = storage.getItem(key)
+        if (stored) hydrateQueryCache(queryCache, JSON.parse(stored))
+      } catch {
+        // Corrupt on-disk copy — cold start.
+      }
+      restoreResolve?.()
+    }
+
+    void restoreFromDisk()
+
+    queryCache.$onAction(({ name, after }) => {
+      if (name === 'setEntryState' || name === 'setQueryData' || name === 'remove') {
+        after(() => scheduleDebouncedSaveToDisk())
+      }
+    })
+  }
 }
