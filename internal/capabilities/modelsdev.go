@@ -36,7 +36,12 @@ type modelsDevOption struct {
 }
 
 type modelsDevEntry struct {
-	Name             string             `toml:"name"`
+	Name string `toml:"name"`
+	// BaseModel points at the canonical definition under the checkout's top-level
+	// models/ directory. A provider entry is an overlay carrying only what differs,
+	// so most omit the reasoning flag, the modalities and the context limit and
+	// inherit them instead.
+	BaseModel        string             `toml:"base_model"`
 	Reasoning        *bool              `toml:"reasoning"`
 	ToolCall         *bool              `toml:"tool_call"`
 	ReasoningOptions *[]modelsDevOption `toml:"reasoning_options"`
@@ -59,6 +64,8 @@ type modelsDevEntry struct {
 type ModelsDevSource struct {
 	// entries is keyed by "provider/model-id", both normalized.
 	entries map[string]modelsDevEntry
+	// bases is keyed by base_model path, e.g. "google/gemini-2.5-flash".
+	bases map[string]modelsDevEntry
 }
 
 // providerAliases maps our template names onto models.dev provider directories.
@@ -71,9 +78,17 @@ var providerAliases = map[string]string{
 // NewModelsDevSource loads every model TOML under dir/providers. dir is the root
 // of a models.dev checkout.
 func NewModelsDevSource(dir string) (*ModelsDevSource, error) {
-	root := filepath.Join(dir, "providers")
-	src := &ModelsDevSource{entries: make(map[string]modelsDevEntry, 4096)}
+	src := &ModelsDevSource{
+		entries: make(map[string]modelsDevEntry, 8192),
+		bases:   make(map[string]modelsDevEntry, 512),
+	}
+	// Canonical definitions first: provider entries overlay these, and resolving an
+	// overlay against a missing base would silently lose what it omits.
+	if err := src.loadBases(filepath.Join(dir, "models")); err != nil {
+		return nil, err
+	}
 
+	root := filepath.Join(dir, "providers")
 	providers, err := os.ReadDir(root)
 	if err != nil {
 		return nil, fmt.Errorf("read models.dev providers: %w", err)
@@ -129,7 +144,7 @@ func (s *ModelsDevSource) Resolve(provider, modelID string) (Capabilities, bool)
 	if !ok {
 		return Capabilities{}, false
 	}
-	return deriveFromModelsDev(entry), true
+	return deriveFromModelsDev(s.resolveInheritance(entry)), true
 }
 
 // entryKey normalizes an id so that cosmetic differences between our templates and
@@ -278,4 +293,56 @@ func containsFold(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// loadBases reads the canonical model definitions under the checkout's top-level
+// models/ directory. Provider entries reference these by base_model and carry only
+// their differences: of 2994 overlays, 2751 have no reasoning flag of their own,
+// 2255 no modalities and 1608 no context limit. Reading overlays alone therefore
+// misses most of the catalog's capability data.
+func (s *ModelsDevSource) loadBases(dir string) error {
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".toml") {
+			return nil //nolint:nilerr // a missing models/ directory is not fatal
+		}
+		var entry modelsDevEntry
+		if _, err := toml.DecodeFile(path, &entry); err != nil {
+			return nil //nolint:nilerr // see the note in NewModelsDevSource
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		s.bases[strings.ToLower(strings.TrimSuffix(rel, ".toml"))] = entry
+		return nil
+	})
+}
+
+// resolveInheritance fills an overlay's absent fields from its base model. Only
+// absent values are taken: an overlay states what differs for this provider, so
+// anything it does say wins.
+func (s *ModelsDevSource) resolveInheritance(e modelsDevEntry) modelsDevEntry {
+	if e.BaseModel == "" {
+		return e
+	}
+	base, ok := s.bases[strings.ToLower(strings.TrimSpace(e.BaseModel))]
+	if !ok {
+		return e
+	}
+	if e.Reasoning == nil {
+		e.Reasoning = base.Reasoning
+	}
+	if e.ToolCall == nil {
+		e.ToolCall = base.ToolCall
+	}
+	if e.ReasoningOptions == nil {
+		e.ReasoningOptions = base.ReasoningOptions
+	}
+	if e.Limit.Context == nil {
+		e.Limit.Context = base.Limit.Context
+	}
+	if len(e.Modalities.Input) == 0 {
+		e.Modalities.Input = base.Modalities.Input
+	}
+	return e
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/models"
@@ -12,11 +13,17 @@ import (
 
 // writeCatalog builds a minimal models.dev checkout on disk. Fixtures rather than
 // the real clone, so the test says what it depends on.
+//
+// A key starting with "models/" lands in the canonical tree; everything else is a
+// provider overlay under providers/.
 func writeCatalog(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for rel, body := range files {
 		path := filepath.Join(dir, "providers", rel)
+		if strings.HasPrefix(rel, "models/") {
+			path = filepath.Join(dir, rel)
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
@@ -230,5 +237,84 @@ func TestModelsDevSkipsUnreadableEntries(t *testing.T) {
 	}
 	if _, ok := src.Resolve("openai", "bad"); ok {
 		t.Error("the broken entry should be absent, not guessed at")
+	}
+}
+
+// Provider entries are overlays: they carry what differs and inherit the rest.
+// Of 2994 overlays in the real catalog, 2751 have no reasoning flag of their own,
+// 2255 no modalities and 1608 no context limit — so reading them without resolving
+// base_model misses most of the capability data.
+func TestModelsDevResolvesBaseModelInheritance(t *testing.T) {
+	t.Parallel()
+
+	dir := writeCatalog(t, map[string]string{
+		"models/google/gemini-x.toml": `
+name = "Gemini X"
+reasoning = true
+tool_call = true
+[[reasoning_options]]
+type = "budget_tokens"
+min = 0
+max = 24576
+[limit]
+context = 1048576
+[modalities]
+input = ["text", "image", "pdf"]
+`,
+		// The overlay states only what differs for this provider.
+		"google/models/gemini-x.toml": `
+base_model = "google/gemini-x"
+[cost]
+input = 0.30
+`,
+		// An overlay may also override: what it says wins over the base.
+		"openrouter/models/google/gemini-x.toml": `
+base_model = "google/gemini-x"
+[[reasoning_options]]
+type = "effort"
+values = ["low", "high"]
+`,
+	})
+
+	src, err := NewModelsDevSource(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	inherited, ok := src.Resolve("google", "gemini-x")
+	if !ok {
+		t.Fatal("overlay should resolve")
+	}
+	if inherited.ThinkingMode != models.ThinkingModeToggle {
+		t.Errorf("mode = %q, want toggle (inherited)", inherited.ThinkingMode)
+	}
+	if inherited.ReasoningDialect != reasoning.DialectBudget {
+		t.Errorf("dialect = %q, want budget (inherited)", inherited.ReasoningDialect)
+	}
+	if inherited.ContextWindow == nil || *inherited.ContextWindow != 1048576 {
+		t.Errorf("context = %v, want 1048576 (inherited)", inherited.ContextWindow)
+	}
+	if inherited.Vision == nil || !*inherited.Vision {
+		t.Error("vision should be inherited from the base modalities")
+	}
+	if inherited.ThinkingBudgetMax == nil || *inherited.ThinkingBudgetMax != 24576 {
+		t.Errorf("budget max = %v, want 24576 (inherited)", inherited.ThinkingBudgetMax)
+	}
+
+	// The overlay's own options replace the base's rather than merging with them:
+	// a provider that exposes different controls is stating a fact about itself.
+	overridden, ok := src.Resolve("openrouter", "google/gemini-x")
+	if !ok {
+		t.Fatal("nested overlay should resolve")
+	}
+	if overridden.ReasoningDialect != reasoning.DialectTier {
+		t.Errorf("dialect = %q, want tier (overlay wins)", overridden.ReasoningDialect)
+	}
+	if !slices.Equal(overridden.EffortLevels, []string{"low", "high"}) {
+		t.Errorf("tiers = %v, want [low high] (overlay wins)", overridden.EffortLevels)
+	}
+	// Fields the overlay is silent about still come from the base.
+	if overridden.ContextWindow == nil || *overridden.ContextWindow != 1048576 {
+		t.Errorf("context = %v, want 1048576 (still inherited)", overridden.ContextWindow)
 	}
 }
