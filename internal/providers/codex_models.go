@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/reasoning"
 )
 
 const (
@@ -112,9 +113,15 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 		if containsFold(model.InputModalities, "image") {
 			compatibilities = append(compatibilities, models.CompatVision)
 		}
-		reasoningEfforts := make([]string, 0, len(model.SupportedReasoningLevels))
+		// Upstream spells off "none"; normalize rather than filter so a model that
+		// can be turned off keeps saying so. See copilot_models.go for the same
+		// reasoning.
+		advertised := make([]string, 0, len(model.SupportedReasoningLevels))
 		for _, level := range model.SupportedReasoningLevels {
-			effort := strings.TrimSpace(level.Effort)
+			advertised = append(advertised, strings.TrimSpace(level.Effort))
+		}
+		reasoningEfforts := make([]string, 0, len(advertised))
+		for _, effort := range reasoning.NormalizeAdvertised(advertised) {
 			if models.IsValidReasoningEffort(effort) && !containsFold(reasoningEfforts, effort) {
 				reasoningEfforts = append(reasoningEfforts, effort)
 			}

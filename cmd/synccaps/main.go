@@ -194,10 +194,16 @@ func applyToModel(model *yaml.Node, mode string, efforts []string) bool {
 	// Gemini 3.x accepts it as its floor. Registry silence is not evidence of
 	// absence.
 	if existing := mapValue(cfg, "reasoning_efforts"); existing != nil {
+		// Collected in canonical order and prepended once, so the list stays
+		// weakest-to-strongest instead of reversing with each insertion.
+		var carried []string
 		for _, token := range []string{"disable", "minimal"} {
 			if seqContains(existing, token) && !slices.Contains(wantEfforts, token) {
-				wantEfforts = append([]string{token}, wantEfforts...)
+				carried = append(carried, token)
 			}
+		}
+		if len(carried) > 0 {
+			wantEfforts = append(carried, wantEfforts...)
 		}
 	}
 

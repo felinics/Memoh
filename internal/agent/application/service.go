@@ -722,6 +722,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		HTTPClient:            s.streamHTTPClient,
 		ReasoningConfig:       reasoningConfig,
 		ReasoningDialect:      chatModel.Config.ReasoningDialect,
+		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport,
 		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin,
 		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax,
 	})

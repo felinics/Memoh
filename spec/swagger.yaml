@@ -4069,6 +4069,13 @@ definitions:
         items:
           type: string
         type: array
+      reasoning_off_support:
+        description: |-
+          ReasoningOffSupport declares how the model answers an explicit request to
+          stop thinking. Anthropic's per-model table splits models that share a
+          thinking mode and an identical tier list, so this cannot be derived — see the
+          reasoning package's OffSupport constants.
+        type: string
       thinking_budget_max:
         type: integer
       thinking_budget_min:
@@ -4605,6 +4612,14 @@ definitions:
       efforts:
         description: Efforts are the selectable active tiers, weakest to strongest
           as advertised.
+        items:
+          type: string
+        type: array
+      efforts_without_off:
+        description: |-
+          EffortsWithoutOff are tiers that cannot be combined with off on this model.
+          Opus 5 accepts an explicit disable only at effort high or below, so a client
+          that lets a user hold both must know which tiers conflict.
         items:
           type: string
         type: array

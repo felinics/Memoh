@@ -130,6 +130,11 @@ type ModelConfig struct {
 	// sniffing the model id, and an id is not a capability. Empty means the
 	// provider's modern default.
 	ReasoningDialect string `json:"reasoning_dialect,omitempty"`
+	// ReasoningOffSupport declares how the model answers an explicit request to
+	// stop thinking. Anthropic's per-model table splits models that share a
+	// thinking mode and an identical tier list, so this cannot be derived — see the
+	// reasoning package's OffSupport constants.
+	ReasoningOffSupport string `json:"reasoning_off_support,omitempty"`
 	// ThinkingBudgetMin/Max bound the budget dialect. The range is per model
 	// family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
 	// off, while Flash starts at 0 and can.
@@ -202,6 +207,9 @@ func (m *Model) Validate() error {
 	if !reasoning.IsValidDialect(m.Config.ReasoningDialect) {
 		return errors.New("invalid reasoning dialect: " + m.Config.ReasoningDialect)
 	}
+	if !reasoning.IsValidOffSupport(m.Config.ReasoningOffSupport) {
+		return errors.New("invalid reasoning off support: " + m.Config.ReasoningOffSupport)
+	}
 	return nil
 }
 
@@ -226,7 +234,12 @@ func (m *Model) ResolveThinkingMode() string {
 // It is the single source every surface reads — the web picker, /reasoning, and
 // the API all render this rather than deriving their own answer.
 func (m *Model) ReasoningOptions(clientType string) reasoning.Options {
-	return reasoning.OptionsFor(m.ResolveThinkingMode(), m.Config.ReasoningEfforts, clientType)
+	return reasoning.OptionsFor(
+		m.ResolveThinkingMode(),
+		m.Config.ReasoningEfforts,
+		clientType,
+		m.Config.ReasoningOffSupport,
+	)
 }
 
 // AddRequest is the payload for creating a new model. Enable is a pointer so

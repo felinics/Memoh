@@ -1642,6 +1642,7 @@ func (p *SpawnProvider) resolveModel(
 		ChatCompletionsCompat: chatCompletionsCompat,
 		ReasoningConfig:       reasoningConfig,
 		ReasoningDialect:      modelInfo.Config.ReasoningDialect,
+		ReasoningOffSupport:   modelInfo.Config.ReasoningOffSupport,
 		ThinkingBudgetMin:     modelInfo.Config.ThinkingBudgetMin,
 		ThinkingBudgetMax:     modelInfo.Config.ThinkingBudgetMax,
 	})

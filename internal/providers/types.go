@@ -112,20 +112,28 @@ type OAuthAuthorizeResponse struct {
 
 // RemoteModel represents a model returned by the provider's /v1/models endpoint.
 type RemoteModel struct {
-	ID                string   `json:"id"`
-	Description       *string  `json:"description,omitempty"`
-	Object            string   `json:"object"`
-	Created           int64    `json:"created"`
-	OwnedBy           string   `json:"owned_by"`
-	Name              string   `json:"name,omitempty"`
-	DisplayName       string   `json:"display_name,omitempty"`
-	Type              string   `json:"type,omitempty"`
-	Compatibilities   []string `json:"compatibilities,omitempty"`
-	ReasoningEfforts  []string `json:"reasoning_efforts,omitempty"`
-	ThinkingMode      string   `json:"thinking_mode,omitempty"`
-	ContextWindow     *int     `json:"context_window,omitempty"`
-	Dimensions        *int     `json:"dimensions,omitempty"`
-	CapabilitiesKnown bool     `json:"-"`
+	ID               string   `json:"id"`
+	Description      *string  `json:"description,omitempty"`
+	Object           string   `json:"object"`
+	Created          int64    `json:"created"`
+	OwnedBy          string   `json:"owned_by"`
+	Name             string   `json:"name,omitempty"`
+	DisplayName      string   `json:"display_name,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	Compatibilities  []string `json:"compatibilities,omitempty"`
+	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+	ThinkingMode     string   `json:"thinking_mode,omitempty"`
+	// ReasoningDialect and the budget bounds must survive the import path, not
+	// just live in the template: an imported Gemini 2.5 row without a dialect
+	// falls back to the tier wire and every request is a 400.
+	ReasoningDialect string `json:"reasoning_dialect,omitempty"`
+	// ReasoningOffSupport declares how the model answers an explicit disable.
+	ReasoningOffSupport string `json:"reasoning_off_support,omitempty"`
+	ThinkingBudgetMin   *int   `json:"thinking_budget_min,omitempty"`
+	ThinkingBudgetMax   *int   `json:"thinking_budget_max,omitempty"`
+	ContextWindow       *int   `json:"context_window,omitempty"`
+	Dimensions          *int   `json:"dimensions,omitempty"`
+	CapabilitiesKnown   bool   `json:"-"`
 }
 
 // ImportModelsResponse represents the response for importing models.

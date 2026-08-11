@@ -511,7 +511,7 @@
       "choosePrompt": "Higher effort means more careful thinking, but slower replies. Choose a level:",
       "setUsage": "Usage: /reasoning set <off|low|medium|high|xhigh>",
       "unavailable": "Reasoning isn't available right now.",
-      "unknownLevel": "Unknown level {level} — choose off, none, low, medium, high, or xhigh."
+      "unknownLevel": "Unknown level {level} — pick one of the levels shown above."
     },
     "error": {
       "unknownCommand": "Unknown command {command}. Run {help} to see what's available, or resend without the leading slash to send it as a regular message.",

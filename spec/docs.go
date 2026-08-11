@@ -20616,6 +20616,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "reasoning_off_support": {
+                    "description": "ReasoningOffSupport declares how the model answers an explicit request to\nstop thinking. Anthropic's per-model table splits models that share a\nthinking mode and an identical tier list, so this cannot be derived — see the\nreasoning package's OffSupport constants.",
+                    "type": "string"
+                },
                 "thinking_budget_max": {
                     "type": "integer"
                 },
@@ -21403,6 +21407,13 @@ const docTemplate = `{
                 },
                 "efforts": {
                     "description": "Efforts are the selectable active tiers, weakest to strongest as advertised.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "efforts_without_off": {
+                    "description": "EffortsWithoutOff are tiers that cannot be combined with off on this model.\nOpus 5 accepts an explicit disable only at effort high or below, so a client\nthat lets a user hold both must know which tiers conflict.",
                     "type": "array",
                     "items": {
                         "type": "string"

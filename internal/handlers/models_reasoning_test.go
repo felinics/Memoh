@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/providers"
+	"github.com/memohai/memoh/internal/reasoning"
 )
 
 // A handler with no providers service stands in for the case where a provider
@@ -106,5 +108,52 @@ func TestReasoningOptionsSerializeAsSnakeCase(t *testing.T) {
 		if !strings.Contains(string(encoded), want) {
 			t.Fatalf("payload missing %s: %s", want, encoded)
 		}
+	}
+}
+
+// The registry guard covers YAML templates, which is where the dialect is written
+// — but not where it is read from at call time. A model reaches the wire through
+// the import path, and a dialect lost anywhere along it means a Gemini 2.5 row
+// resolved as 3.x: thinkingLevel on a wire that wants thinkingBudget, i.e. a 400
+// on every request. That gap is exactly how the field came to be missing from
+// RemoteModel in the first place.
+func TestImportedModelConfigCarriesTheWireDeclarations(t *testing.T) {
+	t.Parallel()
+
+	budgetMin, budgetMax := 128, 32768
+	remote := providers.RemoteModel{
+		ID:                  "gemini-2.5-pro",
+		Type:                string(models.ModelTypeChat),
+		ReasoningEfforts:    []string{models.ReasoningEffortLow, models.ReasoningEffortHigh},
+		ThinkingMode:        models.ThinkingModeToggle,
+		ReasoningDialect:    reasoning.DialectBudget,
+		ReasoningOffSupport: reasoning.OffSupportRejected,
+		ThinkingBudgetMin:   &budgetMin,
+		ThinkingBudgetMax:   &budgetMax,
+	}
+
+	// The real assembly ImportModels uses. Mirroring it here instead would pass
+	// even if the production path dropped a field, which is the mistake this test
+	// exists to catch.
+	cfg := modelConfigFromRemote(remote, []string{models.CompatReasoning})
+
+	if cfg.ReasoningDialect != reasoning.DialectBudget {
+		t.Errorf("dialect = %q, want %q", cfg.ReasoningDialect, reasoning.DialectBudget)
+	}
+	if cfg.ReasoningOffSupport != reasoning.OffSupportRejected {
+		t.Errorf("off support = %q, want %q", cfg.ReasoningOffSupport, reasoning.OffSupportRejected)
+	}
+	if cfg.ThinkingBudgetMin == nil || *cfg.ThinkingBudgetMin != budgetMin {
+		t.Errorf("budget min = %v, want %d", cfg.ThinkingBudgetMin, budgetMin)
+	}
+	if cfg.ThinkingBudgetMax == nil || *cfg.ThinkingBudgetMax != budgetMax {
+		t.Errorf("budget max = %v, want %d", cfg.ThinkingBudgetMax, budgetMax)
+	}
+
+	// A declared rejection must survive into what a client is offered, or the
+	// picker would show an off switch the wire answers with a 400.
+	m := models.Model{Type: models.ModelTypeChat, Config: cfg}
+	if opts := m.ReasoningOptions("google-generative-ai"); opts.CanDisable {
+		t.Error("a model declaring it rejects an explicit off must not offer one")
 	}
 }

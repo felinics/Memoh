@@ -228,7 +228,7 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
 
 // UpdateByModelID godoc
@@ -271,7 +271,7 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
 
 // DeleteByID godoc

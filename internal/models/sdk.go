@@ -34,6 +34,9 @@ type SDKModelConfig struct {
 	ReasoningDialect  string
 	ThinkingBudgetMin *int
 	ThinkingBudgetMax *int
+	// ReasoningOffSupport declares whether this model accepts an explicit
+	// thinking{type:"disabled"}. See anthropicAcceptsExplicitOff.
+	ReasoningOffSupport string
 }
 
 // ReasoningConfig is the resolved extended-thinking decision for one call,
@@ -106,15 +109,26 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		//     does not turn it on. The resolver flags every effort-era model as
 		//     Adaptive (including cloud variants missing supports_adaptive_thinking),
 		//     so a non-adaptive active config here is a legacy model.
-		if rc := cfg.ReasoningConfig; rc != nil && rc.Active {
-			if rc.Adaptive {
+		//   - off: an explicit thinking{type:"disabled"} rather than an omitted
+		//     field. Omission means "off" only up to 4.8; from Opus 5 and Sonnet 5
+		//     on, thinking is the default and an omitted field leaves it running —
+		//     billed, counted against max_tokens, and invisible to a user who
+		//     believes they turned it off. Sending the explicit shape is only safe
+		//     where the model accepts it, which the catalog declares.
+		if rc := cfg.ReasoningConfig; rc != nil {
+			switch {
+			case rc.Active && rc.Adaptive:
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 					Type: "adaptive",
 				}))
-			} else {
+			case rc.Active:
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 					Type:         "enabled",
 					BudgetTokens: legacyAnthropicBudgetFor(rc.Effort),
+				}))
+			case rc.Disabled && anthropicAcceptsExplicitOff(cfg.ReasoningOffSupport):
+				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
+					Type: "disabled",
 				}))
 			}
 		}
@@ -383,3 +397,24 @@ func googleBudgetFor(rc *ReasoningConfig, minBudget, maxBudget *int) (int, bool)
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// anthropicAcceptsExplicitOff reports whether a model takes
+// thinking{type:"disabled"} on the wire.
+//
+// Omitting the field is not a substitute. It reads as "off" only through Opus 4.8;
+// Opus 5, Sonnet 5, Fable 5 and Mythos 5 think by default, so an omitted field
+// leaves thinking running — billed as output tokens and counted against
+// max_tokens, while the user believes it is off. Fable 5 and Mythos 5 also reject
+// the explicit shape with a 400, so it cannot be sent unconditionally either.
+//
+// Only a catalog declaration can tell these apart: the models share a thinking
+// mode and an identical tier list. An undeclared model gets the omission
+// behaviour, which is correct for every generation we currently ship.
+func anthropicAcceptsExplicitOff(offSupport string) bool {
+	switch offSupport {
+	case reasoning.OffSupportAccepted, reasoning.OffSupportLowEffortOnly:
+		return true
+	default:
+		return false
+	}
+}

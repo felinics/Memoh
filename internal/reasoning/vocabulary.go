@@ -206,3 +206,49 @@ func BudgetRatio(effort string) (float64, bool) {
 	ratio, ok := budgetRatios[strings.TrimSpace(effort)]
 	return ratio, ok
 }
+
+// How a model responds to an explicit request to stop thinking. This cannot be
+// derived from the thinking mode or the advertised tiers: Anthropic's own
+// per-model table splits models that share both. Opus 4.6 through 4.8 default to
+// thinking off and accept thinking{type:"disabled"}; Sonnet 5 defaults to on and
+// still accepts it; Opus 5 accepts it only at effort high or below; Fable 5 and
+// Mythos 5 reject it outright. Guessing from a model id is what this field exists
+// to avoid.
+const (
+	// OffSupportUnset means the catalog has not said. Callers fall back to the
+	// mode-based rule, which is right for the toggle generation and conservative
+	// for the rest.
+	OffSupportUnset = ""
+	// OffSupportAccepted means the model accepts an explicit disable at any effort.
+	OffSupportAccepted = "accepted"
+	// OffSupportLowEffortOnly means the model accepts an explicit disable, but only
+	// at effort high or below — pairing it with xhigh or max is a 400 (Opus 5).
+	OffSupportLowEffortOnly = "low_effort_only"
+	// OffSupportRejected means the model always thinks and rejects an explicit
+	// disable (Fable 5, Mythos 5). Offering an off switch would be a dead control
+	// that also costs a round trip.
+	OffSupportRejected = "rejected"
+)
+
+var validOffSupport = map[string]struct{}{
+	OffSupportUnset:         {},
+	OffSupportAccepted:      {},
+	OffSupportLowEffortOnly: {},
+	OffSupportRejected:      {},
+}
+
+// IsValidOffSupport reports whether an off-support token can be stored.
+func IsValidOffSupport(support string) bool {
+	_, ok := validOffSupport[support]
+	return ok
+}
+
+// effortsAboveHigh are the tiers Opus 5 refuses to combine with an explicit
+// disable. They are the tiers stronger than high in the ordering.
+func effortExceedsHigh(effort string) bool {
+	switch strings.TrimSpace(effort) {
+	case EffortXHigh, EffortMax:
+		return true
+	}
+	return false
+}
