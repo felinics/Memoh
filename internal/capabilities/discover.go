@@ -43,6 +43,14 @@ type Capabilities struct {
 	FileInput *bool
 	// ContextWindow is nil when unknown.
 	ContextWindow *int
+	// ReasoningDialect, the budget bounds and ReasoningOffSupport are wire facts
+	// LiteLLM could not express at all: it reported which OpenAI-wire flags a model
+	// set, not which shape the provider speaks. models.dev models the shape
+	// directly, so discovery can now fill what the templates used to carry by hand.
+	ReasoningDialect    string
+	ThinkingBudgetMin   *int
+	ThinkingBudgetMax   *int
+	ReasoningOffSupport string
 }
 
 // effortOrder is the canonical low→high ordering used to render effort lists.
