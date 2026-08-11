@@ -147,6 +147,48 @@ models:
 	}
 }
 
+func TestEnrichFilePreservesHandMaintainedMinimalToken(t *testing.T) {
+	t.Parallel()
+
+	// LiteLLM reports supports_minimal for one model family only, while Gemini 3.x
+	// takes minimal as its floor. A template that declares it must survive re-sync
+	// for the same reason the disable token does: registry silence is not evidence
+	// of absence.
+	resolver, err := capabilities.NewResolver([]byte(`{
+		"tier-model": {"mode": "chat", "supports_reasoning": true}
+	}`))
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "provider.yaml")
+	fixture := `name: Test
+client_type: google-generative-ai
+models:
+  - model_id: tier-model
+    name: Tier
+    type: chat
+    config:
+      compatibilities: [reasoning, tool-call]
+      thinking_mode: toggle
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
+`
+	if err := os.WriteFile(path, []byte(fixture), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	changed, err := enrichFile(path, resolver, false)
+	if err != nil {
+		t.Fatalf("enrichFile: %v", err)
+	}
+	if changed != 0 {
+		got, _ := os.ReadFile(path) //nolint:gosec // test reads its own temp fixture
+		t.Fatalf("changed = %d, want 0 (minimal and the dialect should survive):\n%s", changed, got)
+	}
+}
+
 func TestEnrichFilePreservesHandMaintainedDisableToken(t *testing.T) {
 	t.Parallel()
 

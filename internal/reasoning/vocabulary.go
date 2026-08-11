@@ -157,3 +157,52 @@ func hasEffort(levels []string, effort string) bool {
 func OrderedEfforts() []string {
 	return slices.Clone(orderedEfforts)
 }
+
+// Reasoning wire dialects. A dialect is how a provider spells the thinking
+// control on the request, which is not derivable from the tiers a model
+// advertises — Gemini 2.5 takes a token budget while 3.x takes a named level, and
+// sending both is a 400. It is declared per model rather than sniffed from an id.
+const (
+	// DialectTier sends a named tier: OpenAI reasoning.effort, Anthropic
+	// output_config.effort, Gemini 3.x thinkingLevel.
+	DialectTier = "tier"
+	// DialectBudget sends a token budget: Anthropic <=4.5 budget_tokens, Gemini
+	// 2.5 thinkingBudget.
+	DialectBudget = "budget"
+)
+
+var validDialects = map[string]struct{}{
+	DialectTier:   {},
+	DialectBudget: {},
+}
+
+// IsValidDialect reports whether a dialect token can be stored. An empty dialect
+// is valid and means "the provider's modern default".
+func IsValidDialect(dialect string) bool {
+	if dialect == "" {
+		return true
+	}
+	_, ok := validDialects[dialect]
+	return ok
+}
+
+// budgetRatios place each tier proportionally within a model's own budget range.
+// Fixed token counts cannot be right across models with different ceilings, and
+// the vendors publish no tier-to-token mapping — they describe tiers as relative
+// allowances rather than guarantees. Two independent clients (Cline, Cherry
+// Studio) converged on this same proportional approach.
+var budgetRatios = map[string]float64{
+	EffortMinimal: 0.1,
+	EffortLow:     0.2,
+	EffortMedium:  0.5,
+	EffortHigh:    0.8,
+	EffortXHigh:   0.95,
+	EffortMax:     1,
+}
+
+// BudgetRatio returns where a tier sits within a budget range, as a fraction.
+// It reports false for values that are not active tiers, including the off token.
+func BudgetRatio(effort string) (float64, bool) {
+	ratio, ok := budgetRatios[strings.TrimSpace(effort)]
+	return ratio, ok
+}

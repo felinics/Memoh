@@ -4056,10 +4056,27 @@ definitions:
         type: string
       dimensions:
         type: integer
+      reasoning_dialect:
+        description: |-
+          ReasoningDialect declares the wire shape of this model's thinking control,
+          which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
+          token budget while 3.x takes a named level, and the two are mutually
+          exclusive on the same request. Declared per model because the alternative is
+          sniffing the model id, and an id is not a capability. Empty means the
+          provider's modern default.
+        type: string
       reasoning_efforts:
         items:
           type: string
         type: array
+      thinking_budget_max:
+        type: integer
+      thinking_budget_min:
+        description: |-
+          ThinkingBudgetMin/Max bound the budget dialect. The range is per model
+          family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
+          off, while Flash starts at 0 and can.
+        type: integer
       thinking_mode:
         type: string
     type: object

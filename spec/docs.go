@@ -20606,11 +20606,22 @@ const docTemplate = `{
                 "dimensions": {
                     "type": "integer"
                 },
+                "reasoning_dialect": {
+                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty means the\nprovider's modern default.",
+                    "type": "string"
+                },
                 "reasoning_efforts": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                },
+                "thinking_budget_max": {
+                    "type": "integer"
+                },
+                "thinking_budget_min": {
+                    "description": "ThinkingBudgetMin/Max bound the budget dialect. The range is per model\nfamily, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned\noff, while Flash starts at 0 and can.",
+                    "type": "integer"
                 },
                 "thinking_mode": {
                     "type": "string"

@@ -1641,6 +1641,9 @@ func (p *SpawnProvider) resolveModel(
 		BaseURL:               baseURL,
 		ChatCompletionsCompat: chatCompletionsCompat,
 		ReasoningConfig:       reasoningConfig,
+		ReasoningDialect:      modelInfo.Config.ReasoningDialect,
+		ThinkingBudgetMin:     modelInfo.Config.ThinkingBudgetMin,
+		ThinkingBudgetMax:     modelInfo.Config.ThinkingBudgetMax,
 	})
 	return resolvedSubagentModel{
 		Model:                 sdkModel,

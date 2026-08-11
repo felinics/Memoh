@@ -123,6 +123,18 @@ type ModelConfig struct {
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	ThinkingMode     string   `json:"thinking_mode,omitempty"`
 	CatalogAvailable *bool    `json:"catalog_available,omitempty"`
+	// ReasoningDialect declares the wire shape of this model's thinking control,
+	// which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
+	// token budget while 3.x takes a named level, and the two are mutually
+	// exclusive on the same request. Declared per model because the alternative is
+	// sniffing the model id, and an id is not a capability. Empty means the
+	// provider's modern default.
+	ReasoningDialect string `json:"reasoning_dialect,omitempty"`
+	// ThinkingBudgetMin/Max bound the budget dialect. The range is per model
+	// family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
+	// off, while Flash starts at 0 and can.
+	ThinkingBudgetMin *int `json:"thinking_budget_min,omitempty"`
+	ThinkingBudgetMax *int `json:"thinking_budget_max,omitempty"`
 }
 
 func normalizeModelConfig(config ModelConfig) ModelConfig {
@@ -186,6 +198,9 @@ func (m *Model) Validate() error {
 	}
 	if m.Config.ThinkingMode != "" && !reasoning.IsValidMode(m.Config.ThinkingMode) {
 		return errors.New("invalid thinking mode: " + m.Config.ThinkingMode)
+	}
+	if !reasoning.IsValidDialect(m.Config.ReasoningDialect) {
+		return errors.New("invalid reasoning dialect: " + m.Config.ReasoningDialect)
 	}
 	return nil
 }
