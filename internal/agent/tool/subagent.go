@@ -1643,6 +1643,7 @@ func (p *SpawnProvider) resolveModel(
 		ReasoningConfig:       reasoningConfig,
 		ReasoningDialect:      modelInfo.Config.ReasoningDialect,
 		ReasoningOffSupport:   modelInfo.Config.ReasoningOffSupport,
+		ReasoningDefaultOn:    modelInfo.Config.ReasoningDefaultOn,
 		ThinkingBudgetMin:     modelInfo.Config.ThinkingBudgetMin,
 		ThinkingBudgetMax:     modelInfo.Config.ThinkingBudgetMax,
 	})

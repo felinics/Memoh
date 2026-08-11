@@ -723,6 +723,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ReasoningConfig:       reasoningConfig,
 		ReasoningDialect:      chatModel.Config.ReasoningDialect,
 		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport,
+		ReasoningDefaultOn:    chatModel.Config.ReasoningDefaultOn,
 		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin,
 		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax,
 	})

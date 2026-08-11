@@ -243,6 +243,21 @@ func IsValidOffSupport(support string) bool {
 	return ok
 }
 
+// DefaultOn reports whether omitting the thinking field leaves the model thinking.
+//
+// This is a different question from whether a model can be turned off, and the two
+// were briefly conflated. "Can it be turned off" decides whether a picker offers
+// the control; "does omission mean off" decides what the adaptor must send to
+// honour that choice. Claude 4.6 answers no to the second (omitting is off) while
+// Opus 5 answers yes (omitting keeps thinking, billed and counted against
+// max_tokens, while the user believes it is off).
+//
+// nil means unknown, which callers treat as the conservative "omission is not a
+// reliable way to turn thinking off".
+func DefaultOn(defaultOn *bool) bool {
+	return defaultOn != nil && *defaultOn
+}
+
 // effortsAboveHigh are the tiers Opus 5 refuses to combine with an explicit
 // disable. They are the tiers stronger than high in the ordering.
 func effortExceedsHigh(effort string) bool {

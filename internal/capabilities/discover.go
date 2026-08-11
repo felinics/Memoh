@@ -51,6 +51,9 @@ type Capabilities struct {
 	ThinkingBudgetMin   *int
 	ThinkingBudgetMax   *int
 	ReasoningOffSupport string
+	// ReasoningDefaultOn reports whether omitting the thinking field leaves the
+	// model thinking. nil when no source said.
+	ReasoningDefaultOn *bool
 }
 
 // effortOrder is the canonical low→high ordering used to render effort lists.

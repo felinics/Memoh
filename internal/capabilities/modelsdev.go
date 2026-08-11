@@ -205,8 +205,11 @@ func deriveFromModelsDev(e modelsDevEntry) Capabilities {
 	caps.ThinkingMode = models.ThinkingModeToggle
 	opts := *e.ReasoningOptions
 	if len(opts) == 0 {
-		// Reasons, but exposes no control: always on. Declaring no tiers and no off
-		// switch is what keeps a picker from offering either.
+		// Reasons and takes no direction: no tiers, no switch. This is its own
+		// thinking mode rather than a toggle with an empty list, because "you may
+		// not turn this off" and "you may turn this off but there are no tiers" are
+		// different things to tell a user.
+		caps.ThinkingMode = reasoning.ModeAlways
 		caps.EffortLevels = []string{}
 		caps.ReasoningOffSupport = reasoning.OffSupportRejected
 		return caps

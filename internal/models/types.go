@@ -135,6 +135,12 @@ type ModelConfig struct {
 	// thinking mode and an identical tier list, so this cannot be derived — see the
 	// reasoning package's OffSupport constants.
 	ReasoningOffSupport string `json:"reasoning_off_support,omitempty"`
+	// ReasoningDefaultOn reports whether omitting the thinking field leaves the
+	// model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
+	// defaults to off, while Opus 5 can be turned off but defaults to on, so
+	// omitting the field there keeps thinking running — billed, and invisible to a
+	// user who believes they turned it off. nil means unknown.
+	ReasoningDefaultOn *bool `json:"reasoning_default_on,omitempty"`
 	// ThinkingBudgetMin/Max bound the budget dialect. The range is per model
 	// family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
 	// off, while Flash starts at 0 and can.

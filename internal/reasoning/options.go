@@ -49,6 +49,12 @@ func OptionsFor(mode string, advertised []string, clientType, offSupport string)
 	if !Supported(mode) {
 		return Options{}
 	}
+	if mode == ModeAlways {
+		// The model reasons and takes no direction: no tiers to pick, no switch to
+		// flip. Reporting it as supported-but-uncontrollable is what lets a client
+		// say so, rather than rendering a control that cannot reach the model.
+		return Options{Supported: true}
+	}
 
 	levels := effectiveEfforts(advertised, clientType)
 	tiers := make([]string, 0, len(levels))
@@ -100,6 +106,9 @@ func OptionsFor(mode string, advertised []string, clientType, offSupport string)
 // would accept a disable, which costs a control, rather than over-offering on a
 // model that rejects one, which costs a failed request.
 func canDisable(mode string, levels []string, clientType, offSupport string) bool {
+	if mode == ModeAlways {
+		return false
+	}
 	switch offSupport {
 	case OffSupportAccepted, OffSupportLowEffortOnly:
 		return true

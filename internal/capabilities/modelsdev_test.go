@@ -114,9 +114,12 @@ name = "Quiet"
 			wantTiers: []string{"disable", "low", "medium", "high", "xhigh"},
 		},
 		{
-			name:     "no controls means always on",
+			// Its own mode, not a toggle with an empty list: "you cannot turn this
+			// off" and "you can turn it off but there are no tiers" are different
+			// things to tell a user.
+			name:     "no controls at all is the always mode",
 			provider: "minimax", modelID: "always-on",
-			wantMode: models.ThinkingModeToggle, wantTiers: []string{},
+			wantMode: reasoning.ModeAlways, wantTiers: []string{},
 			wantOff: reasoning.OffSupportRejected,
 		},
 		{
