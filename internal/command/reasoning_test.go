@@ -39,6 +39,7 @@ func fullLadderOptions() reasoning.Options {
 			reasoning.EffortXHigh,
 		},
 		"openai-codex",
+		"",
 	)
 }
 
@@ -152,16 +153,12 @@ func TestReasoningChoicesFollowTheModel(t *testing.T) {
 	}{
 		{
 			name: "a model that can be turned off leads with off",
-			opts: reasoning.OptionsFor(reasoning.ModeToggle,
-				[]string{reasoning.EffortDisable, reasoning.EffortLow, reasoning.EffortHigh},
-				"openai-codex"),
+			opts: reasoning.OptionsFor(reasoning.ModeToggle, []string{reasoning.EffortDisable, reasoning.EffortLow, reasoning.EffortHigh}, "openai-codex", ""),
 			want: []string{"off", "low", "high"},
 		},
 		{
-			name: "a model that cannot be turned off does not offer it",
-			opts: reasoning.OptionsFor(reasoning.ModeToggle,
-				[]string{reasoning.EffortMinimal, reasoning.EffortLow, reasoning.EffortMedium},
-				"openai-codex"),
+			name:   "a model that cannot be turned off does not offer it",
+			opts:   reasoning.OptionsFor(reasoning.ModeToggle, []string{reasoning.EffortMinimal, reasoning.EffortLow, reasoning.EffortMedium}, "openai-codex", ""),
 			want:   []string{"minimal", "low", "medium"},
 			absent: []string{"off"},
 		},
@@ -195,7 +192,7 @@ func TestAcceptsEffortRejectsTiersTheModelDoesNotOffer(t *testing.T) {
 	t.Parallel()
 
 	cannotDisable := reasoning.OptionsFor(reasoning.ModeToggle,
-		[]string{reasoning.EffortLow, reasoning.EffortMedium}, "openai-codex")
+		[]string{reasoning.EffortLow, reasoning.EffortMedium}, "openai-codex", "")
 	canDisable := fullLadderOptions()
 
 	if !acceptsEffort(reasoning.EffortLow, cannotDisable) {
@@ -212,5 +209,26 @@ func TestAcceptsEffortRejectsTiersTheModelDoesNotOffer(t *testing.T) {
 	}
 	if acceptsEffort(reasoning.EffortLow, reasoning.Options{}) {
 		t.Error("an unsupported or unresolved model must not accept a fallback tier")
+	}
+}
+
+// A typed `set <level>` has no picker above it, so pointing at "the levels shown
+// above" names something that may not be on screen — and the levels differ per
+// model, so they have to travel in the message itself.
+func TestUnknownLevelMessageNamesTheAvailableLevels(t *testing.T) {
+	t.Parallel()
+
+	opts := reasoning.OptionsFor(reasoning.ModeToggle,
+		[]string{reasoning.EffortMinimal, reasoning.EffortLow, reasoning.EffortHigh},
+		"google-generative-ai", "")
+
+	got := reasoningChoicesFor(opts)
+	if !slices.Equal(got, []string{"minimal", "low", "high"}) {
+		t.Fatalf("choices = %v, want the model's own tiers", got)
+	}
+	// The rendered list is what the message interpolates; asserting it here keeps
+	// the two from drifting apart.
+	if joined := strings.Join(got, ", "); joined != "minimal, low, high" {
+		t.Fatalf("rendered levels = %q", joined)
 	}
 }

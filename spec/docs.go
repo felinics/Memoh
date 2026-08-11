@@ -21153,6 +21153,14 @@ const docTemplate = `{
                 "provider_id": {
                     "type": "string"
                 },
+                "reasoning": {
+                    "description": "Reasoning is the model's resolved thinking options, filled by the API layer\n(it depends on the provider's client type). Clients render this rather than\nderiving their own answer from ThinkingMode and ReasoningEfforts — the\nduplication that let the web picker and the wire disagree.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/reasoning.Options"
+                        }
+                    ]
+                },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
                 }
@@ -21179,11 +21187,26 @@ const docTemplate = `{
                 "dimensions": {
                     "type": "integer"
                 },
+                "reasoning_dialect": {
+                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty means the\nprovider's modern default.",
+                    "type": "string"
+                },
                 "reasoning_efforts": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                },
+                "reasoning_off_support": {
+                    "description": "ReasoningOffSupport declares how the model answers an explicit request to\nstop thinking. Anthropic's per-model table splits models that share a\nthinking mode and an identical tier list, so this cannot be derived — see the\nreasoning package's OffSupport constants.",
+                    "type": "string"
+                },
+                "thinking_budget_max": {
+                    "type": "integer"
+                },
+                "thinking_budget_min": {
+                    "description": "ThinkingBudgetMin/Max bound the budget dialect. The range is per model\nfamily, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned\noff, while Flash starts at 0 and can.",
+                    "type": "integer"
                 },
                 "thinking_mode": {
                     "type": "string"
@@ -21960,6 +21983,37 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                }
+            }
+        },
+        "reasoning.Options": {
+            "type": "object",
+            "properties": {
+                "can_disable": {
+                    "description": "CanDisable reports whether picking \"off\" actually reaches the model.",
+                    "type": "boolean"
+                },
+                "default_effort": {
+                    "description": "DefaultEffort is the tier to use when nothing is stored, and the tier to fall\nback to when a stored value is no longer offered by the model.",
+                    "type": "string"
+                },
+                "efforts": {
+                    "description": "Efforts are the selectable active tiers, weakest to strongest as advertised.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "efforts_without_off": {
+                    "description": "EffortsWithoutOff are tiers that cannot be combined with off on this model.\nOpus 5 accepts an explicit disable only at effort high or below, so a client\nthat lets a user hold both must know which tiers conflict.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "supported": {
+                    "description": "Supported is false when the model has no thinking concept; the other fields\nare then empty and no control should be rendered at all.",
+                    "type": "boolean"
                 }
             }
         },

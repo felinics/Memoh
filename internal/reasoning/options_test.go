@@ -12,7 +12,7 @@ func TestOptionsForNeverOffersTheDisableTokenAsATier(t *testing.T) {
 	// declares it can be turned off. It must not come back out as something a user
 	// can pick as an *effort* — that confusion is what let an active config
 	// resolve to "off" before this package existed.
-	opts := OptionsFor(ModeToggle, []string{EffortDisable, EffortLow, EffortHigh}, "openai-completions")
+	opts := OptionsFor(ModeToggle, []string{EffortDisable, EffortLow, EffortHigh}, "openai-completions", "")
 
 	if !opts.CanDisable {
 		t.Fatal("advertised disable token should report CanDisable")
@@ -33,6 +33,7 @@ func TestOptionsForOffReachability(t *testing.T) {
 		mode       string
 		advertised []string
 		clientType string
+		offSupport string
 		canDisable bool
 	}{
 		{
@@ -54,12 +55,43 @@ func TestOptionsForOffReachability(t *testing.T) {
 			canDisable: true,
 		},
 		{
-			// Claude 4.6+: omitting the field leaves adaptive thinking in charge,
-			// which still thinks. Off is not reachable by omission here.
-			name:       "anthropic adaptive cannot be turned off by omission",
+			// An undeclared adaptive model: omission may leave the model's own
+			// default in charge, so the conservative answer is no off switch. Under-
+			// offering costs a control; over-offering costs a failed request.
+			name:       "undeclared anthropic adaptive is conservative",
 			mode:       ModeAdaptive,
 			advertised: []string{EffortLow, EffortHigh, EffortMax},
 			clientType: ClientTypeAnthropicMessages,
+			canDisable: false,
+		},
+		{
+			// Opus 4.6-4.8 accept thinking{type:"disabled"} even though they are
+			// adaptive. Only the declaration can say so — the mode and the tier list
+			// are identical to Fable 5's, which rejects the same shape.
+			name:       "a declared accepted model can be turned off",
+			mode:       ModeAdaptive,
+			advertised: []string{EffortLow, EffortHigh, EffortMax},
+			clientType: ClientTypeAnthropicMessages,
+			offSupport: OffSupportAccepted,
+			canDisable: true,
+		},
+		{
+			// Fable 5 / Mythos 5 always think and 400 on an explicit disable.
+			name:       "a declared rejecting model cannot",
+			mode:       ModeAdaptive,
+			advertised: []string{EffortLow, EffortHigh, EffortMax},
+			clientType: ClientTypeAnthropicMessages,
+			offSupport: OffSupportRejected,
+			canDisable: false,
+		},
+		{
+			// A declaration also overrides an advertised token, since the wire has
+			// the final say over the catalog's tier list.
+			name:       "a rejection wins over an advertised disable token",
+			mode:       ModeToggle,
+			advertised: []string{EffortDisable, EffortLow},
+			clientType: "openai-completions",
+			offSupport: OffSupportRejected,
 			canDisable: false,
 		},
 		{
@@ -76,7 +108,7 @@ func TestOptionsForOffReachability(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := OptionsFor(tt.mode, tt.advertised, tt.clientType).CanDisable; got != tt.canDisable {
+			if got := OptionsFor(tt.mode, tt.advertised, tt.clientType, tt.offSupport).CanDisable; got != tt.canDisable {
 				t.Fatalf("CanDisable = %v, want %v", got, tt.canDisable)
 			}
 		})
@@ -86,7 +118,7 @@ func TestOptionsForOffReachability(t *testing.T) {
 func TestOptionsForUnsupportedModelOffersNothing(t *testing.T) {
 	t.Parallel()
 
-	opts := OptionsFor(ModeNone, []string{EffortLow}, "openai-completions")
+	opts := OptionsFor(ModeNone, []string{EffortLow}, "openai-completions", "")
 	if opts.Supported || opts.CanDisable || len(opts.Efforts) > 0 || opts.DefaultEffort != "" {
 		t.Fatalf("a model with no thinking concept should offer nothing, got %+v", opts)
 	}
@@ -101,7 +133,7 @@ func TestOptionsForAppliesTheSameWirePolicyAsResolve(t *testing.T) {
 	const advertisedMax = EffortMax
 	advertised := []string{EffortLow, EffortHigh, advertisedMax}
 
-	opts := OptionsFor(ModeToggle, advertised, "openai-completions")
+	opts := OptionsFor(ModeToggle, advertised, "openai-completions", "")
 	if slices.Contains(opts.Efforts, advertisedMax) {
 		t.Fatalf("max should be filtered for generic OpenAI clients: %v", opts.Efforts)
 	}
@@ -112,7 +144,7 @@ func TestOptionsForAppliesTheSameWirePolicyAsResolve(t *testing.T) {
 	}
 
 	// Codex keeps max, and both answers must agree about that too.
-	codexOpts := OptionsFor(ModeToggle, advertised, "openai-codex")
+	codexOpts := OptionsFor(ModeToggle, advertised, "openai-codex", "")
 	if !slices.Contains(codexOpts.Efforts, advertisedMax) {
 		t.Fatalf("codex should keep max: %v", codexOpts.Efforts)
 	}
@@ -135,7 +167,7 @@ func TestOptionsDefaultEffortMatchesWhatResolveWouldSend(t *testing.T) {
 		{EffortDisable, EffortHigh, EffortXHigh},
 		nil,
 	} {
-		opts := OptionsFor(ModeToggle, advertised, "openai-codex")
+		opts := OptionsFor(ModeToggle, advertised, "openai-codex", "")
 		cfg := ResolveConfig(ModeToggle, advertised, opts, "", "", "openai-codex")
 		if cfg == nil {
 			t.Fatalf("advertised %v: resolver returned nil for a toggle model", advertised)
@@ -150,9 +182,9 @@ func TestOptionsDefaultEffortMatchesWhatResolveWouldSend(t *testing.T) {
 func TestReconcileStored(t *testing.T) {
 	t.Parallel()
 
-	canDisable := OptionsFor(ModeToggle, []string{EffortDisable, EffortLow, EffortHigh}, "openai-codex")
-	cannotDisable := OptionsFor(ModeToggle, []string{EffortLow, EffortHigh}, "openai-codex")
-	unsupported := OptionsFor(ModeNone, nil, "openai-codex")
+	canDisable := OptionsFor(ModeToggle, []string{EffortDisable, EffortLow, EffortHigh}, "openai-codex", "")
+	cannotDisable := OptionsFor(ModeToggle, []string{EffortLow, EffortHigh}, "openai-codex", "")
+	unsupported := OptionsFor(ModeNone, nil, "openai-codex", "")
 
 	cases := []struct {
 		name   string
@@ -179,12 +211,62 @@ func TestReconcileStored(t *testing.T) {
 	}
 }
 
+// Opus 5 accepts an explicit disable only at effort high or below; pairing it with
+// xhigh or max is a 400. A client that lets a user hold both a tier and an off
+// switch needs to know which tiers conflict, so Options names them.
+func TestOptionsNamesTiersThatConflictWithOff(t *testing.T) {
+	t.Parallel()
+
+	advertised := []string{EffortLow, EffortHigh, EffortXHigh, EffortMax}
+
+	conditional := OptionsFor(ModeAdaptive, advertised, ClientTypeAnthropicMessages, OffSupportLowEffortOnly)
+	if !conditional.CanDisable {
+		t.Fatal("a conditionally-accepting model can still be turned off")
+	}
+	if !slices.Equal(conditional.EffortsWithoutOff, []string{EffortXHigh, EffortMax}) {
+		t.Fatalf("conflicting tiers = %v, want [xhigh max]", conditional.EffortsWithoutOff)
+	}
+	// The conflicting tiers stay selectable; they just cannot be combined with off.
+	for _, want := range []string{EffortXHigh, EffortMax} {
+		if !slices.Contains(conditional.Efforts, want) {
+			t.Errorf("%q should remain selectable: %v", want, conditional.Efforts)
+		}
+	}
+
+	// Unconditional acceptance has no conflicts to report.
+	plain := OptionsFor(ModeAdaptive, advertised, ClientTypeAnthropicMessages, OffSupportAccepted)
+	if len(plain.EffortsWithoutOff) != 0 {
+		t.Errorf("an unconditionally-accepting model has no conflicts: %v", plain.EffortsWithoutOff)
+	}
+}
+
+// A model that advertises only the off token has no tier to fall back to.
+// Reporting one it does not offer would invite a caller to send it.
+func TestOptionsForOffOnlyModelHasNoDefaultTier(t *testing.T) {
+	t.Parallel()
+
+	opts := OptionsFor(ModeToggle, []string{EffortDisable}, "openai-codex", "")
+	if !opts.CanDisable {
+		t.Fatal("an off-only model can be turned off")
+	}
+	if len(opts.Efforts) != 0 {
+		t.Fatalf("no tiers should be offered: %v", opts.Efforts)
+	}
+	if opts.DefaultEffort != "" {
+		t.Fatalf("default = %q, want empty: the model offers no tier to default to", opts.DefaultEffort)
+	}
+	// Such a model stays on off rather than being moved to a tier it lacks.
+	if got := ReconcileStored(EffortDisable, opts); got != EffortDisable {
+		t.Fatalf("ReconcileStored = %q, want %q", got, EffortDisable)
+	}
+}
+
 func TestResolveConfigAgreesWithOffReachability(t *testing.T) {
 	t.Parallel()
 
 	advertised := []string{EffortMinimal, EffortLow}
 	const clientType = "openai-completions"
-	opts := OptionsFor(ModeToggle, advertised, clientType)
+	opts := OptionsFor(ModeToggle, advertised, clientType, "")
 	if opts.CanDisable {
 		t.Fatal("fixture must describe a model that cannot disable reasoning")
 	}
@@ -230,12 +312,10 @@ func TestResolveConfigHonorsProjectedOffDeclarations(t *testing.T) {
 		t.Parallel()
 
 		advertised := []string{EffortLow, EffortMedium, EffortHigh}
-		opts := OptionsFor(ModeToggle, advertised, "google-generative-ai")
-		if opts.CanDisable {
-			t.Fatal("fixture must require an explicit accepted declaration")
+		opts := OptionsFor(ModeToggle, advertised, "google-generative-ai", OffSupportAccepted)
+		if !opts.CanDisable {
+			t.Fatal("accepted declaration must make off reachable without a disable token")
 		}
-		// reasoning_off_support: accepted is projected into this shared option.
-		opts.CanDisable = true
 
 		cfg := ResolveConfig(ModeToggle, advertised, opts, EffortLow, EffortDisable, "google-generative-ai")
 		if cfg == nil || !cfg.Disabled || cfg.Active {
@@ -262,12 +342,10 @@ func TestResolveConfigHonorsProjectedOffDeclarations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			opts := OptionsFor(ModeToggle, tt.advertised, tt.clientType)
-			if !opts.CanDisable {
-				t.Fatal("fixture must have a derived off fallback to override")
+			opts := OptionsFor(ModeToggle, tt.advertised, tt.clientType, OffSupportRejected)
+			if opts.CanDisable {
+				t.Fatal("rejected declaration must override every derived off fallback")
 			}
-			// reasoning_off_support: rejected is projected into this shared option.
-			opts.CanDisable = false
 
 			cfg := ResolveConfig(ModeToggle, tt.advertised, opts, EffortLow, EffortDisable, tt.clientType)
 			if cfg == nil || !cfg.Active || cfg.Disabled || cfg.Effort != EffortLow {

@@ -862,7 +862,7 @@ import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
-import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, nearestEffortToMedium, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
@@ -1926,17 +1926,9 @@ function clearDefaultACPComposerError() {
   defaultACPComposerError.value = ''
 }
 
-const activeThinkingMode = computed(() => resolveThinkingMode(activeModel.value?.config))
+const activeModelReasoning = computed(() => activeModel.value?.reasoning)
 
-const activeModelSupportsReasoning = computed(() => activeThinkingMode.value !== 'none')
-
-const activeModelClientType = computed(() =>
-  providers.value.find((p) => p.id === activeModel.value?.provider_id)?.client_type,
-)
-
-const availableReasoningEfforts = computed(() =>
-  availableEffortsForMode(activeThinkingMode.value, resolveEffortLevels(activeModel.value?.config, activeModelClientType.value)),
-)
+const activeModelSupportsReasoning = computed(() => activeModelReasoning.value?.supported === true)
 
 // A native composer with no chat model cannot answer, so the trigger says so
 // ("None") instead of the old "Default" placeholder, which named a model that
@@ -2021,16 +2013,15 @@ watch(pinnedSubagentModelId, (pinned, previous) => {
   if (previous) overrideModelId.value = botSettings.value?.chat_model_id ?? ''
 }, { immediate: true })
 
-watch(availableReasoningEfforts, (efforts) => {
+// Switching models can strand the composer's override on a tier the new model
+// does not offer. An empty override is left alone: it means "inherit the bot's
+// setting", not a stranded value.
+watch(activeModelReasoning, (options) => {
   if (activeUsesACPComposer.value) return
   const current = overrideReasoningEffort.value
-  if (!current || current === REASONING_EFFORT_DISABLE || efforts.includes(current)) return
-  // efforts[0] is always REASONING_EFFORT_DISABLE (availableEffortsForMode
-  // prepends it), so falling back to it silently turned reasoning off whenever a
-  // model lacked the selected tier. Land on the nearest real tier instead.
-  overrideReasoningEffort.value = efforts.includes('medium')
-    ? 'medium'
-    : nearestEffortToMedium(efforts) || REASONING_EFFORT_DISABLE
+  if (!current || !options?.supported) return
+  const next = reconcileStoredEffort(current, options)
+  if (next && next !== current) overrideReasoningEffort.value = next
 }, { immediate: true })
 
 watch(currentBotId, () => {

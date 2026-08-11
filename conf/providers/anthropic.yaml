@@ -11,6 +11,10 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1000000
       thinking_mode: adaptive
+      # 4.6 defaults to thinking off and accepts thinking{type:"disabled"}, per
+      # Anthropic's per-model table. Declared because nothing about the mode or the
+      # tier list distinguishes it from Fable 5, which rejects the same shape.
+      reasoning_off_support: accepted
       reasoning_efforts: [low, medium, high, max]
 
   - model_id: claude-sonnet-4-6
@@ -20,6 +24,10 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1000000
       thinking_mode: adaptive
+      # 4.6 defaults to thinking off and accepts thinking{type:"disabled"}, per
+      # Anthropic's per-model table. Declared because nothing about the mode or the
+      # tier list distinguishes it from Fable 5, which rejects the same shape.
+      reasoning_off_support: accepted
       reasoning_efforts: [low, medium, high, max]
 
   - model_id: claude-opus-4-5-20251101

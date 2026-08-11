@@ -12,6 +12,7 @@ import (
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/reasoning"
 )
 
 const (
@@ -147,7 +148,7 @@ func (s *Service) listGitHubCopilotRemoteModels(ctx context.Context, baseURL, gi
 			advertisedEfforts = append(advertisedEfforts, strings.ToLower(strings.TrimSpace(effort)))
 		}
 		reasoningEfforts := make([]string, 0, len(advertisedEfforts))
-		for _, effort := range models.NormalizeAdvertisedEfforts(advertisedEfforts) {
+		for _, effort := range reasoning.NormalizeAdvertised(advertisedEfforts) {
 			if models.IsValidReasoningEffort(effort) && !containsFold(reasoningEfforts, effort) {
 				reasoningEfforts = append(reasoningEfforts, effort)
 			}

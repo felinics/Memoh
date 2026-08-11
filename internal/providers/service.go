@@ -439,16 +439,20 @@ func remoteModelsFromCatalog(items []sqlc.TemplateProviderTemplateModel) []Remot
 	for _, model := range items {
 		cfg := providerConfig(model.Config)
 		out = append(out, RemoteModel{
-			ID:                model.ModelID,
-			Name:              model.Name,
-			Description:       configStringPtr(cfg, "description"),
-			Type:              model.Type,
-			Compatibilities:   configStringSlice(cfg, "compatibilities"),
-			ReasoningEfforts:  configStringSlice(cfg, "reasoning_efforts"),
-			ThinkingMode:      configString(cfg, "thinking_mode"),
-			ContextWindow:     configIntPtr(cfg, "context_window"),
-			Dimensions:        configIntPtr(cfg, "dimensions"),
-			CapabilitiesKnown: true,
+			ID:                  model.ModelID,
+			Name:                model.Name,
+			Description:         configStringPtr(cfg, "description"),
+			Type:                model.Type,
+			Compatibilities:     configStringSlice(cfg, "compatibilities"),
+			ReasoningEfforts:    configStringSlice(cfg, "reasoning_efforts"),
+			ThinkingMode:        configString(cfg, "thinking_mode"),
+			ReasoningDialect:    configString(cfg, "reasoning_dialect"),
+			ReasoningOffSupport: configString(cfg, "reasoning_off_support"),
+			ThinkingBudgetMin:   configIntPtr(cfg, "thinking_budget_min"),
+			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
+			ContextWindow:       configIntPtr(cfg, "context_window"),
+			Dimensions:          configIntPtr(cfg, "dimensions"),
+			CapabilitiesKnown:   true,
 		})
 	}
 	return out
@@ -463,16 +467,20 @@ func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
 		}
 		cfg := model.Config
 		out = append(out, RemoteModel{
-			ID:                model.ModelID,
-			Name:              model.Name,
-			Description:       configStringPtr(cfg, "description"),
-			Type:              modelType,
-			Compatibilities:   configStringSlice(cfg, "compatibilities"),
-			ReasoningEfforts:  configStringSlice(cfg, "reasoning_efforts"),
-			ThinkingMode:      configString(cfg, "thinking_mode"),
-			ContextWindow:     configIntPtr(cfg, "context_window"),
-			Dimensions:        configIntPtr(cfg, "dimensions"),
-			CapabilitiesKnown: true,
+			ID:                  model.ModelID,
+			Name:                model.Name,
+			Description:         configStringPtr(cfg, "description"),
+			Type:                modelType,
+			Compatibilities:     configStringSlice(cfg, "compatibilities"),
+			ReasoningEfforts:    configStringSlice(cfg, "reasoning_efforts"),
+			ThinkingMode:        configString(cfg, "thinking_mode"),
+			ReasoningDialect:    configString(cfg, "reasoning_dialect"),
+			ReasoningOffSupport: configString(cfg, "reasoning_off_support"),
+			ThinkingBudgetMin:   configIntPtr(cfg, "thinking_budget_min"),
+			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
+			ContextWindow:       configIntPtr(cfg, "context_window"),
+			Dimensions:          configIntPtr(cfg, "dimensions"),
+			CapabilitiesKnown:   true,
 		})
 	}
 	return out

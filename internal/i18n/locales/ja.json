@@ -512,7 +512,7 @@
       "setUsage": "使い方: /reasoning set <{levels}>",
       "unavailable": "推論は現在利用できません。",
       "unsupported": "現在のモデルは推論に対応していません。",
-      "unknownLevel": "不明なレベル {level} — 利用可能なレベル: {levels}。"
+      "unknownLevel": "不明なレベル {level} —— 利用可能なレベル: {levels}。"
     },
     "error": {
       "unknownCommand": "不明なコマンド {command}。 {help} を実行して利用可能なものを確認するか、先頭のスラッシュを付けずに再送信して通常のメッセージとして送信します。",

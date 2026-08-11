@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/reasoning"
 )
 
 const (
@@ -117,7 +118,7 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 			advertisedEfforts = append(advertisedEfforts, strings.ToLower(strings.TrimSpace(level.Effort)))
 		}
 		reasoningEfforts := make([]string, 0, len(advertisedEfforts))
-		for _, effort := range models.NormalizeAdvertisedEfforts(advertisedEfforts) {
+		for _, effort := range reasoning.NormalizeAdvertised(advertisedEfforts) {
 			if models.IsValidReasoningEffort(effort) && !containsFold(reasoningEfforts, effort) {
 				reasoningEfforts = append(reasoningEfforts, effort)
 			}

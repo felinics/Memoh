@@ -133,6 +133,23 @@ type ModelConfig struct {
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	ThinkingMode     string   `json:"thinking_mode,omitempty"`
 	CatalogAvailable *bool    `json:"catalog_available,omitempty"`
+	// ReasoningDialect declares the wire shape of this model's thinking control,
+	// which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
+	// token budget while 3.x takes a named level, and the two are mutually
+	// exclusive on the same request. Declared per model because the alternative is
+	// sniffing the model id, and an id is not a capability. Empty means the
+	// provider's modern default.
+	ReasoningDialect string `json:"reasoning_dialect,omitempty"`
+	// ReasoningOffSupport declares how the model answers an explicit request to
+	// stop thinking. Anthropic's per-model table splits models that share a
+	// thinking mode and an identical tier list, so this cannot be derived — see the
+	// reasoning package's OffSupport constants.
+	ReasoningOffSupport string `json:"reasoning_off_support,omitempty"`
+	// ThinkingBudgetMin/Max bound the budget dialect. The range is per model
+	// family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
+	// off, while Flash starts at 0 and can.
+	ThinkingBudgetMin *int `json:"thinking_budget_min,omitempty"`
+	ThinkingBudgetMax *int `json:"thinking_budget_max,omitempty"`
 }
 
 func normalizeModelConfig(config ModelConfig) ModelConfig {
@@ -140,20 +157,15 @@ func normalizeModelConfig(config ModelConfig) ModelConfig {
 		description := strings.TrimSpace(*config.Description)
 		config.Description = &description
 	}
-	config.ReasoningEfforts = NormalizeAdvertisedEfforts(config.ReasoningEfforts)
+	// Rewrites the legacy "none" spelling of off on both ModelConfig boundaries —
+	// before a write is validated and after a row is read back — so nothing
+	// downstream has to know that "none" was ever declarable.
+	config.ReasoningEfforts = reasoning.NormalizeAdvertised(config.ReasoningEfforts)
 	return config
 }
 
-// NormalizeAdvertisedEfforts rewrites the legacy spelling of "off" to the token a
-// model declares today. It runs on both boundaries of ModelConfig — before a write
-// is validated and after a row is read back — and at external catalog boundaries,
-// so nothing downstream has to know that "none" was ever declarable.
-//
-// Without it the vocabulary change would only apply to freshly written configs:
-// rows persisted earlier, and provider registries that have not been regenerated,
-// would keep advertising "none", and every consumer that now looks for the disable
-// token would read those models as "cannot be turned off" — silently dropping Off
-// from the picker and misreading which thinking mechanism the model wants.
+// NormalizeAdvertisedEfforts forwards the catalog-boundary normalizer while
+// callers migrate to the reasoning leaf package.
 func NormalizeAdvertisedEfforts(efforts []string) []string {
 	return reasoning.NormalizeAdvertised(efforts)
 }
@@ -206,6 +218,12 @@ func (m *Model) Validate() error {
 	if m.Config.ThinkingMode != "" && !reasoning.IsValidMode(m.Config.ThinkingMode) {
 		return errors.New("invalid thinking mode: " + m.Config.ThinkingMode)
 	}
+	if !reasoning.IsValidDialect(m.Config.ReasoningDialect) {
+		return errors.New("invalid reasoning dialect: " + m.Config.ReasoningDialect)
+	}
+	if !reasoning.IsValidOffSupport(m.Config.ReasoningOffSupport) {
+		return errors.New("invalid reasoning off support: " + m.Config.ReasoningOffSupport)
+	}
 	return nil
 }
 
@@ -230,7 +248,12 @@ func (m *Model) ResolveThinkingMode() string {
 // It is the single source every surface reads — the web picker, /reasoning, and
 // the API all render this rather than deriving their own answer.
 func (m *Model) ReasoningOptions(clientType string) reasoning.Options {
-	return reasoning.OptionsFor(m.ResolveThinkingMode(), m.Config.ReasoningEfforts, clientType)
+	return reasoning.OptionsFor(
+		m.ResolveThinkingMode(),
+		m.Config.ReasoningEfforts,
+		clientType,
+		m.Config.ReasoningOffSupport,
+	)
 }
 
 // AddRequest is the payload for creating a new model. Enable is a pointer so
@@ -257,6 +280,11 @@ type GetResponse struct {
 	ID      string `json:"id"`
 	ModelID string `json:"model_id"`
 	Model
+	// Reasoning is the model's resolved thinking options, filled by the API layer
+	// (it depends on the provider's client type). Clients render this rather than
+	// deriving their own answer from ThinkingMode and ReasoningEfforts — the
+	// duplication that let the web picker and the wire disagree.
+	Reasoning *reasoning.Options `json:"reasoning,omitempty"`
 }
 
 // UpdateRequest is the payload for updating an existing model. Enable is a

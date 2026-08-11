@@ -2489,6 +2489,13 @@ export type ModelsGetResponse = {
     model_id?: string;
     name?: string;
     provider_id?: string;
+    /**
+     * Reasoning is the model's resolved thinking options, filled by the API layer
+     * (it depends on the provider's client type). Clients render this rather than
+     * deriving their own answer from ThinkingMode and ReasoningEfforts — the
+     * duplication that let the web picker and the wire disagree.
+     */
+    reasoning?: ReasoningOptions;
     type?: ModelsModelType;
 };
 
@@ -2498,7 +2505,30 @@ export type ModelsModelConfig = {
     context_window?: number;
     description?: string;
     dimensions?: number;
+    /**
+     * ReasoningDialect declares the wire shape of this model's thinking control,
+     * which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
+     * token budget while 3.x takes a named level, and the two are mutually
+     * exclusive on the same request. Declared per model because the alternative is
+     * sniffing the model id, and an id is not a capability. Empty means the
+     * provider's modern default.
+     */
+    reasoning_dialect?: string;
     reasoning_efforts?: Array<string>;
+    /**
+     * ReasoningOffSupport declares how the model answers an explicit request to
+     * stop thinking. Anthropic's per-model table splits models that share a
+     * thinking mode and an identical tier list, so this cannot be derived — see the
+     * reasoning package's OffSupport constants.
+     */
+    reasoning_off_support?: string;
+    thinking_budget_max?: number;
+    /**
+     * ThinkingBudgetMin/Max bound the budget dialect. The range is per model
+     * family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
+     * off, while Flash starts at 0 and can.
+     */
+    thinking_budget_min?: number;
     thinking_mode?: string;
 };
 
@@ -2792,6 +2822,33 @@ export type ProvidertemplatesModelResponse = {
     name?: string;
     sort_order?: number;
     type?: string;
+};
+
+export type ReasoningOptions = {
+    /**
+     * CanDisable reports whether picking "off" actually reaches the model.
+     */
+    can_disable?: boolean;
+    /**
+     * DefaultEffort is the tier to use when nothing is stored, and the tier to fall
+     * back to when a stored value is no longer offered by the model.
+     */
+    default_effort?: string;
+    /**
+     * Efforts are the selectable active tiers, weakest to strongest as advertised.
+     */
+    efforts?: Array<string>;
+    /**
+     * EffortsWithoutOff are tiers that cannot be combined with off on this model.
+     * Opus 5 accepts an explicit disable only at effort high or below, so a client
+     * that lets a user hold both must know which tiers conflict.
+     */
+    efforts_without_off?: Array<string>;
+    /**
+     * Supported is false when the model has no thinking concept; the other fields
+     * are then empty and no control should be rendered at all.
+     */
+    supported?: boolean;
 };
 
 export type ScheduleCreateRequest = {
