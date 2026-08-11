@@ -12,6 +12,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
+	"github.com/memohai/memoh/internal/reasoning"
 )
 
 // SDKModelConfig holds provider and model information resolved from DB,
@@ -29,32 +30,13 @@ type SDKModelConfig struct {
 	ReasoningConfig       *ReasoningConfig
 }
 
-// ReasoningConfig is the resolved extended-thinking decision for one call. The
-// resolver makes a single decision (based on the model's thinking mode and the
-// user's settings); the SDK layer mechanically translates it per provider.
-// Anthropic 4.6+ (Adaptive) sends thinking{type:"adaptive"} plus an effort
+// ReasoningConfig is the resolved extended-thinking decision for one call,
+// produced by internal/reasoning and translated here into each provider's wire
+// shape. Anthropic 4.6+ (Adaptive) sends thinking{type:"adaptive"} plus an effort
 // string and never a token budget; legacy Anthropic (<=4.5, non-adaptive) sends
 // thinking{type:"enabled", budget_tokens:N} derived from the effort. OpenAI-style
 // providers only ever receive an effort string.
-type ReasoningConfig struct {
-	// Active means thinking is on for this call.
-	Active bool
-	// Disabled means thinking was explicitly turned off (toggle=off). For
-	// OpenAI-style providers without a real off switch, OffEffort approximates it.
-	Disabled bool
-	// Adaptive means the provider's thinking is adaptive (Anthropic 4.6+), wired
-	// as thinking{type:"adaptive"} with no budget. When false on an active
-	// Anthropic call, the model is treated as legacy (<=4.5) and wired as
-	// thinking{type:"enabled", budget_tokens:N}.
-	Adaptive bool
-	// Effort is the effort tier to send when active ("" lets the SDK default).
-	Effort string
-	// OffEffort is the effort an OpenAI-format provider should send when disabled:
-	// "none" when the model advertised that it can be turned off, else "" meaning
-	// the reasoning_effort field is omitted entirely. It is never a real tier
-	// (minimal/low/medium/high) because those enable thinking instead of disabling it.
-	OffEffort string
-}
+type ReasoningConfig = reasoning.Config
 
 // NewSDKChatModel builds a Twilight AI SDK Model from the resolved model config.
 func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
@@ -256,9 +238,13 @@ func openAIEffortOptions(clientType ClientType, rc *ReasoningConfig) []sdk.Gener
 
 // openAIWireEffort retains the generic OpenAI clients' existing max-to-xhigh
 // compatibility behavior. Codex accepts the catalog-advertised max value.
+//
+// The resolver already filters "max" out of the selectable tiers for these
+// clients, so this only fires for values that bypassed it — a stale stored effort,
+// or a caller that built a ReasoningConfig by hand.
 func openAIWireEffort(clientType ClientType, effort string) string {
-	if clientType != ClientTypeOpenAICodex && effort == ReasoningEffortMax {
-		return ReasoningEffortXHigh
+	if clientType != ClientTypeOpenAICodex && effort == reasoning.EffortMax {
+		return reasoning.EffortXHigh
 	}
 	return effort
 }

@@ -128,7 +128,7 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 		ContextCurrentUserMessageIndex: currentUserMessageIndex,
 		SessionType:                    cfg.SessionType,
 		Messages:                       messages,
-		ReasoningEffort:                cfg.ReasoningEffort,
+		ReasoningConfig:                cfg.ReasoningConfig,
 		PromptCacheTTL:                 cfg.PromptCacheTTL,
 		ChatCompletionsCompat:          cfg.ChatCompletionsCompat,
 		SupportsImageInput:             cfg.SupportsImageInput,

@@ -3,7 +3,6 @@ package native
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -12,6 +11,7 @@ import (
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/event"
 	tools "github.com/memohai/memoh/internal/agent/tool"
+	"github.com/memohai/memoh/internal/models"
 )
 
 // SessionContext carries request-scoped identity and routing information.
@@ -80,17 +80,16 @@ type InjectMessage struct {
 
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
-	Model                          *sdk.Model
-	CurrentModelUUID               string
-	CurrentModelID                 string
-	CurrentModelProvider           string
-	ForkContext                    *tools.MessageSnapshot
-	ForkContextSourceMessageIDs    []string
-	ReasoningEffort                string
-	ReasoningActive                bool
-	ReasoningDisabled              bool
-	ReasoningAdaptive              bool
-	ReasoningOffEffort             string
+	Model                       *sdk.Model
+	CurrentModelUUID            string
+	CurrentModelID              string
+	CurrentModelProvider        string
+	ForkContext                 *tools.MessageSnapshot
+	ForkContextSourceMessageIDs []string
+	// ReasoningConfig is the resolved thinking decision, carried whole. It was
+	// once five flat fields, which is how the subagent spawn path came to carry
+	// one of them and silently drop the rest.
+	ReasoningConfig                *models.ReasoningConfig
 	ChatCompletionsCompat          string
 	Messages                       []sdk.Message
 	Query                          string
@@ -187,23 +186,6 @@ type (
 type SystemFile struct {
 	Filename string
 	Content  string
-}
-
-// ModelConfig holds provider and model information resolved from DB.
-type ModelConfig struct {
-	ModelID         string
-	ClientType      string
-	APIKey          string //nolint:gosec // carries provider credential material at runtime
-	CodexAccountID  string
-	BaseURL         string
-	HTTPClient      *http.Client
-	ReasoningConfig *ReasoningConfig
-}
-
-// ReasoningConfig controls extended thinking/reasoning behavior.
-type ReasoningConfig struct {
-	Enabled bool
-	Effort  string
 }
 
 func mustMarshal(v any) json.RawMessage {

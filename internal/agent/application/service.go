@@ -43,6 +43,7 @@ import (
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthctx"
 	"github.com/memohai/memoh/internal/providers"
+	"github.com/memohai/memoh/internal/reasoning"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/workspace"
 )
@@ -716,10 +717,6 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 	)
 
 	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, provider.ClientType)
-	reasoningEffort := ""
-	if reasoningConfig != nil && reasoningConfig.Active {
-		reasoningEffort = reasoningConfig.Effort
-	}
 
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               chatModel.ModelID,
@@ -754,11 +751,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		CurrentModelUUID:      chatModel.ID,
 		CurrentModelID:        chatModel.ModelID,
 		CurrentModelProvider:  provider.Name,
-		ReasoningEffort:       reasoningEffort,
-		ReasoningActive:       reasoningConfig != nil && reasoningConfig.Active,
-		ReasoningDisabled:     reasoningConfig != nil && reasoningConfig.Disabled,
-		ReasoningAdaptive:     reasoningConfig != nil && reasoningConfig.Adaptive,
-		ReasoningOffEffort:    offEffortOrEmpty(reasoningConfig),
+		ReasoningConfig:       reasoningConfig,
 		ChatCompletionsCompat: chatCompletionsCompat,
 		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
 		SessionType:           p.SessionType,
@@ -832,177 +825,18 @@ func supportsFileInputForModel(m models.GetResponse) bool {
 	return m.HasCompatibility(models.CompatFileInput)
 }
 
-const (
-	reasoningEffortAdaptive = "adaptive"
-	reasoningEffortDisable  = models.ReasoningEffortDisable
-)
-
-// resolveReasoningConfig makes the single reasoning decision for a call, driven
-// by the model's discovered thinking mode plus the user's settings/override.
-//
-//   - none:     no thinking; returns nil.
-//   - adaptive: on/off; when active, Anthropic-style providers use adaptive
-//     thinking plus the selected effort.
-//   - toggle:   on/off, with per-message override taking precedence over the
-//     bot's default.
+// resolveReasoningConfig makes the single reasoning decision for a call. The
+// decision itself lives in internal/reasoning, which also answers what a picker
+// may offer — the two share internals so the options a user sees and the value a
+// call sends cannot disagree.
 func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort, clientType string) *models.ReasoningConfig {
-	mode := chatModel.ResolveThinkingMode()
-	if mode == models.ThinkingModeNone {
-		return nil
-	}
-
-	effortLevels := effectiveReasoningEfforts(chatModel.Config.ReasoningEfforts, clientType)
-	offEffort := offEffortFor(effortLevels)
-	requested := strings.TrimSpace(requestedEffort)
-	adaptive := mode == models.ThinkingModeAdaptive
-	// Anthropic 4.6+ uses the effort/adaptive wire (no budget_tokens). Cloud
-	// variants (bedrock/vertex/azure/openrouter) are missing
-	// supports_adaptive_thinking in the LiteLLM registry but still advertise the
-	// 4.6+ effort tiers, so promote them to adaptive here. This keeps them off the
-	// legacy budget path, where budget_tokens is rejected with 400 on 4.7+.
-	if !adaptive && clientType == string(models.ClientTypeAnthropicMessages) && anthropicEffortEra(effortLevels) {
-		adaptive = true
-	}
-
-	switch {
-	case reasoningEffortDisabled(requested):
-		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
-	case requested == reasoningEffortAdaptive:
-		// Legacy "adaptive" override on a toggle model: treat as on (toggle has no
-		// adaptive concept; send a normal effort).
-		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
-	case requested != "":
-		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort(requested, botSettings, effortLevels), OffEffort: offEffort}
-	case reasoningEffortDisabled(botSettings.ReasoningEffort):
-		// The bot's stored effort is the only on/off source; "disable" is off.
-		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
-	default:
-		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
-	}
-}
-
-// anthropicEffortEra reports whether an Anthropic model uses the 4.6+
-// effort/adaptive thinking mechanism rather than the legacy
-// thinking{type:"enabled", budget_tokens:N} path. Pre-4.6 Claude advertises only
-// the implicit low/medium/high base; 4.6+ adds at least one of minimal/xhigh/max.
-// Detecting any of those catches the cloud-provider variants that the registry
-// leaves without supports_adaptive_thinking.
-//
-// The disable token is deliberately not a signal. It declares that a model can be
-// turned off, which every Claude generation can do, so reading it as "4.6+" would
-// put a legacy model on the adaptive wire that it rejects.
-func anthropicEffortEra(effortLevels []string) bool {
-	for _, e := range effortLevels {
-		switch e {
-		case models.ReasoningEffortMinimal, models.ReasoningEffortXHigh,
-			models.ReasoningEffortMax:
-			return true
-		}
-	}
-	return false
-}
-
-// pickEffort resolves the effort to send when thinking is active: the
-// per-message override (if a concrete tier) wins, then the bot default, then
-// medium. Values outside the effective model+wire effort list are ignored so
-// stale settings or command/API overrides cannot send a known-invalid wire value.
-func pickEffort(requested string, botSettings settings.Settings, effortLevels []string) string {
-	if e := strings.TrimSpace(requested); e != "" && e != reasoningEffortAdaptive && e != reasoningEffortDisable {
-		if hasEffort(effortLevels, e) {
-			return e
-		}
-	}
-	// The stored effort is skipped when it means "off". pickEffort only runs once
-	// reasoning is on, and "off" is advertisable now, so without this guard a bot
-	// parked on off would hand the disable token back as an active tier and send it
-	// upstream, where no provider knows the word.
-	if e := strings.TrimSpace(botSettings.ReasoningEffort); e != "" &&
-		!models.IsReasoningDisabled(e) && hasEffort(effortLevels, e) {
-		return e
-	}
-	if hasEffort(effortLevels, models.ReasoningEffortMedium) {
-		return models.ReasoningEffortMedium
-	}
-	// No medium: land on the tier closest to it rather than on effortLevels[0],
-	// which is whatever the registry listed first (usually the weakest tier).
-	if nearest := models.NearestEffortToMedium(effortLevels); nearest != "" {
-		return nearest
-	}
-	return models.ReasoningEffortMedium
-}
-
-// effectiveReasoningEfforts intersects the model's advertised effort levels
-// with the selected client's current wire policy. Generic OpenAI-format clients
-// retain the existing max-to-xhigh compatibility behavior, while Codex uses its
-// catalog levels directly. openAIWireEffort in models/sdk.go is defence-in-depth.
-// Keep normalizesMaxReasoningEffort in sync with the frontend
-// MAX_NORMALIZED_CLIENT_TYPES.
-func effectiveReasoningEfforts(effortLevels []string, clientType string) []string {
-	levels := effortLevels
-	if len(levels) == 0 {
-		levels = []string{models.ReasoningEffortLow, models.ReasoningEffortMedium, models.ReasoningEffortHigh}
-	}
-	out := make([]string, 0, len(levels))
-	for _, e := range levels {
-		if normalizesMaxReasoningEffort(clientType) && e == models.ReasoningEffortMax {
-			continue
-		}
-		if !hasEffort(out, e) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// normalizesMaxReasoningEffort reports whether the current compatibility policy
-// maps "max" to "xhigh". Keep in sync with MAX_NORMALIZED_CLIENT_TYPES in
-// reasoning-effort.ts.
-func normalizesMaxReasoningEffort(clientType string) bool {
-	switch models.ClientType(clientType) {
-	case models.ClientTypeOpenAICompletions, models.ClientTypeOpenAIResponses:
-		return true
-	default:
-		return false
-	}
-}
-
-func hasEffort(effortLevels []string, effort string) bool {
-	for _, e := range effortLevels {
-		if e == effort {
-			return true
-		}
-	}
-	return false
-}
-
-// offEffortFor translates "off" into the effort value an OpenAI-format provider
-// needs, or "" when the model cannot be turned off and the caller must omit
-// reasoning_effort entirely. A model that advertises ReasoningEffortDisable can be
-// switched off, and OpenAI spells that state "none".
-//
-// It deliberately never falls back to a real tier. "minimal" used to serve as a
-// second-best "off", but it enables reasoning rather than disabling it, so Off
-// would have resolved to the same request as the Minimal tier — one state, two
-// selectable options. The two are also mutually exclusive upstream: minimal is
-// gpt-5.0's weakest tier and gpt-5.1 replaced it with none, so "advertises minimal
-// but not none" describes a model that genuinely cannot be turned off. Omitting
-// the field is the honest answer there, and it lets the provider default stand.
-func offEffortFor(effortLevels []string) string {
-	if hasEffort(effortLevels, models.ReasoningEffortDisable) {
-		return models.ReasoningEffortNone
-	}
-	return ""
-}
-
-func reasoningEffortDisabled(effort string) bool {
-	return models.IsReasoningDisabled(effort)
-}
-
-func offEffortOrEmpty(rc *models.ReasoningConfig) string {
-	if rc == nil {
-		return ""
-	}
-	return rc.OffEffort
+	return reasoning.ResolveConfig(
+		chatModel.ResolveThinkingMode(),
+		chatModel.Config.ReasoningEfforts,
+		botSettings.ReasoningEffort,
+		requestedEffort,
+		clientType,
+	)
 }
 
 func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {

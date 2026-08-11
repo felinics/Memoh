@@ -2,10 +2,11 @@ package models
 
 import (
 	"errors"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/memohai/memoh/internal/reasoning"
 )
 
 type ModelType string
@@ -59,117 +60,42 @@ const (
 	CompatFileInput = "file-input"
 )
 
-// Active effort tiers, weakest to strongest. These are the values that turn
-// reasoning on; "off" is ReasoningEffortDisable and deliberately not among them.
+// Reasoning effort tokens. The vocabulary lives in internal/reasoning; these are
+// forwarding aliases so existing call sites keep compiling while they migrate.
 const (
-	ReasoningEffortMinimal = "minimal"
-	ReasoningEffortLow     = "low"
-	ReasoningEffortMedium  = "medium"
-	ReasoningEffortHigh    = "high"
-	ReasoningEffortXHigh   = "xhigh"
-	ReasoningEffortMax     = "max"
+	ReasoningEffortMinimal = reasoning.EffortMinimal
+	ReasoningEffortLow     = reasoning.EffortLow
+	ReasoningEffortMedium  = reasoning.EffortMedium
+	ReasoningEffortHigh    = reasoning.EffortHigh
+	ReasoningEffortXHigh   = reasoning.EffortXHigh
+	ReasoningEffortMax     = reasoning.EffortMax
+
+	// ReasoningEffortDisable is the single representation of "no reasoning" —
+	// both what a user picks and what a model advertises.
+	ReasoningEffortDisable = reasoning.EffortDisable
+	// ReasoningEffortNone is OpenAI's wire spelling of the same state, produced
+	// by adaptors and never declared or stored.
+	ReasoningEffortNone = reasoning.EffortNone
 )
 
-// ReasoningEffortDisable is the single representation of "no reasoning". It is
-// both what a user picks and what a model advertises: a model listing it in
-// reasoning_efforts can be turned off, whatever wire shape that takes on its
-// provider. Since bots dropped the separate reasoning_enabled flag, it is also
-// the only stored form of "off".
-const ReasoningEffortDisable = "disable"
-
-// ReasoningEffortNone is OpenAI's wire spelling of "no reasoning" (gpt-5.1
-// introduced it and dropped minimal; gpt-5.0 has minimal and no none). It is
-// never declared by a model nor stored in settings — provider adaptors translate
-// ReasoningEffortDisable into it, exactly as the Anthropic path translates the
-// same intent into thinking{type:"disabled"}. Giving "off" one name on our side
-// and letting each provider spell it its own way is what keeps a single state
-// from acquiring two selectable tokens.
-const ReasoningEffortNone = "none"
-
-// orderedReasoningEfforts lists the active tiers weakest to strongest. Order is
-// what NearestEffortToMedium walks, so it must stay monotonic. ReasoningEffortDisable
-// is absent on purpose: it is not a tier, and including it would let the nearest-tier
-// fallback resolve an *active* reasoning config to "off".
-var orderedReasoningEfforts = []string{
-	ReasoningEffortMinimal,
-	ReasoningEffortLow,
-	ReasoningEffortMedium,
-	ReasoningEffortHigh,
-	ReasoningEffortXHigh,
-	ReasoningEffortMax,
-}
-
 // IsReasoningDisabled reports whether an effort value means "no reasoning".
-// ReasoningEffortNone is accepted as the legacy spelling: it was declarable and
-// storable before "off" was unified onto ReasoningEffortDisable.
 func IsReasoningDisabled(effort string) bool {
-	switch strings.TrimSpace(effort) {
-	case ReasoningEffortDisable, ReasoningEffortNone:
-		return true
-	}
-	return false
+	return reasoning.IsDisabled(effort)
 }
 
 // NearestEffortToMedium picks the tier closest to medium from levels, breaking
-// ties toward the weaker tier. It is the fallback when a model does not
-// advertise medium: [minimal low] -> low, [high max] -> high, [low high] -> low.
-// Ignores values outside the known tier list (including "disable"), and returns
-// "" when levels has no usable tier.
-//
-// Keep in sync with nearestEffortToMedium in
-// apps/web/src/pages/bots/components/reasoning-effort.ts.
+// ties toward the weaker tier.
 func NearestEffortToMedium(levels []string) string {
-	mediumIdx := -1
-	for i, e := range orderedReasoningEfforts {
-		if e == ReasoningEffortMedium {
-			mediumIdx = i
-			break
-		}
-	}
-
-	best, bestIdx, bestDistance := "", 0, 0
-	for _, level := range levels {
-		idx := -1
-		for i, e := range orderedReasoningEfforts {
-			if e == level {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
-			continue
-		}
-		distance := idx - mediumIdx
-		if distance < 0 {
-			distance = -distance
-		}
-		// Ties break toward the weaker tier (smaller index) rather than toward
-		// whichever came first, because levels arrives in registry order and is
-		// not guaranteed to be sorted.
-		if best == "" || distance < bestDistance || (distance == bestDistance && idx < bestIdx) {
-			best, bestIdx, bestDistance = level, idx, distance
-		}
-	}
-	return best
+	return reasoning.NearestToMedium(levels)
 }
 
-// ThinkingMode describes how a model's extended-thinking control behaves. It is
-// the capability-discovery output that the UI and wire layer key off of.
-//
-//   - toggle:        user can turn thinking on/off (most reasoning/hybrid models,
-//     incl. OpenAI). "off" wire behavior is provider-specific (see adapter).
-//   - adaptive:      user can turn thinking on/off; when on, the provider uses
-//     adaptive thinking (Claude 4.6+/4.7/4.8).
-//   - only_adaptive: legacy alias for adaptive retained for branch-local imports.
-//   - none:          model has no thinking concept.
-//
-// An empty value means "unknown" and is treated as a transitional state that
-// falls back to the legacy CompatReasoning flag (see Model.SupportsReasoning).
+// Thinking mode tokens. Semantics live in internal/reasoning; these are
+// forwarding aliases so existing call sites keep compiling while they migrate.
 const (
-	ThinkingModeAdaptive     = "adaptive"
-	ThinkingModeToggle       = "toggle"
-	ThinkingModeOnlyAdaptive = "only_adaptive"
-	ThinkingModeNone         = "none"
+	ThinkingModeAdaptive     = reasoning.ModeAdaptive
+	ThinkingModeToggle       = reasoning.ModeToggle
+	ThinkingModeOnlyAdaptive = reasoning.ModeOnlyAdaptive
+	ThinkingModeNone         = reasoning.ModeNone
 )
 
 // validCompatibilities enumerates accepted compatibility tokens.
@@ -188,31 +114,9 @@ func ValidateCompatibilities(compatibilities []string) error {
 	return nil
 }
 
-// validReasoningEfforts is the vocabulary a model may advertise: the active tiers
-// plus ReasoningEffortDisable, which declares that the model can be turned off.
-// ReasoningEffortNone is absent because it is a provider wire value, not something
-// a model declares — see the constant.
-var validReasoningEfforts = map[string]struct{}{
-	ReasoningEffortDisable: {},
-	ReasoningEffortMinimal: {},
-	ReasoningEffortLow:     {},
-	ReasoningEffortMedium:  {},
-	ReasoningEffortHigh:    {},
-	ReasoningEffortXHigh:   {},
-	ReasoningEffortMax:     {},
-}
-
 // IsValidReasoningEffort reports whether effort can be stored in ModelConfig.
 func IsValidReasoningEffort(effort string) bool {
-	_, ok := validReasoningEfforts[effort]
-	return ok
-}
-
-var validThinkingModes = map[string]struct{}{
-	ThinkingModeAdaptive:     {},
-	ThinkingModeToggle:       {},
-	ThinkingModeOnlyAdaptive: {},
-	ThinkingModeNone:         {},
+	return reasoning.IsDeclarable(effort)
 }
 
 // ModelConfig holds the JSONB config stored per model.
@@ -251,19 +155,7 @@ func normalizeModelConfig(config ModelConfig) ModelConfig {
 // token would read those models as "cannot be turned off" — silently dropping Off
 // from the picker and misreading which thinking mechanism the model wants.
 func NormalizeAdvertisedEfforts(efforts []string) []string {
-	if len(efforts) == 0 {
-		return efforts
-	}
-	out := make([]string, 0, len(efforts))
-	for _, effort := range efforts {
-		if strings.TrimSpace(effort) == ReasoningEffortNone {
-			effort = ReasoningEffortDisable
-		}
-		if !slices.Contains(out, effort) {
-			out = append(out, effort)
-		}
-	}
-	return out
+	return reasoning.NormalizeAdvertised(efforts)
 }
 
 type Model struct {
@@ -311,10 +203,8 @@ func (m *Model) Validate() error {
 			return errors.New("invalid reasoning effort: " + effort)
 		}
 	}
-	if m.Config.ThinkingMode != "" {
-		if _, ok := validThinkingModes[m.Config.ThinkingMode]; !ok {
-			return errors.New("invalid thinking mode: " + m.Config.ThinkingMode)
-		}
+	if m.Config.ThinkingMode != "" && !reasoning.IsValidMode(m.Config.ThinkingMode) {
+		return errors.New("invalid thinking mode: " + m.Config.ThinkingMode)
 	}
 	return nil
 }
@@ -329,35 +219,18 @@ func (m *Model) HasCompatibility(c string) bool {
 	return false
 }
 
-// SupportsReasoning reports whether the model supports extended thinking. It
-// prefers the new ThinkingMode field and falls back to the legacy
-// CompatReasoning flag for models discovered before the thinking-mode schema
-// existed (transitional; resolved naturally on next model re-fetch).
-func (m *Model) SupportsReasoning() bool {
-	switch m.Config.ThinkingMode {
-	case ThinkingModeToggle, ThinkingModeAdaptive, ThinkingModeOnlyAdaptive:
-		return true
-	case ThinkingModeNone:
-		return false
-	default: // unknown / empty → legacy bridge
-		return m.HasCompatibility(CompatReasoning)
-	}
-}
-
 // ResolveThinkingMode returns the effective ThinkingMode, bridging legacy data:
 // unknown + reasoning compat → toggle; unknown without it → none.
 func (m *Model) ResolveThinkingMode() string {
-	switch m.Config.ThinkingMode {
-	case ThinkingModeToggle, ThinkingModeAdaptive, ThinkingModeNone:
-		return m.Config.ThinkingMode
-	case ThinkingModeOnlyAdaptive:
-		return ThinkingModeAdaptive
-	default:
-		if m.HasCompatibility(CompatReasoning) {
-			return ThinkingModeToggle
-		}
-		return ThinkingModeNone
-	}
+	return reasoning.ResolveMode(m.Config.ThinkingMode, m.HasCompatibility(CompatReasoning))
+}
+
+// ReasoningOptions reports what a caller may select for this model on the given
+// client type: the selectable tiers, whether off is reachable, and the default.
+// It is the single source every surface reads — the web picker, /reasoning, and
+// the API all render this rather than deriving their own answer.
+func (m *Model) ReasoningOptions(clientType string) reasoning.Options {
+	return reasoning.OptionsFor(m.ResolveThinkingMode(), m.Config.ReasoningEfforts, clientType)
 }
 
 // AddRequest is the payload for creating a new model. Enable is a pointer so

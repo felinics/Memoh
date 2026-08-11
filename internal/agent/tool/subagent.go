@@ -25,6 +25,7 @@ import (
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthctx"
 	"github.com/memohai/memoh/internal/providers"
+	"github.com/memohai/memoh/internal/reasoning"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -37,17 +38,20 @@ type SpawnAgent interface {
 
 // SpawnRunConfig mirrors agent.RunConfig fields needed by subagent controls.
 type SpawnRunConfig struct {
-	Model                 *sdk.Model
-	ModelUUID             string
-	ModelID               string
-	ModelProvider         string
-	System                string
-	Query                 string
-	SessionType           string
-	Identity              SpawnIdentity
-	LoopDetection         SpawnLoopConfig
-	Messages              []sdk.Message
-	ReasoningEffort       string
+	Model         *sdk.Model
+	ModelUUID     string
+	ModelID       string
+	ModelProvider string
+	System        string
+	Query         string
+	SessionType   string
+	Identity      SpawnIdentity
+	LoopDetection SpawnLoopConfig
+	Messages      []sdk.Message
+	// ReasoningConfig is the thinking decision resolved for the subagent's own
+	// model. It replaces a lone effort string that was never assigned, which is
+	// how subagents came to run with no reasoning configuration at all (#983).
+	ReasoningConfig       *models.ReasoningConfig
 	PromptCacheTTL        string
 	ChatCompletionsCompat string
 	SupportsImageInput    bool
@@ -192,10 +196,15 @@ type agentSessionService interface {
 }
 
 type resolvedSubagentModel struct {
-	Model                 *sdk.Model
-	UUID                  string
-	ModelID               string
-	ProviderName          string
+	Model        *sdk.Model
+	UUID         string
+	ModelID      string
+	ProviderName string
+	// ReasoningConfig is resolved against this model, not inherited from the
+	// parent: a subagent may run a different model, whose advertised tiers and
+	// off-ability differ. Before #983 it was neither inherited nor resolved, so
+	// subagents ran with no thinking configuration at all.
+	ReasoningConfig       *models.ReasoningConfig
 	PromptCacheTTL        string
 	ChatCompletionsCompat string
 	SupportsImageInput    bool
@@ -939,6 +948,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		ModelUUID:             req.runtime.UUID,
 		ModelID:               req.runtime.ModelID,
 		ModelProvider:         req.runtime.ProviderName,
+		ReasoningConfig:       req.runtime.ReasoningConfig,
 		System:                req.systemPrompt,
 		Query:                 req.message,
 		SessionType:           sessionpkg.TypeSubagent,
@@ -1629,6 +1639,8 @@ func (p *SpawnProvider) resolveModel(
 		baseURL,
 		providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	)
+	reasoningConfig := p.resolveSubagentReasoning(ctx, session.BotID, modelInfo, provider.ClientType)
+
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               modelInfo.ModelID,
 		ClientType:            provider.ClientType,
@@ -1636,9 +1648,11 @@ func (p *SpawnProvider) resolveModel(
 		CodexAccountID:        creds.CodexAccountID,
 		BaseURL:               baseURL,
 		ChatCompletionsCompat: chatCompletionsCompat,
+		ReasoningConfig:       reasoningConfig,
 	})
 	return resolvedSubagentModel{
 		Model:                 sdkModel,
+		ReasoningConfig:       reasoningConfig,
 		UUID:                  modelInfo.ID,
 		ModelID:               modelInfo.ModelID,
 		ProviderName:          provider.Name,
@@ -1656,4 +1670,36 @@ func truncateTitle(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes-3]) + "..."
+}
+
+// resolveSubagentReasoning resolves the thinking decision for a subagent against
+// the model the subagent will actually run, using the bot's stored effort as the
+// on/off source. It deliberately does not inherit the parent's resolved config: a
+// subagent may run a different model, and a tier the parent's model advertises
+// may not exist on this one.
+//
+// A missing settings service or an unreadable row yields a nil config, which is
+// the same "no decision" the spawn path produced for every subagent before #983.
+// That is a floor, not a target — it means reasoning falls back to the provider
+// default rather than failing the run.
+func (p *SpawnProvider) resolveSubagentReasoning(
+	ctx context.Context,
+	botID string,
+	modelInfo models.GetResponse,
+	clientType string,
+) *models.ReasoningConfig {
+	if p.settings == nil {
+		return nil
+	}
+	botSettings, err := p.settings.GetBot(ctx, botID)
+	if err != nil {
+		return nil
+	}
+	return reasoning.ResolveConfig(
+		modelInfo.ResolveThinkingMode(),
+		modelInfo.Config.ReasoningEfforts,
+		botSettings.ReasoningEffort,
+		"",
+		clientType,
+	)
 }

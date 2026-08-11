@@ -285,8 +285,8 @@ func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
 	t.Parallel()
 
 	for _, effort := range []string{"none", "low", "medium", "high", "xhigh"} {
-		if !isValidReasoningEffort(effort) {
-			t.Fatalf("isValidReasoningEffort(%q) = false, want true", effort)
+		if !hasReasoningEffortValue(effort) {
+			t.Fatalf("hasReasoningEffortValue(%q) = false, want true", effort)
 		}
 		got := normalizeBotSetting("en", "auto", "allow", effort, false, 60, false, 0, pgtype.Int4{})
 		if got.ReasoningEffort != effort {
