@@ -12,6 +12,7 @@ import (
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/reasoning"
 )
 
 const (
@@ -142,9 +143,16 @@ func (s *Service) listGitHubCopilotRemoteModels(ctx context.Context, baseURL, gi
 		if model.Capabilities.Supports.Vision {
 			compatibilities = append(compatibilities, models.CompatVision)
 		}
-		reasoningEfforts := make([]string, 0, len(model.Capabilities.Supports.ReasoningEffort))
+		// Upstream spells off its own way ("none" on the OpenAI wire). Normalizing
+		// rather than filtering is what keeps a model that can be turned off from
+		// silently losing the capability — dropping the value would read as "this
+		// model cannot be turned off" everywhere downstream.
+		advertised := make([]string, 0, len(model.Capabilities.Supports.ReasoningEffort))
 		for _, effort := range model.Capabilities.Supports.ReasoningEffort {
-			effort = strings.ToLower(strings.TrimSpace(effort))
+			advertised = append(advertised, strings.ToLower(strings.TrimSpace(effort)))
+		}
+		reasoningEfforts := make([]string, 0, len(advertised))
+		for _, effort := range reasoning.NormalizeAdvertised(advertised) {
 			if models.IsValidReasoningEffort(effort) && !containsFold(reasoningEfforts, effort) {
 				reasoningEfforts = append(reasoningEfforts, effort)
 			}

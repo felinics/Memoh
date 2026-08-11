@@ -511,7 +511,7 @@
       "choosePrompt": "努力が増えると、より慎重に考えることになりますが、応答は遅くなります。レベルを選択してください:",
       "setUsage": "使い方: /reasoning set<off|low|medium|high|xhigh>",
       "unavailable": "推論は現在利用できません。",
-      "unknownLevel": "不明レベル {level} — off、none、low、medium、high、または xhigh を選択します。"
+      "unknownLevel": "不明なレベル {level} —— 上に表示されているレベルから選んでください。"
     },
     "error": {
       "unknownCommand": "不明なコマンド {command}。 {help} を実行して利用可能なものを確認するか、先頭のスラッシュを付けずに再送信して通常のメッセージとして送信します。",

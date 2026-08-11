@@ -721,6 +721,10 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ChatCompletionsCompat: chatCompletionsCompat,
 		HTTPClient:            s.streamHTTPClient,
 		ReasoningConfig:       reasoningConfig,
+		ReasoningDialect:      chatModel.Config.ReasoningDialect,
+		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport,
+		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin,
+		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax,
 	})
 
 	var agentSkills []native.SkillEntry

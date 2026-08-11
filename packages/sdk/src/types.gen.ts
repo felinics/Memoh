@@ -2408,6 +2408,13 @@ export type ModelsGetResponse = {
     model_id?: string;
     name?: string;
     provider_id?: string;
+    /**
+     * Reasoning is the model's resolved thinking options, filled by the API layer
+     * (it depends on the provider's client type). Clients render this rather than
+     * deriving their own answer from ThinkingMode and ReasoningEfforts — the
+     * duplication that let the web picker and the wire disagree.
+     */
+    reasoning?: ReasoningOptions;
     type?: ModelsModelType;
 };
 
@@ -2707,6 +2714,27 @@ export type ProvidertemplatesModelResponse = {
     name?: string;
     sort_order?: number;
     type?: string;
+};
+
+export type ReasoningOptions = {
+    /**
+     * CanDisable reports whether picking "off" actually reaches the model.
+     */
+    can_disable?: boolean;
+    /**
+     * DefaultEffort is the tier to use when nothing is stored, and the tier to fall
+     * back to when a stored value is no longer offered by the model.
+     */
+    default_effort?: string;
+    /**
+     * Efforts are the selectable active tiers, weakest to strongest as advertised.
+     */
+    efforts?: Array<string>;
+    /**
+     * Supported is false when the model has no thinking concept; the other fields
+     * are then empty and no control should be rendered at all.
+     */
+    supported?: boolean;
 };
 
 export type ScheduleCreateRequest = {

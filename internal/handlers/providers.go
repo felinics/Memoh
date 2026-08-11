@@ -386,14 +386,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		if name == "" {
 			name = m.ID
 		}
-		cfg := models.ModelConfig{
-			Description:      m.Description,
-			Compatibilities:  compatibilities,
-			ReasoningEfforts: m.ReasoningEfforts,
-			ThinkingMode:     m.ThinkingMode,
-			ContextWindow:    m.ContextWindow,
-			Dimensions:       m.Dimensions,
-		}
+		cfg := modelConfigFromRemote(m, compatibilities)
 		if managedCatalog {
 			available := true
 			cfg.CatalogAvailable = &available
@@ -495,14 +488,56 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, mo
 	return true
 }
 
+// preserveDeclaredCapabilities lets discovery refresh the tier list while keeping
+// capability tokens it structurally cannot know about.
+//
+// The disable token declares that a model can be turned off. For providers whose
+// off travels outside the effort field — DeepSeek and MiniMax through
+// chat_completions_compat, Gemini 2.5 Flash through a zero budget — no upstream
+// catalog reports it, so it can only ever come from a hand-maintained template.
+// Replacing the list wholesale on each refresh silently revoked the capability
+// and dropped Off from the picker, which is worse than a stale tier list.
+//
+// Only tokens absent from discovery are carried over, so a genuine upstream change
+// still lands.
+// modelConfigFromRemote builds the stored config for an imported model. It exists
+// as a named function so a test can assert that every wire declaration survives
+// the import path: a dialect or off-support token lost here is lost for every row
+// this path creates, and the resulting model resolves onto the wrong wire — which
+// is how these fields came to be missing from RemoteModel in the first place.
+func modelConfigFromRemote(m providers.RemoteModel, compatibilities []string) models.ModelConfig {
+	return models.ModelConfig{
+		Description:         m.Description,
+		Compatibilities:     compatibilities,
+		ReasoningEfforts:    m.ReasoningEfforts,
+		ThinkingMode:        m.ThinkingMode,
+		ReasoningDialect:    m.ReasoningDialect,
+		ReasoningOffSupport: m.ReasoningOffSupport,
+		ThinkingBudgetMin:   m.ThinkingBudgetMin,
+		ThinkingBudgetMax:   m.ThinkingBudgetMax,
+		ContextWindow:       m.ContextWindow,
+		Dimensions:          m.Dimensions,
+	}
+}
+
+func preserveDeclaredCapabilities(stored, discovered []string) []string {
+	out := append([]string(nil), discovered...)
+	for _, token := range []string{models.ReasoningEffortDisable} {
+		if slices.Contains(stored, token) && !slices.Contains(out, token) {
+			out = append([]string{token}, out...)
+		}
+	}
+	return out
+}
+
 func mergeManagedDiscoveredConfig(existing, discovered models.ModelConfig) (models.ModelConfig, bool) {
 	out, changed := mergeDiscoveredConfig(existing, discovered)
 	if !slices.Equal(out.Compatibilities, discovered.Compatibilities) {
 		out.Compatibilities = append([]string(nil), discovered.Compatibilities...)
 		changed = true
 	}
-	if !slices.Equal(out.ReasoningEfforts, discovered.ReasoningEfforts) {
-		out.ReasoningEfforts = append([]string(nil), discovered.ReasoningEfforts...)
+	if wanted := preserveDeclaredCapabilities(out.ReasoningEfforts, discovered.ReasoningEfforts); !slices.Equal(out.ReasoningEfforts, wanted) {
+		out.ReasoningEfforts = wanted
 		changed = true
 	}
 	if discovered.ThinkingMode != "" && out.ThinkingMode != discovered.ThinkingMode {
@@ -529,9 +564,11 @@ func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.Mode
 		out.ThinkingMode = discovered.ThinkingMode
 		changed = true
 	}
-	if len(discovered.ReasoningEfforts) > 0 && !slices.Equal(discovered.ReasoningEfforts, out.ReasoningEfforts) {
-		out.ReasoningEfforts = append([]string(nil), discovered.ReasoningEfforts...)
-		changed = true
+	if len(discovered.ReasoningEfforts) > 0 {
+		if wanted := preserveDeclaredCapabilities(out.ReasoningEfforts, discovered.ReasoningEfforts); !slices.Equal(wanted, out.ReasoningEfforts) {
+			out.ReasoningEfforts = wanted
+			changed = true
+		}
 	}
 	if discovered.ContextWindow != nil && (out.ContextWindow == nil || *discovered.ContextWindow != *out.ContextWindow) {
 		out.ContextWindow = discovered.ContextWindow

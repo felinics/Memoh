@@ -28,6 +28,15 @@ type SDKModelConfig struct {
 	ChatCompletionsCompat string
 	HTTPClient            *http.Client
 	ReasoningConfig       *ReasoningConfig
+	// ReasoningDialect and the budget bounds come from the model's catalog entry.
+	// They say how this model spells its thinking control, which is not derivable
+	// from the tiers it advertises.
+	ReasoningDialect  string
+	ThinkingBudgetMin *int
+	ThinkingBudgetMax *int
+	// ReasoningOffSupport declares whether this model accepts an explicit
+	// thinking{type:"disabled"}. See anthropicAcceptsExplicitOff.
+	ReasoningOffSupport string
 }
 
 // ReasoningConfig is the resolved extended-thinking decision for one call,
@@ -100,15 +109,26 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		//     does not turn it on. The resolver flags every effort-era model as
 		//     Adaptive (including cloud variants missing supports_adaptive_thinking),
 		//     so a non-adaptive active config here is a legacy model.
-		if rc := cfg.ReasoningConfig; rc != nil && rc.Active {
-			if rc.Adaptive {
+		//   - off: an explicit thinking{type:"disabled"} rather than an omitted
+		//     field. Omission means "off" only up to 4.8; from Opus 5 and Sonnet 5
+		//     on, thinking is the default and an omitted field leaves it running —
+		//     billed, counted against max_tokens, and invisible to a user who
+		//     believes they turned it off. Sending the explicit shape is only safe
+		//     where the model accepts it, which the catalog declares.
+		if rc := cfg.ReasoningConfig; rc != nil {
+			switch {
+			case rc.Active && rc.Adaptive:
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 					Type: "adaptive",
 				}))
-			} else {
+			case rc.Active:
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 					Type:         "enabled",
 					BudgetTokens: legacyAnthropicBudgetFor(rc.Effort),
+				}))
+			case rc.Disabled && anthropicAcceptsExplicitOff(cfg.ReasoningOffSupport):
+				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
+					Type: "disabled",
 				}))
 			}
 		}
@@ -122,6 +142,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		opts = append(opts, googlegenerative.WithHTTPClient(cfg.HTTPClient))
 		if cfg.BaseURL != "" {
 			opts = append(opts, googlegenerative.WithBaseURL(cfg.BaseURL))
+		}
+		if thinking, ok := googleThinkingFor(cfg); ok {
+			opts = append(opts, googlegenerative.WithThinking(thinking))
 		}
 		p := googlegenerative.New(opts...)
 		return p.ChatModel(cfg.ModelID)
@@ -198,7 +221,9 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 		return nil
 
 	case ClientTypeGoogleGenerativeAI:
-		// Google thinking is out of scope for the effort wire; leave untouched.
+		// Google's thinking control rides on the provider (see googleThinkingFor),
+		// because budget and level are mutually exclusive and which one applies is
+		// a property of the model, not of the request.
 		return nil
 
 	case ClientTypeOpenAIResponses, ClientTypeOpenAICodex, ClientTypeOpenAICompletions:
@@ -289,5 +314,107 @@ func ResolveClientType(model *sdk.Model) string {
 		return string(ClientTypeOpenAIResponses)
 	default:
 		return string(ClientTypeOpenAICompletions)
+	}
+}
+
+// googleThinkingFor translates a resolved reasoning decision into Gemini's
+// thinking config. Which field to send is the model's declared dialect, never
+// guessed from its id: 2.5 takes thinkingBudget, 3.x takes thinkingLevel, and
+// sending both is a 400.
+//
+// The budget dialect maps a tier proportionally across the model's own range
+// rather than through fixed token counts. A fixed table cannot be right for two
+// models with different ceilings — 2.5 Pro allows 128..32768 while Flash allows
+// 0..24576 — and the vendors deliberately publish no tier-to-token mapping,
+// describing tiers as relative allowances rather than guarantees.
+//
+// IncludeThoughts is set whenever thinking is on, because the API emits no
+// thought parts without it and the reasoning stream would stay empty.
+func googleThinkingFor(cfg SDKModelConfig) (googlegenerative.ThinkingConfig, bool) {
+	rc := cfg.ReasoningConfig
+	if rc == nil {
+		return googlegenerative.ThinkingConfig{}, false
+	}
+
+	if cfg.ReasoningDialect == reasoning.DialectBudget {
+		budget, ok := googleBudgetFor(rc, cfg.ThinkingBudgetMin, cfg.ThinkingBudgetMax)
+		if !ok {
+			return googlegenerative.ThinkingConfig{}, false
+		}
+		thinking := googlegenerative.ThinkingConfig{ThinkingBudget: &budget}
+		if budget != googlegenerative.ThinkingBudgetDisabled {
+			thinking.IncludeThoughts = boolPtr(true)
+		}
+		return thinking, true
+	}
+
+	// Tier dialect (Gemini 3.x). There is no off value on this wire — minimal is
+	// the floor — so a disabled model sends nothing and lets the provider default
+	// stand. OptionsFor keeps Off out of the picker for such models, so reaching
+	// here with Disabled means a stale stored setting rather than a user choice.
+	if !rc.Active || rc.Effort == "" {
+		return googlegenerative.ThinkingConfig{}, false
+	}
+	return googlegenerative.ThinkingConfig{
+		ThinkingLevel:   rc.Effort,
+		IncludeThoughts: boolPtr(true),
+	}, true
+}
+
+// googleBudgetFor resolves a tier into a token budget within the model's range,
+// or the dynamic/disabled sentinels. It reports false when nothing should be sent.
+func googleBudgetFor(rc *ReasoningConfig, minBudget, maxBudget *int) (int, bool) {
+	switch {
+	case rc.Disabled:
+		// 0 is only legal where the range allows it (Flash/Lite); on a model with a
+		// positive floor, such as 2.5 Pro, thinking cannot be turned off at all and
+		// omitting the field is the honest answer.
+		if minBudget != nil && *minBudget > 0 {
+			return 0, false
+		}
+		return googlegenerative.ThinkingBudgetDisabled, true
+	case !rc.Active:
+		return 0, false
+	case rc.Effort == "":
+		return googlegenerative.ThinkingBudgetDynamic, true
+	}
+
+	ratio, ok := reasoning.BudgetRatio(rc.Effort)
+	if !ok {
+		return googlegenerative.ThinkingBudgetDynamic, true
+	}
+	lo, hi := 0, 0
+	if minBudget != nil {
+		lo = *minBudget
+	}
+	if maxBudget != nil {
+		hi = *maxBudget
+	}
+	if hi <= lo {
+		return googlegenerative.ThinkingBudgetDynamic, true
+	}
+	return lo + int(ratio*float64(hi-lo)), true
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+// anthropicAcceptsExplicitOff reports whether a model takes
+// thinking{type:"disabled"} on the wire.
+//
+// Omitting the field is not a substitute. It reads as "off" only through Opus 4.8;
+// Opus 5, Sonnet 5, Fable 5 and Mythos 5 think by default, so an omitted field
+// leaves thinking running — billed as output tokens and counted against
+// max_tokens, while the user believes it is off. Fable 5 and Mythos 5 also reject
+// the explicit shape with a 400, so it cannot be sent unconditionally either.
+//
+// Only a catalog declaration can tell these apart: the models share a thinking
+// mode and an identical tier list. An undeclared model gets the omission
+// behaviour, which is correct for every generation we currently ship.
+func anthropicAcceptsExplicitOff(offSupport string) bool {
+	switch offSupport {
+	case reasoning.OffSupportAccepted, reasoning.OffSupportLowEffortOnly:
+		return true
+	default:
+		return false
 	}
 }

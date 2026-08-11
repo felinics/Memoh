@@ -511,7 +511,7 @@
       "choosePrompt": "强度越高思考越深入，但回复更慢。选择级别：",
       "setUsage": "用法：/reasoning set <off|low|medium|high|xhigh>",
       "unavailable": "推理功能暂不可用。",
-      "unknownLevel": "未知级别 {level}，请选择 off、none、low、medium、high 或 xhigh。"
+      "unknownLevel": "未知级别 {level} —— 请从上面显示的级别中选择。"
     },
     "error": {
       "unknownCommand": "未知命令 {command}，用 {help} 查看可用命令。也可去掉斜杠作为普通消息发送。",

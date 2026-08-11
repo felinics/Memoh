@@ -177,9 +177,7 @@ import {
   EFFORT_LABELS,
   EFFORT_OPACITY,
   REASONING_EFFORT_DISABLE,
-  availableEffortsForMode,
-  resolveEffortLevels,
-  resolveThinkingMode,
+  selectableEfforts,
 } from './reasoning-effort'
 
 export interface ModelOption {
@@ -194,6 +192,7 @@ export interface ModelOption {
   contextWindow?: number
   providerId: string
   config?: ModelsGetResponse['config']
+  reasoning?: ModelsGetResponse['reasoning']
 }
 
 interface HeaderRow {
@@ -289,6 +288,7 @@ const options = computed<ModelOption[]>(() =>
       contextWindow: config?.context_window,
       providerId,
       config: model.config,
+      reasoning: model.reasoning,
     }
   }),
 )
@@ -447,18 +447,9 @@ const activeModel = computed(() =>
   options.value.find((o) => o.value === modelValue.value),
 )
 
-const activeClientType = computed(() =>
-  props.providers.find((p) => p.id === activeModel.value?.providerId)?.client_type,
+const nativeAvailableEfforts = computed(() =>
+  selectableEfforts(activeModel.value?.reasoning),
 )
-
-const nativeAvailableEfforts = computed(() => {
-  if (!activeModel.value) return []
-  return availableEffortsForMode(
-    resolveThinkingMode(activeModel.value.config),
-    resolveEffortLevels(activeModel.value.config, activeClientType.value),
-    activeClientType.value,
-  )
-})
 
 const availableReasoningOptions = computed<ReasoningOption[]>(() => {
   if (props.reasoningOptions !== undefined) {

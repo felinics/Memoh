@@ -39,6 +39,7 @@ func fullLadderOptions() reasoning.Options {
 			reasoning.EffortXHigh,
 		},
 		"openai-codex",
+		"",
 	)
 }
 
@@ -152,16 +153,12 @@ func TestReasoningChoicesFollowTheModel(t *testing.T) {
 	}{
 		{
 			name: "a model that can be turned off leads with off",
-			opts: reasoning.OptionsFor(reasoning.ModeToggle,
-				[]string{reasoning.EffortDisable, reasoning.EffortLow, reasoning.EffortHigh},
-				"openai-codex"),
+			opts: reasoning.OptionsFor(reasoning.ModeToggle, []string{reasoning.EffortDisable, reasoning.EffortLow, reasoning.EffortHigh}, "openai-codex", ""),
 			want: []string{"off", "low", "high"},
 		},
 		{
-			name: "a model that cannot be turned off does not offer it",
-			opts: reasoning.OptionsFor(reasoning.ModeToggle,
-				[]string{reasoning.EffortMinimal, reasoning.EffortLow, reasoning.EffortMedium},
-				"openai-codex"),
+			name:   "a model that cannot be turned off does not offer it",
+			opts:   reasoning.OptionsFor(reasoning.ModeToggle, []string{reasoning.EffortMinimal, reasoning.EffortLow, reasoning.EffortMedium}, "openai-codex", ""),
 			want:   []string{"minimal", "low", "medium"},
 			absent: []string{"off"},
 		},
@@ -194,8 +191,7 @@ func TestReasoningChoicesFollowTheModel(t *testing.T) {
 func TestAcceptsEffortRejectsTiersTheModelDoesNotOffer(t *testing.T) {
 	t.Parallel()
 
-	opts := reasoning.OptionsFor(reasoning.ModeToggle,
-		[]string{reasoning.EffortLow, reasoning.EffortMedium}, "openai-codex")
+	opts := reasoning.OptionsFor(reasoning.ModeToggle, []string{reasoning.EffortLow, reasoning.EffortMedium}, "openai-codex", "")
 
 	if !acceptsEffort(reasoning.EffortLow, opts) {
 		t.Error("an advertised tier should be accepted")

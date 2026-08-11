@@ -185,14 +185,26 @@ func applyToModel(model *yaml.Node, mode string, efforts []string) bool {
 	if len(wantEfforts) == 0 {
 		wantEfforts = []string{"low", "medium", "high"}
 	}
-	// A hand-maintained disable token is preserved, not overwritten. LiteLLM's
-	// only off signal is the OpenAI-wire supports_none_reasoning_effort flag, so
-	// for providers whose off travels another way (DeepSeek/MiniMax toggle via
-	// chat_completions_compat) the token can only ever come from the template.
-	// Registry silence must not strip what the registry cannot know about.
-	if existing := mapValue(cfg, "reasoning_efforts"); seqContains(existing, "disable") &&
-		!slices.Contains(wantEfforts, "disable") {
-		wantEfforts = append([]string{"disable"}, wantEfforts...)
+	// Hand-maintained tokens the registry cannot know about are preserved rather
+	// than overwritten. LiteLLM's only off signal is the OpenAI-wire
+	// supports_none_reasoning_effort flag, so where off travels another way
+	// (DeepSeek/MiniMax toggle via chat_completions_compat, Gemini 2.5 Flash via a
+	// zero budget) the token can only come from the template. The same holds for
+	// minimal, which the registry reports for exactly one model family while
+	// Gemini 3.x accepts it as its floor. Registry silence is not evidence of
+	// absence.
+	if existing := mapValue(cfg, "reasoning_efforts"); existing != nil {
+		// Collected in canonical order and prepended once, so the list stays
+		// weakest-to-strongest instead of reversing with each insertion.
+		var carried []string
+		for _, token := range []string{"disable", "minimal"} {
+			if seqContains(existing, token) && !slices.Contains(wantEfforts, token) {
+				carried = append(carried, token)
+			}
+		}
+		if len(carried) > 0 {
+			wantEfforts = append(carried, wantEfforts...)
+		}
 	}
 
 	changed := false

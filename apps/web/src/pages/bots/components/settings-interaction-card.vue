@@ -92,7 +92,7 @@ import { computed, watch } from 'vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SettingsRow, SettingsSection, Switch } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import ModelSelect from './model-select.vue'
-import { REASONING_EFFORT_DISABLE, nearestEffortToMedium, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
+import { reconcileStoredEffort } from './reasoning-effort'
 import type { AcpprofilePublicProfile, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 
@@ -189,31 +189,21 @@ watch(selectableACPProfiles, (profiles) => {
   if (firstAgentID) setDefaultACPAgent(firstAgentID)
 }, { immediate: true })
 
-const chatModelConfig = computed(() => {
+const chatModelReasoning = computed(() => {
   if (!props.form.chat_model_id) return undefined
-  return props.models.find((m) => m.id === props.form.chat_model_id)?.config
+  return props.models.find((m) => m.id === props.form.chat_model_id)?.reasoning
 })
-
-const chatModelClientType = computed(() => {
-  if (!props.form.chat_model_id) return undefined
-  const model = props.models.find((m) => m.id === props.form.chat_model_id)
-  return props.providers.find((p) => p.id === model?.provider_id)?.client_type
-})
-
-const thinkingMode = computed(() => resolveThinkingMode(chatModelConfig.value))
-
-const effortLevels = computed(() => resolveEffortLevels(chatModelConfig.value, chatModelClientType.value))
 
 // Switching models can strand the stored tier on a model that does not offer it.
-// "Off" survives any model (it is not a tier), and a model with no thinking at
-// all has nothing to migrate to, so both are left alone.
-watch([effortLevels, thinkingMode], ([levels, mode]) => {
-  const current = props.form.reasoning_effort
-  if (mode === 'none' || current === REASONING_EFFORT_DISABLE) return
-  if (current && levels.includes(current)) return
+// A model with no thinking at all has nothing to migrate to, so it is left alone
+// rather than cleared — the stored value is still meaningful if the user
+// switches back.
+watch(chatModelReasoning, (options) => {
+  if (!options?.supported) return
+  const current = props.form.reasoning_effort ?? ''
+  const next = reconcileStoredEffort(current, options)
+  if (next === current) return
   // eslint-disable-next-line vue/no-mutating-props
-  props.form.reasoning_effort = levels.includes('medium')
-    ? 'medium'
-    : nearestEffortToMedium(levels) || 'medium'
+  props.form.reasoning_effort = next
 }, { immediate: true })
 </script>
