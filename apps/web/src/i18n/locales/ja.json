@@ -195,8 +195,9 @@
     "webSearch": "ウェブ検索",
     "memory": "メモリ",
     "group": {
-      "integrations": "連携",
-      "account": "アカウント"
+      "capabilities": "モデルと機能",
+      "team": "チーム",
+      "preferences": "環境設定"
     },
     "network": "ネットワーク",
     "speech": "音声合成",

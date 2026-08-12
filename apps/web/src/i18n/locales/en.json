@@ -198,8 +198,9 @@
     "webSearch": "Web Search",
     "memory": "Memory",
     "group": {
-      "integrations": "Integrations",
-      "account": "Account"
+      "capabilities": "Models & Capabilities",
+      "team": "Team",
+      "preferences": "Preferences"
     },
     "network": "Network",
     "speech": "Speech",

@@ -39,82 +39,27 @@
       </SidebarHeader>
 
       <SidebarContent>
-        <!-- Core group: no label. In fullWidth (mobile list home) the header
-             is hidden, so the group owns the whole gap below the top-bar
+        <!-- One block per nav group; the group list itself lives in navGroups.
+             The first group carries no label: in fullWidth (mobile list home)
+             the header is hidden, so it owns the whole gap below the top-bar
              hairline — 16px, matching its own left inset. On desktop the
              header's pb-3 already carries the rhythm and pt-1 suffices. -->
         <SidebarGroup
+          v-for="(group, idx) in navGroups"
+          :key="group.key"
           class="px-[16px] pb-0"
-          :class="fullWidth ? 'pt-4' : 'pt-1'"
+          :class="idx === 0 ? (fullWidth ? 'pt-4' : 'pt-1') : 'pt-4'"
         >
-          <SidebarGroupContent>
-            <SidebarMenu class="gap-1">
-              <SidebarMenuItem
-                v-for="item in coreNavItems"
-                :key="item.name"
-              >
-                <NavItem
-                  :active="isItemActive(item.name)"
-                  :aria-current="isItemActive(item.name) ? 'page' : undefined"
-                  @click="navigate(item.name)"
-                >
-                  <component
-                    :is="item.icon"
-                    :stroke-width="1.75"
-                    class="size-4 shrink-0"
-                    :class="item.flipX && '-scale-x-100'"
-                  />
-                  <span>{{ item.title }}</span>
-                </NavItem>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <!-- Integrations group -->
-        <SidebarGroup
-          v-if="integrationsNavItems.length"
-          class="px-[16px] pt-4 pb-0"
-        >
-          <SidebarGroupLabel size="compact">
-            {{ t('sidebar.group.integrations') }}
+          <SidebarGroupLabel
+            v-if="group.label"
+            size="compact"
+          >
+            {{ group.label }}
           </SidebarGroupLabel>
-          <SidebarGroupContent class="pt-0">
+          <SidebarGroupContent :class="group.label && 'pt-0'">
             <SidebarMenu class="gap-1">
               <SidebarMenuItem
-                v-for="item in integrationsNavItems"
-                :key="item.name"
-              >
-                <NavItem
-                  :active="isItemActive(item.name)"
-                  :aria-current="isItemActive(item.name) ? 'page' : undefined"
-                  @click="navigate(item.name)"
-                >
-                  <component
-                    :is="item.icon"
-                    :stroke-width="1.75"
-                    class="size-4 shrink-0"
-                    :class="item.flipX && '-scale-x-100'"
-                  />
-                  <span>{{ item.title }}</span>
-                </NavItem>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <!-- Account group -->
-        <SidebarGroup
-          v-if="accountNavItems.length"
-          class="px-[16px] pt-4 pb-0"
-        >
-          <SidebarGroupLabel size="compact">
-            {{ t('sidebar.group.account') }}
-          </SidebarGroupLabel>
-          <SidebarGroupContent class="pt-0">
-            <SidebarMenu class="gap-1">
-              <SidebarMenuItem
-                v-for="item in accountNavItems"
+                v-for="item in group.items"
                 :key="item.name"
               >
                 <NavItem
@@ -281,6 +226,7 @@ function isItemActive(name: string): boolean {
 }
 
 type NavItem = { title: string; name: string; icon: Component; flipX?: boolean; adminOnly?: boolean }
+type NavGroup = { key: string; label?: string; items: NavItem[] }
 
 function filterItems(items: NavItem[]): NavItem[] {
   return items.filter((item) => {
@@ -289,27 +235,52 @@ function filterItems(items: NavItem[]): NavItem[] {
   })
 }
 
-const coreNavItems = computed<NavItem[]>(() => filterItems([
-  { title: t('sidebar.bots'), name: 'bots', icon: MousePointer2, flipX: true },
-  { title: t('sidebar.runtimes'), name: 'runtimes', icon: Laptop },
-  { title: t('sidebar.providers'), name: 'providers', icon: Box },
-  { title: t('sidebar.memory'), name: 'memory', icon: Database },
-]))
-
-const integrationsNavItems = computed<NavItem[]>(() => filterItems([
-  { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
-  { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
-  { title: t('sidebar.email'), name: 'email', icon: Mail },
-  { title: t('sidebar.video'), name: 'video', icon: Video },
-  { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
-  { title: t('sidebar.usage'), name: 'usage', icon: ChartNoAxesColumn },
-  { title: t('sidebar.people'), name: 'people', icon: Users, adminOnly: true },
-]))
-
-const accountNavItems = computed<NavItem[]>(() => filterItems([
-  { title: t('sidebar.appearance'), name: 'appearance', icon: AppearanceIcon },
-  { title: t('sidebar.keyboard'), name: 'keyboard', icon: Keyboard },
-  { title: t('sidebar.profile'), name: 'profile', icon: CircleUserRound },
-  { title: t('sidebar.about'), name: 'about', icon: Info },
-]))
+// Four groups, ordered by what the user came here to do: the things they own
+// (bots, computers, the market they install from), the service providers those
+// things draw on, the org-level view (who is in it, what it consumes), and
+// their own preferences. `providers`/`memory` sit with search/voice/video/email
+// because all six are the same page: a provider gallery you configure once and
+// then pick from inside a bot — splitting them across groups only hid that.
+// Groups that end up empty after filtering drop out entirely.
+const navGroups = computed<NavGroup[]>(() => [
+  {
+    key: 'workspace',
+    items: [
+      { title: t('sidebar.bots'), name: 'bots', icon: MousePointer2, flipX: true },
+      { title: t('sidebar.runtimes'), name: 'runtimes', icon: Laptop },
+      { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
+    ],
+  },
+  {
+    key: 'capabilities',
+    label: t('sidebar.group.capabilities'),
+    items: [
+      { title: t('sidebar.providers'), name: 'providers', icon: Box },
+      { title: t('sidebar.memory'), name: 'memory', icon: Database },
+      { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
+      { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
+      { title: t('sidebar.video'), name: 'video', icon: Video },
+      { title: t('sidebar.email'), name: 'email', icon: Mail },
+    ],
+  },
+  {
+    key: 'team',
+    label: t('sidebar.group.team'),
+    items: [
+      { title: t('sidebar.people'), name: 'people', icon: Users, adminOnly: true },
+      { title: t('sidebar.usage'), name: 'usage', icon: ChartNoAxesColumn },
+    ],
+  },
+  {
+    key: 'preferences',
+    label: t('sidebar.group.preferences'),
+    items: [
+      { title: t('sidebar.appearance'), name: 'appearance', icon: AppearanceIcon },
+      { title: t('sidebar.keyboard'), name: 'keyboard', icon: Keyboard },
+      { title: t('sidebar.profile'), name: 'profile', icon: CircleUserRound },
+      { title: t('sidebar.about'), name: 'about', icon: Info },
+    ],
+  },
+].map(group => ({ ...group, items: filterItems(group.items) }))
+  .filter(group => group.items.length > 0))
 </script>

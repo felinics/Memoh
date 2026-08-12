@@ -199,8 +199,9 @@
     "webSearch": "搜索引擎",
     "memory": "记忆管理",
     "group": {
-      "integrations": "集成",
-      "account": "账户"
+      "capabilities": "模型与能力",
+      "team": "团队",
+      "preferences": "偏好"
     },
     "network": "网络配置",
     "speech": "语音合成",
