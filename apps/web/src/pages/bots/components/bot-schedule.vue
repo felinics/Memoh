@@ -6,11 +6,8 @@
     <template #actions>
       <DropdownMenu v-if="schedules.length > 1">
         <DropdownMenuTrigger as-child>
-          <Button
-            variant="ghost"
-            class="text-muted-foreground"
-          >
-            <ArrowUpDown class="size-3.5" />
+          <Button variant="ghost">
+            <ArrowUpDown />
             {{ currentSortLabel }}
           </Button>
         </DropdownMenuTrigger>
@@ -22,64 +19,88 @@
             @select="sortKey = opt.key"
           >
             {{ $t(opt.labelKey) }}
-            <Check
-              class="size-3.5 shrink-0"
-              :class="sortKey === opt.key ? 'opacity-100' : 'opacity-0'"
-            />
+            <Check :class="sortKey === opt.key ? 'opacity-100' : 'opacity-0'" />
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <Button @click="handleNew">
-        <Plus class="size-4" />
+        <Plus />
         {{ $t('bots.schedule.create') }}
       </Button>
     </template>
 
-    <!-- Loading -->
-    <InlineLoadingRow
-      v-if="isLoading && schedules.length === 0"
-      class="px-2"
-    >
-      {{ $t('common.loading') }}
-    </InlineLoadingRow>
-
-    <!-- Empty -->
-    <div
-      v-else-if="schedules.length === 0"
-      class="flex flex-col items-center justify-center rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16 text-center"
-    >
-      <Calendar class="mb-3 size-8 text-muted-foreground/40" />
-      <p class="text-sm font-medium text-foreground">
-        {{ $t('bots.schedule.empty') }}
-      </p>
-      <Button
-        variant="outline"
-        size="sm"
-        class="mt-4"
-        @click="handleNew"
+    <!-- One titleless card: the page title already names the concern, so a
+         section label here would say "tasks" a second time. -->
+    <SettingsSection>
+      <InlineLoadingRow
+        v-if="isLoading && schedules.length === 0"
+        surface="card-row"
       >
-        <Plus class="size-4" />
-        {{ $t('bots.schedule.create') }}
-      </Button>
-    </div>
+        {{ $t('common.loading') }}
+      </InlineLoadingRow>
 
-    <!-- Card Grid -->
-    <div
-      v-else
-      class="grid grid-cols-1 gap-3 sm:grid-cols-2"
-    >
-      <ScheduleListItem
-        v-for="item in sortedSchedules"
-        :key="item.id"
-        :item="item"
-        :description="item.description?.trim() || describeItem(item.pattern) || item.pattern || ''"
-        :busy="busyIds.has(item.id || '')"
-        @open="handleEdit(item)"
-        @edit="handleEdit(item)"
-        @delete="deleteTarget = item"
-        @toggle="(enabled) => handleToggleEnabled(item, enabled)"
-      />
-    </div>
+      <Empty
+        v-else-if="schedules.length === 0"
+        class="py-12"
+      >
+        <EmptyHeader>
+          <EmptyTitle>{{ $t('bots.schedule.empty') }}</EmptyTitle>
+          <EmptyDescription>{{ $t('bots.schedule.emptyDescription') }}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button
+            variant="outline"
+            @click="handleNew"
+          >
+            <Plus />
+            {{ $t('bots.schedule.create') }}
+          </Button>
+        </EmptyContent>
+      </Empty>
+
+      <SettingsRow
+        v-for="row in rows"
+        v-else
+        :key="row.item.id"
+        :label="row.item.name || ''"
+        :description="row.description"
+      >
+        <div class="flex items-center gap-2">
+          <Switch
+            :model-value="!!row.item.enabled"
+            :disabled="busyIds.has(row.item.id || '')"
+            :aria-label="$t('bots.schedule.form.enabled')"
+            @update:model-value="(value: boolean) => handleToggleEnabled(row.item, !!value)"
+          />
+
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="$t('common.actions')"
+              >
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem @select="handleEdit(row.item)">
+                <Pencil />
+                {{ $t('bots.schedule.edit') }}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                @select="deleteTarget = row.item"
+              >
+                <Trash2 />
+                {{ $t('bots.schedule.delete') }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </SettingsRow>
+    </SettingsSection>
 
     <!-- Create / Edit Dialog -->
     <Dialog v-model:open="formVisible">
@@ -101,49 +122,32 @@
       </DialogScrollContent>
     </Dialog>
 
-    <!-- Delete confirmation dialog -->
-    <Dialog
+    <ConfirmDeleteDialog
       :open="!!deleteTarget"
-      @update:open="(v) => { if (!v) deleteTarget = null }"
-    >
-      <DialogContent class="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{{ $t('bots.schedule.deleteTitle') }}</DialogTitle>
-        </DialogHeader>
-        <p class="text-sm text-muted-foreground">
-          {{ $t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' }) }}
-        </p>
-        <DialogFooter class="gap-2">
-          <Button
-            variant="outline"
-            @click="deleteTarget = null"
-          >
-            {{ $t('common.cancel') }}
-          </Button>
-          <Button
-            variant="destructive"
-            :loading="isDeleting"
-            @click="confirmDelete"
-          >
-            {{ $t('bots.schedule.delete') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      :title="$t('bots.schedule.deleteTitle')"
+      :description="$t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' })"
+      :cancel-label="$t('common.cancel')"
+      :confirm-label="$t('bots.schedule.delete')"
+      :loading="isDeleting"
+      @update:open="(v: boolean) => { if (!v) deleteTarget = null }"
+      @confirm="confirmDelete"
+    />
   </PageShell>
 </template>
 
 <script setup lang="ts">
 import {
-  ArrowUpDown, Calendar, Check, Plus,
+  ArrowUpDown, Check, MoreHorizontal, Pencil, Plus, Trash2,
 } from 'lucide-vue-next'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { InlineLoadingRow, PageShell, toast } from '@felinic/ui'
 import {
   Button,
-  Dialog, DialogContent, DialogScrollContent, DialogHeader, DialogTitle, DialogFooter,
-  DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem,
+  ConfirmDeleteDialog,
+  Dialog, DialogScrollContent, DialogHeader, DialogTitle,
+  DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem, DropdownMenuSeparator,
+  Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle,
+  InlineLoadingRow, PageShell, SettingsRow, SettingsSection, Switch, toast,
 } from '@felinic/ui'
 import {
   deleteBotsByBotIdScheduleById,
@@ -153,9 +157,9 @@ import {
 } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { formatCalendarTime } from '@/utils/date-time'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleEditor from './schedule-editor.vue'
-import ScheduleListItem from './schedule-list-item.vue'
 
 const props = defineProps<{
   botId: string
@@ -183,6 +187,9 @@ const currentSortLabel = computed(
   () => t(SORT_OPTIONS.find((o) => o.key === sortKey.value)?.labelKey ?? 'bots.schedule.sortName'),
 )
 
+const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
+const uiLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : locale.value.startsWith('ja') ? 'ja-JP' : 'en-US')
+
 const effectiveTimezone = computed(() => {
   const tz = botTimezone.value?.trim()
   if (tz) return tz
@@ -198,14 +205,36 @@ const sortedSchedules = computed(() => {
     return list.sort((a, b) => Number(b.enabled ?? false) - Number(a.enabled ?? false))
   }
   if (sortKey.value === 'next-run') {
-    return list.sort((a, b) => {
-      const aTime = a.pattern ? (nextRuns(a.pattern, effectiveTimezone.value, 1)[0]?.getTime() ?? Infinity) : Infinity
-      const bTime = b.pattern ? (nextRuns(b.pattern, effectiveTimezone.value, 1)[0]?.getTime() ?? Infinity) : Infinity
-      return aTime - bTime
-    })
+    return list.sort((a, b) => (nextRunAt(a)?.getTime() ?? Infinity) - (nextRunAt(b)?.getTime() ?? Infinity))
   }
   return list
 })
+
+function nextRunAt(item: ScheduleSchedule): Date | null {
+  if (!item.pattern) return null
+  return nextRuns(item.pattern, effectiveTimezone.value, 1)[0] ?? null
+}
+
+// One line per task carrying the three things this page is asked for: what the
+// user called it, when it fires, and when that next happens. A disabled task
+// promises no next run, so the clause simply drops.
+function rowDescription(item: ScheduleSchedule): string {
+  const parts = [item.description?.trim() || '']
+  parts.push((item.pattern ? describeCron(item.pattern, cronLocale.value) : '') || item.pattern || '')
+  if (item.enabled) {
+    const next = nextRunAt(item)
+    if (next) {
+      parts.push(t('bots.schedule.nextRun', {
+        time: formatCalendarTime(next.toISOString(), { locale: uiLocale.value }),
+      }))
+    }
+  }
+  return parts.filter(Boolean).join(' · ')
+}
+
+const rows = computed(() =>
+  sortedSchedules.value.map(item => ({ item, description: rowDescription(item) })),
+)
 
 // --- Delete via card menu ---
 const deleteTarget = ref<ScheduleSchedule | null>(null)
@@ -235,14 +264,6 @@ const formVisible = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const editingSchedule = ref<ScheduleSchedule | null>(null)
 const consumedInitialScheduleId = ref<string | undefined>(undefined)
-
-const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
-
-// --- Card helpers ---
-function describeItem(pattern: string | undefined): string | undefined {
-  if (!pattern) return undefined
-  return describeCron(pattern, cronLocale.value)
-}
 
 // --- API ---
 async function fetchSchedules() {

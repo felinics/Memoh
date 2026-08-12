@@ -203,21 +203,25 @@
         :class="showMore ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
       >
         <div class="min-h-0">
-          <div class="mt-3">
-            <div class="flex items-center justify-between gap-3">
-              <Label class="text-muted-foreground">
-                {{ t('bots.schedule.form.maxCalls') }}
-              </Label>
+          <!-- The disclosed zone is one continuous form column with the fields
+               above it, so it keeps the same label-over-control rhythm rather
+               than switching to a side-by-side row halfway down the dialog.
+               The placeholder carries the empty-value meaning, so no help line
+               repeats it. -->
+          <FormStack class="mt-3">
+            <FieldStack
+              :label="t('bots.schedule.form.maxCalls')"
+              for="sched-max-calls"
+            >
               <Input
+                id="sched-max-calls"
                 v-model="runLimitModel"
                 type="text"
                 inputmode="numeric"
-                size="sm"
-                :placeholder="'∞'"
-                class="w-24 text-center"
+                :placeholder="t('bots.schedule.unlimited')"
               />
-            </div>
-          </div>
+            </FieldStack>
+          </FormStack>
         </div>
       </div>
     </div>
@@ -276,6 +280,8 @@ import { ChevronRight, Trash2 } from 'lucide-vue-next'
 import {
   Button,
   DialogFooter,
+  FieldStack,
+  FormStack,
   Input,
   Label,
   Select,
@@ -293,7 +299,6 @@ import {
   putBotsByBotIdScheduleById,
 } from '@memohai/sdk'
 import type { ScheduleCreateRequest, ScheduleSchedule, ScheduleUpdateRequest } from '@memohai/sdk'
-import { FieldStack } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   describeCron,

@@ -3030,6 +3030,7 @@
       "title": "Schedule",
       "loadFailed": "Load failed",
       "empty": "No tasks scheduled",
+      "emptyDescription": "Give this bot a prompt to run on its own, on a schedule you set.",
       "name": "Name",
       "pattern": "Pattern",
       "enabled": "Enabled",
@@ -3054,6 +3055,7 @@
       "sortName": "By name",
       "sortStatus": "By status",
       "sortNextRun": "By next run",
+      "nextRun": "Next run {time}",
       "picker": {
         "every": "Every",
         "minutes": "minutes",

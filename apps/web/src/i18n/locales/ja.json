@@ -3007,6 +3007,7 @@
       "title": "スケジュール",
       "loadFailed": "ロードに失敗しました",
       "empty": "スケジュールされたタスクはありません",
+      "emptyDescription": "設定した時刻に Bot が自分でプロンプトを実行します。",
       "name": "名前",
       "pattern": "パターン",
       "enabled": "有効",
@@ -3031,6 +3032,7 @@
       "sortName": "名前で",
       "sortStatus": "ステータス別",
       "sortNextRun": "次回の実行までに",
+      "nextRun": "次回実行 {time}",
       "picker": {
         "every": "毎",
         "minutes": "分",

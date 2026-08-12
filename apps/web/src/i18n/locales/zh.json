@@ -3030,6 +3030,7 @@
       "title": "定时任务",
       "loadFailed": "加载失败",
       "empty": "暂无定时任务",
+      "emptyDescription": "让这个 Bot 按你设定的时间自动执行一段指令。",
       "name": "名称",
       "pattern": "表达式",
       "enabled": "启用",
@@ -3054,6 +3055,7 @@
       "sortName": "按名称",
       "sortStatus": "按状态",
       "sortNextRun": "按下次触发",
+      "nextRun": "下次运行 {time}",
       "picker": {
         "every": "每",
         "minutes": "分钟",

@@ -1,22 +1,19 @@
 <template>
+  <!-- The sidebar's schedule card. Deliberately NOT a SettingsRow: the panel is
+       its own dense surface (compact card, two tight lines, hover-revealed
+       actions), a different spatial relationship from the settings list this
+       used to share code with. -->
   <div
-    class="group/card relative flex cursor-pointer items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card transition-colors hover:bg-accent/30 dark:hover:bg-accent focus-visible:outline-none"
-    :class="variant === 'sidebar' ? '' : 'px-4 py-3.5'"
+    :class="cardClass"
     role="button"
     tabindex="0"
     @click="$emit('open')"
     @keydown.enter="$emit('open')"
     @keydown.space.prevent="$emit('open')"
   >
-    <div
-      class="min-w-0 flex-1"
-      :class="variant === 'sidebar' ? 'px-3 py-2.5' : ''"
-    >
+    <div class="min-w-0 flex-1 px-3 py-2.5">
       <div class="flex min-w-0 items-center gap-2">
-        <p
-          class="truncate text-foreground"
-          :class="variant === 'sidebar' ? 'text-control font-normal leading-snug' : 'text-sm font-medium'"
-        >
+        <p class="truncate text-control font-normal leading-snug text-foreground">
           {{ item.name }}
         </p>
         <span
@@ -26,30 +23,21 @@
           {{ timeLabel }}
         </span>
       </div>
-      <p
-        class="truncate text-muted-foreground"
-        :class="variant === 'sidebar' ? 'mt-0.5 text-caption leading-snug' : 'text-xs'"
-      >
+      <p class="mt-0.5 truncate text-caption leading-snug text-muted-foreground">
         {{ description }}
       </p>
     </div>
 
-    <div
-      class="flex shrink-0 items-center gap-2"
-      :class="variant === 'sidebar' ? 'pr-1.5' : ''"
-    >
+    <div class="flex shrink-0 items-center gap-2 pr-1.5">
       <DropdownMenu
         @update:open="(open: boolean) => { menuOpen = open }"
       >
         <DropdownMenuTrigger as-child>
           <Button
             variant="ghost"
-            :size="variant === 'sidebar' ? 'icon-sm' : 'icon'"
-            class="transition-opacity"
-            :class="[
-              variant === 'sidebar' ? 'size-6' : 'size-7',
-              menuOpen ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100',
-            ]"
+            size="icon-sm"
+            class="size-6 transition-opacity"
+            :class="menuOpen ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'"
             :aria-label="t('common.actions')"
             @click.stop
           >
@@ -57,20 +45,16 @@
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            class="gap-2"
-            @select="$emit('edit')"
-          >
-            <Pencil class="size-3.5" />
+          <DropdownMenuItem @select="$emit('edit')">
+            <Pencil />
             {{ t('bots.schedule.edit') }}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             variant="destructive"
-            class="gap-2"
             @select="$emit('delete')"
           >
-            <Trash2 class="size-3.5" />
+            <Trash2 />
             {{ t('bots.schedule.delete') }}
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -107,11 +91,9 @@ withDefaults(defineProps<{
   description: string
   timeLabel?: string
   busy?: boolean
-  variant?: 'card' | 'sidebar'
 }>(), {
   timeLabel: '',
   busy: false,
-  variant: 'card',
 })
 
 defineEmits<{
@@ -120,6 +102,11 @@ defineEmits<{
   delete: []
   toggle: [enabled: boolean]
 }>()
+
+// The sidebar is a deliberately local row system (see ui-owners), so this card
+// carries its own hover — on the sidebar's own rung of the overlay ladder, the
+// same token session-item.vue and folders-section.vue use, never a baked tint.
+const cardClass = 'group/card relative flex cursor-pointer items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none' /* ui-allow-style: sidebar rows are a local row system (see ui-owners) — same hover token as session-item.vue */
 
 const { t } = useI18n()
 const menuOpen = ref(false)
