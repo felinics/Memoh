@@ -318,7 +318,12 @@ description = "Build the canonical Debian workspace image"
 run = "docker build --target workspace -f docker/Dockerfile.workspace -t memohai/workspace:debian ."
 
 [tasks."dev:workspace-image"]
-description = "Build and export the canonical workspace image for nested dev containerd"
+description = "Build and export the canonical workspace image for nested dev containerd (skipped when its inputs are unchanged)"
+run = "scripts/prepare-dev-workspace-image.sh"
+
+[tasks."dev:workspace-image:rebuild"]
+description = "Force a rebuild of the dev workspace image (new base image, refreshed apt packages, ...)"
+env = { MEMOH_DEV_WORKSPACE_IMAGE_FORCE = "1" }
 run = "scripts/prepare-dev-workspace-image.sh"
 
 [tasks.lint]

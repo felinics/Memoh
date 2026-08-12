@@ -275,7 +275,8 @@ Bot persona templates (not developer guides):
 | `mise run lint:fix` | Run all linters with auto-fix |
 | `mise run release` | Release new version (bumpp) |
 | `mise run install-socktainer` | Install socktainer (macOS container backend) |
-| `mise run dev:workspace-image` | Build and export the canonical workspace image for development |
+| `mise run dev:workspace-image` | Build and export the canonical workspace image for development (skipped when its inputs are unchanged) |
+| `mise run dev:workspace-image:rebuild` | Force a rebuild of the dev workspace image (new base image, refreshed apt packages) |
 
 ### Dev Component Wall & UI Contract Guard
 

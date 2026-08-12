@@ -56,8 +56,30 @@ if [ ! -r "$workspace_image_archive" ]; then
   exit 1
 fi
 
-echo "Importing development workspace image..."
-ctr --namespace "${MEMOH_CONTAINERD_NAMESPACE:-default}" images import "$workspace_image_archive"
+containerd_namespace="${MEMOH_CONTAINERD_NAMESPACE:-default}"
+workspace_image_ref="${MEMOH_DEV_WORKSPACE_IMAGE:-memohai/workspace:debian}"
+# Importing the ~1GB archive takes far longer than the rest of this entrypoint,
+# and it happens on every container start. The stamp records which archive the
+# store already holds; it lives inside /var/lib/containerd so it is wiped by the
+# same `docker compose down -v` that wipes the image store it vouches for.
+workspace_image_stamp=/var/lib/containerd/.memoh-dev-workspace-image
+workspace_archive_key="$(stat -c '%s:%Y' "$workspace_image_archive")"
+
+workspace_image_present() {
+  ctr --namespace "$containerd_namespace" images ls -q 2>/dev/null | grep -Fqx \
+    -e "$workspace_image_ref" \
+    -e "docker.io/$workspace_image_ref" \
+    -e "docker.io/library/$workspace_image_ref"
+}
+
+if [ "$(cat "$workspace_image_stamp" 2>/dev/null || true)" = "$workspace_archive_key" ] \
+  && workspace_image_present; then
+  echo "Development workspace image is already imported (archive unchanged)."
+else
+  echo "Importing development workspace image..."
+  ctr --namespace "$containerd_namespace" images import "$workspace_image_archive"
+  printf '%s\n' "$workspace_archive_key" > "$workspace_image_stamp"
+fi
 echo "Development workspace image is ready."
 
 # Build bridge binary into runtime directory (first boot)

@@ -131,6 +131,9 @@ services:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
       GOFLAGS: -buildvcs=false
       TZ: "${MEMOH_DEV_TZ:-UTC}"
+      # Entrypoint only: which ref the workspace archive carries, so it can tell
+      # whether containerd already holds it and skip the ~1GB re-import.
+      MEMOH_DEV_WORKSPACE_IMAGE: "${MEMOH_DEV_WORKSPACE_IMAGE:-memohai/workspace:debian}"
       MEMOH_CONNECT_IT_BASE_URL: "${MEMOH_CONNECT_IT_BASE_URL:-}"
       MEMOH_CONNECT_IT_API_TOKEN: "${MEMOH_CONNECT_IT_API_TOKEN:-}"
       # Proxy: use host.docker.internal for localhost proxies, e.g.

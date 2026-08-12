@@ -41,6 +41,7 @@ services:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
       GOFLAGS: -buildvcs=false
       TZ: "${MEMOH_DEV_TZ:-UTC}"
+      MEMOH_DEV_WORKSPACE_IMAGE: "${MEMOH_DEV_WORKSPACE_IMAGE:-memohai/workspace:debian}"
       NO_PROXY: "127.0.0.1,localhost,host.docker.internal,postgres,pgvector,server,server_b"
       no_proxy: "127.0.0.1,localhost,host.docker.internal,postgres,pgvector,server,server_b"
     volumes:
