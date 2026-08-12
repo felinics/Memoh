@@ -448,6 +448,7 @@ func remoteModelsFromCatalog(items []sqlc.TemplateProviderTemplateModel) []Remot
 			ThinkingMode:        configString(cfg, "thinking_mode"),
 			ReasoningDialect:    configString(cfg, "reasoning_dialect"),
 			ReasoningOffSupport: configString(cfg, "reasoning_off_support"),
+			ReasoningDefaultOn:  configBoolPtr(cfg, "reasoning_default_on"),
 			ThinkingBudgetMin:   configIntPtr(cfg, "thinking_budget_min"),
 			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
 			ContextWindow:       configIntPtr(cfg, "context_window"),
@@ -790,4 +791,17 @@ func metadataSectionSource(metadata map[string]any, section string) string {
 		return ""
 	}
 	return strings.TrimSpace(stringValue(nested, metadataSourceKey))
+}
+
+// configBoolPtr reads an optional boolean, distinguishing "absent" from "false".
+// reasoning_default_on needs that distinction: unknown means the adaptor keeps its
+// conservative behaviour, while an explicit false is a fact about the model.
+func configBoolPtr(cfg map[string]any, key string) *bool {
+	if cfg == nil {
+		return nil
+	}
+	if value, ok := cfg[key].(bool); ok {
+		return &value
+	}
+	return nil
 }

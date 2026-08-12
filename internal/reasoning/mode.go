@@ -7,6 +7,10 @@ package reasoning
 //     incl. OpenAI). "off" wire behavior is provider-specific (see adaptor).
 //   - adaptive:      user can turn thinking on/off; when on, the provider uses
 //     adaptive thinking (Claude 4.6+/4.7/4.8).
+//   - always:        the model reasons and exposes no control at all — no tiers,
+//     no off switch (deepseek-reasoner, MiniMax M2.x). Distinct from toggle: a
+//     toggle model with an empty tier list can still be turned off, while this
+//     one cannot be influenced in any way.
 //   - only_adaptive: legacy alias for adaptive retained for branch-local imports.
 //   - none:          model has no thinking concept.
 //
@@ -15,6 +19,7 @@ package reasoning
 const (
 	ModeAdaptive     = "adaptive"
 	ModeToggle       = "toggle"
+	ModeAlways       = "always"
 	ModeOnlyAdaptive = "only_adaptive"
 	ModeNone         = "none"
 )
@@ -22,6 +27,7 @@ const (
 var validModes = map[string]struct{}{
 	ModeAdaptive:     {},
 	ModeToggle:       {},
+	ModeAlways:       {},
 	ModeOnlyAdaptive: {},
 	ModeNone:         {},
 }
@@ -39,7 +45,7 @@ func IsValidMode(mode string) bool {
 // means toggle, its absence means none.
 func ResolveMode(declared string, hasReasoningCompat bool) string {
 	switch declared {
-	case ModeToggle, ModeAdaptive, ModeNone:
+	case ModeToggle, ModeAdaptive, ModeAlways, ModeNone:
 		return declared
 	case ModeOnlyAdaptive:
 		return ModeAdaptive

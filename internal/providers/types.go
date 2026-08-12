@@ -129,6 +129,7 @@ type RemoteModel struct {
 	ReasoningDialect string `json:"reasoning_dialect,omitempty"`
 	// ReasoningOffSupport declares how the model answers an explicit disable.
 	ReasoningOffSupport string `json:"reasoning_off_support,omitempty"`
+	ReasoningDefaultOn  *bool  `json:"reasoning_default_on,omitempty"`
 	ThinkingBudgetMin   *int   `json:"thinking_budget_min,omitempty"`
 	ThinkingBudgetMax   *int   `json:"thinking_budget_max,omitempty"`
 	ContextWindow       *int   `json:"context_window,omitempty"`

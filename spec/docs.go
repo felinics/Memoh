@@ -21187,6 +21187,10 @@ const docTemplate = `{
                 "dimensions": {
                     "type": "integer"
                 },
+                "reasoning_default_on": {
+                    "description": "ReasoningDefaultOn reports whether omitting the thinking field leaves the\nmodel thinking. Separate from off-ability: Claude 4.6 can be turned off *and*\ndefaults to off, while Opus 5 can be turned off but defaults to on, so\nomitting the field there keeps thinking running — billed, and invisible to a\nuser who believes they turned it off. nil means unknown.",
+                    "type": "boolean"
+                },
                 "reasoning_dialect": {
                     "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty means the\nprovider's modern default.",
                     "type": "string"

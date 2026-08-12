@@ -531,6 +531,7 @@ func modelConfigFromRemote(m providers.RemoteModel, compatibilities []string) mo
 		ThinkingMode:        m.ThinkingMode,
 		ReasoningDialect:    m.ReasoningDialect,
 		ReasoningOffSupport: m.ReasoningOffSupport,
+		ReasoningDefaultOn:  m.ReasoningDefaultOn,
 		ThinkingBudgetMin:   m.ThinkingBudgetMin,
 		ThinkingBudgetMax:   m.ThinkingBudgetMax,
 		ContextWindow:       m.ContextWindow,
