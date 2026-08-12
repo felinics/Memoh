@@ -498,6 +498,7 @@ beforeEach(() => {
             runtime.run = {
               run_id: h.lastRunId,
               turn_id: `turn-${h.lastRunId}`,
+              invocation_id: invocationId,
               generation: `generation-${h.lastRunId}`,
               status: 'admitting',
               started_at: now,

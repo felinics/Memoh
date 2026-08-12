@@ -12,6 +12,10 @@ import type {
 export interface RuntimeTranscriptSlice {
   runId: string
   turnId: string
+  // The originating send's client-issued id, echoed back by the server. Empty
+  // for frames from before this field existed or from the rare pre-ledger run;
+  // the transcript falls back to turnId-only matching for those.
+  invocationId: string
   status: RuntimeCurrentRunView['status'] | null
   operation: RuntimeRunOperation | null
   turns: UITurn[]
@@ -97,6 +101,7 @@ function emptyTranscript(): RuntimeTranscriptSlice {
   return {
     runId: '',
     turnId: '',
+    invocationId: '',
     status: null,
     operation: null,
     turns: [],
@@ -136,6 +141,7 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
   return {
     runId: run.run_id,
     turnId,
+    invocationId: run.invocation_id?.trim() ?? '',
     status: run.status,
     operation: run.operation ? { ...run.operation } : null,
     turns,

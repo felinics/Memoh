@@ -184,7 +184,8 @@ func (m *Manager) reserveRecoveredWaitingDecision(ctx context.Context, run ledge
 		if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.RunID != handle.RunID {
 			snapshot.CurrentRunView = &CurrentRunView{
 				RunID: handle.RunID, TurnID: run.TurnID,
-				StartedAt: run.CreatedAt, Messages: []chatview.UIMessage{},
+				InvocationID: run.InvocationID,
+				StartedAt:    run.CreatedAt, Messages: []chatview.UIMessage{},
 			}
 		}
 		view := snapshot.CurrentRunView

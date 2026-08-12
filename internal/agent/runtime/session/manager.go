@@ -597,7 +597,10 @@ type runStart struct {
 	// turnID is the durable turn this run writes into. It reaches the published
 	// run view so every subscriber can line the run up against history, not just
 	// the caller that admitted it.
-	turnID          string
+	turnID string
+	// invocationID is the caller's intent identity, threaded from admission into
+	// the published run view; see CurrentRunView.InvocationID.
+	invocationID    string
 	builder         func(context.Context, RunHandle) (RunAdmissionView, error)
 	ownershipCancel context.CancelCauseFunc
 	abortCh         chan<- struct{}
@@ -739,6 +742,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		snapshot.CurrentRunView = &CurrentRunView{
 			RunID:               runID,
 			TurnID:              start.turnID,
+			InvocationID:        start.invocationID,
 			Generation:          runGeneration,
 			Status:              RunStatusAdmitting,
 			OwnerID:             ownerID,
@@ -1414,14 +1418,15 @@ func (m *Manager) hydrateSnapshotFromLedger(ctx context.Context, snapshot Snapsh
 		return snapshot
 	}
 	snapshot.CurrentRunView = &CurrentRunView{
-		RunID:      run.RunID,
-		TurnID:     run.TurnID,
-		Generation: run.LiveGeneration,
-		Status:     liveRunStatus(run.State),
-		OwnerID:    run.OwnerID,
-		StartedAt:  run.CreatedAt,
-		UpdatedAt:  run.UpdatedAt,
-		Error:      strings.TrimSpace(run.ErrorMessage),
+		RunID:        run.RunID,
+		TurnID:       run.TurnID,
+		InvocationID: run.InvocationID,
+		Generation:   run.LiveGeneration,
+		Status:       liveRunStatus(run.State),
+		OwnerID:      run.OwnerID,
+		StartedAt:    run.CreatedAt,
+		UpdatedAt:    run.UpdatedAt,
+		Error:        strings.TrimSpace(run.ErrorMessage),
 	}
 	if snapshot.CurrentRunView.Error == "" {
 		snapshot.CurrentRunView.Error = strings.TrimSpace(run.ErrorCode)

@@ -294,6 +294,7 @@ func (m *Manager) claimAndStart(ctx context.Context, in AdmitInput, admission Ad
 		sessionID:       in.SessionID,
 		runID:           admission.RunID,
 		turnID:          admission.TurnID,
+		invocationID:    in.InvocationID,
 		fencingToken:    token,
 		builder:         in.Execution.Admission,
 		ownershipCancel: in.Execution.OwnershipCancel,

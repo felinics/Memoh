@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import type { UIMessage, UITurn } from '@/composables/api/useChat.types'
 import { createBackgroundTaskTracker } from './background-tasks'
@@ -40,10 +40,11 @@ function appendUnboundOptimisticPair(transcript: ReturnType<typeof makeTranscrip
   return { userTurn, assistantTurn }
 }
 
-function sliceFor(turnId: string, overrides: Partial<RuntimeTranscriptSlice> = {}): RuntimeTranscriptSlice {
+function sliceFor(turnId: string, invocationId = '', overrides: Partial<RuntimeTranscriptSlice> = {}): RuntimeTranscriptSlice {
   return {
     runId: 'run-1',
     turnId,
+    invocationId,
     status: 'running',
     operation: null,
     streaming: true,
@@ -52,44 +53,58 @@ function sliceFor(turnId: string, overrides: Partial<RuntimeTranscriptSlice> = {
   }
 }
 
-// Adversarial ordering at the race seam: run_accepted (bindRuntimeTurn) and
-// projection frames (applyRuntimeTranscript) carry no ordering guarantee, so
-// every interleaving is exercised deterministically with fake timers instead
-// of being left to production probability.
-describe('chat transcript race seam', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('buffers a projection frame that outruns its acceptance, then merges on bind', () => {
+// Identity matching at the projection seam. Projection frames echo the
+// originating send's invocation_id, so every run_accepted × frame
+// interleaving resolves by reading the frame — there is no timing window
+// and nothing to guess. These tests enumerate the interleavings.
+describe('chat transcript projection identity', () => {
+  it('binds the optimistic pair by invocation when the frame outruns the acceptance', () => {
     const { transcript } = makeTranscript()
     const { userTurn, assistantTurn } = appendUnboundOptimisticPair(transcript)
 
-    transcript.applyRuntimeTranscript(sliceFor('turn-1'))
-    // Buffered: no third turn may appear before the acceptance names the turn.
+    transcript.applyRuntimeTranscript(sliceFor('turn-1', 'invocation-1'))
+
+    // The pair is bound and merged in place: no twin, render identity kept.
     expect(transcript.messages).toHaveLength(2)
-
-    transcript.bindRuntimeTurn('invocation-1', 'turn-1', 'run-1')
-
-    expect(transcript.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
     expect(transcript.messages.every(turn => turn.turnId === 'turn-1')).toBe(true)
-    // The optimistic pair keeps its render identity through the merge.
     expect(transcript.messages[0]?.id).toBe(userTurn.id)
     expect(transcript.messages[1]?.id).toBe(assistantTurn.id)
   })
 
-  it('flushes standalone after the grace window when no local send claims the frame', () => {
+  it('merges into the pair bound by an earlier acceptance', () => {
+    const { transcript } = makeTranscript()
+    const { userTurn, assistantTurn } = appendUnboundOptimisticPair(transcript)
+
+    transcript.bindRuntimeTurn('invocation-1', 'turn-1', 'run-1')
+    transcript.applyRuntimeTranscript(sliceFor('turn-1', 'invocation-1'))
+
+    expect(transcript.messages).toHaveLength(2)
+    expect(transcript.messages[0]?.id).toBe(userTurn.id)
+    expect(transcript.messages[1]?.id).toBe(assistantTurn.id)
+  })
+
+  it('merges when the acceptance pre-stamped the assistant before the frame arrived', () => {
+    const { transcript } = makeTranscript()
+    const { userTurn, assistantTurn } = appendUnboundOptimisticPair(transcript)
+    // bindRunId stamps the turnId onto the invocation's assistant turn inside
+    // the run_accepted handler, before any frame processing; the later frame
+    // must still merge into the pair, not treat it as a foreign owner.
+    assistantTurn.turnId = 'turn-1'
+
+    transcript.applyRuntimeTranscript(sliceFor('turn-1', 'invocation-1'))
+
+    expect(transcript.messages).toHaveLength(2)
+    expect(transcript.messages[0]?.id).toBe(userTurn.id)
+    expect(transcript.messages[1]?.id).toBe(assistantTurn.id)
+  })
+
+  it('lands a foreign run standalone without waiting for any acceptance', () => {
     const { transcript } = makeTranscript()
     appendUnboundOptimisticPair(transcript)
 
-    // A run from another device (turn-9) races our unbound local send.
-    transcript.applyRuntimeTranscript(sliceFor('turn-9'))
-    expect(transcript.messages).toHaveLength(2)
-
-    vi.advanceTimersByTime(800)
+    // A frame naming an invocation this screen does not know is a run from
+    // another device: it renders immediately, no grace delay.
+    transcript.applyRuntimeTranscript(sliceFor('turn-9', 'someone-elses-invocation'))
 
     expect(transcript.messages).toHaveLength(4)
     expect(transcript.messages.slice(2).every(turn => turn.turnId === 'turn-9')).toBe(true)
@@ -98,88 +113,72 @@ describe('chat transcript race seam', () => {
     expect(transcript.messages[1]?.turnId ?? '').toBe('')
   })
 
-  it('adopts the standalone twin when the acceptance arrives after the flush', () => {
+  it('treats the acceptance as a no-op once the frame already bound the pair', () => {
     const { transcript } = makeTranscript()
-    appendUnboundOptimisticPair(transcript)
+    const { userTurn, assistantTurn } = appendUnboundOptimisticPair(transcript)
 
-    transcript.applyRuntimeTranscript(sliceFor('turn-1'))
-    vi.advanceTimersByTime(800)
-    // Grace elapsed before the acceptance: the projection twin is on screen
-    // under turn-1's own render identity.
-    expect(transcript.messages).toHaveLength(4)
-
-    transcript.bindRuntimeTurn('invocation-1', 'turn-1', 'run-1')
-
-    // The late acceptance must not create a second pair for the same turn.
-    expect(transcript.messages).toHaveLength(2)
-    expect(transcript.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
-    expect(transcript.messages.every(turn => turn.turnId === 'turn-1')).toBe(true)
-  })
-
-  it('retires the pre-stamped assistant turn when adopting the standalone twin', () => {
-    const { transcript } = makeTranscript()
-    const { assistantTurn } = appendUnboundOptimisticPair(transcript)
-
-    transcript.applyRuntimeTranscript(sliceFor('turn-1'))
-    vi.advanceTimersByTime(800)
-    expect(transcript.messages).toHaveLength(4)
-
-    // In the real run_accepted flow bindRunId stamps the turnId onto the
-    // invocation's assistant turn before bindRuntimeTurn runs. Adoption must
-    // ignore that own turn when spotting the twin, and must retire it too —
-    // otherwise it survives as a third message next to the twin pair.
-    assistantTurn.turnId = 'turn-1'
+    transcript.applyRuntimeTranscript(sliceFor('turn-1', 'invocation-1'))
     transcript.bindRuntimeTurn('invocation-1', 'turn-1', 'run-1')
 
     expect(transcript.messages).toHaveLength(2)
-    expect(transcript.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
-    expect(transcript.messages.every(turn => turn.role === 'system' || turn.invocationId !== 'invocation-1')).toBe(true)
+    expect(transcript.messages[0]?.id).toBe(userTurn.id)
+    expect(transcript.messages[1]?.id).toBe(assistantTurn.id)
   })
 
-  it('resets the grace timer when a fresher frame arrives for the same turn', () => {
+  it('retires the invocation leftovers when its binding arrives after the turn settled', () => {
     const { transcript } = makeTranscript()
     appendUnboundOptimisticPair(transcript)
 
-    transcript.applyRuntimeTranscript(sliceFor('turn-1', {
-      turns: [rawAssistant('runtime-assistant', [{ id: 0, type: 'text', content: 'first' }])],
-    }))
-    vi.advanceTimersByTime(500)
-    transcript.applyRuntimeTranscript(sliceFor('turn-1', {
-      turns: [rawAssistant('runtime-assistant', [{ id: 0, type: 'text', content: 'fresher' }])],
-    }))
-    // 1000ms since the first frame, but only 500ms since the freshest.
-    vi.advanceTimersByTime(500)
-    expect(transcript.messages).toHaveLength(2)
+    // The acceptance was lost and the turn already settled from history:
+    // turn-1's seat is owned by an identity that is not invocation-1. A late
+    // (duplicate) acceptance must not put a second pair on screen.
+    const settledUser = { ...rawUser('server-user', 'hello first'), turn_id: 'turn-1' }
+    const settledAssistant = { ...rawAssistant('server-assistant'), turn_id: 'turn-1' }
+    transcript.replaceMessages([settledUser, settledAssistant], 'session-1')
 
     transcript.bindRuntimeTurn('invocation-1', 'turn-1', 'run-1')
-    expect(transcript.messages).toHaveLength(2)
-    const assistant = transcript.messages[1]
-    expect(assistant?.role === 'assistant' && assistant.messages[0]).toMatchObject({ content: 'fresher' })
+
+    const nonSystem = transcript.messages.filter(turn => turn.role !== 'system')
+    expect(nonSystem).toHaveLength(2)
+    expect(nonSystem.every(turn => turn.turnId === 'turn-1')).toBe(true)
+    expect(nonSystem.every(turn => turn.invocationId !== 'invocation-1')).toBe(true)
   })
 
-  it('never buffers retry/edit operation frames', () => {
+  it('signals a history resync for an operation frame whose turn is unknown', () => {
     const { transcript } = makeTranscript()
     appendUnboundOptimisticPair(transcript)
 
-    const applied = transcript.applyRuntimeTranscript(sliceFor('turn-9', {
+    const applied = transcript.applyRuntimeTranscript(sliceFor('turn-9', '', {
       operation: { kind: 'retry', replace_from_message_id: 'runtime-user' },
     }))
 
     // An operation frame whose turn the screen does not know can neither apply
-    // nor buffer: the controller signals a history resync instead.
+    // nor be claimed: the controller signals a history resync instead.
     expect(applied).toBe(false)
-    expect(transcript.messages).toHaveLength(2)
-    vi.advanceTimersByTime(800)
     expect(transcript.messages).toHaveLength(2)
   })
 
-  it('self-heals to the settled page after an out-of-grace acceptance', async () => {
+  it('applies a foreign edit in place when its anchor is on screen', () => {
+    const { transcript } = makeTranscript()
+    // Settled history pair the foreign edit can anchor to.
+    transcript.replaceMessages([rawUser('u1', 'original'), rawAssistant('a1')], 'session-1')
+
+    const applied = transcript.applyRuntimeTranscript(sliceFor('turn-9', 'someone-elses-invocation', {
+      operation: { kind: 'edit', replace_from_message_id: 'u1' },
+      turns: [rawUser('runtime-user', 'edited elsewhere'), rawAssistant('runtime-assistant')],
+    }))
+
+    expect(applied).toBe(true)
+    expect(transcript.messages).toHaveLength(2)
+    expect(transcript.messages.every(turn => turn.turnId === 'turn-9')).toBe(true)
+    expect(transcript.messages[0]).toMatchObject({ role: 'user', text: 'edited elsewhere' })
+  })
+
+  it('self-heals to the settled page after a frame-first flow', () => {
     const { transcript } = makeTranscript()
     appendUnboundOptimisticPair(transcript)
 
-    transcript.applyRuntimeTranscript(sliceFor('turn-1'))
-    vi.advanceTimersByTime(800)
-    transcript.bindRuntimeTurn('invocation-1', 'turn-1', 'run-1')
+    transcript.applyRuntimeTranscript(sliceFor('turn-1', 'invocation-1'))
     expect(transcript.messages).toHaveLength(2)
 
     const settledUser = { ...rawUser('server-user', 'hello first'), turn_id: 'turn-1' }

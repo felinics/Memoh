@@ -299,10 +299,12 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     const previousRun = change.previous.currentRunView
     const currentRun = change.current.currentRunView
     const currentInvocationId = currentRun
-      ? deps.assistantStreams.invocationIdForEvent({
+      // The frame's own echo is authoritative; the run_id registry lookup only
+      // covers frames from before the echo existed (pre-ledger runs).
+      ? (currentRun.invocation_id?.trim() || deps.assistantStreams.invocationIdForEvent({
           run_id: currentRun.run_id,
           session_id: sessionId,
-        })
+        }))
       : ''
     const currentPending = currentInvocationId
       ? deps.assistantStreams.getAssistantStream(currentInvocationId)

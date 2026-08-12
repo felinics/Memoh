@@ -106,3 +106,10 @@
 ## 实施补记二（2026-08-10，对抗测试轮）
 
 4. **R1 慢接受窗口：绑定改为收养。** 新增的对抗时序测试（`apps/web/src/store/chat/transcript-race.test.ts`，fake timers 逐一枚举 run_accepted 与投影帧的交错）实证了一处方案未预演的边界：standalone flush 之后迟到的 run_accepted 若仍绑定乐观轮，同一 turnId 会在屏上出现两对。修复为 `bindRuntimeTurn` 发现屏上已有非本 invocation 的轮携带该 turnId 时，收养 standalone 孪生、退役本 invocation 全部轮次。两个非显而易见的约束，均由测试抓到现行：`bindRunId` 在 `bindRuntimeTurn` 之前已把 turnId 打到本 invocation 的 assistant 轮上（run_accepted 处理序），所以收养判定必须排除本 invocation 的轮——否则每次正常接受都误触发，编辑/重试失败的尾部恢复会因锚点对象被退役而失灵（chat-list 既有用例捕获）；退役也必须包含那轮已打标记的 assistant，否则它作为第三条消息残留在孪生对旁。
+
+## 实施补记三(2026-08-11,除根第一刀)
+
+5. **直播帧身份穿线落地,猜测机制删除。** `CurrentRunView` 现在携带 `invocation_id`(受理 → 引擎 → 帧全链路;数据本就在 `session_runs`,此前在 `startRun` 构造 view 时丢掉)。前端投影帧按 `invocation_id` 精确匹配本地乐观轮:认识即原地绑定合并,不认识即外来轮直接落屏——`runtime-slice-buffer.ts`(750ms 启发式窗口)与迟绑定收养分支随之删除。此前靠窗口兜底的三条残留边界(接受帧丢失、收养重挂、重试/编辑帧无小名)一并消亡。
+6. **locate 窗口查询补返回 `turn_position`(Codex P2)。** 跳转定位并入的轮此前缺权威序号、排序回退时间戳;至此 `turn_position` 在历史读路径完整。
+
+远期挂账不变(message 级诞生发 UUID、删 MAX+1 现场编号),管道即本次穿线这条;直播帧带 `turn_position` 同理,字段已在 `session_runs`,一行之遥,待有消费方时再加。

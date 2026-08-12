@@ -167,7 +167,15 @@ type CurrentRunView struct {
 	// It is part of the observable view because SR-OBS-003 requires every
 	// subscriber to agree on the run's turn, and a subscriber that only learns
 	// the run id cannot line the run up against persisted history.
-	TurnID              string               `json:"turn_id" validate:"required" format:"uuid"`
+	TurnID string `json:"turn_id" validate:"required" format:"uuid"`
+	// InvocationID is the caller-supplied intent identity recorded at admission
+	// (session_runs.invocation_id). It rides the live view so the client that
+	// originated the send can match projection frames to its optimistic turn by
+	// reading the frame, instead of inferring the pairing from arrival timing
+	// while waiting for the acceptance that names the two. Subscribers that did
+	// not originate the run see an id unknown to them and treat the turn as
+	// foreign — which is the correct standalone rendering for cross-device runs.
+	InvocationID        string               `json:"invocation_id,omitempty"`
 	Generation          string               `json:"generation"`
 	Status              string               `json:"status"`
 	OwnerID             string               `json:"owner_id,omitempty"`

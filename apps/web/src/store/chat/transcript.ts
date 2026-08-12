@@ -19,7 +19,6 @@ import type {
   ToolCallBlock,
 } from './types'
 import type { RuntimeTranscriptSlice } from './runtime-projection'
-import { createRuntimeSliceBuffer } from './runtime-slice-buffer'
 import { createTranscriptHistory } from './transcript-history'
 import { createTranscriptDecisions } from './transcript-decisions'
 import { createTranscriptQueries } from './transcript-queries'
@@ -124,7 +123,6 @@ export function createTranscriptController({
     loadingMessagesVersion += 1
     loadingOlderVersion += 1
     refreshPromise = null
-    runtimeSliceBuffer.clear()
     replaceMessages([], undefined, { preserveLive: false })
     hasMoreOlder.value = options.hasMoreOlder === true
     hasLoadedOlder.value = false
@@ -137,7 +135,6 @@ export function createTranscriptController({
     loadingMessagesVersion += 1
     loadingOlderVersion += 1
     refreshPromise = null
-    runtimeSliceBuffer.clear()
     hasLoadedOlder.value = false
     loadingMessages.value = false
     loadingOlder.value = false
@@ -152,7 +149,6 @@ export function createTranscriptController({
     historyGeneration += 1
     loadingOlderVersion += 1
     refreshPromise = null
-    runtimeSliceBuffer.clear()
     replaceMessages(items, targetSessionId, { preserveLive: false })
     hasMoreOlder.value = true
     hasLoadedOlder.value = false
@@ -447,15 +443,14 @@ export function createTranscriptController({
     const turn = turnId.trim()
     const run = runId.trim()
     if (!invocation || !turn || !run) return
-    // Late acceptance: the projection twin already flushed standalone and owns
-    // this turnId's render identity. Binding the optimistic pair now would put
-    // two pairs of the same turn on screen, so the twin is adopted and every
-    // turn of this invocation is retired instead. The guard must ignore the
-    // invocation's own turns: bindRunId stamps this turnId onto the
-    // invocation's assistant turn before bindRuntimeTurn runs (run_accepted
-    // handler order), so counting it would fire on every normal acceptance —
-    // and for the same reason the retirement must include that pre-stamped
-    // assistant turn, or it survives as a third message next to the twin pair.
+    // The screen already knows this turn under a render identity that is not
+    // this invocation's — it settled from history or arrived from another
+    // device before this binding showed up. Binding the invocation's leftover
+    // turns now would duplicate the turn, so they are retired and the existing
+    // identity keeps the seat. The guard must exclude the invocation's own
+    // turns: bindRunId stamps this turnId onto the invocation's assistant turn
+    // before this runs (run_accepted handler order), so counting it would fire
+    // on every normal acceptance.
     if (messages.some(message => message.role !== 'system' && message.turnId === turn && message.invocationId !== invocation)) {
       messages.splice(0, messages.length, ...messages.filter(message => message.role === 'system' || message.invocationId !== invocation))
       return
@@ -465,9 +460,6 @@ export function createTranscriptController({
       message.turnId = turn
       message.runtimeRunId = run
     }
-    // The acceptance names the turn; any projection frame buffered ahead of
-    // it can now merge into the just-bound optimistic turns.
-    runtimeSliceBuffer.flush(turn)
   }
 
   function runtimeMessage(
@@ -481,26 +473,15 @@ export function createTranscriptController({
     return normalized
   }
 
-  // Buffers projection frames that arrive before their run_accepted; see
-  // runtime-slice-buffer.ts for the race this guards.
-  const runtimeSliceBuffer = createRuntimeSliceBuffer({
-    hasUnboundOptimisticTurn: () => messages.some(turn =>
-      turn.role !== 'system'
-      && turn.__optimistic === true
-      && !(turn.turnId?.trim()),
-    ),
-    hasTurnWithId: turnId => messages.some(turn =>
-      turn.role !== 'system' && turn.turnId === turnId,
-    ),
-    applyStandalone: slice => applyRuntimeTranscript(slice, { forceStandalone: true }),
-  })
-
   function applyRuntimeTranscript(
     slice: RuntimeTranscriptSlice,
-    options?: { forceStandalone?: boolean },
   ): boolean {
     if (!slice.turnId || slice.turns.length === 0) return true
-    if (!options?.forceStandalone && runtimeSliceBuffer.maybeBuffer(slice)) return true
+    // A frame that names its originating invocation IS the live twin of that
+    // local send: bind the optimistic pair before merging so the merge below
+    // finds it by turnId. The frame itself is the pairing — correct no matter
+    // how it interleaves with run_accepted, with no grace window to guess in.
+    if (slice.invocationId) bindRuntimeTurn(slice.invocationId, slice.turnId, slice.runId)
     const incoming = slice.turns
       .map(normalizeTurn)
       .filter((turn): turn is ChatUserTurn | ChatAssistantTurn => turn.role !== 'system')

@@ -386,6 +386,9 @@ export interface RuntimeRunOperation {
 export interface RuntimeCurrentRunView {
   run_id: string
   turn_id: string
+  // The originating send's client-issued id, echoed so live frames can be
+  // matched to the local optimistic turn by reading, not by timing inference.
+  invocation_id?: string
   generation: string
   status: RuntimeRunStatus
   owner_id?: string
