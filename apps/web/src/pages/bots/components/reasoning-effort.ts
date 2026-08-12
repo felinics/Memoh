@@ -5,13 +5,16 @@ export const REASONING_EFFORT_DISABLE = 'disable'
 // it is a thinking mode handled server-side. The constant is
 // kept so previously-stored values still render gracefully.
 export const REASONING_EFFORT_ADAPTIVE = 'adaptive'
+// How off was spelled before the two tokens were unified, and still OpenAI's wire
+// word for it. Stored values may carry it, so it has to render and reconcile as
+// off — naming it keeps that intent visible wherever it appears.
+export const REASONING_EFFORT_LEGACY_OFF = 'none'
 
 export const EFFORT_LABELS: Record<string, string> = {
   [REASONING_EFFORT_DISABLE]: 'chat.reasoningOff',
   [REASONING_EFFORT_ADAPTIVE]: 'chat.reasoningAdaptive',
-  // Legacy spelling of off, kept so values stored before the two tokens were
-  // unified still render — under the same label, not a second one.
-  none: 'chat.reasoningOff',
+  // Under the same label as off, not a second one.
+  [REASONING_EFFORT_LEGACY_OFF]: 'chat.reasoningOff',
   minimal: 'chat.reasoningMinimal',
   low: 'chat.reasoningLow',
   medium: 'chat.reasoningMedium',
@@ -23,7 +26,7 @@ export const EFFORT_LABELS: Record<string, string> = {
 export const EFFORT_OPACITY: Record<string, number> = {
   [REASONING_EFFORT_DISABLE]: 0.1,
   [REASONING_EFFORT_ADAPTIVE]: 0.25,
-  none: 0.1,
+  [REASONING_EFFORT_LEGACY_OFF]: 0.1,
   minimal: 0.25,
   low: 0.4,
   medium: 0.6,
@@ -59,7 +62,7 @@ export function reconcileStoredEffort(stored: string, options?: ReasoningOptions
   const fallback = options.default_effort ?? ''
   // Both spellings of off are honoured: rows written before the two tokens were
   // unified still say "none", and they describe the same state.
-  if (stored === REASONING_EFFORT_DISABLE || stored === 'none') {
+  if (stored === REASONING_EFFORT_DISABLE || stored === REASONING_EFFORT_LEGACY_OFF) {
     return options.can_disable ? REASONING_EFFORT_DISABLE : fallback
   }
   return (options.efforts ?? []).includes(stored) ? stored : fallback
