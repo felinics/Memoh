@@ -115,12 +115,6 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
     meta: { breadcrumb: i18nRef('sidebar.profile') }
   },
   {
-    name: 'platform',
-    path: '/settings/platform',
-    loader: () => import('@memohai/web/pages/platform/index.vue'),
-    meta: { breadcrumb: i18nRef('sidebar.platform') }
-  },
-  {
     path: '/settings/supermarket',
     meta: { breadcrumb: i18nRef('sidebar.supermarket') },
     children: [

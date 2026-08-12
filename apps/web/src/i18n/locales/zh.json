@@ -212,7 +212,6 @@
     "profile": "个人资料",
     "home": "首页",
     "mcp": "MCP",
-    "platform": "接入渠道",
     "usage": "用量统计",
     "people": "成员",
     "appearance": "外观定制",
@@ -3292,18 +3291,6 @@
       "fieldRequired": "请输入{field}",
       "fieldInvalid": "{field}格式不正确"
     }
-  },
-  "platform": {
-    "addTitle": "添加平台",
-    "addDescription": "添加新的接入平台。",
-    "name": "名称",
-    "namePlaceholder": "输入平台名称",
-    "nameRequired": "请输入名称",
-    "config": "配置",
-    "configPlaceholder": "输入配置 (键:值)",
-    "active": "启用",
-    "platformLabel": "平台",
-    "running": "运行中"
   },
   "languages": {
     "auto": "自动"

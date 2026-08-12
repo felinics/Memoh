@@ -212,7 +212,6 @@
     "profile": "Profile",
     "home": "Home",
     "mcp": "MCP",
-    "platform": "Platform",
     "usage": "Usage",
     "people": "Members",
     "appearance": "Appearance",
@@ -3292,18 +3291,6 @@
       "fieldRequired": "{field} is required",
       "fieldInvalid": "{field} is invalid"
     }
-  },
-  "platform": {
-    "addTitle": "Add Platform",
-    "addDescription": "Add a new platform connection.",
-    "name": "Name",
-    "namePlaceholder": "Enter platform name",
-    "nameRequired": "Name is required",
-    "config": "Configuration",
-    "configPlaceholder": "Enter config (key:value)",
-    "active": "Active",
-    "platformLabel": "Platform",
-    "running": "Running"
   },
   "languages": {
     "auto": "Auto"

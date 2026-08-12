@@ -213,14 +213,6 @@ const routes = [
         },
       },
       {
-        name: 'platform',
-        path: 'platform',
-        component: () => import('@/pages/platform/index.vue'),
-        meta: {
-          breadcrumb: i18nRef('sidebar.platform'),
-        },
-      },
-      {
         path: 'supermarket',
         component: { render: () => h(RouterView) },
         meta: {
