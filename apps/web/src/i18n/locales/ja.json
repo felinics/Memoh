@@ -526,6 +526,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "selectSession": "セッションを選択",
     "welcome": {
       "folder": "{name} で何をしましょうか？"
     },

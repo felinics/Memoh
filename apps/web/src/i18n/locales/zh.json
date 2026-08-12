@@ -529,6 +529,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "selectSession": "选择会话",
     "welcome": {
       "folder": "要在 {name} 里做点什么？",
       "g1": "我们从哪里开始？",

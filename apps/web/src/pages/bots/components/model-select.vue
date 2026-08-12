@@ -34,6 +34,7 @@
           :open="open"
           :none-label="noneLabel"
           :show-reasoning="showReasoning"
+          :reasoning-options="reasoningOptions"
         />
       </div>
     </PopoverContent>
@@ -56,6 +57,14 @@ const props = defineProps<{
   placeholder?: string
   noneLabel?: string
   showReasoning?: boolean
+  // Runtime-supplied tiers, forwarded to ModelOptions. Callers whose efforts do
+  // not come from the model's own capabilities (ACP agents report their own)
+  // pass them here instead of letting the menu derive them.
+  reasoningOptions?: Array<{
+    value: string
+    label: string
+    description?: string
+  }>
 }>()
 
 const selected = defineModel<string>({ default: '' })
@@ -83,6 +92,10 @@ const displayLabel = computed(() => {
   if (!props.showReasoning || !modelLabel.value) return modelLabel.value
   const effort = reasoningEffort.value
   if (!effort || effort === REASONING_EFFORT_DISABLE) return modelLabel.value
+  if (props.reasoningOptions) {
+    const option = props.reasoningOptions.find(o => o.value === effort)
+    return option ? `${modelLabel.value} · ${option.label}` : modelLabel.value
+  }
   const key = EFFORT_LABELS[effort]
   return `${modelLabel.value} · ${key ? t(key) : effort}`
 })

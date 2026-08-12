@@ -529,6 +529,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "selectSession": "Select a session",
     "welcome": {
       "folder": "What can I do in {name}?",
       "g1": "Where should we begin?",
