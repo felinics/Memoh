@@ -1966,6 +1966,7 @@ func toMessageFromLocateWindowByExternalIDBySessionRow(row sqlc.LocateMessagesWi
 		row.CreatedAt,
 	)
 	message.TurnID = uuidString(row.TurnID)
+	message.TurnPosition = int8Ptr(row.TurnPosition)
 	return message
 }
 

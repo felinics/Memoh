@@ -2106,6 +2106,7 @@ SELECT
   m.content,
   m.metadata,
   m.turn_id,
+  m.turn_position,
   m.usage,
   m.session_mode,
   m.runtime_type,

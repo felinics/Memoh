@@ -5053,6 +5053,7 @@ SELECT
   m.content,
   m.metadata,
   m.turn_id,
+  m.turn_position,
   m.usage,
   m.session_mode,
   m.runtime_type,
@@ -5093,6 +5094,7 @@ type LocateMessagesWindowByExternalIDBySessionRow struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	Usage                   []byte             `json:"usage"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
@@ -5132,6 +5134,7 @@ func (q *Queries) LocateMessagesWindowByExternalIDBySession(ctx context.Context,
 			&i.Content,
 			&i.Metadata,
 			&i.TurnID,
+			&i.TurnPosition,
 			&i.Usage,
 			&i.SessionMode,
 			&i.RuntimeType,
