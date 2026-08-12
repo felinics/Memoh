@@ -106,6 +106,9 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			case acceptsEffort(level, opts):
 				req.ReasoningEffort = &level
 			default:
+				// Name the levels rather than pointing at a list that may not be on
+				// screen: a typed `set <level>` has no picker above it, and the
+				// levels differ per model, so the message has to carry them.
 				return &Result{Text: cc.T("cmd.reasoning.unknownLevel", map[string]any{
 					"level":  fmt.Sprintf("%q", cc.Args[0]),
 					"levels": strings.Join(choices, ", "),
