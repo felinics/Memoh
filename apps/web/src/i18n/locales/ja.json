@@ -90,6 +90,23 @@
     "show": "表示",
     "saveChanges": "変更を保存"
   },
+  "computerAccess": {
+    "nativeAlwaysOn": "この Bot では常に利用できます",
+    "emptyBots": "Bot がまだありません。",
+    "emptyComputers": "接続済みのコンピューターがありません。",
+    "connectCta": "コンピューターを接続",
+    "updateFailed": "アクセス権を更新できませんでした",
+    "done": "完了",
+    "subtitleRuntime": "どの Bot がこれを使えますか？",
+    "subtitleBot": "これはどのコンピューターを使えますか？"
+  },
+  "computerConnect": {
+    "title": "コンピューターを接続",
+    "commandLabel": "接続コマンド",
+    "commandDescription": "接続したいコンピューターで実行し、起動したままにしてください。",
+    "waiting": "コンピューターの接続を待っています…",
+    "finish": "完了"
+  },
   "errors": {
     "bot": {
       "name_taken": "この名前はすでに使用されています。"
@@ -243,7 +260,6 @@
     "title": "コンピューター",
     "connect": "コンピューターを接続",
     "connectOther": "別のコンピューターを接続",
-    "computers": "接続済みのコンピューター",
     "otherComputers": "その他のコンピューター",
     "loadingComputers": "コンピューターを読み込んでいます...",
     "loadFailed": "コンピューターを読み込めませんでした",
@@ -253,8 +269,6 @@
     "emptyDescription": "接続コマンドを作成し、Memoh で使用するコンピューター上で実行してください。",
     "emptyOtherTitle": "他のコンピューターは接続されていません",
     "emptyOtherDescription": "Bot で別の端末を使う場合は、もう一台接続してください。",
-    "waitingForConnection": "接続コマンドの実行待ち",
-    "connected": "利用可能",
     "copyCommand": "接続コマンドをコピー",
     "revoke": "接続を解除",
     "revokeTitle": "このコンピューターの接続を解除しますか?",
@@ -294,20 +308,17 @@
       }
     },
     "connectDialog": {
-      "title": "コンピューターを接続",
-      "description": "識別しやすい接続名を付けてください。",
       "name": "コンピューター名",
       "nameHelp": "場所や用途に合わせて、たとえば「Office Mac」のように指定できます。",
       "namePlaceholder": "Office Mac",
       "nameRequired": "コンピューター名を入力してください",
-      "create": "コマンドを作成",
-      "createFailed": "接続を作成できませんでした",
-      "runTitle": "このコマンドを実行してください",
-      "runDescription": "Memoh で使用するコンピューター上で実行し、プロセスを起動したままにしてください。",
-      "command": "接続コマンド",
-      "keyOnce": "コマンドには非公開の接続キーが含まれます。コンピューターの接続を解除すると、キーは直ちに使用できなくなります。",
-      "done": "完了"
-    }
+      "createFailed": "接続を作成できませんでした"
+    },
+    "botAccess": "{count}/{total} の Bot",
+    "noBotAccess": "Bot なし",
+    "manageAccess": "Bot のアクセス権を管理",
+    "revokeAccessWarning": "あわせて {count} 件の Bot のアクセス権も解除されます。",
+    "computerOnline": "{name} がオンラインになりました"
   },
   "breadcrumb": {
     "main": "ホーム"
@@ -584,14 +595,27 @@
     "inputPlaceholder": "質問を入力してください…",
     "readonlyHint": "このチャットは読み取り専用です",
     "readonlyPlaceholder": "このチャットは読み取り専用です。メッセージの送信は無効になっています。",
-    "composerActions": "ファイルの追加、エージェントの切り替え、またはコンピューターの選択",
+    "composerActions": "ファイルの追加またはエージェントの切り替え",
+    "voiceInput": {
+      "start": "音声入力を開始",
+      "stop": "録音を停止",
+      "transcribing": "文字起こし中…",
+      "notConfigured": "先に文字起こしモデルを選択してください。",
+      "unsupported": "このブラウザは音声入力に対応していません。",
+      "permissionDenied": "マイクへのアクセスが拒否されました。",
+      "empty": "音声を認識できませんでした。",
+      "failed": "音声入力に失敗しました。"
+    },
     "agent": "エージェント",
-    "computers": "コンピューター",
-    "computerDefault": "デフォルト",
-    "computerDefaultStatus": "デフォルト · {status}",
+    "continueOn": {
+      "label": "続行先",
+      "addComputer": "コンピューターを追加…",
+      "manageAccess": "アクセス権を管理…",
+      "manageComputers": "コンピューターを管理",
+      "noAccess": "この Bot にはコンピューターのアクセス権がありません"
+    },
     "computerLoading": "コンピューターを読み込み中...",
     "computerLoadFailed": "コンピューターを読み込めませんでした",
-    "computerNone": "利用できるコンピューターがありません",
     "computerUnavailable": "利用できないコンピューター",
     "folder": "フォルダ",
     "folders": "フォルダ",
@@ -678,7 +702,7 @@
       "edit": "編集",
       "apply_patch": "パッチ",
       "list": "リスト",
-      "list_execution_locations": "コンピューターと Server Workspace を確認",
+      "list_execution_locations": "利用可能なコンピューターを確認",
       "exec": "実行",
       "bg_status": "背景",
       "list_background": "バックグラウンドタスクをリストする",
@@ -2063,7 +2087,7 @@
       "archiveDescription": "「{name}」内のセッションは元のディレクトリで動き続けます。新しいセッションは追加できなくなります。",
       "archiveFailed": "フォルダのアーカイブに失敗しました",
       "rowActions": "{name} の操作",
-      "targetNative": "サーバー Workspace",
+      "targetNative": "クラウドコンピューター",
       "targetRemote": "接続済みのコンピューター",
       "form": {
         "name": "名前",
@@ -2085,31 +2109,20 @@
       "loading": "使用場所を読み込んでいます...",
       "loadFailed": "使用場所を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
-      "addComputer": "コンピューターを追加",
       "primary": "既定の場所",
-      "primaryDescription": "別の場所を選ばない限り、ファイルとコマンドはここで実行されます。オフラインでも自動的に別の場所へ切り替わりません。",
+      "primaryDescription": "別の場所を選ばない限り、ファイルとコマンドはここで実行されます。",
       "primarySaveFailed": "既定の場所を変更できませんでした",
       "defaultBadge": "既定",
-      "nativeWorkspace": "Server Workspace",
-      "serverDescription": "Server 上にあるこの Bot の既存 Workspace です。",
+      "nativeWorkspace": "クラウドコンピューター",
+      "serverDescription": "この Bot の組み込み Workspace（Memoh がホスト）。",
       "thisComputerOff": "このコンピューターを使う",
-      "thisComputerOffDescription": "先に「コンピューター」で使用を許可し、その後ここで追加します。",
+      "thisComputerOffDescription": "先に「コンピューター」ページでこのコンピューターを許可し、ここでアクセスを有効にしてください。",
       "openComputerSettings": "コンピューター設定を開く",
-      "computer": "コンピューター",
-      "computerDescription": "「コンピューター」で使用可能にしたコンピューターから選びます。",
-      "selectComputer": "コンピューターを選択",
-      "noAvailableComputers": "追加できるコンピューターがありません。先に「コンピューター」で接続または使用を許可してください。",
       "unknownComputer": "利用できないコンピューター",
-      "addTitle": "この Bot にコンピューターを追加",
-      "mountDescription": "この Bot がファイル操作とコマンド実行に使用できるコンピューターを選びます。",
-      "addSuccess": "Bot にコンピューターを追加しました",
-      "saveFailed": "コンピューターを保存できませんでした",
-      "removeFromBot": "Bot から削除",
-      "deleteTitle": "この Bot からコンピューターを削除しますか?",
-      "deleteDescription": "{name} をこの Bot から削除します。コンピューター上のファイルは削除されません。",
-      "deletePrimaryDescription": "{name} は既定の場所です。削除すると Server Workspace が既定の場所になります。コンピューター上のファイルは削除されません。",
-      "deleteSuccess": "Bot からコンピューターを削除しました",
-      "deleteFailed": "この Bot からコンピューターを削除できませんでした"
+      "noComputers": "利用できるコンピューターがありません",
+      "manageComputers": "コンピューターを管理",
+      "connectManage": "コンピューターの接続・切断",
+      "connectManageDescription": "すべてのコンピューターは「コンピューター」ページで管理します。"
     },
     "desktop": {
       "title": "Desktop環境",

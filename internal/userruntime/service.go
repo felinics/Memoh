@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/memohai/memoh/internal/db"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
@@ -39,13 +40,25 @@ func NewService(store dbstore.UserRuntimeStore, hub *Hub) *Service {
 	}
 }
 
+// DefaultRuntimeName is the placeholder assigned at credential creation when
+// the caller does not pick a name. It is derived from the credential key (not
+// user input), so the first handshake can safely replace it with the
+// machine's hostname without ever touching a user-chosen name.
+func DefaultRuntimeName(key string) string {
+	tail := strings.TrimPrefix(key, "mrk_")
+	if len(tail) > 6 {
+		tail = tail[:6]
+	}
+	return "Computer " + tail
+}
+
 func (s *Service) CreateRuntime(ctx context.Context, userID string, req CreateRuntimeRequest) (Runtime, error) {
 	if s == nil || s.store == nil {
 		return Runtime{}, errors.New("user runtime service not configured")
 	}
 	userID = strings.TrimSpace(userID)
 	name := strings.TrimSpace(req.Name)
-	if userID == "" || name == "" {
+	if userID == "" {
 		return Runtime{}, ErrInvalidInput
 	}
 	if len(name) > maxRuntimeNameBytes || strings.ContainsRune(name, '\x00') || !utf8.ValidString(name) {
@@ -54,6 +67,9 @@ func (s *Service) CreateRuntime(ctx context.Context, userID string, req CreateRu
 	key, err := NewKey()
 	if err != nil {
 		return Runtime{}, err
+	}
+	if name == "" {
+		name = DefaultRuntimeName(key)
 	}
 	row, err := s.store.CreateUserRuntime(ctx, dbstore.CreateUserRuntimeInput{
 		UserID: userID, Name: name, APIToken: key,
@@ -78,7 +94,15 @@ func (s *Service) ListRuntimes(ctx context.Context, userID string) ([]Runtime, e
 	}
 	items := make([]Runtime, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, runtimeFromRecord(row, s.connection(row.ID)))
+		runtime := runtimeFromRecord(row, s.connection(row.ID))
+		// A credential that never connected is an unfinished attempt: it holds
+		// no machine and claims no row. It becomes visible the moment its
+		// machine first connects (the handshake backfills a real name), and
+		// stays visible after that even while offline.
+		if !runtime.Online && row.Name == DefaultRuntimeName(row.APIToken) {
+			continue
+		}
+		items = append(items, runtime)
 	}
 	return items, nil
 }
@@ -163,12 +187,47 @@ func (s *Service) ActivateConnection(ctx context.Context, key, runtimeID string,
 		ClientVersion: info.ClientVersion,
 		Capabilities:  append([]string(nil), info.Capabilities...),
 	}
-	return s.hub.registerGuarded(connection, func() error {
+	if err := s.hub.registerGuarded(connection, func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		return guard()
-	})
+	}); err != nil {
+		return err
+	}
+	s.backfillRuntimeName(ctx, row, info.Hostname)
+	return nil
+}
+
+// backfillRuntimeName adopts the connecting machine's hostname as the display
+// name while the runtime still carries its creation default. A name the user
+// chose (or one already backfilled) is left untouched; a hostname that
+// collides with another of the user's computers gets a numeric suffix.
+func (s *Service) backfillRuntimeName(ctx context.Context, row dbstore.UserRuntimeRecord, hostname string) {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return
+	}
+	defaultName := DefaultRuntimeName(row.APIToken)
+	candidate := hostname
+	for attempt := range 10 {
+		if attempt > 0 {
+			candidate = fmt.Sprintf("%s (%d)", hostname, attempt+1)
+		}
+		if len(candidate) > maxRuntimeNameBytes {
+			return
+		}
+		updated, err := s.store.BackfillUserRuntimeName(ctx, row.ID, row.UserID, candidate, defaultName)
+		if err == nil {
+			// Either adopted, or the name no longer defaults (user renamed /
+			// earlier handshake already backfilled) — both are terminal.
+			_ = updated
+			return
+		}
+		if !db.IsUniqueViolation(err) {
+			return
+		}
+	}
 }
 
 func (s *Service) DeactivateConnection(runtimeID string, connection *Connection, reason string) {

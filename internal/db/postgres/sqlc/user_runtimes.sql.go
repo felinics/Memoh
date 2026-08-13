@@ -11,6 +11,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const backfillUserRuntimeName = `-- name: BackfillUserRuntimeName :execrows
+UPDATE user_runtimes
+SET name = $1, updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND user_id = $3
+  AND revoked_at IS NULL
+  AND (name = '' OR name = $4)
+`
+
+type BackfillUserRuntimeNameParams struct {
+	Name        string      `json:"name"`
+	ID          pgtype.UUID `json:"id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	DefaultName string      `json:"default_name"`
+}
+
+// Fills the display name from the connecting machine, but ONLY while the row
+// still carries its creation-time default (or an empty name): a user-chosen
+// name is never overwritten by a later handshake.
+func (q *Queries) BackfillUserRuntimeName(ctx context.Context, arg BackfillUserRuntimeNameParams) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillUserRuntimeName,
+		arg.Name,
+		arg.ID,
+		arg.UserID,
+		arg.DefaultName,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearBotRemoteRuntimePrimary = `-- name: ClearBotRemoteRuntimePrimary :exec
 UPDATE bot_remote_runtime_bindings
 SET is_primary = FALSE,
@@ -103,6 +136,19 @@ func (q *Queries) DeleteBotRemoteRuntimeMount(ctx context.Context, arg DeleteBot
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteBotRemoteRuntimeMountsByRuntime = `-- name: DeleteBotRemoteRuntimeMountsByRuntime :exec
+DELETE FROM bot_remote_runtime_bindings
+WHERE team_id = public.memoh_current_team_id()
+  AND runtime_id = $1
+`
+
+// Revoking a runtime kills every bot mount of it in the same transaction:
+// dead bindings would otherwise linger as ghost rows on every surface.
+func (q *Queries) DeleteBotRemoteRuntimeMountsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteBotRemoteRuntimeMountsByRuntime, runtimeID)
+	return err
 }
 
 const getBotRemoteRuntimeMount = `-- name: GetBotRemoteRuntimeMount :one
@@ -255,6 +301,57 @@ func (q *Queries) GetUserRuntimeByAPIToken(ctx context.Context, apiToken string)
 	return i, err
 }
 
+const listBotRemoteRuntimeGrantsByRuntimeOwner = `-- name: ListBotRemoteRuntimeGrantsByRuntimeOwner :many
+SELECT
+  binding.id,
+  binding.bot_id,
+  binding.runtime_id,
+  binding.is_primary
+FROM bot_remote_runtime_bindings binding
+JOIN bots bot ON bot.id = binding.bot_id AND bot.team_id = public.memoh_current_team_id()
+JOIN user_runtimes runtime ON runtime.id = binding.runtime_id AND runtime.team_id = public.memoh_current_team_id()
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND bot.owner_user_id = $1
+  AND runtime.revoked_at IS NULL
+ORDER BY binding.created_at ASC, binding.id ASC
+`
+
+type ListBotRemoteRuntimeGrantsByRuntimeOwnerRow struct {
+	ID        pgtype.UUID `json:"id"`
+	BotID     pgtype.UUID `json:"bot_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+	IsPrimary bool        `json:"is_primary"`
+}
+
+// Account-level reverse lookup: every live mount held by the owner's bots.
+// A mount can only exist while runtime.user_id = bot.owner_user_id (enforced
+// by CreateOrUpdateBotRemoteRuntimeMount), so scoping by the bot owner covers
+// exactly the grants on the owner's own runtimes.
+func (q *Queries) ListBotRemoteRuntimeGrantsByRuntimeOwner(ctx context.Context, ownerUserID pgtype.UUID) ([]ListBotRemoteRuntimeGrantsByRuntimeOwnerRow, error) {
+	rows, err := q.db.Query(ctx, listBotRemoteRuntimeGrantsByRuntimeOwner, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListBotRemoteRuntimeGrantsByRuntimeOwnerRow
+	for rows.Next() {
+		var i ListBotRemoteRuntimeGrantsByRuntimeOwnerRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.RuntimeID,
+			&i.IsPrimary,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBotRemoteRuntimeMounts = `-- name: ListBotRemoteRuntimeMounts :many
 SELECT
   binding.id,
@@ -277,6 +374,7 @@ JOIN team_members owner_membership
 JOIN users owner ON owner.id = owner_membership.user_id
 WHERE binding.team_id = public.memoh_current_team_id()
   AND binding.bot_id = $1
+  AND runtime.revoked_at IS NULL
 ORDER BY binding.created_at ASC, binding.id ASC
 `
 

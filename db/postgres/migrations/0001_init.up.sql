@@ -300,7 +300,7 @@ CREATE TABLE IF NOT EXISTS bot_remote_runtime_bindings (
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   runtime_id UUID NOT NULL REFERENCES user_runtimes(id) ON DELETE RESTRICT,
   is_primary BOOLEAN NOT NULL DEFAULT false,
-  tool_approval_config JSONB NOT NULL DEFAULT '{"enabled":true,"read":{"mode":"allow","bypass_globs":[],"force_review_globs":[]},"write":{"mode":"ask","bypass_globs":[],"force_review_globs":[]},"exec":{"mode":"ask","bypass_commands":[],"force_review_commands":[]}}'::jsonb,
+  tool_approval_config JSONB NOT NULL DEFAULT '{"enabled":true,"read":{"mode":"allow","bypass_globs":[],"force_review_globs":[]},"write":{"mode":"allow","bypass_globs":[],"force_review_globs":[]},"exec":{"mode":"allow","bypass_commands":[],"force_review_commands":[]}}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (bot_id, runtime_id)

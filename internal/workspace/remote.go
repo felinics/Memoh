@@ -135,6 +135,45 @@ func (s *RemoteWorkspaceService) ListMounts(ctx context.Context, botID string) (
 	return targets, nil
 }
 
+// WorkspaceTargetGrant is one entry of the account-level ACL view: bot BotID
+// may use the owner's runtime RuntimeID, addressable as mount TargetID.
+type WorkspaceTargetGrant struct {
+	TargetID  string `json:"target_id"`
+	BotID     string `json:"bot_id"`
+	RuntimeID string `json:"runtime_id"`
+	Primary   bool   `json:"primary"`
+}
+
+type WorkspaceTargetGrantsResponse struct {
+	Grants []WorkspaceTargetGrant `json:"grants"`
+}
+
+// ListAccountGrants is the reverse lookup behind the account Computers page:
+// every live mount held by the owner's bots, across all of their runtimes.
+func (s *RemoteWorkspaceService) ListAccountGrants(ctx context.Context, ownerUserID string) ([]WorkspaceTargetGrant, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("remote workspace service not configured")
+	}
+	ownerUserID, ok := canonicalWorkspaceUUID(ownerUserID)
+	if !ok {
+		return nil, userruntime.ErrInvalidInput
+	}
+	records, err := s.store.ListGrantsByRuntimeOwner(ctx, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	grants := make([]WorkspaceTargetGrant, 0, len(records))
+	for _, record := range records {
+		grants = append(grants, WorkspaceTargetGrant{
+			TargetID:  record.ID,
+			BotID:     record.BotID,
+			RuntimeID: record.RuntimeID,
+			Primary:   record.IsPrimary,
+		})
+	}
+	return grants, nil
+}
+
 func (s *RemoteWorkspaceService) GetMount(ctx context.Context, botID, targetID string) (WorkspaceTarget, error) {
 	record, err := s.getRecord(ctx, botID, targetID)
 	if err != nil {
@@ -382,6 +421,9 @@ func (s *RemoteWorkspaceService) target(record dbstore.BotRemoteRuntimeBindingRe
 	return target
 }
 
+// The remote default is allow-everything: mounting a computer is already the
+// explicit trust decision, so per-call asks would just be friction. Bypass
+// and force-review lists stay empty — nothing is inherited from native.
 func DefaultRemoteToolApprovalConfig() settings.ToolApprovalConfig {
 	config := settings.ToolApprovalConfig{
 		Enabled: true,
@@ -389,10 +431,10 @@ func DefaultRemoteToolApprovalConfig() settings.ToolApprovalConfig {
 			Mode: settings.ToolApprovalAllow, BypassGlobs: []string{}, ForceReviewGlobs: []string{},
 		},
 		Write: settings.ToolApprovalFilePolicy{
-			Mode: settings.ToolApprovalAsk, BypassGlobs: []string{}, ForceReviewGlobs: []string{},
+			Mode: settings.ToolApprovalAllow, BypassGlobs: []string{}, ForceReviewGlobs: []string{},
 		},
 		Exec: settings.ToolApprovalExecPolicy{
-			Mode: settings.ToolApprovalAsk, BypassCommands: []string{}, ForceReviewCommands: []string{},
+			Mode: settings.ToolApprovalAllow, BypassCommands: []string{}, ForceReviewCommands: []string{},
 		},
 	}
 	return settings.NormalizeToolApprovalConfig(config)

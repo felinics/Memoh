@@ -67,6 +67,95 @@ func (s *serviceTestStore) RevokeUserRuntime(_ context.Context, runtimeID, userI
 	return nil
 }
 
+func (s *serviceTestStore) BackfillUserRuntimeName(_ context.Context, runtimeID, userID, name, defaultName string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.revoked || s.runtime.ID != runtimeID || s.runtime.UserID != userID {
+		return false, nil
+	}
+	if s.runtime.Name != "" && s.runtime.Name != defaultName {
+		return false, nil
+	}
+	s.runtime.Name = name
+	return true, nil
+}
+
+func TestCreateRuntimeDefaultsNameAndHandshakeBackfills(t *testing.T) {
+	store := &serviceTestStore{}
+	service := NewService(store, NewHub(nil))
+
+	created, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	wantDefault := DefaultRuntimeName(created.Key)
+	if created.Name != wantDefault {
+		t.Fatalf("default name = %q, want %q", created.Name, wantDefault)
+	}
+
+	// A never-connected default claims no row in the list.
+	items, err := service.ListRuntimes(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("ListRuntimes() error = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("unconnected default listed: %#v", items)
+	}
+
+	connection := &Connection{
+		ConnectionID: "connection-1",
+		Client:       newServiceTestClient(t),
+		Close:        func(string) {},
+	}
+	info := HandshakeInfo{
+		Version: 1, Hostname: "qingfengdeMacBook-Pro", OS: "darwin", Arch: "arm64",
+		ClientVersion: "test", WorkspaceBase: "/workspace", Capabilities: []string{CapabilityFS},
+	}
+	if err := service.ActivateConnection(context.Background(), created.Key, created.ID, info, connection, func() error { return nil }); err != nil {
+		t.Fatalf("ActivateConnection() error = %v", err)
+	}
+	store.mu.Lock()
+	backfilled := store.runtime.Name
+	store.mu.Unlock()
+	if backfilled != "qingfengdeMacBook-Pro" {
+		t.Fatalf("backfilled name = %q", backfilled)
+	}
+
+	// Once connected (and backfilled) the row appears — and stays even offline.
+	items, err = service.ListRuntimes(context.Background(), "user-1")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("ListRuntimes() = %#v, %v", items, err)
+	}
+}
+
+func TestHandshakeDoesNotOverwriteUserChosenName(t *testing.T) {
+	store := &serviceTestStore{}
+	service := NewService(store, NewHub(nil))
+
+	created, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: "Workstation"})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	connection := &Connection{
+		ConnectionID: "connection-1",
+		Client:       newServiceTestClient(t),
+		Close:        func(string) {},
+	}
+	info := HandshakeInfo{
+		Version: 1, Hostname: "other-host", OS: "linux", Arch: "amd64",
+		ClientVersion: "test", WorkspaceBase: "/workspace", Capabilities: []string{CapabilityFS},
+	}
+	if err := service.ActivateConnection(context.Background(), created.Key, created.ID, info, connection, func() error { return nil }); err != nil {
+		t.Fatalf("ActivateConnection() error = %v", err)
+	}
+	store.mu.Lock()
+	name := store.runtime.Name
+	store.mu.Unlock()
+	if name != "Workstation" {
+		t.Fatalf("user-chosen name overwritten: %q", name)
+	}
+}
+
 func TestCreateRuntimeCapsNameLength(t *testing.T) {
 	service := NewService(&serviceTestStore{}, NewHub(nil))
 	for name, value := range map[string]string{

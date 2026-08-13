@@ -93,6 +93,23 @@
     "actionRequired": "Action Required",
     "preview": "Preview"
   },
+  "computerAccess": {
+    "nativeAlwaysOn": "Always available to this Bot",
+    "emptyBots": "No bots yet.",
+    "emptyComputers": "No computers connected.",
+    "connectCta": "Connect computer",
+    "updateFailed": "Couldn’t update access",
+    "done": "Done",
+    "subtitleRuntime": "Which bots can use it?",
+    "subtitleBot": "Which computers can it use?"
+  },
+  "computerConnect": {
+    "title": "Connect computer",
+    "commandLabel": "Connection command",
+    "commandDescription": "Run it on the computer you want to connect, and keep it running.",
+    "waiting": "Waiting for the computer to connect…",
+    "finish": "Done"
+  },
   "errors": {
     "bot": {
       "name_taken": "This name is already taken."
@@ -246,7 +263,6 @@
     "title": "Computers",
     "connect": "Connect computer",
     "connectOther": "Connect another computer",
-    "computers": "Connected computers",
     "otherComputers": "Other computers",
     "loadingComputers": "Loading computers...",
     "loadFailed": "Couldn’t load computers",
@@ -256,8 +272,6 @@
     "emptyDescription": "Create a connection command, then run it on the computer you want Memoh to use.",
     "emptyOtherTitle": "No other computers connected",
     "emptyOtherDescription": "Connect another computer if you want a Bot to use a different machine.",
-    "waitingForConnection": "Waiting for the command to run",
-    "connected": "Ready",
     "copyCommand": "Copy connection command",
     "revoke": "Disconnect",
     "revokeTitle": "Disconnect this computer?",
@@ -297,20 +311,17 @@
       }
     },
     "connectDialog": {
-      "title": "Connect a computer",
-      "description": "Give this connection a name you’ll recognize.",
       "name": "Computer name",
       "nameHelp": "You can use a location or purpose, such as Office Mac.",
       "namePlaceholder": "Office Mac",
       "nameRequired": "Enter a computer name",
-      "create": "Create command",
-      "createFailed": "Couldn’t create connection",
-      "runTitle": "Run this command",
-      "runDescription": "Run it on the computer you want Memoh to use, and keep the process running.",
-      "command": "Connection command",
-      "keyOnce": "This command contains a private connection key. Disconnecting the computer makes the key stop working immediately.",
-      "done": "Done"
-    }
+      "createFailed": "Couldn’t create connection"
+    },
+    "botAccess": "{count}/{total} bots",
+    "noBotAccess": "No bots",
+    "manageAccess": "Manage bot access",
+    "revokeAccessWarning": "This also removes access for {count} bot(s).",
+    "computerOnline": "{name} is online"
   },
   "breadcrumb": {
     "main": "Home"
@@ -610,17 +621,30 @@
     "inputPlaceholder": "Ask anything…",
     "readonlyHint": "This chat is read-only",
     "readonlyPlaceholder": "This chat is read-only. Sending messages is disabled.",
-    "composerActions": "Add files, switch Agent, or select Computer",
+    "composerActions": "Add files or switch Agent",
+    "voiceInput": {
+      "start": "Start voice input",
+      "stop": "Stop recording",
+      "transcribing": "Transcribing…",
+      "notConfigured": "Choose a transcription model before using voice input.",
+      "unsupported": "Voice input is not supported in this browser.",
+      "permissionDenied": "Microphone access was denied.",
+      "empty": "No speech was detected.",
+      "failed": "Voice input failed."
+    },
     "attachmentLines": "{count} lines",
     "pastedBadge": "Pasted",
     "pastedViewerTitle": "Pasted content",
     "agent": "Agent",
-    "computers": "Computers",
-    "computerDefault": "Default",
-    "computerDefaultStatus": "Default · {status}",
+    "continueOn": {
+      "label": "Continue on",
+      "addComputer": "Add a computer…",
+      "manageAccess": "Manage access…",
+      "manageComputers": "Manage computers",
+      "noAccess": "This Bot has no computer access"
+    },
     "computerLoading": "Loading computers...",
     "computerLoadFailed": "Couldn’t load computers",
-    "computerNone": "No computers available",
     "computerUnavailable": "Unavailable computer",
     "folder": "Folder",
     "folders": "Folders",
@@ -707,7 +731,7 @@
       "edit": "Edit",
       "apply_patch": "Patch",
       "list": "List",
-      "list_execution_locations": "Check computers and Server Workspace",
+      "list_execution_locations": "Check available computers",
       "exec": "Run",
       "bg_status": "Background",
       "list_background": "List background tasks",
@@ -2074,7 +2098,7 @@
       "archiveDescription": "Sessions already in “{name}” keep their directory; new sessions can no longer join it.",
       "archiveFailed": "Failed to archive folder",
       "rowActions": "Actions for {name}",
-      "targetNative": "Server workspace",
+      "targetNative": "Cloud Computer",
       "targetRemote": "Connected computer",
       "form": {
         "name": "Name",
@@ -2096,31 +2120,20 @@
       "loading": "Loading work locations...",
       "loadFailed": "Couldn’t load work locations",
       "loadFailedDescription": "Check the server connection and try again.",
-      "addComputer": "Add computer",
       "primary": "Default location",
-      "primaryDescription": "Used for files and commands unless another location is chosen. Memoh does not switch locations automatically when it is offline.",
+      "primaryDescription": "Used for files and commands unless another location is chosen.",
       "primarySaveFailed": "Couldn’t change the default location",
       "defaultBadge": "Default",
-      "nativeWorkspace": "Server Workspace",
-      "serverDescription": "This Bot’s existing Workspace on the Server.",
+      "nativeWorkspace": "Cloud Computer",
+      "serverDescription": "This Bot’s built-in workspace, hosted by Memoh.",
       "thisComputerOff": "Use this computer",
-      "thisComputerOffDescription": "Turn on access under Computers first, then add this computer here.",
+      "thisComputerOffDescription": "Allow this computer under Computers first, then enable access here.",
       "openComputerSettings": "Open computer settings",
-      "computer": "Computer",
-      "computerDescription": "Choose a computer already made available under Computers.",
-      "selectComputer": "Select a computer",
-      "noAvailableComputers": "No additional computers are available. Make one available under Computers first.",
       "unknownComputer": "Unavailable computer",
-      "addTitle": "Add a computer to this Bot",
-      "mountDescription": "Choose a computer this Bot may use for files and commands.",
-      "addSuccess": "Computer added to Bot",
-      "saveFailed": "Couldn’t save the computer",
-      "removeFromBot": "Remove from Bot",
-      "deleteTitle": "Remove this computer from the Bot?",
-      "deleteDescription": "{name} will be removed from this Bot. Files on the computer are not deleted.",
-      "deletePrimaryDescription": "{name} is the default location. Removing it makes the Server Workspace the default. Files on the computer are not deleted.",
-      "deleteSuccess": "Computer removed from Bot",
-      "deleteFailed": "Couldn’t remove the computer from this Bot"
+      "noComputers": "No computers available",
+      "manageComputers": "Manage computers",
+      "connectManage": "Connect or disconnect computers",
+      "connectManageDescription": "Manage every computer on the Computers page."
     },
     "desktop": {
       "title": "Desktop Environment",

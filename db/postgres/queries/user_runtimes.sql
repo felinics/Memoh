@@ -28,6 +28,25 @@ WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND revoked_at IS NULL
 RETURNING *;
 
+-- name: DeleteBotRemoteRuntimeMountsByRuntime :exec
+-- Revoking a runtime kills every bot mount of it in the same transaction:
+-- dead bindings would otherwise linger as ghost rows on every surface.
+DELETE FROM bot_remote_runtime_bindings
+WHERE team_id = public.memoh_current_team_id()
+  AND runtime_id = sqlc.arg(runtime_id);
+
+-- name: BackfillUserRuntimeName :execrows
+-- Fills the display name from the connecting machine, but ONLY while the row
+-- still carries its creation-time default (or an empty name): a user-chosen
+-- name is never overwritten by a later handshake.
+UPDATE user_runtimes
+SET name = sqlc.arg(name), updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND user_id = sqlc.arg(user_id)
+  AND revoked_at IS NULL
+  AND (name = '' OR name = sqlc.arg(default_name));
+
 -- name: CreateOrUpdateBotRemoteRuntimeMount :one
 INSERT INTO bot_remote_runtime_bindings (bot_id, runtime_id)
 SELECT b.id, r.id
@@ -70,6 +89,7 @@ JOIN team_members owner_membership
 JOIN users owner ON owner.id = owner_membership.user_id
 WHERE binding.team_id = public.memoh_current_team_id()
   AND binding.bot_id = sqlc.arg(bot_id)
+  AND runtime.revoked_at IS NULL
 ORDER BY binding.created_at ASC, binding.id ASC;
 
 -- name: GetBotRemoteRuntimeMount :one
@@ -150,3 +170,21 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
   AND id = sqlc.arg(target_id)
 RETURNING id;
+
+-- name: ListBotRemoteRuntimeGrantsByRuntimeOwner :many
+-- Account-level reverse lookup: every live mount held by the owner's bots.
+-- A mount can only exist while runtime.user_id = bot.owner_user_id (enforced
+-- by CreateOrUpdateBotRemoteRuntimeMount), so scoping by the bot owner covers
+-- exactly the grants on the owner's own runtimes.
+SELECT
+  binding.id,
+  binding.bot_id,
+  binding.runtime_id,
+  binding.is_primary
+FROM bot_remote_runtime_bindings binding
+JOIN bots bot ON bot.id = binding.bot_id AND bot.team_id = public.memoh_current_team_id()
+JOIN user_runtimes runtime ON runtime.id = binding.runtime_id AND runtime.team_id = public.memoh_current_team_id()
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND bot.owner_user_id = sqlc.arg(owner_user_id)
+  AND runtime.revoked_at IS NULL
+ORDER BY binding.created_at ASC, binding.id ASC;

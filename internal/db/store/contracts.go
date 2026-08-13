@@ -39,6 +39,11 @@ type UserRuntimeStore interface {
 	GetUserRuntimeByAPIToken(ctx context.Context, apiToken string) (UserRuntimeRecord, error)
 	ListUserRuntimes(ctx context.Context, userID string) ([]UserRuntimeRecord, error)
 	RevokeUserRuntime(ctx context.Context, runtimeID, userID string) error
+	// BackfillUserRuntimeName sets the display name only while the row still
+	// carries its creation-time default (or an empty name), so a user-chosen
+	// name is never overwritten by a later handshake. Returns false when the
+	// name no longer defaults (already backfilled or user-renamed).
+	BackfillUserRuntimeName(ctx context.Context, runtimeID, userID, name, defaultName string) (bool, error)
 }
 
 type BotRemoteRuntimeBindingRecord struct {
@@ -58,6 +63,10 @@ type BotRemoteRuntimeBindingRecord struct {
 type BotRemoteRuntimeBindingStore interface {
 	CreateOrUpdateMount(ctx context.Context, botID, runtimeID string) (BotRemoteRuntimeBindingRecord, error)
 	ListMounts(ctx context.Context, botID string) ([]BotRemoteRuntimeBindingRecord, error)
+	// ListGrantsByRuntimeOwner is the account-level reverse lookup: every live
+	// mount held by the owner's bots. Records carry only ID/BotID/RuntimeID/
+	// IsPrimary — the runtime/bot join fields stay zero.
+	ListGrantsByRuntimeOwner(ctx context.Context, ownerUserID string) ([]BotRemoteRuntimeBindingRecord, error)
 	GetMount(ctx context.Context, botID, targetID string) (BotRemoteRuntimeBindingRecord, error)
 	GetPrimaryMount(ctx context.Context, botID string) (BotRemoteRuntimeBindingRecord, error)
 	SetPrimary(ctx context.Context, botID, targetID string) error

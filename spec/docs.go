@@ -14189,6 +14189,38 @@ const docTemplate = `{
                 }
             }
         },
+        "/users/me/computer-access": {
+            "get": {
+                "description": "Every live Remote Runtime mount held by the caller's bots, across all of their runtimes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user-runtimes"
+                ],
+                "summary": "List the caller's bot-to-Computer access grants",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workspace.WorkspaceTargetGrantsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me/password": {
             "put": {
                 "description": "Update current user password with current password check",
@@ -22995,6 +23027,34 @@ const docTemplate = `{
                 },
                 "tool_approval_config": {
                     "$ref": "#/definitions/settings.ToolApprovalConfig"
+                }
+            }
+        },
+        "workspace.WorkspaceTargetGrant": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "primary": {
+                    "type": "boolean"
+                },
+                "runtime_id": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspace.WorkspaceTargetGrantsResponse": {
+            "type": "object",
+            "properties": {
+                "grants": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspace.WorkspaceTargetGrant"
+                    }
                 }
             }
         },

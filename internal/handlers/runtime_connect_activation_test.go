@@ -49,6 +49,16 @@ func (s *runtimeConnectTestStore) GetUserRuntimeByAPIToken(context.Context, stri
 	return s.runtime, nil
 }
 
+func (s *runtimeConnectTestStore) BackfillUserRuntimeName(_ context.Context, _, _, name, defaultName string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runtime.Name != "" && s.runtime.Name != defaultName {
+		return false, nil
+	}
+	s.runtime.Name = name
+	return true, nil
+}
+
 type runtimeConnectTestService struct {
 	pb.UnimplementedContainerServiceServer
 }

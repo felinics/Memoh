@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@felinic/ui/style.css";
+@import "@fontsource-variable/instrument-sans/wght.css";
 
 /* Bundled MiSans Variable (Apache-2.0) as the CJK fallback so Chinese renders
  * identically on Web / Windows / macOS instead of each OS's system font.
@@ -35,6 +36,21 @@
  * it needs these hints to still scan our templates. */
 @source "./";
 @source "../../../packages/ui/src";
+
+/* Welcome heading — the one display-size text in the app: a calm single weight
+   of Instrument Sans (Latin display face) at a fixed 24/32 rhythm, with
+   embedded emphasis bumped just enough to read. */
+[data-welcome-heading] {
+  font-family: "Instrument Sans Variable", var(--font-sans);
+  font-size: 24px; /* ui-allow-px: fixed welcome display size */
+  font-weight: 400;
+  line-height: 32px; /* ui-allow-px: fixed welcome display rhythm */
+  letter-spacing: 0;
+}
+
+[data-welcome-heading] :is(strong, b) {
+  font-weight: 550;
+}
 
 /* ── Workspace surface planes ──────────────────────────────────────────────────────────
  * The editor workspace (dock group view, tabs, file editor, chat, previews)
@@ -107,16 +123,23 @@
    *     --background editor surface (0.152). */
   --surface-composer: var(--surface-editor);
 
-  /* The chat composer and its decision panels share the same two shape states.
-   * Keep the values in rem so they continue to track the app font scale. */
-  --composer-radius-compact: 1.75rem;
-  --composer-radius-multiline: 1.25rem;
+  /* Composer focus edge — tuned per design review: the contract's near-black /
+   * near-white --field-edge-solid reads as a heavy ring at capsule size, while
+   * the subtle --field-edge-engaged (0.17) is one step too quiet. 0.20 is the
+   * perceptible-but-calm middle. Dark mirrors the engaged rung (0.42), which
+   * review accepted as-is. Consumed by .chat-composer-edge below. */
+  --composer-edge-focus: oklch(0 0 0 / 0.20);
 
-  /* The chat capsule's resting hairline is fainter than a normal field edge so
-   * an idle composer doesn't read as a bright box (most noticeable in dark
-   * mode). It brightens to the standard field edge on hover and one notch past
-   * it on focus (see the .chat-composer-edge rules below). */
-  --composer-edge-rest: oklch(0 0 0 / 0.07);
+  /* Composer pill label ink — the rung the type scale doesn't have: --foreground
+   * (0.21) on a pill label reads full-black loud, --muted-foreground (0.52)
+   * reads washed-out gray, and there is no established rung between them.
+   * Derived by color-mix off the two bases (NOT a hand-picked static value) so
+   * dark mode and the color schemes track it for free; the percentage is the
+   * single tuning knob (40% read too strong in review; still settling). Consumed
+   * by the model pill's label in the composer controls row; icons stay
+   * --muted-foreground. */
+  --composer-control-label: color-mix(in oklab, var(--foreground) 20%, var(--muted-foreground));
+
 
   /* User prompt bubble — built RELATIVE to the accent (--brand) via the relative
    * color syntax, never a hardcoded RGB: the HUE tracks --brand (so violet /
@@ -142,10 +165,10 @@
   --surface-editor: var(--background);
   --surface-chrome: var(--sidebar);
   --surface-composer: var(--card);
+  --composer-edge-focus: oklch(0.42 0 0);
   --workspace-divider-color: var(--border);
   --native-sidebar-seam: oklch(1 0 0 / 0.07);
   --native-sidebar-seam-shadow: oklch(0 0 0 / 0.12);
-  --composer-edge-rest: oklch(0.255 0 0);
   /* Dark = a solid deep purple ≈ rgb(83,45,141) with pure-white ink (a filled
    * "sent" bubble); same relative recipe, just a darker L and near-full C. */
   --chat-user-bubble: oklch(from var(--brand) 0.40 0.15 calc(h + 7));
@@ -157,6 +180,7 @@
   --color-surface-editor: var(--surface-editor);
   --color-surface-chrome: var(--surface-chrome);
   --color-surface-composer: var(--surface-composer);
+  --color-composer-control-label: var(--composer-control-label);
   --color-chat-user-bubble: var(--chat-user-bubble);
   --color-chat-user-bubble-fg: var(--chat-user-bubble-fg);
   --color-cop-title: var(--cop-title);
@@ -168,41 +192,49 @@
   border-right: var(--workspace-divider-width) solid var(--workspace-divider-color);
 }
 
-/* Chat composer edge — fainter at rest than a standard field, brightening to
- * the normal field hairline on hover and one notch past it on focus. Reuses the
- * shared --field-edge-* tokens so it themes with everything else. Unlayered so
- * it overrides the @felinic/ui input-group rules without a specificity war. */
-[data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])) {
-  --field-edge: var(--composer-edge-rest);
+/* Chat composer edge — the standard field divider (not a washed-out custom
+ * edge), and flat: the capsule separates from the canvas by its hairline alone.
+ * A drop shadow under an always-docked capsule reads as grime, not elevation,
+ * so the dock carries no lift. Focus does NOT take the contract's near-black /
+ * near-white --field-edge-solid — a persistent capsule wears that ring as a
+ * heavy outline — it steps to --composer-edge-focus (tuned between rest and
+ * solid; see the token comment). Invalid keeps the contract's behavior.
+ * Unlayered so these override the @felinic/ui input-group rules without a
+ * specificity war. */
+[data-slot="input-group"].chat-composer-edge {
+  box-shadow: inset 0 0 0 1px var(--field-edge);
 }
-[data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])):hover,
-[data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])):focus-within {
+[data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])) {
   --field-edge: var(--field-edge-rest);
 }
-
-.chat-composer-radius-compact {
-  border-radius: var(--composer-radius-compact);
+[data-slot="input-group"].chat-composer-edge:focus-within:not(:has([aria-invalid="true"])) {
+  --field-edge: var(--composer-edge-focus);
 }
 
-.chat-composer-radius-multiline {
-  border-radius: var(--composer-radius-multiline);
-}
 
-/* The model preview pill is a WIDE ghost button. The shared ghost press uses a
- * uniform scale (0.974); on a wide element that travels sideways by ~width ×
- * 2.6% — far deeper than the square "+" button beside it. Press it by a FIXED
- * inset instead (~0.5px/edge, the same absolute depth the square button's 0.974
- * scale produces on its 36px height), so the pill shrinks on BOTH axes by an
- * equal, height-derived amount — consistent with the "+" and with no
- * width-driven lurch. */
+/* Composer pill press — the squish is split OFF the anchor box: the ghost
+ * chip (::before) and the ONE content wrapper (.composer-pill-content) scale
+ * together, while the <button> element itself NEVER transforms (reka anchors
+ * an open menu to the trigger's rendered rect sampled at open — a transformed
+ * trigger made every open land at a different x). The recipe is measured off a
+ * reference composer's pill: 0.97 over 150ms with easeOutExpo
+ * (cubic-bezier(0.16, 1, 0.3, 1)) — fast attack, long smooth landing, ZERO
+ * overshoot; a springy bezier on a wide pill reads as wobble instead of
+ * bounce. Scoped deviation from the shared press contract; promote only as a
+ * deliberate contract change. */
+[data-button][data-variant="ghost"].composer-pill-press .composer-pill-content {
+  transition: scale 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
 [data-button][data-variant="ghost"].composer-pill-press::before {
   transition:
-    inset 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+    scale 0.15s cubic-bezier(0.16, 1, 0.3, 1),
     background-color 0.15s ease;
 }
 [data-button][data-variant="ghost"].composer-pill-press:active::before {
-  inset: 0.5px;
-  scale: 1;
+  scale: 0.97;
+}
+[data-button][data-variant="ghost"].composer-pill-press:active .composer-pill-content {
+  scale: 0.97;
 }
 
 /* The model preview pill is a WIDE control trigger, not a small icon button. The

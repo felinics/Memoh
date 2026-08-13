@@ -36,6 +36,11 @@ const SAVE_TO_DISK_DEBOUNCE_MS = 1000
 const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   'remote-runtimes',
   'session-status',
+  // Computer ACL state (which bot may use which runtime). Volatile and
+  // cross-surface: writes land via the access dialog / bot page / API, so a
+  // hydrated copy can silently disagree with the server — always refetch.
+  'bot-workspace-targets',
+  'computer-access-grants',
   // Raw workspace file text (hooks.json env map may contain API keys); deepStripSecrets
   // only walks objects/arrays and cannot redact secrets inside an opaque string.
   'bot-hooks-config',

@@ -48,6 +48,11 @@ interface RawToolApprovalConfig {
 }
 
 export function defaultToolApprovalConfig(kind: WorkspaceTargetKind = 'native'): ToolApprovalConfig {
+  // Mirror of the backend defaults (internal/workspace/remote.go): a remote
+  // mount rests at allow for all three modes — mounting the computer is the
+  // explicit trust decision, so per-call asks would just be friction. Native
+  // keeps write=ask with the data/tmp bypass. This fallback only renders when
+  // the server payload carries neither config nor modes (a pre-ACL backend).
   return {
     enabled: kind === 'remote',
     read: {
@@ -57,14 +62,14 @@ export function defaultToolApprovalConfig(kind: WorkspaceTargetKind = 'native'):
       force_review_globs: [],
     },
     write: {
-      mode: 'ask',
-      require_approval: true,
+      mode: kind === 'remote' ? 'allow' : 'ask',
+      require_approval: kind !== 'remote',
       bypass_globs: kind === 'native' ? ['/data/**', '/tmp/**'] : [],
       force_review_globs: [],
     },
     exec: {
-      mode: kind === 'remote' ? 'ask' : 'allow',
-      require_approval: kind === 'remote',
+      mode: 'allow',
+      require_approval: false,
       bypass_commands: [],
       force_review_commands: [],
     },

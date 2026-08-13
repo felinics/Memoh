@@ -55,8 +55,46 @@ func (s *Store) RevokeUserRuntime(ctx context.Context, runtimeID, userID string)
 	if err != nil {
 		return err
 	}
-	_, err = s.queries.RevokeUserRuntime(ctx, dbsqlc.RevokeUserRuntimeParams{ID: id, UserID: ownerID})
-	return mapQueryErr(err)
+	revoke := func(queries *dbsqlc.Queries) error {
+		if _, err := queries.RevokeUserRuntime(ctx, dbsqlc.RevokeUserRuntimeParams{ID: id, UserID: ownerID}); err != nil {
+			return mapQueryErr(err)
+		}
+		// Cascade: dead mounts of the revoked runtime must not linger as
+		// ghost rows on the bot page / grants view / composer selector.
+		return mapQueryErr(queries.DeleteBotRemoteRuntimeMountsByRuntime(ctx, id))
+	}
+	if s.pool == nil {
+		// NewWithQueries is used only by focused store tests. Production stores
+		// always carry a pool and use the transaction below.
+		return revoke(s.queries)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := revoke(s.queries.WithTx(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) BackfillUserRuntimeName(ctx context.Context, runtimeID, userID, name, defaultName string) (bool, error) {
+	id, err := db.ParseUUID(runtimeID)
+	if err != nil {
+		return false, err
+	}
+	ownerID, err := db.ParseUUID(userID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := s.queries.BackfillUserRuntimeName(ctx, dbsqlc.BackfillUserRuntimeNameParams{
+		ID: id, UserID: ownerID, Name: name, DefaultName: defaultName,
+	})
+	if err != nil {
+		return false, mapQueryErr(err)
+	}
+	return rows > 0, nil
 }
 
 func userRuntimeRecord(row dbsqlc.UserRuntime) dbstore.UserRuntimeRecord {

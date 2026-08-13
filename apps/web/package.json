@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@felinic/ui": "workspace:*",
+    "@fontsource-variable/instrument-sans": "^5.2.8",
     "@fontsource-variable/inter": "^5.2.8",
     "@internationalized/date": "^3.12.2",
     "@lisse/vue": "^0.4.0",

@@ -177,8 +177,8 @@
         v-if="!activeChatReadOnly"
         class="pointer-events-none absolute z-(--z-panel)"
         :class="isWelcome
-          ? 'inset-0 flex flex-col items-center justify-start pt-[38dvh]'
-          : 'inset-x-0 bottom-0 pt-2 pb-8'"
+          ? 'inset-0 flex flex-col items-center justify-start pt-[28dvh]'
+          : 'inset-x-0 bottom-0 pt-2 pb-7'"
         :style="composerLiftPx > 0 ? { bottom: `${composerLiftPx}px` } : undefined"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
@@ -196,22 +196,34 @@
           :style="{ height: dockMaskHeight }"
         />
         <!-- welcome: top-anchored column — the greeting and the composer's top
-             edge stay pinned at pt-[38dvh], so a growing composer (multiline
-             text or attachments) only extends downward and never pushes the
+             edge stay pinned at the shared viewport anchor, so a growing composer
+             (text or attachments) only extends downward and never pushes the
              greeting up; normal: display:contents removes this from layout. -->
-        <div :class="isWelcome ? 'flex flex-col items-center gap-10 w-full' : 'contents'">
+        <div :class="isWelcome ? 'flex w-full flex-col items-center gap-8 md:-translate-x-3' : 'contents'">
           <div
             v-if="isWelcome"
-            class="w-full max-w-[840px] mx-auto px-4 text-center sm:px-6 lg:px-10"
+            class="mx-auto w-full max-w-[44rem] px-4 text-left sm:px-6 lg:px-10"
           >
-            <h1 class="text-balance text-2xl font-semibold tracking-tight text-foreground">
+            <h1
+              data-welcome-heading
+              class="px-4 text-balance text-foreground"
+            >
               {{ welcomeGreeting }}
             </h1>
           </div>
-          <!-- Mirror the message column's padding (px-4 sm:px-6 lg:px-10) exactly
-               so the composer and the chat body always share one width — the inner
-               gutter still relaxes on a cramped pane, but both edges move together. -->
-          <div class="pointer-events-auto relative w-full max-w-[840px] mx-auto px-4 sm:px-6 lg:px-10">
+          <!-- A fresh chat uses a focused content measure; once conversation starts,
+               the composer expands to the message column. Both keep the same responsive
+               gutters (px-4 sm:px-6 lg:px-10), so their internal alignment does not
+               change — the inner gutter still relaxes on a cramped pane, but both
+               edges move together. The -translate-x-0.5 is a 2px optical nudge:
+               the column math is centered, but the eye reads the composer a hair
+               right of the message column (the scroll rail eats the right edge),
+               so the whole dock unit shifts left a touch to sit where it looks
+               centered. -->
+          <div
+            class="pointer-events-auto relative mx-auto w-full -translate-x-0.5 px-4 sm:px-6 lg:px-10"
+            :class="isWelcome ? 'max-w-[44rem]' : 'max-w-[840px]'"
+          >
             <Transition
               enter-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-out"
               enter-from-class="motion-safe:opacity-0"
@@ -363,23 +375,16 @@
               @dismiss-command="clearCurrentCommandEvent"
               @reveal-composer="handleDockRevealComposer"
             >
-              <!--
-              Compact uses a concrete 1.75rem radius (= half the compact height:
-              button 2.25rem + py-2.5 ×2 = 3.5rem), so a short composer still reads as
-              a perfect pill — but, unlike rounded-full (9999px), the value can be
-              animated. Multiline shrinks the corners to 1.25rem; transitioning
-              between two concrete radii interpolates smoothly, whereas animating
-              out of 9999px snapped mid-way (the value stayed clamped-round until
-              it crossed half-height, then jumped the corner in one step).
-            -->
+              <!-- The composer is ALWAYS a two-row card (textarea on top,
+                   controls below) — no pill↔multiline morph: a fixed rounded-2xl
+                   box with a minimum height, so its shape never depends on the
+                   content and nothing animates mid-typing. -->
               <div
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
-                class="chat-composer-edge relative flex w-full flex-wrap items-center gap-1 bg-surface-composer px-2.5 py-2.5 transition-[border-radius] motion-reduce:transition-none"
-                :class="(isMultiline || showAttachmentGrid) ? 'chat-composer-radius-multiline' : 'chat-composer-radius-compact'"
-                :style="{ transitionDuration: `${composerRadiusMs}ms`, transitionTimingFunction: composerRadiusEase }"
-                @click.self="focusTextarea"
+                class="chat-composer-edge relative flex min-h-28 w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer p-3 cursor-text"
+                @click="handleComposerClick"
               >
                 <!-- The attachment row reveals via a grid 0fr↔1fr track so a card
                    is unveiled in place — it never translates and is always
@@ -462,29 +467,26 @@
                   v-model="inputText"
                   rows="1"
                   :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
-                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages"
-                  class="field-sizing-content resize-none break-words bg-transparent text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
-                  :class="isMultiline
-                    ? 'order-none w-full basis-full pl-2 pr-1 pt-2 pb-1.5 max-h-52'
-                    : 'order-2 min-w-0 flex-1 self-center overflow-hidden whitespace-nowrap pl-1 pr-1 py-1 max-h-32'"
+                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || voiceInputState !== 'idle'"
+                  class="order-none min-h-12 max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   @keydown="handleComposerKeydown"
                   @paste="handlePaste"
-                  @input="syncMultiline"
                 />
 
-                <!-- max-md size bumps on the composer controls (here, the model
-                     trigger, and the send ring below) grow the tap targets from
-                     36px to the 44px touch floor on phones; desktop keeps the
-                     compact pill. -->
+                <!-- max-md size bumps on the composer controls (the ＋ and voice
+                     buttons, the model trigger, and the send ring below) grow the
+                     tap targets to the 44px touch floor on phones; desktop keeps
+                     the compact size. -->
                 <DropdownMenu v-model:open="agentPopoverOpen">
                   <DropdownMenuTrigger as-child>
                     <Button
                       type="button"
                       variant="ghost"
+                      size="icon-sm"
+                      shape="circle"
                       :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
                       :title="$t('chat.composerActions')"
-                      class="order-1 size-9 max-md:size-11 rounded-full text-foreground/85"
-                      :class="isMultiline ? 'self-end' : 'self-center'"
+                      class="order-1 self-end text-muted-foreground max-md:size-11"
                       :aria-label="$t('chat.composerActions')"
                     >
                       <Spinner
@@ -493,8 +495,8 @@
                       />
                       <Plus
                         v-else
-                        class="size-[22px]"
-                        :stroke-width="1.75"
+                        :stroke-width="1.5"
+                        class="size-4"
                       />
                     </Button>
                   </DropdownMenuTrigger>
@@ -580,64 +582,7 @@
                         <span class="min-w-0 flex-1 truncate">{{ $t('chat.folderDetachDraft') }}</span>
                       </DropdownMenuItem>
                     </template>
-                    <template v-if="showComputersMenu">
-                      <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComposerFolderSection" />
-                      <DropdownMenuLabel>{{ $t('chat.computers') }}</DropdownMenuLabel>
-                      <DropdownMenuItem
-                        v-if="workspaceTargetsInitialLoading"
-                        disabled
-                      >
-                        <Spinner />
-                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.computerLoading') }}</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        v-else-if="workspaceTargetsLoadFailed"
-                        disabled
-                      >
-                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.computerLoadFailed') }}</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        v-else-if="!workspaceTargets.length"
-                        disabled
-                      >
-                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.computerNone') }}</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        v-if="selectedWorkspaceTargetMissing"
-                        disabled
-                      >
-                        <Monitor class="size-4 shrink-0" />
-                        <span class="min-w-0 flex-1 truncate">
-                          {{ workspaceTargetSelection.snapshot?.name || $t('chat.computerUnavailable') }}
-                        </span>
-                        <span class="shrink-0 text-caption text-muted-foreground">{{ $t('chat.computerUnavailable') }}</span>
-                        <Check class="ml-auto" />
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        v-for="target in workspaceTargets"
-                        :key="target.target_id"
-                        :disabled="computerSwitchLocked || !workspaceTargetAvailable(target)"
-                        @select="selectWorkspaceTarget(target)"
-                      >
-                        <component
-                          :is="target.kind === 'native' ? Server : Monitor"
-                          class="size-4 shrink-0"
-                        />
-                        <span class="min-w-0 flex-1 truncate">{{ workspaceTargetName(target) }}</span>
-                        <span class="shrink-0 text-caption text-muted-foreground">
-                          {{ target.primary
-                            ? (workspaceTargetAvailable(target)
-                              ? $t('chat.computerDefault')
-                              : $t('chat.computerDefaultStatus', { status: workspaceTargetStatusLabel(target) }))
-                            : workspaceTargetStatusLabel(target) }}
-                        </span>
-                        <Check
-                          v-if="selectedWorkspaceTargetId === target.target_id"
-                          class="ml-auto"
-                        />
-                      </DropdownMenuItem>
-                    </template>
-                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu || showComposerFolderSection" />
+                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComposerFolderSection" />
                     <DropdownMenuItem
                       :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
                       @select="fileInput?.click()"
@@ -648,32 +593,50 @@
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <!-- Compact: content-sized and pushed right (ml-auto) so the
-                     textarea (flex-1) owns the slack. Multiline: grows to fill the
-                     controls row (flex-1) and right-aligns, so a long model name
-                     truncates within the row instead of overflowing it. -->
-                <div
-                  class="order-3 flex min-w-0 items-center gap-2"
-                  :class="isMultiline ? 'flex-1 justify-end self-end' : 'ml-auto self-center'"
-                >
+                <!-- Destination selector: a peer of the ＋ menu in the
+                     controls row. Selection only; ACL lives elsewhere. -->
+                <ComposerContinueOn
+                  v-if="showComputersMenu"
+                  :targets="workspaceTargets"
+                  :selected-target-id="selectedWorkspaceTargetId"
+                  :selected-missing="selectedWorkspaceTargetMissing"
+                  :selected-snapshot-name="workspaceTargetSelection.snapshot?.name ?? ''"
+                  :locked="computerSwitchLocked"
+                  :initial-loading="workspaceTargetsInitialLoading"
+                  :load-failed="workspaceTargetsLoadFailed"
+                  :bot-id="currentBotId ?? ''"
+                  :bot-name="currentBot?.display_name || currentBot?.name || ''"
+                  @select="selectWorkspaceTarget"
+                  @menu-open="refetchWorkspaceTargets"
+                />
+
+                <!-- The controls row owns the remaining width and right-aligns,
+                     so a long model name truncates instead of overflowing. -->
+                <div class="order-3 flex min-w-0 flex-1 items-center justify-end gap-2 self-end">
                   <Popover v-model:open="modelPopoverOpen">
                     <PopoverTrigger as-child>
                       <Button
                         type="button"
                         variant="ghost"
+                        size="sm"
+                        shape="circle"
                         :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
-                        class="composer-pill-press h-9 max-md:h-11 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
+                        class="composer-pill-press min-w-0 max-md:h-11"
                         :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
-                        <Spinner
-                          v-if="composerConfigPending || acpModelsLoading"
-                          class="size-3.5 shrink-0"
-                        />
-                        <span
-                          ref="modelLabelEl"
-                          class="min-w-0 truncate text-label"
-                        >{{ modelTriggerLabel }}</span>
-                        <ChevronDown class="size-3.5 shrink-0 opacity-50" />
+                        <!-- One transformable wrapper for the press squish —
+                             same contract as composer-continue-on's pill. -->
+                        <span class="composer-pill-content inline-flex min-w-0 items-center gap-2">
+                          <Spinner
+                            v-if="composerConfigPending || acpModelsLoading"
+                            class="size-3.5 shrink-0"
+                          />
+                          <span class="min-w-0 truncate text-label text-composer-control-label">{{ modelTriggerLabel }}</span>
+                          <ChevronDown
+                            class="size-3.5 shrink-0 text-muted-foreground"
+                            :stroke-width="1.5"
+                          />
+                        </span>
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent
@@ -747,14 +710,57 @@
                     </PopoverContent>
                   </Popover>
 
-                  <div class="relative size-9 max-md:size-11 shrink-0">
-                    <SessionInfoRing
-                      v-if="!activeIsACP"
-                      :override-model-id="overrideModelId"
-                      :fallback-context-window="activeModel?.config?.context_window ?? null"
-                      class="absolute inset-0 size-9 max-md:size-11 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
-                      :class="(!showSend && !streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
-                    />
+                  <div class="relative size-8 max-md:size-11 shrink-0">
+                    <!-- Mic and send share this one slot (never both visible):
+                         with nothing to send, voice input IS the affordance
+                         here; typing (or attaching) hands it to send. Mic is a
+                         filled PRIMARY circle at rest (near-black, not brand —
+                         brand stays scarce, reserved for send/stop), so the
+                         slot reads as one continuous filled control that swaps
+                         its glyph and meaning on the same cross-fade timing.
+                         The context-pressure ring itself is only shelved for
+                         now, not deleted — its useSessionInfo data source
+                         stays wired below (untouched) because the /compact
+                         quick action's live percentage still reads off it. -->
+                    <Button
+                      type="button"
+                      variant="primary"
+                      shape="circle"
+                      :disabled="voiceInputDisabled"
+                      :title="voiceInputLabel"
+                      :aria-label="voiceInputLabel"
+                      class="absolute inset-0 size-8 max-md:size-11 rounded-full transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                      :class="micVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
+                      @click="handleVoiceInput"
+                    >
+                      <Spinner
+                        v-if="voiceInputState === 'transcribing'"
+                        class="size-4"
+                      />
+                      <svg
+                        v-else
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        class="size-4.5"
+                        :class="voiceInputState === 'recording' ? 'motion-safe:animate-pulse' : undefined"
+                        aria-hidden="true"
+                      >
+                        <!-- Relaxed envelope: the center bar spans only 14 of
+                             the 24 viewBox units — the full-18 spike made the
+                             glyph read tense. Ends are vertical ovals
+                             (2.5 × 3.5 — a hair taller than pure circles), mids
+                             hold half the max (7). The 4.5-unit gaps are
+                             untouched: denser spacing smudges at this size. -->
+                        <path d="M3 11.5v1" />
+                        <path d="M7.5 8.5v7" />
+                        <path d="M12 5v14" />
+                        <path d="M16.5 8.5v7" />
+                        <path d="M21 11.5v1" />
+                      </svg>
+                    </Button>
                     <!-- Send and stop are one brand circle: the surface never
                          changes between the two states, only the glyph cross-fades
                          (arrow ⇄ stop square), so the button can't blink color or
@@ -764,12 +770,12 @@
                       variant="brand"
                       :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel)"
                       :aria-label="streaming ? 'Stop generating response' : 'Send message'"
-                      class="absolute inset-0 size-9 max-md:size-11 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
-                      :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
+                      class="absolute inset-0 size-8 max-md:size-11 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
+                      :class="sendButtonVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
                       @click="streaming ? chatStore.abort(paneTarget) : handleSend()"
                     >
                       <span
-                        class="grid size-[20px] shrink-0 place-items-center"
+                        class="grid size-[18px] shrink-0 place-items-center"
                         aria-hidden="true"
                       >
                         <svg
@@ -779,7 +785,7 @@
                           stroke-width="2.75"
                           stroke-linecap="round"
                           stroke-linejoin="round"
-                          class="col-start-1 row-start-1 size-[20px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          class="col-start-1 row-start-1 size-[18px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
                           :class="streaming ? 'opacity-0' : 'opacity-100'"
                         >
                           <path d="M12 19.5 V5" />
@@ -788,7 +794,7 @@
                         <svg
                           viewBox="0 0 24 24"
                           fill="currentColor"
-                          class="col-start-1 row-start-1 size-[18px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          class="col-start-1 row-start-1 size-4 transition-opacity duration-200 ease-out motion-reduce:transition-none"
                           :class="streaming ? 'opacity-100' : 'opacity-0'"
                         >
                           <rect
@@ -829,8 +835,6 @@ import {
   Package,
   SquarePen,
   ShieldCheck,
-  Monitor,
-  Server,
 } from 'lucide-vue-next'
 import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner, menuChromeClass, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
@@ -840,10 +844,12 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
-import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets } from '@memohai/sdk'
+import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import MessageItem from './message-item.vue'
+import ComposerContinueOn from './composer-continue-on.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
 import { useChatScroll } from '../composables/useChatScroll'
 import BgTaskPill from './bg-task-pill.vue'
@@ -854,7 +860,6 @@ import { usePendingApprovals } from '../composables/usePendingApprovals'
 import ChatScrollRail, { type ScrollRailSegment } from './chat-scroll-rail.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
-import SessionInfoRing from './session-info-ring.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, nearestEffortToMedium, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
@@ -869,10 +874,10 @@ import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, m
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
-import { useIsMobile } from '@/composables/useIsMobile'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
+import { workspaceTargetAvailable } from '@/utils/workspace-target'
 import { findLatestPendingChatDecision } from './chat-pending-decision'
 import {
   acpSlashCommandComposerText,
@@ -899,6 +904,7 @@ const props = withDefaults(defineProps<{
 })
 
 const { t } = useI18n()
+const router = useRouter()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { pill: bgTaskPill, scrollToOffscreen, cleanup: cleanupBgTaskBeacons } = provideBgTaskBeacons()
@@ -1105,6 +1111,7 @@ const {
   data: workspaceTargetsResponse,
   error: workspaceTargetsError,
   isLoading: workspaceTargetsLoading,
+  refetch: refetchWorkspaceTargets,
 } = useQuery({
   key: () => ['bot-workspace-targets', currentBotId.value ?? ''],
   query: async () => {
@@ -1295,28 +1302,6 @@ function workspaceTargetFromSessionMetadata(metadata: Record<string, unknown>): 
     kind: value('kind'),
     name: value('name'),
   }
-}
-
-function workspaceTargetName(target: Pick<WorkspaceWorkspaceTarget, 'kind' | 'name'>): string {
-  if (target.kind === 'native') return t('bots.remoteRuntime.nativeWorkspace')
-  return target.name || t('bots.remoteRuntime.unknownComputer')
-}
-
-function workspaceTargetStatus(target: WorkspaceWorkspaceTarget): string {
-  if (target.kind === 'native') return 'online'
-  return target.status || (target.online ? 'online' : 'offline')
-}
-
-function workspaceTargetStatusLabel(target: WorkspaceWorkspaceTarget): string {
-  const status = workspaceTargetStatus(target)
-  const key = `runtimes.status.${status}`
-  const label = t(key)
-  return label === key ? status : label
-}
-
-function workspaceTargetAvailable(target: WorkspaceWorkspaceTarget): boolean {
-  return target.kind === 'native'
-    || (workspaceTargetStatus(target) === 'online' && target.online !== false)
 }
 
 function selectWorkspaceTarget(target: ValidWorkspaceTarget) {
@@ -2407,33 +2392,240 @@ watch(inputText, (text) => {
   if (!prefix || text === prefix || text.startsWith(`${prefix} `)) return
   slashPanelSuppressedPrefix.value = ''
 })
-const isMobile = useIsMobile()
 const {
   textareaEl,
   composerEl,
-  modelLabelEl,
-  isMultiline,
-  composerRadiusMs,
-  composerRadiusEase,
   focusTextarea,
   modelTriggerMaxWidth,
-  snapComposerNext,
 } = useComposerLayout({
-  inputText,
-  isActive,
-  showAttachmentGrid,
-  mobileMultiline: isMobile,
-  modelTriggerLabel,
+  continueOnVisible: showComputersMenu,
 })
 
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0 || requestedSkills.value.length > 0)
 
-// Whether the trailing slot shows the send button at all. In standard chat the
-// SessionInfoRing fills that slot while idle and the send button only reveals
-// once there's content (showSend). ACP sessions have no ring, so without this
-// the slot would sit empty on empty input — the button must stay put and just
-// fall to its disabled (dimmed brand) state instead of vanishing.
-const sendButtonVisible = computed(() => showSend.value || activeIsACP.value)
+// Whether the trailing slot shows the send button (vs. mic — see micVisible
+// just below, its exact complement). Streaming always wins the slot for stop,
+// same as before; unlike the old ring-era rule this no longer special-cases
+// ACP, because mic — not a dimmed disabled send — is what now fills the slot
+// on empty input in EVERY mode.
+const sendButtonVisible = computed(() => showSend.value || streaming.value)
+
+// Mic owns the trailing slot whenever send doesn't: nothing to send is
+// exactly when voice input is the useful affordance there. Exact complement
+// of sendButtonVisible so the two can never both show (or both hide).
+const micVisible = computed(() => !sendButtonVisible.value)
+
+// Voice input: MediaRecorder → the bot's configured transcription model →
+// transcript appended into the draft. The recorder/stream live outside
+// reactivity (plain module lets) because MediaRecorder is stateful and must
+// never be proxied. voiceRequestVersion + voiceSourceBotId guard the async
+// edges: a bot switch or cancel mid-record/mid-transcribe invalidates the
+// in-flight request so a late transcript can't land in the wrong pane.
+type VoiceInputState = 'idle' | 'recording' | 'transcribing'
+
+const voiceInputState = ref<VoiceInputState>('idle')
+const voiceInputLabel = computed(() => {
+  if (voiceInputState.value === 'recording') return t('chat.voiceInput.stop')
+  if (voiceInputState.value === 'transcribing') return t('chat.voiceInput.transcribing')
+  return t('chat.voiceInput.start')
+})
+const voiceInputDisabled = computed(() =>
+  !currentBotId.value
+  || activeChatReadOnly.value
+  || loadingMessages.value
+  || streaming.value
+  || botSettingsLoading.value
+  || voiceInputState.value === 'transcribing',
+)
+
+let voiceRecorder: MediaRecorder | null = null
+let voiceStream: MediaStream | null = null
+let voiceChunks: Blob[] = []
+let discardVoiceRecording = false
+let voiceSourceBotId = ''
+let voiceRequestVersion = 0
+
+function releaseVoiceStream() {
+  voiceStream?.getTracks().forEach(track => track.stop())
+  voiceStream = null
+}
+
+function preferredVoiceMimeType(): string {
+  if (typeof MediaRecorder === 'undefined') return ''
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+  ]
+  return candidates.find(type => MediaRecorder.isTypeSupported(type)) ?? ''
+}
+
+function voiceFileExtension(mimeType: string): string {
+  if (mimeType.includes('mp4')) return 'm4a'
+  if (mimeType.includes('ogg')) return 'ogg'
+  return 'webm'
+}
+
+function openTranscriptionSettings() {
+  const botName = currentBot.value?.name || currentBot.value?.id || currentBotId.value
+  if (!botName) {
+    void router.push({ name: 'voice' })
+    return
+  }
+  void router.push({
+    name: 'bot-detail',
+    params: { botName },
+    query: { tab: 'general', section: 'multimedia' },
+  })
+}
+
+async function transcribeVoiceInput(
+  blob: Blob,
+  mimeType: string,
+  modelId: string,
+  sourceBotId: string,
+  requestVersion: number,
+) {
+  voiceInputState.value = 'transcribing'
+  const file = new File(
+    [blob],
+    `voice-input.${voiceFileExtension(mimeType)}`,
+    { type: mimeType || 'audio/webm' },
+  )
+
+  try {
+    const { data } = await postTranscriptionModelsByIdTest({
+      path: { id: modelId },
+      body: { file },
+      throwOnError: true,
+    })
+    if (voiceRequestVersion !== requestVersion || currentBotId.value !== sourceBotId) return
+    const transcript = data?.text?.trim() ?? ''
+    if (!transcript) {
+      toast.error(t('chat.voiceInput.empty'))
+      return
+    }
+    const draft = inputText.value.trimEnd()
+    inputText.value = draft ? `${draft} ${transcript}` : transcript
+    await nextTick()
+    focusTextarea()
+  } catch (error) {
+    if (voiceRequestVersion !== requestVersion) return
+    toast.error(resolveApiErrorMessage(error, t('chat.voiceInput.failed')))
+  } finally {
+    if (voiceRequestVersion === requestVersion) voiceInputState.value = 'idle'
+  }
+}
+
+function stopVoiceInput() {
+  if (voiceRecorder?.state !== 'recording') return
+  voiceRecorder.stop()
+}
+
+function cancelVoiceInput() {
+  voiceRequestVersion += 1
+  discardVoiceRecording = true
+  if (voiceRecorder?.state === 'recording') {
+    voiceRecorder.stop()
+  } else {
+    voiceRecorder = null
+    voiceChunks = []
+    releaseVoiceStream()
+    voiceInputState.value = 'idle'
+  }
+}
+
+async function startVoiceInput() {
+  const modelId = botSettings.value?.transcription_model_id?.trim() ?? ''
+  if (!modelId) {
+    toast.info(t('chat.voiceInput.notConfigured'))
+    openTranscriptionSettings()
+    return
+  }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    toast.error(t('chat.voiceInput.unsupported'))
+    return
+  }
+
+  const requestVersion = ++voiceRequestVersion
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    })
+    if (voiceRequestVersion !== requestVersion) {
+      stream.getTracks().forEach(track => track.stop())
+      return
+    }
+    const mimeType = preferredVoiceMimeType()
+    const recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream)
+
+    voiceStream = stream
+    voiceRecorder = recorder
+    voiceChunks = []
+    discardVoiceRecording = false
+    voiceSourceBotId = currentBotId.value ?? ''
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) voiceChunks.push(event.data)
+    }
+    recorder.onerror = () => {
+      discardVoiceRecording = true
+      toast.error(t('chat.voiceInput.failed'))
+      if (recorder.state === 'recording') {
+        recorder.stop()
+      } else {
+        voiceRecorder = null
+        voiceChunks = []
+        releaseVoiceStream()
+        voiceInputState.value = 'idle'
+      }
+    }
+    recorder.onstop = () => {
+      const chunks = voiceChunks
+      const shouldDiscard = discardVoiceRecording || voiceRequestVersion !== requestVersion
+      const sourceBotId = voiceSourceBotId
+      const recordedType = recorder.mimeType || mimeType || 'audio/webm'
+      voiceRecorder = null
+      voiceChunks = []
+      releaseVoiceStream()
+      if (shouldDiscard || !chunks.length) {
+        voiceInputState.value = 'idle'
+        return
+      }
+      const audio = new Blob(chunks, { type: recordedType })
+      void transcribeVoiceInput(audio, recordedType, modelId, sourceBotId, requestVersion)
+    }
+
+    recorder.start()
+    voiceInputState.value = 'recording'
+  } catch (error) {
+    if (voiceRequestVersion !== requestVersion) return
+    releaseVoiceStream()
+    voiceRecorder = null
+    voiceInputState.value = 'idle'
+    const denied = error instanceof DOMException
+      && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
+    toast.error(denied ? t('chat.voiceInput.permissionDenied') : t('chat.voiceInput.failed'))
+  }
+}
+
+function handleVoiceInput() {
+  if (voiceInputState.value === 'recording') {
+    stopVoiceInput()
+    return
+  }
+  if (voiceInputState.value === 'idle') void startVoiceInput()
+}
+
+watch(currentBotId, cancelVoiceInput)
+onBeforeUnmount(cancelVoiceInput)
 
 const stopAuthSessionCleanup = onAuthSessionCleared(() => {
   clearAllDrafts()
@@ -2445,7 +2637,6 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
   currentBotId,
   tabId: () => props.tabId,
   inputText,
-  onDraftKeySwap: snapComposerNext,
 })
 
 // The dock owns ALL geometry/visibility orchestration (box-slot mutex,
@@ -2686,6 +2877,20 @@ function activeComposerListBridge() {
   if (slashPanelOpen.value && slashPanelHasResults.value) return slashPickerBridge.value
   if (commandPanelEvent.value && commandResultItems.value.length) return dockEl.value?.commandBridge ?? null
   return null
+}
+
+// The composer card's own padding/gaps are plain background, not covered by
+// any child — @click.self missed them whenever a child element's box (even
+// its invisible padding) sat on top of the pointer, which is most of the
+// card. Focus the textarea for any click that isn't already on something
+// interactive (button, link, form control, or a [role="button"] custom
+// trigger like the model/agent pills) — mirrors a plain text field, where
+// clicking anywhere in its box places the caret.
+const COMPOSER_INTERACTIVE_SELECTOR = 'button, a, input, [role="button"], [contenteditable="true"]'
+function handleComposerClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (target.closest(COMPOSER_INTERACTIVE_SELECTOR)) return
+  focusTextarea()
 }
 
 function handleComposerKeydown(e: KeyboardEvent) {

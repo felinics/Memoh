@@ -3325,6 +3325,17 @@ export type WorkspaceWorkspaceTarget = {
     tool_approval_config?: SettingsToolApprovalConfig;
 };
 
+export type WorkspaceWorkspaceTargetGrant = {
+    bot_id?: string;
+    primary?: boolean;
+    runtime_id?: string;
+    target_id?: string;
+};
+
+export type WorkspaceWorkspaceTargetGrantsResponse = {
+    grants?: Array<WorkspaceWorkspaceTargetGrant>;
+};
+
 export type WorkspaceWorkspaceTargetToolApproval = {
     exec?: SettingsToolApprovalMode;
     read?: SettingsToolApprovalMode;
@@ -14781,6 +14792,35 @@ export type PutUsersMeChannelsByPlatformResponses = {
 };
 
 export type PutUsersMeChannelsByPlatformResponse = PutUsersMeChannelsByPlatformResponses[keyof PutUsersMeChannelsByPlatformResponses];
+
+export type GetUsersMeComputerAccessData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/users/me/computer-access';
+};
+
+export type GetUsersMeComputerAccessErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetUsersMeComputerAccessError = GetUsersMeComputerAccessErrors[keyof GetUsersMeComputerAccessErrors];
+
+export type GetUsersMeComputerAccessResponses = {
+    /**
+     * OK
+     */
+    200: WorkspaceWorkspaceTargetGrantsResponse;
+};
+
+export type GetUsersMeComputerAccessResponse = GetUsersMeComputerAccessResponses[keyof GetUsersMeComputerAccessResponses];
 
 export type PutUsersMePasswordData = {
     /**

@@ -66,6 +66,7 @@
       />
 
       <SettingsMultimediaCard
+        id="settings-section-multimedia"
         :form="form"
         :tts-models="ttsModels"
         :tts-providers="ttsProviders"

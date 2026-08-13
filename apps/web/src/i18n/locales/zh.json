@@ -93,6 +93,23 @@
     "actionRequired": "需要操作",
     "preview": "预览"
   },
+  "computerAccess": {
+    "nativeAlwaysOn": "始终对此 Bot 可用",
+    "emptyBots": "还没有 Bot。",
+    "emptyComputers": "还没有已连接的电脑。",
+    "connectCta": "连接电脑",
+    "updateFailed": "更新访问权失败",
+    "done": "完成",
+    "subtitleRuntime": "哪些 Bot 可以使用它？",
+    "subtitleBot": "它可以使用哪些电脑？"
+  },
+  "computerConnect": {
+    "title": "连接电脑",
+    "commandLabel": "连接命令",
+    "commandDescription": "在要连接的电脑上运行，保持进程运行。",
+    "waiting": "等待电脑连接…",
+    "finish": "完成"
+  },
   "errors": {
     "bot": {
       "name_taken": "该名称已被占用。"
@@ -246,7 +263,6 @@
     "title": "电脑",
     "connect": "连接电脑",
     "connectOther": "连接其他电脑",
-    "computers": "已连接的电脑",
     "otherComputers": "其他电脑",
     "loadingComputers": "正在加载电脑...",
     "loadFailed": "无法加载电脑",
@@ -256,8 +272,6 @@
     "emptyDescription": "创建连接命令，然后在你希望 Memoh 使用的电脑上运行它。",
     "emptyOtherTitle": "还没有连接其他电脑",
     "emptyOtherDescription": "如果希望 Bot 使用其他设备，可以再连接一台电脑。",
-    "waitingForConnection": "等待运行连接命令",
-    "connected": "可用",
     "copyCommand": "复制连接命令",
     "revoke": "断开连接",
     "revokeTitle": "断开这台电脑的连接？",
@@ -297,20 +311,17 @@
       }
     },
     "connectDialog": {
-      "title": "连接一台电脑",
-      "description": "给这个连接起一个容易辨认的名称。",
       "name": "电脑名称",
       "nameHelp": "可以按位置或用途命名，例如“办公室 Mac”。",
       "namePlaceholder": "办公室 Mac",
       "nameRequired": "请输入电脑名称",
-      "create": "创建命令",
-      "createFailed": "无法创建连接",
-      "runTitle": "运行这条命令",
-      "runDescription": "在你希望 Memoh 使用的电脑上运行，并保持进程运行。",
-      "command": "连接命令",
-      "keyOnce": "命令中包含私密的连接密钥。断开这台电脑后，密钥会立即失效。",
-      "done": "完成"
-    }
+      "createFailed": "无法创建连接"
+    },
+    "botAccess": "{count}/{total} 个 Bot",
+    "noBotAccess": "无 Bot",
+    "manageAccess": "管理 Bot 访问权",
+    "revokeAccessWarning": "将同时解除 {count} 个 Bot 的访问权。",
+    "computerOnline": "{name} 已上线"
   },
   "breadcrumb": {
     "main": "首页"
@@ -610,17 +621,30 @@
     "inputPlaceholder": "问点什么…",
     "readonlyHint": "该聊天为只读",
     "readonlyPlaceholder": "该聊天为只读，无法发送消息",
-    "composerActions": "添加文件、切换 Agent 或选择电脑",
+    "composerActions": "添加文件或切换 Agent",
+    "voiceInput": {
+      "start": "开始语音输入",
+      "stop": "停止录音",
+      "transcribing": "正在转写…",
+      "notConfigured": "请先选择语音转写模型。",
+      "unsupported": "当前浏览器不支持语音输入。",
+      "permissionDenied": "麦克风权限已被拒绝。",
+      "empty": "没有识别到语音内容。",
+      "failed": "语音输入失败。"
+    },
     "attachmentLines": "{count} 行",
     "pastedBadge": "粘贴",
     "pastedViewerTitle": "粘贴内容",
     "agent": "Agent",
-    "computers": "电脑",
-    "computerDefault": "默认",
-    "computerDefaultStatus": "默认 · {status}",
+    "continueOn": {
+      "label": "继续位置",
+      "addComputer": "添加电脑…",
+      "manageAccess": "管理访问权…",
+      "manageComputers": "管理电脑",
+      "noAccess": "此 Bot 暂无电脑访问权"
+    },
     "computerLoading": "正在加载电脑...",
     "computerLoadFailed": "无法加载电脑",
-    "computerNone": "没有可用的电脑",
     "computerUnavailable": "不可用的电脑",
     "folder": "文件夹",
     "folders": "文件夹",
@@ -707,7 +731,7 @@
       "edit": "编辑",
       "apply_patch": "应用补丁",
       "list": "列出",
-      "list_execution_locations": "查看电脑和服务器工作区",
+      "list_execution_locations": "查看可用的电脑",
       "exec": "执行",
       "bg_status": "后台任务",
       "list_background": "列出后台任务",
@@ -2074,7 +2098,7 @@
       "archiveDescription": "已在「{name}」中的会话会继续使用原目录；新会话将无法再加入。",
       "archiveFailed": "归档文件夹失败",
       "rowActions": "{name} 的操作",
-      "targetNative": "服务器工作区",
+      "targetNative": "云端电脑",
       "targetRemote": "已连接的电脑",
       "form": {
         "name": "名称",
@@ -2096,31 +2120,20 @@
       "loading": "正在加载使用位置...",
       "loadFailed": "无法加载使用位置",
       "loadFailedDescription": "请检查服务器连接后重试。",
-      "addComputer": "添加电脑",
       "primary": "默认位置",
-      "primaryDescription": "未另行选择时，文件和命令会在这里执行。该位置离线时，Memoh 不会自动切换到其他位置。",
+      "primaryDescription": "未另行选择时，文件和命令都在这里执行。",
       "primarySaveFailed": "无法切换默认位置",
       "defaultBadge": "默认",
-      "nativeWorkspace": "服务器工作区",
-      "serverDescription": "这个 Bot 原有的服务器工作区。",
+      "nativeWorkspace": "云端电脑",
+      "serverDescription": "此 Bot 的内置工作区，由 Memoh 托管。",
       "thisComputerOff": "使用这台电脑",
-      "thisComputerOffDescription": "先到“电脑”中打开使用权限，再在这里添加这台电脑。",
+      "thisComputerOffDescription": "请先在「电脑」页面允许这台电脑，再在这里开启访问。",
       "openComputerSettings": "打开电脑设置",
-      "computer": "电脑",
-      "computerDescription": "从“电脑”中已允许使用的电脑里选择一台。",
-      "selectComputer": "选择电脑",
-      "noAvailableComputers": "没有其他可用的电脑。请先到“电脑”中连接或打开一台电脑。",
       "unknownComputer": "不可用的电脑",
-      "addTitle": "将电脑添加给这个 Bot",
-      "mountDescription": "选择一台允许这个 Bot 读写文件和执行命令的电脑。",
-      "addSuccess": "已将电脑添加给 Bot",
-      "saveFailed": "无法保存电脑",
-      "removeFromBot": "从 Bot 中移除",
-      "deleteTitle": "从这个 Bot 中移除这台电脑？",
-      "deleteDescription": "将从这个 Bot 中移除 {name}，不会删除电脑上的文件。",
-      "deletePrimaryDescription": "{name} 当前是默认位置。移除后，服务器工作区会成为默认位置；电脑上的文件不会被删除。",
-      "deleteSuccess": "已从 Bot 中移除电脑",
-      "deleteFailed": "无法从这个 Bot 中移除电脑"
+      "noComputers": "暂无可授权的电脑",
+      "manageComputers": "管理电脑",
+      "connectManage": "连接或断开电脑",
+      "connectManageDescription": "在「电脑」页面管理所有电脑。"
     },
     "desktop": {
       "title": "桌面环境",

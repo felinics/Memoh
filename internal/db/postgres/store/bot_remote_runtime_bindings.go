@@ -49,6 +49,27 @@ func (s *Store) ListMounts(ctx context.Context, botID string) ([]dbstore.BotRemo
 	return records, nil
 }
 
+func (s *Store) ListGrantsByRuntimeOwner(ctx context.Context, ownerUserID string) ([]dbstore.BotRemoteRuntimeBindingRecord, error) {
+	id, err := db.ParseUUID(ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListBotRemoteRuntimeGrantsByRuntimeOwner(ctx, id)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	records := make([]dbstore.BotRemoteRuntimeBindingRecord, 0, len(rows))
+	for _, row := range rows {
+		records = append(records, dbstore.BotRemoteRuntimeBindingRecord{
+			ID:        row.ID.String(),
+			BotID:     row.BotID.String(),
+			RuntimeID: row.RuntimeID.String(),
+			IsPrimary: row.IsPrimary,
+		})
+	}
+	return records, nil
+}
+
 func (s *Store) GetMount(ctx context.Context, botID, targetID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
 	botUUID, targetUUID, err := parseRemoteMountIDs(botID, targetID)
 	if err != nil {

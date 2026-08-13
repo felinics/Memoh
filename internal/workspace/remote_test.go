@@ -73,6 +73,16 @@ func (s *fakeRemoteBindingStore) ListMounts(_ context.Context, botID string) ([]
 	return records, nil
 }
 
+func (s *fakeRemoteBindingStore) ListGrantsByRuntimeOwner(_ context.Context, ownerUserID string) ([]dbstore.BotRemoteRuntimeBindingRecord, error) {
+	var records []dbstore.BotRemoteRuntimeBindingRecord
+	for _, record := range s.records {
+		if record.BotOwnerUserID == ownerUserID {
+			records = append(records, record)
+		}
+	}
+	return records, nil
+}
+
 func (s *fakeRemoteBindingStore) GetMount(_ context.Context, botID, targetID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
 	for _, record := range s.records {
 		if record.BotID == botID && record.ID == targetID {
@@ -187,9 +197,32 @@ func TestRemoteWorkspaceMountsAreIndependentAndPrimaryIsUnique(t *testing.T) {
 	}
 }
 
+func TestListAccountGrantsScopesByOwnerAndValidatesID(t *testing.T) {
+	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{
+		{ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID, IsPrimary: true, BotOwnerUserID: remoteTestOwnerID},
+		{ID: remoteTestTargetID2, BotID: remoteTestBotID2, RuntimeID: remoteTestRuntimeID, BotOwnerUserID: "55555555-5555-4555-8555-555555555555"},
+	}}
+	service := &RemoteWorkspaceService{store: store, runtimes: fakeRuntimeConnections{}}
+
+	grants, err := service.ListAccountGrants(context.Background(), remoteTestOwnerID)
+	if err != nil {
+		t.Fatalf("ListAccountGrants: %v", err)
+	}
+	if len(grants) != 1 {
+		t.Fatalf("grants = %#v", grants)
+	}
+	if grants[0].TargetID != remoteTestTargetID || grants[0].BotID != remoteTestBotID || grants[0].RuntimeID != remoteTestRuntimeID || !grants[0].Primary {
+		t.Fatalf("grant = %#v", grants[0])
+	}
+
+	if _, err := service.ListAccountGrants(context.Background(), "not-a-uuid"); !errors.Is(err, userruntime.ErrInvalidInput) {
+		t.Fatalf("invalid owner id err = %v", err)
+	}
+}
+
 func TestRemoteWorkspaceDefaultApprovalDoesNotInheritNativeBypasses(t *testing.T) {
 	config := DefaultRemoteToolApprovalConfig()
-	if config.Read.Mode != settings.ToolApprovalAllow || config.Write.Mode != settings.ToolApprovalAsk || config.Exec.Mode != settings.ToolApprovalAsk {
+	if config.Read.Mode != settings.ToolApprovalAllow || config.Write.Mode != settings.ToolApprovalAllow || config.Exec.Mode != settings.ToolApprovalAllow {
 		t.Fatalf("modes = %#v", config)
 	}
 	if len(config.Read.BypassGlobs) != 0 || len(config.Write.BypassGlobs) != 0 || len(config.Exec.BypassCommands) != 0 {
