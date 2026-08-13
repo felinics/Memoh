@@ -208,6 +208,7 @@
                than switching to side-by-side rows halfway down the dialog. -->
           <FormStack class="mt-3">
             <ScheduleExecutionFields
+              ref="executionFields"
               :bot-id="botId"
               :form="execution"
             />
@@ -356,6 +357,7 @@ const form = reactive<SchedulePlainForm>({
 })
 const patternState = ref<ScheduleFormState>(defaultScheduleFormState())
 const execution = reactive<ScheduleExecutionForm>(defaultExecutionForm())
+const executionFields = ref<InstanceType<typeof ScheduleExecutionFields> | null>(null)
 const manualCron = ref('')
 const showMore = ref(false)
 const isSaving = ref(false)
@@ -452,6 +454,10 @@ const canSubmit = computed(() => {
   if (!manualCron.value || !isValidCron(manualCron.value)) return false
   if (!maxCallsUnlimited.value && (form.maxCalls === null || form.maxCalls < 1)) return false
   if (execution.runTarget === 'existing_session' && !execution.targetSessionId) return false
+  // The execution fields seed a model when the bot has no default, so this
+  // only bites when there is no chat model to seed from — the backend would
+  // reject that fire anyway, and the field says why.
+  if (executionFields.value && !executionFields.value.modelSatisfied) return false
   return true
 })
 

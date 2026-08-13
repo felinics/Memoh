@@ -37,7 +37,10 @@
       </p>
     </FieldStack>
 
-    <FieldStack :label="t('bots.schedule.execution.model')">
+    <FieldStack
+      :label="t('bots.schedule.execution.model')"
+      :help="modelHelp"
+    >
       <!-- Existing-session mode inherits the runtime; only the matching model
            column is offered. New-session mode picks the runtime here. Reasoning
            rides inside the picker that owns the model, the same way the chat
@@ -49,7 +52,7 @@
         :models="runtimePickerModels"
         :providers="runtimePickerProviders"
         model-type="chat"
-        :placeholder="t('bots.schedule.execution.botDefault')"
+        :placeholder="newSessionPlaceholder"
         :show-reasoning="!acpAgentInPlay && nativeReasoningOptions.length > 0"
         :reasoning-options="nativeReasoningOptions"
       />
@@ -132,6 +135,7 @@ import {
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getAcpProfiles,
   getBotsById,
+  getBotsByBotIdSettings,
   getModels,
   getProviders,
   postBotsByBotIdAcpRuntimes,
@@ -193,6 +197,9 @@ const ACP_VALUE_PREFIX = 'acp:'
 const NO_PROVIDERS: ProvidersGetResponse[] = []
 
 const selectedSession = ref<SessionSession | null>(null)
+// undefined until the settings request settles, so the model field never
+// flashes a "you must pick one" state at a bot that does have a default.
+const botDefaultModelID = ref<string | undefined>(undefined)
 const models = ref<ModelsGetResponse[]>([])
 const providers = ref<ProvidersGetResponse[]>([])
 const acpProfiles = ref<AcpprofilePublicProfile[]>([])
@@ -311,6 +318,39 @@ const runtimePickerProviders = computed<ProvidersGetResponse[]>(() => [
   ...providers.value,
   { id: ACP_PROVIDER_ID, name: t('bots.schedule.execution.acpAgents') },
 ])
+
+// Model selection falls back bot default → the session's last round, and a
+// fresh session per fire has no last round. So a bot with no default leaves a
+// scheduled run with nothing to resolve, and the backend rejects it. The form
+// closes that hole by picking a model itself rather than offering a "bot
+// default" that does not exist.
+const modelRequired = computed(() =>
+  props.form.runTarget === 'new_session'
+  && botDefaultModelID.value !== undefined
+  && botDefaultModelID.value === ''
+  && props.form.runtimeType !== 'acp_agent',
+)
+
+const newSessionPlaceholder = computed(() =>
+  modelRequired.value
+    ? t('bots.schedule.execution.pickModel')
+    : t('bots.schedule.execution.botDefault'),
+)
+
+const modelHelp = computed(() => {
+  if (!modelRequired.value) return ''
+  return chatModels.value.length === 0
+    ? t('bots.schedule.execution.noModelAvailable')
+    : t('bots.schedule.execution.noBotDefaultModel')
+})
+
+// Seed the picker once the lists land, so the field is answered rather than
+// blocking on a question the user did not ask to be asked. It stays a normal
+// selection they can change.
+watch([modelRequired, chatModels], ([required, available]) => {
+  if (!required || props.form.modelId || available.length === 0) return
+  props.form.modelId = available[0].id ?? ''
+}, { immediate: true })
 
 const runtimeModel = computed({
   get: () => {
@@ -499,10 +539,28 @@ onMounted(async () => {
     })(),
     (async () => {
       try {
+        const { data } = await getBotsByBotIdSettings({ path: { bot_id: props.botId }, throwOnError: true })
+        botDefaultModelID.value = (data as { chat_model_id?: string } | undefined)?.chat_model_id?.trim() ?? ''
+      } catch {
+        // Unknown, not "absent": leaving it undefined keeps the field on its
+        // normal "bot default" reading rather than demanding a model on a
+        // transient settings error.
+        botDefaultModelID.value = undefined
+      }
+    })(),
+    (async () => {
+      try {
         const { data } = await getBotsById({ path: { id: props.botId }, throwOnError: true })
         botMetadata.value = (data as { metadata?: Record<string, unknown> }).metadata
       } catch { botMetadata.value = undefined }
     })(),
   ])
+})
+
+// The editor gates Save on this: everywhere else the form seeds a model
+// itself, so it only reads false when the bot has no default AND there is no
+// chat model to seed from.
+defineExpose({
+  modelSatisfied: computed(() => !modelRequired.value || !!props.form.modelId),
 })
 </script>

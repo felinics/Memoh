@@ -23,11 +23,16 @@ const (
 	execTestWorkdirID = "44444444-4444-4444-4444-444444444444"
 )
 
-// executionQueries fakes the two lookups normalizeExecution performs.
+// executionQueries fakes the lookups normalizeExecution performs.
 type executionQueries struct {
 	dbstore.Queries
 	sessions map[string]sqlc.BotSession
 	models   map[string]sqlc.Model
+	// noDefaultChatModel strips the bot's default chat model. Fixtures leave
+	// it false because every pre-existing case assumes a bot that has one;
+	// dropping it is exactly what makes an explicit model mandatory.
+	noDefaultChatModel bool
+	settingsMissing    bool
 }
 
 func (q *executionQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
@@ -36,6 +41,21 @@ func (q *executionQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sq
 		return sqlc.BotSession{}, pgx.ErrNoRows
 	}
 	return sess, nil
+}
+
+func (q *executionQueries) GetSettingsByBotID(_ context.Context, _ pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
+	if q.settingsMissing {
+		return sqlc.GetSettingsByBotIDRow{}, pgx.ErrNoRows
+	}
+	row := sqlc.GetSettingsByBotIDRow{}
+	if !q.noDefaultChatModel {
+		parsed, err := db.ParseUUID(execTestModelID)
+		if err != nil {
+			return sqlc.GetSettingsByBotIDRow{}, err
+		}
+		row.ChatModelID = parsed
+	}
+	return row, nil
 }
 
 func (q *executionQueries) GetModelByID(_ context.Context, id pgtype.UUID) (sqlc.Model, error) {
@@ -319,6 +339,71 @@ func TestNormalizeExecutionWorkdirRules(t *testing.T) {
 		svc := newExecutionService(t, &executionQueries{}, &fakeWorkdirValidator{})
 		if _, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{WorkdirID: execTestWorkdirID}); err == nil {
 			t.Fatal("expected error for unknown workdir")
+		}
+	})
+}
+
+func TestNormalizeExecutionRequiresModelWithoutBotDefault(t *testing.T) {
+	// A fresh session per fire has no previous round to inherit a model from,
+	// so with no bot default and no explicit model every fire would die at
+	// run time. Catch it while the user can still fix it.
+	t.Run("new session rejects an empty model", func(t *testing.T) {
+		svc := newExecutionService(t, &executionQueries{noDefaultChatModel: true}, nil)
+		_, err := svc.normalizeExecution(context.Background(), execTestBotID, ExecutionConfig{})
+		if !errors.Is(err, ErrModelRequired) {
+			t.Fatalf("error = %v, want ErrModelRequired", err)
+		}
+	})
+
+	t.Run("a bot with no settings row at all is the same case", func(t *testing.T) {
+		svc := newExecutionService(t, &executionQueries{settingsMissing: true}, nil)
+		_, err := svc.normalizeExecution(context.Background(), execTestBotID, ExecutionConfig{})
+		if !errors.Is(err, ErrModelRequired) {
+			t.Fatalf("error = %v, want ErrModelRequired", err)
+		}
+	})
+
+	t.Run("an explicit model satisfies it", func(t *testing.T) {
+		queries := &executionQueries{
+			noDefaultChatModel: true,
+			models: map[string]sqlc.Model{
+				mustUUID(t, execTestModelID).String(): {Type: "chat", Enable: true},
+			},
+		}
+		svc := newExecutionService(t, queries, nil)
+		exec, err := svc.normalizeExecution(context.Background(), execTestBotID, ExecutionConfig{ModelID: execTestModelID})
+		if err != nil {
+			t.Fatalf("normalizeExecution() error = %v", err)
+		}
+		if exec.ModelID != execTestModelID {
+			t.Fatalf("ModelID = %q, want %q", exec.ModelID, execTestModelID)
+		}
+	})
+
+	// An ACP agent brings its own model, so the bot default is irrelevant.
+	t.Run("acp runtime needs no native model", func(t *testing.T) {
+		svc := newExecutionService(t, &executionQueries{noDefaultChatModel: true}, nil)
+		if _, err := svc.normalizeExecution(context.Background(), execTestBotID, ExecutionConfig{
+			RuntimeType: RuntimeACPAgent, ACPAgentID: "codex",
+		}); err != nil {
+			t.Fatalf("normalizeExecution() error = %v", err)
+		}
+	})
+
+	// An existing session can still fall back to the model that produced its
+	// latest round, so it is not blocked here.
+	t.Run("existing session is left alone", func(t *testing.T) {
+		queries := &executionQueries{
+			noDefaultChatModel: true,
+			sessions: map[string]sqlc.BotSession{
+				execTestSessionID: chatSession(t, execTestBotID, "model", "chat", "chat"),
+			},
+		}
+		svc := newExecutionService(t, queries, nil)
+		if _, err := svc.normalizeExecution(context.Background(), execTestBotID, ExecutionConfig{
+			RunTarget: RunTargetExistingSession, TargetSessionID: execTestSessionID,
+		}); err != nil {
+			t.Fatalf("normalizeExecution() error = %v", err)
 		}
 	})
 }

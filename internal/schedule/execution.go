@@ -19,6 +19,9 @@ var (
 	// ErrTargetSessionGone marks a fire whose stored target session no
 	// longer exists; the trigger path reports it and disables the schedule.
 	ErrTargetSessionGone = errors.New("target session was deleted")
+	// ErrModelRequired marks a schedule that would open a fresh session with
+	// no model to run it: the bot has no default and none was given.
+	ErrModelRequired = invalidRequest("this bot has no default model, so a scheduled run needs an explicit model")
 )
 
 // InvalidRequestError marks user-correctable validation failures so the API
@@ -104,6 +107,9 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 			return ExecutionConfig{}, err
 		}
 	}
+	if err := s.requireResolvableModel(ctx, botID, out, targetIsACP); err != nil {
+		return ExecutionConfig{}, err
+	}
 	// Native efforts come from a fixed tier vocabulary, plus the "disable"
 	// sentinel that turns reasoning off for the run — the same on/off value
 	// bot settings and the chat composer store. ACP efforts are
@@ -117,6 +123,43 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 		return ExecutionConfig{}, invalidRequestf("unknown reasoning_effort %q", out.ReasoningEffort)
 	}
 	return out, nil
+}
+
+// requireResolvableModel rejects a schedule whose fires could not name a
+// model at all.
+//
+// Model selection walks request → bot default → the session's last round. A
+// fire that opens a FRESH session has no last round, so with neither an
+// explicit model nor a bot default there is nothing left to fall back on and
+// every fire dies with "chat model not configured". That is a save-time
+// mistake surfacing as a silent runtime failure hours later, so it is caught
+// here instead — for the tools as much as for the web form.
+//
+// Only the native runtime is checked: an ACP agent brings its own model, and
+// an existing session can still fall back to the model that produced its
+// latest round.
+func (s *Service) requireResolvableModel(ctx context.Context, botID string, exec ExecutionConfig, targetIsACP bool) error {
+	if exec.RunTarget != RunTargetNewSession || exec.RuntimeType == RuntimeACPAgent || targetIsACP {
+		return nil
+	}
+	if exec.ModelID != "" {
+		return nil
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return invalidRequestf("invalid bot id: %v", err)
+	}
+	row, err := s.queries.GetSettingsByBotID(ctx, botUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrModelRequired
+		}
+		return err
+	}
+	if !row.ChatModelID.Valid {
+		return ErrModelRequired
+	}
+	return nil
 }
 
 // validateTargetSession checks that the target session exists on this bot
