@@ -915,13 +915,14 @@ CREATE TABLE IF NOT EXISTS schedule (
   -- pins runtime and workdir via the target session (those columns must stay
   -- NULL), while model/effort overrides stay available in both modes. Model
   -- is two columns on purpose: native models are FK-able UUIDs, ACP models
-  -- are agent-reported strings with no backing table. workdir_id gains its
-  -- composite team FK later, next to the bot_workdirs table.
+  -- are agent-reported strings with no backing table. All three references
+  -- (target_session_id, model_id, workdir_id) gain composite team FKs later,
+  -- once schedule.team_id exists — see the deferred block near the end.
   run_target TEXT NOT NULL DEFAULT 'new_session' CHECK (run_target IN ('new_session', 'existing_session')),
-  target_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  target_session_id UUID,
   runtime_type TEXT CHECK (runtime_type IS NULL OR runtime_type IN ('model', 'acp_agent')),
   acp_agent_id TEXT,
-  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  model_id UUID,
   acp_model_id TEXT,
   reasoning_effort TEXT,
   workdir_id UUID,
@@ -2513,8 +2514,24 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_workdir_active_updated
     ON public.bot_sessions (team_id, bot_id, workdir_id, updated_at DESC, id DESC)
     WHERE deleted_at IS NULL AND workdir_id IS NOT NULL;
 
--- Schedule workdir binding (the column lives in the schedule CREATE TABLE;
--- bot_workdirs did not exist yet at that point in this script).
+-- Schedule execution references. The columns live in the schedule CREATE
+-- TABLE, but the keys are composite on team_id so a schedule can never point
+-- at another team's session, model or workdir — the same rule every other
+-- cross-entity reference follows. They wait until here because schedule
+-- gained team_id in the team phase above (and bot_workdirs is declared just
+-- before this block). SET NULL on the referencing column only, so deleting a
+-- target session clears the pin instead of the whole schedule; the trigger
+-- path reports that and disables the schedule.
+ALTER TABLE public.schedule
+    ADD CONSTRAINT schedule_target_session_id_fkey
+    FOREIGN KEY (team_id, target_session_id)
+    REFERENCES public.bot_sessions(team_id, id) ON DELETE SET NULL (target_session_id);
+
+ALTER TABLE public.schedule
+    ADD CONSTRAINT schedule_model_id_fkey
+    FOREIGN KEY (team_id, model_id)
+    REFERENCES public.models(team_id, id) ON DELETE SET NULL (model_id);
+
 ALTER TABLE public.schedule
     ADD CONSTRAINT schedule_workdir_id_fkey
     FOREIGN KEY (team_id, workdir_id)
