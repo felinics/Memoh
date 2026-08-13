@@ -275,16 +275,23 @@ CREATE TABLE IF NOT EXISTS bots (
 CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_name ON bots(name);
 
--- user_runtimes: API tokens for Remote Runtime WebSocket clients. Tokens stay
--- readable so an authenticated owner can copy the connection command again.
+-- user_runtimes: API tokens for Remote Runtime WebSocket clients. A new token
+-- has a short pending window; a ready connection activates it for reconnects.
+-- Activated tokens stay readable so their owner can copy the command again.
 CREATE TABLE IF NOT EXISTS user_runtimes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL CHECK (btrim(name) <> ''),
   api_token TEXT NOT NULL UNIQUE,
   revoked_at TIMESTAMPTZ,
+  activated_at TIMESTAMPTZ,
+  pending_expires_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '15 minutes'),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT user_runtimes_activation_state_check CHECK (
+    (activated_at IS NULL AND pending_expires_at IS NOT NULL)
+    OR (activated_at IS NOT NULL AND pending_expires_at IS NULL)
+  )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_runtimes_active_user_name

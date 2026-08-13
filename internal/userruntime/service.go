@@ -24,8 +24,9 @@ const maxRuntimeNameBytes = 255
 
 type ConnectionCommitGuard func() error
 
-// Service owns the small persistent credential registry and the in-memory
-// reverse-RPC connections. Bot/session routing belongs outside this package.
+// Service owns the persistent pending/activated credential registry and the
+// in-memory reverse-RPC connections. Bot/session routing belongs outside this
+// package.
 type Service struct {
 	store          dbstore.UserRuntimeStore
 	hub            *Hub
@@ -64,6 +65,9 @@ func (s *Service) CreateRuntime(ctx context.Context, userID string, req CreateRu
 	if len(name) > maxRuntimeNameBytes || strings.ContainsRune(name, '\x00') || !utf8.ValidString(name) {
 		return Runtime{}, fmt.Errorf("%w: name must be valid UTF-8 of at most %d bytes", ErrInvalidInput, maxRuntimeNameBytes)
 	}
+	if err := s.store.ExpirePendingUserRuntimes(ctx, userID); err != nil {
+		return Runtime{}, err
+	}
 	key, err := NewKey()
 	if err != nil {
 		return Runtime{}, err
@@ -88,6 +92,9 @@ func (s *Service) ListRuntimes(ctx context.Context, userID string) ([]Runtime, e
 	if userID == "" {
 		return nil, ErrInvalidInput
 	}
+	if err := s.store.ExpirePendingUserRuntimes(ctx, userID); err != nil {
+		return nil, err
+	}
 	rows, err := s.store.ListUserRuntimes(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -95,11 +102,10 @@ func (s *Service) ListRuntimes(ctx context.Context, userID string) ([]Runtime, e
 	items := make([]Runtime, 0, len(rows))
 	for _, row := range rows {
 		runtime := runtimeFromRecord(row, s.connection(row.ID))
-		// A credential that never connected is an unfinished attempt: it holds
-		// no machine and claims no row. It becomes visible the moment its
-		// machine first connects (the handshake backfills a real name), and
-		// stays visible after that even while offline.
-		if !runtime.Online && row.Name == DefaultRuntimeName(row.APIToken) {
+		// A credential becomes a manageable computer only after a ready
+		// connection consumes its short-lived pending state. Persisting that
+		// boundary keeps listing correct across restarts and browser failures.
+		if row.ActivatedAt.IsZero() {
 			continue
 		}
 		items = append(items, runtime)
@@ -156,8 +162,10 @@ func (s *Service) authenticateKeyRecord(ctx context.Context, key string) (dbstor
 	return row, nil
 }
 
-// ActivateConnection rechecks the credential at the publication boundary so
-// a concurrent revoke can never leave a newly published connection alive.
+// ActivateConnection rechecks the credential and transport readiness before
+// consuming the pending state, then checks readiness again at the publication
+// boundary. The lifecycle lock prevents a concurrent revoke from publishing a
+// replacement connection after it returns.
 func (s *Service) ActivateConnection(ctx context.Context, key, runtimeID string, info HandshakeInfo, connection *Connection, guard ConnectionCommitGuard) error {
 	if s == nil || s.store == nil || s.hub == nil || s.lifecycleLocks == nil || connection == nil || connection.Client == nil || strings.TrimSpace(connection.ConnectionID) == "" || guard == nil {
 		return errors.New("runtime connection service not configured")
@@ -187,6 +195,16 @@ func (s *Service) ActivateConnection(ctx context.Context, key, runtimeID string,
 		ClientVersion: info.ClientVersion,
 		Capabilities:  append([]string(nil), info.Capabilities...),
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := guard(); err != nil {
+		return err
+	}
+	activatedRow, err := s.store.ActivateUserRuntime(ctx, runtimeID, key)
+	if err != nil {
+		return err
+	}
 	if err := s.hub.registerGuarded(connection, func() error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -195,7 +213,7 @@ func (s *Service) ActivateConnection(ctx context.Context, key, runtimeID string,
 	}); err != nil {
 		return err
 	}
-	s.backfillRuntimeName(ctx, row, info.Hostname)
+	s.backfillRuntimeName(ctx, activatedRow, info.Hostname)
 	return nil
 }
 

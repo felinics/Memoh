@@ -997,12 +997,14 @@ type UserProviderOauthToken struct {
 }
 
 type UserRuntime struct {
-	ID        pgtype.UUID        `json:"id"`
-	UserID    pgtype.UUID        `json:"user_id"`
-	Name      string             `json:"name"`
-	ApiToken  string             `json:"api_token"`
-	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	TeamID    pgtype.UUID        `json:"team_id"`
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	Name             string             `json:"name"`
+	ApiToken         string             `json:"api_token"`
+	RevokedAt        pgtype.Timestamptz `json:"revoked_at"`
+	ActivatedAt      pgtype.Timestamptz `json:"activated_at"`
+	PendingExpiresAt pgtype.Timestamptz `json:"pending_expires_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	TeamID           pgtype.UUID        `json:"team_id"`
 }

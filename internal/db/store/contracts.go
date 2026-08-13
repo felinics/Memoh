@@ -20,12 +20,14 @@ type Page struct {
 }
 
 type UserRuntimeRecord struct {
-	ID        string
-	TeamID    string
-	UserID    string
-	Name      string
-	APIToken  string //nolint:gosec // owner-readable Remote Runtime credential by product design
-	CreatedAt time.Time
+	ID               string
+	TeamID           string
+	UserID           string
+	Name             string
+	APIToken         string //nolint:gosec // owner-readable Remote Runtime credential by product design
+	ActivatedAt      time.Time
+	PendingExpiresAt time.Time
+	CreatedAt        time.Time
 }
 
 type CreateUserRuntimeInput struct {
@@ -37,6 +39,8 @@ type CreateUserRuntimeInput struct {
 type UserRuntimeStore interface {
 	CreateUserRuntime(ctx context.Context, input CreateUserRuntimeInput) (UserRuntimeRecord, error)
 	GetUserRuntimeByAPIToken(ctx context.Context, apiToken string) (UserRuntimeRecord, error)
+	ActivateUserRuntime(ctx context.Context, runtimeID, apiToken string) (UserRuntimeRecord, error)
+	ExpirePendingUserRuntimes(ctx context.Context, userID string) error
 	ListUserRuntimes(ctx context.Context, userID string) ([]UserRuntimeRecord, error)
 	RevokeUserRuntime(ctx context.Context, runtimeID, userID string) error
 	// BackfillUserRuntimeName sets the display name only while the row still

@@ -13,7 +13,46 @@ JOIN team_members owner_membership
 JOIN users owner ON owner.id = owner_membership.user_id AND owner.is_active = TRUE
 WHERE runtime.team_id = public.memoh_current_team_id()
   AND runtime.api_token = sqlc.arg(api_token)
-  AND runtime.revoked_at IS NULL;
+  AND runtime.revoked_at IS NULL
+  AND (runtime.activated_at IS NOT NULL OR runtime.pending_expires_at > now());
+
+-- name: ActivateUserRuntime :one
+-- The first ready connection consumes the short-lived pending state. Existing
+-- activated credentials remain reusable for later reconnects.
+UPDATE user_runtimes runtime
+SET activated_at = COALESCE(runtime.activated_at, now()),
+    pending_expires_at = NULL,
+    updated_at = CASE WHEN runtime.activated_at IS NULL THEN now() ELSE runtime.updated_at END
+FROM team_members owner_membership, users owner
+WHERE runtime.team_id = public.memoh_current_team_id()
+  AND runtime.id = sqlc.arg(id)
+  AND runtime.api_token = sqlc.arg(api_token)
+  AND runtime.revoked_at IS NULL
+  AND (runtime.activated_at IS NOT NULL OR runtime.pending_expires_at > now())
+  AND owner_membership.team_id = public.memoh_current_team_id()
+  AND owner_membership.user_id = runtime.user_id
+  AND owner_membership.is_active = TRUE
+  AND owner.id = owner_membership.user_id
+  AND owner.is_active = TRUE
+RETURNING runtime.*;
+
+-- name: ExpirePendingUserRuntimes :exec
+-- Expired attempts can no longer authenticate. Mark them revoked and remove
+-- any defensive direct-API mounts so they release names and grant rows too.
+WITH expired AS (
+  UPDATE user_runtimes
+  SET revoked_at = now(), updated_at = now()
+  WHERE team_id = public.memoh_current_team_id()
+    AND user_id = sqlc.arg(user_id)
+    AND revoked_at IS NULL
+    AND activated_at IS NULL
+    AND pending_expires_at <= now()
+  RETURNING id
+)
+DELETE FROM bot_remote_runtime_bindings binding
+USING expired
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND binding.runtime_id = expired.id;
 
 -- name: ListUserRuntimes :many
 SELECT * FROM user_runtimes
@@ -56,6 +95,7 @@ JOIN user_runtimes r
  AND r.team_id = public.memoh_current_team_id()
  AND r.user_id = b.owner_user_id
  AND r.revoked_at IS NULL
+ AND r.activated_at IS NOT NULL
 JOIN team_members owner_membership
   ON owner_membership.team_id = public.memoh_current_team_id()
  AND owner_membership.user_id = b.owner_user_id

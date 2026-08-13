@@ -30,6 +30,26 @@ func (s *Store) GetUserRuntimeByAPIToken(ctx context.Context, apiToken string) (
 	return userRuntimeRecord(row), nil
 }
 
+func (s *Store) ActivateUserRuntime(ctx context.Context, runtimeID, apiToken string) (dbstore.UserRuntimeRecord, error) {
+	id, err := db.ParseUUID(runtimeID)
+	if err != nil {
+		return dbstore.UserRuntimeRecord{}, err
+	}
+	row, err := s.queries.ActivateUserRuntime(ctx, dbsqlc.ActivateUserRuntimeParams{ID: id, ApiToken: apiToken})
+	if err != nil {
+		return dbstore.UserRuntimeRecord{}, mapQueryErr(err)
+	}
+	return userRuntimeRecord(row), nil
+}
+
+func (s *Store) ExpirePendingUserRuntimes(ctx context.Context, userID string) error {
+	id, err := db.ParseUUID(userID)
+	if err != nil {
+		return err
+	}
+	return mapQueryErr(s.queries.ExpirePendingUserRuntimes(ctx, id))
+}
+
 func (s *Store) ListUserRuntimes(ctx context.Context, userID string) ([]dbstore.UserRuntimeRecord, error) {
 	id, err := db.ParseUUID(userID)
 	if err != nil {
@@ -100,6 +120,7 @@ func (s *Store) BackfillUserRuntimeName(ctx context.Context, runtimeID, userID, 
 func userRuntimeRecord(row dbsqlc.UserRuntime) dbstore.UserRuntimeRecord {
 	return dbstore.UserRuntimeRecord{
 		ID: row.ID.String(), TeamID: row.TeamID.String(), UserID: row.UserID.String(), Name: row.Name,
-		APIToken: row.ApiToken, CreatedAt: db.TimeFromPg(row.CreatedAt),
+		APIToken: row.ApiToken, ActivatedAt: db.TimeFromPg(row.ActivatedAt),
+		PendingExpiresAt: db.TimeFromPg(row.PendingExpiresAt), CreatedAt: db.TimeFromPg(row.CreatedAt),
 	}
 }
