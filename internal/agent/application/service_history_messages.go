@@ -137,9 +137,16 @@ func (s *Service) loadTurnResponses(ctx context.Context, sessionID string) []tim
 // stripToolMessages removes bulky tool interactions from the context while
 // keeping ask_user calls and results. ask_user is conversation-visible: the
 // question and the user's answer are part of the chat semantics, not tool noise.
+//
+// Reasoning in the most recent assistant message is preserved. Providers verify
+// the thinking blocks of the latest assistant turn and reject a sequence they
+// did not produce, while older turns are filtered server-side and need no
+// pruning here. Keeping only the newest turn satisfies that check without
+// letting encrypted reasoning accumulate across a long conversation.
 func stripToolMessages(messages []ModelMessage) []ModelMessage {
+	latestAssistant := lastAssistantIndex(messages)
 	filtered := make([]ModelMessage, 0, len(messages))
-	for _, m := range messages {
+	for i, m := range messages {
 		role := strings.TrimSpace(m.Role)
 		if strings.EqualFold(role, "tool") {
 			if kept := keepAskUserToolResultMessage(m); kept != nil {
@@ -151,7 +158,7 @@ func stripToolMessages(messages []ModelMessage) []ModelMessage {
 		// no visible text. Tool-call metadata may live either in ToolCalls or in
 		// structured content parts.
 		if strings.EqualFold(role, "assistant") && hasToolCallContent(m) {
-			stripped, ok := stripNonAskUserToolCalls(m)
+			stripped, ok := stripNonAskUserToolCalls(m, i == latestAssistant)
 			if !ok {
 				continue
 			}
@@ -160,6 +167,17 @@ func stripToolMessages(messages []ModelMessage) []ModelMessage {
 		filtered = append(filtered, m)
 	}
 	return filtered
+}
+
+// lastAssistantIndex reports the index of the most recent assistant message, or
+// -1 when there is none.
+func lastAssistantIndex(messages []ModelMessage) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "assistant") {
+			return i
+		}
+	}
+	return -1
 }
 
 func hasToolCallContent(message ModelMessage) bool {
@@ -174,11 +192,11 @@ func hasToolCallContent(message ModelMessage) bool {
 	return false
 }
 
-func stripNonAskUserToolCalls(message ModelMessage) (ModelMessage, bool) {
+func stripNonAskUserToolCalls(message ModelMessage, keepReasoning bool) (ModelMessage, bool) {
 	legacyToolCalls := keepAskUserLegacyToolCalls(message.ToolCalls)
 	text := strings.TrimSpace(message.TextContent())
 
-	keptParts := filterAssistantContextParts(modelMessageToSDKMessage(message).Content)
+	keptParts := filterAssistantContextParts(modelMessageToSDKMessage(message).Content, keepReasoning)
 	if len(keptParts) > 0 {
 		message = modelMessageFromSDKParts(sdk.MessageRoleAssistant, keptParts, message.Usage)
 		message.ToolCalls = legacyToolCalls
@@ -224,7 +242,11 @@ func keepAskUserLegacyToolCalls(calls []ToolCall) []ToolCall {
 	return kept
 }
 
-func filterAssistantContextParts(parts []sdk.MessagePart) []sdk.MessagePart {
+// filterAssistantContextParts drops tool noise from an assistant message.
+// keepReasoning preserves the message's reasoning parts, which the caller sets
+// for the latest assistant turn: its thinking blocks are the ones a provider
+// verifies, and they have to be replayed whole, empty-text blocks included.
+func filterAssistantContextParts(parts []sdk.MessagePart, keepReasoning bool) []sdk.MessagePart {
 	if len(parts) == 0 {
 		return nil
 	}
@@ -235,7 +257,11 @@ func filterAssistantContextParts(parts []sdk.MessagePart) []sdk.MessagePart {
 			if strings.EqualFold(strings.TrimSpace(typed.ToolName), userinput.ToolNameAskUser) {
 				kept = append(kept, typed)
 			}
-		case sdk.ToolResultPart, sdk.ReasoningPart:
+		case sdk.ReasoningPart:
+			if keepReasoning {
+				kept = append(kept, typed)
+			}
+		case sdk.ToolResultPart:
 			continue
 		case sdk.TextPart:
 			if strings.TrimSpace(typed.Text) != "" {
