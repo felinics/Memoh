@@ -15,8 +15,7 @@ import (
 
 func reasoningPart(text, signature string) sdk.ReasoningPart {
 	return sdk.ReasoningPart{
-		Text:   text,
-		Format: sdk.ReasoningFormatAnthropic,
+		Text: text,
 		ProviderMetadata: map[string]any{
 			"anthropic": map[string]any{"signature": signature},
 		},
@@ -97,7 +96,6 @@ func TestStripToolMessagesKeepsLatestTurnEmptyReasoning(t *testing.T) {
 		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "hi"}}},
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
 			sdk.ReasoningPart{
-				Format: sdk.ReasoningFormatAnthropic,
 				ProviderMetadata: map[string]any{
 					"anthropic": map[string]any{"redactedData": "BLOB"},
 				},
@@ -225,9 +223,9 @@ func TestStripToolMessagesBoundsReplayedReasoning(t *testing.T) {
 			sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "q"}}},
 			sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
 				// Several redacted blocks per turn, as a real response returns.
-				sdk.ReasoningPart{Format: sdk.ReasoningFormatAnthropic, ProviderMetadata: map[string]any{
+				sdk.ReasoningPart{ProviderMetadata: map[string]any{
 					"anthropic": map[string]any{"redactedData": "BLOB_A"}}},
-				sdk.ReasoningPart{Format: sdk.ReasoningFormatAnthropic, ProviderMetadata: map[string]any{
+				sdk.ReasoningPart{ProviderMetadata: map[string]any{
 					"anthropic": map[string]any{"redactedData": "BLOB_B"}}},
 				sdk.TextPart{Text: "a"},
 			}},
