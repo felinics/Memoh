@@ -138,11 +138,13 @@ func (s *Service) loadTurnResponses(ctx context.Context, sessionID string) []tim
 // keeping ask_user calls and results. ask_user is conversation-visible: the
 // question and the user's answer are part of the chat semantics, not tool noise.
 //
-// Reasoning in the most recent assistant message is preserved. Providers verify
-// the thinking blocks of the latest assistant turn and reject a sequence they
-// did not produce, while older turns are filtered server-side and need no
-// pruning here. Keeping only the newest turn satisfies that check without
-// letting encrypted reasoning accumulate across a long conversation.
+// It also caps how much reasoning goes back: only the most recent assistant
+// message keeps its reasoning blocks. Replayed reasoning otherwise grows without
+// bound — every turn carries every earlier turn's blocks, and encrypted ones are
+// several hundred bytes each — until the request is large enough to blow the
+// provider request timeout. Providers verify the thinking blocks of the latest
+// assistant message and filter older turns server-side, so the newest turn is
+// the only one that has to survive.
 func stripToolMessages(messages []ModelMessage) []ModelMessage {
 	latestAssistant := lastAssistantIndex(messages)
 	filtered := make([]ModelMessage, 0, len(messages))
@@ -154,19 +156,48 @@ func stripToolMessages(messages []ModelMessage) []ModelMessage {
 			}
 			continue
 		}
-		// Remove assistant messages that only contain tool calls / reasoning with
-		// no visible text. Tool-call metadata may live either in ToolCalls or in
-		// structured content parts.
-		if strings.EqualFold(role, "assistant") && hasToolCallContent(m) {
-			stripped, ok := stripNonAskUserToolCalls(m, i == latestAssistant)
-			if !ok {
-				continue
+		if strings.EqualFold(role, "assistant") {
+			// Remove assistant messages that only contain tool calls / reasoning
+			// with no visible text. Tool-call metadata may live either in
+			// ToolCalls or in structured content parts.
+			if hasToolCallContent(m) {
+				stripped, ok := stripNonAskUserToolCalls(m, i == latestAssistant)
+				if !ok {
+					continue
+				}
+				m = stripped
+			} else if i != latestAssistant {
+				// A plain conversational turn has no tool call to strip, but its
+				// reasoning still accumulates, so drop it here as well.
+				m = dropReasoning(m)
 			}
-			m = stripped
 		}
 		filtered = append(filtered, m)
 	}
 	return filtered
+}
+
+// dropReasoning removes an assistant message's reasoning parts, leaving the rest
+// of its content untouched. A message left with nothing but reasoning keeps its
+// original form rather than becoming empty, since a contentless assistant turn
+// is not something a provider accepts.
+func dropReasoning(message ModelMessage) ModelMessage {
+	parts := modelMessageToSDKMessage(message).Content
+	kept := make([]sdk.MessagePart, 0, len(parts))
+	dropped := false
+	for _, part := range parts {
+		if _, ok := part.(sdk.ReasoningPart); ok {
+			dropped = true
+			continue
+		}
+		kept = append(kept, part)
+	}
+	if !dropped || len(kept) == 0 {
+		return message
+	}
+	stripped := modelMessageFromSDKParts(sdk.MessageRoleAssistant, kept, message.Usage)
+	stripped.ToolCalls = message.ToolCalls
+	return stripped
 }
 
 // lastAssistantIndex reports the index of the most recent assistant message, or

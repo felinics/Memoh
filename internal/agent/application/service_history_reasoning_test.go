@@ -1,6 +1,7 @@
 package application
 
 import (
+	"strings"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -157,9 +158,8 @@ func TestStripToolMessagesKeepsEveryBlockOfLatestTurn(t *testing.T) {
 	}
 }
 
-// Stripping must not resurrect reasoning in a turn that has no tool call to
-// strip — that path leaves the message untouched either way.
-func TestStripToolMessagesLeavesPlainAssistantTurnsAlone(t *testing.T) {
+// The newest turn keeps its reasoning even with no tool call to strip.
+func TestStripToolMessagesKeepsLatestPlainTurnReasoning(t *testing.T) {
 	messages := sdkMessagesToModelMessages([]sdk.Message{
 		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "hi"}}},
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
@@ -174,5 +174,93 @@ func TestStripToolMessagesLeavesPlainAssistantTurnsAlone(t *testing.T) {
 	}
 	if got := reasoningPartsIn(t, stripped[1]); len(got) != 1 {
 		t.Errorf("reasoning parts: got %d, want 1", len(got))
+	}
+}
+
+// A plain conversational turn carries no tool call, so it never reached the
+// tool-stripping path — and its reasoning accumulated forever. Only the newest
+// turn's blocks go back now.
+func TestStripToolMessagesDropsReasoningFromPlainOlderTurns(t *testing.T) {
+	messages := sdkMessagesToModelMessages([]sdk.Message{
+		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "first"}}},
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+			reasoningPart("old thinking", "SIG_OLD"),
+			sdk.TextPart{Text: "old answer"},
+		}},
+		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "second"}}},
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+			reasoningPart("new thinking", "SIG_NEW"),
+			sdk.TextPart{Text: "new answer"},
+		}},
+	})
+
+	stripped := stripToolMessages(messages)
+	if len(stripped) != 4 {
+		t.Fatalf("messages: got %d, want 4 — nothing should be removed outright", len(stripped))
+	}
+
+	if got := reasoningPartsIn(t, stripped[1]); len(got) != 0 {
+		t.Errorf("older plain turn kept %d reasoning part(s); it should be dropped", len(got))
+	}
+	// The answer text has to stay: only reasoning is dropped.
+	if text := strings.TrimSpace(stripped[1].TextContent()); text != "old answer" {
+		t.Errorf("older turn text: got %q, want %q", text, "old answer")
+	}
+
+	latest := reasoningPartsIn(t, stripped[3])
+	if len(latest) != 1 {
+		t.Fatalf("latest turn reasoning: got %d, want 1", len(latest))
+	}
+	if sig := signatureOf(t, latest[0]); sig != "SIG_NEW" {
+		t.Errorf("latest turn signature: got %q, want SIG_NEW", sig)
+	}
+}
+
+// The replayed block count has to stop growing as a conversation goes on. That
+// unbounded growth is what pushed requests past the provider timeout.
+func TestStripToolMessagesBoundsReplayedReasoning(t *testing.T) {
+	var messages []sdk.Message
+	for turn := 0; turn < 8; turn++ {
+		messages = append(messages,
+			sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "q"}}},
+			sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+				// Several redacted blocks per turn, as a real response returns.
+				sdk.ReasoningPart{Format: sdk.ReasoningFormatAnthropic, ProviderMetadata: map[string]any{
+					"anthropic": map[string]any{"redactedData": "BLOB_A"}}},
+				sdk.ReasoningPart{Format: sdk.ReasoningFormatAnthropic, ProviderMetadata: map[string]any{
+					"anthropic": map[string]any{"redactedData": "BLOB_B"}}},
+				sdk.TextPart{Text: "a"},
+			}},
+		)
+	}
+
+	stripped := stripToolMessages(sdkMessagesToModelMessages(messages))
+	total := 0
+	for _, m := range stripped {
+		total += len(reasoningPartsIn(t, m))
+	}
+	if total != 2 {
+		t.Fatalf("replayed reasoning parts across 8 turns: got %d, want 2 (the newest turn only)", total)
+	}
+}
+
+// An assistant turn whose only content is reasoning must not be emptied out —
+// a contentless assistant message is not something a provider accepts.
+func TestStripToolMessagesKeepsReasoningOnlyTurnIntact(t *testing.T) {
+	messages := sdkMessagesToModelMessages([]sdk.Message{
+		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "q"}}},
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+			reasoningPart("only thinking", "SIG"),
+		}},
+		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "q2"}}},
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "answer"}}},
+	})
+
+	stripped := stripToolMessages(messages)
+	if len(stripped) != 4 {
+		t.Fatalf("messages: got %d, want 4", len(stripped))
+	}
+	if got := reasoningPartsIn(t, stripped[1]); len(got) != 1 {
+		t.Errorf("reasoning-only turn: got %d part(s), want it left intact", len(got))
 	}
 }
