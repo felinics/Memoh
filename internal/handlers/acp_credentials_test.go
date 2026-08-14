@@ -30,13 +30,13 @@ func TestTestACPManagedCredentialsProbesClaudeCodeEndpoint(t *testing.T) {
 	var seenAuthHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/models":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/models":
 			seenAuthHeader = r.Header.Get("x-api-key")
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":[]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/models/__ping__":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/models/__ping__":
 			http.Error(w, `{"error":{"message":"model not found"}}`, http.StatusNotFound)
-		case r.Method == http.MethodPost && r.URL.Path == "/messages":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/messages":
 			http.Error(w, `{"error":{"message":"invalid model"}}`, http.StatusBadRequest)
 		default:
 			http.Error(w, "unexpected request "+r.Method+" "+r.URL.Path, http.StatusTeapot)

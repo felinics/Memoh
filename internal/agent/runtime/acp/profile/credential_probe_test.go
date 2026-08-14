@@ -57,11 +57,28 @@ func TestAPIKeyProbeTargetClaudeCodeDefaults(t *testing.T) {
 	if target.ClientType != "anthropic-messages" {
 		t.Fatalf("client type = %q", target.ClientType)
 	}
-	if target.BaseURL != "https://api.anthropic.com" {
+	if target.BaseURL != "https://api.anthropic.com/v1" {
 		t.Fatalf("base url = %q", target.BaseURL)
 	}
 	if target.APIKey != "sk-ant-test" {
 		t.Fatalf("api key = %q", target.APIKey)
+	}
+}
+
+func TestAPIKeyProbeTargetClaudeCodeAppendsV1ToCustomBaseURL(t *testing.T) {
+	target, err := APIKeyProbeTarget(AgentSetup{
+		AgentID: AgentClaudeCodeID,
+		Mode:    setupModeAPIKey,
+		Managed: map[string]string{
+			"api_key":  "sk-ant-test",
+			"base_url": "https://cpa.example.com/",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.BaseURL != "https://cpa.example.com/v1" {
+		t.Fatalf("base url = %q", target.BaseURL)
 	}
 }
 
@@ -121,7 +138,7 @@ func TestAPIKeyProbeTargetFromParsedMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target.ClientType != "anthropic-messages" || target.BaseURL != "https://gateway.example.com" || target.APIKey != "sk-ant-test" {
+	if target.ClientType != "anthropic-messages" || target.BaseURL != "https://gateway.example.com/v1" || target.APIKey != "sk-ant-test" {
 		t.Fatalf("target = %#v", target)
 	}
 }
