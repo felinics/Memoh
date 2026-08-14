@@ -621,7 +621,7 @@
                         size="sm"
                         shape="circle"
                         :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
-                        class="composer-pill-press min-w-0 max-md:h-11"
+                        class="composer-pill-press min-w-0 shrink max-md:h-11"
                         :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
                         <!-- One transformable wrapper for the press squish —
@@ -2392,6 +2392,12 @@ watch(inputText, (text) => {
   if (!prefix || text === prefix || text.startsWith(`${prefix} `)) return
   slashPanelSuppressedPrefix.value = ''
 })
+// Same rule as ComposerContinueOn's isDefaultTarget (only the native cloud
+// workspace collapses to the circle; a missing/ghost selection resolves to
+// null here exactly like the child's selectedTarget) — the layout reservation
+// must track which of the two widths the control is actually rendering.
+const continueOnExpanded = computed(() => selectedWorkspaceTarget.value?.kind !== 'native')
+
 const {
   textareaEl,
   composerEl,
@@ -2399,6 +2405,7 @@ const {
   modelTriggerMaxWidth,
 } = useComposerLayout({
   continueOnVisible: showComputersMenu,
+  continueOnExpanded,
 })
 
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0 || requestedSkills.value.length > 0)

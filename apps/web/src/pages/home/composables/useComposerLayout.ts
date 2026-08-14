@@ -16,18 +16,25 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Comput
 export const COMPOSER_MASK_BELOW_PX = 32
 
 export interface ComposerLayoutDeps {
-  // Whether the Continue-on destination pill is in the row; it reserves space.
+  // Whether the Continue-on destination control is in the row; it reserves space.
   continueOnVisible: ComputedRef<boolean>
+  // Whether that control is the labeled pill (vs. the collapsed default-target
+  // circle) — the two forms differ by ~148px and must reserve differently.
+  continueOnExpanded: ComputedRef<boolean>
 }
 
 const MODEL_TRIGGER_MAX = 240 // max-w-60
-const PLUS_SLOT = 40 // ＋ button (32) + gap
-const CONTINUE_ON_SLOT = 168 // destination pill cap (max-w-40) + gap
-const SEND_SLOT = 36 // mic/send circle size-8
+// Reservations use the max-md worst case (44px touch-floor controls). On
+// desktop this over-reserves ~24px — invisible at desktop widths; on mobile it
+// errs toward clamping the model name instead of letting the row overflow.
+const PLUS_SLOT = 48 // ＋ circle at its largest (max-md size-11 = 44) + gap-1
+const SEND_SLOT = 44 // mic/send circle at its largest (max-md size-11)
+const CONTINUE_ON_PILL = 196 // labeled pill cap (max-w-48 = 192) + gap-1
+const CONTINUE_ON_CIRCLE = 48 // collapsed circle (max-md 44) + gap-1
 const CLUSTER_GAP = 8 // gap-2 between controls-row children
 
 export function useComposerLayout(deps: ComposerLayoutDeps) {
-  const { continueOnVisible } = deps
+  const { continueOnVisible, continueOnExpanded } = deps
 
   const textareaEl = ref<HTMLTextAreaElement | null>(null)
   const composerEl = ref<HTMLElement | null>(null)
@@ -49,14 +56,15 @@ export function useComposerLayout(deps: ComposerLayoutDeps) {
   }
 
   // Sized to whatever the controls row can spare after the ＋, the Continue-on
-  // pill, and the mic/send circle. Only bites when space is tight; otherwise
-  // it rests at the 240px cap and hugs a short name.
+  // control (pill or collapsed circle — they differ by ~148px), and the
+  // mic/send circle. Only bites when space is tight; otherwise it rests at the
+  // 240px cap and hugs a short name.
   const modelTriggerMaxWidth = computed(() => {
     const inner = composerInnerWidth.value
     if (inner <= 1) return MODEL_TRIGGER_MAX
     let reserved = PLUS_SLOT + CLUSTER_GAP + SEND_SLOT
     if (continueOnVisible.value) {
-      reserved += CONTINUE_ON_SLOT
+      reserved += continueOnExpanded.value ? CONTINUE_ON_PILL : CONTINUE_ON_CIRCLE
     }
     return Math.max(72, Math.min(MODEL_TRIGGER_MAX, inner - reserved))
   })
