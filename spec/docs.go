@@ -1257,6 +1257,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/acp/agents/{agent_id}/credentials/test": {
+            "post": {
+                "description": "Probe the provider endpoint behind an ACP agent's API key setup to verify reachability and authentication without starting the agent",
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Test ACP agent managed API key credentials",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "ACP agent ID",
+                        "name": "agent_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/providers.TestResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/acp/claude-code/oauth/authorize": {
             "get": {
                 "tags": [
