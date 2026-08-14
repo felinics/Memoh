@@ -62,30 +62,6 @@ func TestToolGatewayMiddlewareStopsWhenOwningRunIsCanceled(t *testing.T) {
 	}
 }
 
-func TestValidateRuntimeGuardRejectsCancellationDuringGuard(t *testing.T) {
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	session := ToolSessionContext{RunContext: runCtx}
-	bound, cancelBound := BindRuntimeContext(context.Background(), session)
-	defer cancelBound()
-	started := make(chan struct{})
-	release := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		session.RuntimeGuard = func(context.Context) error {
-			close(started)
-			<-release
-			return nil
-		}
-		done <- ValidateRuntimeGuard(bound, session)
-	}()
-	<-started
-	cancelRun()
-	close(release)
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("runtime guard error = %v, want context.Canceled", err)
-	}
-}
-
 func TestToolGatewayMiddlewareScopesRuntimeToolCallsToActivePrompts(t *testing.T) {
 	provider := &gatewayTestProvider{
 		tools:      []ToolDescriptor{{Name: "echo_tool", InputSchema: map[string]any{"type": "object"}}},

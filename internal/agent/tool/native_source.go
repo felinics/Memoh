@@ -14,6 +14,7 @@ import (
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/toolcontext"
 )
 
 type NativeToolSourceOptions struct {
@@ -181,7 +182,7 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		if !approval.approved {
 			return s.limitMCPResult(toolName, mcp.BuildToolErrorResult(approval.message)), nil
 		}
-		if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+		if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 			return nil, err
 		}
 		result, err := tool.Execute(&sdk.ToolExecContext{

@@ -25,6 +25,7 @@ import (
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/memohai/memoh/internal/toolcontext"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -448,7 +449,7 @@ func (c *clientCallbacks) updateAvailableCommands(sessionID acp.SessionId, comma
 
 func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 
 	toolID := "read-" + uuid.NewString()
@@ -491,7 +492,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 	if p.Limit != nil && *p.Limit > 0 {
 		limit = boundedPositiveInt32(*p.Limit)
 	}
-	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 		toolErr = err
 		return acp.ReadTextFileResponse{}, err
 	}
@@ -533,7 +534,7 @@ func (c *clientCallbacks) limitedApprovalRejectionMessage(toolName string, appro
 
 func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 
 	toolID := "write-" + uuid.NewString()
@@ -562,7 +563,7 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		toolErr = err
 		return acp.WriteTextFileResponse{}, err
 	}
-	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 		toolErr = err
 		return acp.WriteTextFileResponse{}, err
 	}
@@ -686,14 +687,14 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		}
 	}
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 	allowWithGuard := func() (acp.RequestPermissionResponse, error) {
 		resp := allowOncePermission(p)
 		if resp.Outcome.Cancelled != nil {
 			return resp, nil
 		}
-		if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+		if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 			return acp.RequestPermissionResponse{}, err
 		}
 		return resp, nil
@@ -834,7 +835,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		}
 		return resp, nil
 	}
-	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 		return acp.RequestPermissionResponse{}, err
 	}
 	if native {
@@ -1091,7 +1092,7 @@ func (c *clientCallbacks) currentToolSession() ToolSessionContext {
 	base := c.baseSession
 	prompt := c.promptSession
 	c.mu.RUnlock()
-	return mcp.MergeToolSessionContext(base, prompt)
+	return toolcontext.Merge(base, prompt)
 }
 
 func permissionNativeToolState(state *acpToolState, quirks acpprofile.ToolQuirks) (toolCallID, toolName string, input map[string]any, ok bool) {
@@ -1548,7 +1549,7 @@ func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotifica
 
 func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 	return c.terminals.CreateTerminal(ctx, p, func(toolCallID string, input map[string]any) (terminalApprovalResult, error) {
 		id, approval, err := c.approveCallbackTool(ctx, toolCallID, "exec", input)
@@ -1559,7 +1560,7 @@ func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		}, err
 	}, terminalRuntimeScope{
 		validate: func(guardCtx context.Context) error {
-			return mcp.ValidateRuntimeGuard(guardCtx, session)
+			return toolcontext.ValidateRuntimeGuard(guardCtx, session)
 		},
 		runContext: session.RunContext,
 	})

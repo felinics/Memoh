@@ -20,10 +20,11 @@ import (
 	"github.com/memohai/memoh/internal/agent/event"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/toolcontext"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
-type ToolSessionContext = mcp.ToolSessionContext
+type ToolSessionContext = toolcontext.Session
 
 type StartRequest struct {
 	AgentID     string

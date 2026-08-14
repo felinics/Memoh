@@ -15,6 +15,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/toolcontext"
 )
 
 const (
@@ -159,7 +160,7 @@ func (s *Source) CallTool(
 	}
 	callCtx, cancel := context.WithTimeout(ctx, connectorCallTimeout)
 	defer cancel()
-	if err := mcpgw.ValidateRuntimeGuard(callCtx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(callCtx, session); err != nil {
 		return nil, err
 	}
 	clientSession, ok, err := s.connect(callCtx, strings.TrimSpace(session.BotID))

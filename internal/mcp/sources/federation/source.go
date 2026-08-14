@@ -11,6 +11,7 @@ import (
 	"time"
 
 	mcpgw "github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/toolcontext"
 )
 
 const cacheTTL = 5 * time.Second
@@ -125,7 +126,7 @@ func (s *Source) CallTool(ctx context.Context, session mcpgw.ToolSessionContext,
 
 	callCtx, callCancel := context.WithTimeout(ctx, mcpCallTimeout)
 	defer callCancel()
-	if err := mcpgw.ValidateRuntimeGuard(callCtx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(callCtx, session); err != nil {
 		return nil, err
 	}
 

@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"testing"
 )
 
@@ -26,33 +25,6 @@ func TestToolSessionContextStoreMergesLatestPromptContext(t *testing.T) {
 	}
 	if merged.SessionToken != "header-token" {
 		t.Fatalf("SessionToken = %q, want header fallback", merged.SessionToken)
-	}
-}
-
-func TestToolSessionContextMergePreservesSupportsImageInput(t *testing.T) {
-	base := ToolSessionContext{BotID: "bot-1"}
-	merged := MergeToolSessionContext(base, ToolSessionContext{SupportsImageInput: true})
-	if !merged.SupportsImageInput {
-		t.Fatalf("SupportsImageInput = false, want true")
-	}
-}
-
-func TestToolSessionContextMergePreservesUserInputCapability(t *testing.T) {
-	base := ToolSessionContext{BotID: "bot-1"}
-	merged := MergeToolSessionContext(base, ToolSessionContext{CanRequestUserInput: true})
-	if !merged.CanRequestUserInput {
-		t.Fatalf("CanRequestUserInput = false, want true")
-	}
-}
-
-func TestToolSessionContextMergePreservesRuntimeLifecycle(t *testing.T) {
-	runCtx := context.Background()
-	guard := func(context.Context) error { return nil }
-	merged := MergeToolSessionContext(ToolSessionContext{BotID: "bot-1"}, ToolSessionContext{
-		RunContext: runCtx, RuntimeGuard: guard,
-	})
-	if merged.RunContext != runCtx || merged.RuntimeGuard == nil {
-		t.Fatalf("runtime lifecycle = context:%v guard:%v", merged.RunContext, merged.RuntimeGuard != nil)
 	}
 }
 

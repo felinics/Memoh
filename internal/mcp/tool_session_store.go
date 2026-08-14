@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/memohai/memoh/internal/toolcontext"
 )
 
 // ToolSessionContextStore keeps the latest per-prompt context for long-lived
@@ -121,7 +122,7 @@ func (s *ToolSessionContextStore) Put(session ToolSessionContext) {
 	}
 	s.mu.Lock()
 	if existing, ok := s.sessions[key]; ok {
-		session = MergeToolSessionContext(existing, session)
+		session = toolcontext.Merge(existing, session)
 	}
 	s.sessions[key] = session
 	s.mu.Unlock()
@@ -141,7 +142,7 @@ func (s *ToolSessionContextStore) Merge(session ToolSessionContext) ToolSessionC
 	if !ok {
 		return session
 	}
-	return MergeToolSessionContext(session, latest)
+	return toolcontext.Merge(session, latest)
 }
 
 func (s *ToolSessionContextStore) CloseSession(sessionID string) {
@@ -241,76 +242,4 @@ func toolSessionKeyHasSessionID(key, sessionID string) bool {
 func toolStreamEventKeyHasSessionID(key, sessionID string) bool {
 	parts := strings.Split(key, "\x00")
 	return len(parts) == 3 && parts[1] == sessionID
-}
-
-// MergeToolSessionContext overlays every non-empty field of latest onto base
-// (bools are sticky-true). It is the single merge for ToolSessionContext -
-// used by the tool-context store and the ACP client callbacks - so a new
-// field only needs to be wired up here.
-func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext {
-	merged := base
-	if value := strings.TrimSpace(latest.BotID); value != "" {
-		merged.BotID = value
-	}
-	if value := strings.TrimSpace(latest.ChatID); value != "" {
-		merged.ChatID = value
-	}
-	if value := strings.TrimSpace(latest.RuntimeID); value != "" {
-		merged.RuntimeID = value
-	}
-	if value := strings.TrimSpace(latest.RuntimeToken); value != "" {
-		merged.RuntimeToken = value
-	}
-	if value := strings.TrimSpace(latest.SessionID); value != "" {
-		merged.SessionID = value
-	}
-	if value := strings.TrimSpace(latest.RunID); value != "" {
-		merged.RunID = value
-	}
-	if value := strings.TrimSpace(latest.SessionType); value != "" {
-		merged.SessionType = value
-	}
-	if value := strings.TrimSpace(latest.RouteID); value != "" {
-		merged.RouteID = value
-	}
-	if value := strings.TrimSpace(latest.ChannelIdentityID); value != "" {
-		merged.ChannelIdentityID = value
-	}
-	if value := strings.TrimSpace(latest.SessionToken); value != "" {
-		merged.SessionToken = value
-	}
-	if value := strings.TrimSpace(latest.CurrentPlatform); value != "" {
-		merged.CurrentPlatform = value
-	}
-	if value := strings.TrimSpace(latest.ReplyTarget); value != "" {
-		merged.ReplyTarget = value
-	}
-	if value := strings.TrimSpace(latest.ConversationType); value != "" {
-		merged.ConversationType = value
-	}
-	if latest.CanRequestUserInput {
-		merged.CanRequestUserInput = true
-	}
-	if latest.CanListUserInput {
-		merged.CanListUserInput = true
-	}
-	if latest.IsSubagent {
-		merged.IsSubagent = true
-	}
-	if latest.RuntimeActive {
-		merged.RuntimeActive = true
-	}
-	if latest.SupportsImageInput {
-		merged.SupportsImageInput = true
-	}
-	if latest.RuntimeFence.Valid() {
-		merged.RuntimeFence = latest.RuntimeFence
-	}
-	if latest.RunContext != nil {
-		merged.RunContext = latest.RunContext
-	}
-	if latest.RuntimeGuard != nil {
-		merged.RuntimeGuard = latest.RuntimeGuard
-	}
-	return merged
 }
