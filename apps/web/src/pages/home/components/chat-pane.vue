@@ -383,7 +383,7 @@
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
-                class="chat-composer-edge relative flex min-h-28 w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer p-3 cursor-text"
+                class="chat-composer-edge relative flex min-h-28 w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer p-3 cursor-text max-md:rounded-xl max-md:p-2.5"
                 @click="handleComposerClick"
               >
                 <!-- The attachment row reveals via a grid 0fr↔1fr track so a card
@@ -491,12 +491,12 @@
                     >
                       <Spinner
                         v-if="agentChanging"
-                        class="size-4"
+                        class="size-4 max-md:size-5"
                       />
                       <Plus
                         v-else
                         :stroke-width="1.5"
-                        class="size-4"
+                        class="size-4 max-md:size-5"
                       />
                     </Button>
                   </DropdownMenuTrigger>
@@ -735,7 +735,7 @@
                     >
                       <Spinner
                         v-if="voiceInputState === 'transcribing'"
-                        class="size-4"
+                        class="size-4 max-md:size-5"
                       />
                       <svg
                         v-else
@@ -744,7 +744,7 @@
                         stroke="currentColor"
                         stroke-width="2.5"
                         stroke-linecap="round"
-                        class="size-4.5"
+                        class="size-4.5 max-md:size-5"
                         :class="voiceInputState === 'recording' ? 'motion-safe:animate-pulse' : undefined"
                         aria-hidden="true"
                       >
@@ -775,7 +775,7 @@
                       @click="streaming ? chatStore.abort(paneTarget) : handleSend()"
                     >
                       <span
-                        class="grid size-[18px] shrink-0 place-items-center"
+                        class="grid size-[18px] max-md:size-5 shrink-0 place-items-center"
                         aria-hidden="true"
                       >
                         <svg
@@ -785,7 +785,7 @@
                           stroke-width="2.75"
                           stroke-linecap="round"
                           stroke-linejoin="round"
-                          class="col-start-1 row-start-1 size-[18px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          class="col-start-1 row-start-1 size-[18px] max-md:size-5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
                           :class="streaming ? 'opacity-0' : 'opacity-100'"
                         >
                           <path d="M12 19.5 V5" />
@@ -794,7 +794,7 @@
                         <svg
                           viewBox="0 0 24 24"
                           fill="currentColor"
-                          class="col-start-1 row-start-1 size-4 transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          class="col-start-1 row-start-1 size-4 max-md:size-4.5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
                           :class="streaming ? 'opacity-100' : 'opacity-0'"
                         >
                           <rect
