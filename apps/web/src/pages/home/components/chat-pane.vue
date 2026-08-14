@@ -176,9 +176,12 @@
       <div
         v-if="!activeChatReadOnly"
         class="pointer-events-none absolute z-(--z-panel)"
-        :class="isWelcome
-          ? 'inset-0 flex flex-col items-center justify-start pt-[28dvh]'
-          : 'inset-x-0 bottom-0 pt-2 pb-7'"
+        :class="[
+          isWelcome
+            ? 'inset-0 flex flex-col items-center justify-start pt-[28dvh]'
+            : 'inset-x-0 bottom-0 pt-2 pb-7',
+          { invisible: composerPlacementPending },
+        ]"
         :style="composerLiftPx > 0 ? { bottom: `${composerLiftPx}px` } : undefined"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
@@ -1008,6 +1011,17 @@ const isWelcome = computed(() =>
   && !loadingChats.value
   && messages.value.length === 0,
 )
+
+// During boot, "a draft that stays a draft" and "a draft about to be
+// repointed to the most recent session" are indistinguishable until
+// fetchSessions returns (bootstrap auto-picks at the END of the load).
+// isWelcome waits out that window via !loadingChats — but rendering the
+// docked posture meanwhile made a hard refresh of the welcome page flash
+// bottom → center. While placement is undecidable, hide the composer
+// instead: `invisible` keeps layout and the dock measurements alive,
+// where v-if would unmount them. A session panel carries its sessionId
+// from the first frame, so this gate never engages on session routes.
+const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
 
 // Rotate the greeting per fresh chat so the entry point feels alive rather than
 // a fixed banner; the pick stays stable while a single welcome screen is shown
