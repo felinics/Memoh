@@ -301,6 +301,13 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
+	return TestSDKProvider(ctx, sdkProvider), nil
+}
+
+// TestSDKProvider probes an already-constructed SDK provider and classifies
+// the outcome. The "__ping__" model probe exists to surface authentication
+// failures on endpoints whose models listing does not require auth.
+func TestSDKProvider(ctx context.Context, sdkProvider sdk.Provider) TestResponse {
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
 	message := providerTestMessage(result)
@@ -312,7 +319,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Reachable: false,
 			LatencyMs: time.Since(start).Milliseconds(),
 			Message:   message,
-		}, nil
+		}
 	case sdk.ProviderStatusUnhealthy:
 		status := TestStatusError
 		if strings.Contains(result.Message, "authentication failed") {
@@ -323,7 +330,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Reachable: true,
 			LatencyMs: time.Since(start).Milliseconds(),
 			Message:   message,
-		}, nil
+		}
 	default:
 		if _, probeErr := sdkProvider.TestModel(ctx, "__ping__"); probeErr != nil {
 			if strings.Contains(probeErr.Error(), "authentication failed") {
@@ -332,7 +339,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 					Reachable: true,
 					LatencyMs: time.Since(start).Milliseconds(),
 					Message:   probeErr.Error(),
-				}, nil
+				}
 			}
 		}
 		return TestResponse{
@@ -340,7 +347,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Reachable: true,
 			LatencyMs: time.Since(start).Milliseconds(),
 			Message:   result.Message,
-		}, nil
+		}
 	}
 }
 

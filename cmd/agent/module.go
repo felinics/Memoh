@@ -95,6 +95,7 @@ func commonOptions() fx.Option {
 			provideServerHandler(provideProviderOAuthHandler),
 			provideServerHandler(provideACPCodexOAuthServerHandler),
 			provideServerHandler(provideACPClaudeCodeOAuthServerHandler),
+			provideServerHandler(handlers.NewACPCredentialsHandler),
 			provideServerHandler(handlers.NewFetchProvidersHandler),
 			provideServerHandler(handlers.NewSearchProvidersHandler),
 			provideServerHandler(handlers.NewModelsHandler),
