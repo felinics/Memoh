@@ -250,6 +250,18 @@
   background-color: var(--ui-hover);
 }
 
+/* The collapsed circle form presses with the SAME content squish as the pill
+ * (0.97 / 150ms easeOutExpo on .composer-pill-content): press parity — the
+ * glyph must shrink in both forms or the two states stop reading as one
+ * control. The chip is deliberately NOT re-tinted here: the circle keeps the
+ * shared ghost chip so its hover stays a quiet peer of the ＋ button. */
+[data-button][data-variant="ghost"].composer-circle-press .composer-pill-content {
+  transition: scale 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+[data-button][data-variant="ghost"].composer-circle-press:active .composer-pill-content {
+  scale: 0.97;
+}
+
 /* Inter-script spacing (W3C CLREQ / CSS Text 4): insert the standard ~1/8em gap
  * between CJK (Han/kana) and adjacent Latin letters or numerals, so mixed runs
  * like "Chat查看文件" stop colliding into one dense blob. The property is

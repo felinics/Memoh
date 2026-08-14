@@ -873,6 +873,7 @@ import { commandResultPresentation, isCommandResultItemVisible, resolveCommandRe
 import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -2395,8 +2396,11 @@ watch(inputText, (text) => {
 // Same rule as ComposerContinueOn's isDefaultTarget (only the native cloud
 // workspace collapses to the circle; a missing/ghost selection resolves to
 // null here exactly like the child's selectedTarget) — the layout reservation
-// must track which of the two widths the control is actually rendering.
-const continueOnExpanded = computed(() => selectedWorkspaceTarget.value?.kind !== 'native')
+// must track which of the two widths the control is actually rendering. On
+// mobile the trigger never expands (see the child's header comment), so it
+// always reserves the circle.
+const isMobileShell = useIsMobile()
+const continueOnExpanded = computed(() => selectedWorkspaceTarget.value?.kind !== 'native' && !isMobileShell.value)
 
 const {
   textareaEl,

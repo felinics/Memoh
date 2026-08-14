@@ -2,17 +2,22 @@
   <DropdownMenu @update:open="onMenuOpen">
     <DropdownMenuTrigger as-child>
       <!-- Icon-only for the default destination (the native cloud workspace):
-           a quiet peer of the ＋ button. The moment the session is pinned to a
-           real machine — or holds any non-default selection — the trigger
-           grows into the labeled pill: a non-default target is worth reading
-           at a glance.
+           a quiet peer of the ＋ button. On md+, the moment the session is
+           pinned to a real machine — or holds any non-default selection — the
+           trigger grows into the labeled pill: a non-default target is worth
+           reading at a glance. On mobile it NEVER expands: the pill and the
+           model trigger would squeeze each other into uselessness on a narrow
+           row, so the collapsed circle carries it and the selection is read
+           in the menu instead.
            The two forms are ONE element morphing, never two nodes swapping:
            a single Laptop glyph, a collapsing label slot (max-width/opacity),
            and a padding transition converge the circle to exactly 32×32
            (44×44 on mobile). Splitting the forms across v-if/v-else nodes
            reads as two different controls mid-switch. The <button> itself
            still never transforms (reka anchors the open menu to its rendered
-           rect); the pill's press squish lives on .composer-pill-content. -->
+           rect); press squish lives on .composer-pill-content in BOTH forms
+           (composer-pill-press / composer-circle-press, style.css) so press
+           feedback is identical either way. -->
       <Button
         type="button"
         variant="ghost"
@@ -23,7 +28,7 @@
         :aria-label="t('chat.continueOn.label')"
         class="order-2 min-w-0 max-w-48 self-end max-md:h-11 duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
         :class="isDefaultTarget
-          ? 'px-2 max-md:px-3'
+          ? 'composer-circle-press px-2 max-md:px-3'
           : 'composer-pill-press shrink'"
       >
         <span class="composer-pill-content inline-flex min-w-0 items-center">
@@ -33,10 +38,11 @@
           />
           <!-- Spacing lives on the slot's children (ml-2), not the slot itself:
                a gap/padding on the collapsing container would survive the
-               collapse and the circle could never converge to 32px. -->
+               collapse and the circle could never converge to 32px. The
+               expansion is gated to md+ — see the header comment. -->
           <span
             class="inline-flex min-w-0 items-center overflow-hidden transition-[max-width,opacity] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
-            :class="isDefaultTarget ? 'max-w-0 opacity-0' : 'max-w-38 opacity-100'"
+            :class="isDefaultTarget ? 'max-w-0 opacity-0' : 'max-w-0 opacity-0 md:max-w-38 md:opacity-100'"
             :aria-hidden="isDefaultTarget"
           >
             <span class="ml-2 min-w-0 truncate text-label text-composer-control-label">{{ currentName }}</span>
