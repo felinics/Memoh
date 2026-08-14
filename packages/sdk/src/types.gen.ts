@@ -2506,6 +2506,14 @@ export type ModelsModelConfig = {
     description?: string;
     dimensions?: number;
     /**
+     * ReasoningDefaultOn reports whether omitting the thinking field leaves the
+     * model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
+     * defaults to off, while Opus 5 can be turned off but defaults to on, so
+     * omitting the field there keeps thinking running — billed, and invisible to a
+     * user who believes they turned it off. nil means unknown.
+     */
+    reasoning_default_on?: boolean;
+    /**
      * ReasoningDialect declares the wire shape of this model's thinking control,
      * which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
      * token budget while 3.x takes a named level, and the two are mutually

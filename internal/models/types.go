@@ -246,7 +246,7 @@ func (m *Model) HasCompatibility(c string) bool {
 // ResolveThinkingMode returns the effective ThinkingMode, bridging legacy data:
 // unknown + reasoning compat → toggle; unknown without it → none.
 func (m *Model) ResolveThinkingMode() string {
-	return reasoning.ResolveMode(m.Config.ThinkingMode, m.HasCompatibility(CompatReasoning))
+	return reasoning.ResolveMode(m.Config.ThinkingMode, m.HasCompatibility(CompatReasoning), m.ModelID)
 }
 
 // ReasoningOptions reports what a caller may select for this model on the given
