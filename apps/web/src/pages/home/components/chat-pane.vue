@@ -654,73 +654,80 @@
                         </span>
                       </Button>
                     </PopoverTrigger>
+                    <!-- `menu` makes this host transparent: the inner
+                         menuChromeClass div already owns the border/shadow/
+                         radius, so a chromed host would draw a doubled edge
+                         (same pattern as model-select.vue). -->
                     <PopoverContent
+                      menu
                       class="w-80 max-w-[calc(100vw-2rem)] overflow-hidden p-0"
                       align="end"
                       side="top"
                       :side-offset="4"
                     >
-                      <InlineLoadingRow
-                        v-if="composerModelsLoading"
-                        class="px-2 py-3"
-                      >
-                        {{ $t('common.loading') }}
-                      </InlineLoadingRow>
-                      <div
-                        v-else
-                        :class="menuChromeClass"
-                      >
-                        <div
-                          v-if="activeUsesACPComposer && !activeIsPendingACP && acpModes.length"
-                          class="border-b border-border p-3"
+                      <!-- The chrome wrapper covers BOTH branches: with the
+                           host transparent (`menu`), a bare loading row would
+                           float on the chat UI with no surface at all. -->
+                      <div :class="menuChromeClass">
+                        <InlineLoadingRow
+                          v-if="composerModelsLoading"
+                          class="px-2 py-3"
                         >
-                          <div class="mb-2 text-label text-foreground">
-                            {{ $t('chat.sessionMode') }}
-                          </div>
-                          <Select
-                            :model-value="currentACPModeId"
-                            :disabled="activeChatReadOnly || streaming || acpConfigChanging"
-                            @update:model-value="onACPModeSelected"
+                          {{ $t('common.loading') }}
+                        </InlineLoadingRow>
+                        <template v-else>
+                          <div
+                            v-if="activeUsesACPComposer && !activeIsPendingACP && acpModes.length"
+                            class="border-b border-border p-3"
                           >
-                            <SelectTrigger class="w-full">
-                              <SelectValue :placeholder="$t('chat.sessionModePlaceholder')" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem
-                                v-for="mode in acpModes"
-                                :key="mode.id"
-                                :value="mode.id"
-                              >
-                                <div class="min-w-0">
-                                  <div class="truncate">
-                                    {{ mode.name?.trim() || mode.id }}
+                            <div class="mb-2 text-label text-foreground">
+                              {{ $t('chat.sessionMode') }}
+                            </div>
+                            <Select
+                              :model-value="currentACPModeId"
+                              :disabled="activeChatReadOnly || streaming || acpConfigChanging"
+                              @update:model-value="onACPModeSelected"
+                            >
+                              <SelectTrigger class="w-full">
+                                <SelectValue :placeholder="$t('chat.sessionModePlaceholder')" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem
+                                  v-for="mode in acpModes"
+                                  :key="mode.id"
+                                  :value="mode.id"
+                                >
+                                  <div class="min-w-0">
+                                    <div class="truncate">
+                                      {{ mode.name?.trim() || mode.id }}
+                                    </div>
+                                    <div
+                                      v-if="mode.description?.trim()"
+                                      class="text-caption text-muted-foreground"
+                                    >
+                                      {{ mode.description }}
+                                    </div>
                                   </div>
-                                  <div
-                                    v-if="mode.description?.trim()"
-                                    class="text-caption text-muted-foreground"
-                                  >
-                                    {{ mode.description }}
-                                  </div>
-                                </div>
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <p class="mt-2 rounded-md border border-warning-border bg-warning-soft p-2 text-caption text-warning-foreground">
-                            {{ $t('chat.sessionModeCaution') }}
-                          </p>
-                        </div>
-                        <ModelOptions
-                          :model-value="overrideModelId"
-                          :reasoning-effort="overrideReasoningEffort"
-                          :reasoning-options="composerReasoningOptions"
-                          :models="composerModels"
-                          :providers="composerModelProviders"
-                          model-type="chat"
-                          :open="modelPopoverOpen"
-                          show-reasoning
-                          @update:model-value="onComposerModelValueSelected"
-                          @update:reasoning-effort="onComposerReasoningEffortSelected"
-                        />
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p class="mt-2 rounded-md border border-warning-border bg-warning-soft p-2 text-caption text-warning-foreground">
+                              {{ $t('chat.sessionModeCaution') }}
+                            </p>
+                          </div>
+                          <ModelOptions
+                            :model-value="overrideModelId"
+                            :reasoning-effort="overrideReasoningEffort"
+                            :reasoning-options="composerReasoningOptions"
+                            :models="composerModels"
+                            :providers="composerModelProviders"
+                            model-type="chat"
+                            :open="modelPopoverOpen"
+                            show-reasoning
+                            @update:model-value="onComposerModelValueSelected"
+                            @update:reasoning-effort="onComposerReasoningEffortSelected"
+                          />
+                        </template>
                       </div>
                     </PopoverContent>
                   </Popover>
