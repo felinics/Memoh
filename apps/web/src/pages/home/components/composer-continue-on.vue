@@ -1,43 +1,50 @@
 <template>
   <DropdownMenu @update:open="onMenuOpen">
     <DropdownMenuTrigger as-child>
-      <!-- Icon-only ONLY for the default destination (the native cloud
-           workspace): a quiet peer of the ＋ button. The moment the session is
-           pinned to a real machine — or holds any non-default selection — the
-           trigger expands to the labeled pill: a non-default target is worth
-           reading at a glance. The <button> itself never transforms (reka
-           anchors the open menu to its rendered rect); the pill's press
-           squish lives on .composer-pill-content. -->
+      <!-- Icon-only for the default destination (the native cloud workspace):
+           a quiet peer of the ＋ button. The moment the session is pinned to a
+           real machine — or holds any non-default selection — the trigger
+           grows into the labeled pill: a non-default target is worth reading
+           at a glance.
+           The two forms are ONE element morphing, never two nodes swapping:
+           a single Laptop glyph, a collapsing label slot (max-width/opacity),
+           and a padding transition converge the circle to exactly 32×32
+           (44×44 on mobile). Splitting the forms across v-if/v-else nodes
+           reads as two different controls mid-switch. The <button> itself
+           still never transforms (reka anchors the open menu to its rendered
+           rect); the pill's press squish lives on .composer-pill-content. -->
       <Button
         type="button"
         variant="ghost"
-        :size="isDefaultTarget ? 'icon-sm' : 'sm'"
+        size="sm"
         shape="circle"
         :disabled="locked"
         :title="isDefaultTarget ? currentName : t('chat.continueOn.label')"
         :aria-label="t('chat.continueOn.label')"
+        class="order-2 min-w-0 max-w-48 self-end max-md:h-11 duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
         :class="isDefaultTarget
-          ? 'order-2 self-end text-muted-foreground max-md:size-11'
-          : 'composer-pill-press order-2 min-w-0 max-w-48 self-end max-md:h-11'"
+          ? 'px-2 max-md:px-3'
+          : 'composer-pill-press shrink'"
       >
-        <Laptop
-          v-if="isDefaultTarget"
-          class="size-4"
-          :stroke-width="1.5"
-        />
-        <span
-          v-else
-          class="composer-pill-content inline-flex min-w-0 items-center gap-2"
-        >
+        <span class="composer-pill-content inline-flex min-w-0 items-center">
           <Laptop
-            class="size-3.5 shrink-0 text-muted-foreground"
+            class="size-4 max-md:size-5 shrink-0 text-muted-foreground"
             :stroke-width="1.5"
           />
-          <span class="min-w-0 truncate text-label text-composer-control-label">{{ currentName }}</span>
-          <ChevronDown
-            class="size-3.5 shrink-0 text-muted-foreground"
-            :stroke-width="1.5"
-          />
+          <!-- Spacing lives on the slot's children (ml-2), not the slot itself:
+               a gap/padding on the collapsing container would survive the
+               collapse and the circle could never converge to 32px. -->
+          <span
+            class="inline-flex min-w-0 items-center overflow-hidden transition-[max-width,opacity] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
+            :class="isDefaultTarget ? 'max-w-0 opacity-0' : 'max-w-38 opacity-100'"
+            :aria-hidden="isDefaultTarget"
+          >
+            <span class="ml-2 min-w-0 truncate text-label text-composer-control-label">{{ currentName }}</span>
+            <ChevronDown
+              class="ml-2 size-3.5 shrink-0 text-muted-foreground"
+              :stroke-width="1.5"
+            />
+          </span>
         </span>
       </Button>
     </DropdownMenuTrigger>
