@@ -378,12 +378,22 @@
               <!-- The composer is ALWAYS a two-row card (textarea on top,
                    controls below) — no pill↔multiline morph: a fixed rounded-2xl
                    box with a minimum height, so its shape never depends on the
-                   content and nothing animates mid-typing. -->
+                   content and nothing animates mid-typing.
+                   Docked (non-welcome) state compresses and quiets: min-h-24
+                   pulls the textarea row toward the controls row, and
+                   .chat-composer-docked (style.css) softens the edge to
+                   --border-soft — the centered welcome card keeps the full
+                   presence; docked it sits under the conversation and should
+                   read lighter.
+                   Mobile radius is DERIVED, not eyeballed: concentric with the
+                   44px control circles — control radius 22 + padding 10
+                   (p-2.5) = 32 = rounded-4xl. -->
               <div
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
-                class="chat-composer-edge relative flex min-h-28 w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer p-3 cursor-text max-md:rounded-xl max-md:p-2.5"
+                class="chat-composer-edge relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer p-3 cursor-text max-md:rounded-4xl max-md:p-2.5"
+                :class="isWelcome ? 'min-h-28' : 'min-h-24 chat-composer-docked'"
                 @click="handleComposerClick"
               >
                 <!-- The attachment row reveals via a grid 0fr↔1fr track so a card
