@@ -219,9 +219,10 @@
                the column math is centered, but the eye reads the composer a hair
                right of the message column (the scroll rail eats the right edge),
                so the whole dock unit shifts left a touch to sit where it looks
-               centered. -->
+               centered. Desktop only — mobile has no scroll rail, so there the
+               nudge would just push the composer off centre. -->
           <div
-            class="pointer-events-auto relative mx-auto w-full -translate-x-0.5 px-4 sm:px-6 lg:px-10"
+            class="pointer-events-auto relative mx-auto w-full px-4 sm:px-6 lg:px-10 md:-translate-x-0.5"
             :class="isWelcome ? 'max-w-[44rem]' : 'max-w-[840px]'"
           >
             <Transition
@@ -377,23 +378,26 @@
             >
               <!-- The composer is ALWAYS a two-row card (textarea on top,
                    controls below) — no pill↔multiline morph: a fixed rounded-2xl
-                   box with a minimum height, so its shape never depends on the
-                   content and nothing animates mid-typing.
-                   Docked (non-welcome) state compresses and quiets: min-h-24
-                   pulls the textarea row toward the controls row, and
-                   .chat-composer-docked (style.css) softens the edge to
-                   --border-soft — the centered welcome card keeps the full
-                   presence; docked it sits under the conversation and should
-                   read lighter.
-                   Mobile radius is DERIVED, not eyeballed: concentric with the
-                   44px control circles — control radius 22 + padding 10
-                   (p-2.5) = 32 = rounded-4xl. -->
+                   box, so its shape never depends on the content and nothing
+                   animates mid-typing.
+                   Docked (non-welcome) state compresses and quiets: no min
+                   height + tighter padding (p-2.5) + a shorter textarea row
+                   (min-h-10) pull the two rows together — the centered welcome
+                   card keeps the full presence (min-h-28, p-3); docked it sits
+                   under the conversation and should read lighter, with the edge
+                   softened to --border-soft (.chat-composer-docked, style.css).
+                   Mobile radius is DERIVED from the control circles inside:
+                   radius tracks the control radius — 44px controls → 22, i.e.
+                   rounded-3xl (24, nearest rung); the same rule on desktop
+                   (32px controls → 16) is exactly the rounded-2xl the card
+                   already wears. (The concentric alternative, control radius +
+                   padding = 32, read as too round in QA.) -->
               <div
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
-                class="chat-composer-edge relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer p-3 cursor-text max-md:rounded-4xl max-md:p-2.5"
-                :class="isWelcome ? 'min-h-28' : 'min-h-24 chat-composer-docked'"
+                class="chat-composer-edge relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text max-md:rounded-3xl max-md:p-2.5"
+                :class="isWelcome ? 'min-h-28 p-3' : 'p-2.5 chat-composer-docked'"
                 @click="handleComposerClick"
               >
                 <!-- The attachment row reveals via a grid 0fr↔1fr track so a card
@@ -478,7 +482,8 @@
                   rows="1"
                   :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
                   :disabled="!currentBotId || activeChatReadOnly || loadingMessages || voiceInputState !== 'idle'"
-                  class="order-none min-h-12 max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
+                  class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
+                  :class="isWelcome ? 'min-h-12' : 'min-h-10'"
                   @keydown="handleComposerKeydown"
                   @paste="handlePaste"
                 />
