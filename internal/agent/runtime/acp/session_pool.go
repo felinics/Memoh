@@ -1889,7 +1889,7 @@ func (p *SessionPool) toolHTTPHandler(h *runtimeHandle) http.Handler {
 		return nil
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		mcp.ServeToolMCPHTTPWithoutContextMerge(w, req, p.logger, p.tools, p.contexts, h.toolContext())
+		mcp.ServeToolMCPHTTP(w, req, p.logger, p.tools, p.contexts, h.toolContext())
 	})
 }
 

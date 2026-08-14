@@ -2426,11 +2426,6 @@ func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 	if baked.SessionID != "" || baked.RunID != "" || baked.SessionToken != "" || baked.ReplyTarget != "" || baked.RouteID != "" || baked.ChannelIdentityID != "" {
 		t.Fatalf("baked identity leaks per-prompt fields: %#v", baked)
 	}
-	// The pool no longer publishes ACP contexts into the shared store.
-	merged := contexts.Merge(mcp.ToolSessionContext{BotID: "bot-1", SessionID: "session-1"})
-	if merged.RunID != "" || merged.ConversationType != "" {
-		t.Fatalf("ACP context leaked into the shared store: %#v", merged)
-	}
 }
 
 func TestSessionPoolUsesWorkspaceACPToolsEndpointForContainer(t *testing.T) {

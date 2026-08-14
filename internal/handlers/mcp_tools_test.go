@@ -364,27 +364,3 @@ func TestBuildToolSessionContextUsesAuthenticatedIdentity(t *testing.T) {
 		t.Fatalf("channel identity = %q, want authenticated user", session.ChannelIdentityID)
 	}
 }
-
-func TestBuildToolSessionContextDoesNotMergeStoredACPContextForPublicEndpoint(t *testing.T) {
-	store := mcpgw.NewToolSessionContextStore()
-	store.Put(mcpgw.ToolSessionContext{
-		BotID:            "bot-1",
-		SessionID:        "session-1",
-		RunID:            "run-latest",
-		CurrentPlatform:  "web",
-		ReplyTarget:      "reply-latest",
-		ConversationType: "private",
-	})
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", nil)
-	req.Header.Set(headerBotID, "bot-1")
-	req.Header.Set(headerSessionID, "session-1")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	session := (&ContainerdHandler{toolContexts: store}).buildToolSessionContext(c, "bot-1")
-	if session.RunID != "" || session.CurrentPlatform != "" || session.ReplyTarget != "" || session.ConversationType != "" {
-		t.Fatalf("public endpoint merged ACP context: %#v", session)
-	}
-}

@@ -79,11 +79,11 @@ func (h *ContainerdHandler) handleMCPToolsWithBotID(c echo.Context, botID string
 		if !ok {
 			return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
 		}
-		mcpgw.ServeToolMCPHTTPWithoutContextMerge(c.Response().Writer, c.Request(), h.logger, h.toolGateway, h.toolContexts, session)
+		mcpgw.ServeToolMCPHTTP(c.Response().Writer, c.Request(), h.logger, h.toolGateway, h.toolContexts, session)
 		return nil
 	}
 	session := h.buildToolSessionContext(c, botID)
-	mcpgw.ServeToolMCPHTTPWithoutContextMerge(c.Response().Writer, c.Request(), h.logger, h.toolGateway, h.toolContexts, session)
+	mcpgw.ServeToolMCPHTTP(c.Response().Writer, c.Request(), h.logger, h.toolGateway, h.toolContexts, session)
 	return nil
 }
 
