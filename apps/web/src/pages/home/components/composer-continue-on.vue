@@ -253,13 +253,20 @@ function displayName(target: WorkspaceWorkspaceTarget): string {
 const currentName = computed(() => {
   if (selectedTarget.value) return displayName(selectedTarget.value)
   if (props.selectedMissing) return props.selectedSnapshotName || t('chat.computerUnavailable')
-  return t('chat.continueOn.label')
+  // A selection whose targets haven't loaded yet still wears its snapshot
+  // name — the pill is announcing THAT computer, not the generic label.
+  return props.selectedSnapshotName || t('chat.continueOn.label')
 })
 
-// The native cloud workspace IS the default destination; only it gets the
-// collapsed icon trigger. Any real machine (or a non-default/ghost selection)
-// gets the labeled pill.
-const isDefaultTarget = computed(() => selectedTarget.value?.kind === 'native')
+// Only an explicit non-default selection earns the pill. No selection at all —
+// including the window before the targets query lands — renders the collapsed
+// default circle: otherwise every fresh welcome page flashes a "Continue on"
+// pill that collapses the moment the default target resolves.
+const isDefaultTarget = computed(() => (
+  selectedTarget.value
+    ? selectedTarget.value.kind === 'native'
+    : !props.selectedTargetId
+))
 
 function goToRuntimes(): void {
   void router.push({ name: 'runtimes' })

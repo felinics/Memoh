@@ -2408,14 +2408,18 @@ watch(inputText, (text) => {
   if (!prefix || text === prefix || text.startsWith(`${prefix} `)) return
   slashPanelSuppressedPrefix.value = ''
 })
-// Same rule as ComposerContinueOn's isDefaultTarget (only the native cloud
-// workspace collapses to the circle; a missing/ghost selection resolves to
-// null here exactly like the child's selectedTarget) — the layout reservation
-// must track which of the two widths the control is actually rendering. On
-// mobile the trigger never expands (see the child's header comment), so it
-// always reserves the circle.
+// Mirror of ComposerContinueOn's pill rule: only an explicit non-default
+// selection expands the trigger (unset — including the pre-load window —
+// renders the collapsed default circle; a missing/ghost selection resolves to
+// null here exactly like the child's selectedTarget). The reservation must
+// track which width the control is actually rendering, and on mobile the
+// trigger never expands (see the child's header comment).
 const isMobileShell = useIsMobile()
-const continueOnExpanded = computed(() => selectedWorkspaceTarget.value?.kind !== 'native' && !isMobileShell.value)
+const continueOnExpanded = computed(() => (
+  !!selectedWorkspaceTargetId.value
+  && selectedWorkspaceTarget.value?.kind !== 'native'
+  && !isMobileShell.value
+))
 
 const {
   textareaEl,
