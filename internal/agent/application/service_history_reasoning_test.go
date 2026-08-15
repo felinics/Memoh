@@ -224,9 +224,11 @@ func TestStripToolMessagesBoundsReplayedReasoning(t *testing.T) {
 			sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
 				// Several redacted blocks per turn, as a real response returns.
 				sdk.ReasoningPart{ProviderMetadata: map[string]any{
-					"anthropic": map[string]any{"redactedData": "BLOB_A"}}},
+					"anthropic": map[string]any{"redactedData": "BLOB_A"},
+				}},
 				sdk.ReasoningPart{ProviderMetadata: map[string]any{
-					"anthropic": map[string]any{"redactedData": "BLOB_B"}}},
+					"anthropic": map[string]any{"redactedData": "BLOB_B"},
+				}},
 				sdk.TextPart{Text: "a"},
 			}},
 		)
