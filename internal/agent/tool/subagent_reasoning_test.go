@@ -181,13 +181,14 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 		t.Fatalf("model that can be turned off: got %+v", off)
 	}
 
-	// The same stored value on a model without an off switch omits the field
-	// rather than sending a tier, which would turn thinking on.
+	// The same stored value on a model without an off switch must resolve to an
+	// active supported tier. Marking it Disabled would only omit the field and let
+	// the provider turn reasoning back on at an unreported default.
 	offElsewhere := reasoning.ResolveConfig(
 		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts,
 		models.ReasoningEffortDisable, "", clientType,
 	)
-	if offElsewhere == nil || !offElsewhere.Disabled || offElsewhere.OffEffort != "" {
+	if offElsewhere == nil || !offElsewhere.Active || offElsewhere.Disabled || offElsewhere.Effort != models.ReasoningEffortLow {
 		t.Fatalf("model that cannot be turned off: got %+v", offElsewhere)
 	}
 

@@ -52,21 +52,38 @@ func ResolveConfig(mode string, advertised []string, stored, requested, clientTy
 	offEffort := offEffortFor(levels)
 	req := strings.TrimSpace(requested)
 	adaptive := isAdaptiveWire(mode, levels, clientType)
+	canTurnOff := canDisable(mode, levels, clientType)
+	active := func(requestedEffort string) *Config {
+		return &Config{
+			Active:    true,
+			Adaptive:  adaptive,
+			Effort:    pickEffort(requestedEffort, stored, levels),
+			OffEffort: offEffort,
+		}
+	}
 
 	switch {
-	case IsDisabled(req):
+	case IsDisabled(req) && canTurnOff:
 		return &Config{Disabled: true, OffEffort: offEffort}
+	case IsDisabled(req):
+		// An unavailable off override is no different from any other unsupported
+		// tier: fall back to the stored/default active effort. Returning Disabled
+		// here would make the settings surface claim Off while the provider receives
+		// no off signal and continues with its own (usually active) default.
+		return active("")
 	case req == EffortAdaptive:
 		// Legacy "adaptive" override on a toggle model: treat as on (toggle has no
 		// adaptive concept; send a normal effort).
-		return &Config{Active: true, Adaptive: adaptive, Effort: pickEffort("", stored, levels), OffEffort: offEffort}
+		return active("")
 	case req != "":
-		return &Config{Active: true, Adaptive: adaptive, Effort: pickEffort(req, stored, levels), OffEffort: offEffort}
-	case IsDisabled(stored):
+		return active(req)
+	case IsDisabled(stored) && canTurnOff:
 		// The stored effort is the only on/off source; "disable" is off.
 		return &Config{Disabled: true, OffEffort: offEffort}
 	default:
-		return &Config{Active: true, Adaptive: adaptive, Effort: pickEffort("", stored, levels), OffEffort: offEffort}
+		// This also reconciles a stale stored Off after switching to a model that
+		// cannot disable reasoning.
+		return active("")
 	}
 }
 

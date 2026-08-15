@@ -214,11 +214,11 @@ func TestResolveReasoningConfig(t *testing.T) {
 		want          *models.ReasoningConfig
 	}{
 		{
-			name:          "disable overrides bot default",
+			name:          "unsupported disable override falls back to bot default",
 			model:         toggleModel,
 			botSettings:   settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: models.ReasoningEffortDisable,
-			want:          &models.ReasoningConfig{Disabled: true},
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
 			name:          "legacy adaptive request enables toggle with default effort",
@@ -230,11 +230,11 @@ func TestResolveReasoningConfig(t *testing.T) {
 			// A requested "none" is an off request, not an active tier. Treating it as
 			// a tier produced Active with Effort "none" — enabled at no strength —
 			// which wires to the same request as off.
-			name:          "requested none reads as off even when the model cannot be turned off",
+			name:          "requested none falls back when the model cannot be turned off",
 			model:         toggleModel,
 			botSettings:   settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: models.ReasoningEffortNone,
-			want:          &models.ReasoningConfig{Disabled: true},
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
 			name:          "requested none reads as off, and a disablable model carries the wire value",
@@ -283,16 +283,16 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
-			name:        "bot effort of disable turns reasoning off",
+			name:        "stale bot disable falls back when the model cannot turn off",
 			model:       toggleModel,
 			botSettings: settings.Settings{ReasoningEffort: models.ReasoningEffortDisable},
-			want:        &models.ReasoningConfig{Disabled: true},
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
-			name:          "adaptive model can still be disabled",
+			name:          "adaptive model without off support stays active",
 			model:         adaptiveModel,
 			requestEffort: models.ReasoningEffortDisable,
-			want:          &models.ReasoningConfig{Disabled: true},
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
 			name:          "adaptive model honors explicit effort",

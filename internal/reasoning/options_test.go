@@ -178,3 +178,47 @@ func TestReconcileStored(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveConfigAgreesWithOffReachability(t *testing.T) {
+	t.Parallel()
+
+	advertised := []string{EffortMinimal, EffortLow}
+	const clientType = "openai-completions"
+	opts := OptionsFor(ModeToggle, advertised, clientType)
+	if opts.CanDisable {
+		t.Fatal("fixture must describe a model that cannot disable reasoning")
+	}
+
+	for _, tt := range []struct {
+		name      string
+		stored    string
+		requested string
+		want      string
+	}{
+		{
+			name:   "stale stored off falls back to the model default",
+			stored: EffortDisable,
+			want:   opts.DefaultEffort,
+		},
+		{
+			name:      "unsupported off override falls back to the stored tier",
+			stored:    EffortLow,
+			requested: EffortDisable,
+			want:      EffortLow,
+		},
+		{
+			name:      "legacy off override is subject to the same capability check",
+			stored:    EffortLow,
+			requested: EffortNone,
+			want:      EffortLow,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := ResolveConfig(ModeToggle, advertised, tt.stored, tt.requested, clientType)
+			if cfg == nil || !cfg.Active || cfg.Disabled || cfg.Effort != tt.want {
+				t.Fatalf("ResolveConfig() = %+v, want active effort %q", cfg, tt.want)
+			}
+		})
+	}
+}
