@@ -15,29 +15,34 @@ import (
 // Session carries request-scoped identity and runtime ownership for tool
 // execution. Runtime-only fields remain process-local and are never serialized.
 type Session struct {
-	BotID               string
-	ChatID              string
-	RuntimeID           string
-	RuntimeToken        string `json:"-"`
-	SessionID           string
-	RunID               string
-	ToolCallID          string
-	SessionType         string
-	RouteID             string
-	ChannelIdentityID   string
-	SessionToken        string `json:"-"`
-	CurrentPlatform     string
-	ReplyTarget         string
-	ConversationType    string
-	CanRequestUserInput bool
-	CanListUserInput    bool
-	IsSubagent          bool
-	RuntimeActive       bool
-	SupportsImageInput  bool
-	SupportsFileInput   bool
-	RuntimeFence        runtimefence.Fence          `json:"-"`
-	RunContext          context.Context             `json:"-"`
-	RuntimeGuard        func(context.Context) error `json:"-"`
+	BotID             string
+	ChatID            string
+	RuntimeID         string
+	RuntimeToken      string `json:"-"`
+	SessionID         string
+	RunID             string
+	ToolCallID        string
+	SessionType       string
+	RouteID           string
+	ChannelIdentityID string
+	SessionToken      string `json:"-"`
+	CurrentPlatform   string
+	ReplyTarget       string
+	ConversationType  string
+	// ReasoningStoredEffort and ReasoningRequestedEffort are unresolved turn
+	// inputs. A tool that selects another model must resolve them against that
+	// model instead of inheriting the parent runtime's provider-specific result.
+	ReasoningStoredEffort    string
+	ReasoningRequestedEffort string
+	CanRequestUserInput      bool
+	CanListUserInput         bool
+	IsSubagent               bool
+	RuntimeActive            bool
+	SupportsImageInput       bool
+	SupportsFileInput        bool
+	RuntimeFence             runtimefence.Fence          `json:"-"`
+	RunContext               context.Context             `json:"-"`
+	RuntimeGuard             func(context.Context) error `json:"-"`
 }
 
 const runtimeGuardTimeout = 5 * time.Second
@@ -140,6 +145,12 @@ func Merge(base, latest Session) Session {
 	}
 	if value := strings.TrimSpace(latest.ConversationType); value != "" {
 		merged.ConversationType = value
+	}
+	if value := strings.TrimSpace(latest.ReasoningStoredEffort); value != "" {
+		merged.ReasoningStoredEffort = value
+	}
+	if value := strings.TrimSpace(latest.ReasoningRequestedEffort); value != "" {
+		merged.ReasoningRequestedEffort = value
 	}
 	if latest.CanRequestUserInput {
 		merged.CanRequestUserInput = true

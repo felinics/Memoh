@@ -1688,9 +1688,11 @@ func truncateTitle(s string, maxRunes int) string {
 // may not exist on this one.
 //
 // A missing settings service retains the old nil-config fallback for direct or
-// test-only callers that do not carry the parent inputs. A configured settings
-// service is authoritative: read failures are returned instead of silently
-// changing the provider-wire behavior.
+// test-only callers that do not carry the parent inputs. When a requested value
+// arrives without the stored fallback (as it does across the ACP tool bridge), a
+// configured settings service still loads stored: the child model may reject the
+// requested tier or Off and ResolveConfig must then fall back to the bot setting.
+// Read failures are returned instead of silently changing provider-wire behavior.
 func (p *SpawnProvider) resolveSubagentReasoning(
 	ctx context.Context,
 	session SessionContext,
@@ -1699,15 +1701,18 @@ func (p *SpawnProvider) resolveSubagentReasoning(
 ) (*models.ReasoningConfig, error) {
 	stored := strings.TrimSpace(session.ReasoningStoredEffort)
 	requested := strings.TrimSpace(session.ReasoningRequestedEffort)
-	if stored == "" && requested == "" {
+	if stored == "" {
 		if p.settings == nil {
-			return nil, nil
+			if requested == "" {
+				return nil, nil
+			}
+		} else {
+			botSettings, err := p.settings.GetBot(ctx, session.BotID)
+			if err != nil {
+				return nil, fmt.Errorf("load bot reasoning settings: %w", err)
+			}
+			stored = botSettings.ReasoningEffort
 		}
-		botSettings, err := p.settings.GetBot(ctx, session.BotID)
-		if err != nil {
-			return nil, fmt.Errorf("load bot reasoning settings: %w", err)
-		}
-		stored = botSettings.ReasoningEffort
 	}
 	return reasoning.ResolveConfig(
 		modelInfo.ResolveThinkingMode(),

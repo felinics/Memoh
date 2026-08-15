@@ -1785,6 +1785,8 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 	overlay(&ctx.CurrentPlatform, h.active.CurrentPlatform)
 	overlay(&ctx.ReplyTarget, h.active.ReplyTarget)
 	overlay(&ctx.ConversationType, h.active.ConversationType)
+	overlay(&ctx.ReasoningStoredEffort, h.active.ReasoningStoredEffort)
+	overlay(&ctx.ReasoningRequestedEffort, h.active.ReasoningRequestedEffort)
 	if h.active.CanRequestUserInput {
 		ctx.CanRequestUserInput = true
 	}
@@ -1821,24 +1823,28 @@ func (h *runtimeHandle) setStatus(status string) {
 func toolSessionContext(ctx context.Context, input PromptInput, h *runtimeHandle) client.ToolSessionContext {
 	fence, _ := runtimefence.FromContext(ctx)
 	return client.ToolSessionContext{
-		BotID:               h.botID,
-		ChatID:              firstNonEmpty(input.ChatID, h.botID),
-		RuntimeID:           h.id,
-		SessionID:           strings.TrimSpace(input.SessionID),
-		RunID:               strings.TrimSpace(input.RunID),
-		SessionType:         firstNonEmpty(input.SessionType, sessionmode.ACPAgent),
-		RouteID:             input.RouteID,
-		ChannelIdentityID:   input.ChannelIdentityID,
-		SessionToken:        input.SessionToken,
-		CurrentPlatform:     input.CurrentPlatform,
-		ReplyTarget:         input.ReplyTarget,
-		ConversationType:    input.ConversationType,
-		CanRequestUserInput: input.CanRequestUserInput,
-		IsSubagent:          false,
-		SupportsImageInput:  input.SupportsImageInput,
-		RuntimeFence:        fence,
-		RunContext:          ctx,
-		RuntimeGuard:        input.RuntimeGuard,
+		BotID:             h.botID,
+		ChatID:            firstNonEmpty(input.ChatID, h.botID),
+		RuntimeID:         h.id,
+		SessionID:         strings.TrimSpace(input.SessionID),
+		RunID:             strings.TrimSpace(input.RunID),
+		SessionType:       firstNonEmpty(input.SessionType, sessionmode.ACPAgent),
+		RouteID:           input.RouteID,
+		ChannelIdentityID: input.ChannelIdentityID,
+		SessionToken:      input.SessionToken,
+		CurrentPlatform:   input.CurrentPlatform,
+		ReplyTarget:       input.ReplyTarget,
+		ConversationType:  input.ConversationType,
+		// PromptInput.ReasoningEffort is the current turn's explicit selection.
+		// The bot-stored fallback is loaded by SpawnProvider when this ACP tool
+		// context does not already carry one.
+		ReasoningRequestedEffort: strings.TrimSpace(input.ReasoningEffort),
+		CanRequestUserInput:      input.CanRequestUserInput,
+		IsSubagent:               false,
+		SupportsImageInput:       input.SupportsImageInput,
+		RuntimeFence:             fence,
+		RunContext:               ctx,
+		RuntimeGuard:             input.RuntimeGuard,
 	}
 }
 

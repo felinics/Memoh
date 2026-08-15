@@ -246,11 +246,38 @@ func TestResolveSubagentReasoningPreservesParentTurnOverride(t *testing.T) {
 
 type subagentReasoningSettingsQueries struct {
 	dbstore.Queries
-	err error
+	effort string
+	err    error
 }
 
 func (q subagentReasoningSettingsQueries) GetSettingsByBotID(context.Context, pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
-	return sqlc.GetSettingsByBotIDRow{}, q.err
+	return sqlc.GetSettingsByBotIDRow{ReasoningEffort: q.effort}, q.err
+}
+
+func TestResolveSubagentReasoningUsesStoredFallbackWhenRequestedOffIsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	provider := &SpawnProvider{settings: settings.NewService(
+		slog.Default(),
+		subagentReasoningSettingsQueries{effort: models.ReasoningEffortHigh},
+		nil,
+		nil,
+	)}
+	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{
+		ThinkingMode:     models.ThinkingModeToggle,
+		ReasoningEfforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh},
+	}}}
+
+	cfg, err := provider.resolveSubagentReasoning(context.Background(), SessionContext{
+		BotID:                    "00000000-0000-0000-0000-000000000001",
+		ReasoningRequestedEffort: models.ReasoningEffortDisable,
+	}, model, string(models.ClientTypeOpenAICompletions))
+	if err != nil {
+		t.Fatalf("resolveSubagentReasoning: %v", err)
+	}
+	if cfg == nil || !cfg.Active || cfg.Disabled || cfg.Effort != models.ReasoningEffortHigh {
+		t.Fatalf("subagent fallback = %+v, want stored high", cfg)
+	}
 }
 
 func TestResolveSubagentReasoningPropagatesSettingsError(t *testing.T) {

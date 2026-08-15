@@ -2472,16 +2472,18 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	defer cancelRun()
 	guardCalls := 0
 	active := client.ToolSessionContext{
-		ChatID:             "chat-1",
-		SessionID:          "session-1",
-		RunID:              "stream-7",
-		SessionToken:       "token-7",
-		CurrentPlatform:    "web",
-		ReplyTarget:        "reply-7",
-		ConversationType:   "private",
-		SupportsImageInput: true,
-		RuntimeFence:       wantFence,
-		RunContext:         runCtx,
+		ChatID:                   "chat-1",
+		SessionID:                "session-1",
+		RunID:                    "stream-7",
+		SessionToken:             "token-7",
+		CurrentPlatform:          "web",
+		ReplyTarget:              "reply-7",
+		ConversationType:         "private",
+		ReasoningStoredEffort:    "low",
+		ReasoningRequestedEffort: "high",
+		SupportsImageInput:       true,
+		RuntimeFence:             wantFence,
+		RunContext:               runCtx,
 		RuntimeGuard: func(context.Context) error {
 			guardCalls++
 			return nil
@@ -2503,6 +2505,10 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	if !ctx.SupportsImageInput {
 		t.Fatalf("active tool context lost image capability: %#v", ctx)
 	}
+	if ctx.ReasoningStoredEffort != "low" || ctx.ReasoningRequestedEffort != "high" {
+		t.Fatalf("active tool context reasoning intent = stored %q, requested %q",
+			ctx.ReasoningStoredEffort, ctx.ReasoningRequestedEffort)
+	}
 	if ctx.RuntimeFence != wantFence {
 		t.Fatalf("active tool context fence = %#v, want %#v", ctx.RuntimeFence, wantFence)
 	}
@@ -2516,7 +2522,7 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	// clearActive removes every per-prompt field again.
 	h.clearActive()
 	ctx = h.toolContext()
-	if ctx.RunID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || !ctx.CanListUserInput || ctx.RunContext != nil || ctx.RuntimeGuard != nil {
+	if ctx.RunID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || !ctx.CanListUserInput || ctx.RunContext != nil || ctx.RuntimeGuard != nil || ctx.ReasoningStoredEffort != "" || ctx.ReasoningRequestedEffort != "" {
 		t.Fatalf("cleared tool context = %#v", ctx)
 	}
 }
@@ -2525,12 +2531,21 @@ func TestToolSessionContextCarriesPromptRuntimeFence(t *testing.T) {
 	want := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 31}
 	ctx := runtimefence.WithContext(context.Background(), want)
 	guard := func(context.Context) error { return nil }
-	got := toolSessionContext(ctx, PromptInput{SessionID: want.SessionID, RunID: "run-1", RuntimeGuard: guard}, &runtimeHandle{id: "rt-1", botID: want.BotID})
+	got := toolSessionContext(ctx, PromptInput{
+		SessionID:       want.SessionID,
+		RunID:           "run-1",
+		ReasoningEffort: " high ",
+		RuntimeGuard:    guard,
+	}, &runtimeHandle{id: "rt-1", botID: want.BotID})
 	if got.RuntimeFence != want {
 		t.Fatalf("tool session fence = %#v, want %#v", got.RuntimeFence, want)
 	}
 	if got.RunContext != ctx || got.RuntimeGuard == nil {
 		t.Fatalf("tool session runtime lifecycle = context:%v guard:%v", got.RunContext, got.RuntimeGuard != nil)
+	}
+	if got.ReasoningStoredEffort != "" || got.ReasoningRequestedEffort != "high" {
+		t.Fatalf("tool session reasoning intent = stored %q, requested %q",
+			got.ReasoningStoredEffort, got.ReasoningRequestedEffort)
 	}
 }
 

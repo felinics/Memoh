@@ -101,6 +101,19 @@ func TestMergePreservesStickyCapabilities(t *testing.T) {
 	}
 }
 
+func TestMergeCarriesReasoningIntent(t *testing.T) {
+	t.Parallel()
+
+	merged := Merge(Session{}, Session{
+		ReasoningStoredEffort:    " high ",
+		ReasoningRequestedEffort: " disable ",
+	})
+	if merged.ReasoningStoredEffort != "high" || merged.ReasoningRequestedEffort != "disable" {
+		t.Fatalf("reasoning intent = stored %q, requested %q",
+			merged.ReasoningStoredEffort, merged.ReasoningRequestedEffort)
+	}
+}
+
 func TestMergePreservesRuntimeLifecycle(t *testing.T) {
 	runCtx := context.Background()
 	guard := func(context.Context) error { return nil }
