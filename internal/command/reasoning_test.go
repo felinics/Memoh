@@ -166,9 +166,9 @@ func TestReasoningChoicesFollowTheModel(t *testing.T) {
 			absent: []string{"off"},
 		},
 		{
-			name: "an unresolvable model keeps the command usable",
+			name: "a model without reasoning offers no invented fallback",
 			opts: reasoning.Options{},
-			want: []string{"off", "low", "medium", "high"},
+			want: []string{},
 		},
 	}
 
@@ -194,16 +194,23 @@ func TestReasoningChoicesFollowTheModel(t *testing.T) {
 func TestAcceptsEffortRejectsTiersTheModelDoesNotOffer(t *testing.T) {
 	t.Parallel()
 
-	opts := reasoning.OptionsFor(reasoning.ModeToggle,
+	cannotDisable := reasoning.OptionsFor(reasoning.ModeToggle,
 		[]string{reasoning.EffortLow, reasoning.EffortMedium}, "openai-codex")
+	canDisable := fullLadderOptions()
 
-	if !acceptsEffort(reasoning.EffortLow, opts) {
+	if !acceptsEffort(reasoning.EffortLow, cannotDisable) {
 		t.Error("an advertised tier should be accepted")
 	}
-	if acceptsEffort(reasoning.EffortXHigh, opts) {
+	if acceptsEffort(reasoning.EffortXHigh, cannotDisable) {
 		t.Error("a tier the model does not advertise should be rejected")
 	}
-	if acceptsEffort(reasoning.EffortDisable, opts) {
-		t.Error("the disable token is not a tier and has its own branch")
+	if acceptsEffort(offChoice, cannotDisable) {
+		t.Error("off should be rejected when the model cannot disable reasoning")
+	}
+	if !acceptsEffort(offChoice, canDisable) {
+		t.Error("off should be accepted when the model can disable reasoning")
+	}
+	if acceptsEffort(reasoning.EffortLow, reasoning.Options{}) {
+		t.Error("an unsupported or unresolved model must not accept a fallback tier")
 	}
 }

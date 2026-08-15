@@ -509,9 +509,10 @@
       "header": "🧠 推論",
       "current": "現在: {level}",
       "choosePrompt": "努力が増えると、より慎重に考えることになりますが、応答は遅くなります。レベルを選択してください:",
-      "setUsage": "使い方: /reasoning set<off|low|medium|high|xhigh>",
+      "setUsage": "使い方: /reasoning set <{levels}>",
       "unavailable": "推論は現在利用できません。",
-      "unknownLevel": "不明レベル {level} — off、none、low、medium、high、または xhigh を選択します。"
+      "unsupported": "現在のモデルは推論に対応していません。",
+      "unknownLevel": "不明なレベル {level} — 利用可能なレベル: {levels}。"
     },
     "error": {
       "unknownCommand": "不明なコマンド {command}。 {help} を実行して利用可能なものを確認するか、先頭のスラッシュを付けずに再送信して通常のメッセージとして送信します。",

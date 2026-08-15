@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -20,23 +21,39 @@ const offChoice = "off"
 // including Off on models that cannot be turned off, and never xhigh's neighbours
 // on models that advertise them.
 //
-// A model that cannot be resolved yields a zero Options, and the caller falls
-// back to accepting any declarable tier rather than blocking the command.
-func (h *Handler) reasoningOptions(cc CommandContext, modelID string) reasoning.Options {
-	if modelID == "" || h.modelsService == nil {
-		return reasoning.Options{}
+// The bool reports whether both the model and its provider were resolved. It is
+// deliberately separate from Options.Supported: a resolved model may genuinely
+// have no reasoning capability, while a lookup failure leaves the capability
+// unknown. Neither case is safe to treat as a generic reasoning model.
+func (h *Handler) reasoningOptions(cc CommandContext, modelID string) (reasoning.Options, bool) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" || h.modelsService == nil || h.providersService == nil {
+		return reasoning.Options{}, false
 	}
 	m, err := h.modelsService.GetByID(cc.Ctx, modelID)
 	if err != nil {
-		return reasoning.Options{}
-	}
-	clientType := ""
-	if h.providersService != nil {
-		if p, provErr := h.providersService.Get(cc.Ctx, m.ProviderID); provErr == nil {
-			clientType = p.ClientType
+		if h.logger != nil {
+			h.logger.Warn("reasoning model lookup failed",
+				slog.String("bot_id", cc.BotID),
+				slog.String("model_id", modelID),
+				slog.Any("error", err),
+			)
 		}
+		return reasoning.Options{}, false
 	}
-	return m.ReasoningOptions(clientType)
+	p, err := h.providersService.Get(cc.Ctx, m.ProviderID)
+	if err != nil || strings.TrimSpace(p.ClientType) == "" {
+		if h.logger != nil {
+			h.logger.Warn("reasoning provider lookup failed",
+				slog.String("bot_id", cc.BotID),
+				slog.String("model_id", modelID),
+				slog.String("provider_id", m.ProviderID),
+				slog.Any("error", err),
+			)
+		}
+		return reasoning.Options{}, false
+	}
+	return m.ReasoningOptions(p.ClientType), true
 }
 
 // buildReasoningGroup registers /reasoning — a first-class sibling of /model.
@@ -54,18 +71,21 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if err != nil {
 				return nil, err
 			}
-			return reasoningResult(cc.L, s.ReasoningEffort, h.reasoningOptions(cc, s.ChatModelID)), nil
+			opts, resolved := h.reasoningOptions(cc, s.ChatModelID)
+			if !resolved {
+				return &Result{Text: cc.T("cmd.reasoning.unavailable")}, nil
+			}
+			if !opts.Supported {
+				return &Result{Text: cc.T("cmd.reasoning.unsupported")}, nil
+			}
+			return reasoningResult(cc.L, s.ReasoningEffort, opts), nil
 		},
 	})
 	g.Register(SubCommand{
 		Name:    "set",
-		Usage:   "set <off|none|low|medium|high|xhigh> - Set the reasoning level",
+		Usage:   "set <off|minimal|low|medium|high|xhigh|max> - Set the reasoning level",
 		IsWrite: true,
 		ResultHandler: func(cc CommandContext) (*Result, error) {
-			if len(cc.Args) < 1 {
-				return &Result{Text: cc.T("cmd.reasoning.setUsage")}, nil
-			}
-			level := strings.ToLower(strings.TrimSpace(cc.Args[0]))
 			if h.settingsService == nil {
 				return &Result{Text: cc.T("cmd.reasoning.unavailable")}, nil
 			}
@@ -73,11 +93,24 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if err != nil {
 				return nil, err
 			}
-			opts := h.reasoningOptions(cc, current.ChatModelID)
+			opts, resolved := h.reasoningOptions(cc, current.ChatModelID)
+			if !resolved {
+				return &Result{Text: cc.T("cmd.reasoning.unavailable")}, nil
+			}
+			if !opts.Supported {
+				return &Result{Text: cc.T("cmd.reasoning.unsupported")}, nil
+			}
+			choices := reasoningChoicesFor(opts)
+			if len(cc.Args) < 1 {
+				return &Result{Text: cc.T("cmd.reasoning.setUsage", map[string]any{
+					"levels": strings.Join(choices, "|"),
+				})}, nil
+			}
+			level := strings.ToLower(strings.TrimSpace(cc.Args[0]))
 
 			req := settings.UpsertRequest{}
 			switch {
-			case level == offChoice:
+			case level == offChoice && acceptsEffort(level, opts):
 				// "off" is the user-facing token; storage represents it as the
 				// "disable" effort now that bots have no separate on/off flag.
 				disable := models.ReasoningEffortDisable
@@ -85,7 +118,10 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			case acceptsEffort(level, opts):
 				req.ReasoningEffort = &level
 			default:
-				return &Result{Text: cc.T("cmd.reasoning.unknownLevel", map[string]any{"level": fmt.Sprintf("%q", cc.Args[0])})}, nil
+				return &Result{Text: cc.T("cmd.reasoning.unknownLevel", map[string]any{
+					"level":  fmt.Sprintf("%q", cc.Args[0]),
+					"levels": strings.Join(choices, ", "),
+				})}, nil
 			}
 			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, req); err != nil {
 				return nil, err
@@ -102,7 +138,7 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 
 // reasoningResult builds the picker: a header with the current level plus one
 // button per level (current marked ✓). Tapping re-dispatches "/reasoning set X"
-// which edits the message in place. Level tokens (off/none/low/…) are canonical
+// which edits the message in place. Level tokens (off/low/…) are canonical
 // args and stay untranslated; only the surrounding prose is localized via t.
 //
 // Buttons render for everyone; the owner-only gate is enforced at execution
@@ -151,18 +187,13 @@ func reasoningResult(t *i18n.Localizer, effort string, opts reasoning.Options) *
 }
 
 // reasoningChoicesFor renders the levels this model actually offers, with "off"
-// leading when off is reachable. When the model cannot be resolved it falls back
-// to the tiers every reasoning model has, so the command still works rather than
-// showing an empty picker.
+// leading when off is reachable. Callers handle unresolved and unsupported models
+// before reaching this function; inventing a fallback would make those two states
+// look like a real model capability.
 func reasoningChoicesFor(opts reasoning.Options) []string {
 	tiers := opts.Efforts
 	if !opts.Supported {
-		return []string{
-			offChoice,
-			reasoning.EffortLow,
-			reasoning.EffortMedium,
-			reasoning.EffortHigh,
-		}
+		return nil
 	}
 	out := make([]string, 0, len(tiers)+1)
 	if opts.CanDisable {
@@ -171,12 +202,15 @@ func reasoningChoicesFor(opts reasoning.Options) []string {
 	return append(out, tiers...)
 }
 
-// acceptsEffort reports whether a typed tier can be stored. An unresolvable model
-// accepts any declarable tier rather than rejecting everything, since the
-// resolver filters unusable values at call time anyway.
+// acceptsEffort reports whether a typed selection can be stored. Off follows the
+// same capability gate as active tiers; hiding it from the picker is insufficient
+// because users can type `/reasoning set off` directly.
 func acceptsEffort(level string, opts reasoning.Options) bool {
 	if !opts.Supported {
-		return reasoning.IsDeclarable(level) && !reasoning.IsDisabled(level)
+		return false
+	}
+	if level == offChoice {
+		return opts.CanDisable
 	}
 	return slices.Contains(opts.Efforts, level)
 }
