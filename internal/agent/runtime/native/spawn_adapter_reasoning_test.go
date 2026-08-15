@@ -108,6 +108,21 @@ func TestSpawnRunConfigCarriesTheWholeReasoningDecision(t *testing.T) {
 	}
 }
 
+func TestSpawnRunConfigCarriesReasoningInputsForNestedSubagents(t *testing.T) {
+	t.Parallel()
+
+	rc := runConfigFromSpawnRunConfig(tools.SpawnRunConfig{
+		ReasoningStoredEffort:    models.ReasoningEffortHigh,
+		ReasoningRequestedEffort: models.ReasoningEffortDisable,
+	})
+
+	if rc.ReasoningStoredEffort != models.ReasoningEffortHigh ||
+		rc.ReasoningRequestedEffort != models.ReasoningEffortDisable {
+		t.Fatalf("reasoning inputs = stored %q, requested %q",
+			rc.ReasoningStoredEffort, rc.ReasoningRequestedEffort)
+	}
+}
+
 // TestSpawnActiveReasoningEffortNeverReachesOpenAIWire is the user-visible
 // consequence on OpenAI-style providers: openAIEffortOptions only emits an effort
 // when Active or Disabled is set, so before the fix the tier was dropped and the

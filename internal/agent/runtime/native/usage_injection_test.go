@@ -238,6 +238,24 @@ func TestStreamPassesLiveToolStreamFlagToTools(t *testing.T) {
 	}
 }
 
+func TestAssembleToolsPassesReasoningInputsToToolSession(t *testing.T) {
+	t.Parallel()
+
+	var seen tools.SessionContext
+	a := newTestAgent(&usageTestProvider{emitTool: true, sessionSeen: &seen})
+	_, _, _, _, err := a.assembleTools(context.Background(), RunConfig{
+		ReasoningStoredEffort:    "high",
+		ReasoningRequestedEffort: "disable",
+	}, nil, false)
+	if err != nil {
+		t.Fatalf("assembleTools error: %v", err)
+	}
+	if seen.ReasoningStoredEffort != "high" || seen.ReasoningRequestedEffort != "disable" {
+		t.Fatalf("tool session reasoning inputs = stored %q, requested %q",
+			seen.ReasoningStoredEffort, seen.ReasoningRequestedEffort)
+	}
+}
+
 func TestStreamOmitsToolUsageWhenToolCallingUnsupported(t *testing.T) {
 	t.Parallel()
 	modelProvider := &usageStreamRecordingProvider{}

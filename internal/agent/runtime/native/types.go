@@ -89,7 +89,13 @@ type RunConfig struct {
 	// ReasoningConfig is the resolved thinking decision, carried whole. It was
 	// once five flat fields, which is how the subagent spawn path came to carry
 	// one of them and silently drop the rest.
-	ReasoningConfig                *models.ReasoningConfig
+	ReasoningConfig *models.ReasoningConfig
+	// ReasoningStoredEffort and ReasoningRequestedEffort retain the two inputs
+	// behind ReasoningConfig. Tools that select a different model (notably
+	// spawn_agent) must resolve those inputs against that model instead of copying
+	// a decision made for the parent model.
+	ReasoningStoredEffort          string
+	ReasoningRequestedEffort       string
 	ChatCompletionsCompat          string
 	Messages                       []sdk.Message
 	Query                          string

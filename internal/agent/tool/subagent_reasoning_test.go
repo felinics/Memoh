@@ -2,11 +2,17 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/reasoning"
+	"github.com/memohai/memoh/internal/settings"
 )
 
 // Characterization tests for the upstream half of the subagent reasoning drop.
@@ -200,5 +206,69 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	)
 	if stranded == nil || !stranded.Active || stranded.Effort == models.ReasoningEffortHigh {
 		t.Fatalf("stranded tier should not be forwarded: got %+v", stranded)
+	}
+}
+
+func TestResolveSubagentReasoningPreservesParentTurnOverride(t *testing.T) {
+	t.Parallel()
+
+	provider := &SpawnProvider{}
+	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{
+		ThinkingMode:     models.ThinkingModeToggle,
+		ReasoningEfforts: []string{models.ReasoningEffortDisable, models.ReasoningEffortLow, models.ReasoningEffortHigh},
+	}}}
+
+	cfg, err := provider.resolveSubagentReasoning(context.Background(), SessionContext{
+		ReasoningStoredEffort:    models.ReasoningEffortHigh,
+		ReasoningRequestedEffort: models.ReasoningEffortDisable,
+	}, model, string(models.ClientTypeOpenAICompletions))
+	if err != nil {
+		t.Fatalf("resolveSubagentReasoning: %v", err)
+	}
+	if cfg == nil || !cfg.Disabled || cfg.Active || cfg.OffEffort != models.ReasoningEffortNone {
+		t.Fatalf("subagent ignored parent-turn Off override: %+v", cfg)
+	}
+
+	cfg, err = provider.resolveSubagentReasoning(context.Background(), SessionContext{
+		ReasoningStoredEffort:    models.ReasoningEffortDisable,
+		ReasoningRequestedEffort: models.ReasoningEffortHigh,
+	}, model, string(models.ClientTypeOpenAICompletions))
+	if err != nil {
+		t.Fatalf("resolveSubagentReasoning: %v", err)
+	}
+	if cfg == nil || !cfg.Active || cfg.Disabled || cfg.Effort != models.ReasoningEffortHigh {
+		t.Fatalf("subagent ignored parent-turn active override: %+v", cfg)
+	}
+}
+
+type subagentReasoningSettingsQueries struct {
+	dbstore.Queries
+	err error
+}
+
+func (q subagentReasoningSettingsQueries) GetSettingsByBotID(context.Context, pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
+	return sqlc.GetSettingsByBotIDRow{}, q.err
+}
+
+func TestResolveSubagentReasoningPropagatesSettingsError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("settings unavailable")
+	provider := &SpawnProvider{settings: settings.NewService(
+		slog.Default(),
+		subagentReasoningSettingsQueries{err: wantErr},
+		nil,
+		nil,
+	)}
+	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{
+		ThinkingMode:     models.ThinkingModeToggle,
+		ReasoningEfforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh},
+	}}}
+
+	_, err := provider.resolveSubagentReasoning(context.Background(), SessionContext{
+		BotID: "00000000-0000-0000-0000-000000000001",
+	}, model, string(models.ClientTypeOpenAICompletions))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("resolveSubagentReasoning error = %v, want %v", err, wantErr)
 	}
 }

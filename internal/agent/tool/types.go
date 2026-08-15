@@ -318,7 +318,12 @@ type SessionContext struct {
 	CurrentModelUUID     string
 	CurrentModelID       string
 	CurrentModelProvider string
-	ForkContext          *MessageSnapshot
+	// ReasoningStoredEffort and ReasoningRequestedEffort are the unresolved
+	// parent-turn inputs. A tool that selects another model must resolve them for
+	// that model rather than inheriting the parent's provider-specific decision.
+	ReasoningStoredEffort    string
+	ReasoningRequestedEffort string
+	ForkContext              *MessageSnapshot
 	// WorkspaceTargetID is the request-scoped default for file and command
 	// tools. An explicit tool target_id still takes precedence.
 	WorkspaceTargetID   string

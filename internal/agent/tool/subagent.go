@@ -51,14 +51,18 @@ type SpawnRunConfig struct {
 	// ReasoningConfig is the thinking decision resolved for the subagent's own
 	// model. It replaces a lone effort string that was never assigned, which is
 	// how subagents came to run with no reasoning configuration at all (#983).
-	ReasoningConfig       *models.ReasoningConfig
-	PromptCacheTTL        string
-	ChatCompletionsCompat string
-	SupportsImageInput    bool
-	SupportsFileInput     bool
-	SupportsToolCall      bool
-	Skills                map[string]SkillDetail
-	BackgroundManager     *background.Manager
+	ReasoningConfig *models.ReasoningConfig
+	// Keep the unresolved parent-turn inputs as well, so a nested subagent can
+	// resolve the same override against its own selected model.
+	ReasoningStoredEffort    string
+	ReasoningRequestedEffort string
+	PromptCacheTTL           string
+	ChatCompletionsCompat    string
+	SupportsImageInput       bool
+	SupportsFileInput        bool
+	SupportsToolCall         bool
+	Skills                   map[string]SkillDetail
+	BackgroundManager        *background.Manager
 	// TurnRequestMessageID is the persisted task user message this run's
 	// assistant and tool rows bind to, so incremental step persistence files
 	// them into the same history turn the runtime view names.
@@ -944,23 +948,25 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		history = combined
 	}
 	cfg := SpawnRunConfig{
-		Model:                 req.runtime.Model,
-		ModelUUID:             req.runtime.UUID,
-		ModelID:               req.runtime.ModelID,
-		ModelProvider:         req.runtime.ProviderName,
-		ReasoningConfig:       req.runtime.ReasoningConfig,
-		System:                req.systemPrompt,
-		Query:                 req.message,
-		SessionType:           sessionpkg.TypeSubagent,
-		PromptCacheTTL:        req.runtime.PromptCacheTTL,
-		ChatCompletionsCompat: req.runtime.ChatCompletionsCompat,
-		SupportsImageInput:    req.runtime.SupportsImageInput,
-		SupportsFileInput:     req.runtime.SupportsFileInput,
-		SupportsToolCall:      req.runtime.SupportsToolCall,
-		Messages:              history,
-		Skills:                req.parentSession.Skills,
-		BackgroundManager:     p.bgManager,
-		TurnRequestMessageID:  req.requestMessageID,
+		Model:                    req.runtime.Model,
+		ModelUUID:                req.runtime.UUID,
+		ModelID:                  req.runtime.ModelID,
+		ModelProvider:            req.runtime.ProviderName,
+		ReasoningConfig:          req.runtime.ReasoningConfig,
+		ReasoningStoredEffort:    req.parentSession.ReasoningStoredEffort,
+		ReasoningRequestedEffort: req.parentSession.ReasoningRequestedEffort,
+		System:                   req.systemPrompt,
+		Query:                    req.message,
+		SessionType:              sessionpkg.TypeSubagent,
+		PromptCacheTTL:           req.runtime.PromptCacheTTL,
+		ChatCompletionsCompat:    req.runtime.ChatCompletionsCompat,
+		SupportsImageInput:       req.runtime.SupportsImageInput,
+		SupportsFileInput:        req.runtime.SupportsFileInput,
+		SupportsToolCall:         req.runtime.SupportsToolCall,
+		Messages:                 history,
+		Skills:                   req.parentSession.Skills,
+		BackgroundManager:        p.bgManager,
+		TurnRequestMessageID:     req.requestMessageID,
 		Identity: SpawnIdentity{
 			BotID:               req.parentSession.BotID,
 			ChatID:              req.parentSession.ChatID,
@@ -1639,7 +1645,10 @@ func (p *SpawnProvider) resolveModel(
 		baseURL,
 		providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	)
-	reasoningConfig := p.resolveSubagentReasoning(ctx, session.BotID, modelInfo, provider.ClientType)
+	reasoningConfig, err := p.resolveSubagentReasoning(ctx, session, modelInfo, provider.ClientType)
+	if err != nil {
+		return resolvedSubagentModel{}, fmt.Errorf("resolve subagent reasoning: %w", err)
+	}
 
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               modelInfo.ModelID,
@@ -1678,28 +1687,33 @@ func truncateTitle(s string, maxRunes int) string {
 // subagent may run a different model, and a tier the parent's model advertises
 // may not exist on this one.
 //
-// A missing settings service or an unreadable row yields a nil config, which is
-// the same "no decision" the spawn path produced for every subagent before #983.
-// That is a floor, not a target — it means reasoning falls back to the provider
-// default rather than failing the run.
+// A missing settings service retains the old nil-config fallback for direct or
+// test-only callers that do not carry the parent inputs. A configured settings
+// service is authoritative: read failures are returned instead of silently
+// changing the provider-wire behavior.
 func (p *SpawnProvider) resolveSubagentReasoning(
 	ctx context.Context,
-	botID string,
+	session SessionContext,
 	modelInfo models.GetResponse,
 	clientType string,
-) *models.ReasoningConfig {
-	if p.settings == nil {
-		return nil
-	}
-	botSettings, err := p.settings.GetBot(ctx, botID)
-	if err != nil {
-		return nil
+) (*models.ReasoningConfig, error) {
+	stored := strings.TrimSpace(session.ReasoningStoredEffort)
+	requested := strings.TrimSpace(session.ReasoningRequestedEffort)
+	if stored == "" && requested == "" {
+		if p.settings == nil {
+			return nil, nil
+		}
+		botSettings, err := p.settings.GetBot(ctx, session.BotID)
+		if err != nil {
+			return nil, fmt.Errorf("load bot reasoning settings: %w", err)
+		}
+		stored = botSettings.ReasoningEffort
 	}
 	return reasoning.ResolveConfig(
 		modelInfo.ResolveThinkingMode(),
 		modelInfo.Config.ReasoningEfforts,
-		botSettings.ReasoningEffort,
-		"",
+		stored,
+		requested,
 		clientType,
-	)
+	), nil
 }
