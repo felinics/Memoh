@@ -1825,13 +1825,14 @@ func TestShouldGenerateSessionTitleAllowsACPPlaceholderTitle(t *testing.T) {
 }
 
 type recordingACPPrompter struct {
-	calls        int
-	input        acpagent.PromptInput
-	result       acpclient.PromptResult
-	err          error
-	onPrompt     func()
-	streamEvents []event.StreamEvent
-	afterEvents  func()
+	calls         int
+	input         acpagent.PromptInput
+	result        acpclient.PromptResult
+	err           error
+	closedSession string
+	onPrompt      func()
+	streamEvents  []event.StreamEvent
+	afterEvents   func()
 }
 
 type storeRoundMemoryProvider struct {
@@ -1890,6 +1891,11 @@ func (p *recordingACPPrompter) Prompt(_ context.Context, input acpagent.PromptIn
 		p.afterEvents()
 	}
 	return p.result, p.err
+}
+
+func (p *recordingACPPrompter) CloseSession(sessionID string) error {
+	p.closedSession = sessionID
+	return nil
 }
 
 type fakeBotPermissionChecker struct {

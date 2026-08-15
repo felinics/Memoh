@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/schedule"
 )
@@ -221,6 +223,14 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 	defer func() { finish(err) }()
 	ctx = runCtx
 
+	acpInfo, err := s.ACPSessionExecutionInfo(ctx, payload.SessionID)
+	if err != nil {
+		return heartbeat.TriggerResult{}, err
+	}
+	if acpInfo.IsACP {
+		return s.triggerHeartbeatACP(ctx, botID, payload, token, admission.RunID, acpInfo)
+	}
+
 	var heartbeatModel string
 	if botSettings, err := s.loadBotSettings(ctx, botID); err == nil {
 		heartbeatModel = strings.TrimSpace(botSettings.HeartbeatModelID)
@@ -247,20 +257,7 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 	cfg.ContextScope.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
-	var checklist string
-	if s.agent != nil {
-		nowFn := time.Now
-		if cfg.Identity.TimezoneLocation != nil {
-			nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }
-		}
-		fs := native.NewFSClient(s.agent.BridgeProvider(), botID, nowFn)
-		checklist = fs.ReadTextSafe(ctx, "/data/HEARTBEAT.md")
-	}
-	now := time.Now().UTC()
-	if cfg.Identity.TimezoneLocation != nil {
-		now = now.In(cfg.Identity.TimezoneLocation)
-	}
-	heartbeatPrompt := native.GenerateHeartbeatPrompt(payload.Interval, checklist, now, payload.LastHeartbeatAt)
+	heartbeatPrompt := s.generateHeartbeatPrompt(ctx, botID, payload.Interval, payload.LastHeartbeatAt, cfg.Identity.TimezoneLocation)
 	cfg.Messages = append(cfg.Messages, sdk.UserMessage(heartbeatPrompt))
 	cfg = s.prepareRunConfig(ctx, cfg)
 
@@ -288,6 +285,141 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 		ModelID:    rc.model.ID,
 		SessionID:  payload.SessionID,
 	}, nil
+}
+
+// triggerHeartbeatACP runs one internal heartbeat through the ACP session pool.
+// It deliberately does not resolve a native model: an ACP-default bot may not
+// have chat_model_id or heartbeat_model_id configured at all.
+func (s *Service) triggerHeartbeatACP(ctx context.Context, botID string, payload heartbeat.TriggerPayload, token, runID string, info ACPSessionExecutionInfo) (heartbeat.TriggerResult, error) {
+	if strings.TrimSpace(info.Type) != session.TypeHeartbeat {
+		return heartbeat.TriggerResult{}, errors.New("heartbeat requires an ACP heartbeat session")
+	}
+	if s.acpPool == nil {
+		return heartbeat.TriggerResult{}, errors.New("ACP session pool is not configured")
+	}
+	runtimeOwner := strings.TrimSpace(info.RuntimeOwnerAccountID)
+	if runtimeOwner == "" {
+		return heartbeat.TriggerResult{}, errors.New("ACP runtime owner is missing; recreate the heartbeat session")
+	}
+	if err := s.requireACPRuntimeOwnerWorkspaceExec(ctx, botID, runtimeOwner); err != nil {
+		return heartbeat.TriggerResult{}, err
+	}
+	if closer, ok := s.acpPool.(acpSessionCloser); ok {
+		defer func() {
+			if err := closer.CloseSession(payload.SessionID); err != nil {
+				s.logger.Warn("close ACP heartbeat runtime failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
+			}
+		}()
+	}
+
+	_, timezoneLocation := s.resolveTimezone(ctx, botID, payload.OwnerUserID)
+	heartbeatPrompt := s.generateHeartbeatPrompt(ctx, botID, payload.Interval, payload.LastHeartbeatAt, timezoneLocation)
+	req := ChatRequest{
+		BotID:       botID,
+		ChatID:      botID,
+		ThreadID:    payload.SessionID,
+		RunID:       runID,
+		Query:       heartbeatPrompt,
+		RawQuery:    heartbeatPrompt,
+		UserID:      payload.OwnerUserID,
+		Token:       token,
+		SessionType: sessionmode.Heartbeat,
+		RuntimeType: session.RuntimeACPAgent,
+	}
+	contextMarkdown := s.buildACPContextMarkdown(ctx, req, info.AgentID, info.ProjectPath)
+
+	req, _ = s.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
+	result, promptErr := s.acpPool.Prompt(ctx, acpagent.PromptInput{
+		BotID:                 botID,
+		ChatID:                botID,
+		SessionID:             payload.SessionID,
+		RunID:                 runID,
+		SessionType:           sessionmode.Heartbeat,
+		AgentID:               info.AgentID,
+		ProjectPath:           info.ProjectPath,
+		Prompt:                heartbeatPrompt,
+		ChannelIdentityID:     strings.TrimSpace(payload.OwnerUserID),
+		SessionToken:          token,
+		CanRequestUserInput:   false,
+		SupportsImageInput:    false,
+		ToolOutputLimit:       s.toolOutputLimit(),
+		ContextURI:            acpContextURI,
+		ContextMarkdown:       contextMarkdown,
+		RuntimeOwnerAccountID: runtimeOwner,
+		Sink:                  acpclient.EventSinkFunc(func(event.StreamEvent) {}),
+	})
+	if promptErr != nil {
+		s.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the heartbeat ended before a decision arrived")
+		failedResult, _ := acpFailureResult(ensureACPPromptOutput(result), promptErr)
+		if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, failedResult, promptErr); err != nil {
+			s.logger.Error("ACP heartbeat failure persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
+		}
+		return heartbeat.TriggerResult{}, publicACPTriggerError(promptErr)
+	}
+
+	result = ensureACPPromptOutput(result)
+	if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, result, nil); err != nil {
+		s.logger.Error("ACP heartbeat persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
+		return heartbeat.TriggerResult{}, fmt.Errorf("persist ACP heartbeat round: %w", err)
+	}
+
+	status := "alert"
+	text := strings.TrimSpace(result.Text)
+	if isHeartbeatOK(text) {
+		status = "ok"
+	}
+	var usageJSON []byte
+	if result.Usage != nil {
+		usageJSON, _ = json.Marshal(result.Usage)
+	}
+	return heartbeat.TriggerResult{
+		Status:     status,
+		Text:       text,
+		Usage:      usageJSON,
+		UsageBytes: usageJSON,
+		SessionID:  payload.SessionID,
+	}, nil
+}
+
+type acpTriggerError struct {
+	message string
+	cause   error
+}
+
+func (e *acpTriggerError) Error() string {
+	return e.message
+}
+
+func (e *acpTriggerError) Unwrap() error {
+	return e.cause
+}
+
+func publicACPTriggerError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := acpUserFacingFailureMessage(err)
+	if message == "" {
+		return err
+	}
+	return &acpTriggerError{message: message, cause: err}
+}
+
+func (s *Service) generateHeartbeatPrompt(ctx context.Context, botID string, interval int, lastHeartbeatAt string, timezoneLocation *time.Location) string {
+	var checklist string
+	if s.agent != nil {
+		nowFn := time.Now
+		if timezoneLocation != nil {
+			nowFn = func() time.Time { return time.Now().In(timezoneLocation) }
+		}
+		fs := native.NewFSClient(s.agent.BridgeProvider(), botID, nowFn)
+		checklist = fs.ReadTextSafe(ctx, "/data/HEARTBEAT.md")
+	}
+	now := time.Now().UTC()
+	if timezoneLocation != nil {
+		now = now.In(timezoneLocation)
+	}
+	return native.GenerateHeartbeatPrompt(interval, checklist, now, lastHeartbeatAt)
 }
 
 // scheduleSubmission and heartbeatSubmission are the canonical fingerprint

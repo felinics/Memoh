@@ -410,6 +410,7 @@ func provideHeartbeatTriggerer(service *application.Service) heartbeat.Triggerer
 type sessionCreatorAdapter struct {
 	svc      *sessionpkg.Service
 	workdirs *workdir.Service
+	settings *settings.Service
 }
 
 func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessionType string) (string, error) {
@@ -421,6 +422,43 @@ func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessio
 		return "", err
 	}
 	return sess.ID, nil
+}
+
+func (a *sessionCreatorAdapter) CreateHeartbeatSession(ctx context.Context, botID, ownerUserID string) (string, error) {
+	if a.settings == nil {
+		return "", errors.New("settings service not configured")
+	}
+	botSettings, err := a.settings.GetBot(ctx, botID)
+	if err != nil {
+		return "", fmt.Errorf("load heartbeat bot settings: %w", err)
+	}
+
+	input := heartbeatSessionCreateInput(botID, ownerUserID, botSettings)
+
+	sess, err := a.svc.Create(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	return sess.ID, nil
+}
+
+func heartbeatSessionCreateInput(botID, ownerUserID string, botSettings settings.Settings) sessionpkg.CreateInput {
+	input := sessionpkg.CreateInput{
+		BotID:       botID,
+		Type:        sessionpkg.TypeHeartbeat,
+		SessionMode: sessionpkg.TypeHeartbeat,
+	}
+	if botSettings.ChatRuntime != settings.ChatRuntimeACPAgent {
+		return input
+	}
+	input.RuntimeType = sessionpkg.RuntimeACPAgent
+	input.CreatedByUserID = ownerUserID
+	input.Metadata = map[string]any{
+		"acp_agent_id":     botSettings.ChatACPAgentID,
+		"project_path":     botSettings.ChatACPProjectPath,
+		"acp_project_mode": botSettings.ChatACPProjectMode,
+	}
+	return input
 }
 
 // CreateScheduleSession creates the user-visible session one schedule fire
@@ -463,8 +501,8 @@ func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec 
 	return sess.ID, nil
 }
 
-func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbeat.SessionCreator {
-	return &sessionCreatorAdapter{svc: sessionService}
+func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service, settingsService *settings.Service) heartbeat.SessionCreator {
+	return &sessionCreatorAdapter{svc: sessionService, settings: settingsService}
 }
 
 func provideScheduleSessionCreator(sessionService *sessionpkg.Service, workdirService *workdir.Service) schedule.SessionCreator {

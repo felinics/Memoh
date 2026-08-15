@@ -66,12 +66,10 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "conflicts with runtime_type") {
 		t.Fatalf("error = %v, want a 'conflicts with runtime_type' message", err)
 	}
-	// Schedule mode supports the ACP runtime (schedules can run through an
-	// ACP agent), but internal loop modes like heartbeat still reject it.
-	if _, _, _, err := ResolveDescriptor(TypeHeartbeat, "", RuntimeACPAgent); err == nil {
-		t.Fatal("ResolveDescriptor(heartbeat, acp_agent) = nil error, want an unsupported combination error")
-	} else if !strings.Contains(err.Error(), "only supported") {
-		t.Fatalf("error = %v, want an 'only supported' message", err)
+	// Schedule and heartbeat modes keep their internal loop semantics while
+	// executing through ACP.
+	if _, mode, runtime, err := ResolveDescriptor(TypeHeartbeat, "", RuntimeACPAgent); err != nil || mode != TypeHeartbeat || runtime != RuntimeACPAgent {
+		t.Fatalf("ResolveDescriptor(heartbeat, acp_agent) = (%q, %q, %v), want heartbeat/acp_agent", mode, runtime, err)
 	}
 
 	// Legitimate combinations must still resolve cleanly.
@@ -85,6 +83,7 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 		{"chat + acp_agent -> chat ACP", TypeChat, "", RuntimeACPAgent, TypeACPAgent, TypeChat, RuntimeACPAgent},
 		{"discuss + acp_agent -> discuss ACP", TypeDiscuss, "", RuntimeACPAgent, TypeDiscuss, TypeDiscuss, RuntimeACPAgent},
 		{"schedule + acp_agent -> schedule ACP", TypeSchedule, "", RuntimeACPAgent, TypeSchedule, TypeSchedule, RuntimeACPAgent},
+		{"heartbeat + acp_agent -> heartbeat ACP", TypeHeartbeat, "", RuntimeACPAgent, TypeHeartbeat, TypeHeartbeat, RuntimeACPAgent},
 		{"plain chat", TypeChat, "", "", TypeChat, TypeChat, RuntimeModel},
 	}
 	for _, c := range cases {
@@ -312,6 +311,42 @@ func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
 	}
 	if created.Metadata["acp_project_mode"] != DefaultACPProjectMode {
 		t.Fatalf("created metadata acp_project_mode = %#v, want %q", created.Metadata["acp_project_mode"], DefaultACPProjectMode)
+	}
+}
+
+func TestCreateHeartbeatACPSessionKeepsInternalModeAndOwner(t *testing.T) {
+	botID := "00000000-0000-0000-0000-000000000001"
+	queries := &createACPQueries{
+		bot: sqlc.GetBotByIDRow{
+			ID: mustPGUUID(botID),
+			Metadata: mustSessionJSON(map[string]any{
+				"acp": map[string]any{
+					"agents": map[string]any{
+						"codex": map[string]any{"enabled": true, "setup_mode": "self"},
+					},
+				},
+			}),
+		},
+	}
+	created, err := newACPTestService(queries).Create(context.Background(), CreateInput{
+		BotID:           botID,
+		Type:            TypeHeartbeat,
+		SessionMode:     TypeHeartbeat,
+		RuntimeType:     RuntimeACPAgent,
+		CreatedByUserID: "00000000-0000-0000-0000-000000000003",
+		Metadata:        map[string]any{"acp_agent_id": "codex"},
+	})
+	if err != nil {
+		t.Fatalf("Create(heartbeat ACP) error = %v", err)
+	}
+	if queries.createParams.Type != TypeHeartbeat || queries.createParams.SessionMode != TypeHeartbeat || queries.createParams.RuntimeType != RuntimeACPAgent {
+		t.Fatalf("heartbeat ACP descriptor = %q/%q/%q, want heartbeat/heartbeat/acp_agent", queries.createParams.Type, queries.createParams.SessionMode, queries.createParams.RuntimeType)
+	}
+	if created.Visibility != VisibilityInternal {
+		t.Fatalf("heartbeat ACP visibility = %q, want internal", created.Visibility)
+	}
+	if got := created.RuntimeMetadata["runtime_owner_account_id"]; got != "00000000-0000-0000-0000-000000000003" {
+		t.Fatalf("heartbeat ACP runtime owner = %#v, want creator", got)
 	}
 }
 

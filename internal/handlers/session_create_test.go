@@ -156,33 +156,37 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 }
 
 func TestCreateSessionRejectsSystemACPRuntime(t *testing.T) {
-	botID := "11111111-1111-1111-1111-111111111111"
-	queries := &sessionCreateQueries{
-		bot: testBotRow(botID, map[string]any{
-			acpprofile.MetadataKeyACP: map[string]any{
-				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
-				},
-			},
-		}),
-		permissions: []byte(`["workspace_exec"]`),
-	}
-	handler := NewSessionHandler(
-		slog.Default(),
-		newThreadServiceForTest(queries),
-		nil,
-		bots.NewService(nil, queries),
-		newTestAdminAccountService("user"),
-	)
+	for _, sessionType := range []string{session.TypeSchedule, session.TypeHeartbeat} {
+		t.Run(sessionType, func(t *testing.T) {
+			botID := "11111111-1111-1111-1111-111111111111"
+			queries := &sessionCreateQueries{
+				bot: testBotRow(botID, map[string]any{
+					acpprofile.MetadataKeyACP: map[string]any{
+						"agents": map[string]any{
+							acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+						},
+					},
+				}),
+				permissions: []byte(`["workspace_exec"]`),
+			}
+			handler := NewSessionHandler(
+				slog.Default(),
+				newThreadServiceForTest(queries),
+				nil,
+				bots.NewService(nil, queries),
+				newTestAdminAccountService("user"),
+			)
 
-	body := `{"type":"schedule","runtime_type":"acp_agent","metadata":{"acp_agent_id":"codex"}}`
-	err := callCreateSession(handler, botID, body)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("CreateSession() error = %v, want HTTP 400", err)
-	}
-	if queries.createCalled {
-		t.Fatal("CreateSession should not insert system ACP sessions")
+			body := `{"type":"` + sessionType + `","runtime_type":"acp_agent","metadata":{"acp_agent_id":"codex"}}`
+			err := callCreateSession(handler, botID, body)
+			var httpErr *echo.HTTPError
+			if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+				t.Fatalf("CreateSession() error = %v, want HTTP 400", err)
+			}
+			if queries.createCalled {
+				t.Fatal("CreateSession should not insert system ACP sessions")
+			}
+		})
 	}
 }
 

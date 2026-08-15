@@ -30,7 +30,7 @@ const defaultHeartbeatIntervalMinutes = 1440
 
 // SessionCreator creates sessions for heartbeat runs.
 type SessionCreator interface {
-	CreateSession(ctx context.Context, botID, sessionType string) (string, error)
+	CreateHeartbeatSession(ctx context.Context, botID, ownerUserID string) (string, error)
 }
 
 type Service struct {
@@ -120,11 +120,17 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 		s.logger.Error("invalid bot id", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
 		return
 	}
+	ownerUserID := strings.TrimSpace(cfg.OwnerUserID)
+	if bot, ownerErr := s.queries.GetBotByID(ctx, pgBotID); ownerErr != nil {
+		s.logger.Warn("refresh heartbeat owner failed; using scheduled owner", slog.String("bot_id", cfg.BotID), slog.Any("error", ownerErr))
+	} else if bot.OwnerUserID.Valid {
+		ownerUserID = bot.OwnerUserID.String()
+	}
 
 	var sessionID string
 	var pgSessionID pgtype.UUID
 	if s.sessionCreator != nil {
-		sid, err := s.sessionCreator.CreateSession(ctx, cfg.BotID, "heartbeat")
+		sid, err := s.sessionCreator.CreateHeartbeatSession(ctx, cfg.BotID, ownerUserID)
 		if err != nil {
 			s.logger.Error("create heartbeat session failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
 		} else {
@@ -150,7 +156,7 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 		return
 	}
 
-	token, err := s.generateTriggerToken(cfg.OwnerUserID)
+	token, err := s.generateTriggerToken(ownerUserID)
 	if err != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil, pgtype.UUID{})
 		s.logger.Error("generate trigger token failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
@@ -160,7 +166,7 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 	result, err := s.triggerer.TriggerHeartbeat(ctx, cfg.BotID, TriggerPayload{
 		BotID:           cfg.BotID,
 		Interval:        cfg.Interval,
-		OwnerUserID:     cfg.OwnerUserID,
+		OwnerUserID:     ownerUserID,
 		SessionID:       sessionID,
 		LastHeartbeatAt: lastHeartbeatAt,
 	}, token)

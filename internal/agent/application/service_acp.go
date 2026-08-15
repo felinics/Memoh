@@ -34,6 +34,10 @@ type acpPrompter interface {
 	Prompt(ctx context.Context, input acpagent.PromptInput) (acpclient.PromptResult, error)
 }
 
+type acpSessionCloser interface {
+	CloseSession(sessionID string) error
+}
+
 type acpPreparedAttachments struct {
 	Images                   []acpclient.PromptImage
 	Context                  []ChatAttachment

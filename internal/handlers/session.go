@@ -411,9 +411,9 @@ const (
 // parent filter. That default filters by stored visibility rather than by a
 // type list, so schedule-created sessions marked user-visible surface too.
 // rejectSystemACPRuntime keeps system-managed session modes out of the HTTP
-// session API's ACP surface. The thread domain itself allows
-// schedule+acp_agent — the schedule trigger path creates those sessions —
-// but interactive session creation stays limited to chat and discuss.
+// session API's ACP surface. The thread domain itself allows schedule+acp_agent
+// and heartbeat+acp_agent — their trigger paths create those sessions — but
+// interactive session creation stays limited to chat and discuss.
 func rejectSystemACPRuntime(mode, runtimeType string) error {
 	if runtimeType != session.RuntimeACPAgent {
 		return nil

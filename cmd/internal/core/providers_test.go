@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -50,6 +51,32 @@ func TestAgentLimitsFromConfigUsesCustomValues(t *testing.T) {
 		got.ToolOutputMaxLines != 56 ||
 		got.SystemFilesMaxBytes != 7890 {
 		t.Fatalf("agent limits = %#v", got)
+	}
+}
+
+func TestHeartbeatSessionCreateInputUsesACPDefaultsOnlyForACPRuntime(t *testing.T) {
+	acpInput := heartbeatSessionCreateInput("bot-1", "owner-1", settings.Settings{
+		ChatRuntime:        settings.ChatRuntimeACPAgent,
+		ChatACPAgentID:     "codex",
+		ChatACPProjectPath: "/data/project",
+		ChatACPProjectMode: "project",
+	})
+	if acpInput.Type != sessionpkg.TypeHeartbeat || acpInput.SessionMode != sessionpkg.TypeHeartbeat || acpInput.RuntimeType != sessionpkg.RuntimeACPAgent {
+		t.Fatalf("ACP heartbeat descriptor = %#v, want heartbeat/acp_agent", acpInput)
+	}
+	if acpInput.CreatedByUserID != "owner-1" {
+		t.Fatalf("ACP heartbeat owner = %q, want owner-1", acpInput.CreatedByUserID)
+	}
+	if acpInput.Metadata["acp_agent_id"] != "codex" || acpInput.Metadata["project_path"] != "/data/project" || acpInput.Metadata["acp_project_mode"] != "project" {
+		t.Fatalf("ACP heartbeat metadata = %#v", acpInput.Metadata)
+	}
+
+	nativeInput := heartbeatSessionCreateInput("bot-1", "owner-1", settings.Settings{ChatRuntime: settings.ChatRuntimeModel})
+	if nativeInput.Type != sessionpkg.TypeHeartbeat || nativeInput.SessionMode != sessionpkg.TypeHeartbeat || nativeInput.RuntimeType != "" {
+		t.Fatalf("native heartbeat descriptor = %#v, want heartbeat with derived model runtime", nativeInput)
+	}
+	if nativeInput.CreatedByUserID != "" || nativeInput.Metadata != nil {
+		t.Fatalf("native heartbeat input changed ACP-only fields: %#v", nativeInput)
 	}
 }
 

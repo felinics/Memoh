@@ -17,6 +17,7 @@ import (
 
 type recordingMessageService struct {
 	persisted               []messagepkg.PersistInput
+	persistErr              error
 	replaced                int
 	replacementTurnID       string
 	replacementTurnPosition *int64
@@ -24,6 +25,9 @@ type recordingMessageService struct {
 }
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	if s.persistErr != nil {
+		return messagepkg.Message{}, s.persistErr
+	}
 	s.persisted = append(s.persisted, input)
 	return messagepkg.Message{ID: "message-id", SessionID: input.SessionID, Role: input.Role, Content: input.Content, DisplayContent: input.DisplayText}, nil
 }
