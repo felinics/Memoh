@@ -32,19 +32,21 @@ const (
 
 // ResolveConfig makes the single reasoning decision for a call.
 //
-// It takes plain values rather than a settings struct so that every caller can
-// use it — turn orchestration reads stored from bot settings, the subagent spawn
-// path resolves against the subagent's own model, and a command may pass neither.
+// It takes the same Options projection that capability surfaces render. This is
+// important for CanDisable: explicit model declarations can override both an
+// advertised disable token and a client-type omission fallback, so deriving that
+// answer again here would let the picker and provider wire disagree.
 //
 //	mode:       the model's resolved thinking mode (see ResolveMode)
 //	advertised: the model's declared effort list, "" entries and all
+//	options:    the model's resolved selectable options
 //	stored:     the bot's persisted effort ("" when unset, "disable" for off)
 //	requested:  this message's override ("" when absent)
 //	clientType: the provider's client type, for wire policy
 //
 // Returns nil when the model has no thinking concept at all.
-func ResolveConfig(mode string, advertised []string, stored, requested, clientType string) *Config {
-	if !Supported(mode) {
+func ResolveConfig(mode string, advertised []string, options Options, stored, requested, clientType string) *Config {
+	if !Supported(mode) || !options.Supported {
 		return nil
 	}
 
@@ -52,7 +54,7 @@ func ResolveConfig(mode string, advertised []string, stored, requested, clientTy
 	offEffort := offEffortFor(levels)
 	req := strings.TrimSpace(requested)
 	adaptive := isAdaptiveWire(mode, levels, clientType)
-	canTurnOff := canDisable(mode, levels, clientType)
+	canTurnOff := options.CanDisable
 	active := func(requestedEffort string) *Config {
 		return &Config{
 			Active:    true,

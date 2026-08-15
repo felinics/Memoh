@@ -1712,6 +1712,7 @@ func (p *SpawnProvider) resolveSubagentReasoning(
 	return reasoning.ResolveConfig(
 		modelInfo.ResolveThinkingMode(),
 		modelInfo.Config.ReasoningEfforts,
+		modelInfo.ReasoningOptions(clientType),
 		stored,
 		requested,
 		clientType,

@@ -835,6 +835,7 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 	return reasoning.ResolveConfig(
 		chatModel.ResolveThinkingMode(),
 		chatModel.Config.ReasoningEfforts,
+		chatModel.ReasoningOptions(clientType),
 		botSettings.ReasoningEffort,
 		requestedEffort,
 		clientType,

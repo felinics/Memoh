@@ -106,7 +106,7 @@ func TestOptionsForAppliesTheSameWirePolicyAsResolve(t *testing.T) {
 		t.Fatalf("max should be filtered for generic OpenAI clients: %v", opts.Efforts)
 	}
 
-	cfg := ResolveConfig(ModeToggle, advertised, advertisedMax, "", "openai-completions")
+	cfg := ResolveConfig(ModeToggle, advertised, opts, advertisedMax, "", "openai-completions")
 	if cfg == nil || cfg.Effort == advertisedMax {
 		t.Fatalf("resolver should not send a filtered tier, got %+v", cfg)
 	}
@@ -116,7 +116,7 @@ func TestOptionsForAppliesTheSameWirePolicyAsResolve(t *testing.T) {
 	if !slices.Contains(codexOpts.Efforts, advertisedMax) {
 		t.Fatalf("codex should keep max: %v", codexOpts.Efforts)
 	}
-	codexCfg := ResolveConfig(ModeToggle, advertised, advertisedMax, "", "openai-codex")
+	codexCfg := ResolveConfig(ModeToggle, advertised, codexOpts, advertisedMax, "", "openai-codex")
 	if codexCfg == nil || codexCfg.Effort != advertisedMax {
 		t.Fatalf("codex resolver should send max, got %+v", codexCfg)
 	}
@@ -136,7 +136,7 @@ func TestOptionsDefaultEffortMatchesWhatResolveWouldSend(t *testing.T) {
 		nil,
 	} {
 		opts := OptionsFor(ModeToggle, advertised, "openai-codex")
-		cfg := ResolveConfig(ModeToggle, advertised, "", "", "openai-codex")
+		cfg := ResolveConfig(ModeToggle, advertised, opts, "", "", "openai-codex")
 		if cfg == nil {
 			t.Fatalf("advertised %v: resolver returned nil for a toggle model", advertised)
 		}
@@ -215,9 +215,63 @@ func TestResolveConfigAgreesWithOffReachability(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := ResolveConfig(ModeToggle, advertised, tt.stored, tt.requested, clientType)
+			cfg := ResolveConfig(ModeToggle, advertised, opts, tt.stored, tt.requested, clientType)
 			if cfg == nil || !cfg.Active || cfg.Disabled || cfg.Effort != tt.want {
 				t.Fatalf("ResolveConfig() = %+v, want active effort %q", cfg, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveConfigHonorsProjectedOffDeclarations(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepted without a disable token", func(t *testing.T) {
+		t.Parallel()
+
+		advertised := []string{EffortLow, EffortMedium, EffortHigh}
+		opts := OptionsFor(ModeToggle, advertised, "google-generative-ai")
+		if opts.CanDisable {
+			t.Fatal("fixture must require an explicit accepted declaration")
+		}
+		// reasoning_off_support: accepted is projected into this shared option.
+		opts.CanDisable = true
+
+		cfg := ResolveConfig(ModeToggle, advertised, opts, EffortLow, EffortDisable, "google-generative-ai")
+		if cfg == nil || !cfg.Disabled || cfg.Active {
+			t.Fatalf("accepted off declaration = %+v, want disabled", cfg)
+		}
+	})
+
+	for _, tt := range []struct {
+		name       string
+		advertised []string
+		clientType string
+	}{
+		{
+			name:       "rejected overrides an advertised disable token",
+			advertised: []string{EffortDisable, EffortLow, EffortHigh},
+			clientType: "openai-completions",
+		},
+		{
+			name:       "rejected overrides the Anthropic omission fallback",
+			advertised: []string{EffortLow, EffortHigh},
+			clientType: ClientTypeAnthropicMessages,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := OptionsFor(ModeToggle, tt.advertised, tt.clientType)
+			if !opts.CanDisable {
+				t.Fatal("fixture must have a derived off fallback to override")
+			}
+			// reasoning_off_support: rejected is projected into this shared option.
+			opts.CanDisable = false
+
+			cfg := ResolveConfig(ModeToggle, tt.advertised, opts, EffortLow, EffortDisable, tt.clientType)
+			if cfg == nil || !cfg.Active || cfg.Disabled || cfg.Effort != EffortLow {
+				t.Fatalf("rejected off declaration = %+v, want active low", cfg)
 			}
 		})
 	}

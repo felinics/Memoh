@@ -181,6 +181,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	// Stored "off" reaches the wire as "none" on the model that can be turned off.
 	off := reasoning.ResolveConfig(
 		canDisable.ResolveThinkingMode(), canDisable.Config.ReasoningEfforts,
+		canDisable.ReasoningOptions(clientType),
 		models.ReasoningEffortDisable, "", clientType,
 	)
 	if off == nil || !off.Disabled || off.OffEffort != models.ReasoningEffortNone {
@@ -192,6 +193,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	// the provider turn reasoning back on at an unreported default.
 	offElsewhere := reasoning.ResolveConfig(
 		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts,
+		cannotDisable.ReasoningOptions(clientType),
 		models.ReasoningEffortDisable, "", clientType,
 	)
 	if offElsewhere == nil || !offElsewhere.Active || offElsewhere.Disabled || offElsewhere.Effort != models.ReasoningEffortLow {
@@ -202,6 +204,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	// being forwarded verbatim.
 	stranded := reasoning.ResolveConfig(
 		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts,
+		cannotDisable.ReasoningOptions(clientType),
 		models.ReasoningEffortHigh, "", clientType,
 	)
 	if stranded == nil || !stranded.Active || stranded.Effort == models.ReasoningEffortHigh {
