@@ -56,6 +56,19 @@ func (h *ModelsHandler) withReasoning(ctx context.Context, list []models.GetResp
 			}
 			clientTypes[providerID] = clientType
 		}
+		withReasoningForClientType(list[i:i+1], clientType)
+	}
+	return list
+}
+
+// withReasoningForClientType projects the model's catalog declarations into the
+// capability object returned by every model-listing surface. Keep this helper
+// independent of a handler so /models and /providers/:id/models cannot drift.
+func withReasoningForClientType(list []models.GetResponse, clientType string) []models.GetResponse {
+	for i := range list {
+		if list[i].Type != models.ModelTypeChat {
+			continue
+		}
 		opts := list[i].ReasoningOptions(clientType)
 		list[i].Reasoning = &opts
 	}

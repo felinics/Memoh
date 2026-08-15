@@ -4,13 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/reasoning"
 )
+
+type providerModelsReasoningQueries struct {
+	dbstore.Queries
+	provider sqlc.Provider
+	models   []sqlc.Model
+}
+
+func (q *providerModelsReasoningQueries) GetProviderByID(_ context.Context, _ pgtype.UUID) (sqlc.Provider, error) {
+	return q.provider, nil
+}
+
+func (q *providerModelsReasoningQueries) ListModelsByProviderID(_ context.Context, _ pgtype.UUID) ([]sqlc.Model, error) {
+	return q.models, nil
+}
 
 // A handler with no providers service stands in for the case where a provider
 // row cannot be read: the model's own tiers still resolve, only the wire policy
@@ -84,6 +106,75 @@ func TestWithReasoningSkipsNonChatModels(t *testing.T) {
 	list := newReasoningTestHandler().withReasoning(context.Background(), []models.GetResponse{embedding})
 	if list[0].Reasoning != nil {
 		t.Fatalf("embedding models have no reasoning control: %+v", list[0].Reasoning)
+	}
+}
+
+func TestProviderModelListIncludesResolvedReasoning(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "00000000-0000-0000-0000-000000000010"
+	providerUUID, err := db.ParseUUID(providerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelUUID, err := db.ParseUUID("00000000-0000-0000-0000-000000000011")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries := &providerModelsReasoningQueries{
+		provider: sqlc.Provider{
+			ID:         providerUUID,
+			Name:       "Google",
+			ClientType: string(models.ClientTypeGoogleGenerativeAI),
+			Enable:     true,
+			Config:     []byte(`{}`),
+			Metadata:   []byte(`{}`),
+		},
+		models: []sqlc.Model{{
+			ID:         modelUUID,
+			ProviderID: providerUUID,
+			ModelID:    "gemini-2.5-flash-lite",
+			Type:       string(models.ModelTypeChat),
+			Enable:     true,
+			Config: []byte(`{
+				"compatibilities":["reasoning"],
+				"thinking_mode":"toggle",
+				"reasoning_dialect":"budget",
+				"reasoning_off_support":"accepted",
+				"reasoning_efforts":["low","medium","high"],
+				"thinking_budget_min":512,
+				"thinking_budget_max":24576
+			}`),
+		}},
+	}
+	handler := NewProvidersHandler(
+		slog.Default(),
+		providers.NewService(slog.Default(), queries, ""),
+		models.NewService(slog.Default(), queries),
+	)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/providers/"+providerID+"/models", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/providers/:id/models")
+	c.SetParamNames("id")
+	c.SetParamValues(providerID)
+
+	if err := handler.ListModelsByProvider(c); err != nil {
+		t.Fatalf("list provider models: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var got []models.GetResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got) != 1 || got[0].Reasoning == nil {
+		t.Fatalf("provider model list omitted reasoning projection: %+v", got)
+	}
+	if !got[0].Reasoning.Supported || !got[0].Reasoning.CanDisable {
+		t.Fatalf("unexpected reasoning projection: %+v", got[0].Reasoning)
 	}
 }
 

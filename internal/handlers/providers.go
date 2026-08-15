@@ -182,7 +182,11 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
-	return c.JSON(http.StatusOK, resp)
+	provider, err := h.service.Get(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+	return c.JSON(http.StatusOK, withReasoningForClientType(resp, provider.ClientType))
 }
 
 // GetByName godoc
