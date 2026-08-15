@@ -119,7 +119,11 @@ const mobileBreakpoint = vi.hoisted(() => {
 // polyfilled in this test's environment. Mock it so the import stays
 // side-effect free here.
 vi.mock('@/i18n', () => ({
-  default: { global: { t: (key: string) => key } },
+  default: {
+    global: {
+      t: (key: string) => key === 'chat.terminal.defaultTabLabel' ? 'Terminal' : key,
+    },
+  },
 }))
 
 const chatStoreMock = vi.hoisted(() => ({
@@ -844,13 +848,85 @@ describe('workspace layout store', () => {
     store.registerApi(dock as never)
 
     store.openTerminal()
+    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
     store.openTerminal()
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
     store.closeTab('terminal:1')
     store.openTerminal()
 
     expect(dock.getPanel('terminal:1')).toBeUndefined()
     expect(dock.getPanel('terminal:2')).toBeTruthy()
     expect(dock.getPanel('terminal:3')).toBeTruthy()
+  })
+
+  it('repairs legacy terminal titles when restoring a layout', async () => {
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          panels: {
+            'terminal:1': {
+              id: 'terminal:1',
+              contentComponent: 'terminal',
+              title: 'zsh',
+            },
+            'terminal:2': {
+              id: 'terminal:2',
+              contentComponent: 'terminal',
+              title: '',
+            },
+          },
+        },
+        terminalCounter: 2,
+        ephemeralIds: [],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
+  })
+
+  it('updates only the intended terminal title and ignores invalid or repeated events', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openTerminal()
+    store.openTerminal()
+
+    const first = dock.getPanel('terminal:1')!
+    const second = dock.getPanel('terminal:2')!
+    const setTitle = vi.spyOn(first.api, 'setTitle')
+
+    store.updateTerminalTitle(first.id, '  python  ')
+
+    expect(first.title).toBe('python')
+    expect(second.title).toBe('Terminal 2')
+    expect(setTitle).toHaveBeenCalledTimes(1)
+
+    store.updateTerminalTitle(first.id, 'python')
+    store.updateTerminalTitle(first.id, '   ')
+    store.updateTerminalTitle(first.id, null)
+
+    expect(first.title).toBe('python')
+    expect(setTitle).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts a split terminal with its own fallback title', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openTerminal()
+
+    const first = dock.getPanel('terminal:1')!
+    store.updateTerminalTitle(first.id, 'node')
+    store.splitGroup(first.group!.id, 'right')
+
+    expect(first.title).toBe('node')
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
   })
 
   it('duplicates the active file into a split pane with a unique panel id', () => {
