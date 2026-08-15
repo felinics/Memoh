@@ -35,12 +35,16 @@ func TestInterruptedStepKeepsEveryReasoningBlockToken(t *testing.T) {
 	for _, part := range []sdk.StreamPart{
 		&sdk.ReasoningStartPart{ID: "b1", Format: sdk.ReasoningFormatAnthropic},
 		&sdk.ReasoningDeltaPart{ID: "b1", Text: "AAA", Format: sdk.ReasoningFormatAnthropic},
-		&sdk.ReasoningEndPart{ID: "b1", Format: sdk.ReasoningFormatAnthropic,
-			ProviderMetadata: anthropicMeta("signature", "SIG_A")},
+		&sdk.ReasoningEndPart{
+			ID: "b1", Format: sdk.ReasoningFormatAnthropic,
+			ProviderMetadata: anthropicMeta("signature", "SIG_A"),
+		},
 		&sdk.ReasoningStartPart{ID: "b2", Format: sdk.ReasoningFormatAnthropic},
 		&sdk.ReasoningDeltaPart{ID: "b2", Text: "BBB", Format: sdk.ReasoningFormatAnthropic},
-		&sdk.ReasoningEndPart{ID: "b2", Format: sdk.ReasoningFormatAnthropic,
-			ProviderMetadata: anthropicMeta("signature", "SIG_B")},
+		&sdk.ReasoningEndPart{
+			ID: "b2", Format: sdk.ReasoningFormatAnthropic,
+			ProviderMetadata: anthropicMeta("signature", "SIG_B"),
+		},
 		&sdk.TextDeltaPart{Text: "answer"},
 	} {
 		capture.observe(part)
@@ -70,8 +74,10 @@ func TestInterruptedStepKeepsEmptyTextReasoningBlock(t *testing.T) {
 	var capture interruptedStepCapture
 	for _, part := range []sdk.StreamPart{
 		&sdk.ReasoningStartPart{ID: "r1", Format: sdk.ReasoningFormatAnthropic},
-		&sdk.ReasoningEndPart{ID: "r1", Format: sdk.ReasoningFormatAnthropic,
-			ProviderMetadata: anthropicMeta("redactedData", "BLOB")},
+		&sdk.ReasoningEndPart{
+			ID: "r1", Format: sdk.ReasoningFormatAnthropic,
+			ProviderMetadata: anthropicMeta("redactedData", "BLOB"),
+		},
 		&sdk.TextDeltaPart{Text: "answer"},
 	} {
 		capture.observe(part)
@@ -92,8 +98,10 @@ func TestInterruptedStepKeepsEmptyTextReasoningBlock(t *testing.T) {
 func TestInterruptedStepSnapshotsReasoningWithoutText(t *testing.T) {
 	var capture interruptedStepCapture
 	capture.observe(&sdk.ReasoningStartPart{ID: "b1", Format: sdk.ReasoningFormatAnthropic})
-	capture.observe(&sdk.ReasoningEndPart{ID: "b1", Format: sdk.ReasoningFormatAnthropic,
-		ProviderMetadata: anthropicMeta("redactedData", "BLOB")})
+	capture.observe(&sdk.ReasoningEndPart{
+		ID: "b1", Format: sdk.ReasoningFormatAnthropic,
+		ProviderMetadata: anthropicMeta("redactedData", "BLOB"),
+	})
 
 	step := capture.snapshot(0)
 	if step == nil {
