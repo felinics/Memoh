@@ -142,9 +142,12 @@ func (s *Service) listGitHubCopilotRemoteModels(ctx context.Context, baseURL, gi
 		if model.Capabilities.Supports.Vision {
 			compatibilities = append(compatibilities, models.CompatVision)
 		}
-		reasoningEfforts := make([]string, 0, len(model.Capabilities.Supports.ReasoningEffort))
+		advertisedEfforts := make([]string, 0, len(model.Capabilities.Supports.ReasoningEffort))
 		for _, effort := range model.Capabilities.Supports.ReasoningEffort {
-			effort = strings.ToLower(strings.TrimSpace(effort))
+			advertisedEfforts = append(advertisedEfforts, strings.ToLower(strings.TrimSpace(effort)))
+		}
+		reasoningEfforts := make([]string, 0, len(advertisedEfforts))
+		for _, effort := range models.NormalizeAdvertisedEfforts(advertisedEfforts) {
 			if models.IsValidReasoningEffort(effort) && !containsFold(reasoningEfforts, effort) {
 				reasoningEfforts = append(reasoningEfforts, effort)
 			}

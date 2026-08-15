@@ -127,6 +127,7 @@ func TestListCodexRemoteModels(t *testing.T) {
 					"display_name": "GPT-5.6-Sol",
 					"visibility":   "list",
 					"supported_reasoning_levels": []map[string]any{
+						{"effort": " NONE "},
 						{"effort": "low"},
 						{"effort": "medium"},
 						{"effort": "high"},
@@ -134,6 +135,7 @@ func TestListCodexRemoteModels(t *testing.T) {
 						{"effort": "xhigh"},
 						{"effort": "max"},
 						{"effort": "ultra"},
+						{"effort": "none"},
 					},
 					"context_window":   372000,
 					"input_modalities": []string{"text", "image"},
@@ -186,7 +188,7 @@ func TestListCodexRemoteModels(t *testing.T) {
 	if got := strings.Join(model.Compatibilities, ","); got != "tool-call,vision,reasoning" {
 		t.Fatalf("compatibilities = %q", got)
 	}
-	if got := strings.Join(model.ReasoningEfforts, ","); got != "low,medium,high,xhigh,max" {
+	if got := strings.Join(model.ReasoningEfforts, ","); got != "disable,low,medium,high,xhigh,max" {
 		t.Fatalf("reasoning efforts = %q", got)
 	}
 	if model.ThinkingMode != models.ThinkingModeToggle {

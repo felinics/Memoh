@@ -236,21 +236,21 @@ func normalizeModelConfig(config ModelConfig) ModelConfig {
 		description := strings.TrimSpace(*config.Description)
 		config.Description = &description
 	}
-	config.ReasoningEfforts = normalizeAdvertisedEfforts(config.ReasoningEfforts)
+	config.ReasoningEfforts = NormalizeAdvertisedEfforts(config.ReasoningEfforts)
 	return config
 }
 
-// normalizeAdvertisedEfforts rewrites the legacy spelling of "off" to the token a
+// NormalizeAdvertisedEfforts rewrites the legacy spelling of "off" to the token a
 // model declares today. It runs on both boundaries of ModelConfig — before a write
-// is validated and after a row is read back — so nothing downstream has to know
-// that "none" was ever declarable.
+// is validated and after a row is read back — and at external catalog boundaries,
+// so nothing downstream has to know that "none" was ever declarable.
 //
 // Without it the vocabulary change would only apply to freshly written configs:
 // rows persisted earlier, and provider registries that have not been regenerated,
 // would keep advertising "none", and every consumer that now looks for the disable
 // token would read those models as "cannot be turned off" — silently dropping Off
 // from the picker and misreading which thinking mechanism the model wants.
-func normalizeAdvertisedEfforts(efforts []string) []string {
+func NormalizeAdvertisedEfforts(efforts []string) []string {
 	if len(efforts) == 0 {
 		return efforts
 	}
