@@ -11,17 +11,91 @@ import (
 // distinguishes an unfinished frontier from a step already committed while its
 // finish event was still buffered for this consumer.
 type interruptedStepCapture struct {
-	text, reasoning strings.Builder
-	reasoningMeta   map[string]any
+	text            strings.Builder
+	reasoningBlocks reasoningBlockCapture
 	toolActivity    bool
 	finished        bool
 	stepIndex       int
 }
 
+// reasoningBlockCapture folds streamed reasoning into ordered blocks, keeping
+// each block's own dialect and opaque token. Providers verify the block sequence
+// on replay, so merging blocks or dropping their tokens makes the checkpoint
+// unreplayable.
+type reasoningBlockCapture struct {
+	parts []sdk.ReasoningPart
+	byID  map[string]int
+}
+
+func (c *reasoningBlockCapture) reset() {
+	c.parts = nil
+	c.byID = nil
+}
+
+// at returns the block a stream part belongs to, creating it when the provider
+// announces a new ID. A part with no ID joins the most recent block, which is
+// what providers that omit block IDs imply.
+func (c *reasoningBlockCapture) at(id string) int {
+	if id != "" {
+		if idx, ok := c.byID[id]; ok {
+			return idx
+		}
+	} else if len(c.parts) > 0 {
+		return len(c.parts) - 1
+	}
+	c.parts = append(c.parts, sdk.ReasoningPart{ID: id})
+	idx := len(c.parts) - 1
+	if id != "" {
+		if c.byID == nil {
+			c.byID = make(map[string]int)
+		}
+		c.byID[id] = idx
+	}
+	return idx
+}
+
+// observe applies one stream part. Text concatenates; the dialect and opaque
+// token replace, because a provider sends the token once as a whole at the end
+// of a block and the later value is authoritative.
+func (c *reasoningBlockCapture) observe(id, text string, format sdk.ReasoningFormat, meta map[string]any) {
+	idx := c.at(id)
+	c.parts[idx].Text += text
+	if format != sdk.ReasoningFormatUnknown {
+		c.parts[idx].Format = format
+	}
+	if len(meta) == 0 {
+		return
+	}
+	if c.parts[idx].ProviderMetadata == nil {
+		c.parts[idx].ProviderMetadata = make(map[string]any, len(meta))
+	}
+	for key, value := range meta {
+		c.parts[idx].ProviderMetadata[key] = value
+	}
+}
+
+func (c *reasoningBlockCapture) messageParts() []sdk.MessagePart {
+	parts := make([]sdk.MessagePart, 0, len(c.parts))
+	for i := range c.parts {
+		parts = append(parts, c.parts[i])
+	}
+	return parts
+}
+
+func (c *reasoningBlockCapture) text() string {
+	return sdk.ReasoningText(c.parts)
+}
+
+// empty reports whether anything was captured at all. A block with no text is
+// not empty: a redacted thinking block carries its whole payload in metadata,
+// and dropping it breaks the replay the provider requires.
+func (c *reasoningBlockCapture) empty() bool {
+	return len(c.parts) == 0
+}
+
 func (c *interruptedStepCapture) resetContent() {
 	c.text.Reset()
-	c.reasoning.Reset()
-	c.reasoningMeta = nil
+	c.reasoningBlocks.reset()
 	c.toolActivity = false
 	c.finished = false
 }
@@ -55,21 +129,19 @@ func (c *interruptedStepCapture) observe(part sdk.StreamPart) {
 	switch p := part.(type) {
 	case *sdk.StartStepPart:
 		c.advance()
-	case *sdk.TextStartPart, *sdk.ReasoningStartPart:
+	case *sdk.TextStartPart:
 		c.reopenIfFinished()
 	case *sdk.TextDeltaPart:
 		c.reopenIfFinished()
 		c.text.WriteString(p.Text)
+	case *sdk.ReasoningStartPart:
+		c.reopenIfFinished()
+		c.reasoningBlocks.observe(p.ID, "", p.Format, p.ProviderMetadata)
 	case *sdk.ReasoningDeltaPart:
 		c.reopenIfFinished()
-		c.reasoning.WriteString(p.Text)
-		if p.ProviderMetadata != nil {
-			c.reasoningMeta = p.ProviderMetadata
-		}
+		c.reasoningBlocks.observe(p.ID, p.Text, p.Format, p.ProviderMetadata)
 	case *sdk.ReasoningEndPart:
-		if p.ProviderMetadata != nil {
-			c.reasoningMeta = p.ProviderMetadata
-		}
+		c.reasoningBlocks.observe(p.ID, "", p.Format, p.ProviderMetadata)
 	case *sdk.ToolInputStartPart, *sdk.ToolInputDeltaPart, *sdk.ToolInputEndPart,
 		*sdk.StreamToolCallPart, *sdk.StreamToolResultPart, *sdk.StreamToolErrorPart,
 		*sdk.ToolOutputDeniedPart, *sdk.ToolApprovalRequestPart, *sdk.ToolProgressPart:
@@ -83,20 +155,21 @@ func (c *interruptedStepCapture) observe(part sdk.StreamPart) {
 // step is still eligible when its complete commit lost the abort race; a
 // successful complete commit advances nextDurableStep and rejects it here.
 func (c *interruptedStepCapture) snapshot(nextDurableStep int) *sdk.StepResult {
-	text, reasoning := c.text.String(), c.reasoning.String()
+	text := c.text.String()
 	if c.toolActivity || c.stepIndex != nextDurableStep ||
-		(strings.TrimSpace(text) == "" && strings.TrimSpace(reasoning) == "") {
+		(strings.TrimSpace(text) == "" && c.reasoningBlocks.empty()) {
 		return nil
 	}
-	parts := make([]sdk.MessagePart, 0, 2)
-	if reasoning != "" {
-		parts = append(parts, sdk.ReasoningPart{Text: reasoning, ProviderMetadata: c.reasoningMeta})
-	}
+	// Reasoning leads the message, one part per block: providers enforce
+	// thinking-first ordering and reject a modified block sequence.
+	parts := c.reasoningBlocks.messageParts()
 	if text != "" {
 		parts = append(parts, sdk.TextPart{Text: text})
 	}
 	return &sdk.StepResult{
-		Text: text, Reasoning: reasoning,
-		Messages: []sdk.Message{{Role: sdk.MessageRoleAssistant, Content: parts}},
+		Text:           text,
+		Reasoning:      c.reasoningBlocks.text(),
+		ReasoningParts: c.reasoningBlocks.parts,
+		Messages:       []sdk.Message{{Role: sdk.MessageRoleAssistant, Content: parts}},
 	}
 }
