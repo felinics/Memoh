@@ -27,10 +27,10 @@ const offChoice = "off"
 // unknown. Neither case is safe to treat as a generic reasoning model.
 func (h *Handler) reasoningOptions(cc CommandContext, modelID string) (reasoning.Options, bool) {
 	modelID = strings.TrimSpace(modelID)
-	if modelID == "" || h.modelsService == nil || h.providersService == nil {
+	if modelID == "" || h.modelsService == nil {
 		return reasoning.Options{}, false
 	}
-	m, err := h.modelsService.GetByID(cc.Ctx, modelID)
+	opts, err := h.modelsService.ResolveReasoningOptions(cc.Ctx, modelID)
 	if err != nil {
 		if h.logger != nil {
 			h.logger.Warn("reasoning model lookup failed",
@@ -41,19 +41,7 @@ func (h *Handler) reasoningOptions(cc CommandContext, modelID string) (reasoning
 		}
 		return reasoning.Options{}, false
 	}
-	p, err := h.providersService.Get(cc.Ctx, m.ProviderID)
-	if err != nil || strings.TrimSpace(p.ClientType) == "" {
-		if h.logger != nil {
-			h.logger.Warn("reasoning provider lookup failed",
-				slog.String("bot_id", cc.BotID),
-				slog.String("model_id", modelID),
-				slog.String("provider_id", m.ProviderID),
-				slog.Any("error", err),
-			)
-		}
-		return reasoning.Options{}, false
-	}
-	return m.ReasoningOptions(p.ClientType), true
+	return opts, true
 }
 
 // buildReasoningGroup registers /reasoning — a first-class sibling of /model.

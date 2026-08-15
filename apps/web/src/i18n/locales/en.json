@@ -120,6 +120,10 @@
     "compaction": {
       "model_unavailable": "The compaction model is unavailable. Pick an enabled chat model with a declared context window."
     },
+    "settings": {
+      "reasoning_effort_invalid": "Reasoning level \"{effort}\" is not supported by the selected chat model.",
+      "reasoning_options_unavailable": "The chat model's reasoning options could not be resolved. Please try again."
+    },
     "profile": {
       "request_invalid": "The profile update request is invalid.",
       "title_model_invalid": "The selected title model is unavailable or is not a chat model.",

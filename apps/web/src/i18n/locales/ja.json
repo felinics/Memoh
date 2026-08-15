@@ -117,6 +117,10 @@
     "compaction": {
       "model_unavailable": "圧縮Modelを利用できません。有効でコンテキストウィンドウが宣言されたチャットModelを選択してください。"
     },
+    "settings": {
+      "reasoning_effort_invalid": "選択したチャットModelは推論レベル「{effort}」に対応していません。",
+      "reasoning_options_unavailable": "チャットModelの推論オプションを確認できませんでした。しばらくしてからもう一度お試しください。"
+    },
     "profile": {
       "request_invalid": "プロフィール更新リクエストが無効です。",
       "title_model_invalid": "選択したタイトルModelは利用できないか、チャットModelではありません。",

@@ -23,7 +23,6 @@ import (
 	"github.com/memohai/memoh/internal/providertemplates"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/userruntime"
 	videopkg "github.com/memohai/memoh/internal/video"
 	"github.com/memohai/memoh/internal/workdir"
@@ -66,7 +65,7 @@ func ServerModule() fx.Option {
 			provideOverlayProviderRegistry,
 			provideNetworkService,
 			provideNetworkController,
-			settings.NewService,
+			provideSettingsService,
 			provideToolApprovalService,
 			providePGVectorStore,
 			provideUserRuntimeStore,

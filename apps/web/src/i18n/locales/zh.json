@@ -120,6 +120,10 @@
     "compaction": {
       "model_unavailable": "压缩模型不可用。请选择一个已启用、且声明了上下文窗口的对话模型。"
     },
+    "settings": {
+      "reasoning_effort_invalid": "所选对话模型不支持推理级别“{effort}”。",
+      "reasoning_options_unavailable": "暂时无法解析对话模型的推理选项，请稍后重试。"
+    },
     "profile": {
       "request_invalid": "个人资料更新请求无效。",
       "title_model_invalid": "所选标题模型不可用或不是聊天模型。",

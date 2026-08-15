@@ -9925,11 +9925,15 @@ export type PostBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdSettingsError = PostBotsByBotIdSettingsErrors[keyof PostBotsByBotIdSettingsErrors];
@@ -9962,11 +9966,15 @@ export type PutBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PutBotsByBotIdSettingsError = PutBotsByBotIdSettingsErrors[keyof PutBotsByBotIdSettingsErrors];

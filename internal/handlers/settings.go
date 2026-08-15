@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/settings"
@@ -78,7 +79,8 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body settings.UpsertRequest true "Settings payload"
 // @Success 200 {object} settings.Settings
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/settings [put]
 // @Router /bots/{bot_id}/settings [post].
@@ -100,6 +102,9 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 	}
 	resp, err := h.service.UpsertBot(c.Request().Context(), botID, req)
 	if err != nil {
+		if reasoningErr := settingsReasoningHTTPError(err); reasoningErr != nil {
+			return reasoningErr
+		}
 		if feedbackErr := acpFeedbackHTTPError(err); feedbackErr != nil {
 			return feedbackErr
 		}
@@ -119,6 +124,19 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+func settingsReasoningHTTPError(err error) error {
+	var invalid *settings.InvalidReasoningEffortError
+	if errors.As(err, &invalid) {
+		return apperror.New(apperror.CodeSettingsReasoningEffortInvalid, map[string]string{
+			"effort": invalid.Effort,
+		})
+	}
+	if errors.Is(err, settings.ErrReasoningOptionsUnavailable) {
+		return apperror.Wrap(apperror.CodeSettingsReasoningUnavailable, err, nil)
+	}
+	return nil
 }
 
 // Delete godoc

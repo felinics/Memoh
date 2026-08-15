@@ -14,6 +14,8 @@ const (
 	CodeBotNameTaken                     Code = "bot.name_taken"
 	CodeChannelRuntimeUnavailable        Code = "channel.runtime_unavailable"
 	CodeCompactionModelUnavailable       Code = "compaction.model_unavailable"
+	CodeSettingsReasoningEffortInvalid   Code = "settings.reasoning_effort_invalid"
+	CodeSettingsReasoningUnavailable     Code = "settings.reasoning_options_unavailable"
 	CodeWorkspaceUnreachable             Code = "workspace.unreachable"
 	CodeWorkspaceImageIncompatible       Code = "workspace.image_incompatible"
 	CodeWorkspaceTemplateBootstrapFailed Code = "workspace.template_bootstrap_failed"
@@ -97,6 +99,15 @@ var catalog = map[Code]Definition{
 		HTTPStatus:  http.StatusBadRequest,
 		Detail:      "The compaction model is unavailable.",
 		AllowedArgs: []string{"reason"},
+	},
+	CodeSettingsReasoningEffortInvalid: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "The selected reasoning level is not supported by the chat model.",
+		AllowedArgs: []string{"effort"},
+	},
+	CodeSettingsReasoningUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The chat model's reasoning options could not be resolved. Please try again.",
 	},
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,

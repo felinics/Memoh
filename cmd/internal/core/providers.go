@@ -231,6 +231,18 @@ func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore) 
 	return accounts.NewService(log, accountStore)
 }
 
+func provideSettingsService(
+	log *slog.Logger,
+	queries dbstore.Queries,
+	aclService *acl.Service,
+	networkService *netctl.Service,
+	modelsService *models.Service,
+) *settings.Service {
+	service := settings.NewService(log, queries, aclService, networkService)
+	service.SetReasoningOptionsResolver(modelsService)
+	return service
+}
+
 // provideWikiStore wires the PostgreSQL memory wiki store. Returns a pointer
 // so FX can inject nil-safe into providers that may run without a wiki store.
 func provideWikiStore(postgresStore *postgresstore.Store) (*wikistore.Store, error) {

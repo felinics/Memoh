@@ -19,20 +19,36 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	netctl "github.com/memohai/memoh/internal/network"
+	"github.com/memohai/memoh/internal/reasoning"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
+type ReasoningOptionsResolver interface {
+	ResolveReasoningOptions(context.Context, string) (reasoning.Options, error)
+}
+
 type Service struct {
-	queries dbstore.Queries
-	acl     *acl.Service
-	network *netctl.Service
-	logger  *slog.Logger
+	queries           dbstore.Queries
+	acl               *acl.Service
+	network           *netctl.Service
+	reasoningResolver ReasoningOptionsResolver
+	logger            *slog.Logger
 }
 
 var (
-	ErrModelIDAmbiguous = errors.New("model_id is ambiguous across providers")
-	ErrInvalidModelRef  = errors.New("invalid model reference")
+	ErrModelIDAmbiguous            = errors.New("model_id is ambiguous across providers")
+	ErrInvalidModelRef             = errors.New("invalid model reference")
+	ErrReasoningOptionsUnavailable = errors.New("reasoning options unavailable")
 )
+
+type InvalidReasoningEffortError struct {
+	Effort  string
+	Options reasoning.Options
+}
+
+func (e *InvalidReasoningEffortError) Error() string {
+	return fmt.Sprintf("reasoning effort %q is not supported by the chat model", e.Effort)
+}
 
 func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service, networkService *netctl.Service) *Service {
 	return &Service{
@@ -41,6 +57,10 @@ func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Servi
 		network: networkService,
 		logger:  log.With(slog.String("service", "settings")),
 	}
+}
+
+func (s *Service) SetReasoningOptionsResolver(resolver ReasoningOptionsResolver) {
+	s.reasoningResolver = resolver
 }
 
 func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
@@ -141,9 +161,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if effect := strings.TrimSpace(req.AclDefaultEffect); effect != "" {
 		current.AclDefaultEffect = effect
 	}
-	if req.ReasoningEffort != nil && hasReasoningEffortValue(*req.ReasoningEffort) {
-		current.ReasoningEffort = *req.ReasoningEffort
-	}
 	if req.HeartbeatEnabled != nil {
 		current.HeartbeatEnabled = *req.HeartbeatEnabled
 	}
@@ -237,6 +254,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		} else {
 			current.ChatModelID = ""
 		}
+	}
+	if err := s.applyReasoningPolicy(ctx, &current, req); err != nil {
+		return Settings{}, err
 	}
 	heartbeatModelUUID := pgtype.UUID{}
 	heartbeatModelIDSet := req.HeartbeatModelID != nil
@@ -520,6 +540,68 @@ func nullableCompactionTargetPercent(value *int) pgtype.Int4 {
 // a given model accepts are enforced upstream, not by this generic setting.
 func hasReasoningEffortValue(effort string) bool {
 	return strings.TrimSpace(effort) != ""
+}
+
+func (s *Service) applyReasoningPolicy(ctx context.Context, current *Settings, req UpsertRequest) error {
+	requestedSet := req.ReasoningEffort != nil && hasReasoningEffortValue(*req.ReasoningEffort)
+	if !requestedSet && req.ChatModelID == nil {
+		return nil
+	}
+
+	requested := ""
+	if requestedSet {
+		requested = normalizeDormantReasoningEffort(*req.ReasoningEffort)
+	}
+	if strings.TrimSpace(current.ChatModelID) == "" {
+		if requestedSet {
+			current.ReasoningEffort = requested
+		}
+		return nil
+	}
+	if s.reasoningResolver == nil {
+		return fmt.Errorf("%w: resolver not configured", ErrReasoningOptionsUnavailable)
+	}
+
+	opts, err := s.reasoningResolver.ResolveReasoningOptions(ctx, current.ChatModelID)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrReasoningOptionsUnavailable, err)
+	}
+	// A model without a reasoning concept keeps the dormant preference. This
+	// preserves import/create behavior and lets a later switch back to a reasoning
+	// model reconcile the value against that model's real options.
+	if !opts.Supported {
+		if requestedSet {
+			current.ReasoningEffort = requested
+		}
+		return nil
+	}
+	if requestedSet {
+		normalized, ok := reasoning.NormalizeSelection(requested, opts)
+		if !ok {
+			// Full model-setting payloads (create/import and the web model picker)
+			// may carry a preference from the previous model. Reconcile that stale
+			// value in the same write; effort-only requests are explicit choices and
+			// receive a validation error instead.
+			if req.ChatModelID != nil {
+				current.ReasoningEffort = reasoning.ReconcileStored(requested, opts)
+				return nil
+			}
+			return &InvalidReasoningEffortError{Effort: requested, Options: opts}
+		}
+		current.ReasoningEffort = normalized
+		return nil
+	}
+
+	current.ReasoningEffort = reasoning.ReconcileStored(current.ReasoningEffort, opts)
+	return nil
+}
+
+func normalizeDormantReasoningEffort(effort string) string {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort == "off" || reasoning.IsDisabled(effort) {
+		return reasoning.EffortDisable
+	}
+	return effort
 }
 
 func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {

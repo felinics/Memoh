@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -522,6 +523,16 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err error) string {
 	if err == nil {
 		return ""
+	}
+	var invalidReasoning *settings.InvalidReasoningEffortError
+	if errors.As(err, &invalidReasoning) {
+		return t.T("cmd.reasoning.unknownLevel", map[string]any{
+			"level":  fmt.Sprintf("%q", invalidReasoning.Effort),
+			"levels": strings.Join(reasoningChoicesFor(invalidReasoning.Options), ", "),
+		})
+	}
+	if errors.Is(err, settings.ErrReasoningOptionsUnavailable) {
+		return t.T("cmd.reasoning.unavailable")
 	}
 	msg := strings.TrimSpace(err.Error())
 	res := strings.TrimSpace(resource)
