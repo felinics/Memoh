@@ -68,6 +68,60 @@ func TestInterruptedStepKeepsEveryReasoningBlockToken(t *testing.T) {
 	}
 }
 
+// A reasoning block's opaque token is bound to the model that produced it.
+// Stream parts may report that model at different points, so later non-empty
+// values replace earlier aliases while omitted values must not erase it.
+func TestInterruptedStepKeepsReasoningBlockModel(t *testing.T) {
+	var capture interruptedStepCapture
+	capture.observe(&sdk.ReasoningStartPart{
+		ID: "b1", Model: "claude-sonnet-4", Format: sdk.ReasoningFormatAnthropic,
+	})
+	capture.observe(&sdk.ReasoningDeltaPart{
+		ID: "b1", Text: "thought", Format: sdk.ReasoningFormatAnthropic,
+	})
+	if got := capture.reasoningBlocks.parts[0].Model; got != "claude-sonnet-4" {
+		t.Fatalf("empty delta model erased start model: got %q", got)
+	}
+	capture.observe(&sdk.ReasoningDeltaPart{
+		ID: "b1", Model: "anthropic/claude-sonnet-4", Format: sdk.ReasoningFormatAnthropic,
+	})
+	if got := capture.reasoningBlocks.parts[0].Model; got != "anthropic/claude-sonnet-4" {
+		t.Fatalf("delta model was not merged: got %q", got)
+	}
+	capture.observe(&sdk.ReasoningEndPart{
+		ID: "b1", Model: "claude-sonnet-4-20250514", Format: sdk.ReasoningFormatAnthropic,
+		ProviderMetadata: anthropicMeta("signature", "SIG"),
+	})
+
+	step := capture.snapshot(0)
+	if step == nil {
+		t.Fatal("no snapshot produced")
+	}
+	if got := step.ReasoningParts[0].Model; got != "claude-sonnet-4-20250514" {
+		t.Errorf("ReasoningParts[0].Model: got %q, want response model", got)
+	}
+	parts := reasoningPartsOf(t, step)
+	if got := parts[0].Model; got != "claude-sonnet-4-20250514" {
+		t.Errorf("message reasoning model: got %q, want response model", got)
+	}
+}
+
+// A start marker only announces a block; without text or provider metadata it
+// contains nothing that can be replayed and should not create a checkpoint.
+func TestInterruptedStepDropsEmptyReasoningStart(t *testing.T) {
+	var capture interruptedStepCapture
+	capture.observe(&sdk.ReasoningStartPart{
+		ID: "b1", Model: "claude-sonnet-4-20250514", Format: sdk.ReasoningFormatAnthropic,
+	})
+	capture.observe(&sdk.ReasoningDeltaPart{
+		ID: "b1", Text: "   ", Format: sdk.ReasoningFormatAnthropic,
+	})
+
+	if step := capture.snapshot(0); step != nil {
+		t.Fatalf("empty reasoning start produced a snapshot: %+v", step)
+	}
+}
+
 // A redacted thinking block has no text at all. Its payload lives entirely in
 // metadata and must still reach the checkpoint.
 func TestInterruptedStepKeepsEmptyTextReasoningBlock(t *testing.T) {

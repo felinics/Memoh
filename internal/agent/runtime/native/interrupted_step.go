@@ -54,14 +54,21 @@ func (c *reasoningBlockCapture) at(id string) int {
 	return idx
 }
 
-// observe applies one stream part. Text concatenates; the dialect and opaque
-// token replace, because a provider sends the token once as a whole at the end
-// of a block and the later value is authoritative.
-func (c *reasoningBlockCapture) observe(id, text string, format sdk.ReasoningFormat, meta map[string]any) {
+// observe applies one stream part. Text concatenates; the dialect, model, and
+// opaque token replace when present because the later value is authoritative.
+func (c *reasoningBlockCapture) observe(
+	id, text string,
+	format sdk.ReasoningFormat,
+	model string,
+	meta map[string]any,
+) {
 	idx := c.at(id)
 	c.parts[idx].Text += text
 	if format != sdk.ReasoningFormatUnknown {
 		c.parts[idx].Format = format
+	}
+	if model != "" {
+		c.parts[idx].Model = model
 	}
 	if len(meta) == 0 {
 		return
@@ -86,11 +93,17 @@ func (c *reasoningBlockCapture) text() string {
 	return sdk.ReasoningText(c.parts)
 }
 
-// empty reports whether anything was captured at all. A block with no text is
-// not empty: a redacted thinking block carries its whole payload in metadata,
-// and dropping it breaks the replay the provider requires.
+// empty reports whether any replayable reasoning was captured. IDs, dialects,
+// and model names merely describe a block; text or provider metadata is the
+// payload. A redacted thinking block has no text but is meaningful because its
+// encrypted payload lives in metadata.
 func (c *reasoningBlockCapture) empty() bool {
-	return len(c.parts) == 0
+	for i := range c.parts {
+		if strings.TrimSpace(c.parts[i].Text) != "" || len(c.parts[i].ProviderMetadata) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *interruptedStepCapture) resetContent() {
@@ -136,12 +149,12 @@ func (c *interruptedStepCapture) observe(part sdk.StreamPart) {
 		c.text.WriteString(p.Text)
 	case *sdk.ReasoningStartPart:
 		c.reopenIfFinished()
-		c.reasoningBlocks.observe(p.ID, "", p.Format, p.ProviderMetadata)
+		c.reasoningBlocks.observe(p.ID, "", p.Format, p.Model, p.ProviderMetadata)
 	case *sdk.ReasoningDeltaPart:
 		c.reopenIfFinished()
-		c.reasoningBlocks.observe(p.ID, p.Text, p.Format, p.ProviderMetadata)
+		c.reasoningBlocks.observe(p.ID, p.Text, p.Format, p.Model, p.ProviderMetadata)
 	case *sdk.ReasoningEndPart:
-		c.reasoningBlocks.observe(p.ID, "", p.Format, p.ProviderMetadata)
+		c.reasoningBlocks.observe(p.ID, "", p.Format, p.Model, p.ProviderMetadata)
 	case *sdk.ToolInputStartPart, *sdk.ToolInputDeltaPart, *sdk.ToolInputEndPart,
 		*sdk.StreamToolCallPart, *sdk.StreamToolResultPart, *sdk.StreamToolErrorPart,
 		*sdk.ToolOutputDeniedPart, *sdk.ToolApprovalRequestPart, *sdk.ToolProgressPart:
