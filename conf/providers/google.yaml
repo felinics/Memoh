@@ -51,9 +51,10 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      # 3.x takes a named level; minimal is the floor, so there is no off.
+      # Gemini 3.1 Pro rejects minimal and cannot be turned off.
       reasoning_dialect: tier
-      reasoning_efforts: [minimal, low, medium, high]
+      reasoning_off_support: rejected
+      reasoning_efforts: [low, medium, high]
 
   - model_id: gemini-3.1-flash-lite-preview
     name: Gemini 3.1 Flash-Lite Preview
@@ -94,6 +95,7 @@ models:
       # 2.5 controls thinking with a token budget; its floor is positive, so this
       # model cannot be turned off and does not advertise the disable token.
       reasoning_dialect: budget
+      reasoning_off_support: rejected
       thinking_budget_min: 128
       thinking_budget_max: 32768
       reasoning_efforts: [low, medium, high]
@@ -121,6 +123,7 @@ models:
       thinking_mode: toggle
       # Flash allows a zero budget, so off is reachable here where it is not on Pro.
       reasoning_dialect: budget
+      reasoning_off_support: accepted
       thinking_budget_min: 0
       thinking_budget_max: 24576
       reasoning_efforts: [disable, low, medium, high]
@@ -140,6 +143,8 @@ models:
       context_window: 1114112
       thinking_mode: toggle
       reasoning_dialect: budget
+      # The active range starts at 512, but 0 is a separate disable sentinel.
+      reasoning_off_support: accepted
       thinking_budget_min: 512
       thinking_budget_max: 24576
       reasoning_efforts: [low, medium, high]
@@ -152,6 +157,8 @@ models:
       context_window: 1114112
       thinking_mode: toggle
       reasoning_dialect: budget
+      # The active range starts at 512, but 0 is a separate disable sentinel.
+      reasoning_off_support: accepted
       thinking_budget_min: 512
       thinking_budget_max: 24576
       reasoning_efforts: [low, medium, high]

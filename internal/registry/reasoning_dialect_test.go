@@ -3,7 +3,6 @@ package registry
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -64,10 +63,11 @@ func TestGoogleReasoningModelsDeclareAWireDialect(t *testing.T) {
 	}
 }
 
-// Off-ability on the budget dialect is not a matter of taste: a zero budget is
-// legal only where the model's floor is zero. Flash allows it, Pro does not, and
-// the catalog has to say the same thing the wire will.
-func TestGoogleBudgetModelsAdvertiseOffOnlyWhenTheFloorIsZero(t *testing.T) {
+// The active budget range does not answer whether the separate zero sentinel is
+// accepted: Flash Lite starts active thinking at 512 but still accepts 0 to turn
+// it off. Require the catalog to declare that capability instead of deriving it
+// from the active floor.
+func TestGoogleBudgetModelsDeclareOffSupport(t *testing.T) {
 	t.Parallel()
 
 	raw, err := os.ReadFile("../../conf/providers/google.yaml") //nolint:gosec // repo-local template
@@ -88,22 +88,10 @@ func TestGoogleBudgetModelsAdvertiseOffOnlyWhenTheFloorIsZero(t *testing.T) {
 		if dialect, _ := m.Config["reasoning_dialect"].(string); dialect != "budget" {
 			continue
 		}
-		minBudget, hasMin := m.Config["thinking_budget_min"].(int)
-		efforts, _ := m.Config["reasoning_efforts"].([]any)
-		advertisesOff := false
-		for _, e := range efforts {
-			if s, ok := e.(string); ok && strings.TrimSpace(s) == "disable" {
-				advertisesOff = true
-			}
-		}
-
-		switch {
-		case hasMin && minBudget == 0 && !advertisesOff:
-			t.Errorf("%s allows a zero budget but does not advertise off; the control "+
-				"would be hidden from a model that supports it", m.ModelID)
-		case hasMin && minBudget > 0 && advertisesOff:
-			t.Errorf("%s advertises off but its floor is %d, so a zero budget is a 400; "+
-				"the picker would offer a switch the wire rejects", m.ModelID, minBudget)
+		offSupport, _ := m.Config["reasoning_off_support"].(string)
+		if offSupport != "accepted" && offSupport != "rejected" {
+			t.Errorf("%s must declare reasoning_off_support as accepted or rejected; got %q",
+				m.ModelID, offSupport)
 		}
 	}
 }

@@ -340,7 +340,12 @@ func googleThinkingFor(cfg SDKModelConfig) (googlegenerative.ThinkingConfig, boo
 	}
 
 	if cfg.ReasoningDialect == reasoning.DialectBudget {
-		budget, ok := googleBudgetFor(rc, cfg.ThinkingBudgetMin, cfg.ThinkingBudgetMax)
+		budget, ok := googleBudgetFor(
+			rc,
+			cfg.ThinkingBudgetMin,
+			cfg.ThinkingBudgetMax,
+			cfg.ReasoningOffSupport,
+		)
 		if !ok {
 			return googlegenerative.ThinkingConfig{}, false
 		}
@@ -366,13 +371,15 @@ func googleThinkingFor(cfg SDKModelConfig) (googlegenerative.ThinkingConfig, boo
 
 // googleBudgetFor resolves a tier into a token budget within the model's range,
 // or the dynamic/disabled sentinels. It reports false when nothing should be sent.
-func googleBudgetFor(rc *ReasoningConfig, minBudget, maxBudget *int) (int, bool) {
+func googleBudgetFor(rc *ReasoningConfig, minBudget, maxBudget *int, offSupport string) (int, bool) {
 	switch {
 	case rc.Disabled:
-		// 0 is only legal where the range allows it (Flash/Lite); on a model with a
-		// positive floor, such as 2.5 Pro, thinking cannot be turned off at all and
-		// omitting the field is the honest answer.
-		if minBudget != nil && *minBudget > 0 {
+		// The active range and the off sentinel are separate capabilities. Flash
+		// Lite, for example, has a positive active floor but still accepts 0 as an
+		// explicit disable. Prefer the catalog declaration; retain the zero-floor
+		// fallback for older imported rows that predate that field.
+		if offSupport == reasoning.OffSupportRejected ||
+			(offSupport == reasoning.OffSupportUnset && minBudget != nil && *minBudget > 0) {
 			return 0, false
 		}
 		return googlegenerative.ThinkingBudgetDisabled, true

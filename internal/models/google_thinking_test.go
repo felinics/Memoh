@@ -45,25 +45,25 @@ func TestGoogleThinkingFollowsTheDeclaredDialect(t *testing.T) {
 			wantBudget: intPtr(16448),
 		},
 		{
-			name: "a 2.5 model whose floor is zero can be turned off",
+			name: "a 2.5 model declaring off support can be turned off",
 			cfg: SDKModelConfig{
-				ReasoningDialect:  reasoning.DialectBudget,
-				ThinkingBudgetMin: intPtr(0),
-				ThinkingBudgetMax: intPtr(24576),
-				ReasoningConfig:   &ReasoningConfig{Disabled: true},
+				ReasoningDialect:    reasoning.DialectBudget,
+				ReasoningOffSupport: reasoning.OffSupportAccepted,
+				ThinkingBudgetMin:   intPtr(512),
+				ThinkingBudgetMax:   intPtr(24576),
+				ReasoningConfig:     &ReasoningConfig{Disabled: true},
 			},
 			wantSend:   true,
 			wantBudget: intPtr(googlegenerative.ThinkingBudgetDisabled),
 		},
 		{
-			// 2.5 Pro's floor is 128, so thinking cannot be switched off at all.
-			// Omitting the field is honest; sending 0 would be a 400.
-			name: "a 2.5 model with a positive floor cannot be turned off",
+			name: "a 2.5 model declaring off rejection cannot be turned off",
 			cfg: SDKModelConfig{
-				ReasoningDialect:  reasoning.DialectBudget,
-				ThinkingBudgetMin: intPtr(128),
-				ThinkingBudgetMax: intPtr(32768),
-				ReasoningConfig:   &ReasoningConfig{Disabled: true},
+				ReasoningDialect:    reasoning.DialectBudget,
+				ReasoningOffSupport: reasoning.OffSupportRejected,
+				ThinkingBudgetMin:   intPtr(128),
+				ThinkingBudgetMax:   intPtr(32768),
+				ReasoningConfig:     &ReasoningConfig{Disabled: true},
 			},
 			wantSend: false,
 		},
@@ -138,13 +138,14 @@ func TestGoogleThinkingRequestsThoughtsWheneverThinkingIsOn(t *testing.T) {
 	}
 
 	off, ok := googleThinkingFor(SDKModelConfig{
-		ReasoningDialect:  reasoning.DialectBudget,
-		ThinkingBudgetMin: intPtr(0),
-		ThinkingBudgetMax: intPtr(24576),
-		ReasoningConfig:   &ReasoningConfig{Disabled: true},
+		ReasoningDialect:    reasoning.DialectBudget,
+		ReasoningOffSupport: reasoning.OffSupportAccepted,
+		ThinkingBudgetMin:   intPtr(512),
+		ThinkingBudgetMax:   intPtr(24576),
+		ReasoningConfig:     &ReasoningConfig{Disabled: true},
 	})
 	if !ok {
-		t.Fatal("a zero-floor model should send an explicit off budget")
+		t.Fatal("a model declaring off support should send an explicit off budget")
 	}
 	if off.IncludeThoughts != nil {
 		t.Errorf("thinking off should not ask for thoughts: %+v", off)
