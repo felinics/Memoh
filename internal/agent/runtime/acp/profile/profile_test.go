@@ -20,7 +20,7 @@ func TestListIncludesClaudeCode(t *testing.T) {
 	if len(profile.ManagedFields) == 0 || !profile.ManagedFields[0].Required {
 		t.Fatalf("Claude Code profile should expose required API key field: %#v", profile.ManagedFields)
 	}
-	if len(profile.SetupModes) != 3 || profile.SetupModes[0] != setupModeAPIKey || profile.SetupModes[1] != setupModeOAuth || profile.SetupModes[2] != setupModeSelf {
+	if len(profile.SetupModes) != 3 || profile.SetupModes[0] != setupModeOAuth || profile.SetupModes[1] != setupModeAPIKey || profile.SetupModes[2] != setupModeSelf {
 		t.Fatalf("Claude Code setup modes = %#v", profile.SetupModes)
 	}
 	if profile.ReasoningConfigID != "effort" || profile.DefaultReasoningEffort != "high" {
@@ -49,6 +49,10 @@ func TestCodexUsesPinnedWorkspaceAdapter(t *testing.T) {
 	if profile.RuntimeStorage.SessionLocator != RuntimeSessionLocatorCodexRollout {
 		t.Fatalf("Codex session locator = %q, want %q", profile.RuntimeStorage.SessionLocator, RuntimeSessionLocatorCodexRollout)
 	}
+	// OAuth leads the picker on purpose — the account sign-in is the primary path.
+	if len(profile.SetupModes) != 3 || profile.SetupModes[0] != setupModeOAuth || profile.SetupModes[1] != setupModeAPIKey || profile.SetupModes[2] != setupModeSelf {
+		t.Fatalf("Codex setup modes = %#v", profile.SetupModes)
+	}
 }
 
 func TestListIncludesHermes(t *testing.T) {
@@ -62,7 +66,7 @@ func TestListIncludesHermes(t *testing.T) {
 	if len(profile.ManagedFields) != 4 {
 		t.Fatalf("Hermes managed fields = %#v", profile.ManagedFields)
 	}
-	if len(profile.SetupModes) != 2 || profile.SetupModes[0] != setupModeSelf || profile.SetupModes[1] != setupModeAPIKey {
+	if len(profile.SetupModes) != 2 || profile.SetupModes[0] != setupModeAPIKey || profile.SetupModes[1] != setupModeSelf {
 		t.Fatalf("Hermes setup modes = %#v", profile.SetupModes)
 	}
 	if len(profile.SupportedBackends) != 1 || profile.SupportedBackends[0] != "container" {

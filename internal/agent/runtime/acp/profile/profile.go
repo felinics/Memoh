@@ -230,7 +230,9 @@ func codexProfile() Profile {
 			},
 		},
 		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		// OAuth first: signing in with a ChatGPT account is the path we want
+		// users to reach for; the API key stays available behind it.
+		SetupModes: []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},
 	}
 }
 
@@ -278,7 +280,9 @@ func claudeCodeProfile() Profile {
 			},
 		},
 		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		// OAuth first, same reasoning as Codex: the Claude account sign-in is
+		// the primary path, the API key is the fallback.
+		SetupModes: []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},
 	}
 }
 
@@ -333,7 +337,9 @@ func hermesProfile() Profile {
 			},
 		},
 		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeSelf, setupModeAPIKey},
+		// The first mode is the client's default selection, so the managed
+		// API-key path leads and self-managed stays the escape hatch.
+		SetupModes: []string{setupModeAPIKey, setupModeSelf},
 	}
 }
 

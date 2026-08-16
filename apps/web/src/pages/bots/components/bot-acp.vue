@@ -256,7 +256,14 @@ function setAgentEnabled(profile: AcpprofilePublicProfile, enabled: boolean) {
 }
 
 function shouldOpenAgentOnEnable(profile: AcpprofilePublicProfile): boolean {
-  return agentNeedsConfig(profile) || isHermesSelfMode(profile)
+  return agentNeedsConfig(profile) || isHermesSelfMode(profile) || isOAuthMode(profile)
+}
+
+// OAuth 的凭据存在工作区里,不在 metadata 的托管字段里 —— 所以 agentNeedsConfig
+// 对它永远是 false,开关一拨就会静默启用一个还没授权的 agent。这里改为一律带到
+// 详情页:授权状态只有那张账号卡片查得到(已连接的话它会直说)。
+function isOAuthMode(profile: AcpprofilePublicProfile): boolean {
+  return agentForm(profile).setup_mode === 'oauth'
 }
 
 function agentNeedsConfig(profile: AcpprofilePublicProfile): boolean {

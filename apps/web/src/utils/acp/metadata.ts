@@ -221,9 +221,12 @@ export function fieldsFromProfile(profile: AcpprofilePublicProfile, source: Reco
   return values
 }
 
+// 首项即默认:setup_modes 的顺序由后端 profile 定义,它既是分段控件的显示顺序,
+// 也是默认选中项 —— 一处真相。前端不再另立「有 api_key 就选 api_key」的偏好,
+// 那条规则会让后端把某个模式提到首位的意图只兑现一半(排序变了、默认没变)。
 export function defaultSetupMode(profile: AcpprofilePublicProfile): string {
-  const mode = profile.setup_modes?.includes('api_key') ? 'api_key' : (profile.setup_modes?.[0] ?? 'api_key')
-  return normalizeSetupMode(mode)
+  const modes = (profile.setup_modes ?? []).filter(Boolean)
+  return normalizeSetupMode(modes[0] ?? 'api_key')
 }
 
 export function normalizeACPAgentID(value: unknown): string {
