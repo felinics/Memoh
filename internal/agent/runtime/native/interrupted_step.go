@@ -11,11 +11,12 @@ import (
 // distinguishes an unfinished frontier from a step already committed while its
 // finish event was still buffered for this consumer.
 type interruptedStepCapture struct {
-	text            strings.Builder
-	reasoningBlocks reasoningBlockCapture
-	toolActivity    bool
-	finished        bool
-	stepIndex       int
+	text                 strings.Builder
+	textProviderMetadata map[string]any
+	reasoningBlocks      reasoningBlockCapture
+	toolActivity         bool
+	finished             bool
+	stepIndex            int
 }
 
 // reasoningBlockCapture folds streamed reasoning into ordered blocks, keeping
@@ -108,6 +109,7 @@ func (c *reasoningBlockCapture) empty() bool {
 
 func (c *interruptedStepCapture) resetContent() {
 	c.text.Reset()
+	c.textProviderMetadata = nil
 	c.reasoningBlocks.reset()
 	c.toolActivity = false
 	c.finished = false
@@ -147,6 +149,10 @@ func (c *interruptedStepCapture) observe(part sdk.StreamPart) {
 	case *sdk.TextDeltaPart:
 		c.reopenIfFinished()
 		c.text.WriteString(p.Text)
+	case *sdk.TextEndPart:
+		if p.ProviderMetadata != nil {
+			c.textProviderMetadata = p.ProviderMetadata
+		}
 	case *sdk.ReasoningStartPart:
 		c.reopenIfFinished()
 		c.reasoningBlocks.observe(p.ID, "", p.Format, p.Model, p.ProviderMetadata)
@@ -177,7 +183,10 @@ func (c *interruptedStepCapture) snapshot(nextDurableStep int) *sdk.StepResult {
 	// thinking-first ordering and reject a modified block sequence.
 	parts := c.reasoningBlocks.messageParts()
 	if text != "" {
-		parts = append(parts, sdk.TextPart{Text: text})
+		parts = append(parts, sdk.TextPart{
+			Text:             text,
+			ProviderMetadata: c.textProviderMetadata,
+		})
 	}
 	return &sdk.StepResult{
 		Text:           text,

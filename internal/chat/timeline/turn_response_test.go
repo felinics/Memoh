@@ -134,6 +134,42 @@ func TestDecodeTurnResponseEntryPreservesToolCallProviderMetadata(t *testing.T) 
 	}
 }
 
+func TestDecodeTurnResponseEntryPreservesTextProviderMetadata(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{{
+		"type": "text",
+		"text": " the answer ",
+		"providerMetadata": map[string]any{
+			"google": map[string]any{"thoughtSignature": "SIG_TEXT"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	modelMessage, err := json.Marshal(turn.ModelMessage{Role: "assistant", Content: content})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+
+	entry, ok := DecodeTurnResponseEntry(messagepkg.Message{
+		Role:    "assistant",
+		Content: modelMessage,
+	})
+	if !ok {
+		t.Fatal("expected turn response entry")
+	}
+	part := assertRawPart(t, entry.RawContent, "text", " the answer ", "")
+	meta, ok := part["providerMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("providerMetadata = %#v, want map", part["providerMetadata"])
+	}
+	google, ok := meta["google"].(map[string]any)
+	if !ok || google["thoughtSignature"] != "SIG_TEXT" {
+		t.Fatalf("google metadata = %#v, want thought signature", meta["google"])
+	}
+}
+
 func TestDecodeTurnResponseEntryRendersTextAndToolCall(t *testing.T) {
 	t.Parallel()
 
@@ -274,6 +310,57 @@ func TestDecodeTurnResponseEntryKeepsOnlyInterruptedReasoning(t *testing.T) {
 		t.Fatalf("entries = %d, want only the latest interrupted checkpoint", len(entries))
 	}
 	assertRawPart(t, entries[0].RawContent, "text", messagepkg.AgentStepInterruptedReasoningPrefix+"thinking out loud", "")
+}
+
+func TestDecodeTurnResponseEntriesKeepsOpaqueInterruptedReasoning(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{{
+		"type":   "reasoning",
+		"id":     "r1",
+		"text":   "",
+		"format": "anthropic-v1",
+		"model":  "claude-sonnet-4-20250514",
+		"providerMetadata": map[string]any{
+			"anthropic": map[string]any{"redactedData": "BLOB"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	modelMessage, err := json.Marshal(turn.ModelMessage{Role: "assistant", Content: content})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+	checkpoint := messagepkg.Message{
+		Role:    "assistant",
+		Content: modelMessage,
+		Metadata: map[string]any{
+			messagepkg.AgentStepInterruptedMetadataKey: true,
+		},
+	}
+
+	entries := DecodeTurnResponseEntries([]messagepkg.Message{checkpoint})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want opaque interrupted checkpoint", len(entries))
+	}
+	part := assertRawPart(t, entries[0].RawContent, "reasoning", "", "")
+	if part["id"] != "r1" || part["format"] != "anthropic-v1" ||
+		part["model"] != "claude-sonnet-4-20250514" {
+		t.Fatalf("reasoning provenance was not preserved: %#v", part)
+	}
+	meta, ok := part["providerMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("providerMetadata = %#v, want map", part["providerMetadata"])
+	}
+	anthropic, ok := meta["anthropic"].(map[string]any)
+	if !ok || anthropic["redactedData"] != "BLOB" {
+		t.Fatalf("anthropic metadata = %#v, want redactedData", meta["anthropic"])
+	}
+
+	if _, ok := DecodeTurnResponseEntry(checkpoint); ok {
+		t.Fatal("completed-history decoder retained opaque reasoning")
+	}
 }
 
 func TestDecodeTurnResponseEntriesDropSupersededCheckpoint(t *testing.T) {

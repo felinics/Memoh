@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/messageconv"
 )
 
 // An interrupted step is persisted as a checkpoint and replayed on the next
@@ -28,6 +30,42 @@ func reasoningPartsOf(t *testing.T, step *sdk.StepResult) []sdk.ReasoningPart {
 
 func anthropicMeta(key, value string) map[string]any {
 	return map[string]any{"anthropic": map[string]any{key: value}}
+}
+
+func googleMeta(key, value string) map[string]any {
+	return map[string]any{"google": map[string]any{key: value}}
+}
+
+func TestInterruptedStepKeepsTextProviderMetadata(t *testing.T) {
+	var capture interruptedStepCapture
+	for _, part := range []sdk.StreamPart{
+		&sdk.TextStartPart{ID: "t1"},
+		&sdk.TextDeltaPart{ID: "t1", Text: "answer"},
+		&sdk.TextEndPart{
+			ID:               "t1",
+			ProviderMetadata: googleMeta("thoughtSignature", "SIG_TEXT"),
+		},
+	} {
+		capture.observe(part)
+	}
+
+	step := capture.snapshot(0)
+	if step == nil {
+		t.Fatal("no snapshot produced")
+	}
+	persisted := messageconv.SDKMessagesToModelMessages(step.Messages)
+	if len(persisted) != 1 {
+		t.Fatalf("persisted messages: got %d, want 1", len(persisted))
+	}
+	replayed := messageconv.ModelMessageToSDKMessage(persisted[0])
+	text, ok := replayed.Content[0].(sdk.TextPart)
+	if !ok {
+		t.Fatalf("content[0] = %T, want TextPart", replayed.Content[0])
+	}
+	gm, _ := text.ProviderMetadata["google"].(map[string]any)
+	if sig, _ := gm["thoughtSignature"].(string); sig != "SIG_TEXT" {
+		t.Errorf("thought signature: got %q, want SIG_TEXT", sig)
+	}
 }
 
 func TestInterruptedStepKeepsEveryReasoningBlockToken(t *testing.T) {

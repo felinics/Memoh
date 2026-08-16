@@ -61,7 +61,7 @@ func decodeTurnResponseEntry(msg messagepkg.Message, liveCheckpoint bool) (TurnR
 		if liveCheckpoint {
 			modelMsg = ProjectInterruptedReasoning(modelMsg)
 		}
-		rawContent = nativeAssistantContent(modelMsg)
+		rawContent = nativeAssistantContent(modelMsg, liveCheckpoint)
 	}
 
 	if len(rawContent) == 0 || strings.TrimSpace(string(rawContent)) == "" {
@@ -130,7 +130,10 @@ func ProjectInterruptedReasoning(modelMsg turn.ModelMessage) turn.ModelMessage {
 // structure while keeping the type declaration local to this package.
 type turnResponsePart struct {
 	Type             string          `json:"type"`
+	ID               string          `json:"id,omitempty"`
 	Text             string          `json:"text,omitempty"`
+	Format           string          `json:"format,omitempty"`
+	Model            string          `json:"model,omitempty"`
 	ToolCallID       string          `json:"toolCallId,omitempty"`
 	ToolName         string          `json:"toolName,omitempty"`
 	Input            json.RawMessage `json:"input,omitempty"`
@@ -139,7 +142,7 @@ type turnResponsePart struct {
 	ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
 }
 
-func nativeAssistantContent(msg turn.ModelMessage) json.RawMessage {
+func nativeAssistantContent(msg turn.ModelMessage, liveCheckpoint bool) json.RawMessage {
 	var out []map[string]any
 	// 1) Plain-string content (legacy format).
 	if len(msg.Content) > 0 {
@@ -164,16 +167,45 @@ func nativeAssistantContent(msg turn.ModelMessage) json.RawMessage {
 	for _, p := range parts {
 		switch strings.ToLower(strings.TrimSpace(p.Type)) {
 		case "text":
+			hasMetadata := hasJSONPayload(p.ProviderMetadata)
 			text := strings.TrimSpace(p.Text)
-			if text == "" {
+			if text == "" && !hasMetadata {
 				continue
 			}
-			out = append(out, map[string]any{
+			if hasMetadata {
+				// Provider metadata can be bound to the exact text block. Keep
+				// its whitespace unchanged when carrying that metadata forward.
+				text = p.Text
+			}
+			textPart := map[string]any{
 				"type": "text",
 				"text": text,
-			})
+			}
+			if hasMetadata {
+				textPart["providerMetadata"] = p.ProviderMetadata
+			}
+			out = append(out, textPart)
 		case "reasoning":
-			continue
+			if !liveCheckpoint || !hasReplayableReasoningPayload(p) {
+				continue
+			}
+			reasoning := map[string]any{
+				"type": "reasoning",
+				"text": p.Text,
+			}
+			if strings.TrimSpace(p.ID) != "" {
+				reasoning["id"] = p.ID
+			}
+			if strings.TrimSpace(p.Format) != "" {
+				reasoning["format"] = p.Format
+			}
+			if strings.TrimSpace(p.Model) != "" {
+				reasoning["model"] = p.Model
+			}
+			if hasJSONPayload(p.ProviderMetadata) {
+				reasoning["providerMetadata"] = p.ProviderMetadata
+			}
+			out = append(out, reasoning)
 		case "tool-call":
 			out = append(out, nativeToolCallPart(p.ToolCallID, p.ToolName, p.Input, p.ProviderMetadata))
 		case "tool-result":
@@ -204,6 +236,19 @@ func nativeAssistantContent(msg turn.ModelMessage) json.RawMessage {
 	}
 
 	return marshalParts(out)
+}
+
+func hasReplayableReasoningPayload(part turnResponsePart) bool {
+	return strings.TrimSpace(part.Text) != "" || hasJSONPayload(part.ProviderMetadata)
+}
+
+func hasJSONPayload(raw json.RawMessage) bool {
+	switch strings.TrimSpace(string(raw)) {
+	case "", "null", "{}":
+		return false
+	default:
+		return true
+	}
 }
 
 func nativeToolRoleContent(msg turn.ModelMessage) json.RawMessage {
