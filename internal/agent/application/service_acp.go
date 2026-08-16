@@ -876,7 +876,7 @@ func (s *Service) persistACPRound(
 		err = errors.New("ACP assistant output was not persisted")
 	}
 	if err == nil && promptErr == nil && req.UserMessagePersisted && !req.SkipMemoryExtraction {
-		go s.storeMemory(context.WithoutCancel(ctx), req, output, persisted)
+		go s.storeMemory(context.WithoutCancel(ctx), req, persisted)
 	}
 	return err
 }

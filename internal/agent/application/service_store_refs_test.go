@@ -2,10 +2,12 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,33 +16,51 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-func TestToProviderMessagesKeepsContentAndPersistedSourceAligned(t *testing.T) {
+func TestToProviderMessagesKeepsPersistedContentAndSourceAligned(t *testing.T) {
 	t.Parallel()
 
 	persisted := []messagepkg.Message{
-		{ID: "msg-a", SessionID: "sess-1"},
-		{ID: "msg-b"},
+		storedMemoryTestMessage(t, "msg-a", "sess-1", "assistant", "first stored answer"),
+		storedMemoryTestMessage(t, "msg-b", "sess-1", "assistant", "second stored answer"),
 	}
-	got := toProviderMessages(ChatRequest{
-		ThreadID:               "sess-1",
-		Query:                  "original user question",
-		UserMessagePersisted:   true,
-		PersistedUserMessageID: "msg-user",
-	}, []ModelMessage{
-		{Role: "assistant", Content: newTextContent("first answer")},
-		{Role: "assistant", Content: newTextContent("second answer")},
-	}, persisted)
-	if len(got) != 3 {
-		t.Fatalf("provider messages = %v, want reused user plus two persisted messages", got)
+	got := toProviderMessages(persisted)
+	if len(got) != 2 {
+		t.Fatalf("provider messages = %v, want two persisted messages", got)
 	}
-	wantRefs := []string{"sess-1/msg-user", "sess-1/msg-a", "sess-1/msg-b"}
+	wantRefs := []string{"sess-1/msg-a", "sess-1/msg-b"}
 	for i, want := range wantRefs {
 		if got[i].SourceMessageID != want {
 			t.Fatalf("provider message %d source = %q, want %q", i, got[i].SourceMessageID, want)
 		}
 	}
-	if got[0].Content != "original user question" || got[1].Content != "first answer" || got[2].Content != "second answer" {
+	if got[0].Content != "first stored answer" || got[1].Content != "second stored answer" {
 		t.Fatalf("provider message content is misaligned: %v", got)
+	}
+}
+
+func TestToProviderMessagesUsesPrunedPersistedContent(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
+		logger:          slog.New(slog.DiscardHandler),
+	}
+	unit := "large tool result "
+	huge := strings.Repeat(unit, gatewayToolPayloadMaxBytes/len(unit)+2)
+	inputs, err := service.buildPersistInputs(context.Background(), ChatRequest{
+		BotID: storeRoundBotID, ThreadID: "session-1",
+	}, []ModelMessage{{Role: "tool", Content: newTextContent(huge)}}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("buildPersistInputs() error = %v", err)
+	}
+	got := toProviderMessages([]messagepkg.Message{{
+		ID: "msg-tool", SessionID: "session-1", Role: "tool", Content: inputs[0].Content,
+	}})
+	if len(got) != 1 {
+		t.Fatalf("provider messages = %v, want one persisted tool message", got)
+	}
+	if got[0].Content == huge || !strings.Contains(got[0].Content, gatewayToolPayloadPrunedMarker) {
+		t.Fatalf("provider message did not use pruned persisted content: %.120q", got[0].Content)
 	}
 }
 
@@ -111,6 +131,43 @@ func TestStoreRoundPassesSourceRefsToMemory(t *testing.T) {
 	}
 }
 
+func TestStoreMemoryUsesPersistedUserContent(t *testing.T) {
+	t.Parallel()
+
+	user := storedMemoryTestMessage(t, "msg-user", "session-1", "user", "persisted user question")
+	messages := &recordingMessageService{persisted: []messagepkg.PersistInput{{
+		SessionID: user.SessionID, Role: user.Role, Content: user.Content,
+	}}}
+	memory := &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 1)}
+	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
+	registry.Register(storeRoundMemoryProviderID, memory)
+	service := &Service{
+		messageService:  messages,
+		memoryRegistry:  registry,
+		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
+		logger:          slog.New(slog.DiscardHandler),
+	}
+
+	service.storeMemory(context.Background(), ChatRequest{
+		BotID: storeRoundBotID, ThreadID: "session-1",
+		Query:                "runtime query with generated headers",
+		UserMessagePersisted: true, PersistedUserMessageID: "msg-user",
+	}, []messagepkg.Message{
+		storedMemoryTestMessage(t, "msg-assistant", "session-1", "assistant", "stored answer"),
+	})
+
+	got := <-memory.afterChat
+	if len(got.Messages) != 2 {
+		t.Fatalf("memory messages = %v, want persisted user and assistant", got.Messages)
+	}
+	if got.Messages[0].Content != "persisted user question" || got.Messages[0].SourceMessageID != "session-1/msg-user" {
+		t.Fatalf("persisted user message = %#v", got.Messages[0])
+	}
+	if got.Messages[1].Content != "stored answer" || got.Messages[1].SourceMessageID != "session-1/msg-assistant" {
+		t.Fatalf("persisted assistant message = %#v", got.Messages[1])
+	}
+}
+
 func TestStoreRoundSkipsMemoryWhenPersistenceIsPartial(t *testing.T) {
 	t.Parallel()
 
@@ -139,4 +196,13 @@ func TestStoreRoundSkipsMemoryWhenPersistenceIsPartial(t *testing.T) {
 		t.Fatalf("memory extraction ran for partial persistence: %+v", got)
 	case <-time.After(100 * time.Millisecond):
 	}
+}
+
+func storedMemoryTestMessage(t *testing.T, id, sessionID, role, text string) messagepkg.Message {
+	t.Helper()
+	content, err := json.Marshal(ModelMessage{Role: role, Content: newTextContent(text)})
+	if err != nil {
+		t.Fatalf("marshal stored message: %v", err)
+	}
+	return messagepkg.Message{ID: id, SessionID: sessionID, Role: role, Content: content}
 }

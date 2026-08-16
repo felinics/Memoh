@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -76,8 +77,16 @@ func (*recordingMessageService) LocateByExternalIDBySession(context.Context, str
 	return messagepkg.LocateResult{}, nil
 }
 
-func (*recordingMessageService) GetByIDBySession(context.Context, string, string) (messagepkg.Message, error) {
-	return messagepkg.Message{}, nil
+func (s *recordingMessageService) GetByIDBySession(_ context.Context, sessionID, messageID string) (messagepkg.Message, error) {
+	for _, input := range s.persisted {
+		if input.SessionID == sessionID && input.Role == "user" {
+			return messagepkg.Message{
+				ID: messageID, SessionID: sessionID, Role: input.Role,
+				Content: input.Content, DisplayContent: input.DisplayText,
+			}, nil
+		}
+	}
+	return messagepkg.Message{}, errors.New("message not found")
 }
 
 func (*recordingMessageService) ListVisibleFromBySession(context.Context, string, string) ([]messagepkg.Message, error) {

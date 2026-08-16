@@ -176,7 +176,7 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 		c.service.LinkOutboundAssets(ctx, c.req.BotID, c.req.ThreadID, outboundAssetRefsToMessageRefs(c.req.OutboundAssetCollector()))
 	}
 	if !c.req.SkipMemoryExtraction && len(memoryPersisted) == len(messages) && len(memoryPersisted) > 0 {
-		go c.service.storeMemory(ctx, c.req, messages, memoryPersisted)
+		go c.service.storeMemory(ctx, c.req, memoryPersisted)
 	}
 	if inputTokens > 0 {
 		go c.service.maybeCompact(ctx, c.req, c.rc, inputTokens)
