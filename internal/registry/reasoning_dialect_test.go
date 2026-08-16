@@ -9,9 +9,9 @@ import (
 )
 
 // Declaring a wire dialect per model is what lets the code avoid sniffing model
-// ids, but it moves a cost: a new model added without one silently falls back to
-// the provider's modern default. For Google that fallback is wrong half the time
-// — a 2.5 model treated as 3.x gets thinkingLevel, which the API rejects.
+// ids, but it moves a cost: a new controllable model added without one has to fail
+// closed and sends no control. That is safe for upgrades, but it would quietly
+// turn a newly catalogued picker's choices into a placebo.
 //
 // This test is the tripwire. It is scoped to providers whose generations actually
 // disagree about the wire shape; elsewhere an empty dialect is correct and
@@ -40,7 +40,19 @@ func TestGoogleReasoningModelsDeclareAWireDialect(t *testing.T) {
 
 	for _, m := range doc.Models {
 		mode, _ := m.Config["thinking_mode"].(string)
-		if mode == "" || mode == "none" {
+		compatibilities, _ := m.Config["compatibilities"].([]any)
+		hasReasoning := false
+		for _, compatibility := range compatibilities {
+			if compatibility == "reasoning" {
+				hasReasoning = true
+				break
+			}
+		}
+		if !hasReasoning || mode == "none" || mode == "always" {
+			continue
+		}
+		if mode == "" {
+			t.Errorf("%s declares reasoning compatibility but no thinking_mode", m.ModelID)
 			continue
 		}
 		dialect, _ := m.Config["reasoning_dialect"].(string)
@@ -93,5 +105,53 @@ func TestGoogleBudgetModelsDeclareOffSupport(t *testing.T) {
 			t.Errorf("%s must declare reasoning_off_support as accepted or rejected; got %q",
 				m.ModelID, offSupport)
 		}
+	}
+}
+
+func TestMinimaxReasoningModelsDeclareAMode(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile("../../conf/providers/minimax.yaml") //nolint:gosec // repo-local template
+	if err != nil {
+		t.Fatalf("read minimax.yaml: %v", err)
+	}
+	var doc struct {
+		Models []struct {
+			ModelID string         `yaml:"model_id"`
+			Config  map[string]any `yaml:"config"`
+		} `yaml:"models"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse minimax.yaml: %v", err)
+	}
+
+	foundM27 := false
+	for _, m := range doc.Models {
+		compatibilities, _ := m.Config["compatibilities"].([]any)
+		hasReasoning := false
+		for _, compatibility := range compatibilities {
+			if compatibility == "reasoning" {
+				hasReasoning = true
+				break
+			}
+		}
+		if m.ModelID == "MiniMax-M2.7" {
+			foundM27 = true
+			mode, _ := m.Config["thinking_mode"].(string)
+			if !hasReasoning || mode != "always" {
+				t.Errorf("%s is an always-on reasoning model; compatibilities = %v, thinking_mode = %q",
+					m.ModelID, compatibilities, mode)
+			}
+		}
+		if !hasReasoning {
+			continue
+		}
+		mode, _ := m.Config["thinking_mode"].(string)
+		if mode != "always" && mode != "toggle" {
+			t.Errorf("%s declares reasoning compatibility but thinking_mode is %q", m.ModelID, mode)
+		}
+	}
+	if !foundM27 {
+		t.Fatal("MiniMax-M2.7 is missing from the provider catalog")
 	}
 }

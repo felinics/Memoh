@@ -160,6 +160,27 @@ func TestReasoningResolvedUnsupportedDoesNotUseFallback(t *testing.T) {
 	}
 }
 
+func TestReasoningAlwaysOnModelReportsNoControl(t *testing.T) {
+	t.Parallel()
+
+	handler, queries, botID := newReasoningCommandHarness(t,
+		`{"compatibilities":["reasoning"],"thinking_mode":"always"}`,
+		nil, nil,
+	)
+	for _, command := range []string{"/reasoning", "/reasoning set high"} {
+		result := executeReasoningCommand(t, handler, botID, command)
+		if got, want := result.Text, "The current model always reasons and exposes no reasoning controls."; got != want {
+			t.Fatalf("%s response = %q, want %q", command, got, want)
+		}
+		if result.Interactive != nil {
+			t.Fatalf("%s returned empty choices: %+v", command, result.Interactive)
+		}
+	}
+	if queries.upsertAttempts != 0 {
+		t.Fatalf("always-on model entered persistence path %d time(s)", queries.upsertAttempts)
+	}
+}
+
 func TestReasoningLookupFailuresFailClosed(t *testing.T) {
 	t.Parallel()
 

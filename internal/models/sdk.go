@@ -339,7 +339,8 @@ func googleThinkingFor(cfg SDKModelConfig) (googlegenerative.ThinkingConfig, boo
 		return googlegenerative.ThinkingConfig{}, false
 	}
 
-	if cfg.ReasoningDialect == reasoning.DialectBudget {
+	switch cfg.ReasoningDialect {
+	case reasoning.DialectBudget:
 		budget, ok := googleBudgetFor(
 			rc,
 			cfg.ThinkingBudgetMin,
@@ -354,19 +355,25 @@ func googleThinkingFor(cfg SDKModelConfig) (googlegenerative.ThinkingConfig, boo
 			thinking.IncludeThoughts = boolPtr(true)
 		}
 		return thinking, true
-	}
-
-	// Tier dialect (Gemini 3.x). There is no off value on this wire — minimal is
-	// the floor — so a disabled model sends nothing and lets the provider default
-	// stand. OptionsFor keeps Off out of the picker for such models, so reaching
-	// here with Disabled means a stale stored setting rather than a user choice.
-	if !rc.Active || rc.Effort == "" {
+	case reasoning.DialectTier:
+		// Tier dialect (Gemini 3.x). There is no off value on this wire — minimal
+		// is the floor — so a disabled model sends nothing and lets the provider
+		// default stand. OptionsFor keeps Off out of the picker for such models, so
+		// reaching here with Disabled means a stale stored setting.
+		if !rc.Active || rc.Effort == "" {
+			return googlegenerative.ThinkingConfig{}, false
+		}
+		return googlegenerative.ThinkingConfig{
+			ThinkingLevel:   rc.Effort,
+			IncludeThoughts: boolPtr(true),
+		}, true
+	default:
+		// Rows imported before the dialect field existed carry no trustworthy wire
+		// declaration. Preserve their pre-upgrade request shape until a trusted
+		// catalog re-import backfills it; guessing tier here makes old Gemini 2.5
+		// rows send thinkingLevel and hard-fail.
 		return googlegenerative.ThinkingConfig{}, false
 	}
-	return googlegenerative.ThinkingConfig{
-		ThinkingLevel:   rc.Effort,
-		IncludeThoughts: boolPtr(true),
-	}, true
 }
 
 // googleBudgetFor resolves a tier into a token budget within the model's range,

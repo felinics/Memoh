@@ -510,18 +510,6 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, mo
 	return true
 }
 
-// preserveDeclaredCapabilities lets discovery refresh the tier list while keeping
-// capability tokens it structurally cannot know about.
-//
-// The disable token declares that a model can be turned off. For providers whose
-// off travels outside the effort field — DeepSeek and MiniMax through
-// chat_completions_compat, Gemini 2.5 Flash through a zero budget — no upstream
-// catalog reports it, so it can only ever come from a hand-maintained template.
-// Replacing the list wholesale on each refresh silently revoked the capability
-// and dropped Off from the picker, which is worse than a stale tier list.
-//
-// Only tokens absent from discovery are carried over, so a genuine upstream change
-// still lands.
 // modelConfigFromRemote builds the stored config for an imported model. It exists
 // as a named function so a test can assert that every wire declaration survives
 // the import path: a dialect or off-support token lost here is lost for every row
@@ -543,6 +531,14 @@ func modelConfigFromRemote(m providers.RemoteModel, compatibilities []string) mo
 	}
 }
 
+// preserveDeclaredCapabilities lets generic discovery refresh the tier list while
+// keeping capability tokens it structurally cannot know about.
+//
+// The disable token declares that a model can be turned off. For providers whose
+// off travels outside the effort field — DeepSeek through chat_completions_compat,
+// Gemini 2.5 Flash through a zero budget — the hand-maintained template is the only
+// source. Managed Codex/Copilot catalogs skip this helper and replace the list
+// exactly, so an upstream removal can revoke Off.
 func preserveDeclaredCapabilities(stored, discovered []string) []string {
 	out := append([]string(nil), discovered...)
 	for _, token := range []string{models.ReasoningEffortDisable} {
@@ -559,12 +555,32 @@ func mergeManagedDiscoveredConfig(existing, discovered models.ModelConfig) (mode
 		out.Compatibilities = append([]string(nil), discovered.Compatibilities...)
 		changed = true
 	}
-	if wanted := preserveDeclaredCapabilities(out.ReasoningEfforts, discovered.ReasoningEfforts); !slices.Equal(out.ReasoningEfforts, wanted) {
-		out.ReasoningEfforts = wanted
+	if !slices.Equal(out.ReasoningEfforts, discovered.ReasoningEfforts) {
+		out.ReasoningEfforts = append([]string(nil), discovered.ReasoningEfforts...)
 		changed = true
 	}
-	if discovered.ThinkingMode != "" && out.ThinkingMode != discovered.ThinkingMode {
+	if out.ThinkingMode != discovered.ThinkingMode {
 		out.ThinkingMode = discovered.ThinkingMode
+		changed = true
+	}
+	if out.ReasoningDialect != discovered.ReasoningDialect {
+		out.ReasoningDialect = discovered.ReasoningDialect
+		changed = true
+	}
+	if out.ReasoningOffSupport != discovered.ReasoningOffSupport {
+		out.ReasoningOffSupport = discovered.ReasoningOffSupport
+		changed = true
+	}
+	if !sameBoolPointer(out.ReasoningDefaultOn, discovered.ReasoningDefaultOn) {
+		out.ReasoningDefaultOn = discovered.ReasoningDefaultOn
+		changed = true
+	}
+	if !sameIntPointer(out.ThinkingBudgetMin, discovered.ThinkingBudgetMin) {
+		out.ThinkingBudgetMin = discovered.ThinkingBudgetMin
+		changed = true
+	}
+	if !sameIntPointer(out.ThinkingBudgetMax, discovered.ThinkingBudgetMax) {
+		out.ThinkingBudgetMax = discovered.ThinkingBudgetMax
 		changed = true
 	}
 	return out, changed
@@ -593,6 +609,26 @@ func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.Mode
 			changed = true
 		}
 	}
+	if discovered.ReasoningDialect != "" && discovered.ReasoningDialect != out.ReasoningDialect {
+		out.ReasoningDialect = discovered.ReasoningDialect
+		changed = true
+	}
+	if discovered.ReasoningOffSupport != "" && discovered.ReasoningOffSupport != out.ReasoningOffSupport {
+		out.ReasoningOffSupport = discovered.ReasoningOffSupport
+		changed = true
+	}
+	if discovered.ReasoningDefaultOn != nil && !sameBoolPointer(out.ReasoningDefaultOn, discovered.ReasoningDefaultOn) {
+		out.ReasoningDefaultOn = discovered.ReasoningDefaultOn
+		changed = true
+	}
+	if discovered.ThinkingBudgetMin != nil && !sameIntPointer(out.ThinkingBudgetMin, discovered.ThinkingBudgetMin) {
+		out.ThinkingBudgetMin = discovered.ThinkingBudgetMin
+		changed = true
+	}
+	if discovered.ThinkingBudgetMax != nil && !sameIntPointer(out.ThinkingBudgetMax, discovered.ThinkingBudgetMax) {
+		out.ThinkingBudgetMax = discovered.ThinkingBudgetMax
+		changed = true
+	}
 	if discovered.ContextWindow != nil && (out.ContextWindow == nil || *discovered.ContextWindow != *out.ContextWindow) {
 		out.ContextWindow = discovered.ContextWindow
 		changed = true
@@ -610,4 +646,12 @@ func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.Mode
 		}
 	}
 	return out, changed
+}
+
+func sameBoolPointer(left, right *bool) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func sameIntPointer(left, right *int) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }

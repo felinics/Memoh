@@ -77,4 +77,14 @@ describe('reconcileStoredEffort', () => {
   it('clears the value for a model with no thinking concept', () => {
     expect(reconcileStoredEffort('high', NO_THINKING)).toBe('')
   })
+
+  it('keeps a dormant preference for an always-on model with no controls', () => {
+    const alwaysOn = options({
+      can_disable: false,
+      efforts: [],
+      default_effort: undefined,
+    })
+    expect(reconcileStoredEffort('high', alwaysOn)).toBe('high')
+    expect(reconcileStoredEffort('none', alwaysOn)).toBe('disable')
+  })
 })

@@ -49,6 +49,13 @@ func ResolveConfig(mode string, advertised []string, options Options, stored, re
 	if !Supported(mode) || !options.Supported {
 		return nil
 	}
+	if mode == ModeAlways || (!options.CanDisable && len(options.Efforts) == 0) {
+		// The provider owns the decision completely. Supplying a synthetic medium
+		// tier turns an uncontrollable model into a control it never advertised.
+		// The second condition also covers legacy Google rows that predate the
+		// dialect declaration and therefore cannot safely expose a wire control.
+		return nil
+	}
 
 	levels := effectiveEfforts(advertised, clientType)
 	offEffort := offEffortFor(levels)

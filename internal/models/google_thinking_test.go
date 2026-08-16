@@ -24,6 +24,17 @@ func TestGoogleThinkingFollowsTheDeclaredDialect(t *testing.T) {
 		wantBudget *int
 	}{
 		{
+			// Rows imported before reasoning_dialect existed must retain the old
+			// request shape until a trusted catalog refresh backfills the field.
+			// Treating an empty declaration as the newest dialect sends
+			// thinkingLevel to Gemini 2.5, which rejects the request.
+			name: "legacy row without a dialect sends no control",
+			cfg: SDKModelConfig{
+				ReasoningConfig: &ReasoningConfig{Active: true, Effort: ReasoningEffortHigh},
+			},
+			wantSend: false,
+		},
+		{
 			name: "3.x sends a named level",
 			cfg: SDKModelConfig{
 				ReasoningDialect: reasoning.DialectTier,

@@ -111,6 +111,34 @@ func TestApplyReasoningPolicy(t *testing.T) {
 		}
 	})
 
+	t.Run("always-on model preserves dormant preference", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{opts: reasoning.Options{Supported: true}}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortXHigh}
+		newModelID := modelID
+		if err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{ChatModelID: &newModelID}); err != nil {
+			t.Fatal(err)
+		}
+		if current.ReasoningEffort != reasoning.EffortXHigh {
+			t.Fatalf("dormant preference = %q, want xhigh", current.ReasoningEffort)
+		}
+	})
+
+	t.Run("always-on model rejects an explicit tier", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{opts: reasoning.Options{Supported: true}}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortHigh}
+		requested := reasoning.EffortLow
+		err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{ReasoningEffort: &requested})
+		var invalid *InvalidReasoningEffortError
+		if !errors.As(err, &invalid) || invalid.Effort != reasoning.EffortLow {
+			t.Fatalf("error = %#v, want invalid low error", err)
+		}
+		if current.ReasoningEffort != reasoning.EffortHigh {
+			t.Fatalf("rejected write changed effort to %q", current.ReasoningEffort)
+		}
+	})
+
 	t.Run("lookup failure fails closed", func(t *testing.T) {
 		resolver := &stubReasoningOptionsResolver{err: errors.New("SECRET provider failure")}
 		service := &Service{reasoningResolver: resolver}

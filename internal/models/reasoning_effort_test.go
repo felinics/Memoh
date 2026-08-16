@@ -149,3 +149,20 @@ func TestNearestEffortToMediumNeverReturnsOff(t *testing.T) {
 		t.Errorf("NearestEffortToMedium([disable high]) = %q, want high", got)
 	}
 }
+
+func TestLegacyGoogleRowIsSupportedWithoutAControl(t *testing.T) {
+	t.Parallel()
+
+	m := Model{
+		ModelID: "gemini-2.5-pro",
+		Type:    ModelTypeChat,
+		Config: ModelConfig{
+			Compatibilities:  []string{CompatReasoning},
+			ReasoningEfforts: []string{ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh},
+		},
+	}
+	opts := m.ReasoningOptions(string(ClientTypeGoogleGenerativeAI))
+	if !opts.Supported || opts.CanDisable || len(opts.Efforts) != 0 || opts.DefaultEffort != "" {
+		t.Fatalf("legacy Google options = %+v, want supported without controls", opts)
+	}
+}

@@ -60,6 +60,48 @@ models:
 	}
 }
 
+func TestEnrichFilePreservesHandMaintainedAlwaysMode(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := capabilities.NewResolver([]byte(`{
+		"always-model": {"mode": "chat", "supports_reasoning": false}
+	}`))
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "provider.yaml")
+	raw := []byte(`name: Test
+client_type: openai-completions
+models:
+  - model_id: always-model
+    name: Always
+    type: chat
+    config:
+      compatibilities: [reasoning, tool-call]
+      thinking_mode: always
+`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	changed, err := enrichFile(path, resolver, false)
+	if err != nil {
+		t.Fatalf("enrichFile: %v", err)
+	}
+	if changed != 0 {
+		t.Fatalf("changed = %d, want 0", changed)
+	}
+	got, err := os.ReadFile(path) //nolint:gosec // test reads its own temp fixture
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if string(got) != string(raw) {
+		t.Fatalf("hand-maintained always mode should remain authoritative:\n%s", got)
+	}
+}
+
 func TestEnrichFileLeavesPlainNoReasonModelUntouched(t *testing.T) {
 	t.Parallel()
 

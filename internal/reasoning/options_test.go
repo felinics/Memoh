@@ -124,6 +124,27 @@ func TestOptionsForUnsupportedModelOffersNothing(t *testing.T) {
 	}
 }
 
+func TestAlwaysOnModelIsSupportedWithoutAControl(t *testing.T) {
+	t.Parallel()
+
+	opts := OptionsFor(ModeAlways, []string{EffortLow, EffortHigh}, "openai-completions", OffSupportAccepted)
+	if !opts.Supported || opts.CanDisable || len(opts.Efforts) != 0 || opts.DefaultEffort != "" {
+		t.Fatalf("always-on options = %+v, want supported with no controls", opts)
+	}
+	if cfg := ResolveConfig(ModeAlways, []string{EffortLow, EffortHigh}, opts, EffortHigh, EffortLow, "openai-completions"); cfg != nil {
+		t.Fatalf("always-on model received a synthetic control: %+v", cfg)
+	}
+	if cfg := ResolveConfig(ModeToggle, []string{EffortLow, EffortHigh}, Options{Supported: true}, EffortHigh, EffortLow, "google-generative-ai"); cfg != nil {
+		t.Fatalf("supported-but-uncontrollable model received a synthetic control: %+v", cfg)
+	}
+	if got := ReconcileStored(EffortHigh, opts); got != EffortHigh {
+		t.Fatalf("dormant preference = %q, want high", got)
+	}
+	if got := ReconcileStored(EffortNone, opts); got != EffortDisable {
+		t.Fatalf("legacy dormant off = %q, want disable", got)
+	}
+}
+
 func TestOptionsForAppliesTheSameWirePolicyAsResolve(t *testing.T) {
 	t.Parallel()
 

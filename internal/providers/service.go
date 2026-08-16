@@ -449,7 +449,7 @@ func remoteModelsFromCatalog(items []sqlc.TemplateProviderTemplateModel) []Remot
 			ReasoningDialect:    configString(cfg, "reasoning_dialect"),
 			ReasoningOffSupport: configString(cfg, "reasoning_off_support"),
 			ReasoningDefaultOn:  configBoolPtr(cfg, "reasoning_default_on"),
-			ThinkingBudgetMin:   configIntPtr(cfg, "thinking_budget_min"),
+			ThinkingBudgetMin:   configNonNegativeIntPtr(cfg, "thinking_budget_min"),
 			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
 			ContextWindow:       configIntPtr(cfg, "context_window"),
 			Dimensions:          configIntPtr(cfg, "dimensions"),
@@ -477,7 +477,8 @@ func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
 			ThinkingMode:        configString(cfg, "thinking_mode"),
 			ReasoningDialect:    configString(cfg, "reasoning_dialect"),
 			ReasoningOffSupport: configString(cfg, "reasoning_off_support"),
-			ThinkingBudgetMin:   configIntPtr(cfg, "thinking_budget_min"),
+			ReasoningDefaultOn:  configBoolPtr(cfg, "reasoning_default_on"),
+			ThinkingBudgetMin:   configNonNegativeIntPtr(cfg, "thinking_budget_min"),
 			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
 			ContextWindow:       configIntPtr(cfg, "context_window"),
 			Dimensions:          configIntPtr(cfg, "dimensions"),
@@ -656,6 +657,29 @@ func configIntPtr(cfg map[string]any, key string) *int {
 		}
 	case float64:
 		if value > 0 {
+			out := int(value)
+			return &out
+		}
+	}
+	return nil
+}
+
+func configNonNegativeIntPtr(cfg map[string]any, key string) *int {
+	if cfg == nil {
+		return nil
+	}
+	switch value := cfg[key].(type) {
+	case int:
+		if value >= 0 {
+			return &value
+		}
+	case int64:
+		if value >= 0 {
+			out := int(value)
+			return &out
+		}
+	case float64:
+		if value >= 0 {
 			out := int(value)
 			return &out
 		}

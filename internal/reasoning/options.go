@@ -1,5 +1,7 @@
 package reasoning
 
+import "strings"
+
 // Options is what a caller may select for a model: the answer every surface needs
 // before it can render a picker, a slash-command choice list, or an API response.
 //
@@ -132,6 +134,15 @@ func canDisable(mode string, levels []string, clientType, offSupport string) boo
 func ReconcileStored(stored string, opts Options) string {
 	if !opts.Supported {
 		return ""
+	}
+	if !opts.CanDisable && len(opts.Efforts) == 0 {
+		// An always-on model exposes no selection to reconcile against. Keep the
+		// preference dormant so switching back restores it, while canonicalizing
+		// the legacy spelling of off at the storage boundary.
+		if IsDisabled(stored) {
+			return EffortDisable
+		}
+		return strings.TrimSpace(stored)
 	}
 	if IsDisabled(stored) {
 		if opts.CanDisable {

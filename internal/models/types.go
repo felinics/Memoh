@@ -94,6 +94,7 @@ func NearestEffortToMedium(levels []string) string {
 const (
 	ThinkingModeAdaptive     = reasoning.ModeAdaptive
 	ThinkingModeToggle       = reasoning.ModeToggle
+	ThinkingModeAlways       = reasoning.ModeAlways
 	ThinkingModeOnlyAdaptive = reasoning.ModeOnlyAdaptive
 	ThinkingModeNone         = reasoning.ModeNone
 )
@@ -137,8 +138,9 @@ type ModelConfig struct {
 	// which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
 	// token budget while 3.x takes a named level, and the two are mutually
 	// exclusive on the same request. Declared per model because the alternative is
-	// sniffing the model id, and an id is not a capability. Empty means the
-	// provider's modern default.
+	// sniffing the model id, and an id is not a capability. Empty leaves provider
+	// policy in charge; Google's adaptor deliberately sends no thinking control so
+	// pre-dialect rows retain their safe pre-upgrade request shape.
 	ReasoningDialect string `json:"reasoning_dialect,omitempty"`
 	// ReasoningOffSupport declares how the model answers an explicit request to
 	// stop thinking. Anthropic's per-model table splits models that share a
@@ -254,8 +256,19 @@ func (m *Model) ResolveThinkingMode() string {
 // It is the single source every surface reads — the web picker, /reasoning, and
 // the API all render this rather than deriving their own answer.
 func (m *Model) ReasoningOptions(clientType string) reasoning.Options {
+	mode := m.ResolveThinkingMode()
+	if clientType == string(ClientTypeGoogleGenerativeAI) &&
+		mode != reasoning.ModeAlways &&
+		mode != reasoning.ModeNone &&
+		m.Config.ReasoningDialect == "" {
+		// Google generations use mutually exclusive wire fields. An imported row
+		// from before the dialect schema has no safe selectable control until a
+		// trusted catalog refresh backfills it, so project the model as supported
+		// but uncontrollable instead of advertising a picker the adaptor ignores.
+		return reasoning.Options{Supported: true}
+	}
 	return reasoning.OptionsFor(
-		m.ResolveThinkingMode(),
+		mode,
 		m.Config.ReasoningEfforts,
 		clientType,
 		m.Config.ReasoningOffSupport,

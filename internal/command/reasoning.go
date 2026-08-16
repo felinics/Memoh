@@ -66,6 +66,9 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if !opts.Supported {
 				return &Result{Text: cc.T("cmd.reasoning.unsupported")}, nil
 			}
+			if !hasReasoningControls(opts) {
+				return &Result{Text: cc.T("cmd.reasoning.uncontrollable")}, nil
+			}
 			return reasoningResult(cc.L, s.ReasoningEffort, opts), nil
 		},
 	})
@@ -87,6 +90,9 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			}
 			if !opts.Supported {
 				return &Result{Text: cc.T("cmd.reasoning.unsupported")}, nil
+			}
+			if !hasReasoningControls(opts) {
+				return &Result{Text: cc.T("cmd.reasoning.uncontrollable")}, nil
 			}
 			choices := reasoningChoicesFor(opts)
 			if len(cc.Args) < 1 {
@@ -191,6 +197,10 @@ func reasoningChoicesFor(opts reasoning.Options) []string {
 		out = append(out, offChoice)
 	}
 	return append(out, tiers...)
+}
+
+func hasReasoningControls(opts reasoning.Options) bool {
+	return opts.Supported && (opts.CanDisable || len(opts.Efforts) > 0)
 }
 
 // acceptsEffort reports whether a typed selection can be stored. Off follows the

@@ -512,6 +512,7 @@
       "setUsage": "使い方: /reasoning set <{levels}>",
       "unavailable": "推論は現在利用できません。",
       "unsupported": "現在のモデルは推論に対応していません。",
+      "uncontrollable": "現在のモデルは常に推論を行い、調整可能な推論設定はありません。",
       "unknownLevel": "不明なレベル {level} —— 利用可能なレベル: {levels}。"
     },
     "error": {

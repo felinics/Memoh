@@ -512,6 +512,7 @@
       "setUsage": "Usage: /reasoning set <{levels}>",
       "unavailable": "Reasoning isn't available right now.",
       "unsupported": "The current model doesn't support reasoning.",
+      "uncontrollable": "The current model always reasons and exposes no reasoning controls.",
       "unknownLevel": "Unknown level {level} — available levels: {levels}."
     },
     "error": {

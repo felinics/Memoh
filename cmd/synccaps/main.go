@@ -188,7 +188,7 @@ func applyToModel(model *yaml.Node, mode string, efforts []string) bool {
 	// Hand-maintained tokens the registry cannot know about are preserved rather
 	// than overwritten. LiteLLM's only off signal is the OpenAI-wire
 	// supports_none_reasoning_effort flag, so where off travels another way
-	// (DeepSeek/MiniMax toggle via chat_completions_compat, Gemini 2.5 Flash via a
+	// (DeepSeek toggle via chat_completions_compat, Gemini 2.5 Flash via a
 	// zero budget) the token can only come from the template. The same holds for
 	// minimal, which the registry reports for exactly one model family while
 	// Gemini 3.x accepts it as its floor. Registry silence is not evidence of
@@ -252,11 +252,16 @@ func applyFileInputToModel(model *yaml.Node) bool {
 }
 
 // applyNoReasonToModel records an explicit no-reasoning discovery only when the
-// template already carries stale reasoning metadata. It does not create a config
-// block for ordinary non-reasoning models.
+// template already carries stale derived reasoning metadata. A hand-maintained
+// always declaration is authoritative because registry negatives can lag the
+// provider's first-party contract. It does not create a config block for ordinary
+// non-reasoning models.
 func applyNoReasonToModel(model *yaml.Node) bool {
 	cfg := mapValue(model, "config")
 	if cfg == nil || !hasReasoningResidue(cfg) {
+		return false
+	}
+	if scalarValue(mapValue(cfg, "thinking_mode")) == "always" {
 		return false
 	}
 

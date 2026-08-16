@@ -59,11 +59,18 @@ export function selectableEfforts(options?: ReasoningOptions | null): string[] {
 // capability derivation: every input it reads was decided server-side.
 export function reconcileStoredEffort(stored: string, options?: ReasoningOptions | null): string {
   if (!options?.supported) return ''
+  const tiers = options.efforts ?? []
+  if (!options.can_disable && tiers.length === 0) {
+    // Always-on models expose no selection to migrate to. Keep the preference
+    // dormant so switching back restores it and the settings autosave does not
+    // oscillate between an empty local value and the stored server value.
+    return stored === REASONING_EFFORT_LEGACY_OFF ? REASONING_EFFORT_DISABLE : stored
+  }
   const fallback = options.default_effort ?? ''
   // Both spellings of off are honoured: rows written before the two tokens were
   // unified still say "none", and they describe the same state.
   if (stored === REASONING_EFFORT_DISABLE || stored === REASONING_EFFORT_LEGACY_OFF) {
     return options.can_disable ? REASONING_EFFORT_DISABLE : fallback
   }
-  return (options.efforts ?? []).includes(stored) ? stored : fallback
+  return tiers.includes(stored) ? stored : fallback
 }

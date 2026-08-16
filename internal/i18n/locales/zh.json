@@ -512,6 +512,7 @@
       "setUsage": "用法：/reasoning set <{levels}>",
       "unavailable": "推理功能暂不可用。",
       "unsupported": "当前模型不支持推理。",
+      "uncontrollable": "当前模型始终进行推理，且不提供可调节的推理选项。",
       "unknownLevel": "未知级别 {level} —— 可用级别：{levels}。"
     },
     "error": {
