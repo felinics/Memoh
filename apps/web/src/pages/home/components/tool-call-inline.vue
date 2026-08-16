@@ -10,6 +10,10 @@
       :tone="display.isError ? 'error' : 'cop'"
       @toggle="toggleOpen"
     >
+      <ConnectorLogo
+        v-if="connector"
+        :connector="connector"
+      />
       <span
         v-if="showActionLabel"
         class="shrink-0"
@@ -66,6 +70,10 @@
       class="flex items-center gap-1.5 w-full py-px"
       :class="rowClass"
     >
+      <ConnectorLogo
+        v-if="connector"
+        :connector="connector"
+      />
       <span
         v-if="showActionLabel"
         class="shrink-0"
@@ -175,11 +183,13 @@ import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { useConnectorLogos } from '../composables/useConnectorLogos'
 import {
   getToolDisplay,
   isDirPathTool,
   isFilePathTool,
 } from './tool-call-registry'
+import ConnectorLogo from './tool-detail/connector-logo.vue'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
@@ -193,6 +203,11 @@ const { t } = useI18n()
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const display = computed(() => getToolDisplay(props.block))
+
+// A Connect-It tool carries its binding's alias in the tool name; when that
+// alias resolves to one of the bot's connectors the row leads with its logo.
+const connectorLookup = useConnectorLogos()
+const connector = computed(() => connectorLookup.value(props.block.toolName))
 const executionLocationLabel = computed(() => {
   const location = props.block.execution_location
   if (!location) return ''
