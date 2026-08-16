@@ -40,7 +40,7 @@ const (
 	MetadataKeySourcePath = "source_path"
 	MetadataKeySourceURL  = "source_url"
 
-	containerMediaSubdir = "media"
+	containerMediaSubdir = ".memoh/media"
 )
 
 // Normalize canonicalizes transport fields and fills lightweight derived data
@@ -381,7 +381,7 @@ func IsDataPath(raw string) bool {
 }
 
 // ExtractStorageKey derives the media storage key from a consumer-facing
-// `/data/media/...` access path.
+// `/data/.memoh/media/...` access path.
 func ExtractStorageKey(accessPath string) string {
 	marker := strings.TrimRight(MediaAccessPath(""), "/") + "/"
 	idx := strings.Index(strings.TrimSpace(accessPath), marker)

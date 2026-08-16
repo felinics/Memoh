@@ -254,10 +254,10 @@ func TestSessionPoolPromptFallsBackToAttachmentReferenceWhenImageUnsupported(t *
 		ProjectPath:              "/data/project",
 		Prompt:                   "inspect the image",
 		Images:                   []client.PromptImage{{Data: "aW1hZ2U=", MimeType: "image/png"}},
-		AttachmentReferences:     []string{"/data/media/aa/image.png"},
+		AttachmentReferences:     []string{"/data/.memoh/media/aa/image.png"},
 		CanFallbackImagesToFiles: true,
 		ContextURI:               "memoh://context/current-turn",
-		ContextMarkdown:          "Attachment path: /data/media/aa/image.png",
+		ContextMarkdown:          "Attachment path: /data/.memoh/media/aa/image.png",
 		RuntimeOwnerAccountID:    "user-1",
 	})
 	if err != nil {
@@ -276,9 +276,9 @@ func TestSessionPoolPromptSupportsAttachmentOnly(t *testing.T) {
 		SessionID:             "session-1",
 		AgentID:               acpprofile.AgentCodexID,
 		ProjectPath:           "/data/project",
-		AttachmentReferences:  []string{"/data/media/aa/pasted-text.txt"},
+		AttachmentReferences:  []string{"/data/.memoh/media/aa/pasted-text.txt"},
 		ContextURI:            "memoh://context/current-turn",
-		ContextMarkdown:       "Attachment path: /data/media/aa/pasted-text.txt",
+		ContextMarkdown:       "Attachment path: /data/.memoh/media/aa/pasted-text.txt",
 		RuntimeOwnerAccountID: "user-1",
 	})
 	if err != nil {

@@ -1,6 +1,6 @@
 // Package containerfs implements storage.Provider for bot containers
 // backed by gRPC calls to the in-container MCP service. Files are stored
-// inside the container's writable layer at /data/media/<subpath>.
+// inside the container's writable layer at /data/.memoh/media/<subpath>.
 package containerfs
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
-const containerMediaRoot = "media"
+const containerMediaRoot = ".memoh/media"
 
 // Provider stores media assets inside bot containers via gRPC.
 type Provider struct {

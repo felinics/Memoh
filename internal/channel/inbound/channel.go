@@ -3083,7 +3083,7 @@ func isHTTPURL(raw string) bool {
 }
 
 // extractStorageKey derives the media storage key from a container-internal
-// access path. The expected path format is /data/media/<storage_key>.
+// access path. The expected path format is /data/.memoh/media/<storage_key>.
 func extractStorageKey(accessPath string, _ string) string {
 	return attachment.ExtractStorageKey(accessPath)
 }

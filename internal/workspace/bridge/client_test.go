@@ -182,7 +182,7 @@ func TestClientReadRawMissingFileReturnsNotFoundImmediately(t *testing.T) {
 	t.Parallel()
 
 	client := newTestReadRawClient(t, map[string][]byte{})
-	_, err := client.ReadRaw(context.Background(), "/data/media/missing.jpg")
+	_, err := client.ReadRaw(context.Background(), "/data/.memoh/media/missing.jpg")
 	if err == nil {
 		t.Fatal("expected read raw to fail for missing file")
 	}
@@ -195,9 +195,9 @@ func TestClientReadRawPreservesFirstChunk(t *testing.T) {
 	t.Parallel()
 
 	client := newTestReadRawClient(t, map[string][]byte{
-		"/data/media/existing.jpg": []byte("hello"),
+		"/data/.memoh/media/existing.jpg": []byte("hello"),
 	})
-	reader, err := client.ReadRaw(context.Background(), "/data/media/existing.jpg")
+	reader, err := client.ReadRaw(context.Background(), "/data/.memoh/media/existing.jpg")
 	if err != nil {
 		t.Fatalf("ReadRaw returned error: %v", err)
 	}
@@ -216,9 +216,9 @@ func TestClientReadRawSupportsEmptyFile(t *testing.T) {
 	t.Parallel()
 
 	client := newTestReadRawClient(t, map[string][]byte{
-		"/data/media/empty.txt": {},
+		"/data/.memoh/media/empty.txt": {},
 	})
-	reader, err := client.ReadRaw(context.Background(), "/data/media/empty.txt")
+	reader, err := client.ReadRaw(context.Background(), "/data/.memoh/media/empty.txt")
 	if err != nil {
 		t.Fatalf("ReadRaw returned error: %v", err)
 	}
@@ -242,10 +242,10 @@ func TestClientWriteRawSupportsEmptyFile(t *testing.T) {
 		WorkspaceRoot:  root,
 		DataMount:      "/data",
 	}))
-	if _, err := client.WriteRaw(context.Background(), "/data/media/empty.txt", bytes.NewReader(nil)); err != nil {
+	if _, err := client.WriteRaw(context.Background(), "/data/.memoh/media/empty.txt", bytes.NewReader(nil)); err != nil {
 		t.Fatalf("WriteRaw() error = %v", err)
 	}
-	info, err := os.Stat(filepath.Join(root, "media", "empty.txt"))
+	info, err := os.Stat(filepath.Join(root, ".memoh", "media", "empty.txt"))
 	if err != nil {
 		t.Fatalf("stat empty file: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestClientWriteRawDoesNotReplaceTargetOnReaderFailure(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	target := filepath.Join(root, "media", "asset.txt")
+	target := filepath.Join(root, ".memoh", "media", "asset.txt")
 	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		t.Fatalf("mkdir target: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestClientWriteRawDoesNotReplaceTargetOnReaderFailure(t *testing.T) {
 		WorkspaceRoot:  root,
 		DataMount:      "/data",
 	}))
-	if _, err := client.WriteRaw(context.Background(), "/data/media/asset.txt", &failAfterDataReader{}); err == nil {
+	if _, err := client.WriteRaw(context.Background(), "/data/.memoh/media/asset.txt", &failAfterDataReader{}); err == nil {
 		t.Fatal("WriteRaw() error = nil, want reader failure")
 	}
 

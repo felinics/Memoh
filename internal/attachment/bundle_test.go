@@ -169,9 +169,9 @@ func TestBundleWithAssetAccess(t *testing.T) {
 		Mime:        "text/plain",
 		SizeBytes:   7,
 		StorageKey:  "bb/asset-2.txt",
-	}, "/data/media/bb/asset-2.txt")
+	}, "/data/.memoh/media/bb/asset-2.txt")
 
-	if bundle.Path != "/data/media/bb/asset-2.txt" {
+	if bundle.Path != "/data/.memoh/media/bb/asset-2.txt" {
 		t.Fatalf("expected access path preserved, got %q", bundle.Path)
 	}
 	if MetadataString(bundle.Metadata, MetadataKeySourcePath) != "/data/work/demo.txt" {
@@ -182,7 +182,7 @@ func TestBundleWithAssetAccess(t *testing.T) {
 func TestExtractStorageKey(t *testing.T) {
 	t.Parallel()
 
-	if got := ExtractStorageKey("/data/media/aa/demo.png"); got != "aa/demo.png" {
+	if got := ExtractStorageKey("/data/.memoh/media/aa/demo.png"); got != "aa/demo.png" {
 		t.Fatalf("unexpected storage key: %q", got)
 	}
 	if got := ExtractStorageKey("/tmp/demo.png"); got != "" {
@@ -193,10 +193,10 @@ func TestExtractStorageKey(t *testing.T) {
 func TestMediaAccessPath(t *testing.T) {
 	t.Parallel()
 
-	if got := MediaAccessPath("aa/demo.png"); got != "/data/media/aa/demo.png" {
+	if got := MediaAccessPath("aa/demo.png"); got != "/data/.memoh/media/aa/demo.png" {
 		t.Fatalf("unexpected media access path: %q", got)
 	}
-	if got := MediaAccessPath(""); got != "/data/media" {
+	if got := MediaAccessPath(""); got != "/data/.memoh/media" {
 		t.Fatalf("unexpected media root path: %q", got)
 	}
 }

@@ -37,8 +37,8 @@ func TestProvider_AccessPath(t *testing.T) {
 		key  string
 		want string
 	}{
-		{key: "bot-1/image/ab12/ab12cd.png", want: "/data/media/image/ab12/ab12cd.png"},
-		{key: "bot-1/file/xx/doc.pdf", want: "/data/media/file/xx/doc.pdf"},
+		{key: "bot-1/image/ab12/ab12cd.png", want: "/data/.memoh/media/image/ab12/ab12cd.png"},
+		{key: "bot-1/file/xx/doc.pdf", want: "/data/.memoh/media/file/xx/doc.pdf"},
 	}
 	for _, tt := range tests {
 		got := p.AccessPath(context.Background(), tt.key)

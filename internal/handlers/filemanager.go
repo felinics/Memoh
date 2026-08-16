@@ -22,7 +22,7 @@ import (
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
-const mediaContainerRoot = "/data/media"
+const mediaContainerRoot = "/data/.memoh/media"
 
 // ---------- request / response types ----------
 

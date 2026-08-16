@@ -574,7 +574,7 @@ func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFallback(t *testing.T) {
 		Content: mustUIMessageJSON(t, turn.ModelMessage{
 			Role: "user",
 			Content: mustUIRawJSON(t, `<message id="msg-image-only" sender="Test User (@test_user)" t="2026-05-08T19:08:58Z" channel="telegram" conversation="Test Group" type="group" target="test-group">
-<attachment path="/data/media/test/test-image.webp"/>
+<attachment path="/data/.memoh/media/test/test-image.webp"/>
 
 </message>`),
 		}),

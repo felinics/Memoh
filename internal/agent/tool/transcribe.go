@@ -21,7 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-const mediaDataPrefix = "/data/media/"
+const mediaDataPrefix = "/data/.memoh/media/"
 
 type TranscriptionProvider struct {
 	logger   *slog.Logger
@@ -70,11 +70,11 @@ func (p *TranscriptionProvider) Tools(ctx context.Context, session SessionContex
 	sess := session
 	return []sdk.Tool{{
 		Name:        ToolTranscribeAudio().String(),
-		Description: "Transcribe an audio or voice message into text. Use this when the user sent a voice message and you need to understand its contents. Accepts a bot media path such as /data/media/... or a direct URL.",
+		Description: "Transcribe an audio or voice message into text. Use this when the user sent a voice message and you need to understand its contents. Accepts a bot media path such as /data/.memoh/media/... or a direct URL.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":        map[string]any{"type": "string", "description": "Audio file path from the message context, usually under /data/media/..."},
+				"path":        map[string]any{"type": "string", "description": "Audio file path from the message context, usually under /data/.memoh/media/..."},
 				"url":         map[string]any{"type": "string", "description": "Direct audio URL when a path is unavailable"},
 				"language":    map[string]any{"type": "string", "description": "Optional language hint"},
 				"prompt":      map[string]any{"type": "string", "description": "Optional transcription prompt"},

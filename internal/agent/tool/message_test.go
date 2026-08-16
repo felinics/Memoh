@@ -137,7 +137,7 @@ func (messageTestAssetResolver) Ingest(context.Context, media.IngestInput) (medi
 }
 
 func (messageTestAssetResolver) AccessPath(_ context.Context, asset media.Asset) string {
-	return "/data/media/" + asset.ContentHash
+	return "/data/.memoh/media/" + asset.ContentHash
 }
 
 func (messageTestAssetResolver) IngestContainerFile(context.Context, string, string) (media.Asset, error) {
