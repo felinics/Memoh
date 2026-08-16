@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -234,7 +235,7 @@ func TestPersistTerminalSnapshotSkipsEmptyAssistantSnapshot(t *testing.T) {
 	}
 }
 
-func TestPersistTerminalSnapshotSkipsAbortedSnapshotBeforeVisibleOutput(t *testing.T) {
+func TestPersistTerminalSnapshotPersistsInterruptedMarkerWhenAbortedBeforeVisibleOutput(t *testing.T) {
 	t.Parallel()
 
 	messages := &recordingMessageService{}
@@ -254,13 +255,27 @@ func TestPersistTerminalSnapshotSkipsAbortedSnapshotBeforeVisibleOutput(t *testi
 		terminalSnapshot{
 			sdkMessages: []sdk.Message{sdk.AssistantMessage("partial answer")},
 			aborted:     true,
+			// visibleOutput defaults to false: the turn produced nothing visible
+			// before being interrupted.
 		},
 	); err != nil {
 		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
 	}
 
-	if len(messages.persisted) != 0 {
-		t.Fatalf("expected pre-output abort not to persist, got %#v", messages.persisted)
+	// Issue #1010 family: an aborted turn with no visible output must leave a
+	// trace instead of silently vanishing from history.
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted messages = %d, want user + interrupted marker, got %#v", len(messages.persisted), messages.persisted)
+	}
+	if messages.persisted[0].Role != "user" {
+		t.Fatalf("unexpected first persisted role: %q", messages.persisted[0].Role)
+	}
+	if messages.persisted[1].Role != "assistant" {
+		t.Fatalf("unexpected second persisted role: %q", messages.persisted[1].Role)
+	}
+	markerText := persistedTextContent(t, messages.persisted[1].Content)
+	if !strings.Contains(markerText, "[turn-interrupted]") {
+		t.Fatalf("persisted marker content %q missing [turn-interrupted] prefix", markerText)
 	}
 }
 

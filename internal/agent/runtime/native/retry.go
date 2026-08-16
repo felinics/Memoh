@@ -49,13 +49,28 @@ func isRetryableStreamError(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	// Network-level errors (connection refused, timeout, DNS)
+	// Network-level errors: connection refused/reset, EOF, DNS. These are
+	// transient connectivity failures worth reconnecting for. BUT a pure
+	// network timeout (net.Error with Timeout()==true, or the http.Client
+	// "Client.Timeout exceeded" error) must NOT be retried — retrying a timeout
+	// multiplies the already-long silent wait (issue #1010 family: 10 retries ×
+	// a 10-minute client timeout ≈ 100 minutes of silence). A timeout is a
+	// terminal condition that should fall through to final-state handling
+	// instead of entering the retry storm.
 	var netErr net.Error
 	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return false
+		}
 		return true
 	}
-	// HTTP status errors: retry on 429 and 5xx
+	// Belt-and-braces for "Client.Timeout exceeded (while awaiting headers)" /
+	// "Timeout exceeded" text even if the wrapping type doesn't satisfy net.Error.
 	errStr := err.Error()
+	if strings.Contains(errStr, "Client.Timeout exceeded") || strings.Contains(errStr, "Timeout exceeded") {
+		return false
+	}
+	// HTTP status errors: retry on 429 and 5xx
 	if err429Pattern.MatchString(errStr) {
 		return true
 	}

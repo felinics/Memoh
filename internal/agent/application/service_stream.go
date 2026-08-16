@@ -30,6 +30,13 @@ type terminalSnapshot struct {
 	visibleOutput  bool
 }
 
+// interruptedTurnMarker is the stable, human-visible marker persisted when a
+// turn aborts before producing any visible output (e.g. a provider timeout on
+// the very first response). The [turn-interrupted] prefix lets UI/history
+// tooling recognize the row as an interruption trace rather than a normal
+// assistant reply.
+const interruptedTurnMarker = "[turn-interrupted] ⚠️ 本轮在产出可见内容前被中断（原因：无响应/超时）。"
+
 func hasVisibleAgentStreamOutput(event native.StreamEvent) bool {
 	switch event.Type {
 	case native.EventTextDelta,
@@ -680,12 +687,24 @@ func (s *Service) persistTerminalSnapshot(ctx context.Context, req ChatRequest, 
 func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatRequest, rc resolvedContext, snap terminalSnapshot) ([]messagepkg.Message, error) {
 	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
 	if snap.aborted && !snap.visibleOutput {
-		s.logger.Info("skip persisting aborted terminal snapshot before visible output",
+		// Issue #1010 family: a turn that aborted before producing any visible
+		// output used to be dropped here, so the turn vanished from history with
+		// no trace and the user only saw silence. Instead of returning empty,
+		// replace the (empty) partial output with a stable, human-visible marker
+		// so the interruption leaves an auditable trace in the session history.
+		// The [turn-interrupted] prefix lets UI/history tooling recognize the row
+		// as an interrupted-turn marker rather than a normal assistant reply.
+		s.logger.Info("persisting interrupted-turn marker (aborted before visible output)",
 			slog.String("bot_id", req.BotID),
 			slog.String("chat_id", req.ChatID),
 			slog.Int("messages", len(outputMessages)),
 		)
-		return nil, nil
+		outputMessages = []ModelMessage{
+			{
+				Role:    "assistant",
+				Content: newTextContent(interruptedTurnMarker),
+			},
+		}
 	}
 	if !hasPersistableAssistantOutput(outputMessages) {
 		s.logger.Info("skip persisting terminal snapshot without assistant output",

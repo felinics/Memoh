@@ -416,9 +416,20 @@ func (s *Service) continueUserInputSession(
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	stream := s.agent.Stream(ctx, cfg)
+	// Guard against a silent provider stall (issue #1010 family): if no stream
+	// events arrive within the adaptive idle timeout, cancel the underlying
+	// context so the continuation terminates instead of hanging forever with no
+	// message to the user.
+	idleCtx, idleCancel := withIdleTimeout(ctx)
+	defer idleCancel.Stop()
+
+	stream := s.agent.Stream(idleCtx, cfg)
 	stored := false
 	for event := range stream {
+		idleCancel.Reset() // each event resets the idle timer
+		if event.Type == native.EventToolCallStart {
+			idleCancel.RecordToolCall()
+		}
 		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
 			lifecycleCause = eventErr
 		}
@@ -471,6 +482,13 @@ func (s *Service) continueUserInputSession(
 	if ctx.Err() != nil {
 		lifecycleCause = context.Cause(ctx)
 		return lifecycleCause
+	}
+	// The stream produced no events within the adaptive idle window and was
+	// cancelled by the watchdog backstop. Record the true cause (a deadline)
+	// so the terminal lifecycle reflects the stall rather than a generic
+	// "no terminal event" error.
+	if idleCancel.DidFire() && lifecycleCause == nil && !lifecycleDeferred {
+		lifecycleCause = context.DeadlineExceeded
 	}
 	if lifecycleCause == nil && !lifecycleDeferred && !terminalEventSeen {
 		lifecycleCause = errors.New("agent continuation ended without a terminal event")
