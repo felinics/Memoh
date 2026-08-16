@@ -27,9 +27,9 @@
         :title="isDefaultTarget ? currentName : t('chat.continueOn.label')"
         :aria-label="t('chat.continueOn.label')"
         class="order-2 min-w-0 max-w-48 self-end max-md:h-11 duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
-        :class="isDefaultTarget
-          ? 'composer-circle-press px-2 max-md:px-3'
-          : 'composer-pill-press shrink'"
+        :class="rendersAsPill
+          ? 'composer-pill-press shrink'
+          : 'composer-circle-press px-2 max-md:px-3'"
       >
         <span class="composer-pill-content inline-flex min-w-0 items-center">
           <Laptop
@@ -38,12 +38,11 @@
           />
           <!-- Spacing lives on the slot's children (ml-2), not the slot itself:
                a gap/padding on the collapsing container would survive the
-               collapse and the circle could never converge to 32px. The
-               expansion is gated to md+ — see the header comment. -->
+               collapse and the circle could never converge to 32px. -->
           <span
             class="inline-flex min-w-0 items-center overflow-hidden transition-[max-width,opacity] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
-            :class="isDefaultTarget ? 'max-w-0 opacity-0' : 'max-w-0 opacity-0 md:max-w-38 md:opacity-100'"
-            :aria-hidden="isDefaultTarget"
+            :class="rendersAsPill ? 'max-w-38 opacity-100' : 'max-w-0 opacity-0'"
+            :aria-hidden="!rendersAsPill"
           >
             <span class="ml-2 min-w-0 truncate text-label text-composer-control-label">{{ currentName }}</span>
             <ChevronDown
@@ -188,6 +187,7 @@ import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
 } from '@/lib/desktop-shell'
+import { useIsMobile } from '@/composables/useIsMobile'
 import {
   workspaceTargetAvailable,
   workspaceTargetName,
@@ -267,6 +267,13 @@ const isDefaultTarget = computed(() => (
     ? selectedTarget.value.kind === 'native'
     : !props.selectedTargetId
 ))
+
+// The pill form only exists on md+; on mobile the trigger always renders the
+// circle (see the header comment), so it must also PRESS and read like the
+// circle — same composer-circle-press, collapsed slot, hidden from SRs. This
+// is the single source of truth for which form is on screen.
+const isMobileShell = useIsMobile()
+const rendersAsPill = computed(() => !isDefaultTarget.value && !isMobileShell.value)
 
 function goToRuntimes(): void {
   void router.push({ name: 'runtimes' })

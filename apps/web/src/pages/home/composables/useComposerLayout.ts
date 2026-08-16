@@ -7,9 +7,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Comput
 // The composer is a fixed two-row card now (textarea on its own row, controls
 // below), so there is no pill↔multiline reflow to detect and no height morph
 // to drive — the card simply grows with the textarea's field-sizing. What
-// remains genuinely dynamic is the model trigger's max-width: the trigger
-// inherits the Button's shrink-0, so without a hard clamp a long model name
-// would push past the box instead of ellipsising.
+// remains genuinely dynamic is the model trigger's max-width: the clamp
+// reserves space for the sibling controls so the row never overflows, and
+// floors at 72px — below that the trigger's own `shrink` lets it truncate
+// rather than push past the box.
 
 // The strip beneath the bottom box (pb-8). Shared with the dock so the mask
 // can apply the same half-height rule to whatever box replaces the composer.
@@ -24,9 +25,11 @@ export interface ComposerLayoutDeps {
 }
 
 const MODEL_TRIGGER_MAX = 240 // max-w-60
-// Reservations use the max-md worst case (44px touch-floor controls). On
-// desktop this over-reserves ~24px — invisible at desktop widths; on mobile it
-// errs toward clamping the model name instead of letting the row overflow.
+// Reservations use the max-md worst case (44px touch-floor controls): exact on
+// mobile, while desktop over-reserves ~12px per 32px control (24–36px total
+// depending on the Continue-on form) — invisible at desktop widths, and the
+// error direction is clamping the model name rather than letting the row
+// overflow.
 const PLUS_SLOT = 48 // ＋ circle at its largest (max-md size-11 = 44) + gap-1
 const SEND_SLOT = 44 // mic/send circle at its largest (max-md size-11)
 const CONTINUE_ON_PILL = 196 // labeled pill cap (max-w-48 = 192) + gap-1
