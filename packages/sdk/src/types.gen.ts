@@ -2642,8 +2642,9 @@ export type ModelsModelConfig = {
      * which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
      * token budget while 3.x takes a named level, and the two are mutually
      * exclusive on the same request. Declared per model because the alternative is
-     * sniffing the model id, and an id is not a capability. Empty means the
-     * provider's modern default.
+     * sniffing the model id, and an id is not a capability. Empty leaves provider
+     * policy in charge; Google's adaptor deliberately sends no thinking control so
+     * pre-dialect rows retain their safe pre-upgrade request shape.
      */
     reasoning_dialect?: string;
     reasoning_efforts?: Array<string>;
@@ -7355,6 +7356,75 @@ export type PostBotsByBotIdMcpOpsBatchDeleteResponses = {
     204: unknown;
 };
 
+export type GetBotsByBotIdMcpOpsExportData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/bots/{bot_id}/mcp-ops/export';
+};
+
+export type GetBotsByBotIdMcpOpsExportErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMcpOpsExportError = GetBotsByBotIdMcpOpsExportErrors[keyof GetBotsByBotIdMcpOpsExportErrors];
+
+export type GetBotsByBotIdMcpOpsExportResponses = {
+    /**
+     * OK
+     */
+    200: McpExportResponse;
+};
+
+export type GetBotsByBotIdMcpOpsExportResponse = GetBotsByBotIdMcpOpsExportResponses[keyof GetBotsByBotIdMcpOpsExportResponses];
+
+export type PutBotsByBotIdMcpOpsImportData = {
+    /**
+     * mcpServers dict
+     */
+    body: McpImportRequest;
+    path?: never;
+    query?: never;
+    url: '/bots/{bot_id}/mcp-ops/import';
+};
+
+export type PutBotsByBotIdMcpOpsImportErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdMcpOpsImportError = PutBotsByBotIdMcpOpsImportErrors[keyof PutBotsByBotIdMcpOpsImportErrors];
+
+export type PutBotsByBotIdMcpOpsImportResponses = {
+    /**
+     * OK
+     */
+    200: McpListResponse;
+};
+
+export type PutBotsByBotIdMcpOpsImportResponse = PutBotsByBotIdMcpOpsImportResponses[keyof PutBotsByBotIdMcpOpsImportResponses];
+
 export type PostBotsByBotIdMcpStdioData = {
     /**
      * Stdio MCP payload
@@ -7444,75 +7514,6 @@ export type PostBotsByBotIdMcpStdioByConnectionIdResponses = {
 };
 
 export type PostBotsByBotIdMcpStdioByConnectionIdResponse = PostBotsByBotIdMcpStdioByConnectionIdResponses[keyof PostBotsByBotIdMcpStdioByConnectionIdResponses];
-
-export type GetBotsByBotIdMcpExportData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/bots/{bot_id}/mcp/export';
-};
-
-export type GetBotsByBotIdMcpExportErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdMcpExportError = GetBotsByBotIdMcpExportErrors[keyof GetBotsByBotIdMcpExportErrors];
-
-export type GetBotsByBotIdMcpExportResponses = {
-    /**
-     * OK
-     */
-    200: McpExportResponse;
-};
-
-export type GetBotsByBotIdMcpExportResponse = GetBotsByBotIdMcpExportResponses[keyof GetBotsByBotIdMcpExportResponses];
-
-export type PutBotsByBotIdMcpImportData = {
-    /**
-     * mcpServers dict
-     */
-    body: McpImportRequest;
-    path?: never;
-    query?: never;
-    url: '/bots/{bot_id}/mcp/import';
-};
-
-export type PutBotsByBotIdMcpImportErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutBotsByBotIdMcpImportError = PutBotsByBotIdMcpImportErrors[keyof PutBotsByBotIdMcpImportErrors];
-
-export type PutBotsByBotIdMcpImportResponses = {
-    /**
-     * OK
-     */
-    200: McpListResponse;
-};
-
-export type PutBotsByBotIdMcpImportResponse = PutBotsByBotIdMcpImportResponses[keyof PutBotsByBotIdMcpImportResponses];
 
 export type DeleteBotsByBotIdMcpByIdData = {
     body?: never;

@@ -4794,6 +4794,87 @@
                 }
             }
         },
+        "/bots/{bot_id}/mcp-ops/export": {
+            "get": {
+                "description": "Export all MCP connections for a bot in standard mcpServers format.",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Export MCP connections",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.ExportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp-ops/import": {
+            "put": {
+                "description": "Batch import MCP connections from standard mcpServers format. Existing connections (matched by name) get config updated with is_active preserved. New connections are created as active.",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Import MCP connections",
+                "parameters": [
+                    {
+                        "description": "mcpServers dict",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/mcp.ImportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.ListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/mcp-stdio": {
             "post": {
                 "description": "Start a stdio MCP process in the bot workspace and expose it as an MCP HTTP endpoint.",
@@ -4894,87 +4975,6 @@
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/mcp/export": {
-            "get": {
-                "description": "Export all MCP connections for a bot in standard mcpServers format.",
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "Export MCP connections",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/mcp.ExportResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/mcp/import": {
-            "put": {
-                "description": "Batch import MCP connections from standard mcpServers format. Existing connections (matched by name) get config updated with is_active preserved. New connections are created as active.",
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "Import MCP connections",
-                "parameters": [
-                    {
-                        "description": "mcpServers dict",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/mcp.ImportRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/mcp.ListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -21606,7 +21606,7 @@
                     "type": "boolean"
                 },
                 "reasoning_dialect": {
-                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty means the\nprovider's modern default.",
+                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty leaves provider\npolicy in charge; Google's adaptor deliberately sends no thinking control so\npre-dialect rows retain their safe pre-upgrade request shape.",
                     "type": "string"
                 },
                 "reasoning_efforts": {
