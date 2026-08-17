@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	"github.com/memohai/memoh/internal/agent/runtime/watchdog"
 	tools "github.com/memohai/memoh/internal/agent/tool"
 )
 
@@ -50,9 +52,10 @@ var errSpawnAgentAborted = errors.New("agent run aborted")
 // SpawnAdapter wraps *Agent to satisfy tools.SpawnAgent without creating
 // an import cycle (tools -> agent).
 type SpawnAdapter struct {
-	agent       *Agent
-	stepCommit  SpawnStepCommitFactory
-	runObserver SpawnRunObserverFactory
+	agent             *Agent
+	stepCommit        SpawnStepCommitFactory
+	runObserver       SpawnRunObserverFactory
+	streamIdleTimeout time.Duration
 }
 
 // NewSpawnAdapter creates a SpawnAdapter from the given Agent.
@@ -231,7 +234,11 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	}
 
 	// Use Stream instead of Generate to get per-token/per-tool activity signals.
-	eventCh := s.agent.Stream(ctx, rc)
+	// The local watchdog covers providers that never emit their first event;
+	// touchFn remains the outer subagent activity signal.
+	idleCtx, idleCancel := watchdog.WithIdleTimeout(ctx, s.streamIdleTimeout)
+	defer idleCancel.Stop()
+	eventCh := s.agent.Stream(idleCtx, rc)
 
 	var allText strings.Builder
 	var finalMessages []sdk.Message
@@ -245,6 +252,10 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	for evt := range eventCh {
 		// Touch the watchdog on every event — this is the activity signal.
 		touchFn()
+		idleCancel.Reset()
+		if evt.Type == EventToolCallStart {
+			idleCancel.RecordToolCall()
+		}
 		switch evt.Type {
 		case EventError:
 			// Error is attempt-local until the caller resolves the following abort:
@@ -299,11 +310,13 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 
 	var runErr error
 	// Check if context was cancelled (watchdog fired or parent cancelled).
-	if !completed && ctx.Err() != nil {
-		if cause := context.Cause(ctx); cause != nil {
+	if !completed && idleCtx.Err() != nil {
+		if idleCancel.DidFire() {
+			runErr = context.DeadlineExceeded
+		} else if cause := context.Cause(ctx); cause != nil {
 			runErr = cause
 		} else {
-			runErr = ctx.Err()
+			runErr = idleCtx.Err()
 		}
 	}
 	// A stream that errored without reaching a clean end is a failed attempt,

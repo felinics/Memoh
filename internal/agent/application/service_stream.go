@@ -30,12 +30,11 @@ type terminalSnapshot struct {
 	visibleOutput  bool
 }
 
-// interruptedTurnMarker is the stable, human-visible marker persisted when a
-// turn aborts before producing any visible output (e.g. a provider timeout on
-// the very first response). The [turn-interrupted] prefix lets UI/history
-// tooling recognize the row as an interruption trace rather than a normal
-// assistant reply.
-const interruptedTurnMarker = "[turn-interrupted] ⚠️ 本轮在产出可见内容前被中断（原因：无响应/超时）。"
+// interruptedTurnMarker is a stable code persisted when a turn aborts before
+// producing any visible output (e.g. a provider timeout on the very first
+// response). The Web UI localizes this code for display; keeping the stored
+// value language-neutral also keeps it safe when replayed into model context.
+const interruptedTurnMarker = "[turn-interrupted]"
 
 func hasVisibleAgentStreamOutput(event native.StreamEvent) bool {
 	switch event.Type {
@@ -56,6 +55,22 @@ func hasVisibleAgentStreamOutput(event native.StreamEvent) bool {
 	default:
 		return false
 	}
+}
+
+func shouldPersistTerminalEvent(event native.StreamEvent, idle *idleCancel, visibleOutput bool) bool {
+	if !event.IsTerminal() {
+		return false
+	}
+	if event.Type == native.EventAgentAbort && !visibleOutput && (idle == nil || !idle.DidFire()) {
+		return false
+	}
+	if len(event.Messages) > 0 {
+		return true
+	}
+	// An idle timeout can produce an aborted terminal event before the SDK has
+	// emitted its first message. Explicit user cancellation should not create a
+	// synthetic history row for an unsent turn.
+	return event.Type == native.EventAgentAbort && idle != nil && idle.DidFire()
 }
 
 func agentStreamEventError(event native.StreamEvent) error {
@@ -79,8 +94,9 @@ func agentAbortCause(ctx context.Context) error {
 }
 
 // extractTerminalSnapshot decodes a terminal stream event payload into the
-// raw SDK messages plus auxiliary metadata. Returns ok=false when the event
-// has no usable messages.
+// raw SDK messages plus auxiliary metadata. Empty message arrays are accepted
+// for abort events because a provider can time out before emitting its first
+// SDK message; other terminal events still require usable messages.
 func extractTerminalSnapshot(data []byte) (terminalSnapshot, bool) {
 	var envelope struct {
 		Type       string          `json:"type"`
@@ -91,11 +107,13 @@ func extractTerminalSnapshot(data []byte) (terminalSnapshot, bool) {
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return terminalSnapshot{}, false
 	}
-	if len(envelope.Messages) == 0 {
-		return terminalSnapshot{}, false
-	}
 	var sdkMsgs []sdk.Message
-	if err := json.Unmarshal(envelope.Messages, &sdkMsgs); err != nil || len(sdkMsgs) == 0 {
+	if len(envelope.Messages) > 0 {
+		if err := json.Unmarshal(envelope.Messages, &sdkMsgs); err != nil {
+			return terminalSnapshot{}, false
+		}
+	}
+	if len(sdkMsgs) == 0 && envelope.Type != string(native.EventAgentAbort) {
 		return terminalSnapshot{}, false
 	}
 	return terminalSnapshot{
@@ -252,7 +270,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			if err != nil {
 				continue
 			}
-			if event.IsTerminal() && len(event.Messages) > 0 {
+			if shouldPersistTerminalEvent(event, idleCancel, hasVisibleOutput) {
 				if snap, ok := extractTerminalSnapshot(data); ok {
 					snap.visibleOutput = hasVisibleOutput
 					lastSnapshot = snap
@@ -267,7 +285,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 								lifecycleCause = storeErr
 							}
 							s.logger.Error("stream step finalization failed", slog.Any("error", storeErr))
-						} else {
+						} else if len(stepCommitter.persistedMessages()) > 0 {
 							stored = true
 						}
 					} else if !stored && !runOwnershipLost(streamCtx) {
@@ -548,7 +566,7 @@ func (s *Service) streamChatWSResultWithHooks(
 			continue
 		}
 
-		if event.IsTerminal() && len(event.Messages) > 0 {
+		if shouldPersistTerminalEvent(event, idleCancel, hasVisibleOutput) {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.visibleOutput = hasVisibleOutput
 				lastSnapshot = snap
@@ -563,7 +581,7 @@ func (s *Service) streamChatWSResultWithHooks(
 							lifecycleCause = storeErr
 						}
 						s.logger.Error("ws step finalization failed", slog.Any("error", storeErr))
-					} else {
+					} else if len(stepCommitter.persistedMessages()) > 0 {
 						persistedMessages = stepCommitter.persistedMessages()
 						stored = true
 					}
@@ -800,6 +818,22 @@ func (s *Service) persistPartialResult(
 			return persisted
 		}
 		s.logger.Error("failed to persist partial agent messages",
+			slog.String("bot_id", req.BotID),
+			slog.Any("error", err),
+		)
+	}
+	if wasIdleTimeout && !hasVisibleOutput {
+		persisted, err := s.persistTerminalSnapshotResult(persistCtx, req, rc, terminalSnapshot{
+			aborted: true,
+		})
+		if err == nil {
+			s.logger.Info("persisted interrupted marker after idle timeout",
+				slog.String("bot_id", req.BotID),
+				slog.Int("tool_calls", toolCallCount),
+			)
+			return persisted
+		}
+		s.logger.Error("failed to persist interrupted marker after idle timeout",
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)

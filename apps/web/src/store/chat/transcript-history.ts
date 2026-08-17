@@ -3,6 +3,9 @@ import type {
   UISystemTurn,
   UITurn,
 } from '@/composables/api/useChat.types'
+import en from '@/i18n/locales/en.json'
+import ja from '@/i18n/locales/ja.json'
+import zh from '@/i18n/locales/zh.json'
 import {
   nextId,
   normalizeAttachment,
@@ -24,6 +27,23 @@ import type {
   ContentBlock,
   ToolCallBlock,
 } from './types'
+
+const interruptedTurnMarker = '[turn-interrupted]'
+const interruptedTurnMessages = { en, zh, ja }
+
+function interruptedTurnText(): string {
+  const stored = typeof localStorage === 'undefined'
+    ? ''
+    : localStorage.getItem('language') ?? ''
+  const locale = stored === 'zh' || stored === 'ja' || stored === 'en'
+    ? stored
+    : typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('zh')
+      ? 'zh'
+      : typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('ja')
+        ? 'ja'
+        : 'en'
+  return interruptedTurnMessages[locale].chat.interruptedTurn
+}
 
 export function createTranscriptHistory(deps: {
   messages: ChatMessage[]
@@ -63,6 +83,13 @@ export function createTranscriptHistory(deps: {
         return {
           ...msg,
           attachments: msg.attachments.map(normalizeAttachment),
+        }
+      case 'text':
+        return {
+          ...msg,
+          content: msg.content === interruptedTurnMarker
+            ? interruptedTurnText()
+            : msg.content,
         }
       default:
         return { ...msg }

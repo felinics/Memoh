@@ -113,6 +113,37 @@ func TestSpawnAdapterGenerateWithWatchdogCarriesLifecycleSnapshot(t *testing.T) 
 	}
 }
 
+func TestSpawnAdapterGenerateWithWatchdogStopsProviderSilence(t *testing.T) {
+	provider := &atomicMockProvider{
+		stream: func(_ context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+			return &sdk.StreamResult{Stream: make(chan sdk.StreamPart)}, nil
+		},
+	}
+	adapter := NewSpawnAdapter(newTestAgent())
+	adapter.streamIdleTimeout = 10 * time.Millisecond
+
+	started := time.Now()
+	_, err := adapter.GenerateWithWatchdog(
+		context.Background(),
+		tools.SpawnRunConfig{
+			Model:       &sdk.Model{ID: "spawn-idle-model", Provider: provider, Type: sdk.ModelTypeChat},
+			Query:       "wait for the provider",
+			SessionType: sessionmode.Subagent,
+			Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
+			ResolveAttempt: func(error) tools.SpawnAttemptDisposition {
+				return tools.SpawnAttemptFailure
+			},
+		},
+		func() {},
+	)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("GenerateWithWatchdog error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("provider silence took %s to terminate, want under one second", elapsed)
+	}
+}
+
 func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T) {
 	var streamCalls atomic.Int32
 	var dispositionCalls atomic.Int32

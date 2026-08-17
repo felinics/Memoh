@@ -591,6 +591,7 @@
     "emptySystemSession": "系统会话暂无记录",
     "selectBot": "选择一个 Bot",
     "selectBotHint": "从侧边栏选择一个 Bot 开始对话",
+    "interruptedTurn": "⚠️ 本轮在产出可见内容前被中断（无响应或超时）。",
     "thinking": "思考中…",
     "thinkingInProgress": "思考中…",
     "thinkingDone": "思考完成",

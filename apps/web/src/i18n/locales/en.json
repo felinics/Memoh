@@ -591,6 +591,7 @@
     "emptySystemSession": "No messages recorded for this system session",
     "selectBot": "Select a Bot",
     "selectBotHint": "Choose a bot from the sidebar to start chatting",
+    "interruptedTurn": "⚠️ This turn was interrupted before producing visible output (no response or timeout).",
     "thinking": "Thinking…",
     "thinkingInProgress": "Thinking…",
     "thinkingDone": "Thinking complete",

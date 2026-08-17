@@ -39,6 +39,7 @@ type fakeDiscussService struct {
 	resolveResult  ResolveRunConfigResult
 	inlineFn       func(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart
 	storeCalls     int
+	storedMessages []sdk.Message
 	lastStoreRunID string
 	lastLifecycle  *contextfrag.LifecycleHolder
 	storeErr       error
@@ -56,8 +57,9 @@ func (f *fakeDiscussService) InlineImageAttachments(ctx context.Context, botID s
 	return nil
 }
 
-func (f *fakeDiscussService) StoreRound(_ context.Context, runID, _, _, _, _ string, _ []sdk.Message, _ string, lifecycle *contextfrag.LifecycleHolder) error {
+func (f *fakeDiscussService) StoreRound(_ context.Context, runID, _, _, _, _ string, messages []sdk.Message, _ string, lifecycle *contextfrag.LifecycleHolder) error {
 	f.storeCalls++
+	f.storedMessages = append([]sdk.Message(nil), messages...)
 	f.lastStoreRunID = runID
 	f.lastLifecycle = lifecycle
 	if f.storeFn != nil {

@@ -499,6 +499,7 @@ func (s *Service) continueToolApprovalSession(
 
 	stream := s.agent.Stream(idleCtx, cfg)
 	stored := false
+	var hasVisibleOutput bool
 	for event := range stream {
 		idleCancel.Reset() // each event resets the idle timer
 		if event.Type == native.EventToolCallStart {
@@ -521,12 +522,16 @@ func (s *Service) continueToolApprovalSession(
 				}
 			}
 		}
+		if hasVisibleAgentStreamOutput(event) {
+			hasVisibleOutput = true
+		}
 		data, err := json.Marshal(event)
 		if err != nil {
 			continue
 		}
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
+		if !stored && shouldPersistTerminalEvent(event, idleCancel, hasVisibleOutput) {
 			if snap, ok := extractTerminalSnapshot(data); ok {
+				snap.visibleOutput = hasVisibleOutput
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
 				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
 					lifecycleCause = agentAbortCause(ctx)

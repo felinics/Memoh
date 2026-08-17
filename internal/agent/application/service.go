@@ -135,6 +135,7 @@ type Service struct {
 	continueUserInputFn               func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
 	sessionCompactionMu               sync.Mutex
 	sessionCompactions                map[string]*sessionCompactionGate
+	streamIdleTimeout                 time.Duration
 	timeout                           time.Duration
 	memorySearchTimeout               time.Duration
 	clockLocation                     *time.Location

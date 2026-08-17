@@ -189,13 +189,23 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 	}()
 
-	eventCh := s.streamDiscussAgent(ctx, runConfig)
+	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx)
+	defer idleCancel.Stop()
+	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
 
 	var finalMessages json.RawMessage
 	var terminalEvent native.StreamEvent
 	var terminalPayload []byte
 	var hasTerminalEvent bool
+	var hasVisibleOutput bool
 	for event := range eventCh {
+		idleCancel.Reset()
+		if event.Type == native.EventToolCallStart {
+			idleCancel.RecordToolCall()
+		}
+		if hasVisibleAgentStreamOutput(event) {
+			hasVisibleOutput = true
+		}
 		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
 			lifecycleCause = eventErr
 		}
@@ -211,7 +221,9 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 				case native.EventAgentEnd:
 					lifecycleCause = nil
 				case native.EventAgentAbort:
-					if context.Cause(ctx) != nil || lifecycleCause == nil {
+					if idleCancel.DidFire() {
+						lifecycleCause = context.DeadlineExceeded
+					} else if context.Cause(ctx) != nil || lifecycleCause == nil {
 						lifecycleCause = agentAbortCause(ctx)
 					}
 				}
@@ -256,21 +268,25 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// detaching cancellation so that terminal history and runtime publication
 	// can cross the same durable boundary as the main chat stream.
 	terminalCtx := context.WithoutCancel(ctx)
+	var sdkMsgs []sdk.Message
 	if len(finalMessages) > 0 {
-		var sdkMsgs []sdk.Message
-		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
-			if storeErr := s.storeDiscussRound(terminalCtx,
-				runConfig.RunID,
-				cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
-				sdkMsgs, resolved.ModelID,
-				runConfig.ContextLifecycle,
-			); storeErr != nil {
-				historyErr := runtimeHistoryError(storeErr)
-				lifecycleCause = historyErr
-				lifecycleDeferred = false
-				h.emitErr(historyErr)
-				return
-			}
+		_ = json.Unmarshal(finalMessages, &sdkMsgs)
+	}
+	if len(sdkMsgs) == 0 && terminalEvent.Type == native.EventAgentAbort && idleCancel.DidFire() && !hasVisibleOutput {
+		sdkMsgs = []sdk.Message{sdk.AssistantMessage(interruptedTurnMarker)}
+	}
+	if len(sdkMsgs) > 0 {
+		if storeErr := s.storeDiscussRound(terminalCtx,
+			runConfig.RunID,
+			cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
+			sdkMsgs, resolved.ModelID,
+			runConfig.ContextLifecycle,
+		); storeErr != nil {
+			historyErr := runtimeHistoryError(storeErr)
+			lifecycleCause = historyErr
+			lifecycleDeferred = false
+			h.emitErr(historyErr)
+			return
 		}
 	}
 	if hasTerminalEvent && h.publishAgentEvent != nil {

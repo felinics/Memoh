@@ -577,6 +577,7 @@
     "emptySystemSession": "このシステムセッションにはメッセージが記録されていません",
     "selectBot": "Botを選択してください",
     "selectBotHint": "サイドバーからBotを選択してチャットを開始します",
+    "interruptedTurn": "⚠️ このターンは表示可能な出力を生成する前に中断されました（応答なしまたはタイムアウト）。",
     "thinking": "考えています…",
     "thinkingInProgress": "考え…",
     "thinkingDone": "思考完了",
