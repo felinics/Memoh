@@ -121,21 +121,30 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
       id: `runtime:${turnId}:user`,
     })
   }
-  turns.push({
-    turn_id: turnId,
-    role: 'assistant',
-    id: `runtime:${turnId}:assistant`,
-    timestamp: run.started_at,
-    messages: run.messages.map(cloneUIMessage),
-  })
-  if (run.error && !run.messages.some(message => message.type === 'error')) {
-    turns[turns.length - 1] = {
-      ...turns[turns.length - 1]!,
+  // A settled run with no streamed content has nothing to project. Emitting the
+  // assistant shell here would let applyRuntimeTranscript's merge overwrite the
+  // settled database turn's blocks with this empty list: once the run ends the
+  // database history is authoritative, and idle snapshots arrive with
+  // messages:null (e.g. after a backend restart, whose ledger view carries no
+  // streamed blocks).
+  const projectsAssistantContent = isRuntimeRunActive(run.status) || run.messages.length > 0 || Boolean(run.error)
+  if (projectsAssistantContent) {
+    turns.push({
+      turn_id: turnId,
       role: 'assistant',
-      messages: [
-        ...run.messages.map(cloneUIMessage),
-        { id: nextMessageId(run.messages), type: 'error', content: run.error },
-      ],
+      id: `runtime:${turnId}:assistant`,
+      timestamp: run.started_at,
+      messages: run.messages.map(cloneUIMessage),
+    })
+    if (run.error && !run.messages.some(message => message.type === 'error')) {
+      turns[turns.length - 1] = {
+        ...turns[turns.length - 1]!,
+        role: 'assistant',
+        messages: [
+          ...run.messages.map(cloneUIMessage),
+          { id: nextMessageId(run.messages), type: 'error', content: run.error },
+        ],
+      }
     }
   }
   return {
