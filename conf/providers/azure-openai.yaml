@@ -373,7 +373,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      reasoning_efforts: [disable, minimal, low, medium, high, xhigh]
   - model_id: "gpt-5.4-mini"
     name: "GPT 5.4 Mini"
     type: chat
