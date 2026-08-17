@@ -619,3 +619,31 @@ func assertMetadataValue(t *testing.T, md metadata.MD, key, want string) {
 		t.Fatalf("metadata %s = %v, want %q", key, values, want)
 	}
 }
+
+type execEarlyCloseTestServer struct {
+	pb.UnimplementedContainerServiceServer
+}
+
+func (*execEarlyCloseTestServer) Exec(stream pb.ContainerService_ExecServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_STDOUT, Data: []byte("done")}); err != nil {
+		return err
+	}
+	return stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT, ExitCode: 0})
+}
+
+func TestClientExecReturnsResultWhenServerClosesBeforeStdinLands(t *testing.T) {
+	t.Parallel()
+
+	client := newTestClient(t, &execEarlyCloseTestServer{})
+	stdin := bytes.Repeat([]byte("x"), 8<<20)
+	result, err := client.ExecWithStdin(context.Background(), "hook", "", 5, stdin)
+	if err != nil {
+		t.Fatalf("ExecWithStdin returned error: %v", err)
+	}
+	if result.Stdout != "done" || result.ExitCode != 0 {
+		t.Fatalf("exec result = %q/%d, want %q/0", result.Stdout, result.ExitCode, "done")
+	}
+}

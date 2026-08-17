@@ -279,7 +279,10 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 		return nil, mapError(err)
 	}
 
-	// Send config message first
+	// A command may exit without consuming its stdin; the server then closes
+	// the stream while these sends are still in flight, and gRPC reports the
+	// close as io.EOF. The receive loop below carries the authoritative
+	// result or status, so half-closed sends fall through to it.
 	err = stream.Send(&pb.ExecInput{
 		Command:        command,
 		WorkDir:        workDir,
@@ -288,15 +291,15 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
-	if len(stdinData) > 0 {
-		if err := stream.Send(&pb.ExecInput{StdinData: stdinData}); err != nil {
+	if err == nil && len(stdinData) > 0 {
+		if err := stream.Send(&pb.ExecInput{StdinData: stdinData}); err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
 	}
-	if err := stream.CloseSend(); err != nil {
+	if err := stream.CloseSend(); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 
