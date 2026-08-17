@@ -39,6 +39,26 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
+// IsTimeoutStreamError reports whether err represents a timeout-class stream
+// failure. Application-level persistence uses the same classification as the
+// retry policy so a timeout made terminal here cannot silently disappear there.
+func IsTimeoutStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	// EventError flattens provider failures to text, so keep a text fallback for
+	// http.Client and transport timeout messages after their concrete type is lost.
+	detail := strings.ToLower(err.Error())
+	return strings.Contains(detail, "timeout") || strings.Contains(detail, "deadline exceeded")
+}
+
 // isRetryableStreamError returns true for errors worth retrying.
 func isRetryableStreamError(err error) bool {
 	if err == nil {
@@ -51,23 +71,17 @@ func isRetryableStreamError(err error) bool {
 	}
 	// Network-level errors: connection refused/reset, EOF, DNS. These are
 	// transient connectivity failures worth reconnecting for. BUT a pure
-	// network timeout (net.Error with Timeout()==true, or the http.Client
-	// "Client.Timeout exceeded" error) must NOT be retried — retrying a timeout
-	// multiplies the already-long silent wait (issue #1010 family: 10 retries ×
-	// a 10-minute client timeout ≈ 100 minutes of silence). A timeout is a
-	// terminal condition that should fall through to final-state handling
-	// instead of entering the retry storm.
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return !netErr.Timeout()
-	}
-	// Belt-and-braces for "Client.Timeout exceeded (while awaiting headers)" /
-	// "Timeout exceeded" text even if the wrapping type doesn't satisfy net.Error.
-	errStr := err.Error()
-	if strings.Contains(errStr, "Client.Timeout exceeded") || strings.Contains(errStr, "Timeout exceeded") {
+	// network timeout must NOT be retried — retrying a timeout multiplies the
+	// already-long silent wait (issue #1010 family).
+	if IsTimeoutStreamError(err) {
 		return false
 	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
 	// HTTP status errors: retry on 429 and 5xx
+	errStr := err.Error()
 	if err429Pattern.MatchString(errStr) {
 		return true
 	}
