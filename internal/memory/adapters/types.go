@@ -27,7 +27,6 @@ type AfterChatRequest struct {
 	ChannelIdentityID string
 	DisplayName       string
 	TimezoneLocation  *time.Location
-	SourceMessageIDs  []string
 }
 
 // LLM is the interface for LLM operations needed by memory service.
@@ -38,8 +37,9 @@ type LLM interface {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role            string `json:"role"`
+	Content         string `json:"content"`
+	SourceMessageID string `json:"-"`
 }
 
 type AddRequest struct {
@@ -127,7 +127,8 @@ type ExtractRequest struct {
 }
 
 type ExtractResponse struct {
-	Facts []string `json:"facts"`
+	Facts                []string   `json:"facts"`
+	FactSourceMessageIDs [][]string `json:"-"`
 }
 
 type CandidateMemory struct {
@@ -146,10 +147,11 @@ type DecideRequest struct {
 }
 
 type DecisionAction struct {
-	Event     string `json:"event"`
-	ID        string `json:"id,omitempty"`
-	Text      string `json:"text"`
-	OldMemory string `json:"old_memory,omitempty"`
+	Event             string `json:"event"`
+	ID                string `json:"id,omitempty"`
+	Text              string `json:"text"`
+	OldMemory         string `json:"old_memory,omitempty"`
+	SourceFactIndices []int  `json:"source_fact_indices,omitempty"`
 }
 
 type DecideResponse struct {

@@ -141,7 +141,7 @@ func (r *graphRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapte
 		CreatedAt:        now.Format(time.RFC3339),
 		UpdatedAt:        now.Format(time.RFC3339),
 		Metadata:         req.Metadata,
-		SourceMessageIDs: unionStrings(nil, req.SourceMessageIDs),
+		SourceMessageIDs: adapters.NormalizeSourceRefs(req.SourceMessageIDs),
 	}, botID)
 
 	saved, err := r.store.UpsertNode(ctx, spec)
@@ -379,7 +379,7 @@ func (r *graphRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 	existing.ID = memoryID
 	existing.Body = text
 	existing.Hash = runtimeHash(text)
-	existing.SourceMessageIDs = unionStrings(existing.SourceMessageIDs, req.SourceMessageIDs)
+	existing.SourceMessageIDs = adapters.MergeSourceRefs(existing.SourceMessageIDs, req.SourceMessageIDs)
 	saved, err := r.store.UpsertNode(ctx, existing)
 	if err != nil {
 		return adapters.MemoryItem{}, fmt.Errorf("graph runtime: update node: %w", err)
@@ -635,33 +635,11 @@ func memoryItemToNodeSpec(item adapters.MemoryItem, botID string) migrate.NodeSp
 		Subject:          metadataStringVal(item.Metadata, "subject"),
 		Confidence:       metadataFloatVal(item.Metadata, "confidence", 0.5),
 		Metadata:         item.Metadata,
-		SourceMessageIDs: item.SourceMessageIDs,
+		SourceMessageIDs: adapters.NormalizeSourceRefs(item.SourceMessageIDs),
 		ProfileRef:       profileRef,
 		Topic:            metadataStringVal(item.Metadata, "topic"),
 		CapturedAt:       parseGraphTime(item.CreatedAt),
 	}
-}
-
-func unionStrings(existing, extra []string) []string {
-	if len(extra) == 0 {
-		return existing
-	}
-	out := make([]string, 0, len(existing)+len(extra))
-	seen := make(map[string]struct{}, len(existing)+len(extra))
-	for _, list := range [][]string{existing, extra} {
-		for _, value := range list {
-			value = strings.TrimSpace(value)
-			if value == "" {
-				continue
-			}
-			if _, ok := seen[value]; ok {
-				continue
-			}
-			seen[value] = struct{}{}
-			out = append(out, value)
-		}
-	}
-	return out
 }
 
 func metadataStringVal(m map[string]any, key string) string {

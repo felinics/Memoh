@@ -159,6 +159,6 @@ func nodeSpecToMemoryItem(n migrate.NodeSpec) adapters.MemoryItem {
 		Score:            0,
 		Metadata:         buildNodeMetadata(n),
 		BotID:            n.BotID,
-		SourceMessageIDs: n.SourceMessageIDs,
+		SourceMessageIDs: adapters.NormalizeSourceRefs(n.SourceMessageIDs),
 	}
 }

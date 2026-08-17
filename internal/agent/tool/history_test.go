@@ -22,9 +22,13 @@ func (f fakeHistorySessionLister) ListByBot(_ context.Context, _ string) ([]sess
 type fakeHistoryMessageReader struct {
 	latestSessionID string
 	beforeSessionID string
+	exactSessionID  string
+	exactMessageID  string
 	before          time.Time
 	latestMessages  []messagepkg.Message
 	beforeMessages  []messagepkg.Message
+	exactMessage    messagepkg.Message
+	exactErr        error
 }
 
 func (f *fakeHistoryMessageReader) ListLatestBySession(_ context.Context, sessionID string, _ int32) ([]messagepkg.Message, error) {
@@ -36,6 +40,12 @@ func (f *fakeHistoryMessageReader) ListBeforeBySession(_ context.Context, sessio
 	f.beforeSessionID = sessionID
 	f.before = before
 	return f.beforeMessages, nil
+}
+
+func (f *fakeHistoryMessageReader) GetByIDBySession(_ context.Context, sessionID string, messageID string) (messagepkg.Message, error) {
+	f.exactSessionID = sessionID
+	f.exactMessageID = messageID
+	return f.exactMessage, f.exactErr
 }
 
 func TestHistoryProviderGetMessagesDefaultsToCurrentSession(t *testing.T) {
@@ -117,6 +127,39 @@ func TestHistoryProviderGetMessagesBeforeUsesRequestedSession(t *testing.T) {
 	messages := out["messages"].([]map[string]any)
 	if messages[0]["text"] != "before cursor" {
 		t.Fatalf("message text = %v, want before cursor", messages[0]["text"])
+	}
+}
+
+func TestHistoryProviderGetMessagesResolvesExactSourceRef(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakeHistoryMessageReader{exactMessage: historyTestMessage(
+		t, "msg-source", "session-current", "user", "supporting detail", time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC),
+	)}
+	provider := NewHistoryProvider(nil, nil, reader, nil)
+	got, err := provider.execGetMessages(context.Background(), SessionContext{
+		BotID: "bot-1", SessionID: "session-current",
+	}, map[string]any{"session_id": "session-current", "message_id": "msg-source"})
+	if err != nil {
+		t.Fatalf("execGetMessages() error = %v", err)
+	}
+	if reader.exactSessionID != "session-current" || reader.exactMessageID != "msg-source" {
+		t.Fatalf("exact lookup = (%q, %q)", reader.exactSessionID, reader.exactMessageID)
+	}
+	messages := got.(map[string]any)["messages"].([]map[string]any)
+	if len(messages) != 1 || messages[0]["text"] != "supporting detail" {
+		t.Fatalf("exact messages = %v", messages)
+	}
+}
+
+func TestHistoryProviderGetMessagesRejectsExactLookupWithBefore(t *testing.T) {
+	t.Parallel()
+	provider := NewHistoryProvider(nil, nil, &fakeHistoryMessageReader{}, nil)
+	_, err := provider.execGetMessages(context.Background(), SessionContext{
+		BotID: "bot-1", SessionID: "session-current",
+	}, map[string]any{"message_id": "msg-source", "before": "2026-06-14T09:00:00Z"})
+	if err == nil {
+		t.Fatal("execGetMessages() error = nil, want ambiguous argument error")
 	}
 }
 

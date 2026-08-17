@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -30,6 +31,7 @@ type SessionLister interface {
 type HistoryMessageReader interface {
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]messagepkg.Message, error)
+	GetByIDBySession(ctx context.Context, sessionID string, messageID string) (messagepkg.Message, error)
 }
 
 // HistoryProvider exposes list_sessions, get_messages, and search_messages tools.
@@ -60,7 +62,7 @@ func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available Ava
 		parts = append(parts, ref+": List accessible chat sessions with their bound contact/route info. Filter by `type` (chat/heartbeat/schedule) or `platform`.")
 	}
 	if ref, ok := available.Ref(ToolGetMessages()); ok {
-		parts = append(parts, ref+": Get recent messages from the current or selected session.")
+		parts = append(parts, ref+": Get recent messages from the current or selected session, or resolve one exact `message_id`.")
 		if listSessionsRef != "" {
 			parts = append(parts, "Use session IDs from "+listSessionsRef+" as `session_id` for "+ref+" when reading a specific conversation.")
 		}
@@ -111,13 +113,17 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 		s := sess
 		tools = append(tools, sdk.Tool{
 			Name:        ToolGetMessages().String(),
-			Description: "Get recent messages from a chat session. Defaults to the current session. Results are returned oldest-first.",
+			Description: "Get recent messages from a chat session, or resolve one exact message ID. Defaults to the current session. Results are returned oldest-first.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_id": map[string]any{
 						"type":        "string",
 						"description": "Session ID to read. Defaults to the current session when omitted.",
+					},
+					"message_id": map[string]any{
+						"type":        "string",
+						"description": "Exact persisted message ID to resolve, such as a message_id returned in search_memory source_refs.",
 					},
 					"before": map[string]any{
 						"type":        "string",
@@ -286,13 +292,27 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 			return nil, err
 		}
 	}
+	messageID := strings.TrimSpace(StringArg(args, "message_id"))
+	if messageID != "" && strings.TrimSpace(StringArg(args, "before")) != "" {
+		return nil, errors.New("message_id and before cannot be used together")
+	}
 
 	var (
 		messages []messagepkg.Message
 		err      error
 		before   time.Time
 	)
-	if rawBefore := StringArg(args, "before"); rawBefore != "" {
+	if messageID != "" {
+		message, loadErr := p.messages.GetByIDBySession(ctx, sessionID, messageID)
+		switch {
+		case errors.Is(loadErr, pgx.ErrNoRows):
+			messages = []messagepkg.Message{}
+		case loadErr != nil:
+			return nil, loadErr
+		default:
+			messages = []messagepkg.Message{message}
+		}
+	} else if rawBefore := StringArg(args, "before"); rawBefore != "" {
 		before, err = parseFlexibleTime(rawBefore)
 		if err != nil {
 			return nil, err
@@ -318,6 +338,9 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 		"messages": results,
 	}
 	out["session_id"] = sessionID
+	if messageID != "" {
+		out["message_id"] = messageID
+	}
 	if !before.IsZero() {
 		out["before"] = sess.FormatTime(before)
 	}

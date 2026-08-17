@@ -25,6 +25,7 @@ type agentStepCommitter struct {
 	mu                   sync.Mutex
 	turnRequestMessageID string
 	persisted            []messagepkg.Message
+	memoryPersisted      []messagepkg.Message
 	messages             []ModelMessage
 	nextStep             int // In-process ordering guard, not a durable replay cursor.
 	commitErr            error
@@ -135,6 +136,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	if !interrupted {
 		// Unfinished reasoning/text is history context, not a fact source for
 		// asynchronous long-term memory extraction.
+		c.memoryPersisted = append(c.memoryPersisted, persisted...)
 		c.messages = append(c.messages, messages...)
 	}
 	return nil
@@ -160,6 +162,7 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 	}
 	c.finalized = true
 	persisted := append([]messagepkg.Message(nil), c.persisted...)
+	memoryPersisted := append([]messagepkg.Message(nil), c.memoryPersisted...)
 	messages := append([]ModelMessage(nil), c.messages...)
 	c.mu.Unlock()
 	if len(persisted) == 0 {
@@ -172,8 +175,8 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 	if c.req.OutboundAssetCollector != nil {
 		c.service.LinkOutboundAssets(ctx, c.req.BotID, c.req.ThreadID, outboundAssetRefsToMessageRefs(c.req.OutboundAssetCollector()))
 	}
-	if !c.req.SkipMemoryExtraction {
-		go c.service.storeMemory(ctx, c.req, messages, roundSourceRefs(c.req, persisted))
+	if !c.req.SkipMemoryExtraction && len(memoryPersisted) == len(messages) && len(memoryPersisted) > 0 {
+		go c.service.storeMemory(ctx, c.req, memoryPersisted)
 	}
 	if inputTokens > 0 {
 		go c.service.maybeCompact(ctx, c.req, c.rc, inputTokens)

@@ -62,7 +62,7 @@ func (c *Client) Extract(ctx context.Context, req adapters.ExtractRequest) (adap
 	defer cancel()
 
 	var sb strings.Builder
-	for _, m := range req.Messages {
+	for i, m := range req.Messages {
 		content := strings.TrimSpace(m.Content)
 		if content == "" {
 			continue
@@ -71,6 +71,7 @@ func (c *Client) Extract(ctx context.Context, req adapters.ExtractRequest) (adap
 		if role == "" {
 			role = "user"
 		}
+		fmt.Fprintf(&sb, "[message_index=%d] ", i)
 		sb.WriteString(strings.ToUpper(role[:1]) + role[1:])
 		sb.WriteString(": ")
 		sb.WriteString(content)
@@ -101,11 +102,24 @@ func (c *Client) Extract(ctx context.Context, req adapters.ExtractRequest) (adap
 		return adapters.ExtractResponse{}, fmt.Errorf("extract: %w", err)
 	}
 
-	facts := parseExtractResponse(result.Text)
-	if len(facts) > maxExtractFacts {
-		facts = facts[:maxExtractFacts]
+	extracted := parseExtractResponseWithSources(result.Text)
+	if len(extracted) > maxExtractFacts {
+		extracted = extracted[:maxExtractFacts]
 	}
-	return adapters.ExtractResponse{Facts: facts}, nil
+	facts := make([]string, 0, len(extracted))
+	sources := make([][]string, 0, len(extracted))
+	for _, fact := range extracted {
+		refs := make([]string, 0, len(fact.MessageIndices))
+		for _, index := range fact.MessageIndices {
+			if index < 0 || index >= len(req.Messages) {
+				continue
+			}
+			refs = append(refs, req.Messages[index].SourceMessageID)
+		}
+		facts = append(facts, fact.Text)
+		sources = append(sources, adapters.NormalizeSourceRefs(refs))
+	}
+	return adapters.ExtractResponse{Facts: facts, FactSourceMessageIDs: sources}, nil
 }
 
 func (c *Client) Decide(ctx context.Context, req adapters.DecideRequest) (adapters.DecideResponse, error) {
@@ -193,7 +207,11 @@ func buildUpdateUserMessage(candidates []adapters.CandidateMemory, facts []strin
 	}
 
 	sb.WriteString("The new retrieved facts are mentioned in the triple backticks. You have to analyze the new retrieved facts and determine whether these facts should be added, updated, or deleted in the memory.\n\n```\n")
-	factsJSON, _ := json.Marshal(facts)
+	indexedFacts := make([]map[string]any, 0, len(facts))
+	for i, fact := range facts {
+		indexedFacts = append(indexedFacts, map[string]any{"index": i, "text": fact})
+	}
+	factsJSON, _ := json.Marshal(indexedFacts)
 	sb.Write(factsJSON)
 	sb.WriteString("\n```\n\n")
 
@@ -205,7 +223,8 @@ func buildUpdateUserMessage(candidates []adapters.CandidateMemory, facts []strin
       "id" : " ",
       "text" : " ",
       "event" : " ",
-      "old_memory" : " "
+      "old_memory" : " ",
+      "source_fact_indices" : [0]
     }
   ]
 }
@@ -217,6 +236,7 @@ Follow the instruction mentioned below:
 - If there is an addition, generate a new key and add the new memory corresponding to it.
 - If there is a deletion, the memory key-value pair should be removed from the memory.
 - If there is an update, the ID key should remain the same and only the value needs to be updated.
+- Every ADD or UPDATE must include source_fact_indices containing the zero-based indices of the retrieved facts that support the resulting memory. Never invent an index.
 
 Do not return anything except the JSON format.
 `)
@@ -225,18 +245,65 @@ Do not return anything except the JSON format.
 
 // --- JSON parsing helpers ---
 
-// parseExtractResponse parses the {"facts": [...]} response from Extract.
-func parseExtractResponse(text string) []string {
+type extractedFactEntry struct {
+	Text           string `json:"text"`
+	MessageIndices []int  `json:"message_indices"`
+}
+
+// parseExtractResponseWithSources parses the provenance-aware extraction
+// shape and remains compatible with legacy arrays of strings.
+func parseExtractResponseWithSources(text string) []extractedFactEntry {
 	text = extractJSONBlock(text)
 
-	var wrapper struct {
-		Facts []string `json:"facts"`
+	var objectWrapper struct {
+		Facts []extractedFactEntry `json:"facts"`
 	}
-	if json.Unmarshal([]byte(text), &wrapper) == nil && len(wrapper.Facts) > 0 {
-		return filterNonEmpty(wrapper.Facts)
+	if json.Unmarshal([]byte(text), &objectWrapper) == nil && len(objectWrapper.Facts) > 0 {
+		return filterExtractedFactEntries(objectWrapper.Facts)
+	}
+	var objectArray []extractedFactEntry
+	if json.Unmarshal([]byte(text), &objectArray) == nil && len(objectArray) > 0 {
+		return filterExtractedFactEntries(objectArray)
 	}
 
-	return parseJSONStringArray(text)
+	var legacyWrapper struct {
+		Facts []string `json:"facts"`
+	}
+	legacy := []string(nil)
+	if json.Unmarshal([]byte(text), &legacyWrapper) == nil {
+		legacy = filterNonEmpty(legacyWrapper.Facts)
+	}
+	if len(legacy) == 0 {
+		legacy = parseJSONStringArray(text)
+	}
+	entries := make([]extractedFactEntry, 0, len(legacy))
+	for _, fact := range legacy {
+		entries = append(entries, extractedFactEntry{Text: fact})
+	}
+	return entries
+}
+
+// parseExtractResponse is retained for parser compatibility tests and callers
+// that only need fact text.
+func parseExtractResponse(text string) []string {
+	entries := parseExtractResponseWithSources(text)
+	facts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		facts = append(facts, entry.Text)
+	}
+	return facts
+}
+
+func filterExtractedFactEntries(entries []extractedFactEntry) []extractedFactEntry {
+	out := make([]extractedFactEntry, 0, len(entries))
+	for _, entry := range entries {
+		entry.Text = strings.TrimSpace(entry.Text)
+		if entry.Text == "" {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func parseJSONStringArray(text string) []string {
@@ -250,10 +317,11 @@ func parseJSONStringArray(text string) []string {
 
 // updateResponseEntry mirrors a single item in Mem0's {"memory": [...]} response.
 type updateResponseEntry struct {
-	ID        string `json:"id"`
-	Text      string `json:"text"`
-	Event     string `json:"event"`
-	OldMemory string `json:"old_memory"`
+	ID                string `json:"id"`
+	Text              string `json:"text"`
+	Event             string `json:"event"`
+	OldMemory         string `json:"old_memory"`
+	SourceFactIndices []int  `json:"source_fact_indices"`
 }
 
 // parseUpdateResponse parses the {"memory": [...]} response from Decide.
@@ -271,10 +339,11 @@ func parseUpdateResponse(text string) []adapters.DecisionAction {
 				event = "NOOP"
 			}
 			actions = append(actions, adapters.DecisionAction{
-				Event:     event,
-				ID:        strings.TrimSpace(entry.ID),
-				Text:      strings.TrimSpace(entry.Text),
-				OldMemory: strings.TrimSpace(entry.OldMemory),
+				Event:             event,
+				ID:                strings.TrimSpace(entry.ID),
+				Text:              strings.TrimSpace(entry.Text),
+				OldMemory:         strings.TrimSpace(entry.OldMemory),
+				SourceFactIndices: entry.SourceFactIndices,
 			})
 		}
 		return actions

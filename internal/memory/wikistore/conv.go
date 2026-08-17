@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/memory/migrate"
 )
 
@@ -23,7 +24,7 @@ func nodeToRecord(n migrate.NodeSpec) record {
 		Subject:          n.Subject,
 		Confidence:       clampConfidence(n.Confidence),
 		Metadata:         n.Metadata,
-		SourceMessageIDs: n.SourceMessageIDs,
+		SourceMessageIDs: adapters.NormalizeSourceRefs(n.SourceMessageIDs),
 		ProfileRef:       n.ProfileRef,
 		Topic:            n.Topic,
 		CapturedAt:       n.CapturedAt,
@@ -42,7 +43,7 @@ func recordToNode(r record) migrate.NodeSpec {
 		Subject:          r.Subject,
 		Confidence:       r.Confidence,
 		Metadata:         r.Metadata,
-		SourceMessageIDs: r.SourceMessageIDs,
+		SourceMessageIDs: adapters.NormalizeSourceRefs(r.SourceMessageIDs),
 		ProfileRef:       r.ProfileRef,
 		Topic:            r.Topic,
 		CapturedAt:       r.CapturedAt,

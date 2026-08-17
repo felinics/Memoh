@@ -72,11 +72,19 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 
 	persisted := s.storeMessages(ctx, req, filtered, modelID, opts)
 	opts.ContextLifecycle.SetAssistantMessageID(lastPersistedAssistantMessageID(persisted))
-	if opts.RequireCompletePersist && len(persisted) != len(filtered) {
-		return persisted, fmt.Errorf("persisted %d of %d messages", len(persisted), len(filtered))
+	if len(persisted) != len(filtered) {
+		if opts.RequireCompletePersist {
+			return persisted, fmt.Errorf("persisted %d of %d messages", len(persisted), len(filtered))
+		}
+		s.logger.Warn("skipping memory extraction for partially persisted round",
+			slog.String("bot_id", req.BotID),
+			slog.Int("persisted", len(persisted)),
+			slog.Int("expected", len(filtered)),
+		)
+		return persisted, nil
 	}
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
-		go s.storeMemory(context.WithoutCancel(ctx), req, filtered, roundSourceRefs(req, persisted))
+		go s.storeMemory(context.WithoutCancel(ctx), req, persisted)
 	}
 
 	return persisted, nil

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	session "github.com/memohai/memoh/internal/chat/thread"
@@ -42,6 +43,30 @@ func TestMemoryProviderFiltersSourceRefsByHistoryVisibility(t *testing.T) {
 		if ref["session_id"] == "session-bob" || ref["message_id"] == "legacy-unscoped" {
 			t.Fatalf("inaccessible source ref leaked: %v", ref)
 		}
+	}
+}
+
+func TestVisibleSourceRefsValidatesBeforeCapping(t *testing.T) {
+	t.Parallel()
+	refs := make([]map[string]any, 0, maxVisibleMemorySourceRefs+2)
+	for i := 0; i < maxVisibleMemorySourceRefs; i++ {
+		refs = append(refs, map[string]any{
+			"session_id": "session-current", "message_id": fmt.Sprintf("message-%02d", i), "private": "drop-me",
+		})
+	}
+	refs = append(refs,
+		map[string]any{"session_id": "session-current", "message_id": ""},
+		map[string]any{"session_id": "session-current"},
+	)
+	got := visibleSourceRefs(refs, map[string]struct{}{"session-current": {}})
+	if len(got) != maxVisibleMemorySourceRefs {
+		t.Fatalf("visibleSourceRefs() length = %d, want %d: %v", len(got), maxVisibleMemorySourceRefs, got)
+	}
+	if got[0]["message_id"] != "message-00" || got[len(got)-1]["message_id"] != "message-07" {
+		t.Fatalf("visibleSourceRefs() = %v, want all valid refs", got)
+	}
+	if _, leaked := got[0]["private"]; leaked {
+		t.Fatalf("visibleSourceRefs() leaked provider-controlled fields: %v", got[0])
 	}
 }
 

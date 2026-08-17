@@ -466,11 +466,18 @@ func completeCompactNode(node migrate.NodeSpec, sources []migrate.NodeSpec) migr
 }
 
 func mergeCompactSourceMessageIDs(nodes []migrate.NodeSpec) []string {
+	ordered := append([]migrate.NodeSpec(nil), nodes...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if !ordered[i].CapturedAt.Equal(ordered[j].CapturedAt) {
+			return ordered[i].CapturedAt.Before(ordered[j].CapturedAt)
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
 	values := make([]string, 0)
-	for _, node := range nodes {
+	for _, node := range ordered {
 		values = append(values, node.SourceMessageIDs...)
 	}
-	return uniqueCompactStrings(values)
+	return adapters.NormalizeSourceRefs(values)
 }
 
 func cloneCompactMetadata(metadata map[string]any) map[string]any {

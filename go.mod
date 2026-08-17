@@ -35,7 +35,7 @@ require (
 	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
 	github.com/memohai/connect-it/sdk/go v0.1.1-0.20260801041115-19a755fb92f6
 	github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978
-	github.com/memohai/twilight-ai v0.4.1-0.20260811053034-702921454f2b
+	github.com/memohai/twilight-ai v0.5.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0

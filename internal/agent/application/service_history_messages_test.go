@@ -41,6 +41,40 @@ func TestProjectInterruptedHistoryReasoning(t *testing.T) {
 	}
 }
 
+func TestProjectInterruptedHistoryReasoningKeepsOpaqueBlock(t *testing.T) {
+	checkpoint := historyfrag.HistoryRecord{
+		ModelMessage: sdkMessagesToModelMessages([]sdk.Message{{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ReasoningPart{
+				ID:     "r1",
+				Format: sdk.ReasoningFormatAnthropic,
+				Model:  "claude-sonnet-4-20250514",
+				ProviderMetadata: map[string]any{
+					"anthropic": map[string]any{"redactedData": "BLOB"},
+				},
+			}},
+		}})[0],
+		Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
+	}
+
+	got := modelMessageToSDKMessage(projectInterruptedHistoryReasoning([]historyfrag.HistoryRecord{checkpoint})[0].ModelMessage)
+	if len(got.Content) != 1 {
+		t.Fatalf("projected content = %#v, want one opaque reasoning block", got.Content)
+	}
+	part, ok := got.Content[0].(sdk.ReasoningPart)
+	if !ok {
+		t.Fatalf("content[0] = %T, want ReasoningPart", got.Content[0])
+	}
+	if part.ID != "r1" || part.Format != sdk.ReasoningFormatAnthropic ||
+		part.Model != "claude-sonnet-4-20250514" {
+		t.Fatalf("reasoning provenance was not preserved: %#v", part)
+	}
+	meta, _ := part.ProviderMetadata["anthropic"].(map[string]any)
+	if data, _ := meta["redactedData"].(string); data != "BLOB" {
+		t.Fatalf("redactedData = %q, want BLOB", data)
+	}
+}
+
 func TestProjectInterruptedHistoryReasoningSkipsSupersededCheckpoint(t *testing.T) {
 	checkpoint := historyfrag.HistoryRecord{
 		ModelMessage: sdkMessagesToModelMessages([]sdk.Message{{

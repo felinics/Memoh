@@ -47,7 +47,7 @@ func runFormation(ctx context.Context, logger *slog.Logger, llm adapters.LLM, ru
 		logger.Warn("memory formation: extract failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return result
 	}
-	facts := filterNonEmpty(extracted.Facts)
+	facts, factSourceMessageIDs := normalizeExtractedFacts(extracted)
 	if len(facts) == 0 {
 		return result
 	}
@@ -72,7 +72,7 @@ func runFormation(ctx context.Context, logger *slog.Logger, llm adapters.LLM, ru
 	}
 	metadata := adapters.BuildProfileMetadata(req.UserID, req.ChannelIdentityID, req.DisplayName)
 
-	applyActions(ctx, logger, runtime, botID, decided.Actions, filters, metadata, req.SourceMessageIDs, &result)
+	applyActions(ctx, logger, runtime, botID, decided.Actions, facts, factSourceMessageIDs, filters, metadata, &result)
 	return result
 }
 
@@ -157,12 +157,13 @@ func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime,
 }
 
 // applyActions executes the decided CRUD actions against the runtime.
-func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, botID string, actions []adapters.DecisionAction, filters map[string]any, metadata map[string]any, sourceMessageIDs []string, result *formationResult) {
+func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, botID string, actions []adapters.DecisionAction, facts []string, factSourceMessageIDs [][]string, filters map[string]any, metadata map[string]any, result *formationResult) {
 	deleted := make(map[string]struct{})
 	updated := make(map[string]struct{})
 
 	for _, action := range actions {
 		event := strings.ToUpper(strings.TrimSpace(action.Event))
+		sourceMessageIDs := sourceRefsForAction(action, facts, factSourceMessageIDs)
 		switch event {
 		case actionADD:
 			text := strings.TrimSpace(action.Text)
@@ -234,13 +235,55 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 	}
 }
 
-func filterNonEmpty(ss []string) []string {
-	out := make([]string, 0, len(ss))
-	for _, s := range ss {
-		s = strings.TrimSpace(s)
-		if s != "" {
-			out = append(out, s)
+func normalizeExtractedFacts(resp adapters.ExtractResponse) ([]string, [][]string) {
+	facts := make([]string, 0, len(resp.Facts))
+	sources := make([][]string, 0, len(resp.Facts))
+	for i, fact := range resp.Facts {
+		fact = strings.TrimSpace(fact)
+		if fact == "" {
+			continue
+		}
+		var refs []string
+		if i < len(resp.FactSourceMessageIDs) {
+			refs = adapters.NormalizeSourceRefs(resp.FactSourceMessageIDs[i])
+		}
+		facts = append(facts, fact)
+		sources = append(sources, refs)
+	}
+	return facts, sources
+}
+
+func sourceRefsForAction(action adapters.DecisionAction, facts []string, sources [][]string) []string {
+	indices := action.SourceFactIndices
+	if len(indices) == 0 {
+		// Backward-compatible models sometimes omit the new index field. Only an
+		// exact fact/action match is safe to infer; ambiguous rewrites stay
+		// uncited instead of inheriting the whole round.
+		text := normalizeActionFact(action.Text)
+		for i, fact := range facts {
+			if normalizeActionFact(fact) == text && text != "" {
+				indices = append(indices, i)
+			}
 		}
 	}
-	return out
+	refs := make([]string, 0)
+	for _, index := range indices {
+		if index < 0 || index >= len(sources) {
+			continue
+		}
+		refs = append(refs, sources[index]...)
+	}
+	return adapters.NormalizeSourceRefs(refs)
+}
+
+func normalizeActionFact(value string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
+}
+
+func sourceMessageIDsFromMessages(messages []adapters.Message) []string {
+	refs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		refs = append(refs, message.SourceMessageID)
+	}
+	return adapters.NormalizeSourceRefs(refs)
 }

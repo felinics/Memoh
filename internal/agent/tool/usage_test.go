@@ -739,6 +739,12 @@ func TestMemoryProviderUsageGatesSearchMemory(t *testing.T) {
 			t.Fatalf("Usage with search_memory should mention %q, got:\n%s", want, got)
 		}
 	}
+	got = provider.Usage(context.Background(), SessionContext{}, availableToolsForTest(ToolSearchMemory(), ToolGetMessages()))
+	for _, want := range []string{"`source_refs`", "`get_messages`", "`session_id`", "`message_id`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage with memory/history drill-down should mention %q, got:\n%s", want, got)
+		}
+	}
 }
 
 func TestSkillProviderUsageGatesUseSkill(t *testing.T) {

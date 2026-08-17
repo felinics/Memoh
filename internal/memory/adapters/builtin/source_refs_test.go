@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/memohai/memoh/internal/mcp"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/memohai/memoh/internal/memory/migrate"
 )
 
 func TestGraphRuntimeAddPersistsSourceMessageIDs(t *testing.T) {
@@ -73,6 +75,42 @@ func TestGraphRuntimeUpdateUnionsSourceMessageIDs(t *testing.T) {
 	}
 }
 
+func TestGraphRuntimeBoundsSourceMessageIDs(t *testing.T) {
+	t.Parallel()
+	store := newFakeWikiStore()
+	rt := NewGraphRuntime(nil, store, newFakeStore())
+	refs := make([]string, 0, adapters.MaxSourceRefsPerMemory+2)
+	for i := 0; i < adapters.MaxSourceRefsPerMemory+2; i++ {
+		refs = append(refs, fmt.Sprintf("sess-1/msg-%03d", i))
+	}
+	resp, err := rt.Add(context.Background(), adapters.AddRequest{
+		Message: "bounded provenance", BotID: "bot-1", SourceMessageIDs: refs,
+	})
+	if err != nil {
+		t.Fatalf("Add error: %v", err)
+	}
+	got := resp.Results[0].SourceMessageIDs
+	if len(got) != adapters.MaxSourceRefsPerMemory {
+		t.Fatalf("stored refs = %d, want %d", len(got), adapters.MaxSourceRefsPerMemory)
+	}
+	if got[0] != "sess-1/msg-002" || got[len(got)-1] != "sess-1/msg-065" {
+		t.Fatalf("stored refs retained range = %q...%q", got[0], got[len(got)-1])
+	}
+}
+
+func TestMergeCompactSourceMessageIDsUsesCaptureOrder(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	got := mergeCompactSourceMessageIDs([]migrate.NodeSpec{
+		{ID: "newer", CapturedAt: base.Add(time.Hour), SourceMessageIDs: []string{"sess-1/msg-new"}},
+		{ID: "older", CapturedAt: base, SourceMessageIDs: []string{"sess-1/msg-old"}},
+	})
+	want := []string{"sess-1/msg-old", "sess-1/msg-new"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("mergeCompactSourceMessageIDs() = %v, want %v", got, want)
+	}
+}
+
 type capturingRuntime struct {
 	Runtime
 	addReqs    []adapters.AddRequest
@@ -101,31 +139,33 @@ func TestFormationCarriesSourceMessageIDs(t *testing.T) {
 	t.Parallel()
 	runtime := &capturingRuntime{}
 	llm := &fakeLLM{
-		extractFacts: []string{"User likes oolong tea"},
+		extractFacts:       []string{"User likes oolong tea", "User moved to Berlin"},
+		extractFactSources: [][]string{{"sess-1/msg-1"}, {"sess-1/msg-2"}},
 		decideActions: []adapters.DecisionAction{
-			{Event: "ADD", Text: "User likes oolong tea"},
-			{Event: "UPDATE", ID: "bot-1:mem_existing", Text: "User likes strong oolong tea"},
+			{Event: "ADD", Text: "User likes oolong tea", SourceFactIndices: []int{0}},
+			{Event: "UPDATE", ID: "bot-1:mem_existing", Text: "User lives in Berlin", SourceFactIndices: []int{1}},
 		},
 	}
-	refs := []string{"sess-1/msg-1", "sess-1/msg-2"}
 
 	runFormation(context.Background(), slog.Default(), llm, runtime, adapters.AfterChatRequest{
-		BotID:            "bot-1",
-		Messages:         []adapters.Message{{Role: "user", Content: "I like oolong tea"}},
-		SourceMessageIDs: refs,
+		BotID: "bot-1",
+		Messages: []adapters.Message{
+			{Role: "user", Content: "I like oolong tea", SourceMessageID: "sess-1/msg-1"},
+			{Role: "user", Content: "I moved to Berlin", SourceMessageID: "sess-1/msg-2"},
+		},
 	})
 
 	if len(runtime.addReqs) != 1 {
 		t.Fatalf("expected 1 add request, got %d", len(runtime.addReqs))
 	}
-	if !slices.Equal(runtime.addReqs[0].SourceMessageIDs, refs) {
-		t.Fatalf("ADD SourceMessageIDs = %v, want %v", runtime.addReqs[0].SourceMessageIDs, refs)
+	if want := []string{"sess-1/msg-1"}; !slices.Equal(runtime.addReqs[0].SourceMessageIDs, want) {
+		t.Fatalf("ADD SourceMessageIDs = %v, want %v", runtime.addReqs[0].SourceMessageIDs, want)
 	}
 	if len(runtime.updateReqs) != 1 {
 		t.Fatalf("expected 1 update request, got %d", len(runtime.updateReqs))
 	}
-	if !slices.Equal(runtime.updateReqs[0].SourceMessageIDs, refs) {
-		t.Fatalf("UPDATE SourceMessageIDs = %v, want %v", runtime.updateReqs[0].SourceMessageIDs, refs)
+	if want := []string{"sess-1/msg-2"}; !slices.Equal(runtime.updateReqs[0].SourceMessageIDs, want) {
+		t.Fatalf("UPDATE SourceMessageIDs = %v, want %v", runtime.updateReqs[0].SourceMessageIDs, want)
 	}
 }
 
@@ -170,7 +210,6 @@ func TestCallToolSearchMemoryReturnsSourceRefs(t *testing.T) {
 	}
 	want := []map[string]any{
 		{"session_id": "sess-1", "message_id": "msg-1"},
-		{"message_id": "msg-2"},
 	}
 	if len(refs) != len(want) {
 		t.Fatalf("source_refs = %v, want %v", refs, want)
@@ -210,7 +249,23 @@ func TestCallToolSearchMemoryCapsSourceRefs(t *testing.T) {
 		t.Fatalf("expected 8 source_refs, got %d", len(got))
 	}
 	if got[0]["message_id"] != "msg-03" || got[7]["message_id"] != "msg-10" {
-		t.Fatalf("expected most recent 8 refs, got first=%v last=%v", got[0], got[7])
+		t.Fatalf("expected retained tail of 8 refs, got first=%v last=%v", got[0], got[7])
+	}
+}
+
+func TestCallToolSearchMemoryValidatesBeforeCappingSourceRefs(t *testing.T) {
+	t.Parallel()
+	refs := make([]string, 0, 10)
+	for i := 1; i <= 8; i++ {
+		refs = append(refs, fmt.Sprintf("sess-1/msg-%02d", i))
+	}
+	refs = append(refs, "bare-message", "broken/")
+	got := sourceRefsPayload(refs)
+	if len(got) != 8 {
+		t.Fatalf("sourceRefsPayload() length = %d, want 8 valid refs: %v", len(got), got)
+	}
+	if got[0]["message_id"] != "msg-01" || got[7]["message_id"] != "msg-08" {
+		t.Fatalf("sourceRefsPayload() = %v, want all valid refs", got)
 	}
 }
 
