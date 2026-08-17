@@ -13,7 +13,9 @@ type fakeNetError struct {
 	timeout bool
 }
 
-func (e fakeNetError) Error() string   { return "fake network error" }
+var _ net.Error = fakeNetError{}
+
+func (_ fakeNetError) Error() string   { return "fake network error" }
 func (e fakeNetError) Timeout() bool   { return e.timeout }
 func (e fakeNetError) Temporary() bool { return !e.timeout }
 
@@ -56,5 +58,3 @@ func TestIsRetryableStreamError(t *testing.T) {
 		})
 	}
 }
-
-var _ net.Error = fakeNetError{}

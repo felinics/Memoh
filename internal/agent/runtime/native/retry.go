@@ -59,10 +59,7 @@ func isRetryableStreamError(err error) bool {
 	// instead of entering the retry storm.
 	var netErr net.Error
 	if errors.As(err, &netErr) {
-		if netErr.Timeout() {
-			return false
-		}
-		return true
+		return !netErr.Timeout()
 	}
 	// Belt-and-braces for "Client.Timeout exceeded (while awaiting headers)" /
 	// "Timeout exceeded" text even if the wrapping type doesn't satisfy net.Error.
