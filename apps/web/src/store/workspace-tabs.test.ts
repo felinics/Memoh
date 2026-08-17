@@ -35,6 +35,9 @@ vi.hoisted(() => {
 
   const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
   const storage = new MemoryStorage()
+  // Keep real i18n active so terminal-title assertions catch missing or
+  // misspelled keys, while making the expected English fallback deterministic.
+  storage.setItem('language', 'en')
   // Layout/selection now live in sessionStorage (per-Tab), so the store's
   // restore path reads it, not localStorage. A separate instance mirrors the
   // real browser split (two distinct areas under the same key names).
@@ -113,18 +116,6 @@ const mobileBreakpoint = vi.hoisted(() => {
     },
   }
 })
-
-// workspace-tabs imports @/i18n to localize the desktop panel title; that
-// module reads localStorage at load to pick the initial locale, which isn't
-// polyfilled in this test's environment. Mock it so the import stays
-// side-effect free here.
-vi.mock('@/i18n', () => ({
-  default: {
-    global: {
-      t: (key: string) => key === 'chat.terminal.defaultTabLabel' ? 'Terminal' : key,
-    },
-  },
-}))
 
 const chatStoreMock = vi.hoisted(() => ({
   sessionId: null as string | null,

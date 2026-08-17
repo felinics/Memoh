@@ -342,7 +342,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function terminalTitleFallback(id: string): string {
-    const prefix = i18n.global.t('chat.terminal.defaultTabLabel').trim() || DEFAULT_TERMINAL_TITLE
+    const prefix = i18n.global.t('bots.terminal.defaultTabLabel').trim() || DEFAULT_TERMINAL_TITLE
     return numberedFallbackTitle(prefix, id)
   }
 
