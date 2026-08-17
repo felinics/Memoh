@@ -128,6 +128,10 @@ func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.S
 	if err != nil {
 		return nil, err
 	}
+	return s.historyRecordsFromMessages(msgs, fallback)
+}
+
+func (s *Service) historyRecordsFromMessages(msgs []messagepkg.Message, fallback historyfrag.ScopeFallback) ([]historyfrag.HistoryRecord, error) {
 	result := make([]historyfrag.HistoryRecord, 0, len(msgs))
 	for _, m := range msgs {
 		record, err := historyfrag.FromDBMessageWithLogger(s.logger, m, fallback)

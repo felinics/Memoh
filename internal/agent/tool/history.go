@@ -34,11 +34,13 @@ type HistoryMessageReader interface {
 	GetByIDBySession(ctx context.Context, sessionID string, messageID string) (messagepkg.Message, error)
 }
 
-// HistoryProvider exposes list_sessions, get_messages, and search_messages tools.
+// HistoryProvider exposes list_sessions, get_messages, search_messages, and
+// get_session_context tools.
 type HistoryProvider struct {
 	sessions SessionLister
 	messages HistoryMessageReader
 	queries  dbstore.Queries
+	composer SessionContextComposer
 	logger   *slog.Logger
 }
 
@@ -52,6 +54,12 @@ func NewHistoryProvider(log *slog.Logger, sessions SessionLister, messages Histo
 		queries:  queries,
 		logger:   log.With(slog.String("tool", "history")),
 	}
+}
+
+// SetSessionContextComposer wires the application-side composer after
+// construction; the tool registers only when a composer is present.
+func (p *HistoryProvider) SetSessionContextComposer(composer SessionContextComposer) {
+	p.composer = composer
 }
 
 func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available AvailableTools) string {
@@ -71,6 +79,12 @@ func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available Ava
 		parts = append(parts, ref+": Search past message history. All parameters are optional: `start_time` / `end_time`, `keyword`, `session_id`, `contact_id`, and `role`.")
 		if listSessionsRef != "" {
 			parts = append(parts, "Use session IDs from "+listSessionsRef+" as `session_id` for "+ref+" when searching a specific conversation.")
+		}
+	}
+	if ref, ok := available.Ref(ToolGetSessionContext()); ok {
+		parts = append(parts, ref+": Reconstruct a session's context window: recent history folded with compaction summaries (overview), or raw detail centered on `around_message_id` (drill-down).")
+		if memoryRef, memoryOk := available.Ref(ToolSearchMemory()); memoryOk {
+			parts = append(parts, "When "+memoryRef+" results carry source_refs, pass a ref's session_id and message_id to "+ref+" (`session_id` / `around_message_id`) to pull the detailed conversation behind that memory.")
 		}
 	}
 	return usageSection("Sessions & History", parts)
@@ -184,6 +198,39 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execSearchMessages(ctx.Context, s, inputAsMap(input))
+			},
+		})
+	}
+
+	if p.composer != nil {
+		s := sess
+		tools = append(tools, sdk.Tool{
+			Name:        ToolGetSessionContext().String(),
+			Description: "Reconstruct the context window of an accessible chat session, trimmed to a token budget. Omit around_message_id for an overview of the most recent history folded with compaction summaries; pass around_message_id (for example a source_refs message_id from search_memory) to center the window on that message and get raw detail without summary folding.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{
+						"type":        "string",
+						"description": "Session ID to compose. Defaults to the current session when omitted.",
+					},
+					"around_message_id": map[string]any{
+						"type":        "string",
+						"description": "Message ID inside the session to center the window on. When omitted the window covers the most recent history.",
+					},
+					"window_minutes": map[string]any{
+						"type":        "integer",
+						"description": "Total window span in minutes. Default 1440 (24h), max 10080 (7 days).",
+					},
+					"max_tokens": map[string]any{
+						"type":        "integer",
+						"description": "Token budget for the composed window. Default 6000, max 16000.",
+					},
+				},
+				"required": []string{},
+			},
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execGetSessionContext(ctx.Context, s, inputAsMap(input))
 			},
 		})
 	}
@@ -530,7 +577,13 @@ func extractTextContent(raw []byte) string {
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		return ""
 	}
+	return HistoryMessageDisplayText(msg)
+}
 
+// HistoryMessageDisplayText renders a persisted ModelMessage as the short
+// display text used by history surfaces: visible text, else tool-call or
+// tool-result markers derived from structured content parts or legacy fields.
+func HistoryMessageDisplayText(msg turn.ModelMessage) string {
 	if text := extractVisibleHistoryText(msg.Content); text != "" {
 		return text
 	}

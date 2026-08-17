@@ -209,3 +209,11 @@ type Service interface {
 	DeleteBySession(ctx context.Context, sessionID string) error
 	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error
 }
+
+// ActiveWindowLister lists active session messages inside a closed time
+// window, newest-capped at limit and returned in ascending order. It is an
+// optional capability next to Service so existing implementations without
+// windowed reads keep compiling.
+type ActiveWindowLister interface {
+	ListActiveBetweenBySession(ctx context.Context, sessionID string, start, end time.Time, limit int32) ([]Message, error)
+}

@@ -2585,6 +2585,116 @@ func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Co
 	return err
 }
 
+const listActiveMessagesBetweenBySession = `-- name: ListActiveMessagesBetweenBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id,
+  m.display_text,
+  m.compact_id,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_visible_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND m.created_at >= $2
+  AND m.created_at <= $3
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT $4
+`
+
+type ListActiveMessagesBetweenBySessionParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	StartAt   pgtype.Timestamptz `json:"start_at"`
+	EndAt     pgtype.Timestamptz `json:"end_at"`
+	MaxCount  int32              `json:"max_count"`
+}
+
+type ListActiveMessagesBetweenBySessionRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+func (q *Queries) ListActiveMessagesBetweenBySession(ctx context.Context, arg ListActiveMessagesBetweenBySessionParams) ([]ListActiveMessagesBetweenBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listActiveMessagesBetweenBySession,
+		arg.SessionID,
+		arg.StartAt,
+		arg.EndAt,
+		arg.MaxCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveMessagesBetweenBySessionRow
+	for rows.Next() {
+		var i ListActiveMessagesBetweenBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CompactID,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveMessagesSince = `-- name: ListActiveMessagesSince :many
 SELECT
   m.id,

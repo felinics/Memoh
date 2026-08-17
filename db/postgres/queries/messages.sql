@@ -1711,6 +1711,39 @@ WHERE m.team_id = public.memoh_current_team_id()
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
+-- name: ListActiveMessagesBetweenBySession :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id,
+  m.display_text,
+  m.compact_id,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_visible_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = sqlc.arg(session_id)
+  AND m.created_at >= sqlc.arg(start_at)
+  AND m.created_at <= sqlc.arg(end_at)
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT sqlc.arg(max_count);
+
 -- name: ListMessagesBefore :many
 SELECT
   m.id,

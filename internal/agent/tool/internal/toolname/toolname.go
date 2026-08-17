@@ -47,13 +47,15 @@ func ToolGetContacts() Name    { return newName("get_contacts") }
 func ToolListSessions() Name   { return newName("list_sessions") }
 func ToolGetMessages() Name    { return newName("get_messages") }
 func ToolSearchMessages() Name { return newName("search_messages") }
-func ToolSearchMemory() Name   { return newName(memprovider.ToolSearchMemory) }
-func ToolListSkills() Name     { return newName("list_skills") }
-func ToolUseSkill() Name       { return newName("use_skill") }
-func ToolSpawnAgent() Name     { return newName("spawn_agent") }
-func ToolSendMessage() Name    { return newName("send_message") }
-func ToolListAgents() Name     { return newName("list_agents") }
-func ToolListModels() Name     { return newName("list_models") }
+
+func ToolGetSessionContext() Name { return newName("get_session_context") }
+func ToolSearchMemory() Name      { return newName(memprovider.ToolSearchMemory) }
+func ToolListSkills() Name        { return newName("list_skills") }
+func ToolUseSkill() Name          { return newName("use_skill") }
+func ToolSpawnAgent() Name        { return newName("spawn_agent") }
+func ToolSendMessage() Name       { return newName("send_message") }
+func ToolListAgents() Name        { return newName("list_agents") }
+func ToolListModels() Name        { return newName("list_models") }
 
 func ToolListWorkdirs() Name  { return newName("list_workdirs") }
 func ToolListACPAgents() Name { return newName("list_acp_agents") }
@@ -85,7 +87,7 @@ func ToolReadEmail() Name         { return newName("read_email") }
 var all = []Name{
 	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListExecutionLocations(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
 	ToolSend(), ToolReact(), ToolSpeak(),
-	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),
+	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolGetSessionContext(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),
 	ToolListWorkdirs(), ToolListACPAgents(),
 	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
 	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),

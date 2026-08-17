@@ -1059,6 +1059,31 @@ func (s *DBService) ListActiveSinceBySession(ctx context.Context, sessionID stri
 	return msgs, nil
 }
 
+// ListActiveBetweenBySession returns session messages inside [start, end],
+// excluding passive_sync messages. Rows are capped at limit newest-first in
+// the query, then returned in ascending order.
+func (s *DBService) ListActiveBetweenBySession(ctx context.Context, sessionID string, start, end time.Time, limit int32) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListActiveMessagesBetweenBySession(ctx, sqlc.ListActiveMessagesBetweenBySessionParams{
+		SessionID: pgSessionID,
+		StartAt:   pgtype.Timestamptz{Time: start, Valid: true},
+		EndAt:     pgtype.Timestamptz{Time: end, Valid: true},
+		MaxCount:  limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := make([]Message, 0, len(rows))
+	for i := len(rows) - 1; i >= 0; i-- {
+		msgs = append(msgs, toMessageFromActiveSinceBySessionRow(sqlc.ListActiveMessagesSinceBySessionRow(rows[i])))
+	}
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
 // ListLatestBySession returns the latest N session messages.
 func (s *DBService) ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)

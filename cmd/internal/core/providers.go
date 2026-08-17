@@ -507,6 +507,9 @@ func injectToolProviders(a *native.Agent, msgService *message.DBService, hookSer
 		if cp, ok := p.(*agenttools.ContainerProvider); ok {
 			cp.SetHookService(hookService)
 		}
+		if hp, ok := p.(*agenttools.HistoryProvider); ok {
+			hp.SetSessionContextComposer(agentService)
+		}
 		if sp, ok := p.(*agenttools.SpawnProvider); ok {
 			adapter := native.NewSpawnAdapter(a)
 			// Incremental step persistence and live runtime publishing both key
