@@ -15,6 +15,41 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
+func TestAgentStreamEventErrorConversion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-error event", func(t *testing.T) {
+		if err := agentStreamEventError(native.StreamEvent{Type: native.EventTextDelta}); err != nil {
+			t.Fatalf("agentStreamEventError() = %v, want nil", err)
+		}
+	})
+	t.Run("stable application code", func(t *testing.T) {
+		event := native.StreamEvent{
+			Type: native.EventError, Code: string(apperror.CodeContextBudgetUnsatisfied),
+			Error: "untrusted backend fallback",
+		}
+		err := agentStreamEventError(event)
+		if got := apperror.CodeOf(err); got != apperror.CodeContextBudgetUnsatisfied {
+			t.Fatalf("error code = %q, want %q", got, apperror.CodeContextBudgetUnsatisfied)
+		}
+		if err.Error() != string(apperror.CodeContextBudgetUnsatisfied) {
+			t.Fatalf("coded stream identity = %q", err)
+		}
+	})
+	t.Run("legacy detail", func(t *testing.T) {
+		err := agentStreamEventError(native.StreamEvent{Type: native.EventError, Error: " provider stopped "})
+		if err == nil || err.Error() != "provider stopped" {
+			t.Fatalf("agentStreamEventError() = %v", err)
+		}
+	})
+	t.Run("empty legacy detail", func(t *testing.T) {
+		err := agentStreamEventError(native.StreamEvent{Type: native.EventError})
+		if err == nil || err.Error() != "agent stream failed" {
+			t.Fatalf("agentStreamEventError() = %v", err)
+		}
+	})
+}
+
 type recordingMessageService struct {
 	persisted               []messagepkg.PersistInput
 	replaced                int

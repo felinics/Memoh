@@ -11,6 +11,16 @@ import (
 // accounting), and the single swap point for a real tokenizer.
 const EstimateBytesPerToken = 4
 
+const (
+	// ProviderBudgetEstimator identifies the conservative estimator used only
+	// for provider-envelope decisions.
+	ProviderBudgetEstimator = "bytes_ceil_div4_margin_v1"
+	// ProviderBudgetSafetyFactorPercent adds 25 percent headroom after byte
+	// ceiling. The midpoint of the accepted 15–30 percent range covers common
+	// multilingual and JSON density without changing legacy ledger estimates.
+	ProviderBudgetSafetyFactorPercent = 125
+)
+
 // EstimateImageTokens is the flat per-image estimate. Real image cost is
 // resolution-dependent and provider-capped at roughly 1.1–1.6K tokens, so a
 // ceiling-magnitude flat figure keeps image-heavy history visible to budget
@@ -23,6 +33,20 @@ func TokensFromBytes(n int) int {
 		return 0
 	}
 	return n / EstimateBytesPerToken
+}
+
+// ProviderBudgetTokensFromBytes converts bytes for provider-envelope decisions
+// only. Selection, compaction, cache metrics, and other ledger consumers keep
+// the legacy floor-based TokensFromBytes contract.
+func ProviderBudgetTokensFromBytes(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	ceiling := n / EstimateBytesPerToken
+	if n%EstimateBytesPerToken != 0 {
+		ceiling++
+	}
+	return ceiling * ProviderBudgetSafetyFactorPercent / 100
 }
 
 // EstimateSDKMessageTokens estimates tokens for one SDK message additively
@@ -85,6 +109,17 @@ func ResolveFragTokens(frag ContextFrag) int {
 		return frag.TokenEstimate
 	}
 	return EstimateFragTokens(frag)
+}
+
+// ResolveProviderBudgetFragTokens keeps an authoritative fragment estimate when
+// it is larger, otherwise it uses the conservative provider byte estimate.
+func ResolveProviderBudgetFragTokens(frag ContextFrag) int {
+	bytes, images := fragEstimate(frag)
+	estimated := ProviderBudgetTokensFromBytes(bytes) + images*EstimateImageTokens
+	if frag.TokenEstimate > estimated {
+		return frag.TokenEstimate
+	}
+	return estimated
 }
 
 // ToolDefAccountingFor measures one tool definition as the provider will

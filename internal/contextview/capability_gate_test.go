@@ -35,10 +35,11 @@ func TestApplyProviderRunConfigGatesUnavailableSkillGuidance(t *testing.T) {
 		t.Fatalf("selection = %#v, want two capability-gated drops", got.ContextManifest.Selection)
 	}
 	records := got.ContextMutations.Records()
-	if len(records) != 1 ||
-		records[0].Kind != contextfrag.MutationCapabilityGate ||
-		records[0].Detail != "dropped=2" {
-		t.Fatalf("mutations = %+v, want one count-only capability gate record", records)
+	if len(records) != 2 ||
+		records[0].Kind != contextfrag.MutationContextBudgetDisabled ||
+		records[1].Kind != contextfrag.MutationCapabilityGate ||
+		records[1].Detail != "dropped=2" {
+		t.Fatalf("mutations = %+v, want disabled-budget audit then count-only capability gate", records)
 	}
 }
 
@@ -56,8 +57,8 @@ func TestApplyProviderRunConfigKeepsAvailableSkillGuidanceByteIdentical(t *testi
 		got.ContextManifest.Selection.DropReasons[capabilityGateDropReason] != 0 {
 		t.Fatalf("selection = %#v, want no capability gate", got.ContextManifest.Selection)
 	}
-	if records := got.ContextMutations.Records(); len(records) != 0 {
-		t.Fatalf("mutations = %+v, want none", records)
+	if records := got.ContextMutations.Records(); len(records) != 1 || records[0].Kind != contextfrag.MutationContextBudgetDisabled {
+		t.Fatalf("mutations = %+v, want only missing-window audit", records)
 	}
 }
 
@@ -71,8 +72,8 @@ func TestApplyProviderRunConfigLeavesUnknownCapabilityRosterUngated(t *testing.T
 	if got.System != cfg.System {
 		t.Fatalf("system = %q, want unknown roster to preserve %q", got.System, cfg.System)
 	}
-	if records := got.ContextMutations.Records(); len(records) != 0 {
-		t.Fatalf("mutations = %+v, want unknown roster ungated", records)
+	if records := got.ContextMutations.Records(); len(records) != 1 || records[0].Kind != contextfrag.MutationContextBudgetDisabled {
+		t.Fatalf("mutations = %+v, want unknown roster ungated plus missing-window audit", records)
 	}
 }
 
@@ -161,10 +162,11 @@ func TestApplyProviderRunConfigFallbackCannotRestoreGatedGuidance(t *testing.T) 
 		t.Fatalf("fallback messages = %#v, want legacy message", got.Messages)
 	}
 	records := got.ContextMutations.Records()
-	if len(records) != 2 ||
-		records[0].Kind != contextfrag.MutationCapabilityGate ||
-		records[1].Kind != contextfrag.MutationContextViewFallback {
-		t.Fatalf("fallback mutations = %+v, want capability gate then context-view fallback", records)
+	if len(records) != 3 ||
+		records[0].Kind != contextfrag.MutationContextBudgetDisabled ||
+		records[1].Kind != contextfrag.MutationCapabilityGate ||
+		records[2].Kind != contextfrag.MutationContextViewFallback {
+		t.Fatalf("fallback mutations = %+v, want disabled budget, capability gate, then context-view fallback", records)
 	}
 	if got.ContextManifest.Selection == nil ||
 		got.ContextManifest.Selection.DropReasons[capabilityGateDropReason] != 2 {

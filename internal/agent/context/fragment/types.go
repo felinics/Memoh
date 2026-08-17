@@ -3,6 +3,7 @@
 package contextfrag
 
 import (
+	"errors"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -146,6 +147,11 @@ const (
 	RetentionRequired    RetentionTier = "required"
 	RetentionPreferred   RetentionTier = "preferred"
 	RetentionOptional    RetentionTier = "optional"
+)
+
+var (
+	ErrProtectedContextOverflow = errors.New("protected context exceeds its budget")
+	ErrBudgetUnsatisfied        = errors.New("context budget reserves exceed the available window")
 )
 
 // DropPriority orders fragments within one retention tier. Higher values drop
@@ -330,6 +336,7 @@ type Manifest struct {
 	Items              []ManifestItem      `json:"items,omitempty"`
 	SelectionDecisions []SelectionDecision `json:"selection_decisions,omitempty"`
 	Selection          *SelectionTrace     `json:"selection,omitempty"`
+	BudgetPlan         *ContextBudgetPlan  `json:"budget_plan,omitempty"`
 	CachePlan          *CachePlan          `json:"cache_plan,omitempty"`
 	Mutations          *MutationLedger     `json:"mutations,omitempty"`
 }
@@ -391,6 +398,20 @@ type ToolDefAccounting struct {
 	Name          string `json:"name"`
 	Bytes         int    `json:"bytes"`
 	TokenEstimate int    `json:"token_estimate"`
+}
+
+// ContextBudgetPlan records the numeric input-envelope allocation used for one
+// provider-bound turn. Raw prompt content never enters this accounting view.
+type ContextBudgetPlan struct {
+	Estimator                    string `json:"estimator"`
+	EstimatorSafetyFactorPercent int    `json:"estimator_safety_factor_percent"`
+	Window                       int    `json:"window"`
+	OutputReserve                int    `json:"output_reserve"`
+	ToolDefsCost                 int    `json:"tool_defs_cost"`
+	CurrentRequestCost           int    `json:"current_request_cost"`
+	SystemBudget                 int    `json:"system_budget"`
+	ActualSystemCost             int    `json:"actual_system_cost"`
+	HistoryBudget                int    `json:"history_budget"`
 }
 
 type SelectionTrace struct {

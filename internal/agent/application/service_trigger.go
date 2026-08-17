@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
-
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/event"
 	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
@@ -19,6 +17,13 @@ import (
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/schedule"
 )
+
+// attachCurrentTurnPrompt routes a trigger's rich prompt through Query so the
+// context view classifies it as the live current request rather than history.
+func attachCurrentTurnPrompt(cfg native.RunConfig, prompt string) native.RunConfig {
+	cfg.Query = prompt
+	return cfg
+}
 
 // TriggerSchedule executes a scheduled command via the internal agent.
 func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (triggerResult schedule.TriggerResult, err error) {
@@ -88,7 +93,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		MaxCalls:    payload.MaxCalls,
 		Command:     payload.Command,
 	})
-	cfg.Messages = append(cfg.Messages, sdk.UserMessage(schedulePrompt))
+	cfg = attachCurrentTurnPrompt(cfg, schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)
 	terminal := s.contextLifecycleTerminal(ctx, cfg)
 	var lifecycleCause error
@@ -289,7 +294,7 @@ func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload he
 		now = now.In(cfg.Identity.TimezoneLocation)
 	}
 	heartbeatPrompt := native.GenerateHeartbeatPrompt(payload.Interval, checklist, now, payload.LastHeartbeatAt)
-	cfg.Messages = append(cfg.Messages, sdk.UserMessage(heartbeatPrompt))
+	cfg = attachCurrentTurnPrompt(cfg, heartbeatPrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)
 	terminal := s.contextLifecycleTerminal(ctx, cfg)
 	var lifecycleCause error

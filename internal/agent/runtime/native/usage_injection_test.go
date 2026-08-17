@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	tools "github.com/memohai/memoh/internal/agent/tool"
 )
@@ -322,6 +323,27 @@ func TestAssembleToolsInjectsUsageWhenProviderEmitsTools(t *testing.T) {
 	}
 	if !strings.Contains(usage, "## Tool usage") {
 		t.Fatalf("expected usage to carry the section header, got %q", usage)
+	}
+}
+
+func TestAssembleToolsPassesContextBudgetAndToolExchangePolicyToSession(t *testing.T) {
+	t.Parallel()
+	var captured tools.SessionContext
+	a := newTestAgent(&usageTestProvider{emitTool: true, sessionSeen: &captured})
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 10}
+
+	if _, _, _, _, err := a.assembleTools(context.Background(), RunConfig{
+		ContextBudgetMaxTokens:    128000,
+		ContextToolExchangePolicy: policy,
+	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true); err != nil {
+		t.Fatalf("assembleTools error: %v", err)
+	}
+
+	if captured.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", captured.ContextBudgetMaxTokens)
+	}
+	if captured.ContextToolExchangePolicy != policy {
+		t.Fatalf("ContextToolExchangePolicy = %p, want same pointer %p", captured.ContextToolExchangePolicy, policy)
 	}
 }
 

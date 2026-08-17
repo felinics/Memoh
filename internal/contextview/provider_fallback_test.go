@@ -30,7 +30,8 @@ func TestProviderViewFallbackKeepsLegacyBytesAndAudit(t *testing.T) {
 		t.Fatalf("manifest = %#v", got.ContextManifest)
 	}
 	records := got.ContextMutations.Records()
-	if len(records) != 1 || records[0].Kind != contextfrag.MutationContextViewFallback {
+	if len(records) != 2 || records[0].Kind != contextfrag.MutationContextBudgetDisabled ||
+		records[1].Kind != contextfrag.MutationContextViewFallback {
 		t.Fatalf("records = %#v", records)
 	}
 }
@@ -74,8 +75,9 @@ func TestApplyProviderRunConfigAcceptsEmptyProviderInput(t *testing.T) {
 	if got.ContextMutations == nil {
 		t.Fatal("empty provider input did not install a mutation ledger")
 	}
-	if records := got.ContextMutations.Records(); len(records) != 0 {
-		t.Fatalf("empty provider input was classified as fallback: %#v", records)
+	if records := got.ContextMutations.Records(); len(records) != 1 ||
+		records[0].Kind != contextfrag.MutationContextBudgetDisabled {
+		t.Fatalf("empty provider input audit = %#v, want only missing-window classification", records)
 	}
 }
 

@@ -1184,6 +1184,16 @@ func sendWSError(writer *wsWriter, ref wsTurnRef, message string) {
 	writer.SendJSON(event)
 }
 
+func sendWSAgentError(writer *wsWriter, ref wsTurnRef, streamEvent native.StreamEvent) {
+	event := ref.event("error")
+	event.Code = strings.TrimSpace(streamEvent.Code)
+	event.Message = strings.TrimSpace(streamEvent.Error)
+	if event.Message == "" {
+		event.Message = "stream error"
+	}
+	writer.SendJSON(event)
+}
+
 // wsRunAcceptance is what a client needs beyond the run id to reconcile the turn
 // it rendered optimistically with the authoritative one: which turn the run
 // executes, and where in the session's stream it became observable.
@@ -1348,11 +1358,7 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 			// its own: it names the run as failed but not what to tell this
 			// caller, which is still waiting on the send it made.
 			if streamEvent.Type == native.EventError {
-				message := strings.TrimSpace(streamEvent.Error)
-				if message == "" {
-					message = "stream error"
-				}
-				sendWSError(writer, ref, message)
+				sendWSAgentError(writer, ref, streamEvent)
 			}
 		}
 	}

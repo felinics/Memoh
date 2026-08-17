@@ -17,10 +17,15 @@ type SourceSpec struct {
 	Config any
 }
 
-// BudgetEnvelope carries independently configured fragment policies. The
-// caller remains responsible for the already-materialized history window.
 type BudgetEnvelope struct {
-	ToolExchange *contextfrag.ToolExchangePolicy
+	MaxTokens int
+	// Plan activates unified provider-envelope budgeting. Nil preserves the
+	// legacy unbudgeted provider selection path.
+	Plan *contextfrag.ContextBudgetPlan
+	// RecentProtectTokens bands the newest droppable history within this many
+	// estimated tokens to drop last. Zero disables the window.
+	RecentProtectTokens int
+	ToolExchange        *contextfrag.ToolExchangePolicy
 }
 
 type BuildOptions struct {

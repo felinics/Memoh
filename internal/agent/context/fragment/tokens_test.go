@@ -32,6 +32,54 @@ func TestTokensFromBytes(t *testing.T) {
 	}
 }
 
+func TestProviderBudgetTokensFromBytesUsesCeilingAndSafetyMargin(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   int
+		want int
+	}{
+		{in: -1, want: 0},
+		{in: 0, want: 0},
+		{in: 1, want: 1},
+		{in: 3, want: 1},
+		{in: 4, want: 1},
+		{in: 7, want: 2},
+		{in: 8, want: 2},
+		{in: 16, want: 5},
+		{in: 4096, want: 1280},
+	}
+	for _, tc := range cases {
+		if got := ProviderBudgetTokensFromBytes(tc.in); got != tc.want {
+			t.Fatalf("ProviderBudgetTokensFromBytes(%d) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+
+	if got := TokensFromBytes(3); got != 0 {
+		t.Fatalf("TokensFromBytes(3) = %d, want legacy floor estimate 0", got)
+	}
+}
+
+func TestResolveProviderBudgetFragTokensKeepsGreaterEstimate(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:   "current",
+		Kind: KindCurrentUserMessage,
+		Slot: SlotCurrentUser,
+		Text: "abcdefghijklmnop",
+	})
+	frag.TokenEstimate = 1
+	if got := ResolveProviderBudgetFragTokens(frag); got != 5 {
+		t.Fatalf("ResolveProviderBudgetFragTokens(16 bytes) = %d, want conservative byte estimate 5", got)
+	}
+
+	frag.TokenEstimate = 99
+	if got := ResolveProviderBudgetFragTokens(frag); got != 99 {
+		t.Fatalf("ResolveProviderBudgetFragTokens(authoritative) = %d, want 99", got)
+	}
+}
+
 func TestEstimateSDKMessageTokensTextOnly(t *testing.T) {
 	t.Parallel()
 

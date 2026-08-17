@@ -11,6 +11,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
 	"github.com/memohai/memoh/internal/agent/tool/internal/toolset"
 )
@@ -331,11 +332,13 @@ type SessionContext struct {
 	WorkspaceTargetName string
 	// WorkdirPath is the session's immutable working directory. When set,
 	// relative tool paths resolve under it and exec defaults its cwd to it.
-	WorkdirPath      string
-	Skills           map[string]SkillDetail
-	TimezoneLocation *time.Location
-	Emitter          StreamEmitter
-	LiveStream       bool
+	WorkdirPath               string
+	Skills                    map[string]SkillDetail
+	TimezoneLocation          *time.Location
+	Emitter                   StreamEmitter
+	LiveStream                bool
+	ContextBudgetMaxTokens    int
+	ContextToolExchangePolicy *contextfrag.ToolExchangePolicy
 }
 
 // CanAskUser reports whether ask_user can be both shown to the model and

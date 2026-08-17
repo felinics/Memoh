@@ -8,18 +8,20 @@ import (
 	"sync"
 )
 
-// MutationKind identifies a post-render context mutator: code that changes
-// the provider payload after the context view rendered it.
+// MutationKind identifies an observable provider-context decision or a
+// post-render mutation that changes the provider payload.
 type MutationKind string
 
 const (
-	MutationBeforeModelCallHook MutationKind = "before_model_call_hook"
-	MutationBackgroundSummary   MutationKind = "background_summary"
-	MutationMidTaskPrune        MutationKind = "mid_task_prune"
-	MutationInjectedMessage     MutationKind = "injected_message"
-	MutationContextViewFallback MutationKind = "context_view_fallback"
-	MutationCapabilityGate      MutationKind = "capability_gate"
-	MutationReadMedia           MutationKind = "read_media"
+	MutationBeforeModelCallHook   MutationKind = "before_model_call_hook"
+	MutationBackgroundSummary     MutationKind = "background_summary"
+	MutationMidTaskPrune          MutationKind = "mid_task_prune"
+	MutationInjectedMessage       MutationKind = "injected_message"
+	MutationContextViewFallback   MutationKind = "context_view_fallback"
+	MutationContextBudgetFailure  MutationKind = "context_budget_failure"
+	MutationContextBudgetDisabled MutationKind = "context_budget_disabled"
+	MutationCapabilityGate        MutationKind = "capability_gate"
+	MutationReadMedia             MutationKind = "read_media"
 )
 
 // MutationRecord is one ledger entry describing a post-render mutation.

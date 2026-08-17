@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
+	"github.com/memohai/memoh/internal/agent/runtime/native"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
 
@@ -75,6 +78,55 @@ func TestFilterMessagesBeforeIDFailsClosedWhenCutoffIsMissing(t *testing.T) {
 	}
 	if got := filterMessagesBeforeID(records, "missing-cutoff"); len(got) != 0 {
 		t.Fatalf("missing cutoff retained history: %#v", got)
+	}
+}
+
+func TestMarkRequiredHistoryMessageCurrentUsesExactPersistedID(t *testing.T) {
+	t.Parallel()
+
+	cfg := native.RunConfig{
+		Messages: []sdk.Message{
+			sdk.UserMessage("retry request"),
+			sdk.AssistantMessage("old answer"),
+			sdk.UserMessage("newer unrelated user"),
+		},
+		ForkContextSourceMessageIDs: []string{"retry-user", "old-answer", "newer-user"},
+	}
+	markRequiredHistoryMessageCurrent(&cfg, "retry-user")
+	if cfg.ContextCurrentUserMessageIndex == nil || *cfg.ContextCurrentUserMessageIndex != 0 {
+		t.Fatalf("current index = %#v, want exact persisted request at 0", cfg.ContextCurrentUserMessageIndex)
+	}
+}
+
+func TestMarkRequiredHistoryMessageCurrentRejectsNonUserAndMissingIDs(t *testing.T) {
+	t.Parallel()
+
+	stale := 2
+	cfg := native.RunConfig{
+		Messages:                       []sdk.Message{sdk.AssistantMessage("not a request"), sdk.UserMessage("actual user")},
+		ForkContextSourceMessageIDs:    []string{"required", "other"},
+		ContextCurrentUserMessageIndex: &stale,
+	}
+	markRequiredHistoryMessageCurrent(&cfg, "required")
+	if cfg.ContextCurrentUserMessageIndex != nil {
+		t.Fatalf("non-user source ID marked current: %#v", cfg.ContextCurrentUserMessageIndex)
+	}
+	markRequiredHistoryMessageCurrent(&cfg, "missing")
+	if cfg.ContextCurrentUserMessageIndex != nil {
+		t.Fatalf("missing source ID marked current: %#v", cfg.ContextCurrentUserMessageIndex)
+	}
+}
+
+func TestNormalizedContextPrefixLengthTracksSanitizedHistory(t *testing.T) {
+	t.Parallel()
+
+	messages := []ModelMessage{
+		{Content: newTextContent("invalid history")},
+		{Role: "user", Content: newTextContent("valid history")},
+		{Role: "user", Content: newTextContent("pinned tail")},
+	}
+	if got := normalizedContextPrefixLength(messages, 2); got != 1 {
+		t.Fatalf("normalized prefix = %d, want 1", got)
 	}
 }
 
