@@ -102,10 +102,6 @@ type SessionPool struct {
 	userInput      sessionUserInputService
 	timeout        time.Duration
 
-	adapterMu                  sync.Mutex
-	adapterStates              map[string]*adapterUpgradeState
-	dynamicAdapterStartTimeout time.Duration
-
 	mu        sync.RWMutex
 	runtimes  map[string]*runtimeHandle
 	bySession map[string]string
@@ -1605,14 +1601,12 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		BotID:                  h.botID,
 		ProjectPath:            h.projectPath,
 		Command:                profile.Command,
-		Args:                   profile.Args,
 		Env:                    env,
 		CleanEnv:               cleanEnv,
 		UnsetEnv:               unsetEnv,
 		Resolved:               &resolved,
 		SetupMode:              mode,
 		SessionMode:            profile.SessionModeID,
-		SessionConfigValues:    profile.SessionConfigValues,
 		ReasoningConfigID:      profile.ReasoningConfigID,
 		DefaultReasoningEffort: profile.DefaultReasoningEffort,
 		Timeout:                0,
@@ -1718,27 +1712,13 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		}
 	}
 
-	var sess *client.Session
-	sess, err = p.startDynamicAdapter(startCtx, profile, workspaceInfo, startReq, opts.Sink)
-	if err != nil {
-		if startCtx.Err() != nil {
-			return fail(err)
-		}
-		p.logger.Warn("dynamic ACP adapter unavailable; falling back to bundled version",
-			slog.String("bot_id", h.botID),
-			slog.String("agent_id", h.agentID),
-			slog.String("runtime_id", h.id),
-			slog.Any("error", err))
+	runnerCtx := startCtx
+	cancelRunner := func() {}
+	if startReq.Resume != nil {
+		runnerCtx, cancelRunner = context.WithTimeout(startCtx, sessionStateIOTimeout)
 	}
-	if sess == nil {
-		runnerCtx := startCtx
-		cancelRunner := func() {}
-		if startReq.Resume != nil {
-			runnerCtx, cancelRunner = context.WithTimeout(startCtx, sessionStateIOTimeout)
-		}
-		sess, err = p.runner.StartSession(runnerCtx, startReq, opts.Sink)
-		cancelRunner()
-	}
+	sess, err := p.runner.StartSession(runnerCtx, startReq, opts.Sink)
+	cancelRunner()
 	if err != nil {
 		if startCtx.Err() != nil {
 			return fail(err)

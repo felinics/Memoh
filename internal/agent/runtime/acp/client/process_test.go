@@ -596,14 +596,13 @@ type recordingFSNode struct {
 type recordingBridgeServer struct {
 	pb.UnimplementedContainerServiceServer
 
-	mu     sync.Mutex
-	execs  []execRecord
-	files  []writeRecord
-	reads  []string
-	exits  map[string]int32
-	seqs   map[string][]int32
-	stdout map[string]string
-	fs     map[string]recordingFSNode
+	mu    sync.Mutex
+	execs []execRecord
+	files []writeRecord
+	reads []string
+	exits map[string]int32
+	seqs  map[string][]int32
+	fs    map[string]recordingFSNode
 }
 
 func (s *recordingBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.ExecInput, pb.ExecOutput]) error {
@@ -613,7 +612,6 @@ func (s *recordingBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.ExecInpu
 	}
 	s.mu.Lock()
 	exitCode := s.exits[input.GetCommand()]
-	stdout := s.stdout[input.GetCommand()]
 	if len(s.seqs[input.GetCommand()]) > 0 {
 		exitCode = s.seqs[input.GetCommand()][0]
 		s.seqs[input.GetCommand()] = s.seqs[input.GetCommand()][1:]
@@ -627,11 +625,6 @@ func (s *recordingBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.ExecInpu
 		Timeout:  input.GetTimeoutSeconds(),
 	})
 	s.mu.Unlock()
-	if stdout != "" {
-		if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_STDOUT, Data: []byte(stdout)}); err != nil {
-			return err
-		}
-	}
 	if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT, ExitCode: exitCode}); err != nil {
 		return err
 	}
@@ -654,15 +647,6 @@ func (s *recordingBridgeServer) setExitCode(command string, code int32) {
 		s.exits = make(map[string]int32)
 	}
 	s.exits[command] = code
-}
-
-func (s *recordingBridgeServer) setStdout(command, output string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stdout == nil {
-		s.stdout = make(map[string]string)
-	}
-	s.stdout[command] = output
 }
 
 func (s *recordingBridgeServer) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {

@@ -21,6 +21,7 @@ import (
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/toolcontext"
+	"github.com/memohai/memoh/internal/version"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -63,10 +64,6 @@ type StartRequest struct {
 	// SessionMode, when set, is pinned via session/set_mode right after the
 	// session is created (see acpprofile.Profile.SessionModeID).
 	SessionMode string
-	// SessionConfigValues are pinned via session/set_config_option after the
-	// session is created, for options the agent advertises (see
-	// acpprofile.Profile.SessionConfigValues).
-	SessionConfigValues map[string]string
 	// ReasoningConfigID is a profile compatibility mapping used only when the
 	// agent omits ACP's thought_level category. DefaultReasoningEffort is the
 	// profile default applied at startup; per-turn choices are applied by the
@@ -143,6 +140,7 @@ type Session struct {
 	modeRevision              uint64
 	embeddedContext           bool
 	imagePromptSupported      bool
+	closeSessionSupported     bool
 	defaultSink               EventSink
 	cancel                    context.CancelFunc
 	reverseHTTPStop           func()
@@ -309,7 +307,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientInfo:         &acp.Implementation{Name: "memoh", Version: "dev"},
+		ClientInfo:         &acp.Implementation{Name: "memoh", Version: version.Version},
 		ClientCapabilities: clientCapabilities,
 	})
 	if err != nil {
@@ -320,6 +318,19 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		}
 		cancel()
 		return nil, fmt.Errorf("initialize ACP agent: %w", err)
+	}
+	if initResp.ProtocolVersion != acp.ProtocolVersionNumber {
+		callbacks.close()
+		_ = proc.Close()
+		if toolHTTPStop != nil {
+			toolHTTPStop()
+		}
+		cancel()
+		return nil, fmt.Errorf(
+			"initialize ACP agent: unsupported protocol version %d (client supports %d)",
+			initResp.ProtocolVersion,
+			acp.ProtocolVersionNumber,
+		)
 	}
 
 	mcpServers := []acp.McpServer{}
@@ -378,8 +389,6 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		cancel()
 		return nil, err
 	}
-	configOptions := pinSessionConfigValues(ctx, conn, sess.SessionId, sess.ConfigOptions, req.SessionConfigValues, r.logger, req.AgentID)
-
 	clientSession := &Session{
 		logger:                    r.logger,
 		proc:                      proc,
@@ -392,11 +401,12 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		reasoningConfigFallbackID: strings.TrimSpace(req.ReasoningConfigID),
 		embeddedContext:           initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
 		imagePromptSupported:      initResp.AgentCapabilities.PromptCapabilities.Image,
+		closeSessionSupported:     initResp.AgentCapabilities.SessionCapabilities.Close != nil,
 		defaultSink:               sink,
 		cancel:                    cancel,
 		reverseHTTPStop:           toolHTTPStop,
 	}
-	clientSession.replaceConfigOptions(sess.SessionId, configOptions)
+	clientSession.replaceConfigOptions(sess.SessionId, sess.ConfigOptions)
 	clientSession.installLegacyModels(sess.Models)
 	clientSession.installModes(sess.Modes)
 	callbacks.setSession(clientSession)
@@ -460,6 +470,9 @@ func startOrResumeSession(
 		})
 		if err != nil {
 			return sessionResponse{}, fmt.Errorf("create ACP session: %w", err)
+		}
+		if strings.TrimSpace(string(resp.SessionId)) == "" {
+			return sessionResponse{}, errors.New("create ACP session: agent returned an empty session id")
 		}
 		return resp, nil
 	}
@@ -550,84 +563,6 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 			slog.String("previous_mode", string(previousMode)))
 	}
 	return nil
-}
-
-// pinSessionConfigValues applies any non-semantic profile config pins to
-// options the agent actually advertises. Thought level is handled separately
-// through ReasoningState so explicit user choices can override profile
-// defaults. Unlike the session mode, these are quality settings rather than a
-// security boundary, so failures are logged and startup continues.
-func pinSessionConfigValues(ctx context.Context, conn *clientConnection, sessionID acp.SessionId, options []acp.SessionConfigOption, desired map[string]string, logger *slog.Logger, agentID string) []acp.SessionConfigOption {
-	current := options
-	for _, option := range options {
-		if option.Select == nil {
-			continue
-		}
-		value, ok := desired[string(option.Select.Id)]
-		if !ok {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if value == "" || string(option.Select.CurrentValue) == value {
-			continue
-		}
-		if !selectOptionHasValue(option.Select.Options, value) {
-			if logger != nil {
-				logger.Warn("ACP agent does not offer the pinned config value; leaving agent default",
-					slog.String("agent_id", agentID),
-					slog.String("config_id", string(option.Select.Id)),
-					slog.String("desired_value", value),
-					slog.String("current_value", string(option.Select.CurrentValue)))
-			}
-			continue
-		}
-		resp, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-			ValueId: &acp.SetSessionConfigOptionValueId{
-				SessionId: sessionID,
-				ConfigId:  option.Select.Id,
-				Value:     acp.SessionConfigValueId(value),
-			},
-		})
-		if err != nil {
-			if logger != nil {
-				logger.Warn("failed to pin ACP session config option",
-					slog.String("agent_id", agentID),
-					slog.String("config_id", string(option.Select.Id)),
-					slog.String("desired_value", value),
-					slog.Any("error", err))
-			}
-			continue
-		}
-		current = resp.ConfigOptions
-		if logger != nil {
-			logger.Info("pinned ACP session config option",
-				slog.String("agent_id", agentID),
-				slog.String("config_id", string(option.Select.Id)),
-				slog.String("value", value),
-				slog.String("previous_value", string(option.Select.CurrentValue)))
-		}
-	}
-	return current
-}
-
-func selectOptionHasValue(options acp.SessionConfigSelectOptions, value string) bool {
-	if options.Ungrouped != nil {
-		for _, option := range *options.Ungrouped {
-			if string(option.Value) == value {
-				return true
-			}
-		}
-	}
-	if options.Grouped != nil {
-		for _, group := range *options.Grouped {
-			for _, option := range group.Options {
-				if string(option.Value) == value {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client *bridge.Client, route string, handler http.Handler) (*bridge.Client, func(), error) {
@@ -1160,6 +1095,7 @@ func (s *Session) close(force bool) error {
 	proc := s.proc
 	cancel := s.cancel
 	reverseHTTPStop := s.reverseHTTPStop
+	closeSessionSupported := s.closeSessionSupported
 	promptCancel := s.promptCancel
 	promptDone := s.promptDone
 	s.mu.Unlock()
@@ -1198,7 +1134,7 @@ func (s *Session) close(force bool) error {
 		}
 		return closeErr
 	}
-	if conn != nil && sessionID != "" {
+	if closeSessionSupported && conn != nil && sessionID != "" {
 		ctx, cancelClose := context.WithTimeout(context.Background(), 2*time.Second)
 		_, _ = conn.CloseSession(ctx, acp.CloseSessionRequest{SessionId: sessionID})
 		cancelClose()
