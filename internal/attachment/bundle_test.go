@@ -182,11 +182,39 @@ func TestBundleWithAssetAccess(t *testing.T) {
 func TestExtractStorageKey(t *testing.T) {
 	t.Parallel()
 
-	if got := ExtractStorageKey("/data/.memoh/media/aa/demo.png"); got != "aa/demo.png" {
-		t.Fatalf("unexpected storage key: %q", got)
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "current", path: "/data/.memoh/media/aa/demo.png", want: "aa/demo.png"},
+		{name: "legacy", path: "/data/media/aa/demo.png", want: "aa/demo.png"},
+		{name: "other", path: "/tmp/demo.png", want: ""},
 	}
-	if got := ExtractStorageKey("/tmp/demo.png"); got != "" {
-		t.Fatalf("expected empty storage key for non-media path, got %q", got)
+	for _, tt := range tests {
+		if got := ExtractStorageKey(tt.path); got != tt.want {
+			t.Errorf("%s: ExtractStorageKey(%q) = %q, want %q", tt.name, tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestIsMediaAccessPath(t *testing.T) {
+	t.Parallel()
+
+	for _, mediaPath := range []string{
+		"/data/.memoh/media",
+		"/data/.memoh/media/aa/demo.png",
+		"/data/media",
+		"data/media/aa/demo.png",
+	} {
+		if !IsMediaAccessPath(mediaPath) {
+			t.Errorf("IsMediaAccessPath(%q) = false, want true", mediaPath)
+		}
+	}
+	for _, otherPath := range []string{"/data/mediakit/demo.png", "/data/.memoh/mediakit/demo.png", "/tmp/demo.png"} {
+		if IsMediaAccessPath(otherPath) {
+			t.Errorf("IsMediaAccessPath(%q) = true, want false", otherPath)
+		}
 	}
 }
 

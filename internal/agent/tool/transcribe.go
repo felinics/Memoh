@@ -16,12 +16,11 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/attachment"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/media"
 	"github.com/memohai/memoh/internal/settings"
 )
-
-const mediaDataPrefix = "/data/.memoh/media/"
 
 type TranscriptionProvider struct {
 	logger   *slog.Logger
@@ -169,8 +168,8 @@ func (p *TranscriptionProvider) loadAudio(ctx context.Context, botID, pathValue,
 }
 
 func (p *TranscriptionProvider) loadAudioFromPath(ctx context.Context, botID, pathValue, contentTypeOverride string) ([]byte, string, string, error) {
-	storageKey := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(pathValue), mediaDataPrefix))
-	if storageKey == "" || storageKey == strings.TrimSpace(pathValue) {
+	storageKey := attachment.ExtractStorageKey(pathValue)
+	if storageKey == "" {
 		return nil, "", "", fmt.Errorf("unsupported media path: %s", pathValue)
 	}
 	asset, err := p.media.GetByStorageKey(ctx, botID, storageKey)
