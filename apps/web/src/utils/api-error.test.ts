@@ -164,6 +164,23 @@ describe('resolveApiErrorMessage', () => {
     }, 'fallback')).toBe(expected)
   })
 
+  it.each([
+    ['context.budget_unsatisfied', 'en', 'The model context window is too small for this request.'],
+    ['context.budget_unsatisfied', 'zh', '模型上下文窗口不足，无法处理当前请求。'],
+    ['context.budget_unsatisfied', 'ja', 'モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。'],
+    ['context.protected_overflow', 'en', 'Required context exceeds the model context budget.'],
+    ['context.protected_overflow', 'zh', '必要的上下文内容超出了模型上下文预算。'],
+    ['context.protected_overflow', 'ja', '必須コンテキストがモデルのコンテキスト予算を超えています。'],
+  ])('localizes %s for %s', (code, language, expected) => {
+    locale = language
+
+    expect(resolveApiErrorMessage({
+      type: 'error',
+      code,
+      message: 'backend English fallback',
+    }, 'fallback')).toBe(expected)
+  })
+
   it('keeps unknown codes as open strings and uses their safe fallback', () => {
     const error = {
       code: 'future.new_condition',

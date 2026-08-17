@@ -64,7 +64,7 @@ func TestApplyProviderRunConfigMergesOnlyMatchingHistoryAuditMetadata(t *testing
 	scope := contextfrag.Scope{BotID: "bot-1", CurrentMessageID: "current"}
 	cfg := agentpkg.RunConfig{
 		Messages: []sdk.Message{message}, ContextFrags: []contextfrag.ContextFrag{shadow},
-		ContextScope: scope, ContextQueryMaterialized: true,
+		ContextScope: scope, ContextQueryMaterialized: true, ContextTrimmableMessages: 1,
 	}
 	cfg.ContextSourceFrags = CollectNonSystemProviderSourceFrags(context.Background(), cfg)
 
@@ -88,7 +88,10 @@ func TestApplyProviderRunConfigMergesOnlyMatchingHistoryAuditMetadata(t *testing
 func TestProviderRunConfigApplierUsesInjectedLoggerShape(t *testing.T) {
 	t.Parallel()
 	applier := ProviderRunConfigApplier(nil)
-	got := applier(context.Background(), agentpkg.RunConfig{System: "system", Query: "query"})
+	got, err := applier(context.Background(), agentpkg.RunConfig{System: "system", Query: "query"})
+	if err != nil {
+		t.Fatalf("applier error = %v", err)
+	}
 	if got.System != "system" || len(got.Messages) != 1 {
 		t.Fatalf("got = %#v", got)
 	}

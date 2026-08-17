@@ -354,6 +354,7 @@ export interface UIStreamErrorEvent {
   run_id?: string
   invocation_id?: string
   session_id?: string
+  code?: string
   message: string
   feedback?: unknown
 }

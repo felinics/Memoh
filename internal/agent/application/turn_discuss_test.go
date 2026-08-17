@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/apperror"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/memohai/memoh/internal/contextview"
 )
 
 type fakeAgentStreamer struct {
@@ -116,6 +117,21 @@ func drainDiscuss(t *testing.T, h turn.RunHandle) []turn.Event {
 	for range h.Errs() {
 	}
 	return events
+}
+
+func assertSDKMessagesEqual(t *testing.T, got, want []sdk.Message) {
+	t.Helper()
+	gotJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal got messages: %v", err)
+	}
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal wanted messages: %v", err)
+	}
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("messages = %s, want %s", gotJSON, wantJSON)
+	}
 }
 
 func discussCommand() turn.StartTurnCommand {
@@ -465,28 +481,18 @@ func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 	}
 }
 
-func TestDiscussRefreshesContextFragWithoutLateBindingMessage(t *testing.T) {
+func TestDiscussPropagatesContextBudgetAndToolExchangePolicy(t *testing.T) {
 	agent := &fakeAgentStreamer{}
-	staleIndex := 0
-	staleMemoryIndex := 0
 	resolver := &fakeDiscussService{
 		resolveResult: ResolveRunConfigResult{
-			RunConfig: native.RunConfig{
-				System:                         "base system",
-				ContextCurrentUserMessageIndex: &staleIndex,
-				ContextMemoryMessageIndex:      &staleMemoryIndex,
-				ContextSourceFrags: []contextfrag.ContextFrag{{
-					ID: "stale-system-only-source", Slot: contextfrag.SlotSystem,
-				}},
-			},
-			ModelID: "model-1",
+			RunConfig:              native.RunConfig{},
+			ModelID:                "model-1",
+			ContextBudgetMaxTokens: 128000,
 		},
 	}
 	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
-	cmd := discussCommand()
-	cmd.DiscussMessages = []turn.DiscussMessage{{Role: "user", Content: `<message id="x">hello</message>`}}
 
-	h, err := a.StartTurn(context.Background(), cmd)
+	h, err := a.StartTurn(context.Background(), discussCommand())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,16 +501,84 @@ func TestDiscussRefreshesContextFragWithoutLateBindingMessage(t *testing.T) {
 	if agent.lastConfig == nil {
 		t.Fatal("expected agent to be invoked")
 	}
+	if agent.lastConfig.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", agent.lastConfig.ContextBudgetMaxTokens)
+	}
+	if agent.lastConfig.ContextToolExchangePolicy == nil {
+		t.Fatal("expected a default ContextToolExchangePolicy for the discuss path")
+	}
+}
+
+func TestDiscussCarriesComposedMessagesThroughTypedFragments(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	staleIndex := 0
+	staleMemoryIndex := 0
+	baseConfig := native.RunConfig{
+		System:                         "base system",
+		SupportsImageInput:             true,
+		ContextScope:                   contextfrag.Scope{BotID: "bot-1", SessionID: "sess-1"},
+		ContextCurrentUserMessageIndex: &staleIndex,
+		ContextMemoryMessageIndex:      &staleMemoryIndex,
+	}
+	baseConfig.ContextSourceFrags = contextview.CollectProviderSourceFrags(context.Background(), baseConfig)
+	hookFrags, err := (&contextview.HookContextCollector{}).Collect(context.Background(), contextview.CollectRequest{
+		Scope:  baseConfig.ContextScope,
+		Config: contextview.HookContextConfig{Text: "hook system"},
+	})
+	if err != nil {
+		t.Fatalf("collect hook context: %v", err)
+	}
+	baseConfig.ContextSourceFrags = append(baseConfig.ContextSourceFrags, hookFrags...)
+	baseConfig.ContextSourceFrags = append(baseConfig.ContextSourceFrags,
+		contextfrag.MessageFrag(contextfrag.MessageFragInput{
+			ID: "memory.recall", Message: sdk.UserMessage("remember this"), Kind: contextfrag.KindMemoryRecall,
+			Slot: contextfrag.SlotHistory, CacheClass: contextfrag.CacheNever, Trust: contextfrag.TrustWorkspace,
+		}),
+		contextfrag.MessageFrag(contextfrag.MessageFragInput{
+			ID: "stale.message", Message: sdk.UserMessage("must not survive"), Kind: contextfrag.KindConversationEvent,
+			Slot: contextfrag.SlotHistory, CacheClass: contextfrag.CacheNever, Trust: contextfrag.TrustExternal,
+		}),
+	)
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig:              baseConfig,
+			ModelID:                "model-1",
+			ContextBudgetMaxTokens: 128000,
+		},
+		inlineFn: func(_ context.Context, _ string, _ []timeline.ImageAttachmentRef) []sdk.ImagePart {
+			return []sdk.ImagePart{{Image: "data:image/png;base64,abc", MediaType: "image/png"}}
+		},
+	}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	cmd := discussCommand()
+	cmd.DiscussMessages = []turn.DiscussMessage{
+		{Role: "user", Content: "first user"},
+		{Role: "user", Content: "second user"},
+		{Role: "user", Content: "<summary>covered history</summary>", CompactionArtifactID: "artifact-1"},
+		{
+			Role:       "assistant",
+			Content:    "tool call fallback",
+			RawContent: json.RawMessage(`[{"type":"tool-call","toolCallId":"call-1","toolName":"lookup","input":{"query":"answer"}}]`),
+		},
+		{
+			Role:       "tool",
+			Content:    "debug fallback",
+			RawContent: json.RawMessage(`[{"type":"tool-result","toolCallId":"call-1","toolName":"lookup","result":{"answer":42}}]`),
+		},
+		{Role: "user", Content: "latest user"},
+	}
+	cmd.DiscussImageRefs = []turn.DiscussImageRef{{ContentHash: "image-1", Mime: "image/png"}}
+
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	if agent.lastConfig == nil {
+		t.Fatal("expected agent to be called")
+	}
 	cfg := agent.lastConfig
-	if cfg.ContextManifest.Counts.Messages != len(cfg.Messages) {
-		t.Fatalf("manifest message count = %d, messages = %d", cfg.ContextManifest.Counts.Messages, len(cfg.Messages))
-	}
-	if len(cfg.Messages) != 1 {
-		t.Fatalf("messages = %d, want only composed discuss context", len(cfg.Messages))
-	}
-	if cfg.ContextSourceFrags != nil {
-		t.Fatalf("discuss retained stale authoritative source: %#v", cfg.ContextSourceFrags)
-	}
 	if cfg.ContextCurrentUserMessageIndex != nil || cfg.ContextMemoryMessageIndex != nil {
 		t.Fatalf("discuss retained stale message markers: current=%#v memory=%#v", cfg.ContextCurrentUserMessageIndex, cfg.ContextMemoryMessageIndex)
 	}
@@ -512,6 +586,67 @@ func TestDiscussRefreshesContextFragWithoutLateBindingMessage(t *testing.T) {
 		lastMessageFragContains(cfg.ContextFrags, "MUST use the `send` tool") {
 		t.Fatalf("context frags include a volatile late-binding prompt: %#v", cfg.ContextManifest.Items)
 	}
+	frags := cfg.ContextSourceFrags
+	if len(frags) != len(cmd.DiscussMessages)+3 {
+		t.Fatalf("ContextSourceFrags = %d, want system + hook + %d discuss + memory", len(frags), len(cmd.DiscussMessages))
+	}
+	wantIDs := []string{
+		"discuss.message.000",
+		"discuss.message.001",
+		"discuss.message.002",
+		"discuss.message.003",
+		"discuss.message.004",
+		"discuss.message.005",
+	}
+	for _, wantID := range wantIDs {
+		if !hasContextFragID(frags, wantID) {
+			t.Fatalf("ContextSourceFrags missing %q: %#v", wantID, frags)
+		}
+	}
+	for _, wantID := range []string{"system.hook_context", "memory.recall"} {
+		if !hasContextFragID(frags, wantID) {
+			t.Fatalf("ContextSourceFrags missing preserved %q: %#v", wantID, frags)
+		}
+	}
+	if hasContextFragID(frags, "stale.message") {
+		t.Fatalf("pre-compose history fragment survived the authoritative discuss carrier: %#v", frags)
+	}
+	current := contextFragByID(frags, "discuss.message.005")
+	if current == nil || current.Kind != contextfrag.KindCurrentUserMessage || current.Slot != contextfrag.SlotHistory ||
+		current.Trust != contextfrag.TrustUser || current.Budget.Overflow != contextfrag.OverflowKeep {
+		t.Fatalf("current discuss fragment = %#v", current)
+	}
+	currentMessage := contextfrag.FragMessage(*current)
+	if currentMessage == nil || len(currentMessage.Content) != 2 {
+		t.Fatalf("current discuss message = %#v, want text plus one image", currentMessage)
+	}
+
+	rendered, err := contextview.ProviderRunConfigApplier(slog.New(slog.DiscardHandler))(context.Background(), *cfg)
+	if err != nil {
+		t.Fatalf("ApplyProviderRunConfig() error = %v", err)
+	}
+	if rendered.System != "base system\n\nhook system" {
+		t.Fatalf("System = %q, want preserved base and hook system fragments", rendered.System)
+	}
+	if rendered.ContextManifest.BudgetPlan == nil || rendered.ContextManifest.BudgetPlan.CurrentRequestCost <= 0 {
+		t.Fatalf("budget plan = %#v, want an active discuss current-request reserve", rendered.ContextManifest.BudgetPlan)
+	}
+	wantMessages := append([]sdk.Message(nil), cfg.Messages...)
+	wantMessages = append(wantMessages, sdk.UserMessage("remember this"))
+	assertSDKMessagesEqual(t, rendered.Messages, wantMessages)
+}
+
+func hasContextFragID(frags []contextfrag.ContextFrag, id string) bool {
+	return contextFragByID(frags, id) != nil
+}
+
+func contextFragByID(frags []contextfrag.ContextFrag, id string) *contextfrag.ContextFrag {
+	for i := range frags {
+		if frags[i].ID == id {
+			return &frags[i]
+		}
+	}
+	return nil
 }
 
 func TestInjectImagePartsIntoLastUserMessage(t *testing.T) {

@@ -59,6 +59,10 @@ func TestPrepareContinuationRunConfigReplacesStaleContextAndSetsCapabilities(t *
 	if got.ContextMemoryMessageIndex != nil {
 		t.Fatalf("continuation retained stale memory index: %#v", got.ContextMemoryMessageIndex)
 	}
+	if got.ContextTrimmableMessages != len(got.Messages) || len(got.ContextHistoryTokenEstimates) != len(got.Messages) {
+		t.Fatalf("budget signals = trimmable:%d estimates:%d messages:%d",
+			got.ContextTrimmableMessages, len(got.ContextHistoryTokenEstimates), len(got.Messages))
+	}
 	for _, frag := range got.ContextSourceFrags {
 		if frag.ID == "stale-source-fragment" {
 			t.Fatalf("continuation retained stale source fragment: %#v", frag)

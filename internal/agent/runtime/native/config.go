@@ -11,7 +11,7 @@ import (
 
 // ContextViewApplier rebuilds provider-facing fields from the authoritative
 // context fragments immediately before generate options are assembled.
-type ContextViewApplier func(context.Context, RunConfig) RunConfig
+type ContextViewApplier func(context.Context, RunConfig) (RunConfig, error)
 
 const (
 	DefaultToolOutputMaxBytes  = 64 * 1024

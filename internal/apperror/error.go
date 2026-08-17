@@ -16,6 +16,8 @@ const (
 	CodeCompactionModelUnavailable       Code = "compaction.model_unavailable"
 	CodeSettingsReasoningEffortInvalid   Code = "settings.reasoning_effort_invalid"
 	CodeSettingsReasoningUnavailable     Code = "settings.reasoning_options_unavailable"
+	CodeContextBudgetUnsatisfied         Code = "context.budget_unsatisfied"
+	CodeContextProtectedOverflow         Code = "context.protected_overflow"
 	CodeWorkspaceUnreachable             Code = "workspace.unreachable"
 	CodeWorkspaceImageIncompatible       Code = "workspace.image_incompatible"
 	CodeWorkspaceTemplateBootstrapFailed Code = "workspace.template_bootstrap_failed"
@@ -115,6 +117,14 @@ var catalog = map[Code]Definition{
 	CodeSettingsReasoningUnavailable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The chat model's reasoning options could not be resolved. Please try again.",
+	},
+	CodeContextBudgetUnsatisfied: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "The model context window is too small for this request.",
+	},
+	CodeContextProtectedOverflow: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "Required context exceeds the model context budget.",
 	},
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,

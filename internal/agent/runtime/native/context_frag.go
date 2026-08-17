@@ -30,16 +30,40 @@ func (cfg RunConfig) RefreshContextFrag() RunConfig {
 	cfg.ContextFrags = assembled.Frags
 	manifest := assembled.Manifest
 	manifest.ToolDefs = cfg.ContextToolDefs
-	if cfg.ContextManifest.CachePlan != nil && manifest.CachePlan == nil {
-		plan := *cfg.ContextManifest.CachePlan
-		manifest.CachePlan = &plan
-	}
-	if cfg.ContextManifest.Mutations != nil && manifest.Mutations == nil {
-		manifest.Mutations = cfg.ContextManifest.Mutations
-	}
+	manifest = preserveProviderAccounting(cfg.ContextManifest, manifest)
 	cfg.ContextManifest = manifest
-	cfg.ContextLifecycle.SetManifest(manifest)
+	if cfg.ContextLifecycle != nil {
+		cfg.ContextLifecycle.SetManifest(manifest)
+	}
 	return cfg
+}
+
+func preserveProviderAccounting(previous, next contextfrag.Manifest) contextfrag.Manifest {
+	if previous.CachePlan != nil && next.CachePlan == nil {
+		plan := *previous.CachePlan
+		next.CachePlan = &plan
+	}
+	if previous.Mutations != nil && next.Mutations == nil {
+		next.Mutations = previous.Mutations
+	}
+	if previous.Selection != nil && next.Selection == nil {
+		selection := *previous.Selection
+		if len(previous.Selection.DropReasons) > 0 {
+			selection.DropReasons = make(map[string]int, len(previous.Selection.DropReasons))
+			for reason, count := range previous.Selection.DropReasons {
+				selection.DropReasons[reason] = count
+			}
+		}
+		next.Selection = &selection
+	}
+	if previous.BudgetPlan != nil && next.BudgetPlan == nil {
+		plan := *previous.BudgetPlan
+		next.BudgetPlan = &plan
+	}
+	if len(previous.SelectionDecisions) > 0 && len(next.SelectionDecisions) == 0 {
+		next.SelectionDecisions = append([]contextfrag.SelectionDecision(nil), previous.SelectionDecisions...)
+	}
+	return next
 }
 
 func (cfg RunConfig) RefreshContextFragWithDynamicMutators(readMedia bool, beforeModelCallHook bool, injectCh bool) RunConfig {

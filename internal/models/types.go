@@ -178,6 +178,15 @@ func NormalizeAdvertisedEfforts(efforts []string) []string {
 	return reasoning.NormalizeAdvertised(efforts)
 }
 
+// ContextBudgetMaxTokens returns the configured model context window, or zero
+// when budget enforcement is unavailable for this model.
+func (c ModelConfig) ContextBudgetMaxTokens() int {
+	if c.ContextWindow != nil && *c.ContextWindow > 0 {
+		return *c.ContextWindow
+	}
+	return 0
+}
+
 type Model struct {
 	ModelID    string      `json:"model_id"`
 	Name       string      `json:"name"`

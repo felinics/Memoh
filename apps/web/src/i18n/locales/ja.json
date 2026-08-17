@@ -121,6 +121,10 @@
       "reasoning_effort_invalid": "選択したチャットModelは推論レベル「{effort}」に対応していません。",
       "reasoning_options_unavailable": "チャットModelの推論オプションを確認できませんでした。しばらくしてからもう一度お試しください。"
     },
+    "context": {
+      "budget_unsatisfied": "モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。",
+      "protected_overflow": "必須コンテキストがモデルのコンテキスト予算を超えています。"
+    },
     "profile": {
       "request_invalid": "プロフィール更新リクエストが無効です。",
       "title_model_invalid": "選択したタイトルModelは利用できないか、チャットModelではありません。",

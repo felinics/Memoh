@@ -116,6 +116,10 @@ type RunConfig struct {
 	ContextToolDefs                []contextfrag.ToolDefAccounting
 	ContextToolDefsResolved        bool
 	ContextToolExchangePolicy      *contextfrag.ToolExchangePolicy
+	ContextBudgetMaxTokens         int
+	ContextRecentProtectTokens     *int
+	ContextHistoryTokenEstimates   []int
+	ContextTrimmableMessages       int
 	ContextCachePlan               contextfrag.CachePlan
 	ContextMutations               *contextfrag.MutationLedger
 	ContextDynamicMutators         []contextfrag.DynamicMutator

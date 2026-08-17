@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -318,7 +319,7 @@ func assertLifecycleSnapshot(t *testing.T, raw []byte, want contextfrag.Lifecycl
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("lifecycle snapshot = %#v, want %#v", got, want)
 	}
 }

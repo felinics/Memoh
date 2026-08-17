@@ -16,6 +16,7 @@ import (
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	tools "github.com/memohai/memoh/internal/agent/tool"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -53,11 +54,30 @@ func New(deps Deps) *Agent {
 // applyContextView compiles the provider-facing fields from authoritative
 // fragments when the application installed the PR1 compiler. Direct Agent
 // users retain the legacy refresh path.
-func (a *Agent) applyContextView(ctx context.Context, cfg RunConfig) RunConfig {
+func (a *Agent) applyContextView(ctx context.Context, cfg RunConfig) (RunConfig, error) {
 	if a != nil && a.contextViewApplier != nil {
 		return a.contextViewApplier(ctx, cfg)
 	}
-	return cfg.RefreshContextFrag()
+	return cfg.RefreshContextFrag(), nil
+}
+
+const publicContextPreparationError = "The model context could not be prepared."
+
+func contextViewStreamError(err error) StreamEvent {
+	var code apperror.Code
+	switch {
+	case errors.Is(err, contextfrag.ErrProtectedContextOverflow):
+		code = apperror.CodeContextProtectedOverflow
+	case errors.Is(err, contextfrag.ErrBudgetUnsatisfied):
+		code = apperror.CodeContextBudgetUnsatisfied
+	default:
+		return StreamEvent{Type: EventError, Error: publicContextPreparationError}
+	}
+	public, ok := apperror.PublicFrom(apperror.New(code, nil), "")
+	if !ok {
+		return StreamEvent{Type: EventError, Error: publicContextPreparationError}
+	}
+	return StreamEvent{Type: EventError, Code: string(public.Code), Error: public.Detail}
 }
 
 // BridgeProvider returns the underlying bridge provider (workspace manager).
@@ -145,6 +165,9 @@ func sendEvent(ctx context.Context, ch chan<- StreamEvent, evt StreamEvent) bool
 }
 
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
+	if cfg.ContextLifecycle == nil {
+		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
+	}
 	streamCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	aborted := false
@@ -195,7 +218,15 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
 	cfg.ContextDynamicMutators = cfg.contextDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, true)
-	cfg = a.applyContextView(streamCtx, cfg)
+	var contextViewErr error
+	cfg, contextViewErr = a.applyContextView(streamCtx, cfg)
+	if contextViewErr != nil {
+		publicError := contextViewStreamError(contextViewErr)
+		turnError = publicError.Error
+		a.logger.Warn("context view preflight failed", slog.Any("error", contextViewErr))
+		sendEvent(ctx, ch, publicError)
+		return
+	}
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
@@ -735,6 +766,9 @@ func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration, o
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *GenerateResult, retErr error) {
+	if cfg.ContextLifecycle == nil {
+		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
+	}
 	genCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	defer func() {
@@ -781,7 +815,11 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	limit := a.Limits().ToolOutputLimit()
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
 	cfg.ContextDynamicMutators = cfg.contextDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, false)
-	cfg = a.applyContextView(genCtx, cfg)
+	var contextViewErr error
+	cfg, contextViewErr = a.applyContextView(genCtx, cfg)
+	if contextViewErr != nil {
+		return nil, contextViewErr
+	}
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
@@ -971,34 +1009,36 @@ func (a *Agent) assembleTools(
 		}
 	}
 	session := tools.SessionContext{
-		BotID:                    cfg.Identity.BotID,
-		ChatID:                   cfg.Identity.ChatID,
-		SessionID:                cfg.Identity.SessionID,
-		SessionType:              cfg.SessionType,
-		UserID:                   cfg.Identity.UserID,
-		ChannelIdentityID:        cfg.Identity.ChannelIdentityID,
-		SessionToken:             cfg.Identity.SessionToken,
-		WorkspaceTargetID:        cfg.Identity.WorkspaceTargetID,
-		WorkspaceTargetKind:      cfg.Identity.WorkspaceTargetKind,
-		WorkspaceTargetName:      cfg.Identity.WorkspaceTargetName,
-		WorkdirPath:              cfg.Identity.WorkdirPath,
-		CurrentPlatform:          cfg.Identity.CurrentPlatform,
-		ReplyTarget:              cfg.Identity.ReplyTarget,
-		ConversationType:         cfg.Identity.ConversationType,
-		CanRequestUserInput:      cfg.CanRequestUserInput,
-		SupportsImageInput:       cfg.SupportsImageInput,
-		SupportsFileInput:        cfg.SupportsFileInput,
-		IsSubagent:               cfg.Identity.IsSubagent,
-		CurrentModelUUID:         cfg.CurrentModelUUID,
-		CurrentModelID:           cfg.CurrentModelID,
-		CurrentModelProvider:     cfg.CurrentModelProvider,
-		ReasoningStoredEffort:    cfg.ReasoningStoredEffort,
-		ReasoningRequestedEffort: cfg.ReasoningRequestedEffort,
-		ForkContext:              cfg.ForkContext,
-		Skills:                   skillsMap,
-		TimezoneLocation:         cfg.Identity.TimezoneLocation,
-		Emitter:                  emitter,
-		LiveStream:               liveStream,
+		BotID:                     cfg.Identity.BotID,
+		ChatID:                    cfg.Identity.ChatID,
+		SessionID:                 cfg.Identity.SessionID,
+		SessionType:               cfg.SessionType,
+		UserID:                    cfg.Identity.UserID,
+		ChannelIdentityID:         cfg.Identity.ChannelIdentityID,
+		SessionToken:              cfg.Identity.SessionToken,
+		WorkspaceTargetID:         cfg.Identity.WorkspaceTargetID,
+		WorkspaceTargetKind:       cfg.Identity.WorkspaceTargetKind,
+		WorkspaceTargetName:       cfg.Identity.WorkspaceTargetName,
+		WorkdirPath:               cfg.Identity.WorkdirPath,
+		CurrentPlatform:           cfg.Identity.CurrentPlatform,
+		ReplyTarget:               cfg.Identity.ReplyTarget,
+		ConversationType:          cfg.Identity.ConversationType,
+		CanRequestUserInput:       cfg.CanRequestUserInput,
+		SupportsImageInput:        cfg.SupportsImageInput,
+		SupportsFileInput:         cfg.SupportsFileInput,
+		IsSubagent:                cfg.Identity.IsSubagent,
+		CurrentModelUUID:          cfg.CurrentModelUUID,
+		CurrentModelID:            cfg.CurrentModelID,
+		CurrentModelProvider:      cfg.CurrentModelProvider,
+		ReasoningStoredEffort:     cfg.ReasoningStoredEffort,
+		ReasoningRequestedEffort:  cfg.ReasoningRequestedEffort,
+		ForkContext:               cfg.ForkContext,
+		Skills:                    skillsMap,
+		TimezoneLocation:          cfg.Identity.TimezoneLocation,
+		Emitter:                   emitter,
+		LiveStream:                liveStream,
+		ContextBudgetMaxTokens:    cfg.ContextBudgetMaxTokens,
+		ContextToolExchangePolicy: cfg.ContextToolExchangePolicy,
 	}
 
 	var allTools []sdk.Tool

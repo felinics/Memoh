@@ -11,45 +11,54 @@ import (
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 )
 
-func TestLifecycleHolderSnapshotIsContentLight(t *testing.T) {
+func TestLifecycleHolderKeepsDurableContentLightBudgetAudit(t *testing.T) {
 	t.Parallel()
 
 	holder := contextfrag.NewLifecycleHolder()
 	if _, ok := holder.Snapshot(); ok {
 		t.Fatal("empty holder unexpectedly exposed a snapshot")
 	}
+	ledger := contextfrag.NewMutationLedger()
+	ledger.Record(contextfrag.MutationContextBudgetFailure, "protected_context_overflow")
+	plan := contextfrag.ContextBudgetPlan{Window: 1024, SystemBudget: 256, ActualSystemCost: 930}
 	holder.SetManifest(contextfrag.Manifest{
-		View: contextfrag.ViewRunConfigPreProvider,
-		Counts: contextfrag.ManifestCounts{
-			Fragments: 4,
-			Messages:  2,
-			Images:    1,
-			TextBytes: 512,
-		},
-		Items: []contextfrag.ManifestItem{{ID: "private-content-marker"}},
+		View:               contextfrag.ViewRunConfigPreProvider,
+		Counts:             contextfrag.ManifestCounts{Fragments: 2, Messages: 1, TextBytes: 2048},
+		Items:              []contextfrag.ManifestItem{{ID: "private-content-marker"}},
+		Selection:          &contextfrag.SelectionTrace{Selected: 1, Dropped: 1, DropReasons: map[string]int{"system_budget": 1}},
+		SelectionDecisions: []contextfrag.SelectionDecision{{ID: "system.optional", Decision: contextfrag.DecisionDropped, Reason: "system_budget"}},
+		BudgetPlan:         &plan,
+		Mutations:          ledger,
 	})
 	holder.SetAssistantMessageID(" assistant-message-1 ")
 
 	snapshot, ok := holder.Snapshot()
-	if !ok {
-		t.Fatal("expected snapshot after SetManifest")
-	}
-	if snapshot.Version != 1 || snapshot.View != contextfrag.ViewRunConfigPreProvider {
-		t.Fatalf("snapshot identity = (%d, %q), want (1, %q)", snapshot.Version, snapshot.View, contextfrag.ViewRunConfigPreProvider)
-	}
-	if snapshot.Counts != (contextfrag.ManifestCounts{Fragments: 4, Messages: 2, Images: 1, TextBytes: 512}) {
-		t.Fatalf("snapshot counts = %#v", snapshot.Counts)
+	if !ok || snapshot.BudgetPlan == nil || snapshot.BudgetPlan.ActualSystemCost != 930 {
+		t.Fatalf("snapshot = %#v, ok = %v", snapshot, ok)
 	}
 	if snapshot.AssistantMessageID != "assistant-message-1" {
-		t.Fatalf("assistant message ID = %q, want trimmed association", snapshot.AssistantMessageID)
+		t.Fatalf("assistant message ID = %q", snapshot.AssistantMessageID)
 	}
-
+	if snapshot.Selection.DropReasons["system_budget"] != 1 || len(snapshot.SelectionDecisions) != 1 {
+		t.Fatalf("selection audit = %#v / %#v", snapshot.Selection, snapshot.SelectionDecisions)
+	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
-		t.Fatalf("marshal snapshot: %v", err)
+		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), "private-content-marker") || strings.Contains(string(raw), `"items"`) {
 		t.Fatalf("content-light snapshot leaked manifest items: %s", raw)
+	}
+
+	ledger.SetFinalInputHash("final-hash")
+	refreshed, _ := holder.Snapshot()
+	if refreshed.FinalInputHash != "final-hash" {
+		t.Fatalf("live final hash = %q", refreshed.FinalInputHash)
+	}
+	refreshed.Selection.DropReasons["system_budget"] = 99
+	again, _ := holder.Snapshot()
+	if again.Selection.DropReasons["system_budget"] != 1 {
+		t.Fatal("Snapshot exposed mutable holder state")
 	}
 }
 
