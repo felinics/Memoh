@@ -329,12 +329,6 @@ func settingsLabels(raw []byte) []string {
 		}
 		return ""
 	}
-	boolStr := func(k string) string {
-		if v, ok := m[k].(bool); ok && v {
-			return "on"
-		}
-		return "off"
-	}
 	// Reasoning has two archive shapes: the retired reasoning_enabled flag, and
 	// the current effort field where "disable" is off. Prefer the legacy flag when
 	// present so old archives preview the state they will actually import as.
@@ -358,8 +352,11 @@ func settingsLabels(raw []byte) []string {
 		out = append(out, "acl default: "+v)
 	}
 	out = append(out, "reasoning: "+reasoningStr())
-	out = append(out, "heartbeat: "+boolStr("heartbeat_enabled"))
-	out = append(out, "compaction: "+boolStr("compaction_enabled"))
+	compaction := "off"
+	if enabled, ok := m["compaction_enabled"].(bool); ok && enabled {
+		compaction = "on"
+	}
+	out = append(out, "compaction: "+compaction)
 	return out
 }
 
@@ -950,7 +947,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.MemoryProviderID = current.MemoryProviderID
 				eff.TtsModelID = current.TtsModelID
 				eff.TranscriptionModelID = current.TranscriptionModelID
-				eff.HeartbeatModelID = current.HeartbeatModelID
 				eff.CompactionModelID = current.CompactionModelID
 				eff.DiscussProbeModelID = current.DiscussProbeModelID
 			}
@@ -963,8 +959,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.ChatACPProjectPath = current.ChatACPProjectPath
 				eff.ChatACPProjectMode = current.ChatACPProjectMode
 				eff.ReasoningEffort = current.ReasoningEffort
-				eff.HeartbeatEnabled = current.HeartbeatEnabled
-				eff.HeartbeatInterval = current.HeartbeatInterval
 				eff.CompactionEnabled = current.CompactionEnabled
 				eff.CompactionThreshold = current.CompactionThreshold
 				eff.CompactionTargetPercent = current.CompactionTargetPercent
@@ -990,8 +984,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 
 	timezone := eff.Timezone
 	reasoningEffort := eff.ReasoningEffort
-	heartbeatEnabled := eff.HeartbeatEnabled
-	heartbeatInterval := eff.HeartbeatInterval
 	compactionEnabled := eff.CompactionEnabled
 	compactionThreshold := eff.CompactionThreshold
 	compactionTargetPercent := 0
@@ -1021,9 +1013,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		AclDefaultEffect:        eff.AclDefaultEffect,
 		Timezone:                &timezone,
 		ReasoningEffort:         &reasoningEffort,
-		HeartbeatEnabled:        &heartbeatEnabled,
-		HeartbeatInterval:       &heartbeatInterval,
-		HeartbeatModelID:        ptrStringAllowEmpty(modelID(eff.HeartbeatModelID, deps.models)),
 		CompactionEnabled:       &compactionEnabled,
 		CompactionThreshold:     &compactionThreshold,
 		CompactionTargetPercent: &compactionTargetPercent,
@@ -1366,6 +1355,30 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 	if err != nil {
 		return err
 	}
+	retiredSessionIDs := make(map[string]struct{})
+	for _, item := range sessions {
+		if isRetiredAutomationSession(item.Type, item.SessionMode) {
+			retiredSessionIDs[item.ID.String()] = struct{}{}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, item := range sessions {
+			if !item.ParentSessionID.Valid {
+				continue
+			}
+			if _, parentRetired := retiredSessionIDs[item.ParentSessionID.String()]; !parentRetired {
+				continue
+			}
+			if _, alreadyRetired := retiredSessionIDs[item.ID.String()]; !alreadyRetired {
+				retiredSessionIDs[item.ID.String()] = struct{}{}
+				changed = true
+			}
+		}
+	}
+	if len(retiredSessionIDs) > 0 {
+		state.warnings = appendWarningOnce(state.warnings, "retired automation history was skipped")
+	}
 	createRestoredSession := func(item sqlc.ListSessionsByBotRow, parentSessionID pgtype.UUID) error {
 		legacyType, sessionMode, runtimeType, err := restoredSessionDescriptor(item.Type, item.SessionMode, item.RuntimeType)
 		if err != nil {
@@ -1408,7 +1421,12 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		sessionMetadata[item.ID.String()] = created.Metadata
 		return nil
 	}
-	pendingSessions := append([]sqlc.ListSessionsByBotRow(nil), sessions...)
+	pendingSessions := make([]sqlc.ListSessionsByBotRow, 0, len(sessions))
+	for _, item := range sessions {
+		if _, retired := retiredSessionIDs[item.ID.String()]; !retired {
+			pendingSessions = append(pendingSessions, item)
+		}
+	}
 	for len(pendingSessions) > 0 {
 		progressed := false
 		next := make([]sqlc.ListSessionsByBotRow, 0, len(pendingSessions))
@@ -1483,6 +1501,11 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 	messageMap := map[string]pgtype.UUID{}
 	restoredMessages := make([]restoredHistoryMessage, 0, len(messages))
 	for _, item := range messages {
+		_, sessionRetired := retiredSessionIDs[item.SessionID.String()]
+		if sessionRetired || isRetiredAutomationSession("", item.SessionMode) {
+			state.warnings = appendWarningOnce(state.warnings, "retired automation history was skipped")
+			continue
+		}
 		sessionID := pgtype.UUID{}
 		var descriptor restoredHistoryDescriptor
 		if item.SessionID.Valid {
@@ -2246,6 +2269,11 @@ func restoredSessionDescriptor(legacyType, sessionMode, runtimeType string) (str
 		}
 	}
 	return sessionpkg.ResolveDescriptor(legacyType, sessionMode, runtimeType)
+}
+
+func isRetiredAutomationSession(legacyType, sessionMode string) bool {
+	return strings.EqualFold(strings.TrimSpace(legacyType), "heartbeat") ||
+		strings.EqualFold(strings.TrimSpace(sessionMode), "heartbeat")
 }
 
 func defaultJSONMap(raw []byte) []byte {

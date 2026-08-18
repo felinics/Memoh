@@ -59,7 +59,6 @@ import (
 	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
 	emailmailgun "github.com/memohai/memoh/internal/email/adapters/mailgun"
 	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/media"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
@@ -267,7 +266,6 @@ func provideCommandHandler(
 	searchProvService *searchproviders.Service,
 	emailService *emailpkg.Service,
 	emailOutboxService *emailpkg.OutboxService,
-	heartbeatService *heartbeat.Service,
 	queries dbstore.Queries,
 	aclService *acl.Service,
 	containerdHandler *handlers.ContainerdHandler,
@@ -286,7 +284,6 @@ func provideCommandHandler(
 		searchProvService,
 		emailService,
 		emailOutboxService,
-		heartbeatService,
 		queries,
 		aclService,
 		&commandSkillLoaderAdapter{handler: containerdHandler},

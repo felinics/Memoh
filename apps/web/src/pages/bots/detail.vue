@@ -265,7 +265,7 @@ import {
 } from '@felinic/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
-  BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
+  BrainCircuit, ShieldAlert, Database, Mail, Link, Clock, Server, FileBox, Zap,
   Monitor, Globe, Bot as BotIcon, ChevronLeft, Workflow, Laptop, Plug
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
@@ -296,7 +296,6 @@ import BotMcp from './components/bot-mcp.vue'
 import BotConnectors from './components/bot-connectors.vue'
 import BotMemory from './components/bot-memory.vue'
 import BotSkills from './components/bot-skills.vue'
-import BotHeartbeat from './components/bot-heartbeat.vue'
 import BotCompaction from './components/bot-compaction.vue'
 import BotEmail from './components/bot-email.vue'
 import BotOverview from './components/bot-overview.vue'
@@ -413,7 +412,6 @@ const tabList = computed(() => {
       ? [{ value: 'connectors', label: 'bots.tabs.connectors', icon: Plug, component: BotConnectors, params: { 'bot-id': bot_id } }]
       : []),
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
-    { value: 'heartbeat', label: 'bots.tabs.heartbeat', icon: HeartPulse, component: BotHeartbeat, params: { 'bot-id': bot_id } },
     { value: 'compaction', label: 'bots.tabs.compaction', icon: FileBox, component: BotCompaction, params: { 'bot-id': bot_id } },
     { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
@@ -452,7 +450,6 @@ const searchIndex = computed(() => {
       ? [{ tab: 'connectors', key: 'bots.tabs.connectors', keywords: ['providers', 'apps', 'oauth', 'api', '连接器', 'コネクター'] }]
       : []),
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'custom mcp'] },
-    { tab: 'heartbeat', key: 'bots.heartbeat.title', keywords: ['cron', 'ping', 'alive'] },
     { tab: 'compaction', key: 'bots.compaction.title', keywords: ['compress', 'summarize', 'context window'] },
     { tab: 'schedule', key: 'bots.schedule.title', keywords: ['cron', 'jobs', 'tasks', 'automation'] },
     { tab: 'skills', key: 'bots.skills.title', keywords: ['prompts', 'instructions', 'system prompt'] },
@@ -496,7 +493,7 @@ function selectTab(value: string): void {
 }
 
 // Mobile stack state for MasterDetailSidebarLayout, derived from the URL so a
-// refresh / deep link (?tab=heartbeat) opens straight on the content and the
+// refresh / deep link (for example, ?tab=schedule) opens straight on the content and the
 // KeepAlive'd page can never inherit a stale stack state from another bot.
 const mobileDetailOpen = computed(() => {
   const tab = route.query.tab
@@ -526,7 +523,7 @@ function closeMobileDetail(): void {
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
   const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'acp', 'connectors', 'mcp', 'memory']
-  const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction', 'heartbeat']
+  const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction']
   const securityKeys = ['access', 'email']
 
   return [

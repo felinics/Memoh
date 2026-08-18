@@ -144,7 +144,7 @@ RETURNING (next_turn_position - 1)::bigint AS position;
 -- from this same counter (SR-TURN-001, SR-DUR-002), so bumping again would
 -- spend a second position and file the message under a turn the client was
 -- never told about. Entry points with no admission — channel inbound,
--- schedules, heartbeats — pass NULL and keep allocating here.
+-- schedules — pass NULL and keep allocating here.
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1

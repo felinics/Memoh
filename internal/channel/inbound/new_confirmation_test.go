@@ -262,7 +262,7 @@ func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) 
 			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
 			processor.SetACLService(&fakeChatACL{allowed: true})
 			processor.SetSessionEnsurer(ensurer)
-			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
+			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
 			sender := &fakeReplySender{}
 
 			msg := channel.InboundMessage{

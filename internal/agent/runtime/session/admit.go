@@ -23,7 +23,7 @@ var (
 	// one errors.Is works whether the caller holds the ledger error or this one.
 	//
 	// The consequence is deliberate: the session runtime is not a general task
-	// queue. Channel delivery, schedules and heartbeats each already own a retry
+	// queue. Channel delivery and schedules already own a retry
 	// mechanism, and reusing those is strictly better than teaching the runtime
 	// to hold work for them, which would cost a queued state, a queue index,
 	// promotion on every terminal transition, queued aborts, and a queue
@@ -57,7 +57,7 @@ var (
 )
 
 // AdmitInput is one submission from a public entry point: HTTP, a channel
-// adapter, a schedule, or a heartbeat. Every caller supplies the same three
+// adapter or a schedule. Every caller supplies the same three
 // identities, which is what lets one admission path serve all of them.
 type AdmitInput struct {
 	BotID     string

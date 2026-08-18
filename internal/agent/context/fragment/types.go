@@ -222,13 +222,12 @@ type Provenance struct {
 type AttentionReason string
 
 const (
-	AttentionDirect    AttentionReason = "direct"
-	AttentionMention   AttentionReason = "mention"
-	AttentionReply     AttentionReason = "reply"
-	AttentionCommand   AttentionReason = "command"
-	AttentionSchedule  AttentionReason = "schedule"
-	AttentionHeartbeat AttentionReason = "heartbeat"
-	AttentionPassive   AttentionReason = "passive"
+	AttentionDirect   AttentionReason = "direct"
+	AttentionMention  AttentionReason = "mention"
+	AttentionReply    AttentionReason = "reply"
+	AttentionCommand  AttentionReason = "command"
+	AttentionSchedule AttentionReason = "schedule"
+	AttentionPassive  AttentionReason = "passive"
 )
 
 // Scope preserves IM/group-chat topology separately from rendered text.

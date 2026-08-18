@@ -61,10 +61,6 @@ type Bot struct {
 	SearchProviderID        pgtype.UUID        `json:"search_provider_id"`
 	FetchProviderID         pgtype.UUID        `json:"fetch_provider_id"`
 	MemoryProviderID        pgtype.UUID        `json:"memory_provider_id"`
-	HeartbeatEnabled        bool               `json:"heartbeat_enabled"`
-	HeartbeatInterval       int32              `json:"heartbeat_interval"`
-	HeartbeatPrompt         string             `json:"heartbeat_prompt"`
-	HeartbeatModelID        pgtype.UUID        `json:"heartbeat_model_id"`
 	CompactionEnabled       bool               `json:"compaction_enabled"`
 	CompactionThreshold     int32              `json:"compaction_threshold"`
 	CompactionTargetPercent pgtype.Int4        `json:"compaction_target_percent"`
@@ -165,20 +161,6 @@ type BotEmailBinding struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	TeamID          pgtype.UUID        `json:"team_id"`
-}
-
-type BotHeartbeatLog struct {
-	ID           pgtype.UUID        `json:"id"`
-	BotID        pgtype.UUID        `json:"bot_id"`
-	SessionID    pgtype.UUID        `json:"session_id"`
-	Status       string             `json:"status"`
-	ResultText   string             `json:"result_text"`
-	ErrorMessage string             `json:"error_message"`
-	Usage        []byte             `json:"usage"`
-	ModelID      pgtype.UUID        `json:"model_id"`
-	StartedAt    pgtype.Timestamptz `json:"started_at"`
-	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
-	TeamID       pgtype.UUID        `json:"team_id"`
 }
 
 type BotHistoryMessage struct {

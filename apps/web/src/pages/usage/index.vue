@@ -47,9 +47,6 @@
                 <SelectItem value="acp_agent">
                   {{ $t('usage.acpAgent') }}
                 </SelectItem>
-                <SelectItem value="heartbeat">
-                  {{ $t('usage.heartbeat') }}
-                </SelectItem>
                 <SelectItem value="schedule">
                   {{ $t('usage.schedule') }}
                 </SelectItem>
@@ -453,7 +450,7 @@ const modelIdFilter = computed(() =>
   selectedModelId.value === 'all' ? undefined : selectedModelId.value,
 )
 
-type UsageBucketType = 'chat' | 'discuss' | 'acp_agent' | 'heartbeat' | 'schedule'
+type UsageBucketType = 'chat' | 'discuss' | 'acp_agent' | 'schedule'
 type SessionTypeFilter = UsageBucketType
 
 // Declared before the first useQuery below: Pinia Colada evaluates `key`
@@ -572,7 +569,6 @@ function sessionTypeLabel(type: string | undefined): string {
     case 'chat': return t('usage.chat')
     case 'discuss': return t('usage.discuss')
     case 'acp_agent': return t('usage.acpAgent')
-    case 'heartbeat': return t('usage.heartbeat')
     case 'schedule': return t('usage.schedule')
     default: return type || '-'
   }
@@ -592,11 +588,10 @@ interface TypedDayMaps {
   chat: Map<string, HandlersDailyTokenUsage>
   discuss: Map<string, HandlersDailyTokenUsage>
   acp_agent: Map<string, HandlersDailyTokenUsage>
-  heartbeat: Map<string, HandlersDailyTokenUsage>
   schedule: Map<string, HandlersDailyTokenUsage>
 }
 
-const usageBucketTypes: UsageBucketType[] = ['chat', 'discuss', 'acp_agent', 'heartbeat', 'schedule']
+const usageBucketTypes: UsageBucketType[] = ['chat', 'discuss', 'acp_agent', 'schedule']
 
 function buildDayMap(rows: HandlersDailyTokenUsage[] | undefined) {
   const map = new Map<string, HandlersDailyTokenUsage>()
@@ -610,7 +605,6 @@ const dayMaps = computed<TypedDayMaps>(() => ({
   chat: buildDayMap(usageData.value?.chat),
   discuss: buildDayMap(usageData.value?.discuss),
   acp_agent: buildDayMap(usageData.value?.acp_agent),
-  heartbeat: buildDayMap(usageData.value?.heartbeat),
   schedule: buildDayMap(usageData.value?.schedule),
 }))
 
@@ -642,9 +636,8 @@ const hasData = computed(() => {
   const chat = usageData.value?.chat ?? []
   const discuss = usageData.value?.discuss ?? []
   const acpAgent = usageData.value?.acp_agent ?? []
-  const heartbeat = usageData.value?.heartbeat ?? []
   const schedule = usageData.value?.schedule ?? []
-  return chat.length > 0 || discuss.length > 0 || acpAgent.length > 0 || heartbeat.length > 0 || schedule.length > 0 || byModelData.value.length > 0
+  return chat.length > 0 || discuss.length > 0 || acpAgent.length > 0 || schedule.length > 0 || byModelData.value.length > 0
 })
 
 const summary = computed(() => {

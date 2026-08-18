@@ -36,7 +36,6 @@
       "cancel": "✕ 取消"
     },
     "labelModel": "模型",
-    "labelHeartbeat": "心跳",
     "labelReasoning": "推理",
     "labelContext": "上下文",
     "contextUnit": "tokens",
@@ -223,9 +222,8 @@
         },
         "model": {
           "list": "列出可用对话模型",
-          "current": "查看当前对话模型和心跳模型",
-          "set": "设置对话模型",
-          "set-heartbeat": "设置心跳模型"
+          "current": "查看当前对话模型",
+          "set": "设置对话模型"
         },
         "reasoning": {
           "show": "查看并切换推理级别",
@@ -249,9 +247,6 @@
           "providers": "列出邮箱服务商",
           "bindings": "列出机器人邮箱绑定",
           "outbox": "列出最近发送的邮件"
-        },
-        "heartbeat": {
-          "logs": "列出最近的心跳日志"
         },
         "skill": {
           "list": "列出全部技能"
@@ -278,14 +273,11 @@
     "settings": {
       "title": "⚙️ 机器人设置",
       "fieldReasoning": "推理",
-      "fieldHeartbeat": "心跳",
       "fieldAclDefault": "默认权限",
       "fieldChatModel": "对话模型",
-      "fieldHeartbeatModel": "心跳模型",
       "fieldSearchProvider": "搜索服务商",
       "fieldMemoryProvider": "记忆服务商",
       "fieldCommandLanguage": "命令界面语言",
-      "heartbeatOnEvery": "开 · 每 {minutes} 分钟",
       "aclDeny": "拒绝 — 工具执行前需确认",
       "aclAllow": "允许 — 工具直接执行",
       "section": {
@@ -296,8 +288,6 @@
         "language": "语言 ▸"
       },
       "action": {
-        "enableHeartbeat": "开启心跳",
-        "disableHeartbeat": "关闭心跳",
         "aclAsk": "执行前确认",
         "aclAllow": "允许执行"
       },
@@ -307,11 +297,10 @@
       "langEn": "English",
       "langZh": "中文",
       "missingValue": "{option} 缺少取值。\n\n{usage}",
-      "invalidHeartbeatInterval": "无效的 heartbeat_interval：{value}",
       "unknownOption": "未知选项：{option}\n\n{usage}",
       "unknownLanguage": "未知语言 {value}。请选择 auto、en、zh 或 ja。",
       "unavailable": "设置暂不可用。",
-      "updateUsage": "用法：/settings update [选项]\n\n选项：\n- --language <值>\n- --acl_default_effect <allow|deny>\n- --reasoning_effort <disable|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <分钟>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n（命令界面语言：/settings language <auto|en|zh|ja>）",
+      "updateUsage": "用法：/settings update [选项]\n\n选项：\n- --language <值>\n- --acl_default_effect <allow|deny>\n- --reasoning_effort <disable|low|medium|high|xhigh>\n- --chat_model_id <id>\n\n（命令界面语言：/settings language <auto|en|zh|ja>）",
       "langJa": "日本語"
     },
     "language": {
@@ -325,7 +314,6 @@
       "unavailable": "模型功能暂不可用。",
       "listChanged": "模型列表已更新，请重新选择。",
       "setUsage": "用法：/model set <model_id> | <provider_name> <model_name>",
-      "setHeartbeatUsage": "用法：/model set-heartbeat <model_id> | <provider_name> <model_name>",
       "noneUnderProvider": "服务商 {provider} 下没有可用模型。用 {command} 查看全部服务商。",
       "empty": "尚未添加对话模型。\n\n请在 Web 控制台添加。",
       "notFound": "找不到模型 {name}。用 {command} 查看可用模型。",
@@ -334,8 +322,7 @@
       "idRequired": "请指定模型。",
       "serviceUnavailable": "模型服务暂不可用。",
       "marker": {
-        "chat": "对话",
-        "heartbeat": "心跳"
+        "chat": "对话"
       }
     },
     "memory": {
@@ -422,16 +409,6 @@
       "permWrite": "写入",
       "permDelete": "删除"
     },
-    "heartbeat": {
-      "title": "心跳日志",
-      "empty": "暂无心跳日志。\n\n心跳是定期自主巡检，启用后记录会显示在这里。",
-      "section": {
-        "settings": "设置 ▸"
-      },
-      "fieldTime": "时间",
-      "fieldDuration": "耗时",
-      "olderHint": "更早的记录请在 Web UI 查看。"
-    },
     "usage": {
       "unavailable": "Token 用量暂不可用。",
       "empty": "暂无用量记录。\n\n机器人回复消息后，用量会显示在这里。",
@@ -443,7 +420,6 @@
       "byModelTitle": "按模型统计 token 用量（{range}）",
       "bucketChat": "对话",
       "bucketDiscuss": "讨论",
-      "bucketHeartbeat": "心跳",
       "bucketSchedule": "定时任务",
       "inOut": "输入 {in} · 输出 {out}",
       "total": "合计",
@@ -565,7 +541,6 @@
     "mcp": "管理 MCP 连接",
     "usage": "查看 token 用量",
     "email": "查看邮箱配置",
-    "heartbeat": "查看心跳日志",
     "skill": "查看技能",
     "fs": "浏览工作区文件",
     "access": "查看身份与权限",

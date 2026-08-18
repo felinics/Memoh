@@ -25,7 +25,7 @@ func TestGenerateSystemPromptMatchesLegacyAssemblyBytes(t *testing.T) {
 		},
 		PlatformIdentitiesSection: "## Platform Identities\n\n<identity channel=\"telegram\" username=\"@memoh\"/>",
 	}
-	for _, mode := range []string{sessionmode.Chat, sessionmode.Discuss, sessionmode.Heartbeat, sessionmode.Schedule, sessionmode.Subagent} {
+	for _, mode := range []string{sessionmode.Chat, sessionmode.Discuss, sessionmode.Schedule, sessionmode.Subagent} {
 		mode := mode
 		t.Run(mode+"_full", func(t *testing.T) {
 			t.Parallel()

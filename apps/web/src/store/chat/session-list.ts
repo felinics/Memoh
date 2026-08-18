@@ -30,8 +30,8 @@ export interface SessionTouchResult {
 
 export function createSessionList({ currentBotId, sessionId, messages }: SessionListDeps) {
   const sessions = ref<SessionSummary[]>([])
-  // O(1) lookup keeps event handlers off the list scan that previously
-  // blocked the UI on bots with thousands of heartbeat sessions.
+  // O(1) lookup keeps event handlers off the list scan for bots with thousands
+  // of sessions.
   const sessionById = new Map<string, SessionSummary>()
   const sessionLookupRevision = ref(0)
   const rememberedSessions = ref<Record<string, SessionSummary>>({})
@@ -55,7 +55,7 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     const session = activeSession.value
     if (!session) return false
     const type = session.type ?? 'chat'
-    if (type === 'heartbeat' || type === 'schedule') return true
+    if (type === 'schedule') return true
     const ct = (session.channel_type ?? '').trim().toLowerCase()
     if (ct && ct !== 'local') return true
     return false

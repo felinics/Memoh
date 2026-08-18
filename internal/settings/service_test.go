@@ -175,11 +175,10 @@ type reasoningPolicyQueries struct {
 
 func (q *reasoningPolicyQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return sqlc.GetBotByIDRow{
-		ID:                q.botID,
-		Language:          DefaultLanguage,
-		ReasoningEffort:   q.storedEffort,
-		ChatModelID:       q.currentModelID,
-		HeartbeatInterval: DefaultHeartbeatInterval,
+		ID:              q.botID,
+		Language:        DefaultLanguage,
+		ReasoningEffort: q.storedEffort,
+		ChatModelID:     q.currentModelID,
 	}, nil
 }
 
@@ -193,7 +192,6 @@ func (q *reasoningPolicyQueries) GetSettingsByBotID(context.Context, pgtype.UUID
 		Language:               DefaultLanguage,
 		CommandUiLanguage:      DefaultCommandUILanguage,
 		ReasoningEffort:        q.storedEffort,
-		HeartbeatInterval:      DefaultHeartbeatInterval,
 		ChatModelID:            q.currentModelID,
 		ChatRuntime:            ChatRuntimeModel,
 		ChatAcpProjectPath:     DefaultACPProjectPath,
@@ -221,8 +219,6 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 		Language:            arg.Language,
 		CommandUiLanguage:   arg.CommandUiLanguage,
 		ReasoningEffort:     arg.ReasoningEffort,
-		HeartbeatEnabled:    arg.HeartbeatEnabled,
-		HeartbeatInterval:   arg.HeartbeatInterval,
 		CompactionEnabled:   arg.CompactionEnabled,
 		CompactionThreshold: arg.CompactionThreshold,
 		ChatModelID:         modelID,
@@ -304,8 +300,6 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMDefault(t *testing.T) {
 	row := sqlc.GetSettingsByBotIDRow{
 		Language:            "en",
 		ReasoningEffort:     "medium",
-		HeartbeatEnabled:    false,
-		HeartbeatInterval:   60,
 		CompactionEnabled:   false,
 		CompactionThreshold: 0,
 		ShowToolCallsInIm:   false,
@@ -322,7 +316,6 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMPropagates(t *testing.T) {
 	row := sqlc.GetSettingsByBotIDRow{
 		Language:          "en",
 		ReasoningEffort:   "medium",
-		HeartbeatInterval: 60,
 		ShowToolCallsInIm: true,
 	}
 	got := normalizeBotSettingsReadRow(row)
@@ -339,7 +332,6 @@ func TestNormalizeBotSettingsReadRow_CommandUILanguage(t *testing.T) {
 		Language:          "en",
 		CommandUiLanguage: "zh",
 		ReasoningEffort:   "medium",
-		HeartbeatInterval: 60,
 	})
 	if got.CommandUILanguage != "zh" {
 		t.Fatalf("CommandUILanguage = %q, want zh", got.CommandUILanguage)
@@ -347,9 +339,8 @@ func TestNormalizeBotSettingsReadRow_CommandUILanguage(t *testing.T) {
 
 	// Empty value defaults to "auto" (mirrors the DB column default).
 	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
-		Language:          "en",
-		ReasoningEffort:   "medium",
-		HeartbeatInterval: 60,
+		Language:        "en",
+		ReasoningEffort: "medium",
 	})
 	if def.CommandUILanguage != DefaultCommandUILanguage {
 		t.Fatalf("default CommandUILanguage = %q, want %q", def.CommandUILanguage, DefaultCommandUILanguage)
@@ -362,7 +353,6 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 	got := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
 		Language:           "en",
 		ReasoningEffort:    "medium",
-		HeartbeatInterval:  60,
 		ChatRuntime:        ChatRuntimeACPAgent,
 		ChatAcpAgentID:     pgtype.Text{String: "Codex", Valid: true},
 		ChatAcpProjectPath: "/data/app",
@@ -379,9 +369,8 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 	}
 
 	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
-		Language:          "en",
-		ReasoningEffort:   "medium",
-		HeartbeatInterval: 60,
+		Language:        "en",
+		ReasoningEffort: "medium",
 	})
 	if def.ChatRuntime != ChatRuntimeModel || def.ChatACPProjectPath != DefaultACPProjectPath || def.ChatACPProjectMode != DefaultACPProjectMode {
 		t.Fatalf("default chat runtime fields = %#v", def)
@@ -469,7 +458,6 @@ func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
 		"search_provider_id": omitted.SearchProviderID, "memory_provider_id": omitted.MemoryProviderID,
 		"tts_model_id": omitted.TtsModelID, "transcription_model_id": omitted.TranscriptionModelID,
 		"video_model_id": omitted.VideoModelID, "language": omitted.Language,
-		"heartbeat_model_id": omitted.HeartbeatModelID,
 	} {
 		if ptr != nil {
 			t.Fatalf("%s: omitted key must stay nil, got %q", name, *ptr)
@@ -477,29 +465,16 @@ func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
 	}
 
 	var cleared UpsertRequest
-	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":"","memory_provider_id":"","language":"","heartbeat_model_id":""}`), &cleared); err != nil {
+	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":"","memory_provider_id":"","language":""}`), &cleared); err != nil {
 		t.Fatal(err)
 	}
 	for name, ptr := range map[string]*string{
 		"chat_model_id": cleared.ChatModelID, "search_provider_id": cleared.SearchProviderID,
 		"memory_provider_id": cleared.MemoryProviderID, "language": cleared.Language,
-		"heartbeat_model_id": cleared.HeartbeatModelID,
 	} {
 		if ptr == nil || *ptr != "" {
 			t.Fatalf("%s: explicit empty string must decode to a non-nil empty pointer", name)
 		}
-	}
-}
-
-func TestNormalizeBotSettingDefaultHeartbeatInterval(t *testing.T) {
-	t.Parallel()
-
-	got := normalizeBotSetting("en", "auto", "allow", "medium", false, 0, false, 0, pgtype.Int4{})
-	if got.HeartbeatInterval != DefaultHeartbeatInterval {
-		t.Fatalf("heartbeat interval = %d, want %d", got.HeartbeatInterval, DefaultHeartbeatInterval)
-	}
-	if got.HeartbeatInterval != 1440 {
-		t.Fatalf("heartbeat interval = %d, want 1440", got.HeartbeatInterval)
 	}
 }
 
@@ -575,7 +550,7 @@ func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
 		if !hasReasoningEffortValue(effort) {
 			t.Fatalf("hasReasoningEffortValue(%q) = false, want true", effort)
 		}
-		got := normalizeBotSetting("en", "auto", "allow", effort, false, 60, false, 0, pgtype.Int4{})
+		got := normalizeBotSetting("en", "auto", "allow", effort, false, 0, pgtype.Int4{})
 		if got.ReasoningEffort != effort {
 			t.Fatalf("normalizeBotSetting effort = %q, want %q", got.ReasoningEffort, effort)
 		}

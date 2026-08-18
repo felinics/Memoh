@@ -273,7 +273,7 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 		t.Fatalf("Usage should not expose Telegram Markdown math guidance for non-Telegram sessions, got:\n%s", got)
 	}
 
-	backgroundSession := SessionContext{SessionType: sessionmode.Heartbeat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
+	backgroundSession := SessionContext{SessionType: sessionmode.Schedule, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), backgroundSession, availableToolsForTest(ToolReact()))
 	if strings.Contains(got, "Omit `target`") || strings.Contains(got, "unless the current conversation target is explicit") || !strings.Contains(got, "Specify `platform` and `target`") {
 		t.Fatalf("Usage for background reactions should require explicit target, got:\n%s", got)
@@ -302,7 +302,7 @@ func TestMessageProviderToolDescriptionsGateCurrentConversationTarget(t *testing
 	}
 
 	backgroundTools, err := provider.Tools(context.Background(), SessionContext{
-		SessionType:     sessionmode.Heartbeat,
+		SessionType:     sessionmode.Schedule,
 		CurrentPlatform: "telegram",
 		ReplyTarget:     "chat-1",
 	})

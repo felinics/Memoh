@@ -31,7 +31,6 @@ func (q *reasoningCommandQueries) GetSettingsByBotID(context.Context, pgtype.UUI
 		Language:           settings.DefaultLanguage,
 		CommandUiLanguage:  settings.DefaultCommandUILanguage,
 		ReasoningEffort:    settings.DefaultReasoningEffort,
-		HeartbeatInterval:  settings.DefaultHeartbeatInterval,
 		ChatModelID:        q.model.ID,
 		ChatRuntime:        settings.ChatRuntimeModel,
 		ChatAcpProjectPath: settings.DefaultACPProjectPath,
@@ -100,7 +99,7 @@ func newReasoningCommandHarness(
 		nil,
 		models.NewService(logger, queries),
 		providers.NewService(logger, queries, ""),
-		nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	return handler, queries, botID
 }

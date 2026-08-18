@@ -4,7 +4,7 @@
 // It deliberately holds no liveness. The owner lease lives only in the live
 // backend, so PostgreSQL receives exactly four kinds of write — admission,
 // ownership/fencing change, decision, terminal transition. Nothing here is a
-// heartbeat or a progress sample, which is why write volume is proportional to
+// keepalive or a progress sample, which is why write volume is proportional to
 // the number of runs rather than to their duration or token rate. A reader
 // therefore cannot ask this store "is the owner still alive"; only the live
 // backend can answer that, and the reaper is built around that fact.

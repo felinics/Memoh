@@ -1089,9 +1089,52 @@ export type ConnectorsListResponse = {
     items?: Array<ConnectorsConnector>;
 };
 
+export type ContextfragCacheClass = 'stable' | 'dynamic' | 'never';
+
+export type ContextfragCachePlan = {
+    stable_message_count?: number;
+    stable_prefix_hash?: string;
+    stable_prefix_token_estimate?: number;
+};
+
+export type ContextfragContentRange = {
+    end?: number;
+    start?: number;
+};
+
+export type ContextfragContextBudgetPlan = {
+    actual_system_cost?: number;
+    current_request_cost?: number;
+    estimator?: string;
+    estimator_safety_factor_percent?: number;
+    history_budget?: number;
+    output_reserve?: number;
+    system_budget?: number;
+    tool_defs_cost?: number;
+    window?: number;
+};
+
+export type ContextfragContextRef = {
+    content_hash?: string;
+    durability?: ContextfragRefDurability;
+    hash_algo?: string;
+    hash_scope?: string;
+    id?: string;
+    namespace?: string;
+    range?: ContextfragContentRange;
+    schema?: string;
+    version?: number;
+};
+
 export type ContextfragLifecycleSnapshot = {
     assistant_message_id?: string;
+    budget_plan?: ContextfragContextBudgetPlan;
+    cache_plan?: ContextfragCachePlan;
     counts?: ContextfragManifestCounts;
+    final_input_hash?: string;
+    mutations?: Array<ContextfragMutationRecord>;
+    selection?: ContextfragSelectionTrace;
+    selection_decisions?: Array<ContextfragSelectionDecision>;
     version?: number;
     view?: ContextfragManifestView;
 };
@@ -1105,6 +1148,44 @@ export type ContextfragManifestCounts = {
 };
 
 export type ContextfragManifestView = 'run_config_pre_provider';
+
+export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media';
+
+export type ContextfragMutationRecord = {
+    detail?: string;
+    kind?: ContextfragMutationKind;
+};
+
+export type ContextfragRefDurability = 'durable' | 'synthetic' | 'debug';
+
+export type ContextfragRetentionTier = '' | 'required' | 'preferred' | 'optional';
+
+export type ContextfragSelectionDecision = {
+    cache_class?: ContextfragCacheClass;
+    decision?: ContextfragSelectionDecisionKind;
+    id?: string;
+    image_count?: number;
+    reason?: string;
+    ref?: ContextfragContextRef;
+    retention_tier?: ContextfragRetentionTier;
+    slot?: ContextfragSlot;
+    source?: string;
+    source_id?: string;
+    text_bytes?: number;
+    token_estimate?: number;
+};
+
+export type ContextfragSelectionDecisionKind = 'selected' | 'trimmed' | 'dropped';
+
+export type ContextfragSelectionTrace = {
+    drop_reasons?: {
+        [key: string]: number;
+    };
+    dropped?: number;
+    selected?: number;
+};
+
+export type ContextfragSlot = 'system' | 'before_history' | 'history' | 'after_history_before_current' | 'current_user' | 'after_current';
 
 export type ConversationSkillActivation = {
     prompt?: string;
@@ -2181,7 +2262,6 @@ export type HandlersTokenUsageResponse = {
     by_model?: Array<HandlersModelTokenUsage>;
     chat?: Array<HandlersDailyTokenUsage>;
     discuss?: Array<HandlersDailyTokenUsage>;
-    heartbeat?: Array<HandlersDailyTokenUsage>;
     schedule?: Array<HandlersDailyTokenUsage>;
 };
 
@@ -2456,23 +2536,6 @@ export type HandlersUpdateSessionRequest = {
     type?: string;
 };
 
-export type HeartbeatListLogsResponse = {
-    items?: Array<HeartbeatLog>;
-    total_count?: number;
-};
-
-export type HeartbeatLog = {
-    bot_id?: string;
-    completed_at?: string;
-    error_message?: string;
-    id?: string;
-    result_text?: string;
-    session_id?: string;
-    started_at?: string;
-    status?: string;
-    usage?: unknown;
-};
-
 export type HooksActionResult = {
     action_type?: string;
     decision?: string;
@@ -2642,8 +2705,9 @@ export type ModelsModelConfig = {
      * which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
      * token budget while 3.x takes a named level, and the two are mutually
      * exclusive on the same request. Declared per model because the alternative is
-     * sniffing the model id, and an id is not a capability. Empty means the
-     * provider's modern default.
+     * sniffing the model id, and an id is not a capability. Empty leaves provider
+     * policy in charge; Google's adaptor deliberately sends no thinking control so
+     * pre-dialect rows retain their safe pre-upgrade request shape.
      */
     reasoning_dialect?: string;
     reasoning_efforts?: Array<string>;
@@ -3133,9 +3197,6 @@ export type SettingsSettings = {
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
     fetch_provider_id?: string;
-    heartbeat_enabled?: boolean;
-    heartbeat_interval?: number;
-    heartbeat_model_id?: string;
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
@@ -3204,13 +3265,6 @@ export type SettingsUpsertRequest = {
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
     fetch_provider_id?: string;
-    heartbeat_enabled?: boolean;
-    heartbeat_interval?: number;
-    /**
-     * HeartbeatModelID joins the pointer group above (nil/""/value) so the
-     * heartbeat tab's autosave can clear a model override.
-     */
-    heartbeat_model_id?: string;
     image_model_id?: string;
     /**
      * Language follows the same pointer rule; "" normalizes to DefaultLanguage
@@ -7090,81 +7144,6 @@ export type GetBotsByBotIdEmailOutboxByIdResponses = {
 
 export type GetBotsByBotIdEmailOutboxByIdResponse = GetBotsByBotIdEmailOutboxByIdResponses[keyof GetBotsByBotIdEmailOutboxByIdResponses];
 
-export type DeleteBotsByBotIdHeartbeatLogsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/heartbeat/logs';
-};
-
-export type DeleteBotsByBotIdHeartbeatLogsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteBotsByBotIdHeartbeatLogsError = DeleteBotsByBotIdHeartbeatLogsErrors[keyof DeleteBotsByBotIdHeartbeatLogsErrors];
-
-export type DeleteBotsByBotIdHeartbeatLogsResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetBotsByBotIdHeartbeatLogsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Limit
-         */
-        limit?: number;
-        /**
-         * Offset
-         */
-        offset?: number;
-    };
-    url: '/bots/{bot_id}/heartbeat/logs';
-};
-
-export type GetBotsByBotIdHeartbeatLogsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdHeartbeatLogsError = GetBotsByBotIdHeartbeatLogsErrors[keyof GetBotsByBotIdHeartbeatLogsErrors];
-
-export type GetBotsByBotIdHeartbeatLogsResponses = {
-    /**
-     * OK
-     */
-    200: HeartbeatListLogsResponse;
-};
-
-export type GetBotsByBotIdHeartbeatLogsResponse = GetBotsByBotIdHeartbeatLogsResponses[keyof GetBotsByBotIdHeartbeatLogsResponses];
-
 export type GetBotsByBotIdHooksEventsData = {
     body?: never;
     path: {
@@ -9929,7 +9908,7 @@ export type GetBotsByBotIdTokenUsageData = {
          */
         model_id?: string;
         /**
-         * Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.
+         * Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.
          */
         session_type?: string;
     };
@@ -9984,7 +9963,7 @@ export type GetBotsByBotIdTokenUsageRecordsData = {
          */
         model_id?: string;
         /**
-         * Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.
+         * Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.
          */
         session_type?: string;
         /**

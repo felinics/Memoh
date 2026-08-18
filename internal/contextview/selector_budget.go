@@ -28,7 +28,7 @@ const (
 
 // Attention tiers order budget drops: passive group traffic goes first,
 // fragments without attention data stay time-neutral in the middle, and
-// directed traffic (mention/reply/direct/command/schedule/heartbeat) goes
+// directed traffic (mention/reply/direct/command/schedule) goes
 // last.
 const (
 	attentionTierPassive = iota

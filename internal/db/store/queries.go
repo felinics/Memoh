@@ -36,12 +36,10 @@ type Queries interface {
 	ClearMCPOAuthTokens(ctx context.Context, connectionID pgtype.UUID) error
 	CompleteCompactionLog(ctx context.Context, arg dbsqlc.CompleteCompactionLogParams) (dbsqlc.BotHistoryMessageCompact, error)
 	CompleteCompactionRollup(ctx context.Context, arg dbsqlc.CompleteCompactionRollupParams) (dbsqlc.BotHistoryMessageCompact, error)
-	CompleteHeartbeatLog(ctx context.Context, arg dbsqlc.CompleteHeartbeatLogParams) (dbsqlc.BotHeartbeatLog, error)
 	CompleteScheduleLog(ctx context.Context, arg dbsqlc.CompleteScheduleLogParams) (dbsqlc.ScheduleLog, error)
 	CountAccounts(ctx context.Context) (int64, error)
 	CountCompactionLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
 	CountEmailOutboxByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
-	CountHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
 	CountMemoryProvidersByDefault(ctx context.Context) (int64, error)
 	CountMessageAssetsByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
 	CountMessagesByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
@@ -91,7 +89,6 @@ type Queries interface {
 	CreateEmailOutbox(ctx context.Context, arg dbsqlc.CreateEmailOutboxParams) (dbsqlc.EmailOutbox, error)
 	CreateEmailProvider(ctx context.Context, arg dbsqlc.CreateEmailProviderParams) (dbsqlc.EmailProvider, error)
 	CreateFetchProvider(ctx context.Context, arg dbsqlc.CreateFetchProviderParams) (dbsqlc.FetchProvider, error)
-	CreateHeartbeatLog(ctx context.Context, arg dbsqlc.CreateHeartbeatLogParams) (dbsqlc.CreateHeartbeatLogRow, error)
 	CreateMCPConnection(ctx context.Context, arg dbsqlc.CreateMCPConnectionParams) (dbsqlc.McpConnection, error)
 	CreateMemoryProvider(ctx context.Context, arg dbsqlc.CreateMemoryProviderParams) (dbsqlc.MemoryProvider, error)
 	CreateHistoryTurn(ctx context.Context, arg dbsqlc.CreateHistoryTurnParams) (HistoryTurn, error)
@@ -133,7 +130,6 @@ type Queries interface {
 	DeleteEmailProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteEmailProviderByIDAndUser(ctx context.Context, arg dbsqlc.DeleteEmailProviderByIDAndUserParams) error
 	DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error
-	DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMCPConnection(ctx context.Context, arg dbsqlc.DeleteMCPConnectionParams) error
 	DeleteConnector(ctx context.Context, arg dbsqlc.DeleteConnectorParams) error
 	DeleteMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID) error
@@ -286,8 +282,6 @@ type Queries interface {
 	ListEnabledModelsByProviderClientType(ctx context.Context, clientType string) ([]dbsqlc.Model, error)
 	ListEnabledModelsByType(ctx context.Context, type_ string) ([]dbsqlc.Model, error)
 	ListEnabledSchedules(ctx context.Context) ([]dbsqlc.Schedule, error)
-	ListHeartbeatEnabledBots(ctx context.Context) ([]dbsqlc.ListHeartbeatEnabledBotsRow, error)
-	ListHeartbeatLogsByBot(ctx context.Context, arg dbsqlc.ListHeartbeatLogsByBotParams) ([]dbsqlc.ListHeartbeatLogsByBotRow, error)
 	ListBotSkillPackageInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotSkillPackageInstallation, error)
 	ListMCPConnectionsByBotID(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.McpConnection, error)
 	ListConnectorsByBotID(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.Connector, error)

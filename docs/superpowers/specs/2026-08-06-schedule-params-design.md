@@ -83,7 +83,7 @@ UPDATE bot_sessions SET visibility = 'user' WHERE type IN ('chat','discuss','acp
 - Schedule-created sessions in new_session mode are written with
   `visibility='user'` but keep `session_mode='schedule'` so prompt assembly and
   tool gating keep their schedule behavior.
-- Historical schedule/heartbeat/subagent sessions stay internal (backfill only
+- Historical schedule/subagent sessions stay internal (backfill only
   promotes chat/discuss/acp_agent).
 
 ### One fire = one session (new_session mode)
@@ -144,4 +144,3 @@ link to sessions produced by the schedule.
 
 - No retention/folding policy for high-frequency schedule sessions beyond
   UI grouping.
-- No changes to heartbeat.

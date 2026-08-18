@@ -4489,91 +4489,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/heartbeat/logs": {
-            "get": {
-                "description": "List heartbeat execution logs for a bot",
-                "tags": [
-                    "heartbeat"
-                ],
-                "summary": "List heartbeat logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Limit",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 0,
-                        "description": "Offset",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/heartbeat.ListLogsResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete all heartbeat execution logs for a bot",
-                "tags": [
-                    "heartbeat"
-                ],
-                "summary": "Delete heartbeat logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/hooks/events": {
             "get": {
                 "tags": [
@@ -6848,7 +6763,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/events": {
             "get": {
-                "description": "Lightweight SSE for sidebar live-sort. Carries only session\nidentifiers and minimal metadata (touched timestamps, titles).\nNever includes message bodies. Filters out internal session\ntypes such as heartbeat, schedule, subagent.",
+                "description": "Lightweight SSE for sidebar live-sort. Carries only session\nidentifiers and minimal metadata (touched timestamps, titles).\nNever includes message bodies. Filters out internal session\ntypes such as schedule and subagent.",
                 "produces": [
                     "text/event-stream"
                 ],
@@ -8001,7 +7916,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/token-usage": {
             "get": {
-                "description": "Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
+                "description": "Get daily aggregated token usage for a bot, split by chat, discuss, and schedule session types, with optional model filter and per-model breakdown",
                 "tags": [
                     "token-usage"
                 ],
@@ -8036,7 +7951,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "description": "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.",
                         "name": "session_type",
                         "in": "query"
                     }
@@ -8109,7 +8024,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "description": "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.",
                         "name": "session_type",
                         "in": "query"
                     },
@@ -17654,14 +17569,140 @@ const docTemplate = `{
                 }
             }
         },
+        "contextfrag.CacheClass": {
+            "type": "string",
+            "enum": [
+                "stable",
+                "dynamic",
+                "never"
+            ],
+            "x-enum-varnames": [
+                "CacheStable",
+                "CacheDynamic",
+                "CacheNever"
+            ]
+        },
+        "contextfrag.CachePlan": {
+            "type": "object",
+            "properties": {
+                "stable_message_count": {
+                    "type": "integer"
+                },
+                "stable_prefix_hash": {
+                    "type": "string"
+                },
+                "stable_prefix_token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContentRange": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContextBudgetPlan": {
+            "type": "object",
+            "properties": {
+                "actual_system_cost": {
+                    "type": "integer"
+                },
+                "current_request_cost": {
+                    "type": "integer"
+                },
+                "estimator": {
+                    "type": "string"
+                },
+                "estimator_safety_factor_percent": {
+                    "type": "integer"
+                },
+                "history_budget": {
+                    "type": "integer"
+                },
+                "output_reserve": {
+                    "type": "integer"
+                },
+                "system_budget": {
+                    "type": "integer"
+                },
+                "tool_defs_cost": {
+                    "type": "integer"
+                },
+                "window": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContextRef": {
+            "type": "object",
+            "properties": {
+                "content_hash": {
+                    "type": "string"
+                },
+                "durability": {
+                    "$ref": "#/definitions/contextfrag.RefDurability"
+                },
+                "hash_algo": {
+                    "type": "string"
+                },
+                "hash_scope": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "range": {
+                    "$ref": "#/definitions/contextfrag.ContentRange"
+                },
+                "schema": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
         "contextfrag.LifecycleSnapshot": {
             "type": "object",
             "properties": {
                 "assistant_message_id": {
                     "type": "string"
                 },
+                "budget_plan": {
+                    "$ref": "#/definitions/contextfrag.ContextBudgetPlan"
+                },
+                "cache_plan": {
+                    "$ref": "#/definitions/contextfrag.CachePlan"
+                },
                 "counts": {
                     "$ref": "#/definitions/contextfrag.ManifestCounts"
+                },
+                "final_input_hash": {
+                    "type": "string"
+                },
+                "mutations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.MutationRecord"
+                    }
+                },
+                "selection": {
+                    "$ref": "#/definitions/contextfrag.SelectionTrace"
+                },
+                "selection_decisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.SelectionDecision"
+                    }
                 },
                 "version": {
                     "type": "integer"
@@ -17698,6 +17739,160 @@ const docTemplate = `{
             ],
             "x-enum-varnames": [
                 "ViewRunConfigPreProvider"
+            ]
+        },
+        "contextfrag.MutationKind": {
+            "type": "string",
+            "enum": [
+                "before_model_call_hook",
+                "background_summary",
+                "mid_task_prune",
+                "injected_message",
+                "context_view_fallback",
+                "context_budget_failure",
+                "context_budget_disabled",
+                "capability_gate",
+                "read_media"
+            ],
+            "x-enum-varnames": [
+                "MutationBeforeModelCallHook",
+                "MutationBackgroundSummary",
+                "MutationMidTaskPrune",
+                "MutationInjectedMessage",
+                "MutationContextViewFallback",
+                "MutationContextBudgetFailure",
+                "MutationContextBudgetDisabled",
+                "MutationCapabilityGate",
+                "MutationReadMedia"
+            ]
+        },
+        "contextfrag.MutationRecord": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/contextfrag.MutationKind"
+                }
+            }
+        },
+        "contextfrag.RefDurability": {
+            "type": "string",
+            "enum": [
+                "durable",
+                "synthetic",
+                "debug"
+            ],
+            "x-enum-varnames": [
+                "RefDurable",
+                "RefSynthetic",
+                "RefDebug"
+            ]
+        },
+        "contextfrag.RetentionTier": {
+            "type": "string",
+            "enum": [
+                "",
+                "required",
+                "preferred",
+                "optional"
+            ],
+            "x-enum-varnames": [
+                "RetentionUnspecified",
+                "RetentionRequired",
+                "RetentionPreferred",
+                "RetentionOptional"
+            ]
+        },
+        "contextfrag.SelectionDecision": {
+            "type": "object",
+            "properties": {
+                "cache_class": {
+                    "$ref": "#/definitions/contextfrag.CacheClass"
+                },
+                "decision": {
+                    "$ref": "#/definitions/contextfrag.SelectionDecisionKind"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_count": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "ref": {
+                    "$ref": "#/definitions/contextfrag.ContextRef"
+                },
+                "retention_tier": {
+                    "$ref": "#/definitions/contextfrag.RetentionTier"
+                },
+                "slot": {
+                    "$ref": "#/definitions/contextfrag.Slot"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.SelectionDecisionKind": {
+            "type": "string",
+            "enum": [
+                "selected",
+                "trimmed",
+                "dropped"
+            ],
+            "x-enum-varnames": [
+                "DecisionSelected",
+                "DecisionTrimmed",
+                "DecisionDropped"
+            ]
+        },
+        "contextfrag.SelectionTrace": {
+            "type": "object",
+            "properties": {
+                "drop_reasons": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "dropped": {
+                    "type": "integer"
+                },
+                "selected": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.Slot": {
+            "type": "string",
+            "enum": [
+                "system",
+                "before_history",
+                "history",
+                "after_history_before_current",
+                "current_user",
+                "after_current"
+            ],
+            "x-enum-varnames": [
+                "SlotSystem",
+                "SlotBeforeHistory",
+                "SlotHistory",
+                "SlotAfterHistoryBeforeCurrent",
+                "SlotCurrentUser",
+                "SlotAfterCurrent"
             ]
         },
         "conversation.SkillActivation": {
@@ -20563,12 +20758,6 @@ const docTemplate = `{
                         "$ref": "#/definitions/handlers.DailyTokenUsage"
                     }
                 },
-                "heartbeat": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.DailyTokenUsage"
-                    }
-                },
                 "schedule": {
                     "type": "array",
                     "items": {
@@ -21196,50 +21385,6 @@ const docTemplate = `{
                 }
             }
         },
-        "heartbeat.ListLogsResponse": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/heartbeat.Log"
-                    }
-                },
-                "total_count": {
-                    "type": "integer"
-                }
-            }
-        },
-        "heartbeat.Log": {
-            "type": "object",
-            "properties": {
-                "bot_id": {
-                    "type": "string"
-                },
-                "completed_at": {
-                    "type": "string"
-                },
-                "error_message": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "result_text": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "usage": {}
-            }
-        },
         "hooks.ActionResult": {
             "type": "object",
             "properties": {
@@ -21615,7 +21760,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "reasoning_dialect": {
-                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty means the\nprovider's modern default.",
+                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty leaves provider\npolicy in charge; Google's adaptor deliberately sends no thinking control so\npre-dialect rows retain their safe pre-upgrade request shape.",
                     "type": "string"
                 },
                 "reasoning_efforts": {
@@ -22605,15 +22750,6 @@ const docTemplate = `{
                 "fetch_provider_id": {
                     "type": "string"
                 },
-                "heartbeat_enabled": {
-                    "type": "boolean"
-                },
-                "heartbeat_interval": {
-                    "type": "integer"
-                },
-                "heartbeat_model_id": {
-                    "type": "string"
-                },
                 "image_model_id": {
                     "type": "string"
                 },
@@ -22783,16 +22919,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "fetch_provider_id": {
-                    "type": "string"
-                },
-                "heartbeat_enabled": {
-                    "type": "boolean"
-                },
-                "heartbeat_interval": {
-                    "type": "integer"
-                },
-                "heartbeat_model_id": {
-                    "description": "HeartbeatModelID joins the pointer group above (nil/\"\"/value) so the\nheartbeat tab's autosave can clear a model override.",
                     "type": "string"
                 },
                 "image_model_id": {

@@ -157,8 +157,7 @@ src/
 │   │       ├── tool-call-detail-spawn.vue   # Spawn (subagent) task list + links
 │   │       ├── tool-call-detail-image.vue   # generate_image preview
 │   │       ├── tool-call-detail-generic.vue # Generic input/result JSON detail
-│   │       ├── schedule-trigger-block.vue  # Schedule trigger display
-│   │       └── heartbeat-trigger-block.vue # Heartbeat trigger display
+│   │       └── schedule-trigger-block.vue  # Schedule trigger display
 │   ├── bots/                  #   Bot list + detail (tabs: overview, desktop, container, memory, channels, etc.)
 │   │   ├── index.vue          #     Bot grid
 │   │   ├── new.vue            #     Create bot flow
@@ -171,7 +170,6 @@ src/
 │   │       ├── bot-memory.vue         # Memory configuration tab
 │   │       ├── bot-mcp.vue            # MCP connections tab
 │   │       ├── bot-schedule.vue       # Schedule management tab
-│   │       ├── bot-heartbeat.vue      # Heartbeat configuration tab
 │   │       ├── bot-email.vue          # Email configuration tab
 │   │       ├── bot-container.vue      # Container management tab
 │   │       ├── bot-network.vue        # Workspace network tab

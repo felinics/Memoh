@@ -368,7 +368,7 @@ func (s SessionContext) IsSameConversation(platform, target string) bool {
 // so their usage guidance should ask for explicit platform/target instead.
 func (s SessionContext) CanOmitMessagingTarget() bool {
 	switch s.SessionType {
-	case sessionmode.Heartbeat, sessionmode.Schedule:
+	case sessionmode.Schedule:
 		return false
 	default:
 		return strings.TrimSpace(s.CurrentPlatform) != "" &&

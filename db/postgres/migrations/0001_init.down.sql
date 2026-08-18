@@ -22,7 +22,6 @@ DROP TABLE IF EXISTS email_oauth_tokens CASCADE;
 DROP TABLE IF EXISTS email_providers CASCADE;
 DROP TABLE IF EXISTS schedule_logs CASCADE;
 DROP TABLE IF EXISTS bot_history_message_compacts CASCADE;
-DROP TABLE IF EXISTS bot_heartbeat_logs CASCADE;
 DROP TABLE IF EXISTS bot_history_message_assets CASCADE;
 DROP TABLE IF EXISTS media_assets CASCADE;
 DROP TABLE IF EXISTS bot_storage_bindings CASCADE;

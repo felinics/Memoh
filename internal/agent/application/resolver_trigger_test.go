@@ -171,16 +171,3 @@ func TestTriggerScheduleAttachesPromptAsCurrentUserMessage(t *testing.T) {
 	seen, params := runTriggerPromptPipeline(t, cfg, provider)
 	assertTriggerCurrentRequest(t, seen, params, schedulePrompt)
 }
-
-func TestTriggerHeartbeatAttachesPromptAsCurrentUserMessage(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2026, 7, 5, 9, 0, 0, 0, time.UTC)
-	heartbeatPrompt := agentpkg.GenerateHeartbeatPrompt(30, "", now, "")
-
-	provider := &triggerCaptureProvider{}
-	cfg := triggerResolvedRunConfig(provider, "heartbeat", now, sessionmode.Heartbeat)
-	cfg = attachCurrentTurnPrompt(cfg, heartbeatPrompt)
-
-	seen, params := runTriggerPromptPipeline(t, cfg, provider)
-	assertTriggerCurrentRequest(t, seen, params, heartbeatPrompt)
-}

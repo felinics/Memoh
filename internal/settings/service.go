@@ -125,7 +125,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
+	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEffort, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
 	// A read error here must abort: falling through would leave `current` at the
 	// model defaults and silently overwrite a saved chat_runtime=acp_agent (and
 	// its agent id) on the next save. ErrNoRows is impossible because the bot
@@ -160,12 +160,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if effect := strings.TrimSpace(req.AclDefaultEffect); effect != "" {
 		current.AclDefaultEffect = effect
-	}
-	if req.HeartbeatEnabled != nil {
-		current.HeartbeatEnabled = *req.HeartbeatEnabled
-	}
-	if req.HeartbeatInterval != nil && *req.HeartbeatInterval > 0 {
-		current.HeartbeatInterval = *req.HeartbeatInterval
 	}
 	if req.CompactionEnabled != nil {
 		current.CompactionEnabled = *req.CompactionEnabled
@@ -257,17 +251,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if err := s.applyReasoningPolicy(ctx, &current, req); err != nil {
 		return Settings{}, err
-	}
-	heartbeatModelUUID := pgtype.UUID{}
-	heartbeatModelIDSet := req.HeartbeatModelID != nil
-	if req.HeartbeatModelID != nil {
-		if value := strings.TrimSpace(*req.HeartbeatModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, value)
-			if err != nil {
-				return Settings{}, err
-			}
-			heartbeatModelUUID = modelID
-		}
 	}
 	compactionModelUUID := pgtype.UUID{}
 	compactionModelIDSet := req.CompactionModelID != nil
@@ -399,9 +382,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		Language:                   current.Language,
 		CommandUiLanguage:          current.CommandUILanguage,
 		ReasoningEffort:            current.ReasoningEffort,
-		HeartbeatEnabled:           current.HeartbeatEnabled,
-		HeartbeatInterval:          int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
-		HeartbeatPrompt:            "",
 		CompactionEnabled:          current.CompactionEnabled,
 		CompactionThreshold:        int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
 		CompactionTargetPercentSet: compactionTargetPercentSet,
@@ -412,8 +392,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		ChatAcpAgentID:             nullableText(current.ChatACPAgentID),
 		ChatAcpProjectPath:         current.ChatACPProjectPath,
 		ChatAcpProjectMode:         current.ChatACPProjectMode,
-		HeartbeatModelID:           heartbeatModelUUID,
-		HeartbeatModelIDSet:        heartbeatModelIDSet,
 		CompactionModelIDSet:       compactionModelIDSet,
 		CompactionModelID:          compactionModelUUID,
 		ImageModelID:               imageModelUUID,
@@ -468,14 +446,12 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return nil
 }
 
-func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
+func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEffort string, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
 	settings := Settings{
 		Language:                strings.TrimSpace(language),
 		CommandUILanguage:       strings.TrimSpace(commandUILanguage),
 		AclDefaultEffect:        strings.TrimSpace(aclDefaultEffect),
 		ReasoningEffort:         strings.TrimSpace(reasoningEffort),
-		HeartbeatEnabled:        heartbeatEnabled,
-		HeartbeatInterval:       int(heartbeatInterval),
 		CompactionEnabled:       compactionEnabled,
 		CompactionThreshold:     int(compactionThreshold),
 		CompactionTargetPercent: normalizeCompactionTargetPercent(compactionTargetPercent),
@@ -495,9 +471,6 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 	}
 	if !hasReasoningEffortValue(settings.ReasoningEffort) {
 		settings.ReasoningEffort = DefaultReasoningEffort
-	}
-	if settings.HeartbeatInterval <= 0 {
-		settings.HeartbeatInterval = DefaultHeartbeatInterval
 	}
 	if settings.CompactionThreshold < 0 {
 		settings.CompactionThreshold = 0
@@ -609,8 +582,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
-		row.HeartbeatEnabled,
-		row.HeartbeatInterval,
 		row.CompactionEnabled,
 		row.CompactionThreshold,
 		row.CompactionTargetPercent,
@@ -620,7 +591,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.ChatAcpAgentID,
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
-		row.HeartbeatModelID,
 		row.CompactionModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
@@ -644,8 +614,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
-		row.HeartbeatEnabled,
-		row.HeartbeatInterval,
 		row.CompactionEnabled,
 		row.CompactionThreshold,
 		row.CompactionTargetPercent,
@@ -655,7 +623,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.ChatAcpAgentID,
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
-		row.HeartbeatModelID,
 		row.CompactionModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
@@ -678,8 +645,6 @@ func normalizeBotSettingsFields(
 	language string,
 	commandUILanguage string,
 	reasoningEffort string,
-	heartbeatEnabled bool,
-	heartbeatInterval int32,
 	compactionEnabled bool,
 	compactionThreshold int32,
 	compactionTargetPercent pgtype.Int4,
@@ -689,7 +654,6 @@ func normalizeBotSettingsFields(
 	chatACPAgentID pgtype.Text,
 	chatACPProjectPath string,
 	chatACPProjectMode string,
-	heartbeatModelID pgtype.UUID,
 	compactionModelID pgtype.UUID,
 	imageModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
@@ -706,7 +670,7 @@ func normalizeBotSettingsFields(
 	overlayEnabled bool,
 	overlayConfig []byte,
 ) Settings {
-	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionTargetPercent)
+	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEffort, compactionEnabled, compactionThreshold, compactionTargetPercent)
 	if timezone.Valid {
 		settings.Timezone = timezone.String
 	}
@@ -727,9 +691,6 @@ func normalizeBotSettingsFields(
 	settings.ChatACPProjectMode = normalizeACPProjectMode(chatACPProjectMode)
 	if settings.ChatACPProjectMode == "" {
 		settings.ChatACPProjectMode = DefaultACPProjectMode
-	}
-	if heartbeatModelID.Valid {
-		settings.HeartbeatModelID = uuid.UUID(heartbeatModelID.Bytes).String()
 	}
 	if compactionModelID.Valid {
 		settings.CompactionModelID = uuid.UUID(compactionModelID.Bytes).String()

@@ -145,7 +145,6 @@ Memoh/
 │   ├── fetchproviders/         #   Web-fetch provider management (native, Jina, Cloudflare Markdown)
 │   ├── handlers/               #   HTTP request handlers (REST API endpoints)
 │   ├── healthcheck/            #   Health check adapter system (MCP, channel checkers)
-│   ├── heartbeat/              #   Heartbeat scheduling service (cron-based)
 │   ├── hooks/                  #   Bot-defined lifecycle hooks (PreToolUse, TurnEnd, … from hooks.json)
 │   ├── identity/               #   Identity type utilities (human vs bot)
 │   ├── i18n/                   #   Command and message internationalization
@@ -451,7 +450,6 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 **Scheduling & Automation**
 - `schedule` — Scheduled tasks (cron)
 - `schedule_logs` — Schedule execution logs
-- `bot_heartbeat_logs` — Heartbeat execution records
 **Storage**
 - `storage_providers` — Pluggable object storage backends
 - `bot_storage_bindings` — Per-bot storage backend selection

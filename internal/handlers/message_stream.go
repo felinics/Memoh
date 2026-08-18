@@ -31,7 +31,7 @@ const sseHeartbeatInterval = 20 * time.Second
 // @Description Lightweight SSE for sidebar live-sort. Carries only session
 // @Description identifiers and minimal metadata (touched timestamps, titles).
 // @Description Never includes message bodies. Filters out internal session
-// @Description types such as heartbeat, schedule, subagent.
+// @Description types such as schedule and subagent.
 // @Tags messages
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"

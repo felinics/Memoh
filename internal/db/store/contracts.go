@@ -373,15 +373,6 @@ type ScheduleStore interface {
 	DeleteLogsByBot(ctx context.Context, botID ID) error
 }
 
-type HeartbeatStore interface {
-	ListEnabledBots(ctx context.Context) ([]Record, error)
-	CreateLog(ctx context.Context, input Input) (Record, error)
-	CompleteLog(ctx context.Context, id ID, input Patch) (Record, error)
-	ListLogsByBot(ctx context.Context, botID ID, page Page) ([]Record, error)
-	CountLogsByBot(ctx context.Context, botID ID) (int64, error)
-	DeleteLogsByBot(ctx context.Context, botID ID) error
-}
-
 type TokenUsageRepository interface {
 	GetByDayAndType(ctx context.Context, filter Filter) ([]Record, error)
 	GetByModel(ctx context.Context, filter Filter) ([]Record, error)

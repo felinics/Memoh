@@ -46,7 +46,6 @@ func (q *compactionCapabilityQueries) GetSettingsByBotID(context.Context, pgtype
 	return sqlc.GetSettingsByBotIDRow{
 		Language:                settings.DefaultLanguage,
 		ReasoningEffort:         settings.DefaultReasoningEffort,
-		HeartbeatInterval:       settings.DefaultHeartbeatInterval,
 		CompactionTargetPercent: pgtype.Int4{},
 		ChatModelID:             q.chatModel.ID,
 		CompactionModelID:       q.model.ID,

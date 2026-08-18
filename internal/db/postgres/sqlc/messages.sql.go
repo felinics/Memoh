@@ -1404,7 +1404,7 @@ type CreateMessageWithHistoryTurnRow struct {
 // from this same counter (SR-TURN-001, SR-DUR-002), so bumping again would
 // spend a second position and file the message under a turn the client was
 // never told about. Entry points with no admission — channel inbound,
-// schedules, heartbeats — pass NULL and keep allocating here.
+// schedules — pass NULL and keep allocating here.
 func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg CreateMessageWithHistoryTurnParams) (CreateMessageWithHistoryTurnRow, error) {
 	row := q.db.QueryRow(ctx, createMessageWithHistoryTurn,
 		arg.SessionID,

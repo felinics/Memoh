@@ -36,7 +36,6 @@
       "cancel": "✕ キャンセル"
     },
     "labelModel": "Model",
-    "labelHeartbeat": "ハートビート",
     "labelReasoning": "推論",
     "labelContext": "コンテクスト",
     "contextUnit": "Token",
@@ -223,9 +222,8 @@
         },
         "model": {
           "list": "利用可能なチャット Modelをリストする",
-          "current": "現在のチャットとハートビートのModelを表示する",
-          "set": "チャットModelを設定する",
-          "set-heartbeat": "ハートビートModelを設定する"
+          "current": "現在のチャット Modelを表示する",
+          "set": "チャットModelを設定する"
         },
         "reasoning": {
           "show": "推論レベルを表示し、新しい推論レベルを選択します",
@@ -249,9 +247,6 @@
           "providers": "電子EmailProviderをリストする",
           "bindings": "Bot電子Emailバインディングをリストする",
           "outbox": "最近送信したEmailを一覧表示する"
-        },
-        "heartbeat": {
-          "logs": "最近のハートビート ログを一覧表示する"
         },
         "skill": {
           "list": "すべてのSkillをリストする"
@@ -278,14 +273,11 @@
     "settings": {
       "title": "⚙️ Botの設定",
       "fieldReasoning": "推論",
-      "fieldHeartbeat": "ハートビート",
       "fieldAclDefault": "ACLデフォルト",
       "fieldChatModel": "チャットModel",
-      "fieldHeartbeatModel": "ハートビートModel",
       "fieldSearchProvider": "検索Provider",
       "fieldMemoryProvider": "MemoryProvider",
       "fieldCommandLanguage": "コマンドUIの言語",
-      "heartbeatOnEvery": "オン · {minutes} 分ごと",
       "aclDeny": "拒否 — Toolは実行前に尋ねます",
       "aclAllow": "許可 — Toolは何も要求せずに実行されます",
       "section": {
@@ -296,8 +288,6 @@
         "language": "言語 ▸"
       },
       "action": {
-        "enableHeartbeat": "ハートビートをオンにする",
-        "disableHeartbeat": "ハートビートをオフにする",
         "aclAsk": "Toolの前に質問する",
         "aclAllow": "Toolを許可する"
       },
@@ -307,11 +297,10 @@
       "langEn": "英語",
       "langZh": "中文",
       "missingValue": "{option} の値が欠落しています。\n\n{usage}",
-      "invalidHeartbeatInterval": "無効なハートビート間隔: {value}",
       "unknownOption": "不明なオプション: {option}\n\n{usage}",
       "unknownLanguage": "不明な言語 {value}。auto、en、zh、ja から選んでください。",
       "unavailable": "現在設定は利用できません。",
-      "updateUsage": "使い方: /settings update [options]\n\nOptions:\n- --language <value>\n- --acl_default_effect <allow|deny>\n- --reasoning_effort <disable|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <minutes>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n(Command UI language: /settings language <auto|en|zh|ja>)",
+      "updateUsage": "使い方: /settings update [options]\n\nOptions:\n- --language <value>\n- --acl_default_effect <allow|deny>\n- --reasoning_effort <disable|low|medium|high|xhigh>\n- --chat_model_id <id>\n\n(Command UI language: /settings language <auto|en|zh|ja>)",
       "langJa": "日本語"
     },
     "language": {
@@ -325,7 +314,6 @@
       "unavailable": "現在Modelは入手できません。",
       "listChanged": "Model リストが変更されました - /model を再度開いて選択します。",
       "setUsage": "使い方: /Modelセット<model_id> | <provider_name> <model_name>",
-      "setHeartbeatUsage": "使い方: /model set-heartbeat<model_id> | <provider_name> <model_name>",
       "noneUnderProvider": "Provider {provider} にはチャット Modelがありません。 {command} を実行してすべてのProviderを表示します。",
       "empty": "チャットModelはまだありません。\n\nWeb ダッシュボードにModelを追加します。",
       "notFound": "{name} という名前のModelはありません。 {command} を実行して、利用可能なものを確認します。",
@@ -334,8 +322,7 @@
       "idRequired": "Model識別子は必須です。",
       "serviceUnavailable": "現在Modelサービスはご利用いただけません。",
       "marker": {
-        "chat": "チャット",
-        "heartbeat": "心拍数"
+        "chat": "チャット"
       }
     },
     "memory": {
@@ -422,16 +409,6 @@
       "permWrite": "書く",
       "permDelete": "削除"
     },
-    "heartbeat": {
-      "title": "ハートビートログ",
-      "empty": "心拍ログはまだありません。\n\nハートビートは定期的な自律チェックインです。ハートビートが有効になると、ここに実行が表示されます。",
-      "section": {
-        "settings": "設定 ▸"
-      },
-      "fieldTime": "時間",
-      "fieldDuration": "間隔",
-      "olderHint": "ウェブを利用するUI古いハートビート ログの場合。"
-    },
     "usage": {
       "unavailable": "現在、Tokenの使用は利用できません。",
       "empty": "Tokenの使用量はまだ記録されていません。\n\nBotがメッセージに応答した後、使用状況がここに表示されます。",
@@ -443,7 +420,6 @@
       "byModelTitle": "Model別のToken使用量 ({range})",
       "bucketChat": "チャット",
       "bucketDiscuss": "ディスカッション",
-      "bucketHeartbeat": "ハートビート",
       "bucketSchedule": "スケジュール",
       "inOut": "{in} 入力 · {out} 出力",
       "total": "合計",
@@ -565,7 +541,6 @@
     "mcp": "管理MCP接続",
     "usage": "Tokenの使用状況を表示する",
     "email": "電子Email設定を表示する",
-    "heartbeat": "ハートビートログを表示する",
     "skill": "BotのSkillを表示する",
     "fs": "Workspace のファイルを参照する",
     "access": "ID と権限を検査する",

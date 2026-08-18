@@ -206,8 +206,8 @@ func runOwnershipLost(ctx context.Context) bool {
 	return ctx != nil && errors.Is(context.Cause(ctx), sessionruntime.ErrRunOwnershipLost)
 }
 
-// admitTriggeredRun admits a non-interactive turn — a schedule fire, a heartbeat
-// tick — and returns the run context to execute in plus the terminal write that
+// admitTriggeredRun admits a non-interactive schedule fire and returns the run
+// context to execute in plus the terminal write that
 // closes the run's record.
 //
 // These callers reach the agent directly rather than through StartTurn, but they

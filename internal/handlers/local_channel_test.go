@@ -804,7 +804,7 @@ func TestLocalChannelWSMessageAuthorizesSessionBeforeSlashCommand(t *testing.T) 
 		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 		agentService:   &application.Service{},
-		commandHandler: command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
+		commandHandler: command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
 		logger:         slog.Default(),
 	}
 

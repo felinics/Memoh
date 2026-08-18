@@ -61,7 +61,6 @@ import (
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
 	hookspkg "github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
@@ -408,10 +407,6 @@ func provideScheduleTriggerer(service *application.Service) schedule.Triggerer {
 	return application.NewScheduleGateway(service)
 }
 
-func provideHeartbeatTriggerer(service *application.Service) heartbeat.Triggerer {
-	return application.NewHeartbeatGateway(service)
-}
-
 type sessionCreatorAdapter struct {
 	svc      *sessionpkg.Service
 	workdirs *workdir.Service
@@ -466,10 +461,6 @@ func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec 
 		return "", err
 	}
 	return sess.ID, nil
-}
-
-func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbeat.SessionCreator {
-	return &sessionCreatorAdapter{svc: sessionService}
 }
 
 func provideScheduleSessionCreator(sessionService *sessionpkg.Service, workdirService *workdir.Service) schedule.SessionCreator {
@@ -888,14 +879,6 @@ func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			return scheduleService.Bootstrap(ctx)
-		},
-	})
-}
-
-func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			return heartbeatService.Bootstrap(ctx)
 		},
 	})
 }

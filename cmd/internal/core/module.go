@@ -14,7 +14,6 @@ import (
 	"github.com/memohai/memoh/internal/connectors"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
@@ -111,11 +110,8 @@ func ServerModule() fx.Option {
 			provideAgentService,
 			provideTurnService,
 			provideScheduleTriggerer,
-			provideHeartbeatSessionCreator,
 			provideScheduleSessionCreator,
 			schedule.NewService,
-			provideHeartbeatTriggerer,
-			heartbeat.NewService,
 			compaction.NewService,
 			provideContainerdHandler,
 			provideBotBackupService,
@@ -134,7 +130,6 @@ func ServerModule() fx.Option {
 			configureMemoryProviderRegistry,
 			startProviderTemplateSync,
 			startScheduleService,
-			startHeartbeatService,
 			startContainerReconciliation,
 			startBackgroundTaskCleanup,
 			startAudioTempStoreCleanup,

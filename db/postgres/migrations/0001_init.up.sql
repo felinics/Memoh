@@ -240,10 +240,6 @@ CREATE TABLE IF NOT EXISTS bots (
   search_provider_id UUID REFERENCES search_providers(id) ON DELETE SET NULL,
   fetch_provider_id UUID REFERENCES fetch_providers(id) ON DELETE SET NULL,
   memory_provider_id UUID REFERENCES memory_providers(id) ON DELETE SET NULL,
-  heartbeat_enabled BOOLEAN NOT NULL DEFAULT false,
-  heartbeat_interval INTEGER NOT NULL DEFAULT 1440,
-  heartbeat_prompt TEXT NOT NULL DEFAULT '',
-  heartbeat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compaction_enabled BOOLEAN NOT NULL DEFAULT true,
   compaction_threshold INTEGER NOT NULL DEFAULT 0,
   compaction_target_percent INTEGER,
@@ -537,8 +533,8 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   route_id UUID REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
   channel_type TEXT,
-  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'heartbeat', 'schedule', 'subagent', 'discuss', 'acp_agent')),
-  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'heartbeat', 'schedule', 'subagent')),
+  type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'schedule', 'subagent', 'discuss', 'acp_agent')),
+  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'schedule', 'subagent')),
   runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
   runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   -- visibility says whether the session belongs in user-facing session
@@ -612,7 +608,7 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   content JSONB NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   usage JSONB,
-  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'heartbeat', 'schedule', 'subagent')),
+  session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'schedule', 'subagent')),
   runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compact_id UUID,
@@ -975,22 +971,6 @@ CREATE TABLE IF NOT EXISTS bot_history_message_assets (
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
 
 
--- bot_heartbeat_logs: structured execution records for periodic heartbeat checks.
-CREATE TABLE IF NOT EXISTS bot_heartbeat_logs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
-  status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'alert', 'error')),
-  result_text TEXT NOT NULL DEFAULT '',
-  error_message TEXT NOT NULL DEFAULT '',
-  usage JSONB,
-  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  completed_at TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_bot_started ON bot_heartbeat_logs(bot_id, started_at DESC);
-
 CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -1341,7 +1321,6 @@ ALTER TABLE IF EXISTS public.bot_channel_admins ADD COLUMN IF NOT EXISTS team_id
 ALTER TABLE IF EXISTS public.bot_channel_configs ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_channel_routes ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_email_bindings ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.bot_heartbeat_logs ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_history_message_assets ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_history_message_compacts ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_history_messages ADD COLUMN IF NOT EXISTS team_id uuid;
@@ -1406,7 +1385,6 @@ ALTER TABLE IF EXISTS public.bot_channel_admins ALTER COLUMN team_id SET DEFAULT
 ALTER TABLE IF EXISTS public.bot_channel_configs ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_channel_routes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_email_bindings ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.bot_heartbeat_logs ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_history_message_assets ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_history_message_compacts ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_history_messages ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();

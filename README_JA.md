@@ -102,7 +102,7 @@ GitHub が自動生成する「Source code」
 - **Browser Use**: Workspace 内の Browser を操作できます。
 - **Computer Use**: GUI が必要な作業のために Workspace の Desktop を操作できます。
 - **Skills & Supermarket**: モジュール化された Skill、Supermarket からの curated template インストール、sub-agent への委譲に対応します。
-- **Automation**: スケジュールタスクと周期的な heartbeat を実行できます。
+- **Automation**: スケジュールタスクで定期的なワークフローを実行できます。
 
 ## Sub-projects
 

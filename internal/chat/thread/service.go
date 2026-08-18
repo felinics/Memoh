@@ -60,7 +60,6 @@ type Thread struct {
 
 const (
 	TypeChat              = "chat"
-	TypeHeartbeat         = "heartbeat"
 	TypeSchedule          = "schedule"
 	TypeSubagent          = "subagent"
 	TypeDiscuss           = "discuss"
@@ -72,7 +71,7 @@ const (
 )
 
 // userFacingSessionTypes lists the session types intended to appear in
-// user-facing session lists. Heartbeat, schedule, and subagent sessions are
+// user-facing session lists. Schedule and subagent sessions are
 // system-internal — they back agent-driven loops and never surface in the UI.
 var userFacingSessionTypes = []string{TypeChat, TypeDiscuss, TypeACPAgent}
 
@@ -89,7 +88,7 @@ func UserFacingSessionTypes() []string {
 // always demand an explicit type filter; callers that filter by visibility
 // instead pass this list to make the type predicate a no-op.
 func AllSessionTypes() []string {
-	return []string{TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent}
+	return []string{TypeChat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent}
 }
 
 var (
@@ -108,7 +107,7 @@ var (
 
 func IsKnownType(typ string) bool {
 	switch strings.TrimSpace(typ) {
-	case TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent:
+	case TypeChat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent:
 		return true
 	default:
 		return false
@@ -1518,8 +1517,6 @@ func descriptorFromLegacyType(typ string) (string, string) {
 		return TypeChat, RuntimeACPAgent
 	case TypeDiscuss:
 		return TypeDiscuss, RuntimeModel
-	case TypeHeartbeat:
-		return TypeHeartbeat, RuntimeModel
 	case TypeSchedule:
 		return TypeSchedule, RuntimeModel
 	case TypeSubagent:
@@ -1550,7 +1547,7 @@ func LegacyTypeForDescriptor(sessionMode, runtimeType string) string {
 
 func IsKnownSessionMode(mode string) bool {
 	switch strings.TrimSpace(mode) {
-	case TypeChat, TypeDiscuss, TypeHeartbeat, TypeSchedule, TypeSubagent:
+	case TypeChat, TypeDiscuss, TypeSchedule, TypeSubagent:
 		return true
 	default:
 		return false

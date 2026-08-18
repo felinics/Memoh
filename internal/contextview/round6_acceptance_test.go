@@ -14,7 +14,6 @@ import (
 var round6NativeModes = []string{
 	sessionmode.Chat,
 	sessionmode.Discuss,
-	sessionmode.Heartbeat,
 	sessionmode.Schedule,
 	sessionmode.Subagent,
 }

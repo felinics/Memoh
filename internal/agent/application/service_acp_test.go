@@ -2123,7 +2123,6 @@ func (*storeRoundSettingsQueries) GetSettingsByBotID(_ context.Context, botID pg
 		BotID:                   botID,
 		Language:                "auto",
 		ReasoningEffort:         "medium",
-		HeartbeatInterval:       30,
 		CompactionTargetPercent: pgtype.Int4{},
 		MemoryProviderID:        flowTestUUID(storeRoundMemoryProviderID),
 	}, nil

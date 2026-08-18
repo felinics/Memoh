@@ -153,7 +153,6 @@ func newControllerPolicyService(t *testing.T, targetPercent *int) (*Service, *re
 			BotID:                   compactionConfigUUID(t, botUUID),
 			Language:                "auto",
 			ReasoningEffort:         "medium",
-			HeartbeatInterval:       30,
 			CompactionEnabled:       true,
 			CompactionTargetPercent: target,
 			CompactionModelID:       compactionConfigUUID(t, modelUUID),

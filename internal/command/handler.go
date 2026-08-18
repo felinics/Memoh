@@ -13,7 +13,6 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
@@ -78,7 +77,6 @@ type Handler struct {
 	searchProvService  *searchproviders.Service
 	emailService       *emailpkg.Service
 	emailOutboxService *emailpkg.OutboxService
-	heartbeatService   *heartbeat.Service
 	compactionService  *compaction.Service
 	queries            CommandQueries
 	sqlcQueries        dbstore.Queries
@@ -126,7 +124,6 @@ func NewHandler(
 	searchProvService *searchproviders.Service,
 	emailService *emailpkg.Service,
 	emailOutboxService *emailpkg.OutboxService,
-	heartbeatService *heartbeat.Service,
 	queries CommandQueries,
 	aclEvaluator AccessEvaluator,
 	skillLoader SkillLoader,
@@ -146,7 +143,6 @@ func NewHandler(
 		searchProvService:  searchProvService,
 		emailService:       emailService,
 		emailOutboxService: emailOutboxService,
-		heartbeatService:   heartbeatService,
 		queries:            queries,
 		aclEvaluator:       aclEvaluator,
 		skillLoader:        skillLoader,
@@ -163,7 +159,7 @@ func (h *Handler) SetCompactionService(s *compaction.Service, q dbstore.Queries)
 	h.sqlcQueries = q
 }
 
-// CurrentContext resolves the bot's current model/heartbeat/reasoning state for
+// CurrentContext resolves the bot's current model/reasoning state for
 // enriching command output (e.g. the /new confirmation). It is a read-only view
 // over existing bot settings and makes no changes.
 func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentContext, error) {
@@ -175,7 +171,6 @@ func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentCont
 	}
 	return CurrentContext{
 		ChatModel:       h.resolveModelName(cc, s.ChatModelID),
-		HeartbeatModel:  h.resolveModelName(cc, s.HeartbeatModelID),
 		ReasoningEffort: s.ReasoningEffort,
 		ContextWindow:   h.resolveContextWindow(cc),
 	}, nil

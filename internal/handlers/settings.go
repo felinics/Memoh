@@ -12,25 +12,22 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/settings"
 )
 
 type SettingsHandler struct {
-	service          *settings.Service
-	botService       *bots.Service
-	accountService   *accounts.Service
-	heartbeatService *heartbeat.Service
-	logger           *slog.Logger
+	service        *settings.Service
+	botService     *bots.Service
+	accountService *accounts.Service
+	logger         *slog.Logger
 }
 
-func NewSettingsHandler(log *slog.Logger, service *settings.Service, botService *bots.Service, accountService *accounts.Service, heartbeatService *heartbeat.Service) *SettingsHandler {
+func NewSettingsHandler(log *slog.Logger, service *settings.Service, botService *bots.Service, accountService *accounts.Service) *SettingsHandler {
 	return &SettingsHandler{
-		service:          service,
-		botService:       botService,
-		accountService:   accountService,
-		heartbeatService: heartbeatService,
-		logger:           log.With(slog.String("handler", "settings")),
+		service:        service,
+		botService:     botService,
+		accountService: accountService,
+		logger:         log.With(slog.String("handler", "settings")),
 	}
 }
 
@@ -115,12 +112,6 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; select by model UUID")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-
-	if req.HeartbeatEnabled != nil || req.HeartbeatInterval != nil {
-		if err := h.heartbeatService.Reschedule(c.Request().Context(), botID); err != nil {
-			h.logger.Error("failed to reschedule heartbeat", slog.String("bot_id", botID), slog.Any("error", err))
-		}
 	}
 
 	return c.JSON(http.StatusOK, resp)

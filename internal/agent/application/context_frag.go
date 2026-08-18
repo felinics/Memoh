@@ -67,11 +67,8 @@ func contextFragAttentionReasons(req ChatRequest) []contextfrag.AttentionReason 
 		reasons = append(reasons, reason)
 	}
 
-	switch strings.TrimSpace(req.SessionType) {
-	case sessionmode.Schedule:
+	if strings.TrimSpace(req.SessionType) == sessionmode.Schedule {
 		add(contextfrag.AttentionSchedule)
-	case sessionmode.Heartbeat:
-		add(contextfrag.AttentionHeartbeat)
 	}
 	if req.MentionsBot {
 		add(contextfrag.AttentionMention)

@@ -102,7 +102,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup
 - **Browser Use**: Drive a browser inside the workspace.
 - **Computer Use**: Operate the workspace desktop for GUI workflows.
 - **Skills & Supermarket**: Modular skills, install curated templates from Supermarket, delegate to sub-agents.
-- **Automation**: Scheduled tasks and periodic heartbeat.
+- **Automation**: Scheduled tasks for recurring workflows.
 
 ## Sub-projects
 

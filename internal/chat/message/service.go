@@ -932,7 +932,7 @@ func sessionSnapshotFromRow(row sqlc.BotSession) (string, string) {
 
 func normalizeSessionMode(mode string) string {
 	switch strings.TrimSpace(mode) {
-	case "chat", "discuss", "heartbeat", "schedule", "subagent":
+	case "chat", "discuss", "schedule", "subagent":
 		return strings.TrimSpace(mode)
 	default:
 		return ""
@@ -952,7 +952,7 @@ func legacySessionMode(typ string) string {
 	switch strings.TrimSpace(typ) {
 	case "acp_agent":
 		return "chat"
-	case "discuss", "heartbeat", "schedule", "subagent":
+	case "discuss", "schedule", "subagent":
 		return strings.TrimSpace(typ)
 	default:
 		return "chat"
