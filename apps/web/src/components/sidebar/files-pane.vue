@@ -1,5 +1,8 @@
 <template>
-  <div class="group/tree flex flex-col h-full min-w-0">
+  <div
+    class="group/tree relative flex flex-col h-full min-w-0"
+    v-on="dropHandlers"
+  >
     <!-- Section header: aligns with the Chat ("Quick Actions") and Schedule
          group headers via SidebarPanelHeader (same mt-2 top inset, same label
          type) so the first label in each capsule shares one baseline.
@@ -315,6 +318,19 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- Region-scoped drop feedback. The panel is the whole target: dropping
+         anywhere in it lands in the workspace root, NOT in the folder under the
+         cursor — the tree has no notion of a "current directory" (navigateTo
+         only reveals a path), so per-folder aim would have to be invented here
+         and would silently disagree with the toolbar's Upload, which also
+         targets the root. -->
+    <FileDropOverlay
+      :active="dropActive"
+      :bounds="dropBounds"
+      :icon="Upload"
+      :label="t('bots.files.dropToUpload')"
+    />
   </div>
 </template>
 
@@ -356,6 +372,9 @@ import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { joinPath, parentPath } from '@/components/file-manager/utils'
 import FileTree from '@/components/file-manager/file-tree.vue'
 import SidebarPanelHeader from './panel-header.vue'
+import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
+import { useFileDropZone } from '@/composables/useFileDropZone'
+import { readDroppedContents, type DroppedContents } from '@/utils/dropped-files'
 import { FileTreeKey } from '@/components/file-manager/file-tree-context'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
@@ -394,7 +413,7 @@ const activePath = computed(() => {
 const uploadInputRef = ref<HTMLInputElement>()
 const directoryInputRef = ref<HTMLInputElement>()
 const uploadStatus = ref('')
-const directoryUploading = ref(false)
+const uploadBusy = ref(false)
 const batchArchiveLoading = ref(false)
 const extractLoading = ref(false)
 const batchDeleteDialogOpen = ref(false)
@@ -402,7 +421,7 @@ const batchDeleteLoading = ref(false)
 const selectionMode = ref(false)
 const selectedEntries = ref<Map<string, HandlersFsFileInfo>>(new Map())
 const selectedCount = computed(() => selectedEntries.value.size)
-const operationLoading = computed(() => directoryUploading.value || batchArchiveLoading.value || extractLoading.value || batchDeleteLoading.value)
+const operationLoading = computed(() => uploadBusy.value || batchArchiveLoading.value || extractLoading.value || batchDeleteLoading.value)
 
 interface DirectoryUploadFile {
   file: File
@@ -682,35 +701,30 @@ async function handleDirectoryInputUpload(event: Event) {
   }
 }
 
-async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
-  if (!props.canWrite) return
-  if (directoryUploading.value) return
-  const rootName = payload.rootName.trim() || t('bots.files.uploadedFolderFallbackName')
-  const destinationRoot = joinPath(uploadTarget.value, rootName)
-  const directories = [...new Set([
-    '',
-    ...payload.directories,
-    ...payload.files.flatMap(file => parentRelativeDirs(file.relativePath)),
-  ])]
-
-  directoryUploading.value = true
-  uploadStatus.value = t('bots.files.uploadFolderProgress', {
-    done: 0,
-    total: payload.files.length + directories.length,
-  })
+// Shared upload engine for every multi-entry upload (folder picker, drag-drop).
+// Owns the busy gate and the progress line; the RESULT toast is the caller's,
+// because only the caller knows whether the user dropped files, a folder, or
+// both. Directories are created first and sequentially: a nested file upload
+// fails if its parent doesn't exist yet, and the paths arrive parent-first.
+async function runUploadBatch(
+  directories: string[],
+  files: { path: string, file: File }[],
+): Promise<{ failed: number, total: number }> {
+  const total = directories.length + files.length
   let completed = 0
   let failed = 0
-  const total = payload.files.length + directories.length
   const updateProgress = () => {
-    uploadStatus.value = t('bots.files.uploadFolderProgress', { done: completed, total })
+    uploadStatus.value = t('bots.files.uploadProgress', { done: completed, total })
   }
 
+  uploadBusy.value = true
+  updateProgress()
   try {
     for (const dir of directories) {
       try {
         await postBotsByBotIdContainerFsMkdir({
           path: { bot_id: props.botId },
-          body: { path: joinPath(destinationRoot, dir) },
+          body: { path: dir },
           throwOnError: true,
         })
       } catch {
@@ -721,17 +735,19 @@ async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
       }
     }
 
+    // Bounded fan-out: the bridge is a single container, so unbounded parallel
+    // uploads of a large folder just trade throughput for connection pressure.
     let cursor = 0
     const concurrency = 4
     async function worker() {
       for (;;) {
         const index = cursor++
-        const item = payload.files[index]
+        const item = files[index]
         if (!item) return
         try {
           await postBotsByBotIdContainerFsUpload({
             path: { bot_id: props.botId },
-            body: { path: joinPath(destinationRoot, item.relativePath), file: item.file } as never,
+            body: { path: item.path, file: item.file } as never,
             throwOnError: true,
           })
         } catch {
@@ -742,21 +758,45 @@ async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
         }
       }
     }
-    await Promise.all(Array.from({ length: Math.min(concurrency, payload.files.length) }, () => worker()))
+    await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, () => worker()))
+    return { failed, total }
+  } finally {
+    uploadBusy.value = false
+    // Leave the final count visible for a beat — clearing it the instant the
+    // last request lands reads as if nothing happened.
+    window.setTimeout(() => {
+      if (!uploadBusy.value) uploadStatus.value = ''
+    }, 1500)
+  }
+}
 
+async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
+  if (!props.canWrite) return
+  if (uploadBusy.value) return
+  const rootName = payload.rootName.trim() || t('bots.files.uploadedFolderFallbackName')
+  const destinationRoot = joinPath(uploadTarget.value, rootName)
+  // '' materializes destinationRoot itself; parentRelativeDirs covers folders
+  // that only exist implicitly in a file's path (the folder-input flow reports
+  // no directory list of its own).
+  const directories = [...new Set([
+    '',
+    ...payload.directories,
+    ...payload.files.flatMap(file => parentRelativeDirs(file.relativePath)),
+  ])].map(dir => joinPath(destinationRoot, dir))
+
+  try {
+    const { failed, total } = await runUploadBatch(
+      directories,
+      payload.files.map(item => ({ path: joinPath(destinationRoot, item.relativePath), file: item.file })),
+    )
     if (failed > 0) {
-      toast.error(t('bots.files.uploadFolderPartialFailed', { failed, total }))
+      toast.error(t('bots.files.uploadPartialFailed', { failed, total }))
     } else {
       toast.success(t('bots.files.uploadFolderSuccess'))
     }
     reloadAndBroadcast()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
-  } finally {
-    directoryUploading.value = false
-    window.setTimeout(() => {
-      if (!directoryUploading.value) uploadStatus.value = ''
-    }, 1500)
   }
 }
 
@@ -782,6 +822,63 @@ async function handleUpload(event: Event) {
     input.value = ''
   }
 }
+
+// ---- drag & drop ---------------------------------------------------------
+
+// A single drop can carry loose files and whole folders at once, so everything
+// is flattened into ONE batch: one progress line, one result toast. Anything
+// less makes a mixed drop report itself as several unrelated uploads.
+async function handleFilesDrop(transfer: DataTransfer) {
+  let contents: DroppedContents
+  try {
+    contents = await readDroppedContents(transfer)
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
+    return
+  }
+
+  const directories = new Set<string>()
+  const files: { path: string, file: File }[] = []
+
+  for (const file of contents.files) {
+    files.push({ path: joinPath(rootPath, file.name), file })
+  }
+  for (const folder of contents.folders) {
+    const destinationRoot = joinPath(rootPath, folder.name)
+    // '' materializes destinationRoot itself; parentRelativeDirs backfills any
+    // ancestor the walk reported only through a file path.
+    for (const dir of ['', ...folder.directories, ...folder.files.flatMap(item => parentRelativeDirs(item.relativePath))]) {
+      directories.add(joinPath(destinationRoot, dir))
+    }
+    for (const item of folder.files) {
+      files.push({ path: joinPath(destinationRoot, item.relativePath), file: item.file })
+    }
+  }
+
+  // An empty folder tree still has directories to create; a drop with neither is
+  // nothing the user can see (e.g. entries the browser refused to open).
+  if (files.length === 0 && directories.size === 0) return
+
+  try {
+    const { failed, total } = await runUploadBatch([...directories], files)
+    if (failed > 0) {
+      toast.error(t('bots.files.uploadPartialFailed', { failed, total }))
+    } else {
+      toast.success(t('bots.files.uploadSuccess'))
+    }
+    reloadAndBroadcast()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
+  }
+}
+
+const { active: dropActive, bounds: dropBounds, handlers: dropHandlers } = useFileDropZone({
+  // Read-only members and an upload already in flight both refuse the drop, so
+  // the OS paints its no-drop cursor instead of an overlay promising an upload
+  // that won't happen.
+  disabled: () => !props.canWrite || operationLoading.value,
+  onDrop: transfer => void handleFilesDrop(transfer),
+})
 
 // ---- new file ------------------------------------------------------------
 

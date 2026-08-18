@@ -1,5 +1,8 @@
 <template>
-  <div class="flex-1 flex flex-col h-full min-w-0 relative">
+  <div
+    class="flex-1 flex flex-col h-full min-w-0 relative"
+    v-on="dropHandlers"
+  >
     <div
       v-if="!currentBotId"
       class="flex-1"
@@ -840,12 +843,25 @@
         </div>
       </div>
     </template>
+
+    <!-- Region-scoped drop feedback. Sits OUTSIDE the v-else so it can also
+         cover the "pick a bot" placeholder — where the zone is disabled, so the
+         overlay stays dark and the OS shows its no-drop cursor instead of the
+         drop silently doing nothing. Dropped files land in the attachment tray,
+         unsent: the user still gets to type the message that goes with them. -->
+    <FileDropOverlay
+      :active="dropActive"
+      :bounds="dropBounds"
+      :icon="ImagePlus"
+      :label="$t('chat.dropToAttach')"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, useTemplateRef, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import {
+  ImagePlus,
   Paperclip,
   Plus,
   ChevronDown,
@@ -873,6 +889,9 @@ import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings, getBot
 import type { AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
+import { useFileDropZone } from '@/composables/useFileDropZone'
+import { readDroppedFiles } from '@/utils/dropped-files'
 import MessageItem from './message-item.vue'
 import ComposerContinueOn from './composer-continue-on.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
@@ -1897,6 +1916,29 @@ watch(() => pendingFiles.value.length, (len, prevLen) => {
   if (added.some((file) => isPdfFile(file) && file.size > nativePdfMaxBytes)) {
     toast.warning(t('chat.pdfTooLargeForNative'))
   }
+})
+
+// Dropping files on the conversation is the Paperclip by another route: they
+// land in the same pending tray, so the attachment cards, previews, and the PDF
+// warning above all follow with no extra wiring. Nothing is sent — the user
+// still writes the message that goes with the files.
+async function handleFilesDrop(transfer: DataTransfer) {
+  const { files, skippedFolders } = await readDroppedFiles(transfer)
+  for (const file of files) pendingFiles.value.push(file)
+  // An attachment is one file, so a folder has nothing to become here. Warned
+  // even when loose files DID land in the same drop: the cards would otherwise
+  // read as "everything arrived" while the folder vanished silently.
+  if (skippedFolders > 0) {
+    toast.warning(t('chat.dropFolderUnsupported'))
+  }
+}
+
+const { active: dropActive, bounds: dropBounds, handlers: dropHandlers } = useFileDropZone({
+  // Same conditions that disable the Paperclip: no bot, a read-only or streaming
+  // turn, history still loading. A disabled zone keeps the overlay dark, so the
+  // OS no-drop cursor answers instead of a drop that goes nowhere.
+  disabled: () => !currentBotId.value || activeChatReadOnly.value || streaming.value || loadingMessages.value,
+  onDrop: transfer => void handleFilesDrop(transfer),
 })
 
 type DefaultACPSettings = {

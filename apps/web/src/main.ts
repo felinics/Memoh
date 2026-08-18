@@ -12,6 +12,7 @@ import { connectBrowserKeyboardShortcutsLive } from './lib/browser-keyboard-shor
 import { selectWebBindings } from './lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from './composables/useKeyboardCommand'
 import { setupApiClient } from './lib/api-client'
+import { installFileDropGuard } from './lib/file-drop-guard'
 import { DesktopShellKey } from './lib/desktop-shell'
 import { registerWorkspaceTabCommands } from './pages/home/commands/workspace-tab-commands'
 import { useWorkspaceTabsStore } from './store/workspace-tabs'
@@ -26,6 +27,11 @@ import 'katex/dist/katex.min.css'
 setupApiClient({
   onUnauthorized: () => router.replace({ name: 'Login' }),
 })
+
+// Before anything can render: an OS file drop that no zone claims would navigate
+// the browser away from the SPA. Installed at the renderer level because the
+// pages with no drop zone are the ones that need it most.
+installFileDropGuard()
 
 const pinia = createPinia().use(piniaPluginPersistedstate)
 const keyboardCommands = createKeyboardCommandRegistry()
