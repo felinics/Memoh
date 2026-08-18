@@ -198,11 +198,13 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	var terminalPayload []byte
 	var hasTerminalEvent bool
 	var hasVisibleOutput bool
+	var visibleRecovery strings.Builder
 	for event := range eventCh {
 		idleCancel.Reset()
 		if event.Type == native.EventToolCallStart {
 			idleCancel.RecordToolCall()
 		}
+		recordVisibleAgentText(&visibleRecovery, event)
 		if hasVisibleAgentStreamOutput(event) {
 			hasVisibleOutput = true
 		}
@@ -271,6 +273,11 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	var sdkMsgs []sdk.Message
 	if len(finalMessages) > 0 {
 		_ = json.Unmarshal(finalMessages, &sdkMsgs)
+	}
+	if len(sdkMsgs) == 0 && terminalEvent.Type == native.EventAgentAbort && hasVisibleOutput {
+		recovered := terminalSnapshot{aborted: true, visibleOutput: true}
+		restoreVisibleTextSnapshot(&recovered, visibleRecovery.String())
+		sdkMsgs = recovered.sdkMessages
 	}
 	interruptedByTimeout := idleCancel.DidFire() || native.IsTimeoutStreamError(lifecycleCause)
 	if len(sdkMsgs) == 0 && terminalEvent.Type == native.EventAgentAbort && interruptedByTimeout && !hasVisibleOutput {
@@ -542,7 +549,6 @@ func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePa
 			msgs[i].Content = append(msgs[i].Content, extra...)
 			return
 		}
-	}
 }
 
 // discussACPFullContextPrompt renders the composed context into the single
