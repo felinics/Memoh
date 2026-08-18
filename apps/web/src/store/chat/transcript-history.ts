@@ -3,9 +3,7 @@ import type {
   UISystemTurn,
   UITurn,
 } from '@/composables/api/useChat.types'
-import en from '@/i18n/locales/en.json'
-import ja from '@/i18n/locales/ja.json'
-import zh from '@/i18n/locales/zh.json'
+import i18n from '@/i18n'
 import {
   nextId,
   normalizeAttachment,
@@ -28,21 +26,10 @@ import type {
   ToolCallBlock,
 } from './types'
 
-const interruptedTurnMarker = '[turn-interrupted]'
-const interruptedTurnMessages = { en, zh, ja }
+export const interruptedTurnMarker = '[turn-interrupted]'
 
-function interruptedTurnText(): string {
-  const stored = typeof localStorage === 'undefined'
-    ? ''
-    : localStorage.getItem('language') ?? ''
-  const locale = stored === 'zh' || stored === 'ja' || stored === 'en'
-    ? stored
-    : typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('zh')
-      ? 'zh'
-      : typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('ja')
-        ? 'ja'
-        : 'en'
-  return interruptedTurnMessages[locale].chat.interruptedTurn
+export function interruptedTurnText(): string {
+  return String(i18n.global.t('chat.interruptedTurn'))
 }
 
 export function createTranscriptHistory(deps: {
@@ -85,11 +72,17 @@ export function createTranscriptHistory(deps: {
           attachments: msg.attachments.map(normalizeAttachment),
         }
       case 'text':
+        if (msg.content !== interruptedTurnMarker) return { ...msg }
+        // Preserve interruption as semantic state instead of baking the locale
+        // selected at history-load time into a plain string. Vue reads this
+        // accessor during render; i18n.global.t() depends on the reactive locale,
+        // so an already-loaded interrupted turn updates immediately when the
+        // user changes language without refetching or renormalizing history.
         return {
           ...msg,
-          content: msg.content === interruptedTurnMarker
-            ? interruptedTurnText()
-            : msg.content,
+          get content() {
+            return interruptedTurnText()
+          },
         }
       default:
         return { ...msg }
