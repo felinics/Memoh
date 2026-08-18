@@ -500,13 +500,20 @@ func (s *Service) continueToolApprovalSession(
 	stream := s.agent.Stream(idleCtx, cfg)
 	stored := false
 	var hasVisibleOutput bool
+	var visibleText strings.Builder
+	var providerTimedOut bool
 	for event := range stream {
 		idleCancel.Reset() // each event resets the idle timer
 		if event.Type == native.EventToolCallStart {
 			idleCancel.RecordToolCall()
 		}
-		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
-			lifecycleCause = eventErr
+		if eventErr := agentStreamEventError(event); eventErr != nil {
+			if native.IsTimeoutStreamError(eventErr) {
+				providerTimedOut = true
+			}
+			if lifecycleCause == nil {
+				lifecycleCause = eventErr
+			}
 		}
 		if event.IsTerminal() {
 			terminalEventSeen = true
@@ -515,6 +522,7 @@ func (s *Service) continueToolApprovalSession(
 				switch event.Type {
 				case native.EventAgentEnd:
 					lifecycleCause = nil
+					providerTimedOut = false
 				case native.EventAgentAbort:
 					if context.Cause(ctx) != nil || lifecycleCause == nil {
 						lifecycleCause = agentAbortCause(ctx)
@@ -522,6 +530,7 @@ func (s *Service) continueToolApprovalSession(
 				}
 			}
 		}
+		recordVisibleAgentText(&visibleText, event)
 		if hasVisibleAgentStreamOutput(event) {
 			hasVisibleOutput = true
 		}
@@ -529,24 +538,26 @@ func (s *Service) continueToolApprovalSession(
 		if err != nil {
 			continue
 		}
-		if !stored && shouldPersistTerminalEvent(event, idleCancel, hasVisibleOutput) {
+		if !stored && shouldPersistTerminalEvent(event, idleCancel, hasVisibleOutput, providerTimedOut) {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.visibleOutput = hasVisibleOutput
+				restoreVisibleTextSnapshot(&snap, visibleText.String())
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
 				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
 					lifecycleCause = agentAbortCause(ctx)
 				}
-				if storeErr := s.persistTerminalSnapshot(
+				persisted, storeErr := s.persistTerminalSnapshotResult(
 					context.WithoutCancel(ctx),
 					req,
 					resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}},
 					snap,
-				); storeErr != nil {
+				)
+				if storeErr != nil {
 					lifecycleCause = storeErr
 					lifecycleDeferred = false
 					return storeErr
 				}
-				stored = true
+				stored = len(persisted) > 0
 			}
 		}
 		if eventCh != nil {
