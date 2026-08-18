@@ -57,11 +57,36 @@ func hasVisibleAgentStreamOutput(event native.StreamEvent) bool {
 	}
 }
 
-func shouldPersistTerminalEvent(event native.StreamEvent, idle *idleCancel, visibleOutput, providerTimedOut bool) bool {
+// recordVisibleAgentText keeps only user-visible assistant text. The native
+// runtime intentionally leaves terminal Messages empty when a provider refuses
+// to close after cancellation; retaining the already-emitted deltas lets the
+// application persist exactly what the user saw without pretending that an
+// unseen assistant answer existed.
+func recordVisibleAgentText(dst *strings.Builder, event native.StreamEvent) {
+	if dst == nil || event.Type != native.EventTextDelta || event.Delta == "" {
+		return
+	}
+	dst.WriteString(event.Delta)
+}
+
+func restoreVisibleTextSnapshot(snap *terminalSnapshot, visibleText string) {
+	if snap == nil || !snap.aborted || !snap.visibleOutput || len(snap.sdkMessages) > 0 || strings.TrimSpace(visibleText) == "" {
+		return
+	}
+	snap.sdkMessages = []sdk.Message{sdk.AssistantMessage(visibleText)}
+}
+
+// providerTimedOut is variadic so older continuation call sites that do not
+// carry provider-timeout state remain source-compatible. Callers that can
+// distinguish a provider timeout pass it explicitly.
+func shouldPersistTerminalEvent(event native.StreamEvent, idle *idleCancel, visibleOutput bool, providerTimedOut ...bool) bool {
 	if !event.IsTerminal() {
 		return false
 	}
-	interrupted := providerTimedOut || (idle != nil && idle.DidFire())
+	interrupted := idle != nil && idle.DidFire()
+	if len(providerTimedOut) > 0 && providerTimedOut[0] {
+		interrupted = true
+	}
 	if event.Type == native.EventAgentAbort && !visibleOutput && !interrupted {
 		return false
 	}
@@ -227,6 +252,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		var hasSnapshot bool
 		var toolCallCount int
 		var hasVisibleOutput bool
+		var visibleText strings.Builder
 		var providerTimedOut bool
 		var terminalEventSeen bool
 		for event := range eventCh {
@@ -268,6 +294,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					}
 				}
 			}
+			recordVisibleAgentText(&visibleText, event)
 			if hasVisibleAgentStreamOutput(event) {
 				hasVisibleOutput = true
 			}
@@ -279,6 +306,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			if shouldPersistTerminalEvent(event, idleCancel, hasVisibleOutput, providerTimedOut) {
 				if snap, ok := extractTerminalSnapshot(data); ok {
 					snap.visibleOutput = hasVisibleOutput
+					restoreVisibleTextSnapshot(&snap, visibleText.String())
 					lastSnapshot = snap
 					hasSnapshot = true
 					lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
@@ -297,13 +325,14 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					} else if !stored && !runOwnershipLost(streamCtx) {
 						// Use WithoutCancel so persistence still succeeds even when the
 						// parent ctx has already been cancelled by a client disconnect or timeout.
-						if storeErr := s.persistTerminalSnapshot(context.WithoutCancel(streamCtx), streamReq, rc, snap); storeErr != nil {
+						persisted, storeErr := s.persistTerminalSnapshotResult(context.WithoutCancel(streamCtx), streamReq, rc, snap)
+						if storeErr != nil {
 							if lifecycleCause == nil {
 								lifecycleCause = storeErr
 							}
 							s.logger.Error("stream persist failed", slog.Any("error", storeErr))
 						} else {
-							stored = true
+							stored = len(persisted) > 0
 						}
 					}
 				}
@@ -333,8 +362,8 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 
 		interruptedByTimeout := idleCancel.DidFire() || providerTimedOut
 		// Intermediate persistence on abort/error. If the step committer already
-		// finalized an empty interrupted step, explicitly fall back to the marker
-		// pipeline instead of treating the successful empty finalize as storage.
+		// finalized an empty interrupted step, explicitly fall back to the terminal
+		// snapshot (including recovered visible text) before synthesizing a marker.
 		if !stored && stepCommitter != nil && !runOwnershipLost(streamCtx) {
 			if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens); storeErr != nil {
 				if lifecycleCause == nil {
@@ -343,6 +372,9 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				s.logger.Error("stream step finalization failed", slog.Any("error", storeErr))
 			} else if len(stepCommitter.persistedMessages()) > 0 {
 				stored = true
+			} else if hasSnapshot && len(lastSnapshot.sdkMessages) > 0 {
+				persisted := s.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, interruptedByTimeout, hasVisibleOutput)
+				stored = len(persisted) > 0
 			} else if interruptedByTimeout && !hasVisibleOutput {
 				persisted := s.persistPartialResult(streamCtx, streamReq, rc, nil, toolCallCount, true, false)
 				stored = len(persisted) > 0
@@ -528,6 +560,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	var hasSnapshot bool
 	var toolCallCount int
 	var hasVisibleOutput bool
+	var visibleText strings.Builder
 	var providerTimedOut bool
 	var persistedMessages []messagepkg.Message
 	postPersistApplied := false
@@ -569,6 +602,7 @@ func (s *Service) streamChatWSResultWithHooks(
 				}
 			}
 		}
+		recordVisibleAgentText(&visibleText, event)
 		if hasVisibleAgentStreamOutput(event) {
 			hasVisibleOutput = true
 		}
@@ -581,6 +615,7 @@ func (s *Service) streamChatWSResultWithHooks(
 		if shouldPersistTerminalEvent(event, idleCancel, hasVisibleOutput, providerTimedOut) {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.visibleOutput = hasVisibleOutput
+				restoreVisibleTextSnapshot(&snap, visibleText.String())
 				lastSnapshot = snap
 				hasSnapshot = true
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
@@ -606,7 +641,7 @@ func (s *Service) streamChatWSResultWithHooks(
 						s.logger.Error("ws persist failed", slog.Any("error", storeErr))
 					} else {
 						persistedMessages = persisted
-						stored = true
+						stored = len(persisted) > 0
 					}
 				}
 			}
@@ -650,6 +685,9 @@ func (s *Service) streamChatWSResultWithHooks(
 		} else if len(stepCommitter.persistedMessages()) > 0 {
 			persistedMessages = stepCommitter.persistedMessages()
 			stored = true
+		} else if hasSnapshot && len(lastSnapshot.sdkMessages) > 0 {
+			persistedMessages = s.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, interruptedByTimeout, hasVisibleOutput)
+			stored = len(persistedMessages) > 0
 		} else if interruptedByTimeout && !hasVisibleOutput {
 			persistedMessages = s.persistPartialResult(ctx, req, rc, nil, toolCallCount, true, false)
 			stored = len(persistedMessages) > 0
