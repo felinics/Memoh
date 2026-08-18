@@ -36,6 +36,8 @@ type terminalSnapshot struct {
 // value language-neutral also keeps it safe when replayed into model context.
 const interruptedTurnMarker = "[turn-interrupted]"
 
+const streamRecoveryRecordPrefix = "\x1e"
+
 func hasVisibleAgentStreamOutput(event native.StreamEvent) bool {
 	switch event.Type {
 	case native.EventTextDelta,
@@ -57,23 +59,196 @@ func hasVisibleAgentStreamOutput(event native.StreamEvent) bool {
 	}
 }
 
-// recordVisibleAgentText keeps only user-visible assistant text. The native
-// runtime intentionally leaves terminal Messages empty when a provider refuses
-// to close after cancellation; retaining the already-emitted deltas lets the
-// application persist exactly what the user saw without pretending that an
-// unseen assistant answer existed.
+// recordVisibleAgentText is the compact recovery log used when the native
+// runtime cannot produce a terminal Messages snapshot after cancellation. A
+// text-only stream stays as plain text. As soon as a non-text visible event is
+// observed, the buffer switches to record mode and preserves the full visible
+// event sequence so recovery can reconstruct persistence-safe SDK state.
 func recordVisibleAgentText(dst *strings.Builder, event native.StreamEvent) {
-	if dst == nil || event.Type != native.EventTextDelta || event.Delta == "" {
+	if dst == nil || !hasVisibleAgentStreamOutput(event) {
 		return
 	}
-	dst.WriteString(event.Delta)
+	recordMode := strings.HasPrefix(dst.String(), streamRecoveryRecordPrefix)
+	if event.Type == native.EventTextDelta && !recordMode {
+		dst.WriteString(event.Delta)
+		return
+	}
+	if !recordMode {
+		if priorText := dst.String(); priorText != "" {
+			dst.Reset()
+			writeStreamRecoveryEvent(dst, native.StreamEvent{Type: native.EventTextDelta, Delta: priorText})
+		}
+	}
+	writeStreamRecoveryEvent(dst, event)
 }
 
-func restoreVisibleTextSnapshot(snap *terminalSnapshot, visibleText string) {
-	if snap == nil || !snap.aborted || !snap.visibleOutput || len(snap.sdkMessages) > 0 || strings.TrimSpace(visibleText) == "" {
+func writeStreamRecoveryEvent(dst *strings.Builder, event native.StreamEvent) {
+	if dst == nil {
 		return
 	}
-	snap.sdkMessages = []sdk.Message{sdk.AssistantMessage(visibleText)}
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	dst.WriteString(streamRecoveryRecordPrefix)
+	dst.Write(raw)
+	dst.WriteByte('\n')
+}
+
+func restoreVisibleTextSnapshot(snap *terminalSnapshot, recovery string) {
+	if snap == nil || !snap.aborted || !snap.visibleOutput || len(snap.sdkMessages) > 0 || strings.TrimSpace(recovery) == "" {
+		return
+	}
+	if !strings.HasPrefix(recovery, streamRecoveryRecordPrefix) {
+		snap.sdkMessages = []sdk.Message{sdk.AssistantMessage(recovery)}
+		return
+	}
+	if recovered := recoverStreamedSDKMessages(recovery); len(recovered) > 0 {
+		snap.sdkMessages = recovered
+	}
+}
+
+func recoverStreamedSDKMessages(recovery string) []sdk.Message {
+	var messages []sdk.Message
+	seenToolCalls := make(map[string]bool)
+	for _, record := range strings.Split(recovery, streamRecoveryRecordPrefix) {
+		record = strings.TrimSpace(record)
+		if record == "" {
+			continue
+		}
+		var event native.StreamEvent
+		if err := json.Unmarshal([]byte(record), &event); err != nil {
+			continue
+		}
+		switch event.Type {
+		case native.EventTextDelta:
+			appendRecoveredAssistantText(&messages, event.Delta)
+		case native.EventReasoningDelta:
+			appendRecoveredAssistantReasoning(&messages, event.Delta)
+		case native.EventToolCallInputStart, native.EventToolCallStart:
+			key := strings.TrimSpace(event.ToolCallID)
+			if key == "" {
+				key = strings.TrimSpace(event.ToolName)
+			}
+			if key != "" && !seenToolCalls[key] {
+				seenToolCalls[key] = true
+				appendRecoveredAssistantPart(&messages, sdk.ToolCallPart{
+					ToolCallID: event.ToolCallID,
+					ToolName:   event.ToolName,
+					Input:      event.Input,
+				})
+			}
+		case native.EventToolCallProgress:
+			if len(messages) == 0 {
+				appendRecoveredAssistantText(&messages, streamedEventTrace("tool progress", firstNonEmpty(event.ToolName, event.ToolCallID)))
+			}
+		case native.EventToolCallEnd:
+			key := strings.TrimSpace(event.ToolCallID)
+			if key == "" {
+				key = strings.TrimSpace(event.ToolName)
+			}
+			if key != "" && !seenToolCalls[key] {
+				seenToolCalls[key] = true
+				appendRecoveredAssistantPart(&messages, sdk.ToolCallPart{
+					ToolCallID: event.ToolCallID,
+					ToolName:   event.ToolName,
+					Input:      event.Input,
+				})
+			}
+			if strings.TrimSpace(event.ToolCallID) != "" || strings.TrimSpace(event.ToolName) != "" {
+				result := event.Result
+				isError := strings.TrimSpace(event.Error) != ""
+				if result == nil && isError {
+					result = event.Error
+				}
+				messages = append(messages, sdk.ToolMessage(sdk.ToolResultPart{
+					ToolCallID: event.ToolCallID,
+					ToolName:   event.ToolName,
+					Result:     result,
+					IsError:    isError,
+				}))
+			} else if len(messages) == 0 {
+				appendRecoveredAssistantText(&messages, streamedEventTrace("tool completed", ""))
+			}
+		case native.EventToolApprovalRequest:
+			if len(messages) == 0 {
+				appendRecoveredAssistantText(&messages, streamedEventTrace("tool approval requested", firstNonEmpty(event.ToolName, event.ToolCallID)))
+			}
+		case native.EventUserInputRequest:
+			if len(messages) == 0 {
+				appendRecoveredAssistantText(&messages, streamedEventTrace("user input requested", firstNonEmpty(event.ToolName, event.UserInputID)))
+			}
+		case native.EventAttachment:
+			for _, attachment := range event.Attachments {
+				label := firstNonEmpty(attachment.Name, attachment.Path, attachment.URL, attachment.ContentHash, attachment.Type)
+				appendRecoveredAssistantText(&messages, streamedEventTrace("attachment", label))
+			}
+		case native.EventReaction:
+			for _, reaction := range event.Reactions {
+				appendRecoveredAssistantText(&messages, streamedEventTrace("reaction", reaction.Emoji))
+			}
+		case native.EventSpeech:
+			for _, speech := range event.Speeches {
+				appendRecoveredAssistantText(&messages, streamedEventTrace("speech", speech.Text))
+			}
+		}
+	}
+	return messages
+}
+
+func appendRecoveredAssistantPart(messages *[]sdk.Message, part sdk.MessagePart) {
+	if messages == nil || part == nil {
+		return
+	}
+	if len(*messages) > 0 && (*messages)[len(*messages)-1].Role == sdk.MessageRoleAssistant {
+		last := &(*messages)[len(*messages)-1]
+		last.Content = append(last.Content, part)
+		return
+	}
+	*messages = append(*messages, sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{part}})
+}
+
+func appendRecoveredAssistantText(messages *[]sdk.Message, text string) {
+	if strings.TrimSpace(text) == "" || messages == nil {
+		return
+	}
+	if len(*messages) > 0 {
+		last := &(*messages)[len(*messages)-1]
+		if last.Role == sdk.MessageRoleAssistant && len(last.Content) > 0 {
+			if part, ok := last.Content[len(last.Content)-1].(sdk.TextPart); ok {
+				part.Text += text
+				last.Content[len(last.Content)-1] = part
+				return
+			}
+		}
+	}
+	appendRecoveredAssistantPart(messages, sdk.TextPart{Text: text})
+}
+
+func appendRecoveredAssistantReasoning(messages *[]sdk.Message, text string) {
+	if strings.TrimSpace(text) == "" || messages == nil {
+		return
+	}
+	if len(*messages) > 0 {
+		last := &(*messages)[len(*messages)-1]
+		if last.Role == sdk.MessageRoleAssistant && len(last.Content) > 0 {
+			if part, ok := last.Content[len(last.Content)-1].(sdk.ReasoningPart); ok {
+				part.Text += text
+				last.Content[len(last.Content)-1] = part
+				return
+			}
+		}
+	}
+	appendRecoveredAssistantPart(messages, sdk.ReasoningPart{Text: text})
+}
+
+func streamedEventTrace(kind, detail string) string {
+	kind = strings.TrimSpace(kind)
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return "[streamed " + kind + "]"
+	}
+	return "[streamed " + kind + ": " + detail + "]"
 }
 
 // providerTimedOut is variadic so older continuation call sites that do not
@@ -87,16 +262,13 @@ func shouldPersistTerminalEvent(event native.StreamEvent, idle *idleCancel, visi
 	if len(providerTimedOut) > 0 && providerTimedOut[0] {
 		interrupted = true
 	}
-	if event.Type == native.EventAgentAbort && !visibleOutput && !interrupted {
-		return false
-	}
 	if len(event.Messages) > 0 {
 		return true
 	}
-	// A timeout can abort before the SDK has emitted its first message. This is
-	// true both for our idle watchdog and for provider/http response-header
-	// timeouts. Explicit user cancellation still must not synthesize a history row.
-	return event.Type == native.EventAgentAbort && interrupted
+	// Empty explicit cancellation still leaves no synthetic row when nothing
+	// was shown. If the user already saw output, however, persist its recovery
+	// snapshot even when cancellation rather than a timeout caused the abort.
+	return event.Type == native.EventAgentAbort && (interrupted || visibleOutput)
 }
 
 func agentStreamEventError(event native.StreamEvent) error {
@@ -563,7 +735,6 @@ func (s *Service) streamChatWSResultWithHooks(
 	var visibleText strings.Builder
 	var providerTimedOut bool
 	var persistedMessages []messagepkg.Message
-	postPersistApplied := false
 	terminalEventSeen := false
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
@@ -647,15 +818,6 @@ func (s *Service) streamChatWSResultWithHooks(
 			}
 		}
 
-		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
-			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
-				lifecycleCause = err
-				lifecycleDeferred = false
-				return persistedMessages, err
-			}
-			postPersistApplied = true
-		}
-
 		if !clientGone {
 			select {
 			case eventCh <- json.RawMessage(data):
@@ -730,7 +892,11 @@ func (s *Service) streamChatWSResultWithHooks(
 		}
 	}
 
-	if postPersist != nil && !postPersistApplied {
+	// Retry/edit replacement is a post-persistence operation. Run it only after
+	// terminal fallback persistence has produced the final replacement slice;
+	// otherwise an empty pre-fallback slice can delete/fail the old turn before
+	// an interruption marker or recovered partial output is durable.
+	if postPersist != nil && len(persistedMessages) > 0 {
 		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 			lifecycleCause = err
 			lifecycleDeferred = false
