@@ -272,7 +272,8 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if len(finalMessages) > 0 {
 		_ = json.Unmarshal(finalMessages, &sdkMsgs)
 	}
-	if len(sdkMsgs) == 0 && terminalEvent.Type == native.EventAgentAbort && idleCancel.DidFire() && !hasVisibleOutput {
+	interruptedByTimeout := idleCancel.DidFire() || native.IsTimeoutStreamError(lifecycleCause)
+	if len(sdkMsgs) == 0 && terminalEvent.Type == native.EventAgentAbort && interruptedByTimeout && !hasVisibleOutput {
 		sdkMsgs = []sdk.Message{sdk.AssistantMessage(interruptedTurnMarker)}
 	}
 	if len(sdkMsgs) > 0 {
