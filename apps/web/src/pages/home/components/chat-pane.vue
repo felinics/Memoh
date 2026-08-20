@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="rootEl"
     class="flex-1 flex flex-col h-full min-w-0 relative"
     v-on="dropHandlers"
   >
@@ -859,7 +860,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, useTemplateRef, watch, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   ImagePlus,
   Paperclip,
@@ -891,6 +892,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
 import { useFileDropZone } from '@/composables/useFileDropZone'
+import { registerChatFileDropTarget } from '../composables/chat-file-drop-target'
 import { readDroppedFiles } from '@/utils/dropped-files'
 import MessageItem from './message-item.vue'
 import ComposerContinueOn from './composer-continue-on.vue'
@@ -1933,13 +1935,34 @@ async function handleFilesDrop(transfer: DataTransfer) {
   }
 }
 
+// Same conditions that disable the Paperclip: no bot, a read-only or streaming
+// turn, history still loading. A disabled zone keeps the overlay dark, so the
+// OS no-drop cursor answers instead of a drop that goes nowhere.
+const fileDropDisabled = () => !currentBotId.value || activeChatReadOnly.value || streaming.value || loadingMessages.value
+
+// Root element, exposed through the drop-target registry so the page-level base
+// zone can anchor its overlay over THIS pane (a global drag points at the
+// composer it will land in) instead of floating a third, window-centred anchor.
+const rootEl = useTemplateRef<HTMLElement>('rootEl')
+
 const { active: dropActive, bounds: dropBounds, handlers: dropHandlers } = useFileDropZone({
-  // Same conditions that disable the Paperclip: no bot, a read-only or streaming
-  // turn, history still loading. A disabled zone keeps the overlay dark, so the
-  // OS no-drop cursor answers instead of a drop that goes nowhere.
-  disabled: () => !currentBotId.value || activeChatReadOnly.value || streaming.value || loadingMessages.value,
+  disabled: fileDropDisabled,
   onDrop: transfer => void handleFilesDrop(transfer),
 })
+
+// While this pane is the focused dock panel it is also the page-level target:
+// files dropped outside every region zone (e.g. the sidebar on a non-Files
+// view) are forwarded by the base zone in main-section into THIS composer's
+// tray. Cleanup runs on blur and on unmount (watcher stop), and the registry's
+// identity guard makes focus handoff between splits order-safe.
+watch(isActive, (focused) => {
+  if (!focused) return
+  onWatcherCleanup(registerChatFileDropTarget({
+    onDrop: transfer => void handleFilesDrop(transfer),
+    disabled: fileDropDisabled,
+    hostEl: () => rootEl.value,
+  }))
+}, { immediate: true })
 
 type DefaultACPSettings = {
   chat_runtime?: string

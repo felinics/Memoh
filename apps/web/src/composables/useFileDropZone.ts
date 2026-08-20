@@ -1,14 +1,26 @@
 import { onBeforeUnmount, onMounted, readonly, ref } from 'vue'
 
-// OS-file drag state for one drop region (the sidebar Files panel, a chat pane).
+// OS-file drag state for one drop region (the sidebar Files panel, a chat pane,
+// the page-level base zone in main-section).
 // Presentation lives in file-drop-overlay.vue; this owns only the "is a file
 // being dragged over me" question, where that region sits on screen, and the
 // moment files land.
 //
-// WHY a composable and not a component: the two regions upload to completely
+// WHY a composable and not a component: the regions upload to completely
 // different backends (container FS vs. composer attachments) but share the same
 // fiddly event choreography — see the traps below. Only the choreography is
 // shared.
+//
+// ZONES NEST. The page-level base zone ("files dropped anywhere go to the
+// composer") sits UNDER every region zone (chat pane, Files view), and drag
+// events bubble child → parent. Two rules keep exactly one overlay lit:
+//  1. A CLAIMING zone calls stopPropagation, so an outer zone never sees events
+//     over an inner region. A disabled zone does NOT stop — the event bubbles
+//     out and the base zone can still answer for that space.
+//  2. A claim also EVICTS the previous claimant (below). The pointer can cross
+//     from an outer-owned region straight into an inner one, and the outer's
+//     dragleave never fires in that case (relatedTarget is still inside the
+//     outer host), so without eviction both overlays would stay lit.
 
 export interface DropZoneBounds {
   left: number
@@ -27,6 +39,10 @@ export interface FileDropZoneOptions {
   // running. A disabled zone shows no overlay and refuses the drop, so the OS
   // paints its no-drop cursor instead of promising an upload that won't happen.
   disabled?: () => boolean
+  // Measure THIS element for the published bounds instead of the zone's own
+  // host. Exists for the page-level base zone: its host is the whole window,
+  // but its anchor must sit over the pane that will receive the files.
+  measureTarget?: () => HTMLElement | null
 }
 
 // A drag carries OS files iff its type list includes 'Files'. This is what keeps
@@ -35,6 +51,10 @@ export interface FileDropZoneOptions {
 function carriesFiles(transfer: DataTransfer | null): boolean {
   return !!transfer && Array.from(transfer.types).includes('Files')
 }
+
+// The single currently-lit zone, evicted by the next claim (nesting rule 2 in
+// the header). Module-level: claimants live in unrelated components.
+let claimant: (() => void) | null = null
 
 export function useFileDropZone(options: FileDropZoneOptions) {
   const active = ref(false)
@@ -50,6 +70,42 @@ export function useFileDropZone(options: FileDropZoneOptions) {
 
   function deactivate() {
     active.value = false
+    if (claimant === deactivate) claimant = null
+  }
+
+  // Claim the drag for this zone: light the overlay, evict the previous
+  // claimant, and stop the event so outer zones never see it.
+  function claim(event: DragEvent) {
+    cancelExit()
+    if (claimant && claimant !== deactivate) claimant()
+    claimant = deactivate
+    event.preventDefault()
+    event.stopPropagation()
+    measure(event.currentTarget)
+    active.value = true
+  }
+
+  // "Real exit" signals are debounced: Chrome fires dragleave with
+  // relatedTarget null at random SUBTREE boundaries (it should mean
+  // left-the-window only), and the next dragover re-claims a frame later —
+  // without the debounce the overlay strobes off/on at region edges, which in
+  // dark mode reads as a black flash (the cover there IS near-black). A
+  // genuine window exit produces no further dragover, so 80ms of silence is
+  // the confirmation; dragover fires within milliseconds while moving.
+  let exitTimer: ReturnType<typeof setTimeout> | undefined
+
+  function cancelExit() {
+    if (exitTimer === undefined) return
+    clearTimeout(exitTimer)
+    exitTimer = undefined
+  }
+
+  function scheduleExit() {
+    cancelExit()
+    exitTimer = setTimeout(() => {
+      exitTimer = undefined
+      deactivate()
+    }, 80)
   }
 
   // Re-measured on every dragover rather than once on enter: a drag can outlive
@@ -57,8 +113,9 @@ export function useFileDropZone(options: FileDropZoneOptions) {
   // the per-frame dragover would push a fresh object 60×/s and re-style the
   // anchor for nothing.
   function measure(host: EventTarget | null) {
-    if (!(host instanceof HTMLElement)) return
-    const rect = host.getBoundingClientRect()
+    const el = options.measureTarget?.() ?? (host instanceof HTMLElement ? host : null)
+    if (!el) return
+    const rect = el.getBoundingClientRect()
     const prev = bounds.value
     if (prev
       && prev.left === rect.left && prev.top === rect.top
@@ -72,39 +129,39 @@ export function useFileDropZone(options: FileDropZoneOptions) {
   // overlay dark.
   function onDragEnter(event: DragEvent) {
     if (isDisabled() || !carriesFiles(event.dataTransfer)) return
-    event.preventDefault()
-    measure(event.currentTarget)
-    active.value = true
+    claim(event)
   }
 
   function onDragOver(event: DragEvent) {
     if (isDisabled() || !carriesFiles(event.dataTransfer)) return
-    // preventDefault is what makes this element a valid drop target at all —
-    // without it the browser refuses the drop and navigates to the file
-    // instead. It also marks the event as claimed, which is how the global
-    // guard (lib/file-drop-guard.ts) knows to keep its hands off.
-    event.preventDefault()
+    // preventDefault (inside claim) is what makes this element a valid drop
+    // target at all — without it the browser refuses the drop and navigates to
+    // the file instead. It also marks the event as claimed, which is how the
+    // global guard (lib/file-drop-guard.ts) knows to keep its hands off.
+    claim(event)
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
-    measure(event.currentTarget)
-    active.value = true
   }
 
   // Dragging across child elements fires a dragleave for every boundary
   // crossed, so a naive handler would strobe the overlay. Only a relatedTarget
-  // outside this subtree is a real exit (it is null when the pointer leaves the
-  // window entirely, which also reads as outside).
+  // outside this subtree is a real exit, and even that goes through the
+  // debounce above (null relatedTarget is not trustworthy mid-drag).
   function onDragLeave(event: DragEvent) {
     const host = event.currentTarget
     const next = event.relatedTarget
     if (host instanceof Node && next instanceof Node && host.contains(next)) return
-    deactivate()
+    scheduleExit()
   }
 
   function onDrop(event: DragEvent) {
     if (!carriesFiles(event.dataTransfer)) return
     event.preventDefault()
+    cancelExit()
     deactivate()
+    // A disabled zone lets the drop bubble: an outer zone may still accept it
+    // (its overlay is the one lit in that case — see the nesting rules above).
     if (isDisabled() || !event.dataTransfer) return
+    event.stopPropagation()
     options.onDrop(event.dataTransfer)
   }
 
@@ -112,7 +169,7 @@ export function useFileDropZone(options: FileDropZoneOptions) {
   // pointer leaves through a gap the element's own dragleave never fires and the
   // overlay would stay up forever. A drop or a window-exit anywhere clears it.
   function onDocumentDragLeave(event: DragEvent) {
-    if (event.relatedTarget === null) deactivate()
+    if (event.relatedTarget === null) scheduleExit()
   }
 
   onMounted(() => {
@@ -123,6 +180,10 @@ export function useFileDropZone(options: FileDropZoneOptions) {
   onBeforeUnmount(() => {
     document.removeEventListener('drop', deactivate)
     document.removeEventListener('dragleave', onDocumentDragLeave)
+    cancelExit()
+    // A zone that vanishes mid-drag (e.g. the sidebar leaves the Files view)
+    // must release the claimant slot, or it blocks every other zone's claim.
+    deactivate()
   })
 
   return {
