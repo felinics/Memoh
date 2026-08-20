@@ -275,6 +275,12 @@ async function handleSubmit() {
       chat_model_id: form.chat_model_id || undefined,
       memory_provider_id: form.memory_provider_id || undefined,
     },
+    ...(selectedAcpProfile.value && {
+      agent: {
+        name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
+        provider: normalizeACPAgentID(selectedAcpProfile.value.id),
+      },
+    }),
   })
   submitting.value = false
 
@@ -289,6 +295,10 @@ async function handleSubmit() {
     toast.error(store.setupError ?? t('common.saveFailed'))
     store.reset()
     return
+  }
+
+  if (acpSelection.value && !createResult.agentApplied) {
+    acpSelection.value = null
   }
 
   writeOnboardingBotResult({

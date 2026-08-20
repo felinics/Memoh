@@ -54,8 +54,7 @@
         :form="form"
         :models="models"
         :providers="providers"
-        :acp-profiles="acpProfiles"
-        :bot-metadata="botMetadata"
+        :bot-agents="botAgents"
       />
 
       <SettingsContextCard
@@ -118,8 +117,8 @@ import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
 import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getAcpProfiles, getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability } from '@memohai/sdk'
-import type { AcpprofilePublicProfile, SettingsSettings, SettingsUpsertRequest } from '@memohai/sdk'
+import { getBotsById, putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability } from '@memohai/sdk'
+import type { BotagentsBotAgent, SettingsSettings, SettingsUpsertRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
@@ -199,12 +198,16 @@ const { data: providerData } = useQuery({
   },
 })
 
-const { data: acpProfileData } = useQuery({
-  key: ['acp-profiles'],
+const { data: botAgentData } = useQuery({
+  key: () => ['bot-agents', botIdRef.value],
   query: async () => {
-    const { data } = await getAcpProfiles({ throwOnError: true })
+    const { data } = await getBotsByBotIdAgents({
+      path: { bot_id: botIdRef.value },
+      throwOnError: true,
+    })
     return data
   },
+  enabled: () => !!botIdRef.value,
 })
 
 const { data: searchProviderData } = useQuery({
@@ -291,8 +294,7 @@ const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
 
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
-const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
-const botMetadata = computed(() => bot.value?.metadata as Record<string, unknown> | undefined)
+const botAgents = computed<BotagentsBotAgent[]>(() => botAgentData.value?.items ?? [])
 const imageCapableModels = computed(() =>
   models.value.filter((m) => m.config?.compatibilities?.includes('image-output')),
 )
@@ -323,6 +325,7 @@ type SettingsForm = SettingsSettings & {
   chat_acp_agent_id: string
   chat_acp_project_path: string
   chat_acp_project_mode: string
+  default_bot_agent_id: string
   timezone: string
   name: string
 }
@@ -333,6 +336,7 @@ const form = reactive<SettingsForm>({
   chat_acp_agent_id: '',
   chat_acp_project_path: '/data',
   chat_acp_project_mode: 'project',
+  default_bot_agent_id: '',
   image_model_id: '',
   search_provider_id: '',
   fetch_provider_id: '',
@@ -354,6 +358,7 @@ const SETTINGS_FIELD_KEYS = [
   'chat_acp_agent_id',
   'chat_acp_project_path',
   'chat_acp_project_mode',
+  'default_bot_agent_id',
   'image_model_id',
   'search_provider_id',
   'fetch_provider_id',
@@ -380,6 +385,7 @@ watch(settings, (val) => {
     chat_acp_agent_id: (val as SettingsForm).chat_acp_agent_id ?? '',
     chat_acp_project_path: (val as SettingsForm).chat_acp_project_path || '/data',
     chat_acp_project_mode: (val as SettingsForm).chat_acp_project_mode || 'project',
+    default_bot_agent_id: (val as SettingsForm).default_bot_agent_id ?? '',
     image_model_id: val.image_model_id ?? '',
     search_provider_id: val.search_provider_id ?? '',
     fetch_provider_id: val.fetch_provider_id ?? '',

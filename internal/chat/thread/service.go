@@ -40,6 +40,7 @@ const (
 type Thread struct {
 	ID                    string         `json:"id"`
 	BotID                 string         `json:"bot_id"`
+	BotAgentID            string         `json:"bot_agent_id,omitempty"`
 	RouteID               string         `json:"route_id,omitempty"`
 	ChannelType           string         `json:"channel_type,omitempty"`
 	Type                  string         `json:"type"`
@@ -151,6 +152,7 @@ func visibilityForMode(mode string) Visibility {
 // CreateInput holds input for creating a new thread.
 type CreateInput struct {
 	BotID           string
+	BotAgentID      string
 	RouteID         string
 	ChannelType     string
 	Type            string
@@ -335,6 +337,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 	if err != nil {
 		return Thread{}, fmt.Errorf("invalid route id: %w", err)
 	}
+	pgBotAgentID, err := parseOptionalUUID(input.BotAgentID)
+	if err != nil {
+		return Thread{}, fmt.Errorf("invalid bot agent id: %w", err)
+	}
 	pgCreatedByUserID, err := parseOptionalUUID(input.CreatedByUserID)
 	if err != nil {
 		return Thread{}, fmt.Errorf("invalid created by user id: %w", err)
@@ -381,7 +387,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 		if err := validateACPMetadata(meta); err != nil {
 			return Thread{}, err
 		}
-		if err := s.validateACPCreatePolicy(ctx, pgBotID, meta); err != nil {
+		if err := s.validateACPCreatePolicy(ctx, pgBotID, meta, strings.TrimSpace(input.BotAgentID) == ""); err != nil {
 			return Thread{}, err
 		}
 	}
@@ -414,6 +420,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 
 	row, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
 		BotID:           pgBotID,
+		BotAgentID:      pgBotAgentID,
 		RouteID:         pgRouteID,
 		ChannelType:     channelType,
 		Type:            sessionType,
@@ -733,14 +740,14 @@ func (s *Service) UpdateTypeAndMetadataWithOwner(ctx context.Context, sessionID,
 }
 
 func (s *Service) updateTypeAndMetadata(ctx context.Context, sessionID, typ string, metadata map[string]any, runtimeOwnerUserID string) (Thread, error) {
-	return s.updateDescriptorAndMetadata(ctx, s.queries, sessionID, typ, "", "", metadata, nil, strings.TrimSpace(runtimeOwnerUserID))
+	return s.updateDescriptorAndMetadata(ctx, s.queries, sessionID, typ, "", "", metadata, nil, nil, strings.TrimSpace(runtimeOwnerUserID))
 }
 
 // UpdateDescriptorAndMetadataWithOwner updates the session mode/runtime
 // descriptor directly. Callers that only patch metadata for a Phase 3 session
 // must pass the existing descriptor so discuss+ACP sessions keep their runtime.
-func (s *Service) UpdateDescriptorAndMetadataWithOwner(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, runtimeOwnerUserID string) (Thread, error) {
-	return s.updateDescriptorAndMetadata(ctx, s.queries, sessionID, typ, sessionMode, runtimeType, metadata, runtimeMetadata, strings.TrimSpace(runtimeOwnerUserID))
+func (s *Service) UpdateDescriptorAndMetadataWithOwner(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, botAgentID *string, runtimeOwnerUserID string) (Thread, error) {
+	return s.updateDescriptorAndMetadata(ctx, s.queries, sessionID, typ, sessionMode, runtimeType, metadata, runtimeMetadata, botAgentID, strings.TrimSpace(runtimeOwnerUserID))
 }
 
 // UpdateEmptyDescriptorAndMetadataWithOwner updates a session runtime identity
@@ -749,7 +756,7 @@ func (s *Service) UpdateDescriptorAndMetadataWithOwner(ctx context.Context, sess
 // update, runtime-fence bump, and ACP snapshot invalidation. The lock ordering
 // matches runtime activation, so an already-running turn linearizes before the
 // empty-history check and an old runtime token cannot write after the update.
-func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, runtimeOwnerUserID string) (Thread, error) {
+func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, botAgentID *string, runtimeOwnerUserID string) (Thread, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return Thread{}, fmt.Errorf("invalid session id: %w", err)
@@ -768,7 +775,7 @@ func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context,
 		if count > 0 {
 			return Thread{}, ErrSessionHasMessages
 		}
-		return s.updateDescriptorAndMetadata(ctx, queries, sessionID, typ, sessionMode, runtimeType, metadata, runtimeMetadata, strings.TrimSpace(runtimeOwnerUserID))
+		return s.updateDescriptorAndMetadata(ctx, queries, sessionID, typ, sessionMode, runtimeType, metadata, runtimeMetadata, botAgentID, strings.TrimSpace(runtimeOwnerUserID))
 	}
 
 	txer, ok := s.queries.(sessionDescriptorTransactionalQueries)
@@ -829,7 +836,7 @@ func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context,
 	return updated, nil
 }
 
-func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queries, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, runtimeOwnerUserID string) (Thread, error) {
+func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queries, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, botAgentID *string, runtimeOwnerUserID string) (Thread, error) {
 	pgID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return Thread{}, fmt.Errorf("invalid session id: %w", err)
@@ -847,6 +854,17 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queri
 	existing, err := queries.GetSessionByID(ctx, pgID)
 	if err != nil {
 		return Thread{}, err
+	}
+	pgBotAgentID := existing.BotAgentID
+	if botAgentID != nil {
+		value := strings.TrimSpace(*botAgentID)
+		pgBotAgentID = pgtype.UUID{}
+		if value != "" {
+			pgBotAgentID, err = dbpkg.ParseUUID(value)
+			if err != nil {
+				return Thread{}, fmt.Errorf("invalid bot agent id: %w", err)
+			}
+		}
 	}
 	existingRuntimeMeta := parseJSONMap(existing.RuntimeMetadata)
 	existingMeta := parseJSONMap(existing.Metadata)
@@ -882,7 +900,7 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queri
 		if err := validateACPMetadata(metadata); err != nil {
 			return Thread{}, err
 		}
-		if err := s.validateACPCreatePolicyWithQueries(ctx, queries, existing.BotID, metadata); err != nil {
+		if err := s.validateACPCreatePolicyWithQueries(ctx, queries, existing.BotID, metadata, !pgBotAgentID.Valid); err != nil {
 			return Thread{}, err
 		}
 	}
@@ -899,6 +917,7 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queri
 		Type:            sessionType,
 		SessionMode:     desc.SessionMode,
 		RuntimeType:     desc.RuntimeType,
+		BotAgentID:      pgBotAgentID,
 		RuntimeMetadata: runtimeMetaBytes,
 		Metadata:        metaBytes,
 	})
@@ -1360,6 +1379,7 @@ func toThread(row sqlc.BotSession) Thread {
 	return Thread{
 		ID:              row.ID.String(),
 		BotID:           row.BotID.String(),
+		BotAgentID:      row.BotAgentID.String(),
 		RouteID:         row.RouteID.String(),
 		ChannelType:     dbpkg.TextToString(row.ChannelType),
 		Type:            row.Type,
@@ -1628,11 +1648,15 @@ func nonNilMap(in map[string]any) map[string]any {
 	return out
 }
 
-func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, meta map[string]any) error {
-	return s.validateACPCreatePolicyWithQueries(ctx, s.queries, botID, meta)
+func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, meta map[string]any, requireLegacyEnabledOption ...bool) error {
+	requireLegacyEnabled := true
+	if len(requireLegacyEnabledOption) > 0 {
+		requireLegacyEnabled = requireLegacyEnabledOption[0]
+	}
+	return s.validateACPCreatePolicyWithQueries(ctx, s.queries, botID, meta, requireLegacyEnabled)
 }
 
-func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, queries Queries, botID pgtype.UUID, meta map[string]any) error {
+func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, queries Queries, botID pgtype.UUID, meta map[string]any, requireLegacyEnabled bool) error {
 	agentID := metadataString(meta, "acp_agent_id")
 	if s.acpSetupValidator == nil {
 		return fmt.Errorf("%w: ACP setup validator unavailable", ErrACPAgentNotConfigured)
@@ -1646,7 +1670,7 @@ func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, querie
 	}
 	botMeta := parseJSONMap(bot.Metadata)
 	validation := s.acpSetupValidator.ValidateACPSetup(agentID, botMeta)
-	if !validation.Enabled {
+	if requireLegacyEnabled && !validation.Enabled {
 		return fmt.Errorf("%w: %s", ErrACPAgentNotEnabled, agentID)
 	}
 	if validation.MissingManagedFieldID != "" {
@@ -1696,6 +1720,7 @@ func toThreadFromListRow(row sqlc.ListSessionsByBotRow) Thread {
 	return Thread{
 		ID:              row.ID.String(),
 		BotID:           row.BotID.String(),
+		BotAgentID:      row.BotAgentID.String(),
 		RouteID:         row.RouteID.String(),
 		ChannelType:     dbpkg.TextToString(row.ChannelType),
 		Type:            row.Type,
@@ -1730,6 +1755,7 @@ func toThreadFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Thre
 	return Thread{
 		ID:              row.ID.String(),
 		BotID:           row.BotID.String(),
+		BotAgentID:      row.BotAgentID.String(),
 		RouteID:         row.RouteID.String(),
 		ChannelType:     dbpkg.TextToString(row.ChannelType),
 		Type:            row.Type,
@@ -1749,7 +1775,7 @@ func toThreadFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Thre
 
 func toThreadFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Thread {
 	return threadFromPagedColumns(pagedColumns{
-		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
+		ID: row.ID, BotID: row.BotID, BotAgentID: row.BotAgentID, RouteID: row.RouteID, ChannelType: row.ChannelType,
 		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, Visibility: row.Visibility, RuntimeMetadata: row.RuntimeMetadata,
 		Title: row.Title, Metadata: row.Metadata,
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
@@ -1759,7 +1785,7 @@ func toThreadFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Thread {
 
 func toThreadFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow) Thread {
 	return threadFromPagedColumns(pagedColumns{
-		ID: row.ID, BotID: row.BotID, RouteID: row.RouteID, ChannelType: row.ChannelType,
+		ID: row.ID, BotID: row.BotID, BotAgentID: row.BotAgentID, RouteID: row.RouteID, ChannelType: row.ChannelType,
 		Type: row.Type, SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, Visibility: row.Visibility, RuntimeMetadata: row.RuntimeMetadata,
 		Title: row.Title, Metadata: row.Metadata,
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
@@ -1774,6 +1800,7 @@ func toThreadFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow
 type pagedColumns struct {
 	ID              pgtype.UUID
 	BotID           pgtype.UUID
+	BotAgentID      pgtype.UUID
 	RouteID         pgtype.UUID
 	ChannelType     pgtype.Text
 	Type            string
@@ -1807,6 +1834,7 @@ func threadFromPagedColumns(c pagedColumns) Thread {
 	return Thread{
 		ID:              c.ID.String(),
 		BotID:           c.BotID.String(),
+		BotAgentID:      c.BotAgentID.String(),
 		RouteID:         c.RouteID.String(),
 		ChannelType:     dbpkg.TextToString(c.ChannelType),
 		Type:            c.Type,

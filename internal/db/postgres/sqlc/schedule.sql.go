@@ -14,20 +14,21 @@ import (
 const createSchedule = `-- name: CreateSchedule :one
 INSERT INTO schedule (
   name, description, pattern, max_calls, enabled, command, bot_id,
-  run_target, target_session_id, runtime_type, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id
+  run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id
 )
 VALUES (
   $1, $2, $3, $4, $5, $6, $7,
   $8,
   $9::uuid,
   $10::text,
-  $11::text,
-  $12::uuid,
-  $13::text,
+  $11::uuid,
+  $12::text,
+  $13::uuid,
   $14::text,
-  $15::uuid
+  $15::text,
+  $16::uuid
 )
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 `
 
 type CreateScheduleParams struct {
@@ -41,6 +42,7 @@ type CreateScheduleParams struct {
 	RunTarget       string      `json:"run_target"`
 	TargetSessionID pgtype.UUID `json:"target_session_id"`
 	RuntimeType     pgtype.Text `json:"runtime_type"`
+	BotAgentID      pgtype.UUID `json:"bot_agent_id"`
 	AcpAgentID      pgtype.Text `json:"acp_agent_id"`
 	ModelID         pgtype.UUID `json:"model_id"`
 	AcpModelID      pgtype.Text `json:"acp_model_id"`
@@ -60,6 +62,7 @@ func (q *Queries) CreateSchedule(ctx context.Context, arg CreateScheduleParams) 
 		arg.RunTarget,
 		arg.TargetSessionID,
 		arg.RuntimeType,
+		arg.BotAgentID,
 		arg.AcpAgentID,
 		arg.ModelID,
 		arg.AcpModelID,
@@ -82,6 +85,7 @@ func (q *Queries) CreateSchedule(ctx context.Context, arg CreateScheduleParams) 
 		&i.RunTarget,
 		&i.TargetSessionID,
 		&i.RuntimeType,
+		&i.BotAgentID,
 		&i.AcpAgentID,
 		&i.ModelID,
 		&i.AcpModelID,
@@ -107,7 +111,7 @@ UPDATE schedule
 SET enabled = false,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 `
 
 func (q *Queries) DisableSchedule(ctx context.Context, id pgtype.UUID) (Schedule, error) {
@@ -128,6 +132,7 @@ func (q *Queries) DisableSchedule(ctx context.Context, id pgtype.UUID) (Schedule
 		&i.RunTarget,
 		&i.TargetSessionID,
 		&i.RuntimeType,
+		&i.BotAgentID,
 		&i.AcpAgentID,
 		&i.ModelID,
 		&i.AcpModelID,
@@ -139,7 +144,7 @@ func (q *Queries) DisableSchedule(ctx context.Context, id pgtype.UUID) (Schedule
 }
 
 const getScheduleByID = `-- name: GetScheduleByID :one
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 FROM schedule
 WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
@@ -162,6 +167,7 @@ func (q *Queries) GetScheduleByID(ctx context.Context, id pgtype.UUID) (Schedule
 		&i.RunTarget,
 		&i.TargetSessionID,
 		&i.RuntimeType,
+		&i.BotAgentID,
 		&i.AcpAgentID,
 		&i.ModelID,
 		&i.AcpModelID,
@@ -181,7 +187,7 @@ SET current_calls = current_calls + 1,
     END,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 `
 
 func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (Schedule, error) {
@@ -202,6 +208,7 @@ func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (S
 		&i.RunTarget,
 		&i.TargetSessionID,
 		&i.RuntimeType,
+		&i.BotAgentID,
 		&i.AcpAgentID,
 		&i.ModelID,
 		&i.AcpModelID,
@@ -213,7 +220,7 @@ func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (S
 }
 
 const listEnabledSchedules = `-- name: ListEnabledSchedules :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 FROM schedule
 WHERE team_id = public.memoh_current_team_id() AND enabled = true
 ORDER BY created_at DESC
@@ -243,6 +250,7 @@ func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) 
 			&i.RunTarget,
 			&i.TargetSessionID,
 			&i.RuntimeType,
+			&i.BotAgentID,
 			&i.AcpAgentID,
 			&i.ModelID,
 			&i.AcpModelID,
@@ -261,7 +269,7 @@ func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) 
 }
 
 const listSchedulesByBot = `-- name: ListSchedulesByBot :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 FROM schedule
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY created_at DESC
@@ -291,6 +299,7 @@ func (q *Queries) ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]
 			&i.RunTarget,
 			&i.TargetSessionID,
 			&i.RuntimeType,
+			&i.BotAgentID,
 			&i.AcpAgentID,
 			&i.ModelID,
 			&i.AcpModelID,
@@ -319,14 +328,15 @@ SET name = $2,
     run_target = $8,
     target_session_id = $9::uuid,
     runtime_type = $10::text,
-    acp_agent_id = $11::text,
-    model_id = $12::uuid,
-    acp_model_id = $13::text,
-    reasoning_effort = $14::text,
-    workdir_id = $15::uuid,
+    bot_agent_id = $11::uuid,
+    acp_agent_id = $12::text,
+    model_id = $13::uuid,
+    acp_model_id = $14::text,
+    reasoning_effort = $15::text,
+    workdir_id = $16::uuid,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 `
 
 type UpdateScheduleParams struct {
@@ -340,6 +350,7 @@ type UpdateScheduleParams struct {
 	RunTarget       string      `json:"run_target"`
 	TargetSessionID pgtype.UUID `json:"target_session_id"`
 	RuntimeType     pgtype.Text `json:"runtime_type"`
+	BotAgentID      pgtype.UUID `json:"bot_agent_id"`
 	AcpAgentID      pgtype.Text `json:"acp_agent_id"`
 	ModelID         pgtype.UUID `json:"model_id"`
 	AcpModelID      pgtype.Text `json:"acp_model_id"`
@@ -359,6 +370,7 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) 
 		arg.RunTarget,
 		arg.TargetSessionID,
 		arg.RuntimeType,
+		arg.BotAgentID,
 		arg.AcpAgentID,
 		arg.ModelID,
 		arg.AcpModelID,
@@ -381,6 +393,7 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) 
 		&i.RunTarget,
 		&i.TargetSessionID,
 		&i.RuntimeType,
+		&i.BotAgentID,
 		&i.AcpAgentID,
 		&i.ModelID,
 		&i.AcpModelID,

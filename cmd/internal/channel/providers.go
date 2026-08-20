@@ -395,6 +395,7 @@ func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, rou
 	createdByUserID := newSessionCreatedByUserID(spec)
 	sess, err := a.coordinator.CreateNew(ctx, sessionpkg.CreateInput{
 		BotID:           botID,
+		BotAgentID:      spec.BotAgentID,
 		RouteID:         routeID,
 		ChannelType:     channelType,
 		Type:            spec.Type,
@@ -477,6 +478,7 @@ func (r *settingsDefaultChatRuntime) DefaultChatRuntime(ctx context.Context, bot
 		return inbound.DefaultChatRuntimeSettings{}, err
 	}
 	return inbound.DefaultChatRuntimeSettings{
+		BotAgentID:  s.DefaultBotAgentID,
 		Runtime:     s.ChatRuntime,
 		ACPAgentID:  s.ChatACPAgentID,
 		ProjectPath: s.ChatACPProjectPath,

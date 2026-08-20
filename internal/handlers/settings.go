@@ -99,6 +99,9 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 	}
 	resp, err := h.service.UpsertBot(c.Request().Context(), botID, req)
 	if err != nil {
+		if botAgentErr := botAgentHTTPError(err); botAgentErr != nil {
+			return botAgentErr
+		}
 		if reasoningErr := settingsReasoningHTTPError(err); reasoningErr != nil {
 			return reasoningErr
 		}

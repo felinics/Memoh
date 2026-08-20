@@ -543,6 +543,12 @@ function createStartOptions() {
       // from and the stored value would be a guess.
       reasoning_effort: form.chat_model_id ? form.reasoning_effort || undefined : undefined,
     },
+    ...(selectedAcpProfile.value && {
+      agent: {
+        name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
+        provider: normalizeACPAgentID(selectedAcpProfile.value.id),
+      },
+    }),
   }
 }
 

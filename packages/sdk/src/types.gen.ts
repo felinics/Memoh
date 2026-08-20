@@ -534,6 +534,37 @@ export type AudioVoiceInfo = {
     name?: string;
 };
 
+export type BotagentsBotAgent = {
+    bot_id?: string;
+    created_at?: string;
+    deleted_at?: string;
+    enabled?: boolean;
+    id?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    runtime?: string;
+    updated_at?: string;
+};
+
+export type BotagentsCreateRequest = {
+    metadata?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    runtime?: string;
+};
+
+export type BotagentsListResponse = {
+    items?: Array<BotagentsBotAgent>;
+};
+
+export type BotagentsUpdateRequest = {
+    enabled?: boolean;
+    name?: string;
+};
+
 export type BotbackupExportRequest = {
     passphrase?: string;
     sections?: Array<BotbackupSection>;
@@ -1092,9 +1123,20 @@ export type ConnectorsListResponse = {
 export type ContextfragCacheClass = 'stable' | 'dynamic' | 'never';
 
 export type ContextfragCachePlan = {
+    mid_stable_message_count?: number;
     stable_message_count?: number;
     stable_prefix_hash?: string;
     stable_prefix_token_estimate?: number;
+};
+
+export type ContextfragCacheUsageRecord = {
+    attempt?: number;
+    cache_read_tokens?: number;
+    cache_write_1h_tokens?: number;
+    cache_write_5m_tokens?: number;
+    cache_write_tokens?: number;
+    no_cache_tokens?: number;
+    step_index?: number;
 };
 
 export type ContextfragContentRange = {
@@ -1130,11 +1172,18 @@ export type ContextfragLifecycleSnapshot = {
     assistant_message_id?: string;
     budget_plan?: ContextfragContextBudgetPlan;
     cache_plan?: ContextfragCachePlan;
+    cache_read_tokens?: number;
+    cache_usage?: Array<ContextfragCacheUsageRecord>;
+    cache_write_tokens?: number;
+    client_type?: string;
     counts?: ContextfragManifestCounts;
     final_input_hash?: string;
+    loop_selection_mode?: string;
+    model?: string;
     mutations?: Array<ContextfragMutationRecord>;
     selection?: ContextfragSelectionTrace;
     selection_decisions?: Array<ContextfragSelectionDecision>;
+    steps?: Array<ContextfragStepSnapshot>;
     version?: number;
     view?: ContextfragManifestView;
 };
@@ -1149,7 +1198,7 @@ export type ContextfragManifestCounts = {
 
 export type ContextfragManifestView = 'run_config_pre_provider';
 
-export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media';
+export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'loop_step_reselection' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'mid_stream_retry';
 
 export type ContextfragMutationRecord = {
     detail?: string;
@@ -1186,6 +1235,19 @@ export type ContextfragSelectionTrace = {
 };
 
 export type ContextfragSlot = 'system' | 'before_history' | 'history' | 'after_history_before_current' | 'current_user' | 'after_current';
+
+export type ContextfragStepSnapshot = {
+    attempt?: number;
+    drop_reasons?: {
+        [key: string]: number;
+    };
+    dropped?: number;
+    post_prepare_input_hash?: string;
+    reselection_applied?: boolean;
+    reselection_outcome?: string;
+    step_index?: number;
+    truncated?: number;
+};
 
 export type ConversationSkillActivation = {
     prompt?: string;
@@ -2345,6 +2407,7 @@ export type HandlersCreateSessionRequest = {
      * transient in-memory handle reference, never persisted in metadata.
      */
     acp_runtime_id?: string;
+    bot_agent_id?: string;
     channel_type?: string;
     metadata?: {
         [key: string]: unknown;
@@ -2524,6 +2587,7 @@ export type HandlersTerminalInfoResponse = {
 };
 
 export type HandlersUpdateSessionRequest = {
+    bot_agent_id?: string;
     metadata?: {
         [key: string]: unknown;
     };
@@ -2538,6 +2602,7 @@ export type HandlersUpdateSessionRequest = {
 
 export type HooksActionResult = {
     action_type?: string;
+    append_system_sections?: Array<HooksSystemSectionOutput>;
     decision?: string;
     error?: string;
     exit_code?: number;
@@ -2549,12 +2614,21 @@ export type HooksActionResult = {
     result?: unknown;
     stderr?: string;
     stdout?: string;
+    warnings?: Array<HooksOutputWarning>;
+};
+
+export type HooksOutputWarning = {
+    code?: string;
+    hook_name?: string;
+    message?: string;
+    section_id?: string;
 };
 
 export type HooksResult = {
     action_results?: Array<HooksActionResult>;
     actions_run?: number;
     append_context?: string;
+    append_system_sections?: Array<HooksSystemSectionOutput>;
     decision?: string;
     hooks_matched?: number;
     metadata?: {
@@ -2562,7 +2636,20 @@ export type HooksResult = {
     };
     reason?: string;
     runtime_supported?: boolean;
+    warnings?: Array<HooksOutputWarning>;
 };
+
+export type HooksSystemSectionCache = 'dynamic' | 'stable';
+
+export type HooksSystemSectionOutput = {
+    cache?: HooksSystemSectionCache;
+    hook_name?: string;
+    id?: string;
+    retention?: HooksSystemSectionRetention;
+    text?: string;
+};
+
+export type HooksSystemSectionRetention = 'optional' | 'preferred';
 
 export type HooksToolPayload = {
     call_id?: string;
@@ -2936,6 +3023,11 @@ export type ScheduleCreateRequest = {
      * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
      */
     acp_model_id?: string;
+    /**
+     * BotAgentID selects one persisted BotAgent for a new session. Empty means
+     * the built-in Native runtime (or the legacy ACP fields below).
+     */
+    bot_agent_id?: string;
     command?: string;
     description?: string;
     enabled?: boolean;
@@ -2981,6 +3073,11 @@ export type ScheduleExecutionConfig = {
      * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
      */
     acp_model_id?: string;
+    /**
+     * BotAgentID selects one persisted BotAgent for a new session. Empty means
+     * the built-in Native runtime (or the legacy ACP fields below).
+     */
+    bot_agent_id?: string;
     /**
      * ModelID is a native model UUID override (models.id).
      */
@@ -3047,6 +3144,11 @@ export type ScheduleSchedule = {
      * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
      */
     acp_model_id?: string;
+    /**
+     * BotAgentID selects one persisted BotAgent for a new session. Empty means
+     * the built-in Native runtime (or the legacy ACP fields below).
+     */
+    bot_agent_id?: string;
     bot_id?: string;
     command?: string;
     created_at?: string;
@@ -3157,6 +3259,7 @@ export type SearchprovidersUpdateRequest = {
 };
 
 export type SessionSession = {
+    bot_agent_id?: string;
     bot_id?: string;
     channel_type?: string;
     created_at?: string;
@@ -3194,6 +3297,7 @@ export type SettingsSettings = {
     compaction_model_id?: string;
     compaction_target_percent?: number | null;
     compaction_threshold?: number;
+    default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
     fetch_provider_id?: string;
@@ -3262,6 +3366,7 @@ export type SettingsUpsertRequest = {
     compaction_model_id?: string;
     compaction_target_percent?: number;
     compaction_threshold?: number;
+    default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
     fetch_provider_id?: string;
@@ -4809,6 +4914,204 @@ export type GetBotsByBotIdAcpCodexOauthStatusResponses = {
 };
 
 export type GetBotsByBotIdAcpCodexOauthStatusResponse = GetBotsByBotIdAcpCodexOauthStatusResponses[keyof GetBotsByBotIdAcpCodexOauthStatusResponses];
+
+export type GetBotsByBotIdAgentsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents';
+};
+
+export type GetBotsByBotIdAgentsErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAgentsError = GetBotsByBotIdAgentsErrors[keyof GetBotsByBotIdAgentsErrors];
+
+export type GetBotsByBotIdAgentsResponses = {
+    /**
+     * OK
+     */
+    200: BotagentsListResponse;
+};
+
+export type GetBotsByBotIdAgentsResponse = GetBotsByBotIdAgentsResponses[keyof GetBotsByBotIdAgentsResponses];
+
+export type PostBotsByBotIdAgentsData = {
+    /**
+     * Agent payload
+     */
+    body: BotagentsCreateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents';
+};
+
+export type PostBotsByBotIdAgentsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAgentsError = PostBotsByBotIdAgentsErrors[keyof PostBotsByBotIdAgentsErrors];
+
+export type PostBotsByBotIdAgentsResponses = {
+    /**
+     * Created
+     */
+    201: BotagentsBotAgent;
+};
+
+export type PostBotsByBotIdAgentsResponse = PostBotsByBotIdAgentsResponses[keyof PostBotsByBotIdAgentsResponses];
+
+export type DeleteBotsByBotIdAgentsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}';
+};
+
+export type DeleteBotsByBotIdAgentsByIdErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type DeleteBotsByBotIdAgentsByIdError = DeleteBotsByBotIdAgentsByIdErrors[keyof DeleteBotsByBotIdAgentsByIdErrors];
+
+export type DeleteBotsByBotIdAgentsByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdAgentsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}';
+};
+
+export type GetBotsByBotIdAgentsByIdErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdError = GetBotsByBotIdAgentsByIdErrors[keyof GetBotsByBotIdAgentsByIdErrors];
+
+export type GetBotsByBotIdAgentsByIdResponses = {
+    /**
+     * OK
+     */
+    200: BotagentsBotAgent;
+};
+
+export type GetBotsByBotIdAgentsByIdResponse = GetBotsByBotIdAgentsByIdResponses[keyof GetBotsByBotIdAgentsByIdResponses];
+
+export type PatchBotsByBotIdAgentsByIdData = {
+    /**
+     * Agent changes
+     */
+    body: BotagentsUpdateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}';
+};
+
+export type PatchBotsByBotIdAgentsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PatchBotsByBotIdAgentsByIdError = PatchBotsByBotIdAgentsByIdErrors[keyof PatchBotsByBotIdAgentsByIdErrors];
+
+export type PatchBotsByBotIdAgentsByIdResponses = {
+    /**
+     * OK
+     */
+    200: BotagentsBotAgent;
+};
+
+export type PatchBotsByBotIdAgentsByIdResponse = PatchBotsByBotIdAgentsByIdResponses[keyof PatchBotsByBotIdAgentsByIdResponses];
 
 export type PostBotsByBotIdBackupExportData = {
     /**
@@ -8573,7 +8876,12 @@ export type PostBotsByBotIdQuickActionsExecuteResponse = PostBotsByBotIdQuickAct
 
 export type GetBotsByBotIdScheduleData = {
     body?: never;
-    path?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
     query?: never;
     url: '/bots/{bot_id}/schedule';
 };
@@ -8605,7 +8913,12 @@ export type PostBotsByBotIdScheduleData = {
      * Schedule payload
      */
     body: ScheduleCreateRequest;
-    path?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
     query?: never;
     url: '/bots/{bot_id}/schedule';
 };
@@ -8711,6 +9024,10 @@ export type DeleteBotsByBotIdScheduleByIdData = {
     body?: never;
     path: {
         /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
          * Schedule ID
          */
         id: string;
@@ -8742,6 +9059,10 @@ export type DeleteBotsByBotIdScheduleByIdResponses = {
 export type GetBotsByBotIdScheduleByIdData = {
     body?: never;
     path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
         /**
          * Schedule ID
          */
@@ -8783,6 +9104,10 @@ export type PutBotsByBotIdScheduleByIdData = {
      */
     body: ScheduleUpdateRequest;
     path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
         /**
          * Schedule ID
          */

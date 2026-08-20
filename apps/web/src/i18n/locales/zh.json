@@ -114,6 +114,14 @@
     "bot": {
       "name_taken": "该名称已被占用。"
     },
+    "bot_agent": {
+      "not_found": "这个 Agent 已不存在。",
+      "name_taken": "这个 Bot 中已存在同名 Agent。",
+      "invalid_runtime": "暂不支持这个 Agent 运行时。",
+      "invalid_metadata": "Agent 配置无效。",
+      "default_in_use": "请先选择其他默认 Agent，再停用或删除这个 Agent。",
+      "unavailable": "这个 Agent 已不能用于新对话。"
+    },
     "channel": {
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。"
     },
@@ -952,10 +960,10 @@
     "sessionTypeSubagent": "子智能体",
     "sessionTypeDiscuss": "讨论",
     "sessionTypeChat": "对话",
-    "sessionTypeACPAgent": "ACP Agent",
+    "sessionTypeACPAgent": "Agent",
     "agentMemoh": "Memoh",
     "agentCodex": "Codex",
-    "agentSwitchFailed": "切换 ACP Agent 失败",
+    "agentSwitchFailed": "切换 Agent 失败",
     "modelSwitchFailed": "切换模型失败",
     "reasoningSwitchFailed": "切换推理强度失败",
     "modeSwitchFailed": "切换会话模式失败",
@@ -2078,7 +2086,7 @@
       "desktop": "桌面",
       "toolApproval": "工具审核",
       "hooks": "Hooks",
-      "acp": "ACP Agent",
+      "acp": "Agent",
       "network": "网络",
       "memory": "记忆",
       "channels": "平台",
@@ -2095,6 +2103,26 @@
       "access": "访问控制",
       "terminal": "终端",
       "settings": "设置"
+    },
+    "agent": {
+      "add": "添加 Agent",
+      "added": "Agent 已添加",
+      "provider": "类型",
+      "providerPlaceholder": "选择类型",
+      "providerSearchPlaceholder": "搜索类型...",
+      "providerEmpty": "没有可用类型",
+      "providerRequired": "请选择 Agent 类型。",
+      "namePlaceholder": "输入 Agent 名称",
+      "nameRequired": "请输入 Agent 名称。",
+      "emptyTitle": "还没有 Agent",
+      "emptyDescription": "添加 Agent 后，这个 Bot 就可以使用 Codex、Claude Code 或 Hermes。",
+      "statusNeedsConfig": "需要配置",
+      "statusOff": "已停用",
+      "deleteTitle": "删除 Agent？",
+      "deleteDescription": "确定删除“{name}”吗？已有对话会保留绑定，但新对话不能再选择它。",
+      "deleted": "Agent 已删除",
+      "deleteFailed": "删除 Agent 失败",
+      "nameDescription": "这个名称用于在选择器和对话中区分 Agent。"
     },
     "folders": {
       "create": "新建文件夹",
@@ -2471,7 +2499,7 @@
         "interactionDescription": "选择对话模型，并配置 Bot 在对话中的行为习惯。",
         "multimedia": "多媒体",
         "multimediaDescription": "配置语音与图片生成等相关模型。",
-        "acp": "ACP Agent"
+        "acp": "Agent"
       },
       "chatLanguage": "语言",
       "chatLanguagePlaceholder": "例如：English、zh-CN",
@@ -2550,7 +2578,7 @@
       "acpClaudeOAuthCodeRequired": "请粘贴 Claude 授权码。",
       "acpClaudeOAuthExchange": "保存 Token",
       "acpClaudeOAuthExchangeFailed": "保存 Claude Token 失败",
-      "acpSelfModeHint": "该模式直接使用工作区运行环境里你已配置好的对应 ACP Agent（例如已登录的凭据）。",
+      "acpSelfModeHint": "该模式直接使用工作区运行环境里你已配置好的 Agent（例如已登录的凭据）。",
       "acpHermesSelfModeHint": "该模式直接使用当前工作区里已配置好的 Hermes Profile。如需由 Memoh 管理 Bot 凭据，请使用 API Key 配置。",
       "acpHermesSelfModeConfirm": "使用自行配置的 Hermes",
       "acpHermesProviderPlaceholder": "选择提供商",
@@ -2564,7 +2592,7 @@
       "acpStatusNeedsConfig": "需要配置",
       "acpStatusOff": "已关闭",
       "acpEmptyTitle": "暂无可用 Agent",
-      "acpEmptyDescription": "当前服务端还没有可分配的 ACP Profile。",
+      "acpEmptyDescription": "当前服务端还没有可分配的 Agent。",
       "toolApprovalBypass": "跳过审核",
       "toolApprovalMustReview": "必须审核",
       "networkPageTitle": "网络",
@@ -3209,7 +3237,7 @@
     "allTypes": "全部类型",
     "chat": "对话",
     "discuss": "讨论",
-    "acpAgent": "ACP Agent",
+    "acpAgent": "Agent",
     "schedule": "定时任务",
     "inputTokens": "输入 Tokens",
     "outputTokens": "输出 Tokens",

@@ -1,9 +1,10 @@
 -- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, session_mode, runtime_type, visibility, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, workdir_id
+  bot_id, bot_agent_id, route_id, channel_type, type, session_mode, runtime_type, visibility, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, workdir_id
 )
 VALUES (
   sqlc.arg(bot_id),
+  sqlc.narg(bot_agent_id)::uuid,
   sqlc.narg(route_id)::uuid,
   sqlc.narg(channel_type)::text,
   sqlc.arg(type),
@@ -110,6 +111,7 @@ fork_plan AS (
 created_session AS (
   INSERT INTO bot_sessions (
     bot_id,
+    bot_agent_id,
     channel_type,
     type,
     session_mode,
@@ -124,6 +126,7 @@ created_session AS (
   )
   SELECT
     fp.bot_id,
+    fp.bot_agent_id,
     fp.channel_type,
     fp.type,
     fp.session_mode,
@@ -290,7 +293,7 @@ FOR UPDATE;
 
 -- name: ListSessionsByBot :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
@@ -300,7 +303,7 @@ ORDER BY s.updated_at DESC;
 
 -- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
@@ -316,7 +319,7 @@ ORDER BY s.updated_at DESC;
 -- disabled, "sessions of this workdir", or "sessions with no workdir"
 -- (workdir_unassigned) for the sidebar's ungrouped bucket.
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
@@ -347,7 +350,7 @@ LIMIT sqlc.arg(limit_count)::int;
 
 -- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
@@ -422,6 +425,7 @@ UPDATE bot_sessions
 SET type = sqlc.arg(type),
     session_mode = sqlc.arg(session_mode),
     runtime_type = sqlc.arg(runtime_type),
+    bot_agent_id = sqlc.arg(bot_agent_id),
     runtime_metadata = sqlc.arg(runtime_metadata),
     metadata = sqlc.arg(metadata),
     runtime_config_epoch = runtime_config_epoch + 1,

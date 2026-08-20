@@ -41,6 +41,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/turn"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
+	"github.com/memohai/memoh/internal/botagents"
 	"github.com/memohai/memoh/internal/botbackup"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
@@ -235,10 +236,16 @@ func provideSettingsService(
 	aclService *acl.Service,
 	networkService *netctl.Service,
 	modelsService *models.Service,
+	botAgentsService *botagents.Service,
 ) *settings.Service {
 	service := settings.NewService(log, queries, aclService, networkService)
 	service.SetReasoningOptionsResolver(modelsService)
+	service.SetBotAgents(botAgentsService)
 	return service
+}
+
+func provideBotAgentsService(log *slog.Logger, queries dbstore.Queries) *botagents.Service {
+	return botagents.NewService(log, queries)
 }
 
 // provideWikiStore wires the PostgreSQL memory wiki store. Returns a pointer
@@ -430,6 +437,7 @@ func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessio
 func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec schedule.SessionSpec) (string, error) {
 	input := sessionpkg.CreateInput{
 		BotID:           spec.BotID,
+		BotAgentID:      spec.BotAgentID,
 		Type:            sessionpkg.TypeSchedule,
 		Title:           spec.Title,
 		CreatedByUserID: spec.OwnerUserID,
@@ -890,6 +898,10 @@ func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {
 			return scheduleService.Bootstrap(ctx)
 		},
 	})
+}
+
+func injectScheduleBotAgents(scheduleService *schedule.Service, botAgentsService *botagents.Service) {
+	scheduleService.SetBotAgents(botAgentsService)
 }
 
 func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {

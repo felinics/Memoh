@@ -17,6 +17,7 @@ const (
 
 type Settings struct {
 	ChatModelID          string `json:"chat_model_id"`
+	DefaultBotAgentID    string `json:"default_bot_agent_id,omitempty"`
 	ChatRuntime          string `json:"chat_runtime"`
 	ChatACPAgentID       string `json:"chat_acp_agent_id,omitempty"`
 	ChatACPProjectPath   string `json:"chat_acp_project_path,omitempty"`
@@ -56,6 +57,7 @@ type UpsertRequest struct {
 	// FetchProviderID / CompactionModelID); plain strings would make ""
 	// indistinguishable from "not sent".
 	ChatModelID          *string `json:"chat_model_id,omitempty"`
+	DefaultBotAgentID    *string `json:"default_bot_agent_id,omitempty"`
 	ChatRuntime          *string `json:"chat_runtime,omitempty"`
 	ChatACPAgentID       *string `json:"chat_acp_agent_id,omitempty"`
 	ChatACPProjectPath   *string `json:"chat_acp_project_path,omitempty"`

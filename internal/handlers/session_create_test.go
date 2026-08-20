@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/memohai/memoh/internal/botagents"
 	"github.com/memohai/memoh/internal/bots"
 	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -25,8 +26,13 @@ type sessionCreateQueries struct {
 	dbstore.Queries
 	bot          sqlc.GetBotByIDRow
 	permissions  []byte
+	botAgent     sqlc.BotAgent
 	createCalled bool
 	createParams sqlc.CreateSessionParams
+}
+
+func (q *sessionCreateQueries) GetBotAgentByID(_ context.Context, _ sqlc.GetBotAgentByIDParams) (sqlc.BotAgent, error) {
+	return q.botAgent, nil
 }
 
 func (q *sessionCreateQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -49,14 +55,18 @@ func (q *sessionCreateQueries) CreateSession(_ context.Context, arg sqlc.CreateS
 	q.createCalled = true
 	q.createParams = arg
 	return sqlc.BotSession{
-		ID:          testUUID("22222222-2222-2222-2222-222222222222"),
-		BotID:       arg.BotID,
-		ChannelType: arg.ChannelType,
-		Type:        arg.Type,
-		Title:       arg.Title,
-		Metadata:    arg.Metadata,
-		CreatedAt:   pgtype.Timestamptz{Valid: true},
-		UpdatedAt:   pgtype.Timestamptz{Valid: true},
+		ID:              testUUID("22222222-2222-2222-2222-222222222222"),
+		BotID:           arg.BotID,
+		BotAgentID:      arg.BotAgentID,
+		ChannelType:     arg.ChannelType,
+		Type:            arg.Type,
+		SessionMode:     arg.SessionMode,
+		RuntimeType:     arg.RuntimeType,
+		RuntimeMetadata: arg.RuntimeMetadata,
+		Title:           arg.Title,
+		Metadata:        arg.Metadata,
+		CreatedAt:       pgtype.Timestamptz{Valid: true},
+		UpdatedAt:       pgtype.Timestamptz{Valid: true},
 	}, nil
 }
 
@@ -152,6 +162,59 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 	}
 	if runtimeMetadata["runtime_owner_account_id"] != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" {
 		t.Fatalf("runtime metadata owner = %#v, want authenticated user", runtimeMetadata["runtime_owner_account_id"])
+	}
+}
+
+func TestCreateSessionResolvesPersistedBotAgentDescriptor(t *testing.T) {
+	const (
+		botID      = "11111111-1111-1111-1111-111111111111"
+		botAgentID = "33333333-3333-3333-3333-333333333333"
+	)
+	queries := &sessionCreateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					// BotAgent.Enabled is authoritative for new sessions. The legacy
+					// provider bit may be false on migrated data and must not reject it.
+					acpprofile.AgentCodexID: map[string]any{"enabled": false, "setup_mode": "self"},
+				},
+			},
+		}),
+		botAgent: sqlc.BotAgent{
+			ID:        testUUID(botAgentID),
+			BotID:     testUUID(botID),
+			Name:      "Primary Codex",
+			Runtime:   botagents.RuntimeACP,
+			Enabled:   true,
+			Metadata:  []byte(`{"provider":"codex"}`),
+			CreatedAt: pgtype.Timestamptz{Valid: true},
+			UpdatedAt: pgtype.Timestamptz{Valid: true},
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		newThreadServiceForTest(queries),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+	handler.SetBotAgents(botagents.NewService(slog.Default(), queries))
+
+	if err := callCreateSession(handler, botID, `{"type":"chat","bot_agent_id":"`+botAgentID+`","title":"Codex"}`); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if queries.createParams.BotAgentID.String() != botAgentID {
+		t.Fatalf("bot_agent_id = %q, want %q", queries.createParams.BotAgentID.String(), botAgentID)
+	}
+	if queries.createParams.RuntimeType != session.RuntimeACPAgent {
+		t.Fatalf("runtime_type = %q, want %q", queries.createParams.RuntimeType, session.RuntimeACPAgent)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.createParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["acp_agent_id"] != "codex" || metadata["project_path"] != session.DefaultACPProjectPath {
+		t.Fatalf("metadata = %#v, want resolved Codex descriptor", metadata)
 	}
 }
 

@@ -527,7 +527,7 @@
                        so the switcher only appears while the session is still
                        empty. Showing it disabled in an active chat just dangles
                        a choice that can't be made. -->
-                    <template v-if="canChangeAgent && enabledACPProfiles.length">
+                    <template v-if="canChangeAgent && enabledBotAgents.length">
                       <DropdownMenuLabel>{{ $t('chat.agent') }}</DropdownMenuLabel>
                       <DropdownMenuItem @select="selectMemohAgent">
                         <img
@@ -542,14 +542,17 @@
                         />
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        v-for="profile in enabledACPProfiles"
-                        :key="profile.id"
-                        @select="selectACPAgent(profile)"
+                        v-for="agent in enabledBotAgents"
+                        :key="agent.id"
+                        @select="selectBotAgent(agent)"
                       >
-                        <component :is="acpAgentIcon(profile.id, true)" />
-                        <span class="min-w-0 flex-1 truncate">{{ profile.display_name || profile.id }}</span>
+                        <component
+                          :is="botAgentIcon(agent, true)"
+                          class="size-4 shrink-0"
+                        />
+                        <span class="min-w-0 flex-1 truncate">{{ botAgentName(agent) }}</span>
                         <Check
-                          v-if="activeACPAgentId === normalizedProfileID(profile.id)"
+                          v-if="activeBotAgentID === agent.id"
                           class="ml-auto"
                         />
                       </DropdownMenuItem>
@@ -561,7 +564,7 @@
                        pins its workspace target for life, so the picker gives
                        way to a read-only entry. -->
                     <template v-if="composerFolderPickable">
-                      <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuSeparator v-if="canChangeAgent && enabledBotAgents.length" />
                       <DropdownMenuLabel>{{ $t('chat.folder') }}</DropdownMenuLabel>
                       <DropdownMenuItem @select="clearWorkingFolder">
                         <X class="size-4 shrink-0" />
@@ -585,7 +588,7 @@
                       </DropdownMenuItem>
                     </template>
                     <template v-else-if="composerFolderLocked">
-                      <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuSeparator v-if="canChangeAgent && enabledBotAgents.length" />
                       <DropdownMenuLabel>{{ $t('chat.folder') }}</DropdownMenuLabel>
                       <DropdownMenuItem disabled>
                         <FolderOpen class="size-4 shrink-0" />
@@ -600,7 +603,7 @@
                         <span class="min-w-0 flex-1 truncate">{{ $t('chat.folderDetachDraft') }}</span>
                       </DropdownMenuItem>
                     </template>
-                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComposerFolderSection" />
+                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledBotAgents.length) || showComposerFolderSection" />
                     <DropdownMenuItem
                       :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
                       @select="fileInput?.click()"
@@ -869,8 +872,8 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
-import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
-import type { AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
+import { getAcpProfiles, getBotsByBotIdAgents, getModels, getProviders, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
+import type { AcpprofilePublicProfile, BotagentsBotAgent, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import MessageItem from './message-item.vue'
@@ -901,7 +904,8 @@ import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, findMissingRequiredManagedField, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import { botAgentIcon, botAgentName, botAgentProvider } from '@/utils/bot-agent'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workspaceTargetAvailable } from '@/utils/workspace-target'
@@ -1138,6 +1142,18 @@ const { data: acpProfileData, isLoading: acpProfilesLoading } = useQuery({
   },
 })
 
+const { data: botAgentData, isLoading: botAgentsLoading } = useQuery({
+  key: () => ['bot-agents', currentBotId.value],
+  query: async () => {
+    const { data } = await getBotsByBotIdAgents({
+      path: { bot_id: currentBotId.value! },
+      throwOnError: true,
+    })
+    return data
+  },
+  enabled: () => !!currentBotId.value,
+})
+
 const currentBot = computed(() => bots.value.find(bot => bot.id === currentBotId.value) ?? null)
 const canWorkspaceRead = computed(() => (
   hasBotPermission(currentBot.value?.current_user_permissions, 'workspace_read')
@@ -1202,9 +1218,8 @@ interface ForkSourceMeta {
 
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
 const currentBotMetadata = computed(() => currentBot.value?.metadata as Record<string, unknown> | undefined)
-const enabledACPProfiles = computed(() =>
-  acpProfiles.value.filter(profile => isACPAgentEnabled(currentBotMetadata.value, profile.id)),
-)
+const botAgents = computed<BotagentsBotAgent[]>(() => botAgentData.value?.items ?? [])
+const enabledBotAgents = computed(() => botAgents.value.filter(agent => agent.enabled !== false && !!agent.id))
 
 const activeSessionMetadata = computed<Record<string, unknown>>(() => activeChatTarget.value.metadata)
 const forkSource = computed<ForkSourceMeta | null>(() => {
@@ -1386,6 +1401,11 @@ watch([
     'default',
   )
 }, { immediate: true })
+const activeBotAgentID = computed(() =>
+  activeSession.value?.bot_agent_id?.trim()
+  || chatStore.pendingACPSessionInput?.botAgentId?.trim()
+  || '',
+)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
 const activeACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
 const activeACPProjectMode = computed(() => String(activeSessionMetadata.value.acp_project_mode ?? '').trim())
@@ -1904,6 +1924,7 @@ watch(() => pendingFiles.value.length, (len, prevLen) => {
 })
 
 type DefaultACPSettings = {
+  default_bot_agent_id?: string
   chat_runtime?: string
   chat_acp_agent_id?: string
   chat_acp_project_path?: string
@@ -1925,8 +1946,20 @@ const defaultACPAvailability = computed<DefaultACPAvailability>(() => {
   if (!hasBotPermission(currentBot.value?.current_user_permissions, 'workspace_exec')) {
     return { input: null, messageKey: 'chat.defaultACPNoWorkspaceExec', loading: false }
   }
-  const agentId = normalizeACPAgentID(settings.chat_acp_agent_id)
-  if (!agentId) return { input: null, messageKey: 'chat.defaultACPAgentMissing', loading: false }
+  const botAgentId = settings.default_bot_agent_id?.trim() ?? ''
+  if (!botAgentId) return { input: null, messageKey: 'chat.defaultACPAgentMissing', loading: false }
+  if (!botAgentData.value) {
+    return {
+      input: null,
+      messageKey: botAgentsLoading.value ? 'chat.defaultACPLoading' : 'chat.defaultACPAgentUnavailable',
+      loading: botAgentsLoading.value,
+    }
+  }
+  const agent = botAgents.value.find(item => item.id === botAgentId)
+  if (!agent || agent.enabled === false) {
+    return { input: null, messageKey: 'chat.defaultACPAgentDisabled', loading: false }
+  }
+  const agentId = botAgentProvider(agent)
   if (!acpProfileData.value) {
     return {
       input: null,
@@ -1936,15 +1969,13 @@ const defaultACPAvailability = computed<DefaultACPAvailability>(() => {
   }
   const profile = acpProfiles.value.find(item => normalizeACPAgentID(item.id) === agentId)
   if (!profile) return { input: null, messageKey: 'chat.defaultACPAgentUnavailable', loading: false }
-  if (!isACPAgentEnabled(currentBotMetadata.value, profile.id)) {
-    return { input: null, messageKey: 'chat.defaultACPAgentDisabled', loading: false }
-  }
-  const config = readACPAgentConfig(currentBotMetadata.value, profile.id)
+  const config = readACPAgentConfig(currentBotMetadata.value, agentId)
   if (config.setupModeSet && findMissingRequiredManagedField(profile, config.managed, config.setupMode)) {
     return { input: null, messageKey: 'chat.defaultACPAgentNotConfigured', loading: false }
   }
   return {
     input: {
+      botAgentId,
       agentId,
       projectPath: settings.chat_acp_project_path?.trim() || ACP_DEFAULT_PROJECT_PATH,
       projectMode: settings.chat_acp_project_mode?.trim() || ACP_DEFAULT_PROJECT_MODE,
@@ -2022,7 +2053,9 @@ const modelTriggerLabel = computed(() =>
 const pinnedSubagentModelId = computed(() => resolvePinnedSubagentModelId(
   activeSession.value?.type,
   activeSessionMetadata.value,
-  models.value.map(model => model.id),
+  models.value
+    .map(model => model.id)
+    .filter((id): id is string => !!id),
 ))
 
 function initFromBotSettings() {
@@ -2231,10 +2264,6 @@ watch([slashPanelOpen, activeUsesACPComposer, acpOperationScope], ([open, usesAC
   })
 })
 
-function normalizedProfileID(value: unknown): string {
-  return normalizeACPAgentID(value)
-}
-
 // Starting an ACP runtime (spawning the agent process + protocol handshake) has
 // no server-side deadline, so a wedged agent would leave the composer spinning
 // indefinitely — the user's only escape was a full page reload. Bound the switch
@@ -2262,20 +2291,23 @@ function agentSwitchErrorMessage(error: unknown): string {
     : resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
 }
 
-async function selectACPAgent(profile: AcpprofilePublicProfile) {
-  const agentId = normalizeACPAgentID(profile.id)
-  if (!agentId || agentChanging.value || !canChangeAgent.value) return
+async function selectBotAgent(agent: BotagentsBotAgent) {
+  const botAgentId = agent.id?.trim() ?? ''
+  const agentId = botAgentProvider(agent)
+  if (!botAgentId || !agentId || agentChanging.value || !canChangeAgent.value) return
   agentPopoverOpen.value = false
-  if (activeUsesACPComposer.value && agentId === activeACPAgentId.value) return
+  if (activeUsesACPComposer.value && botAgentId === activeBotAgentID.value) return
   agentChanging.value = true
   composerError.value = ''
   try {
     if (paneTarget.value.sessionId) {
       await withAgentSwitchTimeout(chatStore.updateCurrentSessionAgent({
+        botAgentId,
         agentId,
       }, paneTarget.value))
     } else {
       chatStore.stageACPSession({
+        botAgentId,
         agentId,
       }, {}, paneTarget.value)
       await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime(paneTarget.value))

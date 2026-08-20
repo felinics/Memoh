@@ -85,6 +85,7 @@ type Bot struct {
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 	AclDefaultEffect        string             `json:"acl_default_effect"`
 	TeamID                  pgtype.UUID        `json:"team_id"`
+	DefaultBotAgentID       pgtype.UUID        `json:"default_bot_agent_id"`
 }
 
 type BotAclRule struct {
@@ -104,6 +105,19 @@ type BotAclRule struct {
 	Description            pgtype.Text        `json:"description"`
 	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
 	TeamID                 pgtype.UUID        `json:"team_id"`
+}
+
+type BotAgent struct {
+	TeamID    pgtype.UUID        `json:"team_id"`
+	ID        pgtype.UUID        `json:"id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	Name      string             `json:"name"`
+	Runtime   string             `json:"runtime"`
+	Enabled   bool               `json:"enabled"`
+	Metadata  []byte             `json:"metadata"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type BotChannelAdmin struct {
@@ -268,6 +282,7 @@ type BotSession struct {
 	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
 	TeamID                pgtype.UUID        `json:"team_id"`
 	WorkdirID             pgtype.UUID        `json:"workdir_id"`
+	BotAgentID            pgtype.UUID        `json:"bot_agent_id"`
 }
 
 type BotSessionDiscussCursor struct {
@@ -683,6 +698,7 @@ type Schedule struct {
 	RunTarget       string             `json:"run_target"`
 	TargetSessionID pgtype.UUID        `json:"target_session_id"`
 	RuntimeType     pgtype.Text        `json:"runtime_type"`
+	BotAgentID      pgtype.UUID        `json:"bot_agent_id"`
 	AcpAgentID      pgtype.Text        `json:"acp_agent_id"`
 	ModelID         pgtype.UUID        `json:"model_id"`
 	AcpModelID      pgtype.Text        `json:"acp_model_id"`
