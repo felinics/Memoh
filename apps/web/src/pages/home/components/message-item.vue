@@ -232,12 +232,18 @@
                 :lang="contentLang(node.block.content)"
                 class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3)]:mt-5! [&_:is(h1,h2,h3)]:mb-2! [&_:is(h4,h5,h6)]:mt-3! [&_:is(h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
               >
+                <!-- mode="chat" selects the upstream chat profile (32/48/6ms
+                     batches, no live-node virtualization cap) instead of the
+                     default docs profile — it is tuned for message streams,
+                     not long documents. -->
                 <MarkdownRender
                   :content="node.block.content"
                   :is-dark="isDark"
+                  mode="chat"
                   :smooth-streaming="isBlockStreaming(node.index)"
                   :typewriter="isBlockStreaming(node.index)"
                   :fade="isBlockStreaming(node.index)"
+                  :batch-rendering="blockBatchRendering(node.index)"
                   :show-tooltips="false"
                   :mermaid-props="{ showTooltips: false }"
                   :code-block-dark-theme="codeBlockTheme.dark"
@@ -738,6 +744,15 @@ function isAssistantBlockStreaming(index: number): boolean {
 // module-scope ref.
 function isBlockStreaming(index: number): boolean {
   return isAssistantBlockStreaming(index) && !streamRevealPulse.value
+}
+
+// Second layer of the same catch-up problem: the renderer mounts nodes in
+// delayed batches (docs profile defaults: 40, then 80 per 16ms tick), so even
+// with the text fully revealed the DOM fills in chunk by chunk. During the
+// pulse, force batch rendering off for the streaming block so its visible
+// window mounts in one pass; undefined elsewhere keeps the profile default.
+function blockBatchRendering(index: number): boolean | undefined {
+  return isAssistantBlockStreaming(index) && streamRevealPulse.value ? false : undefined
 }
 
 const hasVisibleAssistantBlocks = computed(() =>
