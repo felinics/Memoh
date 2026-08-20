@@ -11,6 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
@@ -342,6 +343,12 @@ func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messa
 				default:
 					displayText = strings.TrimSpace(req.Query)
 				}
+				// req.Query is the headerified <message> envelope by the time a
+				// round is stored, and retry copies that envelope into RawQuery.
+				// An attachment-only message (no caption) has no raw text to fall
+				// back on, so without this the wrapper itself became the user
+				// bubble. Real user text is left untouched.
+				displayText = strings.TrimSpace(turnpkg.UnwrapUserMessageEnvelope(displayText))
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
 				persistMeta = mergeMetadata(meta, buildInteractionMetadata(req))
 			} else {

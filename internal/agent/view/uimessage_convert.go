@@ -498,7 +498,10 @@ func extractPersistedMessageText(raw messagepkg.Message, message *uiDecodedModel
 			return ""
 		}
 		if text := strings.TrimSpace(raw.DisplayContent); text != "" {
-			return text
+			// Rows written before attachment-only messages stopped persisting
+			// the headerified query keep the <message> wrapper as their display
+			// content; unwrap it so history never renders the model-facing XML.
+			return strings.TrimSpace(turn.UnwrapUserMessageEnvelope(text))
 		}
 	}
 
