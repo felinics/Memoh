@@ -7334,6 +7334,75 @@ export type PostBotsByBotIdMcpOpsBatchDeleteResponses = {
     204: unknown;
 };
 
+export type GetBotsByBotIdMcpOpsExportData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/bots/{bot_id}/mcp-ops/export';
+};
+
+export type GetBotsByBotIdMcpOpsExportErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMcpOpsExportError = GetBotsByBotIdMcpOpsExportErrors[keyof GetBotsByBotIdMcpOpsExportErrors];
+
+export type GetBotsByBotIdMcpOpsExportResponses = {
+    /**
+     * OK
+     */
+    200: McpExportResponse;
+};
+
+export type GetBotsByBotIdMcpOpsExportResponse = GetBotsByBotIdMcpOpsExportResponses[keyof GetBotsByBotIdMcpOpsExportResponses];
+
+export type PutBotsByBotIdMcpOpsImportData = {
+    /**
+     * mcpServers dict
+     */
+    body: McpImportRequest;
+    path?: never;
+    query?: never;
+    url: '/bots/{bot_id}/mcp-ops/import';
+};
+
+export type PutBotsByBotIdMcpOpsImportErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdMcpOpsImportError = PutBotsByBotIdMcpOpsImportErrors[keyof PutBotsByBotIdMcpOpsImportErrors];
+
+export type PutBotsByBotIdMcpOpsImportResponses = {
+    /**
+     * OK
+     */
+    200: McpListResponse;
+};
+
+export type PutBotsByBotIdMcpOpsImportResponse = PutBotsByBotIdMcpOpsImportResponses[keyof PutBotsByBotIdMcpOpsImportResponses];
+
 export type PostBotsByBotIdMcpStdioData = {
     /**
      * Stdio MCP payload
@@ -7423,75 +7492,6 @@ export type PostBotsByBotIdMcpStdioByConnectionIdResponses = {
 };
 
 export type PostBotsByBotIdMcpStdioByConnectionIdResponse = PostBotsByBotIdMcpStdioByConnectionIdResponses[keyof PostBotsByBotIdMcpStdioByConnectionIdResponses];
-
-export type GetBotsByBotIdMcpExportData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/bots/{bot_id}/mcp/export';
-};
-
-export type GetBotsByBotIdMcpExportErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdMcpExportError = GetBotsByBotIdMcpExportErrors[keyof GetBotsByBotIdMcpExportErrors];
-
-export type GetBotsByBotIdMcpExportResponses = {
-    /**
-     * OK
-     */
-    200: McpExportResponse;
-};
-
-export type GetBotsByBotIdMcpExportResponse = GetBotsByBotIdMcpExportResponses[keyof GetBotsByBotIdMcpExportResponses];
-
-export type PutBotsByBotIdMcpImportData = {
-    /**
-     * mcpServers dict
-     */
-    body: McpImportRequest;
-    path?: never;
-    query?: never;
-    url: '/bots/{bot_id}/mcp/import';
-};
-
-export type PutBotsByBotIdMcpImportErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutBotsByBotIdMcpImportError = PutBotsByBotIdMcpImportErrors[keyof PutBotsByBotIdMcpImportErrors];
-
-export type PutBotsByBotIdMcpImportResponses = {
-    /**
-     * OK
-     */
-    200: McpListResponse;
-};
-
-export type PutBotsByBotIdMcpImportResponse = PutBotsByBotIdMcpImportResponses[keyof PutBotsByBotIdMcpImportResponses];
 
 export type DeleteBotsByBotIdMcpByIdData = {
     body?: never;

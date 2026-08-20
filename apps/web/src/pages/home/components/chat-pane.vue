@@ -893,6 +893,7 @@ import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAtta
 import { useComposerDrafts } from '../composables/useComposerDrafts'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
+import { provideConnectorLogos } from '../composables/useConnectorLogos'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
 import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig } from './chat-pane-send'
@@ -973,6 +974,9 @@ const paneTarget = computed(() => ({
   viewId: props.tabId.trim() || 'chat',
 }))
 provideChatViewTarget(paneTarget)
+// Resolved once per pane so every tool row below can mark a Connect-It call
+// with its connector's logo without each row running its own lookup.
+provideConnectorLogos(paneTarget)
 const paneView = computed(() => chatStore.chatView(paneTarget.value))
 const messages = computed(() => paneView.value.transcript.visibleMessages.value)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)

@@ -313,7 +313,7 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/import [put].
+// @Router /bots/{bot_id}/mcp-ops/import [put].
 func (h *MCPHandler) Import(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -385,7 +385,7 @@ func (h *MCPHandler) BatchDelete(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/export [get].
+// @Router /bots/{bot_id}/mcp-ops/export [get].
 func (h *MCPHandler) Export(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {

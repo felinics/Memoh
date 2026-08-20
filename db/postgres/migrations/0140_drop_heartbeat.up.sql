@@ -10,18 +10,45 @@ ALTER TABLE public.bot_sessions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bots NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.bots DISABLE ROW LEVEL SECURITY;
 
+-- Subagents can form a session tree below a Heartbeat turn. Retire the whole
+-- tree instead of letting ON DELETE SET NULL detach descendants from the
+-- removed parent and leave their runtime data behind.
+WITH RECURSIVE retired_sessions(team_id, id) AS (
+    SELECT session.team_id, session.id
+    FROM public.bot_sessions AS session
+    WHERE session.type = 'heartbeat'
+       OR session.session_mode = 'heartbeat'
+    UNION
+    SELECT child.team_id, child.id
+    FROM public.bot_sessions AS child
+    JOIN retired_sessions AS parent
+      ON parent.team_id = child.team_id
+     AND parent.id = child.parent_session_id
+)
 DELETE FROM public.bot_history_messages AS message
 WHERE message.session_mode = 'heartbeat'
-   OR message.session_id IN (
-       SELECT session.id
-       FROM public.bot_sessions AS session
-       WHERE session.type = 'heartbeat'
-          OR session.session_mode = 'heartbeat'
+   OR (message.team_id, message.session_id) IN (
+       SELECT retired.team_id, retired.id
+       FROM retired_sessions AS retired
    );
 
-DELETE FROM public.bot_sessions
-WHERE type = 'heartbeat'
-   OR session_mode = 'heartbeat';
+WITH RECURSIVE retired_sessions(team_id, id) AS (
+    SELECT session.team_id, session.id
+    FROM public.bot_sessions AS session
+    WHERE session.type = 'heartbeat'
+       OR session.session_mode = 'heartbeat'
+    UNION
+    SELECT child.team_id, child.id
+    FROM public.bot_sessions AS child
+    JOIN retired_sessions AS parent
+      ON parent.team_id = child.team_id
+     AND parent.id = child.parent_session_id
+)
+DELETE FROM public.bot_sessions AS session
+WHERE (session.team_id, session.id) IN (
+    SELECT retired.team_id, retired.id
+    FROM retired_sessions AS retired
+);
 
 ALTER TABLE public.bot_sessions
     DROP CONSTRAINT IF EXISTS bot_sessions_type_check,

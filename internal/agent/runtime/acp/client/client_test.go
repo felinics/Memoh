@@ -66,57 +66,6 @@ func (w *rotatingTestWorkspace) WorkspaceInfo(context.Context, string) (bridge.W
 	return w.info, nil
 }
 
-func TestRunnerResolveACPAdapterVersion(t *testing.T) {
-	client, recorder := newRecordingBridgeClient(t)
-	command := "npm view @agentclientprotocol/codex-acp dist-tags.latest --json"
-	recorder.setStdout(command, "\"1.2.3-beta.1\"\n")
-	runner := NewRunner(nil, testWorkspace{
-		client: client,
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendContainer,
-			DefaultWorkDir: "/data",
-		},
-	})
-	env := []string{"NPM_CONFIG_CACHE=/data/.memoh/acp/npm-cache", "SSL_CERT_FILE=/opt/memoh/toolkit/certs/ca-certificates.crt"}
-
-	version, err := runner.ResolveACPAdapterVersion(context.Background(), "bot-1", "@agentclientprotocol/codex-acp", env)
-	if err != nil {
-		t.Fatalf("ResolveACPAdapterVersion() error = %v", err)
-	}
-	if version != "1.2.3-beta.1" {
-		t.Fatalf("ResolveACPAdapterVersion() = %q", version)
-	}
-	records := recorder.records()
-	if len(records) != 1 {
-		t.Fatalf("adapter version exec records = %#v", records)
-	}
-	record := records[0]
-	if record.Command != command || record.WorkDir != "/data" || record.Timeout != acpAdapterVersionLookupTimeoutSeconds {
-		t.Fatalf("adapter version exec record = %#v", record)
-	}
-	if len(record.Env) != len(env) || record.Env[0] != env[0] || record.Env[1] != env[1] {
-		t.Fatalf("adapter version exec env = %#v, want %#v", record.Env, env)
-	}
-}
-
-func TestRunnerResolveACPAdapterVersionRejectsMutableOrUnsafeSpecs(t *testing.T) {
-	client, recorder := newRecordingBridgeClient(t)
-	command := "npm view @agentclientprotocol/codex-acp dist-tags.latest --json"
-	runner := NewRunner(nil, testWorkspace{
-		client: client,
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendContainer,
-			DefaultWorkDir: "/data",
-		},
-	})
-	for _, output := range []string{`"latest"`, `"1.2"`, `"1.2.3; touch /tmp/pwned"`, `{}`} {
-		recorder.setStdout(command, output)
-		if _, err := runner.ResolveACPAdapterVersion(context.Background(), "bot-1", "@agentclientprotocol/codex-acp", nil); err == nil {
-			t.Fatalf("ResolveACPAdapterVersion() unexpectedly accepted %s", output)
-		}
-	}
-}
-
 func TestRunnerRequiresACPCommand(t *testing.T) {
 	root := t.TempDir()
 	client := newTestBridgeClient(t, root)
@@ -314,6 +263,85 @@ func TestRunnerStartSessionDoesNotReplaceUnsupportedResumeWithNewSession(t *test
 	}
 	if _, statErr := os.Stat(capturePath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("unsupported resume invoked an ACP lifecycle method: %v", statErr)
+	}
+}
+
+func TestRunnerStartSessionRejectsUnsupportedProtocolVersion(t *testing.T) {
+	runner, agentPath := newSessionResumeTestRunner(t)
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_PROTOCOL_VERSION", "2")
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "unsupported protocol version 2") {
+		t.Fatalf("StartSession() = (%#v, %v), want unsupported protocol version", sess, err)
+	}
+}
+
+func TestRunnerStartSessionRejectsEmptyNewSessionID(t *testing.T) {
+	runner, agentPath := newSessionResumeTestRunner(t)
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_EMPTY_SESSION_ID", "1")
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "empty session id") {
+		t.Fatalf("StartSession() = (%#v, %v), want empty session id failure", sess, err)
+	}
+}
+
+func TestSessionCloseRequiresAdvertisedCapability(t *testing.T) {
+	runner, agentPath := newSessionResumeTestRunner(t)
+	capturePath := filepath.Join(t.TempDir(), "close")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_CLOSE_FILE", capturePath)
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := os.Stat(capturePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("session/close was called without the capability: %v", err)
+	}
+}
+
+func TestSessionCloseUsesAdvertisedCapability(t *testing.T) {
+	runner, agentPath := newSessionResumeTestRunner(t)
+	capturePath := filepath.Join(t.TempDir(), "close")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CLOSE", "1")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_CLOSE_FILE", capturePath)
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if data, err := os.ReadFile(capturePath); err != nil || string(data) != "fake-session" { //nolint:gosec // test helper reads its own temporary capture.
+		t.Fatalf("session/close capture = %q, %v", data, err)
 	}
 }
 
@@ -3253,29 +3281,6 @@ func TestPinSessionModeFailsWhenRequiredModeCannotBeVerified(t *testing.T) {
 	}
 }
 
-func TestPinSessionConfigValuesSkipsWhenNotNeeded(t *testing.T) {
-	t.Parallel()
-
-	effort := acp.SessionConfigOption{
-		Select: &acp.SessionConfigOptionSelect{
-			Id:           acp.SessionConfigId("effort"),
-			CurrentValue: acp.SessionConfigValueId("high"),
-			Options: acp.SessionConfigSelectOptions{
-				Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-					{Value: acp.SessionConfigValueId("default"), Name: "Default"},
-					{Value: acp.SessionConfigValueId("high"), Name: "High"},
-				},
-			},
-		},
-	}
-	// nil conn proves these paths never issue a set_config_option call:
-	// no desired entry, already at desired value, and unadvertised value.
-	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), []acp.SessionConfigOption{effort}, nil, nil, "claude-code")
-	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), []acp.SessionConfigOption{effort}, map[string]string{"effort": "high"}, nil, "claude-code")
-	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), []acp.SessionConfigOption{effort}, map[string]string{"effort": "ultra"}, nil, "claude-code")
-	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), nil, map[string]string{"effort": "high"}, nil, "claude-code")
-}
-
 func TestApprovalGrantsAreClearedBetweenPrompts(t *testing.T) {
 	t.Parallel()
 
@@ -3563,8 +3568,15 @@ func (*fakeACPAgent) Initialize(context.Context, acp.InitializeRequest) (acp.Ini
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_MCP_ACP") == "1" {
 		capabilities.McpCapabilities.Acp = true
 	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_CLOSE") == "1" {
+		capabilities.SessionCapabilities.Close = &acp.SessionCloseCapabilities{}
+	}
+	protocolVersion := acp.ProtocolVersion(acp.ProtocolVersionNumber)
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_PROTOCOL_VERSION") == "2" {
+		protocolVersion = acp.ProtocolVersion(2)
+	}
 	return acp.InitializeResponse{
-		ProtocolVersion:   acp.ProtocolVersionNumber,
+		ProtocolVersion:   protocolVersion,
 		AgentCapabilities: capabilities,
 	}, nil
 }
@@ -3576,7 +3588,12 @@ func (*fakeACPAgent) Cancel(context.Context, acp.CancelNotification) error {
 	return nil
 }
 
-func (*fakeACPAgent) CloseSession(context.Context, acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+func (*fakeACPAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+	if path := os.Getenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_CLOSE_FILE"); path != "" {
+		if err := os.WriteFile(path, []byte(req.SessionId), 0o600); err != nil { //nolint:gosec // test helper writes to env-provided temp path.
+			return acp.CloseSessionResponse{}, err
+		}
+	}
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -3598,7 +3615,11 @@ func (a *fakeACPAgent) NewSession(_ context.Context, p acp.NewSessionRequest) (a
 			return acp.NewSessionResponse{}, err
 		}
 	}
-	resp := acp.NewSessionResponse{SessionId: acp.SessionId("fake-session")}
+	sessionID := acp.SessionId("fake-session")
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_EMPTY_SESSION_ID") == "1" {
+		sessionID = ""
+	}
+	resp := acp.NewSessionResponse{SessionId: sessionID}
 	resp.ConfigOptions = a.configOptions()
 	return resp, nil
 }

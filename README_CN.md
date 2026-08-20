@@ -113,7 +113,7 @@ submodule，setup 也会为后续 pull 启用递归更新。如果从未安装�
 
 ## Star 历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://www.star-history.com/#memohai/Memoh&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://star-history.dera.page/#memohai/Memoh&type=date&legend=top-left)
 
 ## 贡献者
 

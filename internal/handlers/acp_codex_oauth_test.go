@@ -121,9 +121,11 @@ func TestACPCodexDeviceSessionKeepsSuccessForLatePolls(t *testing.T) {
 	if polling.Generation != generation {
 		t.Fatalf("generation mismatch: %d != %d", polling.Generation, generation)
 	}
-	if _, err := h.beginDeviceAuthWrite(context.Background(), session.SessionID, generation, now); err != nil {
+	_, cancelWrite, err := h.beginDeviceAuthWrite(context.Background(), session.SessionID, generation, now)
+	if err != nil {
 		t.Fatalf("begin auth write: %v", err)
 	}
+	defer cancelWrite()
 	updated := h.finishDeviceAuthWrite(session.SessionID, generation, "account-123", nil, now)
 	if updated.Status != acpCodexDeviceAuthStatusSuccess {
 		t.Fatalf("status = %q, want success", updated.Status)
@@ -162,7 +164,7 @@ func TestACPCodexDeviceCancelPreventsInflightWrite(t *testing.T) {
 	session.TerminalExpiresAt = now.Add(acpCodexDeviceAuthTerminalTTL)
 	h.mu.Unlock()
 
-	if _, err := h.beginDeviceAuthWrite(context.Background(), session.SessionID, generation, now); err == nil {
+	if _, _, err := h.beginDeviceAuthWrite(context.Background(), session.SessionID, generation, now); err == nil {
 		t.Fatalf("begin auth write should fail after cancellation")
 	}
 	updated := h.finishDeviceAuthWrite(session.SessionID, generation, "account-123", nil, now)
