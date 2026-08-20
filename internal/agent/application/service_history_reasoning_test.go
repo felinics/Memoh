@@ -244,9 +244,12 @@ func TestStripToolMessagesBoundsReplayedReasoning(t *testing.T) {
 	}
 }
 
-// An assistant turn whose only content is reasoning must not be emptied out —
-// a contentless assistant message is not something a provider accepts.
-func TestStripToolMessagesKeepsReasoningOnlyTurnIntact(t *testing.T) {
+// An assistant turn whose only content is reasoning cannot simply lose it: an
+// emptied assistant message is dropped by sanitizeMessages and rejected by
+// providers. Projecting the thinking to text keeps the turn alive without
+// replaying an opaque block the cap is supposed to have removed — the same
+// projection durable history already applies to a live interrupted checkpoint.
+func TestStripToolMessagesProjectsOlderReasoningOnlyTurn(t *testing.T) {
 	messages := sdkMessagesToModelMessages([]sdk.Message{
 		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "q"}}},
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
@@ -260,7 +263,91 @@ func TestStripToolMessagesKeepsReasoningOnlyTurnIntact(t *testing.T) {
 	if len(stripped) != 4 {
 		t.Fatalf("messages: got %d, want 4", len(stripped))
 	}
-	if got := reasoningPartsIn(t, stripped[1]); len(got) != 1 {
-		t.Errorf("reasoning-only turn: got %d part(s), want it left intact", len(got))
+	if got := reasoningPartsIn(t, stripped[1]); len(got) != 0 {
+		t.Errorf("older reasoning-only turn: got %d reasoning part(s), want 0 — the cap has to reach it too", len(got))
+	}
+	if text := stripped[1].TextContent(); !strings.Contains(text, "only thinking") {
+		t.Errorf("older reasoning-only turn text: got %q, want the thinking projected into it", text)
+	}
+}
+
+// The cap is only a cap if it holds for the shape an interruption mid-thinking
+// leaves behind: assistant messages carrying reasoning and nothing else. Those
+// cannot be emptied, so a bounds check that only covers turns with answer text
+// misses the case that accumulates in practice.
+func TestStripToolMessagesBoundsReasoningOnlyTurns(t *testing.T) {
+	var messages []sdk.Message
+	for turn := 0; turn < 6; turn++ {
+		messages = append(messages,
+			sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "q"}}},
+			sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+				reasoningPart("thinking", "SIG"),
+			}},
+		)
+	}
+	messages = append(messages,
+		sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "last"}}},
+		sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "answer"}}},
+	)
+
+	stripped := stripToolMessages(sdkMessagesToModelMessages(messages))
+	total := 0
+	for _, m := range stripped {
+		total += len(reasoningPartsIn(t, m))
+	}
+	// The latest assistant turn carries no reasoning, so nothing may be replayed.
+	if total != 0 {
+		t.Fatalf("replayed reasoning parts across 6 reasoning-only turns: got %d, want 0", total)
+	}
+}
+
+// Keeping the latest turn's thinking while dropping the tool_use it was issued
+// with leaves a reasoning block that no longer explains anything: the model is
+// shown its own decision to call a tool with no record of the call. Reasoning
+// and the call it belongs to travel together or not at all.
+func TestStripToolMessagesKeepsLatestTurnToolCallWithReasoning(t *testing.T) {
+	messages := sdkMessagesToModelMessages([]sdk.Message{
+		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "search"}}},
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+			reasoningPart("I should search", "SIG_LATEST"),
+			sdk.ToolCallPart{ToolCallID: "c1", ToolName: "web_search", Input: map[string]any{}},
+		}},
+		{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{
+			sdk.ToolResultPart{ToolCallID: "c1", ToolName: "web_search", Result: "results"},
+		}},
+	})
+
+	stripped := stripToolMessages(messages)
+
+	var latest ModelMessage
+	for _, m := range stripped {
+		if strings.EqualFold(strings.TrimSpace(m.Role), "assistant") {
+			latest = m
+		}
+	}
+	if got := len(reasoningPartsIn(t, latest)); got != 1 {
+		t.Fatalf("latest turn reasoning parts: got %d, want 1", got)
+	}
+
+	var toolCalls int
+	for _, part := range modelMessageToSDKMessage(latest).Content {
+		if _, ok := part.(sdk.ToolCallPart); ok {
+			toolCalls++
+		}
+	}
+	if toolCalls != 1 {
+		t.Errorf("latest turn tool calls: got %d, want 1 — reasoning was kept without the call it belongs to", toolCalls)
+	}
+
+	var toolResults int
+	for _, m := range stripped {
+		for _, part := range modelMessageToSDKMessage(m).Content {
+			if _, ok := part.(sdk.ToolResultPart); ok {
+				toolResults++
+			}
+		}
+	}
+	if toolResults != 1 {
+		t.Errorf("tool results paired with the kept call: got %d, want 1", toolResults)
 	}
 }
