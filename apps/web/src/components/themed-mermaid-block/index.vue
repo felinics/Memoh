@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, inject, type Ref } from 'vue'
-import { MermaidBlockNode, type CodeBlockNode } from 'markstream-vue'
+import { MermaidBlockNode, type CodeBlockNodeProps } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import { applyMermaidThemeToSource, resolveMermaidIsDark } from '@/store/settings/mermaid'
+
+// 2.0's own `CodeBlockNode` export is the block component (value), which shadows
+// the parser's node type of the same name; the node type rides on the props.
+type CodeBlockNode = CodeBlockNodeProps['node']
 
 defineOptions({ inheritAttrs: false })
 

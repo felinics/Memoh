@@ -181,7 +181,8 @@
             :typewriter="false"
             :fade="false"
             :show-tooltips="false"
-            :theme="codeBlockTheme"
+            :code-block-dark-theme="codeBlockTheme.dark"
+            :code-block-light-theme="codeBlockTheme.light"
             custom-id="release-notes"
           />
         </div>

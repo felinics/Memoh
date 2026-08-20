@@ -235,12 +235,13 @@
                 <MarkdownRender
                   :content="node.block.content"
                   :is-dark="isDark"
-                  :smooth-streaming="isAssistantBlockStreaming(node.index)"
-                  :typewriter="isAssistantBlockStreaming(node.index)"
-                  :fade="isAssistantBlockStreaming(node.index)"
+                  :smooth-streaming="isBlockStreaming(node.index)"
+                  :typewriter="isBlockStreaming(node.index)"
+                  :fade="isBlockStreaming(node.index)"
                   :show-tooltips="false"
                   :mermaid-props="{ showTooltips: false }"
-                  :theme="codeBlockTheme"
+                  :code-block-dark-theme="codeBlockTheme.dark"
+                  :code-block-light-theme="codeBlockTheme.light"
                   custom-id="chat-msg"
                 />
               </div>
@@ -325,6 +326,30 @@ registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell:
 // markstream default (which only follows the host renderer's isDark flag). One
 // registration covers chat + file preview + any future MarkdownRender call site.
 setCustomComponents({ mermaid: ThemedMermaidBlock })
+
+// One-shot smooth-streaming catch-up gate. markstream's controller reveals
+// queued chars only from a rAF loop, and rAF freezes while the tab is hidden —
+// incoming tokens keep accumulating, so a long background stretch becomes a
+// backlog the renderer then "types out" for tens of seconds after returning
+// (re-parsing and reflowing every frame). The library exposes no visibility
+// hook, so on return-to-visible we flip the streaming props off for exactly one
+// tick: the component's own content watch treats smooth=off as a static render
+// and resets straight to the full received text (respecting its
+// unclosed-code-fence hold-back), then we flip back on — a no-op once caught
+// up, so later tokens keep typewriter-streaming. While hidden nothing changes:
+// rendering stays frozen at zero cost. This rides the library's internal
+// reset-on-smooth-off branch — if that behavior changes, revisit this gate.
+// One module-level listener serves every message block.
+const streamRevealPulse = ref(false)
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return
+    streamRevealPulse.value = true
+    nextTick(() => {
+      streamRevealPulse.value = false
+    })
+  })
+}
 </script>
 
 <script setup lang="ts">
@@ -706,6 +731,13 @@ function hasLaterAssistantMessage(index: number): boolean {
 
 function isAssistantBlockStreaming(index: number): boolean {
   return props.message.role === 'assistant' && props.message.streaming && !hasLaterAssistantMessage(index)
+}
+
+// Read the module-scope pulse inside a function (called during render) so the
+// ref access is tracked; a bare template binding would not reliably unwrap a
+// module-scope ref.
+function isBlockStreaming(index: number): boolean {
+  return isAssistantBlockStreaming(index) && !streamRevealPulse.value
 }
 
 const hasVisibleAssistantBlocks = computed(() =>
