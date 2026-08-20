@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
 	"github.com/memohai/memoh/internal/agent/event"
 	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
@@ -293,38 +294,41 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	// block would pin the answer text above any reasoning that streams first.
 	// The first text_delta lazily creates the text block instead.
 
-	result, err := s.acpPool.Prompt(streamCtx, acpagent.PromptInput{
-		BotID:                    req.BotID,
-		ChatID:                   req.ChatID,
-		SessionID:                req.ThreadID,
-		RunID:                    req.RunID,
-		RouteID:                  req.RouteID,
-		AgentID:                  agentID,
-		ProjectPath:              projectPath,
-		ModelID:                  strings.TrimSpace(req.Model),
-		ReasoningEffort:          strings.TrimSpace(req.ReasoningEffort),
-		Prompt:                   req.Query,
-		Images:                   preparedAttachments.Images,
-		AttachmentReferences:     preparedAttachments.References,
-		CanFallbackImagesToFiles: preparedAttachments.CanFallbackImagesToFiles,
-		ChannelIdentityID:        req.SourceChannelIdentityID,
-		SessionToken:             req.Token,
-		CurrentPlatform:          req.CurrentChannel,
-		ReplyTarget:              req.ReplyTarget,
-		ConversationType:         req.ConversationType,
-		CanRequestUserInput:      s.canDeliverUserInputWS(eventCh),
+	promptInput := acpagent.PromptInput{
+		BotID:               req.BotID,
+		ChatID:              req.ChatID,
+		SessionID:           req.ThreadID,
+		RunID:               req.RunID,
+		RouteID:             req.RouteID,
+		AgentID:             agentID,
+		ProjectPath:         projectPath,
+		ModelID:             strings.TrimSpace(req.Model),
+		ReasoningEffort:     strings.TrimSpace(req.ReasoningEffort),
+		ChannelIdentityID:   req.SourceChannelIdentityID,
+		SessionToken:        req.Token,
+		CurrentPlatform:     req.CurrentChannel,
+		ReplyTarget:         req.ReplyTarget,
+		ConversationType:    req.ConversationType,
+		CanRequestUserInput: s.canDeliverUserInputWS(eventCh),
 		// This flag controls image bytes returned later by the read-media MCP
 		// tool. Initial user images use ACP ImageBlock transport above.
 		SupportsImageInput:    false,
 		ToolOutputLimit:       s.toolOutputLimit(),
 		ToolHTTPURL:           req.ToolHTTPURL,
-		ContextURI:            acpContextURI,
-		ContextMarkdown:       contextMarkdown,
 		RuntimeOwnerAccountID: runtimeOwnerAccountID,
 		ForceFreshRuntime:     req.ForceFreshRuntime,
 		RequiredCommand:       req.AgentCommand,
 		Sink:                  acpclient.EventSinkFunc(emit),
-	})
+	}
+	promptInput.ApplyContext(
+		req.Query,
+		preparedAttachments.Images,
+		preparedAttachments.References,
+		preparedAttachments.CanFallbackImagesToFiles,
+		acpContextURI,
+		contextMarkdown,
+	)
+	result, err := s.acpPool.Prompt(streamCtx, promptInput)
 	lifecycleCause = err
 	if err != nil {
 		s.logger.Error("ACP prompt failed",
@@ -811,7 +815,7 @@ func (s *Service) prepareACPAttachments(ctx context.Context, req ChatRequest) (a
 		}
 
 		if attachmentType == "image" && item.Transport == gatewayTransportInlineDataURL && strings.TrimSpace(item.Payload) != "" {
-			image, imageErr := acpPromptImageFromDataURL(item.Payload, item.Mime)
+			image, imageErr := acpclient.PromptImageFromDataURL(item.Payload, item.Mime)
 			if imageErr != nil {
 				return acpPreparedAttachments{}, acpfeedback.New(
 					acpfeedback.CodeAttachmentInvalid,
@@ -840,27 +844,6 @@ func (s *Service) prepareACPAttachments(ctx context.Context, req ChatRequest) (a
 		result.Context = append(result.Context, contextAttachment)
 	}
 	return result, nil
-}
-
-func acpPromptImageFromDataURL(payload, fallbackMime string) (acpclient.PromptImage, error) {
-	payload = strings.TrimSpace(payload)
-	comma := strings.Index(payload, ",")
-	if comma < 0 || !strings.HasPrefix(strings.ToLower(payload), "data:") ||
-		!strings.Contains(strings.ToLower(payload[:comma]), ";base64") {
-		return acpclient.PromptImage{}, acpclient.ErrInvalidPromptImage
-	}
-	mimeType := attachmentpkg.MimeFromDataURL(payload)
-	if mimeType == "" || mimeType == "application/octet-stream" {
-		mimeType = attachmentpkg.NormalizeMime(fallbackMime)
-	}
-	normalized, err := acpclient.NormalizePromptImages([]acpclient.PromptImage{{
-		Data:     strings.TrimSpace(payload[comma+1:]),
-		MimeType: mimeType,
-	}})
-	if err != nil {
-		return acpclient.PromptImage{}, err
-	}
-	return normalized[0], nil
 }
 
 func acpPromptInputFeedback(err error) *acpfeedback.Error {
@@ -1057,7 +1040,7 @@ func (s *Service) persistACPLeadingUserMessage(ctx context.Context, req ChatRequ
 	if contentText == "" {
 		contentText = displayText
 	}
-	content, err := json.Marshal(ModelMessage{
+	content, err := historyfrag.MarshalStoredModelMessage(ModelMessage{
 		Role:    "user",
 		Content: newTextContent(contentText),
 	})
@@ -1127,7 +1110,7 @@ func (s *Service) persistACPDecisionProjection(ctx context.Context, req ChatRequ
 		if msg.Role != "assistant" {
 			continue
 		}
-		content, err := json.Marshal(msg)
+		content, err := historyfrag.MarshalStoredModelMessage(msg)
 		if err != nil {
 			s.logger.Warn("persist ACP decision projection: marshal failed",
 				slog.String("tool_call_id", ev.ToolCallID),

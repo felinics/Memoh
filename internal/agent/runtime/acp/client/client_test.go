@@ -524,6 +524,30 @@ func TestNormalizePromptImagesRejectsMalformedBase64(t *testing.T) {
 	}
 }
 
+func TestPromptImageFromDataURLUsesPayloadMIME(t *testing.T) {
+	t.Parallel()
+
+	image, err := PromptImageFromDataURL("data:image/jpeg;base64,aW1hZ2U=", "image/png")
+	if err != nil {
+		t.Fatalf("PromptImageFromDataURL() error = %v", err)
+	}
+	if image.Data != "aW1hZ2U=" || image.MimeType != "image/jpeg" {
+		t.Fatalf("image = %#v, want payload MIME and base64 data", image)
+	}
+}
+
+func TestPromptImageFromDataURLUsesFallbackMIMEWhenPayloadOmitsIt(t *testing.T) {
+	t.Parallel()
+
+	image, err := PromptImageFromDataURL("data:;base64,aW1hZ2U=", "image/png")
+	if err != nil {
+		t.Fatalf("PromptImageFromDataURL() error = %v", err)
+	}
+	if image.MimeType != "image/png" {
+		t.Fatalf("MIME = %q, want image/png", image.MimeType)
+	}
+}
+
 func TestStartMemohToolsBridgeRetriesClosingWorkspaceClient(t *testing.T) {
 	t.Parallel()
 

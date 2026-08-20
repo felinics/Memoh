@@ -13,6 +13,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	tools "github.com/memohai/memoh/internal/agent/tool"
@@ -123,7 +124,7 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 		if msg.Role == sdk.MessageRoleUser {
 			continue
 		}
-		content, err := json.Marshal(msg)
+		content, err := historyfrag.MarshalStoredSDKMessage(msg)
 		if err != nil {
 			continue
 		}

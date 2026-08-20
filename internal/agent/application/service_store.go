@@ -11,6 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
@@ -287,7 +288,7 @@ func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messa
 			}
 		}
 
-		content, err := json.Marshal(msg)
+		content, err := historyfrag.MarshalStoredModelMessage(msg)
 		if err != nil {
 			return nil, fmt.Errorf("marshal message %d: %w", i, err)
 		}

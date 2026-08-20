@@ -65,6 +65,69 @@ func TestSDKMessagesToModelMessagesPreservesUsage(t *testing.T) {
 	}
 }
 
+func TestSDKMessagesToModelMessagesPreservesMultipartContent(t *testing.T) {
+	t.Parallel()
+
+	want := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.ReasoningPart{
+				Text:             "thinking",
+				ProviderMetadata: map[string]any{"provider": map[string]any{"signature": "sig"}},
+			},
+			sdk.TextPart{Text: "answer"},
+			sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"},
+			sdk.FilePart{Data: "JVBERi0=", MediaType: "application/pdf", Filename: "report.pdf"},
+			sdk.ToolCallPart{
+				ToolCallID: "call-1",
+				ToolName:   "lookup",
+				Input:      map[string]any{"query": "memoh"},
+			},
+		},
+	}
+
+	model := SDKMessagesToModelMessages([]sdk.Message{want})
+	if len(model) != 1 {
+		t.Fatalf("got %d model messages, want 1", len(model))
+	}
+	got := ModelMessageToSDKMessage(model[0])
+	assertSameJSON(t, got, want)
+}
+
+func TestModelMessageToSDKMessageKeepsLegacyEnvelopeFieldsOutOfSDKMessage(t *testing.T) {
+	t.Parallel()
+
+	model := turn.ModelMessage{
+		Role:       "tool",
+		Content:    mustJSON(t, []map[string]any{{"type": "tool-result", "toolCallId": "call-1", "toolName": "lookup", "result": "ok"}}),
+		Usage:      mustJSON(t, map[string]int{"inputTokens": 9}),
+		ToolCallID: "legacy-call-id",
+		Name:       "legacy-tool",
+		ToolCalls: []turn.ToolCall{{
+			ID:   "legacy-call",
+			Type: "function",
+			Function: turn.ToolCallFunction{
+				Name:      "legacy-tool",
+				Arguments: `{"query":"memoh"}`,
+			},
+		}},
+	}
+
+	got := ModelMessageToSDKMessage(model)
+	want := sdk.Message{
+		Role: sdk.MessageRoleTool,
+		Content: []sdk.MessagePart{sdk.ToolResultPart{
+			ToolCallID: "call-1",
+			ToolName:   "lookup",
+			Result:     "ok",
+		}},
+	}
+	assertSameJSON(t, got, want)
+	if got.Usage != nil {
+		t.Fatalf("usage = %#v, want nil: ModelMessage usage is not written into SDK messages", got.Usage)
+	}
+}
+
 func TestModelMessageToSDKMessageInvalidLegacyContentKeepsRole(t *testing.T) {
 	t.Parallel()
 

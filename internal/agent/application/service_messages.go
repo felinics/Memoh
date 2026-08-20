@@ -5,6 +5,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	"github.com/memohai/memoh/internal/messageconv"
 )
 
@@ -13,7 +14,7 @@ import (
 // redacted to text placeholders first — document bytes never enter
 // bot_history_messages (see redactFilePartsForStorage).
 func sdkMessagesToModelMessages(msgs []sdk.Message) []ModelMessage {
-	return messageconv.SDKMessagesToModelMessages(redactFilePartsForStorage(msgs))
+	return historyfrag.ToStoredModelMessages(msgs)
 }
 
 // redactFilePartsForStorage replaces FileParts with text placeholders before
@@ -23,45 +24,7 @@ func sdkMessagesToModelMessages(msgs []sdk.Message) []ModelMessage {
 // file itself stays in the workspace: follow-up turns re-read it via the read
 // tool, which re-injects it for whatever model is current.
 func redactFilePartsForStorage(msgs []sdk.Message) []sdk.Message {
-	out := msgs
-	copied := false
-	for i, msg := range msgs {
-		hasFile := false
-		for _, part := range msg.Content {
-			if _, ok := part.(sdk.FilePart); ok {
-				hasFile = true
-				break
-			}
-		}
-		if !hasFile {
-			continue
-		}
-		if !copied {
-			out = append([]sdk.Message(nil), msgs...)
-			copied = true
-		}
-		kept := make([]sdk.MessagePart, 0, len(msg.Content))
-		for _, part := range msg.Content {
-			fp, ok := part.(sdk.FilePart)
-			if !ok {
-				kept = append(kept, part)
-				continue
-			}
-			name := strings.TrimSpace(fp.Filename)
-			if name == "" {
-				name = "attachment"
-			}
-			mime := strings.TrimSpace(fp.MediaType)
-			if mime == "" {
-				mime = "application/pdf"
-			}
-			kept = append(kept, sdk.TextPart{
-				Text: "[attachment " + name + " (" + mime + ") was shown to the model this turn; its bytes are not persisted — use the read tool to view it again]",
-			})
-		}
-		out[i].Content = kept
-	}
-	return out
+	return historyfrag.RedactFileParts(msgs)
 }
 
 // modelMessageToSDKMessage converts a persistence format message to SDK message
