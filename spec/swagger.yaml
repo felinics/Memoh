@@ -1928,15 +1928,13 @@ definitions:
     - CacheStable
     - CacheDynamic
     - CacheNever
-  contextfrag.CachePlan:
+  contextfrag.CacheComparison:
     properties:
-      mid_stable_message_count:
+      first_step_cache_read_tokens:
         type: integer
-      stable_message_count:
-        type: integer
-      stable_prefix_hash:
+      outcome:
         type: string
-      stable_prefix_token_estimate:
+      prev_age_ms:
         type: integer
     type: object
   contextfrag.CacheUsageRecord:
@@ -2007,14 +2005,69 @@ definitions:
       version:
         type: integer
     type: object
+  contextfrag.Kind:
+    enum:
+    - system_prompt
+    - system_policy
+    - bot_identity
+    - workspace_instruction
+    - platform_identity
+    - tool_usage
+    - conversation_event
+    - current_user_message
+    - attachment_ref
+    - native_image
+    - skills_catalog
+    - hook_context
+    - injected_message
+    - background_summary
+    - acp_context
+    - memory_recall
+    - conversation_summary
+    type: string
+    x-enum-varnames:
+    - KindSystemPrompt
+    - KindSystemPolicy
+    - KindBotIdentity
+    - KindWorkspaceInstruction
+    - KindPlatformIdentity
+    - KindToolUsage
+    - KindConversationEvent
+    - KindCurrentUserMessage
+    - KindAttachmentRef
+    - KindNativeImage
+    - KindSkillsCatalog
+    - KindHookContext
+    - KindInjectedMessage
+    - KindBackgroundSummary
+    - KindACPContext
+    - KindMemoryRecall
+    - KindConversationSummary
+  contextfrag.KindBreakdown:
+    properties:
+      fragments:
+        type: integer
+      images:
+        type: integer
+      kind:
+        $ref: '#/definitions/contextfrag.Kind'
+      text_bytes:
+        type: integer
+      token_estimate:
+        type: integer
+    type: object
   contextfrag.LifecycleSnapshot:
     properties:
       assistant_message_id:
         type: string
+      breakdown:
+        items:
+          $ref: '#/definitions/contextfrag.KindBreakdown'
+        type: array
       budget_plan:
         $ref: '#/definitions/contextfrag.ContextBudgetPlan'
-      cache_plan:
-        $ref: '#/definitions/contextfrag.CachePlan'
+      cache_comparison:
+        $ref: '#/definitions/contextfrag.CacheComparison'
       cache_read_tokens:
         type: integer
       cache_usage:
@@ -2031,6 +2084,8 @@ definitions:
         type: string
       loop_selection_mode:
         type: string
+      memory_recall:
+        $ref: '#/definitions/contextfrag.MemoryRecallTrace'
       model:
         type: string
       mutations:
@@ -2043,9 +2098,23 @@ definitions:
         items:
           $ref: '#/definitions/contextfrag.SelectionDecision'
         type: array
+      stable_message_count:
+        type: integer
+      stable_prefix_hash:
+        type: string
+      stable_prefix_token_estimate:
+        type: integer
       steps:
         items:
           $ref: '#/definitions/contextfrag.StepSnapshot'
+        type: array
+      tool_defs:
+        items:
+          $ref: '#/definitions/contextfrag.ToolDefAccounting'
+        type: array
+      trust_breakdown:
+        items:
+          $ref: '#/definitions/contextfrag.TrustBreakdown'
         type: array
       version:
         type: integer
@@ -2068,9 +2137,48 @@ definitions:
   contextfrag.ManifestView:
     enum:
     - run_config_pre_provider
+    - acp_runtime_prompt
     type: string
     x-enum-varnames:
     - ViewRunConfigPreProvider
+    - ViewACPRuntimePrompt
+  contextfrag.MemoryRecallQueryTrace:
+    properties:
+      recent_messages:
+        type: integer
+      source:
+        type: string
+      truncated:
+        type: boolean
+    type: object
+  contextfrag.MemoryRecallResultTrace:
+    properties:
+      context_bytes:
+        type: integer
+      count:
+        type: integer
+      refs:
+        items:
+          type: string
+        type: array
+    type: object
+  contextfrag.MemoryRecallTrace:
+    properties:
+      cache_state:
+        type: string
+      fallback_reason:
+        type: string
+      memory_version:
+        type: string
+      provider_id:
+        type: string
+      query:
+        $ref: '#/definitions/contextfrag.MemoryRecallQueryTrace'
+      result:
+        $ref: '#/definitions/contextfrag.MemoryRecallResultTrace'
+      retrieval_mode:
+        type: string
+    type: object
   contextfrag.MutationKind:
     enum:
     - before_model_call_hook
@@ -2211,6 +2319,42 @@ definitions:
       truncated:
         type: integer
     type: object
+  contextfrag.ToolDefAccounting:
+    properties:
+      bytes:
+        type: integer
+      name:
+        type: string
+      provider:
+        type: string
+      token_estimate:
+        type: integer
+    type: object
+  contextfrag.TrustBreakdown:
+    properties:
+      fragments:
+        type: integer
+      images:
+        type: integer
+      text_bytes:
+        type: integer
+      token_estimate:
+        type: integer
+      trust:
+        $ref: '#/definitions/contextfrag.TrustLevel'
+    type: object
+  contextfrag.TrustLevel:
+    enum:
+    - system
+    - workspace
+    - user
+    - external
+    type: string
+    x-enum-varnames:
+    - TrustSystem
+    - TrustWorkspace
+    - TrustUser
+    - TrustExternal
   conversation.SkillActivation:
     properties:
       prompt:
@@ -3068,8 +3212,43 @@ definitions:
       used_bytes:
         type: integer
     type: object
+  handlers.ContextLifecycleAggregates:
+    properties:
+      cache_hit_rate:
+        type: number
+      cache_outcomes:
+        additionalProperties:
+          type: integer
+        type: object
+      cache_read_efficiency:
+        type: number
+      drop_reasons:
+        additionalProperties:
+          type: integer
+        type: object
+      mutation_kinds:
+        additionalProperties:
+          type: integer
+        type: object
+      tool_roster_change_details:
+        items:
+          $ref: '#/definitions/handlers.ToolRosterChange'
+        type: array
+      tool_roster_changes:
+        type: integer
+      total_cache_read_tokens:
+        type: integer
+      total_cache_write_tokens:
+        type: integer
+      total_expected_stable_tokens:
+        type: integer
+      turns:
+        type: integer
+    type: object
   handlers.ContextLifecycleResponse:
     properties:
+      aggregates:
+        $ref: '#/definitions/handlers.ContextLifecycleAggregates'
       turns:
         items:
           $ref: '#/definitions/handlers.ContextLifecycleTurn'
@@ -3092,8 +3271,16 @@ definitions:
     type: object
   handlers.ContextUsage:
     properties:
+      breakdown:
+        items:
+          $ref: '#/definitions/contextfrag.KindBreakdown'
+        type: array
       context_window:
         type: integer
+      tool_defs:
+        items:
+          $ref: '#/definitions/handlers.ToolDefBucket'
+        type: array
       used_tokens:
         type: integer
     type: object
@@ -4154,6 +4341,32 @@ definitions:
           the approval request; empty keeps the plain binary decision.
         type: string
       reason:
+        type: string
+    type: object
+  handlers.ToolDefBucket:
+    properties:
+      provider:
+        type: string
+      token_estimate:
+        type: integer
+      tools:
+        type: integer
+    type: object
+  handlers.ToolRosterChange:
+    properties:
+      added:
+        items:
+          type: string
+        type: array
+      removed:
+        items:
+          type: string
+        type: array
+      resized:
+        items:
+          type: string
+        type: array
+      run_id:
         type: string
     type: object
   handlers.TriggerCompactResponse:
@@ -11131,9 +11344,9 @@ paths:
       - compaction
   /bots/{bot_id}/sessions/{session_id}/context-lifecycle:
     get:
-      description: List run-keyed context lifecycle snapshots for a chat session;
-        sessions predating run lifecycle persistence fall back to legacy assistant
-        metadata
+      description: List run-keyed context lifecycle snapshots and aggregate cache,
+        drop, mutation, and tool-roster diagnostics for a chat session; sessions predating
+        run lifecycle persistence fall back to legacy assistant metadata
       parameters:
       - description: Bot ID
         in: path

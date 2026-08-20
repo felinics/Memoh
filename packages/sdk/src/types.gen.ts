@@ -1122,11 +1122,10 @@ export type ConnectorsListResponse = {
 
 export type ContextfragCacheClass = 'stable' | 'dynamic' | 'never';
 
-export type ContextfragCachePlan = {
-    mid_stable_message_count?: number;
-    stable_message_count?: number;
-    stable_prefix_hash?: string;
-    stable_prefix_token_estimate?: number;
+export type ContextfragCacheComparison = {
+    first_step_cache_read_tokens?: number;
+    outcome?: string;
+    prev_age_ms?: number;
 };
 
 export type ContextfragCacheUsageRecord = {
@@ -1169,10 +1168,21 @@ export type ContextfragContextRef = {
     version?: number;
 };
 
+export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'acp_context' | 'memory_recall' | 'conversation_summary';
+
+export type ContextfragKindBreakdown = {
+    fragments?: number;
+    images?: number;
+    kind?: ContextfragKind;
+    text_bytes?: number;
+    token_estimate?: number;
+};
+
 export type ContextfragLifecycleSnapshot = {
     assistant_message_id?: string;
+    breakdown?: Array<ContextfragKindBreakdown>;
     budget_plan?: ContextfragContextBudgetPlan;
-    cache_plan?: ContextfragCachePlan;
+    cache_comparison?: ContextfragCacheComparison;
     cache_read_tokens?: number;
     cache_usage?: Array<ContextfragCacheUsageRecord>;
     cache_write_tokens?: number;
@@ -1180,11 +1190,17 @@ export type ContextfragLifecycleSnapshot = {
     counts?: ContextfragManifestCounts;
     final_input_hash?: string;
     loop_selection_mode?: string;
+    memory_recall?: ContextfragMemoryRecallTrace;
     model?: string;
     mutations?: Array<ContextfragMutationRecord>;
     selection?: ContextfragSelectionTrace;
     selection_decisions?: Array<ContextfragSelectionDecision>;
+    stable_message_count?: number;
+    stable_prefix_hash?: string;
+    stable_prefix_token_estimate?: number;
     steps?: Array<ContextfragStepSnapshot>;
+    tool_defs?: Array<ContextfragToolDefAccounting>;
+    trust_breakdown?: Array<ContextfragTrustBreakdown>;
     version?: number;
     view?: ContextfragManifestView;
 };
@@ -1197,7 +1213,29 @@ export type ContextfragManifestCounts = {
     token_estimate?: number;
 };
 
-export type ContextfragManifestView = 'run_config_pre_provider';
+export type ContextfragManifestView = 'run_config_pre_provider' | 'acp_runtime_prompt';
+
+export type ContextfragMemoryRecallQueryTrace = {
+    recent_messages?: number;
+    source?: string;
+    truncated?: boolean;
+};
+
+export type ContextfragMemoryRecallResultTrace = {
+    context_bytes?: number;
+    count?: number;
+    refs?: Array<string>;
+};
+
+export type ContextfragMemoryRecallTrace = {
+    cache_state?: string;
+    fallback_reason?: string;
+    memory_version?: string;
+    provider_id?: string;
+    query?: ContextfragMemoryRecallQueryTrace;
+    result?: ContextfragMemoryRecallResultTrace;
+    retrieval_mode?: string;
+};
 
 export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'loop_step_reselection' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'mid_stream_retry';
 
@@ -1249,6 +1287,23 @@ export type ContextfragStepSnapshot = {
     step_index?: number;
     truncated?: number;
 };
+
+export type ContextfragToolDefAccounting = {
+    bytes?: number;
+    name?: string;
+    provider?: string;
+    token_estimate?: number;
+};
+
+export type ContextfragTrustBreakdown = {
+    fragments?: number;
+    images?: number;
+    text_bytes?: number;
+    token_estimate?: number;
+    trust?: ContextfragTrustLevel;
+};
+
+export type ContextfragTrustLevel = 'system' | 'workspace' | 'user' | 'external';
 
 export type ConversationSkillActivation = {
     prompt?: string;
@@ -1767,7 +1822,28 @@ export type HandlersContainerStorageMetricsResponse = {
     used_bytes?: number;
 };
 
+export type HandlersContextLifecycleAggregates = {
+    cache_hit_rate?: number;
+    cache_outcomes?: {
+        [key: string]: number;
+    };
+    cache_read_efficiency?: number;
+    drop_reasons?: {
+        [key: string]: number;
+    };
+    mutation_kinds?: {
+        [key: string]: number;
+    };
+    tool_roster_change_details?: Array<HandlersToolRosterChange>;
+    tool_roster_changes?: number;
+    total_cache_read_tokens?: number;
+    total_cache_write_tokens?: number;
+    total_expected_stable_tokens?: number;
+    turns?: number;
+};
+
 export type HandlersContextLifecycleResponse = {
+    aggregates?: HandlersContextLifecycleAggregates;
     turns?: Array<HandlersContextLifecycleTurn>;
 };
 
@@ -1781,7 +1857,9 @@ export type HandlersContextLifecycleTurn = {
 };
 
 export type HandlersContextUsage = {
+    breakdown?: Array<ContextfragKindBreakdown>;
     context_window?: number;
+    tool_defs?: Array<HandlersToolDefBucket>;
     used_tokens?: number;
 };
 
@@ -2345,6 +2423,19 @@ export type HandlersToolApprovalDecisionRequest = {
      */
     option_id?: string;
     reason?: string;
+};
+
+export type HandlersToolDefBucket = {
+    provider?: string;
+    token_estimate?: number;
+    tools?: number;
+};
+
+export type HandlersToolRosterChange = {
+    added?: Array<string>;
+    removed?: Array<string>;
+    resized?: Array<string>;
+    run_id?: string;
 };
 
 export type HandlersTriggerCompactResponse = {
