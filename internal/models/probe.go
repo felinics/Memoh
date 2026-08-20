@@ -168,7 +168,7 @@ func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientTyp
 			anthropicmessages.WithAPIKey(apiKey),
 			anthropicmessages.WithHTTPClient(httpClient),
 		}
-		if baseURL != "" {
+		if baseURL := anthropicMessagesBaseURL(baseURL); baseURL != "" {
 			opts = append(opts, anthropicmessages.WithBaseURL(baseURL))
 		}
 		return anthropicmessages.New(opts...)
