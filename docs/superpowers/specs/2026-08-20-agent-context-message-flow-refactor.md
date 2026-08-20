@@ -312,7 +312,11 @@ Native、ACP 和附件分别验证 SDK 序列、provider payload、ACP session�
 
 ### PR 3：持久化解耦并清理重复入口
 
-兼容 reader 继续读取旧 JSON，新 envelope 使用独立版本号。数据库写入和 runtime input 分开维护，旧 writer 继续可用。
+把历史 JSON 的读写兼容集中到 `internal/agent/context/history`。codec 继续读旧
+envelope、bare content、raw fallback 和 legacy tool 字段，写入时保持当前
+`bot_history_messages.content` 的字段和结构。数据库字段与 runtime input 仍然分开维护。
+
+新 envelope 和版本号等数据库格式升级放到后续迁移，先用 codec 把边界固定下来。
 
 完成旧 writer/reader 的兼容测试后，再删除已经由 adapter 取代的重复转换和附件组装。
 

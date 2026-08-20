@@ -2,10 +2,10 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
+	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
 
@@ -53,7 +53,7 @@ func (s *Service) persistUserTurn(ctx context.Context, req ChatRequest) (message
 		Content: newTextContent(persistedUserTurnText(req)),
 	}
 	modelMessage = normalizeUserMessageContent(modelMessage)
-	content, err := json.Marshal(modelMessage)
+	content, err := historyfrag.MarshalStoredModelMessage(modelMessage)
 	if err != nil {
 		return messagepkg.Message{}, err
 	}

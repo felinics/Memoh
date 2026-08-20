@@ -1,0 +1,164 @@
+package historyfrag
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/agent/turn"
+)
+
+func TestStoredModelMessageCodecPreservesEnvelopeAndStructuredContent(t *testing.T) {
+	t.Parallel()
+
+	want := turn.ModelMessage{
+		Role:       "assistant",
+		Content:    json.RawMessage(`[{"type":"reasoning","text":"thinking"},{"type":"text","text":"done"}]`),
+		Usage:      json.RawMessage(`{"inputTokens":9}`),
+		ToolCallID: "legacy-call",
+		Name:       "lookup",
+		ToolCalls: []turn.ToolCall{{
+			ID:   "call-1",
+			Type: "function",
+			Function: turn.ToolCallFunction{
+				Name:      "lookup",
+				Arguments: `{"q":"memoh"}`,
+			},
+		}},
+	}
+
+	raw, err := MarshalStoredModelMessage(want)
+	if err != nil {
+		t.Fatalf("MarshalStoredModelMessage: %v", err)
+	}
+	legacyRaw := mustPersistenceJSON(t, want)
+	if string(raw) != string(legacyRaw) {
+		t.Fatalf("stored JSON changed:\ngot  %s\nwant %s", raw, legacyRaw)
+	}
+	got := DecodeStoredModelMessage(nil, "row-1", "assistant", raw)
+	want.Usage = nil // Usage is stored in its own database column.
+	if string(mustPersistenceJSON(t, got)) != string(mustPersistenceJSON(t, want)) {
+		t.Fatalf("decoded message = %s, want %s", mustPersistenceJSON(t, got), mustPersistenceJSON(t, want))
+	}
+}
+
+func TestDecodeStoredModelMessageKeepsInvalidRawContent(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`not-json`)
+	got := DecodeStoredModelMessage(nil, "row-raw", " assistant ", raw)
+	if got.Role != "assistant" {
+		t.Fatalf("role = %q, want assistant", got.Role)
+	}
+	if string(got.Content) != string(raw) {
+		t.Fatalf("content = %s, want raw fallback %s", got.Content, raw)
+	}
+	got.Content[0] = 'N'
+	if string(raw) != "not-json" {
+		t.Fatalf("raw input was mutated: %s", raw)
+	}
+}
+
+func TestDecodeStoredModelMessageSupportsLegacyShapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		raw        string
+		role       string
+		wantText   string
+		wantCallID string
+	}{
+		{name: "bare content part", raw: `{"type":"text","text":"hello"}`, role: "user", wantText: "hello"},
+		{name: "legacy tool envelope", raw: `{"role":"tool","tool_call_id":"call-1","content":"ok"}`, role: "tool", wantText: "ok", wantCallID: "call-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DecodeStoredModelMessage(nil, "row-legacy", tt.role, json.RawMessage(tt.raw))
+			if got.TextContent() != tt.wantText {
+				t.Fatalf("TextContent() = %q, want %q", got.TextContent(), tt.wantText)
+			}
+			if got.ToolCallID != tt.wantCallID {
+				t.Fatalf("ToolCallID = %q, want %q", got.ToolCallID, tt.wantCallID)
+			}
+		})
+	}
+}
+
+func TestRedactFilePartsPreservesOrderAndDoesNotMutateInput(t *testing.T) {
+	t.Parallel()
+
+	input := []sdk.Message{sdk.UserMessage("look", sdk.FilePart{
+		Data:      "secret-file-bytes",
+		Filename:  "report.pdf",
+		MediaType: "application/pdf",
+	}, sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"})}
+
+	redacted := RedactFileParts(input)
+	if len(redacted) != 1 || len(redacted[0].Content) != 3 {
+		t.Fatalf("redacted content = %#v, want three ordered parts", redacted)
+	}
+	if _, ok := redacted[0].Content[0].(sdk.TextPart); !ok {
+		t.Fatalf("part 0 = %T, want TextPart", redacted[0].Content[0])
+	}
+	placeholder, ok := redacted[0].Content[1].(sdk.TextPart)
+	if !ok || placeholder.Text == "" || strings.Contains(placeholder.Text, "secret-file-bytes") {
+		t.Fatalf("file placeholder = %#v, want readable text without bytes", redacted[0].Content[1])
+	}
+	if _, ok := redacted[0].Content[2].(sdk.ImagePart); !ok {
+		t.Fatalf("part 2 = %T, want ImagePart", redacted[0].Content[2])
+	}
+	if file, ok := input[0].Content[1].(sdk.FilePart); !ok || file.Data != "secret-file-bytes" {
+		t.Fatalf("input file part was mutated: %#v", input[0].Content[1])
+	}
+}
+
+func TestToStoredModelMessagesNeverIncludesFileBytes(t *testing.T) {
+	t.Parallel()
+
+	stored := ToStoredModelMessages([]sdk.Message{sdk.UserMessage("attach", sdk.FilePart{
+		Data:      "secret-file-bytes",
+		Filename:  "notes.txt",
+		MediaType: "text/plain",
+	})})
+	if len(stored) != 1 {
+		t.Fatalf("stored messages = %#v, want one message", stored)
+	}
+	if text := stored[0].TextContent(); strings.Contains(text, "secret-file-bytes") {
+		t.Fatalf("stored content contains file bytes: %q", text)
+	}
+	if text := stored[0].TextContent(); !strings.Contains(text, "notes.txt") {
+		t.Fatalf("stored content lost file placeholder: %q", text)
+	}
+}
+
+func TestMarshalStoredSDKMessageRedactsFileBytes(t *testing.T) {
+	t.Parallel()
+
+	message := sdk.UserMessage("inspect", sdk.FilePart{
+		Data:      "secret-bytes",
+		Filename:  "report.pdf",
+		MediaType: "application/pdf",
+	})
+	raw, err := MarshalStoredSDKMessage(message)
+	if err != nil {
+		t.Fatalf("MarshalStoredSDKMessage: %v", err)
+	}
+	if strings.Contains(string(raw), "secret-bytes") {
+		t.Fatalf("stored payload contains file bytes: %s", raw)
+	}
+	if !strings.Contains(string(raw), "report.pdf") {
+		t.Fatalf("stored payload lost attachment placeholder: %s", raw)
+	}
+}
+
+func mustPersistenceJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal %T: %v", value, err)
+	}
+	return raw
+}
