@@ -255,7 +255,7 @@ text -> attachment A -> attachment B
 
 ## 8. 迁移顺序
 
-7 个 PR 会把一个连续的重构切得过碎。建议采用 5 个 PR；每个 PR 都有清楚的行为边界和独立回滚点。
+这次重构采用 3 个 PR。每个 PR 都有清楚的行为边界，合并顺序就是依赖顺序。
 
 ### 8.1 Stack 结构
 
@@ -263,21 +263,17 @@ text -> attachment A -> attachment B
 
 ```text
 main
-└── refactor/runtime-neutral-context   PR 1：现状测试和消息契约
-    └── refactor/context-projection    PR 2：统一 Context 输入
-        └── refactor/runtime-adapters PR 3：Native / ACP 发送边界
-            └── refactor/attachment-resolver PR 4：附件物化
-                └── refactor/context-persistence PR 5：持久化解耦
+└── refactor/runtime-neutral-context   PR 1：Context 投影和兼容契约
+    └── refactor/runtime-adapters     PR 2：Native / ACP / 附件发送边界
+        └── refactor/context-persistence PR 3：持久化解耦和清理
 ```
 
-分支按依赖顺序创建。下层 PR 合并后，上层 PR 的 base 自动前移；审查时始终从 PR 1 向 PR 5 阅读。
+分支按依赖顺序创建。下层 PR 合并后，上层 PR 的 base 自动前移；审查时始终从 PR 1 向 PR 3 阅读。
 
 ```bash
 git config remote.pushDefault origin
 gh stack init --base main refactor/runtime-neutral-context
-gh stack add refactor/context-projection
 gh stack add refactor/runtime-adapters
-gh stack add refactor/attachment-resolver
 gh stack add refactor/context-persistence
 gh stack submit --auto
 gh stack view --json
@@ -287,13 +283,13 @@ gh stack view --json
 
 1. 每个分支只提交属于本层的文件和测试；公共类型或接口先落在较低层。
 2. 需要修改较低层时，先切回对应分支，提交后运行 `gh stack rebase --upstack`，再继续上层工作。
-3. 每层都能单独运行相关测试并回滚。PR 3 的 Native 和 ACP 分别使用独立 commit，便于分别定位和撤回。
+3. 每层都能单独运行相关测试并回滚。PR 2 的 Native、ACP 和附件 resolver 分别使用独立 commit，便于分别定位和撤回。
 
-### PR 1：固定现状和消息契约
+### PR 1：Context 投影和兼容契约
 
-盘点 `sdk.Message`、`turn.ModelMessage`、`timeline.ContextMessage`、`ContextFrag` 的生产、消费和转换点。
+明确 `timeline.ContextMessage`、`turn.ModelMessage`、`ContextFrag` 和 `sdk.Message` 的边界，统一 DCP pipeline、history reader 和 discuss collector 进入 Context 的入口。
 
-补充 `messageconv`、tool closure、reasoning continuity、附件和旧 history JSON 的 characterization tests。这个 PR 没有运行时行为变化。
+补充 `messageconv`、tool closure、reasoning continuity、附件和旧 history JSON 的 characterization tests。Context 继续输出现有 Native 所需的 SDK 消息和 manifest，不改变运行时行为。
 
 编译与测试：
 
@@ -304,28 +300,17 @@ go test ./internal/chat/timeline/...
 go test ./internal/contextview/...
 ```
 
-### PR 2：收拢进入 Context 的路径
+### PR 2：接入 runtime adapters 和附件 resolver
 
-让 DCP pipeline、history reader 和 discuss collector 都通过明确的 projection 边界进入 `ContextFrag`，保留旧 renderer 做 SDK/manifest snapshot 对比。
-
-验证 DCP ordering、summary coverage、tool closure、budget、stable prefix 和 discuss。Context 输出仍然可以回到现有 Native 入口。
-
-### PR 3：接入 runtime adapters
-
-这个 PR 只处理发送边界，内部拆成两个 commit：
+这个 PR 处理 Context 到 runtime 的最后一段，内部拆成三个 commit：
 
 1. Native：选中的 `[]sdk.Message` 和附件绑定交给 Native adapter，保留旧 RunConfig 入口。
 2. ACP：当前 turn projection 编成 `PromptInput`，沿用现有 prompt/resource/session 机制。
+3. 附件：统一引用解析和物化，按普通发送、history replay、retry/continuation、subagent、discuss、read_media、streaming injection 接入。
 
-Native 与 ACP 使用各自的测试和回滚入口。验证 SDK 序列、provider payload、ACP session、resume、continuation、approval、ask_user、transcript 和 cleanup。
+Native、ACP 和附件分别验证 SDK 序列、provider payload、ACP session、resume、continuation、approval、ask_user、transcript、cleanup，以及 `ref -> part -> runtime representation` fixture。每个 commit 都能回滚到 PR 1 的边界。
 
-### PR 4：接入附件 resolver
-
-按普通发送、history replay、retry/continuation、subagent、discuss、read_media、streaming injection 的顺序接入 resolver。
-
-每个入口保留现有 MIME、path/URL/base64 fallback 和错误分类，并记录 `ref -> part -> runtime representation` fixture。每个入口可以单独回滚到旧 helper。
-
-### PR 5：持久化解耦并清理重复入口
+### PR 3：持久化解耦并清理重复入口
 
 兼容 reader 继续读取旧 JSON，新 envelope 使用独立版本号。数据库写入和 runtime input 分开维护，旧 writer 继续可用。
 
