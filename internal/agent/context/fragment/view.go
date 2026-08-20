@@ -21,8 +21,6 @@ const (
 	RenderACPFullContext RenderTarget = "acp_full_context"
 )
 
-const ViewACPRuntimePrompt ManifestView = "acp_runtime_prompt"
-
 // NormalizeContextRefs fills durable refs and canonical hashes for fragments
 // coming from collectors, mirroring what Compile does for legacy inputs.
 func NormalizeContextRefs(frags []ContextFrag) []ContextFrag {

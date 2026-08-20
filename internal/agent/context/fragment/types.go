@@ -369,6 +369,7 @@ type ManifestView string
 
 const (
 	ViewRunConfigPreProvider ManifestView = "run_config_pre_provider"
+	ViewACPRuntimePrompt     ManifestView = "acp_runtime_prompt"
 )
 
 // DynamicMutator names a later runtime transform that can change provider params

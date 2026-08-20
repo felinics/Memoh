@@ -1246,12 +1246,11 @@ func (*acpContextBudgetQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.G
 
 func (q *acpContextBudgetSettingsQueries) GetSettingsByBotID(_ context.Context, botID pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
-		BotID:             botID,
-		Language:          "auto",
-		ReasoningEffort:   "medium",
-		HeartbeatInterval: 30,
-		CompactionRatio:   80,
-		ChatModelID:       flowTestUUID(q.chatModelID),
+		BotID:                   botID,
+		Language:                "auto",
+		ReasoningEffort:         "medium",
+		CompactionTargetPercent: pgtype.Int4{Int32: 20, Valid: true},
+		ChatModelID:             flowTestUUID(q.chatModelID),
 	}, nil
 }
 

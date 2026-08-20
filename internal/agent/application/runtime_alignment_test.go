@@ -340,6 +340,10 @@ type reconcileOutcomeQueries struct {
 
 func (*reconcileOutcomeQueries) SupportsTransactions() bool { return true }
 
+func (*reconcileOutcomeQueries) ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	return nil, nil
+}
+
 func (q *reconcileOutcomeQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
 	q.mu.Lock()
 	if q.failFirst > 0 {

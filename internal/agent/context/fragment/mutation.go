@@ -123,6 +123,9 @@ func (l *MutationLedger) Records() []MutationRecord {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if len(l.records) == 0 {
+		return nil
+	}
 	out := make([]MutationRecord, len(l.records))
 	copy(out, l.records)
 	return out
