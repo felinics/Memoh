@@ -1,12 +1,12 @@
 /* Sidebar-specific native scroll bar: narrow so it doesn't dominate the tight
  * list panes. The 2px transparent border + padding-box clip insets the thumb
  * to a ~4px sliver — visible on hover/scroll but not a constant presence.
- * Callers keep extra right padding (e.g. recents' pr-3) so hover chips stay
- * off the bar.
+ * Callers keep extra right padding (e.g. panel-sessions' pr-1) so hover chips
+ * stay off the bar.
  *
  * Deliberately a shared stylesheet, NOT a `<style scoped>` block: the class is
- * used by BOTH sidebar/recents.vue and sidebar/panel-schedule.vue. It first
- * lived in recents' scoped style, which silently did nothing for
+ * used by BOTH sidebar/panel-sessions.vue and sidebar/panel-schedule.vue. It
+ * first lived in recents' scoped style, which silently did nothing for
  * panel-schedule (scoped selectors only match the defining component's DOM).
  * Import this file from every component that puts `sidebar-scroll` on a
  * scroll container.

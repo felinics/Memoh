@@ -942,6 +942,7 @@
     "untitledSession": "Untitled Session",
     "noSessions": "No sessions yet",
     "sessionsLoadFailed": "Failed to load conversations",
+    "showMoreSessions": "Show more",
     "recents": "Recents",
     "quickActions": "Quick Actions",
     "scheduledJobs": "Scheduled Jobs",

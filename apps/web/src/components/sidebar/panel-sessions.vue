@@ -72,18 +72,27 @@
     -->
 
     <!-- Folders is a SIBLING section of Recents: folders of workdir-bound
-         chats above, the ungrouped timeline below. The wrapper owns the
-         remaining height so neither section can spill into the sidebar footer. -->
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+         chats above, the ungrouped timeline below — and both live in ONE
+         scrollport owned here. Each section used to scroll itself, which
+         capped Folders at ~14rem and buried long folder lists in a second
+         inner scrollbar; now overflow is handled once, for the whole list, so
+         a folder is a peer of Recents rather than an item inside a box.
+         Per-folder growth is bounded by its Show more page instead
+         (folder-sessions-list.vue). pr-1 keeps the scrollbar clear of the
+         rows' hover chips — the sections themselves keep their px-2. -->
+    <div
+      ref="listScrollEl"
+      class="sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1"
+    >
       <FoldersSection />
 
-      <Recents class="min-h-0 flex-1 overflow-hidden" />
+      <Recents :scroll-el="listScrollEl" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -94,8 +103,13 @@ import SidebarPanelHeader from './panel-header.vue'
 import SidebarNavButton from './nav-button.vue'
 import FoldersSection from './folders-section.vue'
 import Recents from './recents.vue'
+import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
+
+// The one scrollport for Folders + Recents. Recents needs the element itself
+// for its load-more sentinel root, so it is passed down rather than provided.
+const listScrollEl = ref<HTMLElement | null>(null)
 const router = useRouter()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()

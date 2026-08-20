@@ -913,6 +913,7 @@
     "untitledSession": "無題のセッション",
     "noSessions": "セッションはまだありません",
     "sessionsLoadFailed": "会話一覧の読み込みに失敗しました",
+    "showMoreSessions": "もっと見る",
     "recents": "最近",
     "quickActions": "クイックアクション",
     "scheduledJobs": "スケジュールされたジョブ",
