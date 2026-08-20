@@ -3268,6 +3268,7 @@
     "browse": "コネクターを見る",
     "connect": "接続",
     "connectTitle": "{name} に接続",
+    "awaitingAuthorization": "認証を待っています…",
     "unavailable": "利用不可",
     "unknown": "不明なコネクター",
     "emptyTitle": "コネクターはまだありません",

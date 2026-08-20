@@ -3283,6 +3283,7 @@
     "browse": "浏览连接器",
     "connect": "连接",
     "connectTitle": "连接 {name}",
+    "awaitingAuthorization": "等待授权…",
     "unavailable": "暂不可用",
     "unknown": "未知连接器",
     "emptyTitle": "还没有连接器",

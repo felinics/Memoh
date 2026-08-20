@@ -3283,6 +3283,7 @@
     "browse": "Browse connectors",
     "connect": "Connect",
     "connectTitle": "Connect {name}",
+    "awaitingAuthorization": "Waiting for authorization…",
     "unavailable": "Unavailable",
     "unknown": "Unknown connector",
     "emptyTitle": "No connectors yet",
