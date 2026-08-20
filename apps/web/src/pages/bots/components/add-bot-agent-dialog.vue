@@ -24,6 +24,27 @@
                 :empty-text="t('bots.agent.providerEmpty')"
                 @update:model-value="(provider) => selectProvider(provider, handleChange)"
               >
+                <template #trigger="{ open: providerOpen, displayLabel, selectedOption, placeholder }">
+                  <button
+                    data-slot="select-trigger"
+                    data-size="default"
+                    :data-placeholder="displayLabel ? undefined : ''"
+                    type="button"
+                    :aria-expanded="providerOpen"
+                    :aria-label="t('bots.agent.provider')"
+                    :class="[selectTriggerClass, 'w-full']"
+                  >
+                    <span class="flex min-w-0 items-center gap-2">
+                      <component
+                        :is="acpAgentIcon(selectedOption?.value ?? '', true)"
+                        v-if="selectedOption"
+                        class="size-4 shrink-0"
+                      />
+                      <span class="line-clamp-1">{{ displayLabel || placeholder }}</span>
+                    </span>
+                    <ChevronsUpDown class="opacity-50" />
+                  </button>
+                </template>
                 <template #option-icon="{ option }">
                   <component
                     :is="acpAgentIcon(option.value, true)"
@@ -65,6 +86,7 @@ import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
+import { ChevronsUpDown } from 'lucide-vue-next'
 import z from 'zod'
 import {
   FieldStack,
@@ -73,6 +95,7 @@ import {
   FormField,
   FormStack,
   Input,
+  selectTriggerClass,
   toast,
 } from '@felinic/ui'
 import {
