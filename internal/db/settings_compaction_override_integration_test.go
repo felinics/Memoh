@@ -49,7 +49,9 @@ func settingsTestTx(t *testing.T, ctx context.Context) pgx.Tx {
 	bindTeamQueryFixture(t, ctx, tx)
 	if _, err := tx.Exec(ctx, `
 ALTER TABLE users ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
-ALTER TABLE bots ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+ALTER TABLE bots
+  ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
+  ADD COLUMN default_bot_agent_id UUID;
 ALTER TABLE models ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
 ALTER TABLE search_providers ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
 ALTER TABLE fetch_providers ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();

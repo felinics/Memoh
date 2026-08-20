@@ -31,8 +31,18 @@ CREATE INDEX IF NOT EXISTS idx_bot_agents_bot_active
     ON public.bot_agents (team_id, bot_id, created_at, id)
     WHERE deleted_at IS NULL;
 
-ALTER TABLE public.bot_agents ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bot_agents FORCE ROW LEVEL SECURITY;
+-- PostgreSQL validates replacement constraints by scanning their tables. A
+-- non-superuser migration owner is subject to FORCE RLS during those scans,
+-- so suspend it before rebuilding constraints and backfilling across teams.
+-- The migration runs transactionally and restores every table at the end.
+ALTER TABLE public.bot_agents NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_agents DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.schedule NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.schedule DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bots NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bots DISABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS bot_agents_team_select ON public.bot_agents;
 DROP POLICY IF EXISTS bot_agents_team_insert ON public.bot_agents;
@@ -100,17 +110,6 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_agent
 CREATE INDEX IF NOT EXISTS idx_schedule_bot_agent
     ON public.schedule (team_id, bot_agent_id)
     WHERE bot_agent_id IS NOT NULL;
-
--- Migration owners are subject to FORCE RLS. Suspend it while collecting and
--- backfilling legacy ACP data across all teams.
-ALTER TABLE public.bot_agents NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.bot_agents DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bot_sessions NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.bot_sessions DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.schedule NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.schedule DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bots NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.bots DISABLE ROW LEVEL SECURITY;
 
 WITH raw_candidates AS (
     SELECT
