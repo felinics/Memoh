@@ -134,14 +134,17 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
       role: 'assistant',
       id: `runtime:${turnId}:assistant`,
       timestamp: run.started_at,
-      messages: run.messages.map(cloneUIMessage),
+      // Share message identity with the run view: consumers normalize into
+      // their own view blocks without mutating UIMessage input, so re-cloning
+      // every message per projection was pure O(all-content) waste.
+      messages: [...run.messages],
     })
     if (run.error && !run.messages.some(message => message.type === 'error')) {
       turns[turns.length - 1] = {
         ...turns[turns.length - 1]!,
         role: 'assistant',
         messages: [
-          ...run.messages.map(cloneUIMessage),
+          ...run.messages,
           { id: nextMessageId(run.messages), type: 'error', content: run.error },
         ],
       }
@@ -166,10 +169,17 @@ function applyRunPatch(
   run: RuntimeCurrentRunView | null,
   delta: RuntimeDelta,
 ): RuntimeCurrentRunView | null {
+  // Hot path (delta without a full view): shallow-copy the run and start from a
+  // fresh messages array — the patch loops below copy-on-write the specific
+  // messages they touch, so unchanged messages keep object identity and a text
+  // append costs O(delta) instead of O(all content). The previous per-delta
+  // cloneRunView made a stream of N deltas cost O(N x content), which is what
+  // melted the main thread when a backgrounded tab replayed its backlog.
+  // Full-view carriers still clone: that payload may be reused by the caller.
   let next = delta.current_run_view
     ? cloneRunView(delta.current_run_view)
     : run
-      ? cloneRunView(run)
+      ? { ...run, messages: [...(run.messages ?? [])] }
       : null
   if (!next) return null
   const patch = delta.run
@@ -186,7 +196,7 @@ function applyRunPatch(
     }
   }
 
-  const messages = delta.reset_messages ? [] : next.messages.map(cloneUIMessage)
+  const messages = delta.reset_messages ? [] : next.messages
   for (const append of delta.message_appends ?? []) {
     const index = messages.findIndex(message => message.id === append.id && message.type === append.type)
     if (index < 0) {
@@ -224,6 +234,19 @@ function applyRunPatch(
   }
   messages.sort((left, right) => left.id - right.id)
   return { ...next, messages }
+}
+
+// Delta-only patch step, exported for the batching runtime client: accumulate
+// many deltas onto a run view cheaply, then build the transcript once.
+export function applyRuntimeRunPatch(
+  run: RuntimeCurrentRunView | null,
+  delta: RuntimeDelta,
+): RuntimeCurrentRunView | null {
+  return applyRunPatch(run, delta)
+}
+
+export function projectRuntimeTranscript(run: RuntimeCurrentRunView | null): RuntimeTranscriptSlice {
+  return transcriptForRun(run)
 }
 
 export function createEmptyRuntimeProjection(sessionId = ''): RuntimeProjectionState {
