@@ -285,7 +285,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
 	streamCtx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
+	eventGate := newStreamEmitterGate(streamCtx, ch)
+	defer func() {
+		cancel(nil)
+		eventGate.close()
+	}()
 	aborted := false
 	turnError := ""
 	defer func() {
@@ -302,9 +306,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	// Stream emitter: tools targeting the current conversation push
 	// side-effect events (attachments, reactions, speech) directly here.
 	// Uses sendEvent to avoid goroutine leaks when the consumer stops reading.
-	streamEmitter := tools.StreamEmitter(func(evt tools.ToolStreamEvent) {
-		sendEvent(ctx, ch, toolStreamEventToAgentEvent(evt))
-	})
+	streamEmitter := tools.StreamEmitter(eventGate.emit)
 	if cfg.ForkContext == nil {
 		cfg.ForkContext = tools.NewMessageSnapshotWithSources(cfg.Messages, cfg.ForkContextSourceMessageIDs)
 	}
@@ -352,7 +354,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	toolExecutionMetadata := newToolExecutionMetadataRegistry(func(call sdk.ToolCall, metadata map[string]any) {
-		sendEvent(ctx, ch, StreamEvent{
+		eventGate.emitAgentEvent(StreamEvent{
 			Type:       EventToolCallMetadata,
 			ToolName:   call.ToolName,
 			ToolCallID: call.ToolCallID,
@@ -869,6 +871,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			cfg.InjectedRecorder,
 		)
 	}
+	// Stop secondary producers before delivering the terminal event. The stream
+	// context cancellation also unblocks an emitter already waiting on ch.
+	cancel(context.Canceled)
+	eventGate.close()
+
 	// Deliver the terminal event using a context that is NOT cancelled when
 	// the parent ctx is cancelled (user abort / idle timeout / loop-detect).
 	// Otherwise sendEvent would short-circuit on <-ctx.Done() and the consumer

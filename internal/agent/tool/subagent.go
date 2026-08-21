@@ -802,7 +802,7 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 		}, nil
 	}
 
-	heartbeatCtx, heartbeatCancel := context.WithCancel(context.WithoutCancel(ctx))
+	heartbeatCtx, heartbeatCancel := context.WithCancel(ctx)
 	defer heartbeatCancel()
 	p.startSpawnHeartbeat(heartbeatCtx, session, 1)
 	result := p.runAgentRequest(taskCtx, key, req)
@@ -1554,15 +1554,25 @@ func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionCo
 	go func() {
 		ticker := time.NewTicker(spawnHeartbeatInterval)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				emitter(ToolStreamEvent{Type: StreamEventSpawnHeartbeat})
-			}
-		}
+		runSpawnHeartbeat(ctx, emitter, ticker.C)
 	}()
+}
+
+func runSpawnHeartbeat(ctx context.Context, emitter StreamEmitter, ticks <-chan time.Time) {
+	if emitter == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			if ctx.Err() != nil {
+				return
+			}
+			emitter(ToolStreamEvent{Type: StreamEventSpawnHeartbeat})
+		}
+	}
 }
 
 func isRetryableSubagentError(err error) bool {
