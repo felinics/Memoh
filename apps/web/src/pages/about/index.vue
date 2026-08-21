@@ -251,6 +251,8 @@ import {
 import MarkdownRender from 'markstream-vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import ChatCodeBlock from '@/pages/home/components/chat-code-block.vue'
+import { registerSharedMarkdownComponents } from '@/components/markdown'
 import {
   DesktopShellKey,
   DesktopUpdatesKey,
@@ -263,6 +265,14 @@ import { useSettingsStore } from '@/store/settings'
 import { useUpdateStore } from '@/store/update'
 
 const GITHUB_REPO = 'memohai/memoh'
+
+// Release notes are arbitrary upstream markdown and can contain fenced code
+// blocks. markstream 2.0's built-in code block needs the optional stream-diffs
+// peer (not installed) and otherwise falls back to a plain <pre>, so give this
+// scope the same design-system code block chat and file preview already use.
+// Idempotent-guarded by the registry; the appearance mermaid scopes need no
+// registration — their content is mermaid-only, served by the global override.
+registerSharedMarkdownComponents('release-notes', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
 
 interface ResourceLink {
   icon: Component
