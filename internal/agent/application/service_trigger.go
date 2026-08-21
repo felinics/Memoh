@@ -204,7 +204,7 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 		return schedule.TriggerResult{}, fmt.Errorf("persist scheduled ACP user message: %w", leadingErr)
 	}
 
-	promptInput := acpagent.PromptInput{
+	result, promptErr := s.acpPool.Prompt(ctx, acpagent.PromptInput{
 		BotID:             botID,
 		ChatID:            botID,
 		SessionID:         payload.SessionID,
@@ -214,17 +214,18 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 		ProjectPath:       info.ProjectPath,
 		ModelID:           strings.TrimSpace(payload.ACPModelID),
 		ReasoningEffort:   strings.TrimSpace(payload.ReasoningEffort),
+		Prompt:            schedulePrompt,
 		ChannelIdentityID: strings.TrimSpace(payload.OwnerUserID),
 		SessionToken:      token,
 		// Nobody is on the other end of a scheduled run.
 		CanRequestUserInput:   false,
 		SupportsImageInput:    false,
 		ToolOutputLimit:       s.toolOutputLimit(),
+		ContextURI:            acpContextURI,
+		ContextMarkdown:       contextMarkdown,
 		RuntimeOwnerAccountID: runtimeOwner,
 		Sink:                  acpclient.EventSinkFunc(func(event.StreamEvent) {}),
-	}
-	promptInput.ApplyContext(schedulePrompt, nil, nil, false, acpContextURI, contextMarkdown)
-	result, promptErr := s.acpPool.Prompt(ctx, promptInput)
+	})
 	lifecycleCause = promptErr
 	if promptErr != nil {
 		s.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the scheduled run ended before a decision arrived")
