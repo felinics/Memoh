@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/event"
 	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 	"github.com/memohai/memoh/internal/schedule"
 )
 
@@ -41,7 +44,23 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	if err != nil {
 		return schedule.TriggerResult{}, err
 	}
-	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, payload.SessionID, scheduleInvocationID(payload), submission)
+	// Project the command as the run's request user turn so subscribers (an
+	// open web session, any future thread subscriber) see what fired this run
+	// while it is still executing — not only after it finishes. Text must equal
+	// the persisted user message (prependTurnUserMessage uses req.Query =
+	// payload.Command), otherwise the bubble's content would visibly change
+	// when the runtime projection hands over to the database at run end.
+	viewFn := func(handle sessionruntime.RunHandle) *sessionruntime.RunAdmissionView {
+		return &sessionruntime.RunAdmissionView{
+			RequestUserTurn: &chatview.UITurn{
+				TurnID:    handle.TurnID,
+				Role:      "user",
+				Text:      payload.Command,
+				Timestamp: time.Now(),
+			},
+		}
+	}
+	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, payload.SessionID, scheduleInvocationID(payload), submission, viewFn)
 	if err != nil {
 		// Including a busy answer: a fire that cannot take the thread's slot has
 		// no value once the next one is due, so it is reported and dropped rather
@@ -78,6 +97,10 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		return schedule.TriggerResult{}, err
 	}
 	req.RunID = rc.runConfig.RunID
+	// The step committer refuses to arm without the durable turn identity
+	// (step_commit.go), and that identity only exists after admission.
+	req.TurnID = admission.TurnID
+	req.TurnPosition = &admission.TurnPosition
 
 	cfg := rc.runConfig
 	cfg.SessionType = sessionmode.Schedule
@@ -98,28 +121,24 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	var lifecycleCause error
 	defer func() { terminal(lifecycleCause) }()
 
-	result, err := s.agent.Generate(ctx, cfg)
-	lifecycleCause = err
-	if err != nil {
-		return schedule.TriggerResult{}, err
+	// Wire the trigger run like an interactive turn: steps persist as they
+	// complete, and every stream event is projected to the session runtime so
+	// the run is visible while it executes. The previous Generate-based path
+	// emitted nothing until storeRound wrote the whole round at the end.
+	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
+	if stepCommitter != nil {
+		cfg.OnStepCommitted = stepCommitter.commit
+		cfg.OnStepInterrupted = stepCommitter.interrupt
 	}
 
-	outputMessages := sdkMessagesToModelMessages(result.Messages)
-	roundMessages := prependUserMessage(req.Query, outputMessages)
-	storeErr := s.storeRoundWithOptions(ctx, req, roundMessages, rc.model.ID, storeRoundOptions{
-		ContextLifecycle: cfg.ContextLifecycle,
-	})
-	if storeErr != nil {
-		lifecycleCause = storeErr
-	}
-
-	totalUsageJSON, _ := json.Marshal(result.Usage)
-	return schedule.TriggerResult{
-		Status:     "ok",
-		Text:       strings.TrimSpace(result.Text),
-		UsageBytes: totalUsageJSON,
-		ModelID:    rc.model.ID,
-	}, storeErr
+	// cancelStream is the consumption brake: if the consumer stops early
+	// (projection refused, terminal handled), cancelling unwinds the Stream
+	// goroutine instead of leaving it blocked on an unread channel.
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	result, streamErr := s.consumeTriggeredStream(streamCtx, s.agent.Stream(streamCtx, cfg), req, rc, admission.Handle, stepCommitter)
+	lifecycleCause = streamErr
+	return result, streamErr
 }
 
 // triggerScheduleACP runs one schedule fire through the ACP session pool.
@@ -233,6 +252,135 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 		Status:     "ok",
 		Text:       strings.TrimSpace(result.Text),
 		UsageBytes: usageJSON,
+	}, nil
+}
+
+// consumeTriggeredStream drains a triggered (non-interactive) run's event
+// stream. Every event is published to the session runtime so subscribers
+// watch the run live; persistence follows the same discipline as the WS loop
+// (streamChatWSResultWithHooks): steps persist as they complete via the step
+// committer, with one terminal-snapshot write as the fallback when step
+// persistence is unavailable. What a trigger deliberately does NOT have is
+// the WS client plumbing — no push channel, no abort channel, no idle
+// timeout — because there is no client; the runtime lease and routed abort
+// already bound execution.
+//
+// The events channel is a parameter (rather than this function calling
+// agent.Stream itself) so tests can drive the loop directly; the caller owns
+// the stream context and must cancel it to unwind a still-running Stream
+// goroutine when this returns early.
+func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan native.StreamEvent, req ChatRequest, rc resolvedContext, handle sessionruntime.RunHandle, stepCommitter *agentStepCommitter) (schedule.TriggerResult, error) {
+	publishEvent := s.turnAgentEventPublisher(handle)
+
+	var (
+		lastSnapshot     terminalSnapshot
+		hasSnapshot      bool
+		hasVisibleOutput bool
+		stored           bool
+		streamErr        error
+	)
+	for event := range events {
+		if eventErr := agentStreamEventError(event); eventErr != nil {
+			s.logger.Error("triggered run stream error",
+				slog.String("bot_id", req.BotID),
+				slog.String("session_id", req.ThreadID),
+				slog.Any("error", eventErr),
+			)
+			if streamErr == nil {
+				streamErr = eventErr
+			}
+		}
+		if hasVisibleAgentStreamOutput(event) {
+			hasVisibleOutput = true
+		}
+		if publishEvent != nil {
+			if publishErr := publishEvent(ctx, event); publishErr != nil {
+				// A refused projection write (fence rejection, ownership
+				// handoff) means this process may no longer own the run, and
+				// continuing would persist history the runtime no longer
+				// attributes to it — the same stop policy as the channel
+				// pump (turn_service.go). Stop consuming; the caller's
+				// stream-context cancel unwinds the producer goroutine.
+				if streamErr == nil {
+					streamErr = publishErr
+				}
+				break
+			}
+		}
+		if event.IsTerminal() && len(event.Messages) > 0 {
+			data, marshalErr := json.Marshal(event)
+			if marshalErr != nil {
+				continue
+			}
+			snap, ok := extractTerminalSnapshot(data)
+			if !ok {
+				continue
+			}
+			snap.visibleOutput = hasVisibleOutput
+			lastSnapshot = snap
+			hasSnapshot = true
+			if !stored && !runOwnershipLost(ctx) {
+				if stepCommitter != nil {
+					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+						if streamErr == nil {
+							streamErr = storeErr
+						}
+						s.logger.Error("triggered run step finalization failed", slog.Any("error", storeErr))
+					} else {
+						stored = true
+					}
+				} else {
+					if storeErr := s.persistTerminalSnapshot(context.WithoutCancel(ctx), req, rc, snap); storeErr != nil {
+						if streamErr == nil {
+							streamErr = storeErr
+						}
+						s.logger.Error("triggered run terminal persist failed", slog.Any("error", storeErr))
+					} else {
+						stored = true
+					}
+				}
+			}
+		}
+	}
+
+	// Mid-run abort/error: finalize whatever the step committer already landed
+	// so the partial transcript survives for audit. This is a deliberate
+	// behavior change from the Generate era, which persisted nothing on
+	// failure — the partial record is the more honest one.
+	if !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
+		if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+			if streamErr == nil {
+				streamErr = storeErr
+			}
+			s.logger.Error("triggered run step finalization failed", slog.Any("error", storeErr))
+		}
+	}
+
+	switch {
+	case runOwnershipLost(ctx):
+		// The reaper names this run's outcome; a superseded owner must not
+		// report a result for it (SR-DUR-002).
+		return schedule.TriggerResult{}, sessionruntime.ErrRunOwnershipLost
+	case streamErr != nil && !hasSnapshot:
+		return schedule.TriggerResult{}, streamErr
+	case !hasSnapshot:
+		return schedule.TriggerResult{}, errors.New("schedule run ended without a terminal event")
+	}
+
+	// A terminal snapshot settles the run even if a non-fatal stream error was
+	// seen earlier (already logged); the trigger result mirrors the Generate
+	// era's contract: final assistant text plus usage for the schedule log.
+	text := ""
+	if modelMsgs := sdkMessagesToModelMessages(lastSnapshot.sdkMessages); len(modelMsgs) > 0 {
+		if idx := lastAssistantMessageIndex(modelMsgs); idx >= 0 {
+			text = strings.TrimSpace(modelMsgs[idx].TextContent())
+		}
+	}
+	return schedule.TriggerResult{
+		Status:     "ok",
+		Text:       text,
+		UsageBytes: lastSnapshot.usage,
+		ModelID:    rc.model.ID,
 	}, nil
 }
 

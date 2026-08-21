@@ -70,13 +70,6 @@ func modelMessageToSDKMessage(mm ModelMessage) sdk.Message {
 	return messageconv.ModelMessageToSDKMessage(mm)
 }
 
-// prependUserMessage prepends the user query as a ModelMessage to the output
-// messages from the agent. The SDK only returns output messages (assistant + tool);
-// user messages must be added back at the resolver boundary for persistence.
-func prependUserMessage(query string, output []ModelMessage) []ModelMessage {
-	return messageconv.PrependUserMessage(query, output)
-}
-
 func prependTurnUserMessage(req ChatRequest, output []ModelMessage) []ModelMessage {
 	if strings.TrimSpace(req.Query) == "" && req.UserMessageKind != UserMessageKindSkillActivation {
 		return output
