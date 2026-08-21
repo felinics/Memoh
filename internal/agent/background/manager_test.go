@@ -274,3 +274,41 @@ func TestRunningTasksSummaryMentionsWaitTools(t *testing.T) {
 	}
 	_ = mgr.Kill(taskID)
 }
+
+func TestCleanupKeepsQueuedAgentTasks(t *testing.T) {
+	mgr := New(nil)
+	taskID, _, err := mgr.StartAgentTask(
+		context.Background(), "bot1", "sess1", "agent1", "child1", "queued work", "Queued work", true,
+	)
+	if err != nil {
+		t.Fatalf("StartAgentTask failed: %v", err)
+	}
+
+	mgr.Cleanup(0)
+	if task := mgr.Get(taskID); task == nil {
+		t.Fatal("cleanup removed a queued agent task")
+	}
+}
+
+func TestCleanupRemovesOldTerminalAgentTasks(t *testing.T) {
+	mgr := New(nil)
+	taskID, _, err := mgr.StartAgentTask(
+		context.Background(), "bot1", "sess1", "agent1", "child1", "work", "Work", false,
+	)
+	if err != nil {
+		t.Fatalf("StartAgentTask failed: %v", err)
+	}
+	mgr.CompleteAgentTask(taskID, AgentTaskResult{Status: TaskCompleted})
+	task := mgr.Get(taskID)
+	if task == nil {
+		t.Fatal("completed task not found")
+	}
+	task.mu.Lock()
+	task.CompletedAt = time.Now().Add(-time.Hour)
+	task.mu.Unlock()
+
+	mgr.Cleanup(time.Minute)
+	if task := mgr.Get(taskID); task != nil {
+		t.Fatal("cleanup kept an old terminal agent task")
+	}
+}

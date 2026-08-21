@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	agenttools "github.com/memohai/memoh/internal/agent/tool"
 )
 
 type agentStreamTestProvider func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error)
