@@ -12,12 +12,14 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
 )
 
-// SDKRenderedPayload is kept as a source-compatible name for ContextView
-// callers. The provider-facing projection is owned by the Native runtime.
-type SDKRenderedPayload = agentpkg.ContextProjection
+type SDKRenderedPayload struct {
+	System       string
+	Messages     []sdk.Message
+	Query        string
+	InlineImages []sdk.ImagePart
+}
 
 type SDKMessagesRenderer struct{}
 
