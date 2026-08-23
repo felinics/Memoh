@@ -3,10 +3,12 @@
   <ToolCallInline
     v-if="items.length === 1 && single && single.type === 'tool'"
     :block="(single as ToolCallBlockType)"
+    :message-id="messageId"
   />
   <ThinkingBlock
     v-else-if="items.length === 1 && single && single.type === 'reasoning'"
     :block="(single as ThinkingBlockType)"
+    :message-id="messageId"
     :streaming="active === true"
   />
 
@@ -62,11 +64,13 @@
           <ToolCallInline
             v-if="item.type === 'tool'"
             :block="(item as ToolCallBlockType)"
+            :message-id="messageId"
             in-group
           />
           <ThinkingBlock
             v-else-if="item.type === 'reasoning'"
             :block="(item as ThinkingBlockType)"
+            :message-id="messageId"
             :streaming="active === true && i === items.length - 1"
             in-group
           />
@@ -94,6 +98,8 @@ import { useConnectorLogos, type ConnectorIdentity } from '../composables/useCon
 const props = defineProps<{
   // Ordered run of tool + reasoning blocks belonging to one process segment.
   items: ContentBlock[]
+  // Stable render identity for the assistant turn that owns these blocks.
+  messageId: string
   // True when this segment is the last block of a still-streaming assistant turn.
   active?: boolean
 }>()
@@ -121,7 +127,7 @@ const connectors = computed(() => {
 // (no auto-open while streaming, no auto-close on completion). The header still
 // acts as a live ticker via `running`/`headerLabel`, so the user can follow
 // progress without the body being forced open.
-const collapseKey = computed(() => groupCollapseKey(props.items))
+const collapseKey = computed(() => groupCollapseKey(props.messageId, props.items))
 const open = ref(getCollapseOpen(collapseKey.value))
 watch(collapseKey, (key) => {
   open.value = getCollapseOpen(key)

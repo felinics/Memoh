@@ -210,6 +210,7 @@
             <ToolCallGroup
               v-if="node.kind === 'process'"
               :items="node.items"
+              :message-id="message.id"
               :active="message.streaming && node.lastIndex === message.messages.length - 1"
             />
 
@@ -382,7 +383,6 @@ import type {
   ChatMessage,
   ContentBlock,
   ToolCallBlock as ToolCallBlockType,
-  ThinkingBlock as ThinkingBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
 import { structuredToolResult } from '@/store/chat-list.normalize'
@@ -847,16 +847,15 @@ const renderNodes = computed<RenderNode[]>(() => {
 // call — so they show a real "Thought for Ns" instead of a bare "Thought".
 watch(
   () => (props.message.role === 'assistant' && props.message.streaming
-    ? props.message.messages.map(block => `${block.type}:${block.id}`).join('|')
+    ? `${props.message.id}|${props.message.messages.map(block => `${block.type}:${block.id}`).join('|')}`
     : ''),
   () => {
     if (props.message.role !== 'assistant' || !props.message.streaming) return
     const blocks = props.message.messages
     blocks.forEach((block, index) => {
       if (block.type !== 'reasoning') return
-      const content = (block as ThinkingBlockType).content ?? ''
-      markReasoningSeen(content)
-      if (index < blocks.length - 1) finalizeReasoning(content)
+      markReasoningSeen(props.message.id, block)
+      if (index < blocks.length - 1) finalizeReasoning(props.message.id, block)
     })
   },
   { immediate: true },
@@ -867,7 +866,9 @@ watch(
   (streaming, was) => {
     if (!was || streaming || props.message.role !== 'assistant') return
     props.message.messages.forEach((block) => {
-      if (block.type === 'reasoning') finalizeReasoning((block as ThinkingBlockType).content ?? '')
+      if (block.type === 'reasoning') {
+        finalizeReasoning(props.message.id, block)
+      }
     })
   },
 )

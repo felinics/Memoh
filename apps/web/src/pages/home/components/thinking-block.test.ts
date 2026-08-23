@@ -21,11 +21,17 @@ afterEach(() => {
   }
 })
 
-function mountThinkingBlock(content: string, streaming = true): MountedThinkingBlock {
+let nextMessageId = 0
+
+function mountThinkingBlock(
+  content: string,
+  streaming = true,
+  messageId = `thinking-message-${nextMessageId++}`,
+): MountedThinkingBlock {
   const block = shallowRef<ThinkingBlockType>({ id: 1, type: 'reasoning', content })
   const harness = defineComponent({
     setup() {
-      return () => h(ThinkingBlock, { block: block.value, streaming })
+      return () => h(ThinkingBlock, { block: block.value, messageId, streaming })
     },
   })
   const root = document.createElement('div')
@@ -107,7 +113,8 @@ describe('ThinkingBlock', () => {
 
   it('restores the latest streamed state after the final content remounts', async () => {
     const finalContent = 'thought that will be re-fetched after streaming'
-    const streaming = mountThinkingBlock('thought that will be re-fetched')
+    const messageId = 'message-refetched-after-streaming'
+    const streaming = mountThinkingBlock('thought that will be re-fetched', true, messageId)
     const streamingButton = disclosureButton(streaming.root)
 
     streamingButton.click()
@@ -116,23 +123,21 @@ describe('ThinkingBlock', () => {
     await nextTick()
     unmountThinkingBlock(streaming)
 
-    const completed = mountThinkingBlock(finalContent, false)
+    const completed = mountThinkingBlock(finalContent, false, messageId)
 
     expect(isExpanded(disclosureButton(completed.root))).toBe(true)
   })
 
-  it('does not retain collapse state for superseded streamed content', async () => {
-    const initialContent = 'temporary streamed thought'
-    const streaming = mountThinkingBlock(initialContent)
+  it('does not share collapse state between different messages with identical reasoning', async () => {
+    const content = 'the same thought in two different messages'
+    const streaming = mountThinkingBlock(content, true, 'message-with-open-thought')
     const streamingButton = disclosureButton(streaming.root)
 
     streamingButton.click()
     await nextTick()
-    streaming.setContent('temporary streamed thought with another token')
-    await nextTick()
 
-    const superseded = mountThinkingBlock(initialContent, false)
+    const separateMessage = mountThinkingBlock(content, false, 'message-with-closed-thought')
 
-    expect(isExpanded(disclosureButton(superseded.root))).toBe(false)
+    expect(isExpanded(disclosureButton(separateMessage.root))).toBe(false)
   })
 })
