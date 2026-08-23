@@ -2212,11 +2212,8 @@ async function refreshACPComposerConfigAfterSelectionError(result: SendMessageRe
 }
 
 function pendingMatchesDefaultACP(input: ACPAgentSessionInput): boolean {
-  const metadata = activeChatTarget.value.metadata
   return activeChatTarget.value.kind === 'draft-acp'
-    && metadata?.acp_agent_id === input.agentId
-    && metadata?.project_path === (input.projectPath || ACP_DEFAULT_PROJECT_PATH)
-    && metadata?.acp_project_mode === (input.projectMode || ACP_DEFAULT_PROJECT_MODE)
+    && chatStore.pendingACPMatchesInput(input, paneTarget.value)
 }
 
 watch([defaultACPUnavailableMessage, defaultACPLoading, currentBotId, hasExplicitSessionSelection, isActive], ([message, loading, _bot, _explicit, focused]) => {

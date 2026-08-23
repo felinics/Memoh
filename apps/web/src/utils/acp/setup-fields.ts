@@ -1,5 +1,5 @@
 import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
-import { isClaudeCodeAgent, isCodexAgent } from './agent-icon'
+import { isACPAgent, isClaudeCodeAgent, isCodexAgent } from './agent-icon'
 import { hermesAPIKeyPlaceholder, isHermesCustomProvider, hermesProviderValue } from './hermes'
 import { normalizeACPAgentID } from './metadata'
 
@@ -31,10 +31,29 @@ export function acpInputType(type: string | undefined): string {
   return 'text'
 }
 
+export function acpManagedFieldLabel(
+  profile: AcpprofilePublicProfile,
+  field: AcpprofileManagedField,
+  t: AcpSetupModeLabelTranslate,
+): string {
+  if (isACPAgent(profile.id)) {
+    const id = normalizeACPAgentID(field.id)
+    if (id === 'command') return t('bots.settings.acpCommand')
+    if (id === 'arguments') return t('bots.settings.acpArguments')
+  }
+  return field.label || field.id || ''
+}
+
 export function acpManagedFieldHelp(
   profile: AcpprofilePublicProfile,
   field: AcpprofileManagedField,
+  t: AcpSetupModeLabelTranslate,
 ): string {
+  if (isACPAgent(profile.id)) {
+    const id = normalizeACPAgentID(field.id)
+    if (id === 'command') return t('bots.settings.acpCommandHelp')
+    if (id === 'arguments') return t('bots.settings.acpArgumentsHelp')
+  }
   const isHermes = normalizeACPAgentID(profile.id) === 'hermes'
   const id = normalizeACPAgentID(field.id)
   if (isHermes && (id === 'provider' || id === 'model')) return ''

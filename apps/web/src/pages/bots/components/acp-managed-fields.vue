@@ -13,6 +13,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Textarea,
 } from '@felinic/ui'
 import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
 import {
@@ -30,6 +31,7 @@ import {
   acpInputType,
   acpManagedFieldAutocomplete,
   acpManagedFieldHelp,
+  acpManagedFieldLabel,
   acpManagedFieldName,
   acpManagedPlaceholder,
 } from '@/utils/acp/setup-fields'
@@ -109,8 +111,8 @@ function handleFieldCommit() {
     <FieldStack
       v-for="field in fields"
       :key="field.id"
-      :label="field.label || field.id"
-      :help="acpManagedFieldHelp(profile, field)"
+      :label="acpManagedFieldLabel(profile, field, t)"
+      :help="acpManagedFieldHelp(profile, field, t)"
       :gap="fieldGap"
     >
       <Select
@@ -166,6 +168,19 @@ function handleFieldCommit() {
           @change="handleFieldCommit"
         />
       </template>
+      <Textarea
+        v-else-if="field.type === 'textarea'"
+        :model-value="managed[field.id || ''] || ''"
+        :name="settingsMode ? acpManagedFieldName(profile, field) : undefined"
+        rows="4"
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        :placeholder="acpManagedPlaceholder(profile, field, hermesProvider)"
+        @update:model-value="(val) => handleFieldInput(field, String(val ?? ''))"
+        @change="handleFieldCommit"
+      />
       <Input
         v-else
         :model-value="managed[field.id || ''] || ''"

@@ -9,6 +9,7 @@ import {
   readACPAgentConfig,
   readACPConfig,
   withACPMetadata,
+  withEnabledACPAgentMetadataIfConfigured,
   type ACPForm,
 } from './metadata'
 
@@ -431,6 +432,58 @@ describe('acp-metadata', () => {
       managed: {
         api_key: 'sk-...cret',
       },
+    })
+  })
+})
+
+describe('withEnabledACPAgentMetadataIfConfigured', () => {
+  it('does not write incomplete profile defaults during Agent creation', () => {
+    expect(withEnabledACPAgentMetadataIfConfigured({}, {
+      id: 'acp',
+      display_name: 'ACP',
+      setup_modes: ['api_key'],
+      managed_fields: [{ id: 'command', required: true }],
+    })).toBeUndefined()
+  })
+
+  it('does not materialize an empty Claude Code OAuth setup during Agent creation', () => {
+    expect(withEnabledACPAgentMetadataIfConfigured({}, claudeCodeProfile)).toBeUndefined()
+  })
+
+  it('enables only a configured selected profile and preserves unrelated ACP config', () => {
+    const codex = {
+      enabled: true,
+      setup_mode: 'oauth',
+      managed: {},
+    }
+    const metadata = {
+      acp: {
+        agents: {
+          codex,
+          acp: {
+            enabled: false,
+            setup_mode: 'api_key',
+            managed: { command: 'custom-acp', arguments: '' },
+          },
+        },
+      },
+    }
+    const next = withEnabledACPAgentMetadataIfConfigured(metadata, {
+      id: 'acp',
+      display_name: 'ACP',
+      setup_modes: ['api_key'],
+      managed_fields: [
+        { id: 'command', required: true },
+        { id: 'arguments' },
+      ],
+    })
+    const agents = (next?.acp as { agents: Record<string, unknown> }).agents
+
+    expect(agents.codex).toBe(codex)
+    expect(agents.acp).toEqual({
+      enabled: true,
+      setup_mode: 'api_key',
+      managed: { command: 'custom-acp', arguments: '' },
     })
   })
 })

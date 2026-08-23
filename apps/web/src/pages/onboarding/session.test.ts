@@ -30,6 +30,7 @@ describe('onboarding session handoff', () => {
       modelConfigured: false,
       acp: {
         agentId: 'Codex',
+        botAgentId: 'agent-id',
         oauthPending: true,
       },
       managed: { api_key: 'must-not-be-stored' },
@@ -42,7 +43,7 @@ describe('onboarding session handoff', () => {
     expect(JSON.parse(raw!)).toEqual({
       botId: 'bot-id',
       modelConfigured: false,
-      acp: { agentId: 'codex', oauthPending: true },
+      acp: { agentId: 'codex', botAgentId: 'agent-id', oauthPending: true },
     })
   })
 
@@ -72,19 +73,21 @@ describe('onboarding session handoff', () => {
     const oauthResult = {
       botId: 'bot-id',
       modelConfigured: false,
-      acp: { agentId: 'codex', oauthPending: true },
+      acp: { agentId: 'codex', botAgentId: 'agent-id', oauthPending: true },
     }
 
     session.writeOnboardingBotResult(oauthResult)
     expect(session.readOnboardingOAuthResume()).toEqual({
       botId: 'bot-id',
       agentId: 'codex',
+      botAgentId: 'agent-id',
     })
 
     session.markOnboardingOAuthComplete()
     expect(session.readOnboardingOAuthResume()).toBeNull()
     expect(session.readOnboardingBotResult()?.acp).toEqual({
       agentId: 'codex',
+      botAgentId: 'agent-id',
       oauthPending: false,
     })
 
@@ -102,7 +105,7 @@ describe('onboarding session handoff', () => {
     sessionStorage.setItem(ONBOARDING_KEYS.botResult, JSON.stringify({
       botId: 'bot-id',
       modelConfigured: true,
-      acp: { agentId: ' CODEX ', oauthPending: true },
+      acp: { agentId: ' CODEX ', botAgentId: ' agent-id ', oauthPending: true },
     }))
 
     const session = await import('./session')
@@ -110,7 +113,7 @@ describe('onboarding session handoff', () => {
     expect(session.readOnboardingBotResult()).toEqual({
       botId: 'bot-id',
       modelConfigured: true,
-      acp: { agentId: 'codex', oauthPending: true },
+      acp: { agentId: 'codex', botAgentId: 'agent-id', oauthPending: true },
     })
 
     sessionStorage.setItem(ONBOARDING_KEYS.botResult, '{broken')

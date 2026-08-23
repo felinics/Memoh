@@ -438,10 +438,16 @@ async function persistACPForm() {
   }
   const normalized = normalizeACPForm(form, profiles.value)
   // Shared ACP credentials outlive individual BotAgent rows. Never turn the
-  // legacy provider bit off when one instance is disabled or deleted.
+  // legacy provider bit off when one configured instance is disabled or
+  // deleted. New, incomplete Agents stay disabled until their required setup
+  // is present so partial settings can be saved without failing server checks.
   for (const agent of agents.value) {
     const provider = botAgentProvider(agent)
-    if (provider && normalized.agents[provider]) normalized.agents[provider].enabled = true
+    const profile = profileFor(agent)
+    const config = provider ? normalized.agents[provider] : undefined
+    if (profile && config && !findMissingRequiredManagedField(profile, config.managed, config.setup_mode)) {
+      config.enabled = true
+    }
   }
   const snapshot = JSON.stringify(normalized)
   if (snapshot === lastPersistedSnapshot.value) return

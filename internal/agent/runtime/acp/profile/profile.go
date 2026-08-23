@@ -7,6 +7,8 @@ import (
 )
 
 const (
+	AgentACPID          = "acp"
+	AgentACPName        = "ACP"
 	AgentCodexID        = "codex"
 	AgentCodexName      = "Codex"
 	AgentClaudeCodeID   = "claude-code"
@@ -148,7 +150,10 @@ func MissingRequiredManagedField(profile Profile, setup AgentSetup) (ManagedFiel
 // decided without a workspace backend. Legacy metadata with no explicit
 // setup_mode is resolved by the runtime pool because legacy metadata may omit it.
 func MissingRequiredManagedFieldForPreflight(profile Profile, setup AgentSetup) (ManagedField, bool) {
-	if !setup.ModeSet {
+	// Built-in profiles predate setup_mode, so missing mode metadata must keep
+	// its legacy runtime resolution. Generic ACP has no legacy representation:
+	// its command is always explicit and can be validated before startup.
+	if !setup.ModeSet && NormalizeAgentID(profile.ID) != AgentACPID {
 		return ManagedField{}, false
 	}
 	return MissingRequiredManagedField(profile, setup)
@@ -171,6 +176,7 @@ func managedFieldOrFallback(profile Profile, fieldID string, fallback ManagedFie
 var registry = map[string]Profile{}
 
 func init() {
+	Register(genericACPProfile())
 	Register(codexProfile())
 	Register(claudeCodeProfile())
 	Register(hermesProfile())
@@ -188,6 +194,36 @@ func Register(profile Profile) {
 		panic(err)
 	}
 	registry[id] = profile
+}
+
+func genericACPProfile() Profile {
+	return Profile{
+		ID:             AgentACPID,
+		DisplayName:    AgentACPName,
+		Description:    "Run a custom Agent Client Protocol command",
+		RuntimeStorage: genericACPRuntimeStorage(),
+		ManagedFields: []ManagedField{
+			{
+				ID:          "command",
+				Label:       "Command",
+				Type:        "text",
+				Required:    true,
+				Placeholder: "my-agent-acp",
+				Help:        "Executable name or path for the ACP agent.",
+			},
+			{
+				ID:          "arguments",
+				Label:       "Arguments",
+				Type:        "textarea",
+				Placeholder: "--stdio",
+				Help:        "Optional process arguments, one argument per line.",
+			},
+		},
+		SupportedBackends: []string{"container"},
+		// api_key is an internal managed-mode marker here; generic ACP has no
+		// authentication UI of its own and only needs Memoh-managed launch data.
+		SetupModes: []string{setupModeAPIKey},
+	}
 }
 
 func codexProfile() Profile {

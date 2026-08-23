@@ -2,6 +2,75 @@ package profile
 
 import "testing"
 
+func TestListIncludesGenericACP(t *testing.T) {
+	profile, ok := Lookup(AgentACPID)
+	if !ok {
+		t.Fatal("generic ACP profile was not registered")
+	}
+	if profile.Command != "" {
+		t.Fatalf("generic ACP command = %q, want managed command", profile.Command)
+	}
+	if len(profile.ManagedFields) != 2 || profile.ManagedFields[0].ID != "command" || !profile.ManagedFields[0].Required || profile.ManagedFields[1].ID != "arguments" {
+		t.Fatalf("generic ACP managed fields = %#v", profile.ManagedFields)
+	}
+	if len(profile.SetupModes) != 1 || profile.SetupModes[0] != setupModeAPIKey {
+		t.Fatalf("generic ACP setup modes = %#v", profile.SetupModes)
+	}
+	if len(profile.RuntimeStorage.SessionRoots) != 0 || profile.RuntimeStorage.SessionLocator != RuntimeSessionLocatorNone {
+		t.Fatalf("generic ACP unexpectedly declares resumable storage: %#v", profile.RuntimeStorage)
+	}
+}
+
+func TestResolveGenericACPLaunch(t *testing.T) {
+	profile, ok := Lookup(AgentACPID)
+	if !ok {
+		t.Fatal("generic ACP profile was not registered")
+	}
+	command, arguments, err := ResolveLaunch(profile, AgentSetup{Managed: map[string]string{
+		"command":   "  uvx  ",
+		"arguments": "agent-package\r\n--mode\nvalue with spaces\n\n",
+	}})
+	if err != nil {
+		t.Fatalf("ResolveLaunch() error = %v", err)
+	}
+	if command != "uvx" {
+		t.Fatalf("ResolveLaunch() command = %q, want uvx", command)
+	}
+	want := []string{"agent-package", "--mode", "value with spaces"}
+	if len(arguments) != len(want) {
+		t.Fatalf("ResolveLaunch() arguments = %#v, want %#v", arguments, want)
+	}
+	for i := range want {
+		if arguments[i] != want[i] {
+			t.Fatalf("ResolveLaunch() arguments[%d] = %q, want %q", i, arguments[i], want[i])
+		}
+	}
+}
+
+func TestResolveGenericACPLaunchRejectsInvalidCommand(t *testing.T) {
+	profile, ok := Lookup(AgentACPID)
+	if !ok {
+		t.Fatal("generic ACP profile was not registered")
+	}
+	if _, _, err := ResolveLaunch(profile, AgentSetup{Managed: map[string]string{"command": "uvx\nagent"}}); err == nil {
+		t.Fatal("ResolveLaunch() error = nil, want invalid command error")
+	}
+}
+
+func TestResolveBuiltInLaunchKeepsPinnedCommand(t *testing.T) {
+	profile, ok := Lookup(AgentCodexID)
+	if !ok {
+		t.Fatal("Codex profile was not registered")
+	}
+	command, arguments, err := ResolveLaunch(profile, AgentSetup{Managed: map[string]string{"command": "ignored"}})
+	if err != nil {
+		t.Fatalf("ResolveLaunch() error = %v", err)
+	}
+	if command != "codex-acp" || len(arguments) != 0 {
+		t.Fatalf("ResolveLaunch() = %q, %#v; want pinned Codex command", command, arguments)
+	}
+}
+
 func TestListIncludesClaudeCode(t *testing.T) {
 	items := List()
 	if len(items) < 2 {
@@ -175,6 +244,23 @@ func TestMissingRequiredManagedFieldForPreflightSkipsLegacyMode(t *testing.T) {
 	setup.ModeSet = true
 	if field, missing := MissingRequiredManagedFieldForPreflight(profile, setup); !missing || field.ID != "api_key" {
 		t.Fatalf("explicit api_key preflight = %#v, %v; want missing api_key", field, missing)
+	}
+}
+
+func TestMissingRequiredManagedFieldForPreflightRequiresGenericACPCommand(t *testing.T) {
+	profile, ok := Lookup(AgentACPID)
+	if !ok {
+		t.Fatal("generic ACP profile not registered")
+	}
+	setup := AgentSetup{
+		AgentID: AgentACPID,
+		Enabled: true,
+		Mode:    setupModeAPIKey,
+		ModeSet: false,
+		Managed: map[string]string{},
+	}
+	if field, missing := MissingRequiredManagedFieldForPreflight(profile, setup); !missing || field.ID != "command" {
+		t.Fatalf("generic ACP preflight = %#v, %v; want missing command", field, missing)
 	}
 }
 

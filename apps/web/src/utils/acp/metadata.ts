@@ -82,6 +82,21 @@ export function withACPMetadata(metadata: Record<string, unknown> | undefined, a
   return nextMetadata
 }
 
+// Agent creation must only touch the selected profile. Re-serializing every
+// profile would turn defaults or stale client state for an unrelated Agent
+// into an explicit server update and can make that unrelated config fail
+// validation before the new BotAgent row is created.
+export function withEnabledACPAgentMetadataIfConfigured(
+  metadata: Record<string, unknown> | undefined,
+  profile: AcpprofilePublicProfile,
+): Record<string, unknown> | undefined {
+  const form = readACPConfig(metadata, [profile])
+  const agent = ensureACPAgentForm(form, profile)
+  if (findMissingRequiredManagedField(profile, agent.managed, agent.setup_mode)) return undefined
+  agent.enabled = true
+  return withACPMetadata(metadata, form, [profile])
+}
+
 export function findMissingRequiredACPField(value: ACPForm, profiles: AcpprofilePublicProfile[]): MissingACPRequiredField | null {
   // Validation is per-agent and skips `self` mode below. Managed api_key and
   // oauth modes apply the profile's credential requirements consistently.

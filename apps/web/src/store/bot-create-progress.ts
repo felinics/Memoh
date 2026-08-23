@@ -38,6 +38,7 @@ export type BotCreateSettings = {
 export type BotCreateAgent = {
   name: string
   provider: string
+  deferDefault?: boolean
 }
 
 export type StartBotCreateOptions = {
@@ -49,6 +50,7 @@ export type StartBotCreateOptions = {
 export type BotCreateStartResult = {
   settingsApplied: boolean
   agentApplied: boolean
+  agentId?: string
 }
 
 function hasSettings(settings?: BotCreateSettings): boolean {
@@ -111,6 +113,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     if (status.value === 'creating') return { settingsApplied: false, agentApplied: false }
     let settingsApplied = !hasSettings(options.settings)
     let agentApplied = !options.agent
+    let createdAgentID = ''
     lastPayload = payload
     lastOptions = options
 
@@ -157,7 +160,6 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       const botId = createdBot.id
       if (botId && (hasSettings(options.settings) || options.agent)) {
         lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'applying-settings', status: 'running' })
-        let createdAgentID = ''
         if (options.agent) {
           try {
             const { data: createdAgent } = await postBotsByBotIdAgents({
@@ -171,23 +173,26 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
             })
             createdAgentID = createdAgent.id?.trim() ?? ''
             if (!createdAgentID) throw new Error('Created Agent has no ID')
+            if (options.agent.deferDefault) agentApplied = true
           } catch (error) {
             setupError.value = resolveApiErrorMessage(error, toMessage(error))
             lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
           }
         }
         try {
-          if (hasSettings(options.settings) || createdAgentID) {
+          if (hasSettings(options.settings) || (createdAgentID && !options.agent?.deferDefault)) {
             await putBotsByBotIdSettings({
               path: { bot_id: botId },
               body: {
                 ...settingsBody(options.settings ?? {}),
-                ...(createdAgentID ? { default_bot_agent_id: createdAgentID } : {}),
+                ...(createdAgentID && !options.agent?.deferDefault
+                  ? { default_bot_agent_id: createdAgentID }
+                  : {}),
               },
               throwOnError: true,
             })
             if (hasSettings(options.settings)) settingsApplied = true
-            if (createdAgentID) agentApplied = true
+            if (createdAgentID && !options.agent?.deferDefault) agentApplied = true
           }
         } catch {
           // Bot created successfully, settings save failed; this is non-fatal.
@@ -202,7 +207,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'ready', status: 'done' })
       }
       status.value = 'ready'
-      return { settingsApplied, agentApplied }
+      return { settingsApplied, agentApplied, agentId: createdAgentID || undefined }
     } catch (error) {
       const parsed = parseMemohError(error)
       const message = resolveApiErrorMessage(error, toMessage(error))
@@ -214,7 +219,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       // to a hard error — otherwise a successful create is reported as failed.
       if (bot.value) {
         status.value = 'ready'
-        return { settingsApplied, agentApplied }
+        return { settingsApplied, agentApplied, agentId: createdAgentID || undefined }
       }
       progress.value = { phase: 'error', error: message }
       ensureErrorLine(message)

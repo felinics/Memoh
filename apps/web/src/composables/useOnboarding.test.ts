@@ -63,7 +63,7 @@ describe('useOnboarding completion', () => {
     writeOnboardingBotResult({
       botId: 'bot-id',
       modelConfigured: false,
-      acp: { agentId: 'codex', oauthPending: false },
+      acp: { agentId: 'codex', botAgentId: 'agent-id', oauthPending: false },
     })
     localStorage.setItem(ONBOARDING_KEYS.forceOnboarding, '1')
 
@@ -92,7 +92,7 @@ describe('useOnboarding completion', () => {
     writeOnboardingBotResult({
       botId: 'bot-id',
       modelConfigured: false,
-      acp: { agentId: 'claude-code', oauthPending: true },
+      acp: { agentId: 'claude-code', botAgentId: 'agent-id', oauthPending: true },
     })
 
     expect(await useOnboarding().complete()).toBe(true)

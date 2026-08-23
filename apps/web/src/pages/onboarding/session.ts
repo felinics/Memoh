@@ -11,6 +11,7 @@ const LEGACY_SESSION_KEYS = [
 
 export interface OnboardingACPResult {
   agentId: string
+  botAgentId: string
   oauthPending: boolean
 }
 
@@ -34,13 +35,15 @@ function normalizeBotResult(value: unknown): OnboardingBotResult | null {
   if (!botId) return null
 
   const acpAgentId = normalizeACPAgentID(candidate.acp?.agentId)
+  const botAgentId = normalizeProviderId(candidate.acp?.botAgentId)
 
   return {
     botId,
     modelConfigured: candidate.modelConfigured === true,
-    ...(acpAgentId && {
+    ...(acpAgentId && botAgentId && {
       acp: {
         agentId: acpAgentId,
+        botAgentId,
         oauthPending: candidate.acp?.oauthPending === true,
       },
     }),
@@ -91,10 +94,10 @@ export function clearOnboardingBotResult(): void {
   safeSessionRemove(ONBOARDING_KEYS.botResult)
 }
 
-export function readOnboardingOAuthResume(): { botId: string, agentId: string } | null {
+export function readOnboardingOAuthResume(): { botId: string, agentId: string, botAgentId: string } | null {
   const result = readOnboardingBotResult()
   if (!result?.acp?.oauthPending) return null
-  return { botId: result.botId, agentId: result.acp.agentId }
+  return { botId: result.botId, agentId: result.acp.agentId, botAgentId: result.acp.botAgentId }
 }
 
 export function markOnboardingOAuthComplete(): void {
@@ -103,7 +106,11 @@ export function markOnboardingOAuthComplete(): void {
   writeOnboardingBotResult({
     botId: result.botId,
     modelConfigured: result.modelConfigured,
-    acp: { agentId: result.acp.agentId, oauthPending: false },
+    acp: {
+      agentId: result.acp.agentId,
+      botAgentId: result.acp.botAgentId,
+      oauthPending: false,
+    },
   })
 }
 

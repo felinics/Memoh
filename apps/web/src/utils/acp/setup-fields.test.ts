@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { AcpprofilePublicProfile } from '@memohai/sdk'
 import {
+  acpManagedFieldHelp,
+  acpManagedFieldLabel,
   acpSetupModeLabel,
   acpSetupModes,
   filterCreateVisibleManagedFields,
@@ -32,6 +34,25 @@ describe('acpSetupModes', () => {
 describe('acpSetupModeLabel', () => {
   it('labels codex oauth mode', () => {
     expect(acpSetupModeLabel(profile(), 'oauth', t)).toBe('bots.settings.acpSetupChatGPT')
+  })
+})
+
+describe('generic ACP managed fields', () => {
+  const generic = profile({
+    id: 'acp',
+    display_name: 'ACP',
+    setup_modes: ['api_key'],
+    managed_fields: [
+      { id: 'command', label: 'Command', required: true },
+      { id: 'arguments', label: 'Arguments', type: 'textarea' },
+    ],
+  })
+
+  it('uses localized labels and help text', () => {
+    const command = generic.managed_fields?.[0] ?? {}
+    const argumentsField = generic.managed_fields?.[1] ?? {}
+    expect(acpManagedFieldLabel(generic, command, t)).toBe('bots.settings.acpCommand')
+    expect(acpManagedFieldHelp(generic, argumentsField, t)).toBe('bots.settings.acpArgumentsHelp')
   })
 })
 

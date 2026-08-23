@@ -933,7 +933,7 @@ func TestRunnerStartSessionSendsNoMCPServers(t *testing.T) {
 	}
 }
 
-func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
+func TestRunnerStartGenericACPSessionInjectsHTTPToolServer(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.MkdirAll(project, 0o750); err != nil {
@@ -955,6 +955,7 @@ func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
 	})
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentACPID,
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
@@ -1013,7 +1014,7 @@ func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
 	}
 }
 
-func TestRunnerStartSessionSkipsHTTPToolServerWithoutCapability(t *testing.T) {
+func TestRunnerStartGenericACPSessionSkipsHTTPToolServerWithoutCapability(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.MkdirAll(project, 0o750); err != nil {
@@ -1033,7 +1034,7 @@ func TestRunnerStartSessionSkipsHTTPToolServerWithoutCapability(t *testing.T) {
 	})
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentCodexID,
+		AgentID:     acpprofile.AgentACPID,
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
 		Command:     agentPath,

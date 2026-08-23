@@ -108,10 +108,8 @@ import SearchableSelectPopover from '@/components/searchable-select-popover/inde
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import {
   acpAgentIcon,
-  ensureACPAgentForm,
   normalizeACPAgentID,
-  readACPConfig,
-  withACPMetadata,
+  withEnabledACPAgentMetadataIfConfigured,
 } from '@/utils/acp'
 import { BOT_AGENT_RUNTIME_ACP, suggestBotAgentName } from '@/utils/bot-agent'
 
@@ -181,13 +179,14 @@ const { mutateAsync: createMutation, isLoading } = useMutation({
     // ACP still owns the shared provider credentials. Keep its legacy enabled
     // bit true once a provider is used so disabling one BotAgent does not stop
     // existing sessions that share those credentials.
-    const acpForm = readACPConfig(props.botMetadata, props.profiles)
-    ensureACPAgentForm(acpForm, profile).enabled = true
-    await putBotsById({
-      path: { id: props.botId },
-      body: { metadata: withACPMetadata(props.botMetadata, acpForm, props.profiles) },
-      throwOnError: true,
-    })
+    const metadata = withEnabledACPAgentMetadataIfConfigured(props.botMetadata, profile)
+    if (metadata) {
+      await putBotsById({
+        path: { id: props.botId },
+        body: { metadata },
+        throwOnError: true,
+      })
+    }
 
     const { data } = await postBotsByBotIdAgents({
       path: { bot_id: props.botId },

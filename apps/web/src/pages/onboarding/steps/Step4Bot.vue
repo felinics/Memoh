@@ -18,7 +18,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { DeviceCodePanel, FieldStack, InlineLoadingRow, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, getProvidersByIdModels, getMemoryProviders, getAcpProfiles, putModelsById, type AcpprofilePublicProfile } from '@memohai/sdk'
+import { getModels, getProviders, getProvidersByIdModels, getMemoryProviders, getAcpProfiles, putBotsByBotIdSettings, putModelsById, type AcpprofilePublicProfile } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
@@ -87,6 +87,7 @@ const acpAgentName = computed(() => acpAgentDisplayName(acpAgentId.value))
 const oauthPhase = ref<'idle' | 'pending'>('idle')
 const oauthVisible = ref(false)
 const oauthBotId = ref('')
+const oauthBotAgentId = ref(oauthResume?.botAgentId ?? '')
 const oauthLeaving = ref(false)
 const claudeCode = ref('')
 const {
@@ -279,6 +280,7 @@ async function handleSubmit() {
       agent: {
         name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
         provider: normalizeACPAgentID(selectedAcpProfile.value.id),
+        deferDefault: acpSelection.value?.setupMode === 'oauth',
       },
     }),
   })
@@ -297,7 +299,7 @@ async function handleSubmit() {
     return
   }
 
-  if (acpSelection.value && !createResult.agentApplied) {
+  if (acpSelection.value && (!createResult.agentApplied || !createResult.agentId)) {
     acpSelection.value = null
   }
 
@@ -307,6 +309,7 @@ async function handleSubmit() {
     ...(acpSelection.value && {
       acp: {
         agentId: acpSelection.value.agentId,
+        botAgentId: createResult.agentId!,
         oauthPending: acpSelection.value.setupMode === 'oauth',
       },
     }),
@@ -323,7 +326,7 @@ async function handleSubmit() {
   // written into the bot-scoped configuration.
   if (acpSelection.value?.setupMode === 'oauth') {
     store.reset()
-    enterOAuthPhase(botId)
+    enterOAuthPhase(botId, createResult.agentId!)
     return
   }
 
@@ -331,8 +334,9 @@ async function handleSubmit() {
   store.reset()
 }
 
-function enterOAuthPhase(botId: string) {
+function enterOAuthPhase(botId: string, botAgentId = oauthBotAgentId.value) {
   oauthBotId.value = botId
+  oauthBotAgentId.value = botAgentId
   oauthPhase.value = 'pending'
   claudeCode.value = ''
   oauthVisible.value = false
@@ -420,11 +424,22 @@ async function exchangeClaudeFlow() {
   }
 }
 
-function continueFromOAuth() {
+async function continueFromOAuth() {
   if (!oauthAuthorized.value || oauthLeaving.value) return
   oauthLeaving.value = true
-  markOnboardingOAuthComplete()
-  leave(nextStep)
+  try {
+    await putBotsByBotIdSettings({
+      path: { bot_id: oauthBotId.value },
+      body: { default_bot_agent_id: oauthBotAgentId.value },
+      throwOnError: true,
+    })
+    void queryCache.invalidateQueries({ key: ['bot-settings', oauthBotId.value] })
+    markOnboardingOAuthComplete()
+    leave(nextStep)
+  } catch {
+    oauthLeaving.value = false
+    toast.error(t('common.saveFailed'))
+  }
 }
 
 async function skipOAuth() {

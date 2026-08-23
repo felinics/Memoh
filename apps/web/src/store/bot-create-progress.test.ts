@@ -216,6 +216,36 @@ describe('useBotCreateProgressStore', () => {
       body: { default_bot_agent_id: 'agent-1' },
     }))
     expect(result.agentApplied).toBe(true)
+    expect(result.agentId).toBe('agent-1')
+    expect(store.status).toBe('ready')
+  })
+
+  it('creates an OAuth Agent without assigning it as default before authorization', async () => {
+    const bot = { id: 'bot-1', name: 'ada' }
+    postBotsStream.mockResolvedValue(streamOf([
+      { type: 'bot_created', bot },
+      { type: 'ready', bot },
+    ]))
+
+    const store = useBotCreateProgressStore()
+    const result = await store.start(
+      { name: 'ada', display_name: 'Ada' },
+      {
+        settings: { memory_provider_id: 'memory-1' },
+        agent: { name: 'Claude Code', provider: 'claude-code', deferDefault: true },
+      },
+    )
+
+    expect(postBotsByBotIdAgents).toHaveBeenCalled()
+    expect(putBotsByBotIdSettings).toHaveBeenCalledWith(expect.objectContaining({
+      path: { bot_id: 'bot-1' },
+      body: { memory_provider_id: 'memory-1' },
+    }))
+    expect(result).toEqual({
+      settingsApplied: true,
+      agentApplied: true,
+      agentId: 'agent-1',
+    })
     expect(store.status).toBe('ready')
   })
 

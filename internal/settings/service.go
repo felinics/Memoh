@@ -226,6 +226,12 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	defaultBotAgentIDSet := req.DefaultBotAgentID != nil
 	if req.DefaultBotAgentID != nil {
 		current.DefaultBotAgentID = strings.TrimSpace(*req.DefaultBotAgentID)
+	} else if req.ChatRuntime != nil && current.ChatRuntime == ChatRuntimeModel {
+		// Legacy Web/Desktop clients know only chat_runtime. An explicit switch
+		// to Native must therefore clear a migrated Agent binding even when the
+		// newer default_bot_agent_id field is absent from their request.
+		current.DefaultBotAgentID = ""
+		defaultBotAgentIDSet = true
 	}
 	if current.DefaultBotAgentID != "" {
 		if s.botAgents == nil {

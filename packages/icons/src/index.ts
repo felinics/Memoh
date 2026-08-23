@@ -1,3 +1,4 @@
+export { default as Acp } from './icons/Acp.vue'
 export { default as Anthropic } from './icons/Anthropic.vue'
 export { default as Azure } from './icons/Azure.vue'
 export { default as AzureColor } from './icons/AzureColor.vue'

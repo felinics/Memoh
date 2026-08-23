@@ -1569,6 +1569,10 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if err != nil {
 		return fail(err)
 	}
+	command, arguments, err := acpprofile.ResolveLaunch(profile, setup)
+	if err != nil {
+		return fail(fmt.Errorf("resolve ACP launch command: %w", err))
+	}
 	supportsSessionState := len(profile.RuntimeStorage.SessionRoots) > 0
 	resolved, err := client.ResolveSessionContext(client.SessionContextInput{
 		AgentID:     h.agentID,
@@ -1600,7 +1604,8 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		AgentID:                h.agentID,
 		BotID:                  h.botID,
 		ProjectPath:            h.projectPath,
-		Command:                profile.Command,
+		Command:                command,
+		Args:                   arguments,
 		Env:                    env,
 		CleanEnv:               cleanEnv,
 		UnsetEnv:               unsetEnv,

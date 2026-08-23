@@ -308,6 +308,7 @@ export const useChatStore = defineStore('chat', () => {
   const {
     pendingACPSessionInput, pendingACPRuntimeId, pendingACPSessionMetadata,
     pendingACPRuntimeStatus, pendingACPRuntimeEnsuring, pendingACPStateFor,
+    pendingACPMatchesInput,
     stageACPSession, stageDefaultACPSession, resetToEmptyComposer,
     ensurePendingACPRuntime, setPendingACPModel, setPendingACPMode, setPendingACPReasoning,
     saveLiveDraftACPStage, activateDraftACPStage, discardEvictedDraft,
@@ -586,6 +587,7 @@ export const useChatStore = defineStore('chat', () => {
     acpRuntimeStatuses, acpRuntimePending, pendingACPSessionInput,
     pendingACPSessionMetadata, pendingACPRuntimeId, pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring, pendingACPStateFor,
+    pendingACPMatchesInput,
     sessionId, hasExplicitSessionSelection, currentBotId, bots,
     activeChatTarget, isSessionStreaming,
     loadingChats, loadingMessages, loadingOlder, hasMoreOlder,
