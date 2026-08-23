@@ -7,9 +7,12 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/memohai/memoh/internal/settings"
 )
 
 func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {
@@ -64,7 +67,7 @@ func TestBuildInteractionMetadataIncludesRequestedSkills(t *testing.T) {
 			},
 			{
 				Name:       "reviewer",
-				SourceKind: "plugin",
+				SourceKind: "registry",
 			},
 		},
 	})
@@ -91,7 +94,7 @@ func TestBuildInteractionMetadataIncludesRequestedSkills(t *testing.T) {
 	if _, ok := raw[0]["ref"]; ok {
 		t.Fatalf("requested skill metadata leaked ref: %#v", raw[0])
 	}
-	if raw[1]["name"] != "reviewer" || raw[1]["source_kind"] != "plugin" {
+	if raw[1]["name"] != "reviewer" || raw[1]["source_kind"] != "registry" {
 		t.Fatalf("unexpected second skill metadata: %#v", raw[1])
 	}
 }
@@ -202,6 +205,45 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 	}
 	if len(persisted) != 4 {
 		t.Fatalf("persisted messages = %d, want 4", len(persisted))
+	}
+}
+
+func TestBuildPersistInputsKeepsAttachmentOnlyUserDisplayTextEmpty(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{
+		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
+		logger:          slog.New(slog.DiscardHandler),
+	}
+	// resolve() replaces ChatRequest.Query with the headerified envelope before
+	// the round is stored; an image with no caption leaves RawQuery empty.
+	headerified := turnpkg.FormatUserHeader(turnpkg.UserMessageHeaderInput{
+		DisplayName:      "User",
+		Channel:          "web",
+		ConversationType: "private",
+		AttachmentPaths:  []string{"/data/.memoh/media/b2/b2edf40e.png"},
+		Time:             time.Date(2026, 8, 20, 17, 37, 14, 0, time.UTC),
+	}, "")
+
+	inputs, err := service.buildPersistInputs(context.Background(), ChatRequest{
+		BotID:    storeRoundBotID,
+		ThreadID: "33333333-3333-3333-3333-333333333333",
+		Query:    headerified,
+	}, []ModelMessage{
+		{Role: "user", Content: newTextContent(headerified)},
+		{Role: "assistant", Content: newTextContent("nice picture")},
+	}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("buildPersistInputs() error = %v", err)
+	}
+	if len(inputs) != 2 {
+		t.Fatalf("persist inputs = %d, want 2", len(inputs))
+	}
+	if got := inputs[0].DisplayText; got != "" {
+		t.Fatalf("attachment-only user display text = %q, want empty", got)
+	}
+	if !bytes.Contains(inputs[0].Content, []byte("attachment path=")) {
+		t.Fatalf("model-facing content lost its envelope: %s", inputs[0].Content)
 	}
 }
 

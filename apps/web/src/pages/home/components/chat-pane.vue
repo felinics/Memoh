@@ -1,5 +1,9 @@
 <template>
-  <div class="flex-1 flex flex-col h-full min-w-0 relative">
+  <div
+    ref="rootEl"
+    class="flex-1 flex flex-col h-full min-w-0 relative"
+    v-on="dropHandlers"
+  >
     <div
       v-if="!currentBotId"
       class="flex-1"
@@ -840,12 +844,25 @@
         </div>
       </div>
     </template>
+
+    <!-- Region-scoped drop feedback. Sits OUTSIDE the v-else so it can also
+         cover the "pick a bot" placeholder — where the zone is disabled, so the
+         overlay stays dark and the OS shows its no-drop cursor instead of the
+         drop silently doing nothing. Dropped files land in the attachment tray,
+         unsent: the user still gets to type the message that goes with them. -->
+    <FileDropOverlay
+      :active="dropActive"
+      :bounds="dropBounds"
+      :icon="ImagePlus"
+      :label="$t('chat.dropToAttach')"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, useTemplateRef, watch, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated } from 'vue'
 import {
+  ImagePlus,
   Paperclip,
   Plus,
   ChevronDown,
@@ -873,6 +890,10 @@ import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings, getBot
 import type { AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
+import { useFileDropZone } from '@/composables/useFileDropZone'
+import { registerChatFileDropTarget } from '../composables/chat-file-drop-target'
+import { readDroppedFiles } from '@/utils/dropped-files'
 import MessageItem from './message-item.vue'
 import ComposerContinueOn from './composer-continue-on.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
@@ -893,6 +914,7 @@ import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAtta
 import { useComposerDrafts } from '../composables/useComposerDrafts'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
+import { provideConnectorLogos } from '../composables/useConnectorLogos'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
 import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig } from './chat-pane-send'
@@ -973,6 +995,9 @@ const paneTarget = computed(() => ({
   viewId: props.tabId.trim() || 'chat',
 }))
 provideChatViewTarget(paneTarget)
+// Resolved once per pane so every tool row below can mark a Connect-It call
+// with its connector's logo without each row running its own lookup.
+provideConnectorLogos(paneTarget)
 const paneView = computed(() => chatStore.chatView(paneTarget.value))
 const messages = computed(() => paneView.value.transcript.visibleMessages.value)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
@@ -1898,6 +1923,50 @@ watch(() => pendingFiles.value.length, (len, prevLen) => {
     toast.warning(t('chat.pdfTooLargeForNative'))
   }
 })
+
+// Dropping files on the conversation is the Paperclip by another route: they
+// land in the same pending tray, so the attachment cards, previews, and the PDF
+// warning above all follow with no extra wiring. Nothing is sent — the user
+// still writes the message that goes with the files.
+async function handleFilesDrop(transfer: DataTransfer) {
+  const { files, skippedFolders } = await readDroppedFiles(transfer)
+  for (const file of files) pendingFiles.value.push(file)
+  // An attachment is one file, so a folder has nothing to become here. Warned
+  // even when loose files DID land in the same drop: the cards would otherwise
+  // read as "everything arrived" while the folder vanished silently.
+  if (skippedFolders > 0) {
+    toast.warning(t('chat.dropFolderUnsupported'))
+  }
+}
+
+// Same conditions that disable the Paperclip: no bot, a read-only or streaming
+// turn, history still loading. A disabled zone keeps the overlay dark, so the
+// OS no-drop cursor answers instead of a drop that goes nowhere.
+const fileDropDisabled = () => !currentBotId.value || activeChatReadOnly.value || streaming.value || loadingMessages.value
+
+// Root element, exposed through the drop-target registry so the page-level base
+// zone can anchor its overlay over THIS pane (a global drag points at the
+// composer it will land in) instead of floating a third, window-centred anchor.
+const rootEl = useTemplateRef<HTMLElement>('rootEl')
+
+const { active: dropActive, bounds: dropBounds, handlers: dropHandlers } = useFileDropZone({
+  disabled: fileDropDisabled,
+  onDrop: transfer => void handleFilesDrop(transfer),
+})
+
+// While this pane is the focused dock panel it is also the page-level target:
+// files dropped outside every region zone (e.g. the sidebar on a non-Files
+// view) are forwarded by the base zone in main-section into THIS composer's
+// tray. Cleanup runs on blur and on unmount (watcher stop), and the registry's
+// identity guard makes focus handoff between splits order-safe.
+watch(isActive, (focused) => {
+  if (!focused) return
+  onWatcherCleanup(registerChatFileDropTarget({
+    onDrop: transfer => void handleFilesDrop(transfer),
+    disabled: fileDropDisabled,
+    hostEl: () => rootEl.value,
+  }))
+}, { immediate: true })
 
 type DefaultACPSettings = {
   chat_runtime?: string

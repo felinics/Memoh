@@ -170,7 +170,7 @@ function onListBack(): void {
 }
 
 // CONTENT ← : pop real drill-ins (bots → bots/new → progress, supermarket →
-// plugin detail) — their paths nest under the page that opened them, so "the
+// Package detail) — their paths nest under the page that opened them, so "the
 // route before this one is my ancestor" is exactly when router.back() is
 // right. Everything else goes back to the list at /settings: replace, so the
 // content page doesn't linger as a history entry above the list.

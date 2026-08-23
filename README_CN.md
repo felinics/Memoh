@@ -95,12 +95,11 @@ submodule，setup 也会为后续 pull 启用递归更新。如果从未安装�
 - **内置记忆**：跨会话、跨平台的长期记忆，开箱即用，也支持接入 [Mem0](https://mem0.ai)、OpenViking
 - **十余种渠道**：Telegram、Discord、飞书、微信、QQ、邮件等
 - **MCP**：接入外部工具服务，每个机器人独立管理连接
-- **插件**：安装打包好的技能、工具和集成，扩展机器人的能力
 - **Agent 托管**：通过 ACP 在 Memoh Workspace 内托管外部 Agent，目前支持 Codex 和 Claude Code，每个机器人独立配置
 - **Browser Use**：在 Workspace 内驱动浏览器
 - **Computer Use**：操作 Workspace 桌面，处理需要 GUI 的工作流
 - **技能与应用超市**：模块化技能，从超市安装模板，重活交给子智能体
-- **自动化**：定时任务与周期心跳
+- **自动化**：通过定时任务运行周期性工作流
 
 ## 为本项目拆出的子项目
 
@@ -114,7 +113,7 @@ submodule，setup 也会为后续 pull 启用递归更新。如果从未安装�
 
 ## Star 历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://www.star-history.com/#memohai/Memoh&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://star-history.dera.page/#memohai/Memoh&type=date&legend=top-left)
 
 ## 贡献者
 

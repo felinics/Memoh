@@ -19,6 +19,19 @@
       :open="open"
       @toggle="toggle"
     >
+      <!-- Every connector this run touched, not just the first: the collapsed
+           header is the only place a reader sees which external systems the
+           whole segment reached. -->
+      <div
+        v-if="connectors.length"
+        class="flex items-center gap-1 shrink-0"
+      >
+        <ConnectorLogo
+          v-for="item in connectors"
+          :key="item.alias"
+          :connector="item"
+        />
+      </div>
       <span
         class="min-w-0 truncate tracking-[0.01em]"
         :class="running ? 'tool-shimmer-text' : ''"
@@ -75,6 +88,8 @@ import { getCollapseOpen, groupCollapseKey, setCollapseOpen } from './process-co
 import HeaderRow from './tool-detail/header-row.vue'
 import ExpandChevron from './tool-detail/expand-chevron.vue'
 import Capsule from './tool-detail/capsule.vue'
+import ConnectorLogo from './tool-detail/connector-logo.vue'
+import { useConnectorLogos, type ConnectorIdentity } from '../composables/useConnectorLogos'
 
 const props = defineProps<{
   // Ordered run of tool + reasoning blocks belonging to one process segment.
@@ -87,6 +102,19 @@ const { t } = useI18n()
 
 const single = computed(() => props.items[0])
 const toolItems = computed(() => props.items.filter((b): b is ToolCallBlockType => b.type === 'tool'))
+
+// Distinct connectors used by this run, in order of first call. Keyed by alias
+// so two bindings of the same connector type stay two marks.
+const connectorLookup = useConnectorLogos()
+const connectors = computed(() => {
+  const lookup = connectorLookup.value
+  const seen = new Map<string, ConnectorIdentity>()
+  for (const tool of toolItems.value) {
+    const identity = lookup(tool.toolName)
+    if (identity && !seen.has(identity.alias)) seen.set(identity.alias, identity)
+  }
+  return [...seen.values()]
+})
 
 // Open state is purely user-driven and persisted across the post-turn refetch:
 // a process is collapsed until the user opens it, then stays as they left it

@@ -97,6 +97,7 @@ let ws: WebSocket | null = null
 let resizeObserver: ResizeObserver | null = null
 let fitTimer: ReturnType<typeof setTimeout> | null = null
 let disposables: Array<{ dispose(): void }> = []
+let connectionDisposables: Array<{ dispose(): void }> = []
 
 function currentCacheKey(): string {
   return terminalCacheKey(props.botId, props.tabId)
@@ -138,6 +139,9 @@ function connectWs() {
   if (!terminal) return
   closeWs()
 
+  for (const d of connectionDisposables) d.dispose()
+  connectionDisposables = []
+
   fitTerminal()
 
   const cols = terminal.cols
@@ -174,10 +178,7 @@ function connectWs() {
     status.value = 'disconnected'
   }
 
-  for (const d of disposables) d.dispose()
-  disposables = []
-
-  disposables.push(
+  connectionDisposables.push(
     terminal.onData((data) => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(new TextEncoder().encode(data))
@@ -257,6 +258,13 @@ onMounted(() => {
   fitAddon = fa
   serializeAddon = sa
 
+  disposables.push(
+    // xterm reports OSC 0/2 application titles, not foreground-process identity.
+    term.onTitleChange((title) => {
+      tabsStore.updateTerminalTitle(props.tabId, title)
+    }),
+  )
+
   const snapshot = readTerminalSnapshot(currentCacheKey())
   if (snapshot) {
     term.write(snapshot)
@@ -318,6 +326,8 @@ onBeforeUnmount(() => {
   closeWs()
   for (const d of disposables) d.dispose()
   disposables = []
+  for (const d of connectionDisposables) d.dispose()
+  connectionDisposables = []
   terminal?.dispose()
   terminal = null
   fitAddon = null

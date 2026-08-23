@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
-	"time"
-
-	sdk "github.com/memohai/twilight-ai/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"github.com/memohai/memoh/internal/agent/event"
@@ -16,9 +14,15 @@ import (
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/schedule"
 )
+
+// attachCurrentTurnPrompt routes a trigger's rich prompt through Query so the
+// context view classifies it as the live current request rather than history.
+func attachCurrentTurnPrompt(cfg native.RunConfig, prompt string) native.RunConfig {
+	cfg.Query = prompt
+	return cfg
+}
 
 // TriggerSchedule executes a scheduled command via the internal agent.
 func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (triggerResult schedule.TriggerResult, err error) {
@@ -88,7 +92,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		MaxCalls:    payload.MaxCalls,
 		Command:     payload.Command,
 	})
-	cfg.Messages = append(cfg.Messages, sdk.UserMessage(schedulePrompt))
+	cfg = attachCurrentTurnPrompt(cfg, schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)
 	terminal := s.contextLifecycleTerminal(ctx, cfg)
 	var lifecycleCause error
@@ -172,7 +176,14 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 	var lifecycleCause error
 	defer func() { terminal(lifecycleCause) }()
 
-	req, _ = s.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
+	// Fail closed like the chat path: proceeding after an uncertain eager
+	// insert would race the background cleanup goroutine against this round's
+	// own user message and could delete the canonical turn's user row.
+	var leadingErr error
+	req, _, leadingErr = s.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
+	if leadingErr != nil {
+		return schedule.TriggerResult{}, fmt.Errorf("persist scheduled ACP user message: %w", leadingErr)
+	}
 
 	result, promptErr := s.acpPool.Prompt(ctx, acpagent.PromptInput{
 		BotID:             botID,
@@ -200,7 +211,7 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 	if promptErr != nil {
 		s.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the scheduled run ended before a decision arrived")
 		failedResult, _ := acpFailureResult(ensureACPPromptOutput(result), promptErr)
-		if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, failedResult, promptErr, contextLifecycle); err != nil {
+		if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, failedResult, promptErr, false, contextLifecycle); err != nil {
 			lifecycleCause = runtimeHistoryError(err)
 			s.logger.Error("ACP schedule failure persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
 		}
@@ -208,7 +219,7 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 	}
 
 	result = ensureACPPromptOutput(result)
-	if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, result, nil, contextLifecycle); err != nil {
+	if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, result, nil, true, contextLifecycle); err != nil {
 		lifecycleCause = runtimeHistoryError(err)
 		s.logger.Error("ACP schedule persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
 		return schedule.TriggerResult{}, err
@@ -225,109 +236,8 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 	}, nil
 }
 
-// TriggerHeartbeat executes a heartbeat check via the internal agent.
-func (s *Service) TriggerHeartbeat(ctx context.Context, botID string, payload heartbeat.TriggerPayload, token string) (triggerResult heartbeat.TriggerResult, err error) {
-	if strings.TrimSpace(botID) == "" {
-		return heartbeat.TriggerResult{}, errors.New("bot id is required")
-	}
-
-	submission, err := json.Marshal(heartbeatSubmission{
-		Kind:     "heartbeat",
-		BotID:    strings.TrimSpace(botID),
-		Interval: payload.Interval,
-	})
-	if err != nil {
-		return heartbeat.TriggerResult{}, err
-	}
-	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, payload.SessionID, heartbeatInvocationID(payload), submission)
-	if err != nil {
-		// A tick that cannot take the thread's slot is dropped: the next tick is
-		// already scheduled and a stale check has nothing to report.
-		return heartbeat.TriggerResult{}, err
-	}
-	defer func() { finish(triggeredRunTerminal{cause: err}) }()
-	ctx = runCtx
-
-	var heartbeatModel string
-	if botSettings, err := s.loadBotSettings(ctx, botID); err == nil {
-		heartbeatModel = strings.TrimSpace(botSettings.HeartbeatModelID)
-	}
-
-	req := ChatRequest{
-		BotID:       botID,
-		ChatID:      botID,
-		ThreadID:    payload.SessionID,
-		RunID:       admission.RunID,
-		Query:       "heartbeat",
-		UserID:      payload.OwnerUserID,
-		Token:       token,
-		Model:       heartbeatModel,
-		SessionType: sessionmode.Heartbeat,
-	}
-	rc, req, err := s.resolve(ctx, req)
-	if err != nil {
-		return heartbeat.TriggerResult{}, err
-	}
-	req.RunID = rc.runConfig.RunID
-
-	cfg := rc.runConfig
-	cfg.SessionType = sessionmode.Heartbeat
-	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
-	cfg.ContextScope.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
-
-	var checklist string
-	if s.agent != nil {
-		nowFn := time.Now
-		if cfg.Identity.TimezoneLocation != nil {
-			nowFn = func() time.Time { return time.Now().In(cfg.Identity.TimezoneLocation) }
-		}
-		fs := native.NewFSClient(s.agent.BridgeProvider(), botID, nowFn)
-		checklist = fs.ReadTextSafe(ctx, "/data/HEARTBEAT.md")
-	}
-	now := time.Now().UTC()
-	if cfg.Identity.TimezoneLocation != nil {
-		now = now.In(cfg.Identity.TimezoneLocation)
-	}
-	heartbeatPrompt := native.GenerateHeartbeatPrompt(payload.Interval, checklist, now, payload.LastHeartbeatAt)
-	cfg.Messages = append(cfg.Messages, sdk.UserMessage(heartbeatPrompt))
-	cfg = s.prepareRunConfig(ctx, cfg)
-	terminal := s.contextLifecycleTerminal(ctx, cfg)
-	var lifecycleCause error
-	defer func() { terminal(lifecycleCause) }()
-
-	result, err := s.agent.Generate(ctx, cfg)
-	lifecycleCause = err
-	if err != nil {
-		return heartbeat.TriggerResult{}, err
-	}
-
-	status := "alert"
-	text := strings.TrimSpace(result.Text)
-	if isHeartbeatOK(text) {
-		status = "ok"
-	}
-
-	outputMessages := sdkMessagesToModelMessages(result.Messages)
-	roundMessages := prependUserMessage(heartbeatPrompt, outputMessages)
-	if storeErr := s.storeRoundWithOptions(ctx, req, roundMessages, rc.model.ID, storeRoundOptions{
-		ContextLifecycle: cfg.ContextLifecycle,
-	}); storeErr != nil {
-		lifecycleCause = storeErr
-	}
-
-	totalUsageJSON, _ := json.Marshal(result.Usage)
-	return heartbeat.TriggerResult{
-		Status:     status,
-		Text:       text,
-		Usage:      totalUsageJSON,
-		UsageBytes: totalUsageJSON,
-		ModelID:    rc.model.ID,
-		SessionID:  payload.SessionID,
-	}, nil
-}
-
-// scheduleSubmission and heartbeatSubmission are the canonical fingerprint
-// inputs for a triggered turn. They carry what the trigger asked for and nothing
+// scheduleSubmission is the canonical fingerprint input for a triggered turn.
+// It carries what the trigger asked for and nothing
 // about when it ran, so re-running one tick's work is recognized as the same
 // submission rather than a new one.
 type scheduleSubmission struct {
@@ -336,13 +246,7 @@ type scheduleSubmission struct {
 	Command    string `json:"command"`
 }
 
-type heartbeatSubmission struct {
-	Kind     string `json:"kind"`
-	BotID    string `json:"bot_id"`
-	Interval int    `json:"interval_minutes"`
-}
-
-// scheduleInvocationID and heartbeatInvocationID name one fire.
+// scheduleInvocationID names one fire.
 //
 // Each fire runs in a thread of its own, and invocation uniqueness is already
 // scoped per thread, so the thread id is what distinguishes consecutive fires.
@@ -351,13 +255,4 @@ type heartbeatSubmission struct {
 // like a replay of the first.
 func scheduleInvocationID(payload schedule.TriggerPayload) string {
 	return "schedule:" + strings.TrimSpace(payload.ID) + ":" + strings.TrimSpace(payload.SessionID)
-}
-
-func heartbeatInvocationID(payload heartbeat.TriggerPayload) string {
-	return "heartbeat:" + strings.TrimSpace(payload.SessionID)
-}
-
-func isHeartbeatOK(text string) bool {
-	t := strings.TrimSpace(text)
-	return strings.HasPrefix(t, "HEARTBEAT_OK") || strings.HasSuffix(t, "HEARTBEAT_OK") || t == "HEARTBEAT_OK"
 }

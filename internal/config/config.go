@@ -219,9 +219,31 @@ type AuthConfig struct {
 }
 
 type AgentConfig struct {
-	ToolOutputMaxBytes  int `toml:"tool_output_max_bytes"`
-	ToolOutputMaxLines  int `toml:"tool_output_max_lines"`
-	SystemFilesMaxBytes int `toml:"system_files_max_bytes"`
+	ToolOutputMaxBytes  int    `toml:"tool_output_max_bytes"`
+	ToolOutputMaxLines  int    `toml:"tool_output_max_lines"`
+	SystemFilesMaxBytes int    `toml:"system_files_max_bytes"`
+	ContextLoopReselect string `toml:"context_loop_reselect"`
+}
+
+const (
+	ContextLoopReselectModeActive = "active"
+	ContextLoopReselectModeShadow = "shadow"
+	ContextLoopReselectModeOff    = "off"
+)
+
+// EffectiveContextLoopReselectMode normalizes the configured in-loop context
+// step reselector rollout mode. Empty defaults to active. recognized is false
+// when a non-empty value does not match active/shadow/off.
+func (c AgentConfig) EffectiveContextLoopReselectMode() (mode string, recognized bool) {
+	value := strings.TrimSpace(strings.ToLower(c.ContextLoopReselect))
+	switch value {
+	case "":
+		return ContextLoopReselectModeActive, true
+	case ContextLoopReselectModeActive, ContextLoopReselectModeShadow, ContextLoopReselectModeOff:
+		return value, true
+	default:
+		return ContextLoopReselectModeActive, false
+	}
 }
 
 const (

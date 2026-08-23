@@ -622,3 +622,28 @@ func TestWorkspaceImagePullCandidatesDoesNotMirrorCustomImages(t *testing.T) {
 		t.Fatalf("unexpected candidates: %v", got)
 	}
 }
+
+func TestAgentConfigEffectiveContextLoopReselectMode(t *testing.T) {
+	cases := []struct {
+		name           string
+		value          string
+		wantMode       string
+		wantRecognized bool
+	}{
+		{"empty defaults to active", "", ContextLoopReselectModeActive, true},
+		{"active", "active", ContextLoopReselectModeActive, true},
+		{"shadow", "shadow", ContextLoopReselectModeShadow, true},
+		{"off", "off", ContextLoopReselectModeOff, true},
+		{"case insensitive", "SHADOW", ContextLoopReselectModeShadow, true},
+		{"whitespace", "  off  ", ContextLoopReselectModeOff, true},
+		{"unknown normalizes to active", "garbage", ContextLoopReselectModeActive, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotMode, gotRecognized := (AgentConfig{ContextLoopReselect: tc.value}).EffectiveContextLoopReselectMode()
+			if gotMode != tc.wantMode || gotRecognized != tc.wantRecognized {
+				t.Fatalf("EffectiveContextLoopReselectMode() = (%q, %v), want (%q, %v)", gotMode, gotRecognized, tc.wantMode, tc.wantRecognized)
+			}
+		})
+	}
+}

@@ -35,6 +35,9 @@ vi.hoisted(() => {
 
   const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
   const storage = new MemoryStorage()
+  // Keep real i18n active so terminal-title assertions catch missing or
+  // misspelled keys, while making the expected English fallback deterministic.
+  storage.setItem('language', 'en')
   // Layout/selection now live in sessionStorage (per-Tab), so the store's
   // restore path reads it, not localStorage. A separate instance mirrors the
   // real browser split (two distinct areas under the same key names).
@@ -113,14 +116,6 @@ const mobileBreakpoint = vi.hoisted(() => {
     },
   }
 })
-
-// workspace-tabs imports @/i18n to localize the desktop panel title; that
-// module reads localStorage at load to pick the initial locale, which isn't
-// polyfilled in this test's environment. Mock it so the import stays
-// side-effect free here.
-vi.mock('@/i18n', () => ({
-  default: { global: { t: (key: string) => key } },
-}))
 
 const chatStoreMock = vi.hoisted(() => ({
   sessionId: null as string | null,
@@ -844,13 +839,85 @@ describe('workspace layout store', () => {
     store.registerApi(dock as never)
 
     store.openTerminal()
+    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
     store.openTerminal()
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
     store.closeTab('terminal:1')
     store.openTerminal()
 
     expect(dock.getPanel('terminal:1')).toBeUndefined()
     expect(dock.getPanel('terminal:2')).toBeTruthy()
     expect(dock.getPanel('terminal:3')).toBeTruthy()
+  })
+
+  it('repairs legacy terminal titles when restoring a layout', async () => {
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          panels: {
+            'terminal:1': {
+              id: 'terminal:1',
+              contentComponent: 'terminal',
+              title: 'zsh',
+            },
+            'terminal:2': {
+              id: 'terminal:2',
+              contentComponent: 'terminal',
+              title: '',
+            },
+          },
+        },
+        terminalCounter: 2,
+        ephemeralIds: [],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
+  })
+
+  it('updates only the intended terminal title and ignores invalid or repeated events', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openTerminal()
+    store.openTerminal()
+
+    const first = dock.getPanel('terminal:1')!
+    const second = dock.getPanel('terminal:2')!
+    const setTitle = vi.spyOn(first.api, 'setTitle')
+
+    store.updateTerminalTitle(first.id, '  python  ')
+
+    expect(first.title).toBe('python')
+    expect(second.title).toBe('Terminal 2')
+    expect(setTitle).toHaveBeenCalledTimes(1)
+
+    store.updateTerminalTitle(first.id, 'python')
+    store.updateTerminalTitle(first.id, '   ')
+    store.updateTerminalTitle(first.id, null)
+
+    expect(first.title).toBe('python')
+    expect(setTitle).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts a split terminal with its own fallback title', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openTerminal()
+
+    const first = dock.getPanel('terminal:1')!
+    store.updateTerminalTitle(first.id, 'node')
+    store.splitGroup(first.group!.id, 'right')
+
+    expect(first.title).toBe('node')
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
   })
 
   it('duplicates the active file into a split pane with a unique panel id', () => {

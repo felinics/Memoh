@@ -61,7 +61,7 @@ func TestRequiredPermissionForACPRuntimeKeepsSystemModesManaged(t *testing.T) {
 		}
 	}
 
-	managedModes := []string{session.TypeHeartbeat, session.TypeSchedule, session.TypeSubagent}
+	managedModes := []string{session.TypeSchedule, session.TypeSubagent}
 	for _, mode := range managedModes {
 		if got := requiredPermissionForSessionRuntime(mode, session.RuntimeACPAgent); got != bots.PermissionManage {
 			t.Fatalf("%s ACP permission = %q, want manage", mode, got)

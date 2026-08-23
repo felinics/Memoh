@@ -138,7 +138,7 @@ func TestPostgresToolTailRoundHonoursAdmittedTurnIdentity(t *testing.T) {
 	}
 }
 
-// Entry points with no admission — channel inbound, schedules, heartbeats —
+// Entry points with no admission — channel inbound and schedules —
 // still allocate their own turn here, so the counter must advance for them.
 func TestPostgresPersistAllocatesTurnWhenAdmissionSuppliedNone(t *testing.T) {
 	ctx := context.Background()

@@ -183,7 +183,7 @@ func (s *Service) validateTargetSession(ctx context.Context, botID, sessionID st
 	if sess.BotID.String() != botID {
 		return false, ErrTargetSessionNotFound
 	}
-	// Heartbeat, subagent, and discuss sessions back internal loops with
+	// Subagent and discuss sessions back internal loops with
 	// their own drivers; appending schedule turns to them would corrupt
 	// those flows. Chat sessions and schedule-created sessions are fair
 	// targets.

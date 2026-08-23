@@ -98,12 +98,11 @@ GitHub が自動生成する「Source code」
 - **Built-in memory**: セッションやプラットフォームをまたいだ長期記憶を標準搭載。[Mem0](https://mem0.ai) や OpenViking も利用できます。
 - **10+ channels**: Telegram、Discord、Lark、WeChat、QQ、Email などに対応しています。
 - **MCP**: 外部 Tool server に接続できます。各 Bot が自分の接続を管理します。
-- **Plugins**: パッケージ化された Skill、Tool、連携をインストールして、Bot の能力を拡張できます。
 - **Agent Hosting**: ACP 経由で外部 Agent を Memoh Workspace にホストできます。現在は Codex と Claude Code に対応し、Bot ごとに設定できます。
 - **Browser Use**: Workspace 内の Browser を操作できます。
 - **Computer Use**: GUI が必要な作業のために Workspace の Desktop を操作できます。
 - **Skills & Supermarket**: モジュール化された Skill、Supermarket からの curated template インストール、sub-agent への委譲に対応します。
-- **Automation**: スケジュールタスクと周期的な heartbeat を実行できます。
+- **Automation**: スケジュールタスクで定期的なワークフローを実行できます。
 
 ## Sub-projects
 
@@ -117,7 +116,7 @@ GitHub が自動生成する「Source code」
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://www.star-history.com/#memohai/Memoh&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://star-history.dera.page/#memohai/Memoh&type=date&legend=top-left)
 
 ## Contributors
 

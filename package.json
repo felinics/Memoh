@@ -1,7 +1,7 @@
 {
   "name": "@memohai/monorepo",
   "private": true,
-  "version": "0.17.0",
+  "version": "0.18.0",
   "scripts": {
     "preinstall": "node scripts/ensure-submodules.mjs --check",
     "web:dev": "pnpm --filter @memohai/web dev",

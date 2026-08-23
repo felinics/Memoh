@@ -28,4 +28,5 @@ type CachePlan struct {
 	StablePrefixHash          string `json:"stable_prefix_hash,omitempty"`
 	StableMessageCount        int    `json:"stable_message_count,omitempty"`
 	StablePrefixTokenEstimate int    `json:"stable_prefix_token_estimate,omitempty"`
+	MidStableMessageCount     int    `json:"mid_stable_message_count,omitempty"`
 }

@@ -48,7 +48,7 @@ type WorkspaceData interface {
 }
 
 type ACPRuntimeCloser interface {
-	CloseBotAgentRuntimes(botID, agentID string) error
+	BeginBotHistoryReset(ctx context.Context, botID string) (resetCtx context.Context, release func(), err error)
 }
 
 type Service struct {
@@ -73,6 +73,13 @@ type Service struct {
 }
 
 const acpManagedSecretsWarning = "ACP managed secrets were excluded from bot/profile.json; re-enter API keys after import" // #nosec G101 -- user-facing warning text, not a credential.
+
+// ACP checkpoints are intentionally not part of backup schema v1. They are
+// versioned against process-run rows and native session files, while history
+// import remaps sessions, turns, and messages without recreating those runs.
+// Keeping a promotion watermark without its matching checkpoint would make an
+// imported transcript claim resumability that the bundle cannot provide.
+const acpCheckpointBackupWarning = "ACP runtime checkpoints are not included in bot backups; imported ACP sessions will start a new native session" // #nosec G101 -- user-facing warning text, not a credential.
 
 type Params struct {
 	Logger          *slog.Logger
@@ -432,7 +439,6 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 		cfg.ImageModelID,
 		cfg.TtsModelID,
 		cfg.TranscriptionModelID,
-		cfg.HeartbeatModelID,
 		cfg.CompactionModelID,
 		cfg.DiscussProbeModelID,
 	})
@@ -547,6 +553,14 @@ func (s *Service) collectHistory(ctx context.Context, botID string, includeAsset
 	}
 	if messages, err := s.queries.ListAllMessagesForBackup(ctx, pgBotID); err == nil {
 		history.Messages = messages
+		// ACP publication heads and JSONL snapshots live outside the backup
+		// schema, so exported ACP history is never resumable.
+		for _, message := range messages {
+			if strings.TrimSpace(message.RuntimeType) == "acp_agent" {
+				warnings = appendWarningOnce(warnings, acpCheckpointBackupWarning)
+				break
+			}
+		}
 		if includeAssets {
 			messageIDs := make([]pgtype.UUID, 0, len(messages))
 			for _, message := range messages {

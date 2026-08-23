@@ -74,14 +74,6 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 			},
 		},
 		{
-			sessionType: sessionmode.Heartbeat,
-			want: []string{
-				"You are an AI agent running inside a private Memoh workspace.",
-				"## Session mode: heartbeat",
-				"If nothing needs attention, output exactly `HEARTBEAT_OK`.",
-			},
-		},
-		{
 			sessionType: sessionmode.Subagent,
 			want: []string{
 				"You are an AI agent running inside a private Memoh workspace.",
@@ -364,7 +356,6 @@ func allPromptSessionTypes() []string {
 		sessionmode.Chat,
 		sessionmode.Discuss,
 		sessionmode.Schedule,
-		sessionmode.Heartbeat,
 		sessionmode.Subagent,
 	}
 }

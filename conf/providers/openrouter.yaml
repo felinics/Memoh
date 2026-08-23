@@ -955,6 +955,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "mistralai/mistral-small-3.1-24b-instruct"
     name: "Mistral: Mistral Small 3.1 24B"
     type: chat

@@ -16,9 +16,6 @@ UPDATE bots
 SET language = 'auto',
     command_ui_language = 'auto',
     reasoning_effort = 'medium',
-    heartbeat_enabled = false,
-    heartbeat_interval = 1440,
-    heartbeat_prompt = '',
     compaction_enabled = true,
     compaction_threshold = 0,
     compaction_target_percent = NULL,
@@ -27,7 +24,6 @@ SET language = 'auto',
     chat_acp_agent_id = NULL,
     chat_acp_project_path = '/data',
     chat_acp_project_mode = 'project',
-    heartbeat_model_id = NULL,
     compaction_model_id = NULL,
     image_model_id = NULL,
     search_provider_id = NULL,
@@ -57,9 +53,6 @@ SELECT
   bots.id AS bot_id,
   bots.language,
   bots.reasoning_effort,
-  bots.heartbeat_enabled,
-  bots.heartbeat_interval,
-  bots.heartbeat_prompt,
   bots.compaction_enabled,
   bots.compaction_threshold,
   bots.compaction_target_percent,
@@ -69,7 +62,6 @@ SELECT
   bots.chat_acp_agent_id,
   bots.chat_acp_project_path,
   bots.chat_acp_project_mode,
-  heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
@@ -88,7 +80,6 @@ SELECT
   bots.command_ui_language
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
-LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
@@ -104,9 +95,6 @@ type GetSettingsByBotIDRow struct {
 	BotID                   pgtype.UUID `json:"bot_id"`
 	Language                string      `json:"language"`
 	ReasoningEffort         string      `json:"reasoning_effort"`
-	HeartbeatEnabled        bool        `json:"heartbeat_enabled"`
-	HeartbeatInterval       int32       `json:"heartbeat_interval"`
-	HeartbeatPrompt         string      `json:"heartbeat_prompt"`
 	CompactionEnabled       bool        `json:"compaction_enabled"`
 	CompactionThreshold     int32       `json:"compaction_threshold"`
 	CompactionTargetPercent pgtype.Int4 `json:"compaction_target_percent"`
@@ -116,7 +104,6 @@ type GetSettingsByBotIDRow struct {
 	ChatAcpAgentID          pgtype.Text `json:"chat_acp_agent_id"`
 	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
 	ChatAcpProjectMode      string      `json:"chat_acp_project_mode"`
-	HeartbeatModelID        pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelID       pgtype.UUID `json:"compaction_model_id"`
 	SearchProviderID        pgtype.UUID `json:"search_provider_id"`
 	FetchProviderID         pgtype.UUID `json:"fetch_provider_id"`
@@ -142,9 +129,6 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.BotID,
 		&i.Language,
 		&i.ReasoningEffort,
-		&i.HeartbeatEnabled,
-		&i.HeartbeatInterval,
-		&i.HeartbeatPrompt,
 		&i.CompactionEnabled,
 		&i.CompactionThreshold,
 		&i.CompactionTargetPercent,
@@ -154,7 +138,6 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.ChatAcpAgentID,
 		&i.ChatAcpProjectPath,
 		&i.ChatAcpProjectMode,
-		&i.HeartbeatModelID,
 		&i.CompactionModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,
@@ -180,80 +163,70 @@ WITH updated AS (
   UPDATE bots
   SET language = $1,
       reasoning_effort = $2,
-      heartbeat_enabled = $3,
-      heartbeat_interval = $4,
-      heartbeat_prompt = $5,
-      compaction_enabled = $6,
-      compaction_threshold = $7,
+      compaction_enabled = $3,
+      compaction_threshold = $4,
       compaction_target_percent = CASE
-        WHEN $8::boolean
-          THEN $9::integer
+        WHEN $5::boolean
+          THEN $6::integer
         ELSE bots.compaction_target_percent
       END,
-      timezone = COALESCE($10::text, bots.timezone),
+      timezone = COALESCE($7::text, bots.timezone),
       chat_model_id = CASE
-        WHEN $11::boolean THEN $12::uuid
+        WHEN $8::boolean THEN $9::uuid
         ELSE bots.chat_model_id
       END,
-      chat_runtime = $13,
-      chat_acp_agent_id = $14::text,
-      chat_acp_project_path = $15,
-      chat_acp_project_mode = $16,
-      heartbeat_model_id = CASE
-        WHEN $17::boolean THEN $18::uuid
-        ELSE bots.heartbeat_model_id
-      END,
+      chat_runtime = $10,
+      chat_acp_agent_id = $11::text,
+      chat_acp_project_path = $12,
+      chat_acp_project_mode = $13,
       compaction_model_id = CASE
-        WHEN $19::boolean THEN $20::uuid
+        WHEN $14::boolean THEN $15::uuid
         ELSE bots.compaction_model_id
       END,
       search_provider_id = CASE
-        WHEN $21::boolean THEN $22::uuid
+        WHEN $16::boolean THEN $17::uuid
         ELSE bots.search_provider_id
       END,
       fetch_provider_id = CASE
-        WHEN $23::boolean THEN $24::uuid
+        WHEN $18::boolean THEN $19::uuid
         ELSE bots.fetch_provider_id
       END,
       memory_provider_id = CASE
-        WHEN $25::boolean THEN $26::uuid
+        WHEN $20::boolean THEN $21::uuid
         ELSE bots.memory_provider_id
       END,
       image_model_id = CASE
-        WHEN $27::boolean THEN $28::uuid
+        WHEN $22::boolean THEN $23::uuid
         ELSE bots.image_model_id
       END,
       tts_model_id = CASE
-        WHEN $29::boolean THEN $30::uuid
+        WHEN $24::boolean THEN $25::uuid
         ELSE bots.tts_model_id
       END,
       transcription_model_id = CASE
-        WHEN $31::boolean THEN $32::uuid
+        WHEN $26::boolean THEN $27::uuid
         ELSE bots.transcription_model_id
       END,
       video_model_id = CASE
-        WHEN $33::boolean THEN $34::uuid
+        WHEN $28::boolean THEN $29::uuid
         ELSE bots.video_model_id
       END,
-      persist_full_tool_results = $35,
-      show_tool_calls_in_im = $36,
-      tool_approval_config = $37,
-      display_enabled = $38,
-      overlay_provider = $39,
-      overlay_enabled = $40,
-      overlay_config = $41,
-      command_ui_language = $42,
+      persist_full_tool_results = $30,
+      show_tool_calls_in_im = $31,
+      tool_approval_config = $32,
+      display_enabled = $33,
+      overlay_provider = $34,
+      overlay_enabled = $35,
+      overlay_config = $36,
+      command_ui_language = $37,
       updated_at = now()
-  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $43
-  RETURNING bots.id, bots.language, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $38
+  RETURNING bots.id, bots.language, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
   updated.language,
   updated.reasoning_effort,
-  updated.heartbeat_enabled,
-  updated.heartbeat_interval,
-  updated.heartbeat_prompt,
   updated.compaction_enabled,
   updated.compaction_threshold,
   updated.compaction_target_percent,
@@ -263,7 +236,6 @@ SELECT
   updated.chat_acp_agent_id,
   updated.chat_acp_project_path,
   updated.chat_acp_project_mode,
-  heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
@@ -282,7 +254,6 @@ SELECT
   updated.command_ui_language
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
-LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
@@ -296,9 +267,6 @@ LEFT JOIN models AS video_models ON video_models.id = updated.video_model_id AND
 type UpsertBotSettingsParams struct {
 	Language                   string      `json:"language"`
 	ReasoningEffort            string      `json:"reasoning_effort"`
-	HeartbeatEnabled           bool        `json:"heartbeat_enabled"`
-	HeartbeatInterval          int32       `json:"heartbeat_interval"`
-	HeartbeatPrompt            string      `json:"heartbeat_prompt"`
 	CompactionEnabled          bool        `json:"compaction_enabled"`
 	CompactionThreshold        int32       `json:"compaction_threshold"`
 	CompactionTargetPercentSet bool        `json:"compaction_target_percent_set"`
@@ -310,8 +278,6 @@ type UpsertBotSettingsParams struct {
 	ChatAcpAgentID             pgtype.Text `json:"chat_acp_agent_id"`
 	ChatAcpProjectPath         string      `json:"chat_acp_project_path"`
 	ChatAcpProjectMode         string      `json:"chat_acp_project_mode"`
-	HeartbeatModelIDSet        bool        `json:"heartbeat_model_id_set"`
-	HeartbeatModelID           pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelIDSet       bool        `json:"compaction_model_id_set"`
 	CompactionModelID          pgtype.UUID `json:"compaction_model_id"`
 	SearchProviderIDSet        bool        `json:"search_provider_id_set"`
@@ -343,9 +309,6 @@ type UpsertBotSettingsRow struct {
 	BotID                   pgtype.UUID `json:"bot_id"`
 	Language                string      `json:"language"`
 	ReasoningEffort         string      `json:"reasoning_effort"`
-	HeartbeatEnabled        bool        `json:"heartbeat_enabled"`
-	HeartbeatInterval       int32       `json:"heartbeat_interval"`
-	HeartbeatPrompt         string      `json:"heartbeat_prompt"`
 	CompactionEnabled       bool        `json:"compaction_enabled"`
 	CompactionThreshold     int32       `json:"compaction_threshold"`
 	CompactionTargetPercent pgtype.Int4 `json:"compaction_target_percent"`
@@ -355,7 +318,6 @@ type UpsertBotSettingsRow struct {
 	ChatAcpAgentID          pgtype.Text `json:"chat_acp_agent_id"`
 	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
 	ChatAcpProjectMode      string      `json:"chat_acp_project_mode"`
-	HeartbeatModelID        pgtype.UUID `json:"heartbeat_model_id"`
 	CompactionModelID       pgtype.UUID `json:"compaction_model_id"`
 	SearchProviderID        pgtype.UUID `json:"search_provider_id"`
 	FetchProviderID         pgtype.UUID `json:"fetch_provider_id"`
@@ -378,9 +340,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 	row := q.db.QueryRow(ctx, upsertBotSettings,
 		arg.Language,
 		arg.ReasoningEffort,
-		arg.HeartbeatEnabled,
-		arg.HeartbeatInterval,
-		arg.HeartbeatPrompt,
 		arg.CompactionEnabled,
 		arg.CompactionThreshold,
 		arg.CompactionTargetPercentSet,
@@ -392,8 +351,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.ChatAcpAgentID,
 		arg.ChatAcpProjectPath,
 		arg.ChatAcpProjectMode,
-		arg.HeartbeatModelIDSet,
-		arg.HeartbeatModelID,
 		arg.CompactionModelIDSet,
 		arg.CompactionModelID,
 		arg.SearchProviderIDSet,
@@ -425,9 +382,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.BotID,
 		&i.Language,
 		&i.ReasoningEffort,
-		&i.HeartbeatEnabled,
-		&i.HeartbeatInterval,
-		&i.HeartbeatPrompt,
 		&i.CompactionEnabled,
 		&i.CompactionThreshold,
 		&i.CompactionTargetPercent,
@@ -437,7 +391,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.ChatAcpAgentID,
 		&i.ChatAcpProjectPath,
 		&i.ChatAcpProjectMode,
-		&i.HeartbeatModelID,
 		&i.CompactionModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,

@@ -168,8 +168,7 @@ type RangeView struct {
 // CurrentContext is the resolved current-state summary used to enrich /new and
 // bare /model output. All fields are display-ready strings.
 type CurrentContext struct {
-	ChatModel      string
-	HeartbeatModel string
+	ChatModel string
 	// ReasoningEffort carries models.ReasoningEffortDisable when reasoning is off.
 	ReasoningEffort string
 	ContextWindow   string // resolved chat-model context window (e.g. "128.0K"), "" if unknown

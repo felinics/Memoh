@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	turnpkg "github.com/memohai/memoh/internal/agent/turn"
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
@@ -19,12 +21,14 @@ func (s *Service) storeRound(ctx context.Context, req ChatRequest, messages []Mo
 }
 
 type storeRoundOptions struct {
-	AllowPendingToolCalls   bool
-	SkipMemory              bool
-	AllowEmptyAssistantText bool
-	MessageMetadataByIndex  map[int]map[string]any
-	RequireCompletePersist  bool
-	ContextLifecycle        *contextfrag.LifecycleHolder
+	AllowPendingToolCalls         bool
+	SkipMemory                    bool
+	AllowEmptyAssistantText       bool
+	MessageMetadataByIndex        map[int]map[string]any
+	RequireCompletePersist        bool
+	CleanupACPDecisionProjections bool
+	ACPPublication                *messagepkg.ACPPublication
+	ContextLifecycle              *contextfrag.LifecycleHolder
 }
 
 func (s *Service) storeRoundWithOptions(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) error {
@@ -70,8 +74,11 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 	}
 	opts = opts.withContextLifecycleMetadata(s.logger, req, filtered)
 
-	persisted := s.storeMessages(ctx, req, filtered, modelID, opts)
+	persisted, persistErr := s.storeMessagesResult(ctx, req, filtered, modelID, opts)
 	opts.ContextLifecycle.SetAssistantMessageID(lastPersistedAssistantMessageID(persisted))
+	if persistErr != nil {
+		return persisted, persistErr
+	}
 	if len(persisted) != len(filtered) {
 		if opts.RequireCompletePersist {
 			return persisted, fmt.Errorf("persisted %d of %d messages", len(persisted), len(filtered))
@@ -184,31 +191,58 @@ func (s *Service) StoreRound(ctx context.Context, botID, sessionID, channelIdent
 }
 
 func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) []messagepkg.Message {
+	persisted, err := s.storeMessagesResult(ctx, req, messages, modelID, opts)
+	if err != nil {
+		s.logger.Warn("persist message round failed", slog.Any("error", err))
+	}
+	return persisted
+}
+
+func (s *Service) storeMessagesResult(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.Message, error) {
 	if s.messageService == nil {
-		return nil
+		return nil, nil
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return nil
+		return nil, nil
 	}
 	persistInputs, err := s.buildPersistInputs(ctx, req, messages, modelID, opts)
 	if err != nil {
-		s.logger.Warn("prepare messages for persistence failed", slog.Any("error", err))
-		return nil
+		return nil, fmt.Errorf("prepare messages for persistence: %w", err)
+	}
+	// A successful ACP checkpoint is published by metadata on the final
+	// assistant row. Persist the complete round and that watermark in one
+	// transaction, otherwise a partially-written round could make a staged
+	// native snapshot visible before all canonical messages exist.
+	if opts.RequireCompletePersist {
+		atomic, ok := s.messageService.(messagepkg.AtomicRoundPersister)
+		if !ok {
+			return nil, errors.New("complete round persistence requires an atomic message persister")
+		}
+		persisted, handled, persistErr := atomic.PersistRound(ctx, persistInputs, messagepkg.RoundPersistenceOptions{
+			CleanupACPDecisionProjections: opts.CleanupACPDecisionProjections,
+			ACPPublication:                opts.ACPPublication,
+		})
+		if persistErr != nil {
+			return persisted, persistErr
+		}
+		if !handled {
+			return nil, errors.New("atomic message persister declined complete round persistence")
+		}
+		return persisted, nil
 	}
 	if batcher, ok := s.messageService.(messagepkg.ToolTailRoundPersister); ok {
 		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
 			if err != nil {
-				s.logger.Warn("persist tool tail round failed", slog.Any("error", err))
-				return nil
+				return nil, fmt.Errorf("persist tool tail round: %w", err)
 			}
-			return persisted
+			return persisted, nil
 		}
 	}
 	turnRequestMessageID := ""
 	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
 		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
 	}
-	return s.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+	return s.persistMessageInputs(ctx, persistInputs, turnRequestMessageID), nil
 }
 
 func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.PersistInput, error) {
@@ -309,6 +343,12 @@ func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messa
 				default:
 					displayText = strings.TrimSpace(req.Query)
 				}
+				// req.Query is the headerified <message> envelope by the time a
+				// round is stored, and retry copies that envelope into RawQuery.
+				// An attachment-only message (no caption) has no raw text to fall
+				// back on, so without this the wrapper itself became the user
+				// bubble. Real user text is left untouched.
+				displayText = strings.TrimSpace(turnpkg.UnwrapUserMessageEnvelope(displayText))
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
 				persistMeta = mergeMetadata(meta, buildInteractionMetadata(req))
 			} else {

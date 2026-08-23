@@ -126,7 +126,7 @@ type PersistInput struct {
 	// TurnID and TurnPosition carry a turn this message must be filed under
 	// because admission already allocated it (SR-TURN-001). Both empty means no
 	// admission decided the turn and the history layer allocates one, which is
-	// still the case for channel inbound, schedules and heartbeats.
+	// still the case for channel inbound and schedules.
 	//
 	// They travel together: a turn id without its position would file the row
 	// under the right turn at the wrong place in the session's order, and a
@@ -160,8 +160,18 @@ type TurnReplacement struct {
 	SessionMetadata         map[string]any
 }
 
+// ACPPublication moves the session's canonical ACP publication head to the
+// round's run inside the same transaction as the round's messages. A head with
+// CheckpointReset=true is canonical but not resumable.
+type ACPPublication struct {
+	RunID           string
+	CheckpointReset bool
+}
+
 type RoundPersistenceOptions struct {
-	Replacement *TurnReplacement
+	Replacement                   *TurnReplacement
+	CleanupACPDecisionProjections bool
+	ACPPublication                *ACPPublication
 }
 
 // AtomicRoundPersister writes a complete round in one transaction.

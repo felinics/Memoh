@@ -31,8 +31,7 @@ const (
 	browserToolTimeout                  = 45 * time.Second
 	browserStartupTimeout               = 12 * time.Second
 	computerDisplayStartupTimeout int32 = 1200
-	browserScreenshotSubdir             = "browser-screenshots"
-	computerScreenshotSubdir            = "computer-screenshots"
+	screenshotSubdir                    = ".memoh/screenshots"
 	defaultComputerWidth                = 1280
 	defaultComputerHeight               = 800
 	rfbButtonLeft                 byte  = 1
@@ -360,7 +359,7 @@ func (p *BrowserProvider) execComputerScreenshot(ctx context.Context, session Se
 	if err != nil {
 		return nil, err
 	}
-	return p.buildScreenshotBytesResult(ctx, botID, img, mime, p.screenshotDir(computerScreenshotSubdir), nil), nil
+	return p.buildScreenshotBytesResult(ctx, botID, img, mime, p.screenshotDir(), nil), nil
 }
 
 func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session SessionContext) (any, error) {
@@ -1428,7 +1427,7 @@ func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Cl
 
 func (p *BrowserProvider) browserActionResult(ctx context.Context, botID string, data map[string]any) any {
 	if b64, ok := data["screenshot"].(string); ok && b64 != "" {
-		return p.buildScreenshotResult(ctx, botID, b64, p.screenshotDir(browserScreenshotSubdir), data)
+		return p.buildScreenshotResult(ctx, botID, b64, p.screenshotDir(), data)
 	}
 	return data
 }
@@ -1975,12 +1974,12 @@ func (p *BrowserProvider) buildScreenshotBytesResult(ctx context.Context, botID 
 	return result
 }
 
-func (p *BrowserProvider) screenshotDir(name string) string {
+func (p *BrowserProvider) screenshotDir() string {
 	root := strings.TrimRight(strings.TrimSpace(p.dataRoot), "/")
 	if root == "" {
 		root = "/data"
 	}
-	return root + "/" + strings.TrimLeft(name, "/")
+	return root + "/" + screenshotSubdir
 }
 
 func (p *BrowserProvider) saveBytes(ctx context.Context, botID, path string, data []byte) error {

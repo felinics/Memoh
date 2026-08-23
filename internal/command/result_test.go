@@ -57,7 +57,7 @@ func TestBuildListResultSinglePageNoSuffix(t *testing.T) {
 }
 
 // TestBuildPagedListResultButtonTextOmitsCommandHintForActionRows covers the
-// hint-aware path through buildPagedListResult (used by /heartbeat logs).
+// hint-aware path through buildPagedListResult.
 // buildListResult no longer has a hint param — all in-memory list callers
 // rely on the FallbackTrailer system for typeable guidance.
 func TestBuildPagedListResultButtonTextOmitsCommandHintForActionRows(t *testing.T) {
@@ -73,7 +73,7 @@ func TestBuildPagedListResultButtonTextOmitsCommandHintForActionRows(t *testing.
 }
 
 func TestBuildPagedListResultButtonTextKeepsPlainHintForDisplayRows(t *testing.T) {
-	res := buildPagedListResult("T", "heartbeat", "logs", nil, sampleRecords(2), 0, 12, 2, "Use the Web UI for older heartbeat logs.")
+	res := buildPagedListResult("T", "email", "outbox", nil, sampleRecords(2), 0, 12, 2, "Use the Web UI for older sent messages.")
 	if !strings.Contains(res.Interactive.List.ButtonText, "Use the Web UI") {
 		t.Fatalf("button text should keep non-action guidance: %q", res.Interactive.List.ButtonText)
 	}

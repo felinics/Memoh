@@ -68,12 +68,13 @@ func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *
 	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
 }
 
-func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager) *handlers.MessageHandler {
+func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, acpPool *acpagent.SessionPool) *handlers.MessageHandler {
 	h := handlers.NewMessageHandler(log, msgService, sessionService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	h.SetToolApprovalService(toolApproval)
 	h.SetUserInputService(userInput)
 	h.SetBackgroundManager(bgManager)
+	h.SetRuntimeResetService(acpPool)
 	return h
 }
 
@@ -86,7 +87,7 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 
 func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool) *handlers.UsersHandler {
 	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaceManager)
-	handler.SetACPRuntimeCloser(acpPool)
+	handler.SetRuntimeResetService(acpPool)
 	return handler
 }
 
@@ -162,7 +163,6 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 			if err := coremodule.EnsureAdminUser(ctx, logger, accountStore, emailService, cfg); err != nil {
 				return err
 			}
-			botService.SetContainerLifecycle(manager)
 			botService.SetContainerReachability(func(ctx context.Context, botID string) error {
 				_, err := manager.MCPClient(ctx, botID)
 				return err

@@ -27,6 +27,7 @@ import (
 	"github.com/memohai/memoh/internal/httpx"
 	"github.com/memohai/memoh/internal/identity"
 	runtimeRpc "github.com/memohai/memoh/internal/rpc/runtime"
+	"github.com/memohai/memoh/internal/runtimefence"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -41,8 +42,8 @@ type botCreateWorkspace interface {
 	SetupBotContainerWithProgress(ctx context.Context, botID string, progress workspace.ContainerSetupProgress) error
 }
 
-type acpRuntimeCloser interface {
-	CloseBotAgentRuntimes(botID, agentID string) error
+type runtimeResetService interface {
+	BeginBotHistoryReset(ctx context.Context, botID string) (resetCtx context.Context, release func(), err error)
 }
 
 type createBotStreamBotEvent struct {
@@ -59,7 +60,7 @@ type UsersHandler struct {
 	channelRuntime channel.Runtime
 	registry       *channel.Registry
 	acpWorkspace   botCreateWorkspace
-	acpRuntimes    acpRuntimeCloser
+	runtimeResets  runtimeResetService
 	logger         *slog.Logger
 }
 
@@ -80,8 +81,8 @@ func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bo
 	}
 }
 
-func (h *UsersHandler) SetACPRuntimeCloser(closer acpRuntimeCloser) {
-	h.acpRuntimes = closer
+func (h *UsersHandler) SetRuntimeResetService(closer runtimeResetService) {
+	h.runtimeResets = closer
 }
 
 func (h *UsersHandler) Register(e *echo.Echo) {
@@ -822,7 +823,7 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	needsACPWorkspaceConfigWrite := false
-	shouldCloseACPRuntimes := false
+	shouldResetRuntimes := false
 	if req.Metadata != nil {
 		if err := h.botService.ValidateUpdate(c.Request().Context(), bot.ID, req); err != nil {
 			return updateBotHTTPError(err)
@@ -833,23 +834,37 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid ACP metadata: "+err.Error())
 		}
 		needsACPWorkspaceConfigWrite = acpManagedConfigNeedsWrite(bot.Metadata, pending.Metadata)
-		shouldCloseACPRuntimes = acpRuntimeMetadataChanged(bot.Metadata, pending.Metadata)
+		shouldResetRuntimes = acpRuntimeMetadataChanged(bot.Metadata, pending.Metadata)
+	}
+	if shouldResetRuntimes && h.runtimeResets == nil {
+		return apperror.Wrap(
+			apperror.CodeSessionHistoryInconsistent,
+			errors.New("runtime reset is not configured"),
+			nil,
+		)
+	}
+	if shouldResetRuntimes {
+		resetCtx, releaseRuntimeReset, resetErr := h.runtimeResets.BeginBotHistoryReset(c.Request().Context(), bot.ID)
+		if resetErr != nil {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, resetErr, nil)
+		}
+		defer releaseRuntimeReset()
+		c.SetRequest(c.Request().WithContext(resetCtx))
 	}
 	resp, err := h.botService.Update(c.Request().Context(), bot.ID, req)
 	if err != nil {
+		if leaseErr := runtimefence.ResetLeaseFailure(c.Request().Context(), err); leaseErr != nil {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, leaseErr, nil)
+		}
 		return updateBotHTTPError(err)
 	}
 	if req.Metadata != nil {
 		if needsACPWorkspaceConfigWrite {
-			if err := h.prepareACPWorkspaceConfig(c.Request().Context(), resp); err != nil {
-				if shouldCloseACPRuntimes {
-					h.closeUpdatedACPRuntimes(resp.ID)
-				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "write ACP workspace config: "+err.Error())
+			if err := h.botService.PublishRuntimeConfig(c.Request().Context(), bot.ID, func(publishCtx context.Context) error {
+				return h.prepareACPWorkspaceConfig(publishCtx, resp)
+			}); err != nil {
+				return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
 			}
-		}
-		if shouldCloseACPRuntimes {
-			h.closeUpdatedACPRuntimes(resp.ID)
 		}
 	}
 	return c.JSON(http.StatusOK, scrubBotForResponse(resp))
@@ -955,21 +970,6 @@ func updateBotHTTPError(err error) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-}
-
-func (h *UsersHandler) closeUpdatedACPRuntimes(botID string) {
-	if h == nil || h.acpRuntimes == nil {
-		return
-	}
-	for _, profile := range acpprofile.List() {
-		if err := h.acpRuntimes.CloseBotAgentRuntimes(botID, profile.ID); err != nil {
-			h.logger.Warn("close ACP runtime after bot metadata update failed",
-				slog.String("bot_id", botID),
-				slog.String("agent_id", profile.ID),
-				slog.Any("error", err),
-			)
-		}
-	}
 }
 
 func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.Bot) error {
@@ -1106,7 +1106,20 @@ func (h *UsersHandler) DeleteBot(c echo.Context) error {
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
 	}
+	var releaseRuntimeReset func()
+	if h.runtimeResets != nil {
+		var resetCtx context.Context
+		resetCtx, releaseRuntimeReset, err = h.runtimeResets.BeginBotHistoryReset(c.Request().Context(), botID)
+		if err != nil {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+		}
+		defer releaseRuntimeReset()
+		c.SetRequest(c.Request().WithContext(resetCtx))
+	}
 	if err := h.botService.Delete(c.Request().Context(), botID); err != nil {
+		if leaseErr := runtimefence.ResetLeaseFailure(c.Request().Context(), err); leaseErr != nil {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, leaseErr, nil)
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "bot not found")
 		}

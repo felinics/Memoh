@@ -16,6 +16,8 @@ const (
 	CodeCompactionModelUnavailable       Code = "compaction.model_unavailable"
 	CodeSettingsReasoningEffortInvalid   Code = "settings.reasoning_effort_invalid"
 	CodeSettingsReasoningUnavailable     Code = "settings.reasoning_options_unavailable"
+	CodeContextBudgetUnsatisfied         Code = "context.budget_unsatisfied"
+	CodeContextProtectedOverflow         Code = "context.protected_overflow"
 	CodeWorkspaceUnreachable             Code = "workspace.unreachable"
 	CodeWorkspaceImageIncompatible       Code = "workspace.image_incompatible"
 	CodeWorkspaceTemplateBootstrapFailed Code = "workspace.template_bootstrap_failed"
@@ -34,6 +36,13 @@ const (
 	CodeConnectorRequestRejected         Code = "connector.request_rejected"
 	CodeConnectorUpstreamUnavailable     Code = "connector.upstream_unavailable"
 	CodeConnectorOperationFailed         Code = "connector.operation_failed"
+	CodeSkillBuiltinReadOnly             Code = "skill.builtin_read_only"
+	CodeSkillNameTaken                   Code = "skill.name_taken"
+	CodeSkillSaveFailed                  Code = "skill.save_failed"
+	CodeRegistryUnavailable              Code = "registry.unavailable"
+	CodeRegistryPackageNotFound          Code = "registry.package_not_found"
+	CodeRegistryPackageInvalid           Code = "registry.package_invalid"
+	CodeRegistryPackageInstallFailed     Code = "registry.package_install_failed"
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed              Code = "profile.update_failed"
@@ -109,6 +118,14 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The chat model's reasoning options could not be resolved. Please try again.",
 	},
+	CodeContextBudgetUnsatisfied: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "The model context window is too small for this request.",
+	},
+	CodeContextProtectedOverflow: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "Required context exceeds the model context budget.",
+	},
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The workspace could not be reached.",
@@ -182,6 +199,34 @@ var catalog = map[Code]Definition{
 	CodeConnectorOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The connector operation failed. Please try again.",
+	},
+	CodeSkillBuiltinReadOnly: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Built-in Skills are managed by Memoh and cannot be edited or deleted.",
+	},
+	CodeSkillNameTaken: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "A Skill with this name already exists.",
+	},
+	CodeSkillSaveFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The Skill could not be saved.",
+	},
+	CodeRegistryUnavailable: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The Supermarket is unavailable.",
+	},
+	CodeRegistryPackageNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The Skill package was not found.",
+	},
+	CodeRegistryPackageInvalid: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The Skill package is invalid.",
+	},
+	CodeRegistryPackageInstallFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The Skill package could not be installed.",
 	},
 	CodeProfileTitleModelInvalid: {
 		HTTPStatus: http.StatusBadRequest,

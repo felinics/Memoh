@@ -49,22 +49,45 @@ type runtimeArtifactSnapshot struct {
 }
 
 type runtimeLease struct {
-	client    *bridge.Client
-	logger    *slog.Logger
-	root      string
-	agentID   string
-	botID     string
-	mode      acpprofile.RuntimeStorageMode
-	agentEnv  []string
-	toolEnv   []string
-	unsetEnv  []string
-	snapshots map[string]*runtimeArtifactSnapshot
-	syncMu    sync.Mutex
-	cleanupMu sync.Mutex
-	cleaned   bool
+	client           *bridge.Client
+	logger           *slog.Logger
+	root             string
+	agentID          string
+	botID            string
+	mode             acpprofile.RuntimeStorageMode
+	sessionRoots     []string
+	agentEnv         []string
+	toolEnv          []string
+	unsetEnv         []string
+	snapshots        map[string]*runtimeArtifactSnapshot
+	runtimeSyncGuard RuntimeSyncGuard
+	syncMu           sync.Mutex
+	cleanupMu        sync.Mutex
+	cleaned          bool
 }
 
 func prepareRuntimeLease(ctx context.Context, client *bridge.Client, opts processOptions) (*runtimeLease, error) {
+	if opts.RuntimeSyncGuard == nil {
+		return prepareRuntimeLeaseUnguarded(ctx, client, opts)
+	}
+	var lease *runtimeLease
+	err := opts.RuntimeSyncGuard(ctx, func(guardCtx context.Context) error {
+		var prepareErr error
+		lease, prepareErr = prepareRuntimeLeaseUnguarded(guardCtx, client, opts)
+		return prepareErr
+	})
+	if err != nil {
+		if lease != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = lease.cleanup(cleanupCtx)
+		}
+		return nil, err
+	}
+	return lease, nil
+}
+
+func prepareRuntimeLeaseUnguarded(ctx context.Context, client *bridge.Client, opts processOptions) (*runtimeLease, error) {
 	if client == nil {
 		return nil, errors.New("workspace bridge client is required")
 	}
@@ -92,13 +115,15 @@ func prepareRuntimeLease(ctx context.Context, client *bridge.Client, opts proces
 		return nil, fmt.Errorf("create ACP runtime directory: %w", err)
 	}
 	lease := &runtimeLease{
-		client:    client,
-		logger:    opts.Logger,
-		root:      root,
-		agentID:   agentID,
-		botID:     strings.TrimSpace(opts.BotID),
-		mode:      storageMode,
-		snapshots: make(map[string]*runtimeArtifactSnapshot),
+		client:           client,
+		logger:           opts.Logger,
+		root:             root,
+		agentID:          agentID,
+		botID:            strings.TrimSpace(opts.BotID),
+		mode:             storageMode,
+		sessionRoots:     append([]string(nil), profile.RuntimeStorage.SessionRoots...),
+		snapshots:        make(map[string]*runtimeArtifactSnapshot),
+		runtimeSyncGuard: opts.RuntimeSyncGuard,
 	}
 	abort := func(err error) (*runtimeLease, error) {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -312,15 +337,32 @@ func (l *runtimeLease) stageFile(ctx context.Context, rule acpprofile.RuntimeArt
 }
 
 func (l *runtimeLease) Sync(ctx context.Context) error {
-	return l.sync(ctx, true, nil)
+	return l.withRuntimeSyncGuard(ctx, func(guardCtx context.Context) error {
+		return l.sync(guardCtx, true, nil)
+	})
 }
 
 // syncLiveState refreshes Codex OAuth credentials. Full compare-and-swap
 // trees are synchronized only at process exit.
 func (l *runtimeLease) syncLiveState(ctx context.Context) error {
-	return l.sync(ctx, false, func(snapshot *runtimeArtifactSnapshot) bool {
-		return snapshot != nil && snapshot.rule.Sync == acpprofile.RuntimeSyncCodexAuth
+	return l.withRuntimeSyncGuard(ctx, func(guardCtx context.Context) error {
+		return l.sync(guardCtx, false, func(snapshot *runtimeArtifactSnapshot) bool {
+			return snapshot != nil && snapshot.rule.Sync == acpprofile.RuntimeSyncCodexAuth
+		})
 	})
+}
+
+func (l *runtimeLease) withRuntimeSyncGuard(ctx context.Context, fn func(context.Context) error) error {
+	if l == nil {
+		return nil
+	}
+	if l.runtimeSyncGuard == nil {
+		return fn(ctx)
+	}
+	// Keep the database guard outside syncMu/runtimeSyncLock. Reset
+	// publication also takes the database bot lock before touching workspace
+	// state; reversing that order here would create a distributed deadlock.
+	return l.runtimeSyncGuard(ctx, fn)
 }
 
 func (l *runtimeLease) sync(
@@ -716,6 +758,12 @@ func (l *runtimeLease) finalize(ctx context.Context, commit bool) error {
 		return l.cleanup(ctx)
 	}
 	if err := l.Sync(ctx); err != nil {
+		if errors.Is(err, ErrRuntimeSyncGuardRejected) {
+			// This generation is forbidden from publishing. Its UUID-owned
+			// process state is no longer recoverable and retaining it on every
+			// reset would leak runtime directories indefinitely.
+			return l.cleanup(ctx)
+		}
 		// Preserve this one UUID directory for manual recovery when durable
 		// credential synchronization failed.
 		return err

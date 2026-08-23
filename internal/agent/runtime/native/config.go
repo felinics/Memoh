@@ -11,7 +11,7 @@ import (
 
 // ContextViewApplier rebuilds provider-facing fields from the authoritative
 // context fragments immediately before generate options are assembled.
-type ContextViewApplier func(context.Context, RunConfig) RunConfig
+type ContextViewApplier func(context.Context, RunConfig) (RunConfig, error)
 
 const (
 	DefaultToolOutputMaxBytes  = 64 * 1024
@@ -32,6 +32,27 @@ type Deps struct {
 	Logger             *slog.Logger
 	Limits             Limits
 	ContextViewApplier ContextViewApplier
+	LoopReselectMode   LoopReselectMode
+}
+
+// LoopReselectMode is the server-level rollout mode for the in-loop context
+// step reselector (cfg.ContextStepReselector).
+type LoopReselectMode string
+
+const (
+	LoopReselectActive LoopReselectMode = "active"
+	LoopReselectShadow LoopReselectMode = "shadow"
+	LoopReselectOff    LoopReselectMode = "off"
+)
+
+// Normalize maps an unrecognized or empty mode to LoopReselectActive.
+func (m LoopReselectMode) Normalize() LoopReselectMode {
+	switch m {
+	case LoopReselectShadow, LoopReselectOff:
+		return m
+	default:
+		return LoopReselectActive
+	}
 }
 
 func DefaultLimits() Limits {

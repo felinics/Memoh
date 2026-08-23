@@ -13,7 +13,6 @@ func TestWorkspaceFSContainsBootstrapFiles(t *testing.T) {
 
 	wantFiles := []string{
 		"AGENTS.md",
-		"HEARTBEAT.md",
 		"MEMORY.md",
 		"PROFILES.md",
 		".memoh/hooks.json",
@@ -37,11 +36,10 @@ func TestWorkspaceFSHasNoUnexpectedRoots(t *testing.T) {
 		t.Fatalf("read workspace template root: %v", err)
 	}
 	want := map[string]bool{
-		"AGENTS.md":    false,
-		"HEARTBEAT.md": false,
-		"MEMORY.md":    false,
-		"PROFILES.md":  false,
-		".memoh":       true,
+		"AGENTS.md":   false,
+		"MEMORY.md":   false,
+		"PROFILES.md": false,
+		".memoh":      true,
 	}
 	for _, entry := range entries {
 		isDir, ok := want[entry.Name()]

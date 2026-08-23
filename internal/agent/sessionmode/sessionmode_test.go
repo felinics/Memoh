@@ -9,7 +9,6 @@ func TestSessionModeConstants(t *testing.T) {
 
 	cases := map[string]string{
 		"chat":      Chat,
-		"heartbeat": Heartbeat,
 		"schedule":  Schedule,
 		"subagent":  Subagent,
 		"discuss":   Discuss,
@@ -31,7 +30,7 @@ func TestIsInteractive(t *testing.T) {
 		}
 	}
 
-	for _, mode := range []string{Discuss, Schedule, Heartbeat, Subagent} {
+	for _, mode := range []string{Discuss, Schedule, Subagent} {
 		if IsInteractive(mode) {
 			t.Fatalf("expected %q to be non-interactive", mode)
 		}

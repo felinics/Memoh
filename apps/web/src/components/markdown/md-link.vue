@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, useAttrs } from 'vue'
-import { LinkNode } from 'markstream-vue'
+import { LinkNode, type LinkNodeProps } from 'markstream-vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { tryParseLocalhostHref } from '@/utils/localhost-link'
 
@@ -13,14 +13,8 @@ import { tryParseLocalhostHref } from '@/utils/localhost-link'
 defineOptions({ inheritAttrs: false })
 
 const props = defineProps<{
-  node: {
-    type: 'link'
-    href: string
-    title: string | null
-    text: string
-    children?: unknown[]
-    raw: string
-  }
+  node: LinkNodeProps['node']
+  indexKey: LinkNodeProps['indexKey']
 }>()
 
 const attrs = useAttrs()
@@ -46,6 +40,7 @@ function onClickCapture(event: MouseEvent) {
 <template>
   <span @click.capture="onClickCapture"><LinkNode
     :node="node"
+    :index-key="indexKey"
     v-bind="attrs"
   /></span>
 </template>

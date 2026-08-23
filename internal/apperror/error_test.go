@@ -134,3 +134,98 @@ func TestContextLifecycleErrorCatalog(t *testing.T) {
 		})
 	}
 }
+
+func TestSkillLayoutErrorsUseConflictContract(t *testing.T) {
+	for _, code := range []Code{
+		CodeSkillBuiltinReadOnly,
+	} {
+		definition, ok := Lookup(code)
+		if !ok {
+			t.Fatalf("%s missing from catalog", code)
+		}
+		if definition.HTTPStatus != http.StatusConflict {
+			t.Fatalf("%s status = %d, want 409", code, definition.HTTPStatus)
+		}
+		if strings.TrimSpace(definition.Detail) == "" {
+			t.Fatalf("%s has empty fallback detail", code)
+		}
+	}
+}
+
+func TestSkillSaveErrorsUseStableContracts(t *testing.T) {
+	tests := []struct {
+		code   Code
+		status int
+	}{
+		{code: CodeSkillNameTaken, status: http.StatusConflict},
+		{code: CodeSkillSaveFailed, status: http.StatusInternalServerError},
+	}
+	for _, test := range tests {
+		definition, ok := Lookup(test.code)
+		if !ok {
+			t.Fatalf("%s missing from catalog", test.code)
+		}
+		if definition.HTTPStatus != test.status {
+			t.Fatalf("%s status = %d, want %d", test.code, definition.HTTPStatus, test.status)
+		}
+		if strings.TrimSpace(definition.Detail) == "" {
+			t.Fatalf("%s has empty fallback detail", test.code)
+		}
+	}
+}
+
+func TestRegistryUpstreamErrorsUseStableContracts(t *testing.T) {
+	tests := []struct {
+		code   Code
+		status int
+	}{
+		{code: CodeRegistryUnavailable, status: http.StatusBadGateway},
+		{code: CodeRegistryPackageNotFound, status: http.StatusNotFound},
+		{code: CodeRegistryPackageInvalid, status: http.StatusBadGateway},
+	}
+	for _, test := range tests {
+		definition, ok := Lookup(test.code)
+		if !ok {
+			t.Fatalf("%s missing from catalog", test.code)
+		}
+		if definition.HTTPStatus != test.status {
+			t.Fatalf("%s status = %d, want %d", test.code, definition.HTTPStatus, test.status)
+		}
+		if strings.TrimSpace(definition.Detail) == "" {
+			t.Fatalf("%s has empty fallback detail", test.code)
+		}
+	}
+}
+
+func TestRegistryPackageInstallFailedUsesPrivateServerErrorContract(t *testing.T) {
+	definition, ok := Lookup(CodeRegistryPackageInstallFailed)
+	if !ok {
+		t.Fatal("registry.package_install_failed missing from catalog")
+	}
+	if definition.HTTPStatus != http.StatusInternalServerError {
+		t.Fatalf("registry.package_install_failed status = %d, want 500", definition.HTTPStatus)
+	}
+	if strings.TrimSpace(definition.Detail) == "" {
+		t.Fatal("registry.package_install_failed has empty fallback detail")
+	}
+}
+
+func TestContextBudgetErrorsHaveStableCatalogContracts(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		code   Code
+		detail string
+	}{
+		{CodeContextBudgetUnsatisfied, "The model context window is too small for this request."},
+		{CodeContextProtectedOverflow, "Required context exceeds the model context budget."},
+	} {
+		definition, ok := Lookup(tt.code)
+		if !ok {
+			t.Fatalf("catalog missing %q", tt.code)
+		}
+		if definition.HTTPStatus != http.StatusUnprocessableEntity || definition.Detail != tt.detail {
+			t.Fatalf("catalog[%q] = %#v", tt.code, definition)
+		}
+	}
+}

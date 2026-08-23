@@ -70,9 +70,18 @@ RETURNING *;
 -- name: DeleteBotRemoteRuntimeMountsByRuntime :exec
 -- Revoking a runtime kills every bot mount of it in the same transaction:
 -- dead bindings would otherwise linger as ghost rows on every surface.
-DELETE FROM bot_remote_runtime_bindings
-WHERE team_id = public.memoh_current_team_id()
-  AND runtime_id = sqlc.arg(runtime_id);
+WITH deleted_packages AS (
+  DELETE FROM bot_skill_package_installations AS package
+  USING bot_remote_runtime_bindings AS binding
+  WHERE package.team_id = public.memoh_current_team_id()
+    AND package.bot_id = binding.bot_id
+    AND package.workspace_target_id = binding.id::text
+    AND binding.team_id = public.memoh_current_team_id()
+    AND binding.runtime_id = sqlc.arg(runtime_id)
+)
+DELETE FROM bot_remote_runtime_bindings AS binding
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND binding.runtime_id = sqlc.arg(runtime_id);
 
 -- name: BackfillUserRuntimeName :execrows
 -- Fills the display name from the connecting machine, but ONLY while the row
@@ -205,10 +214,20 @@ WHERE team_id = public.memoh_current_team_id()
 RETURNING id;
 
 -- name: DeleteBotRemoteRuntimeMount :one
-DELETE FROM bot_remote_runtime_bindings
-WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = sqlc.arg(bot_id)
-  AND id = sqlc.arg(target_id)
+WITH deleted_packages AS (
+  DELETE FROM bot_skill_package_installations AS package
+  USING bot_remote_runtime_bindings AS binding
+  WHERE package.team_id = public.memoh_current_team_id()
+    AND package.bot_id = binding.bot_id
+    AND package.workspace_target_id = binding.id::text
+    AND binding.team_id = public.memoh_current_team_id()
+    AND binding.bot_id = sqlc.arg(bot_id)
+    AND binding.id = sqlc.arg(target_id)
+)
+DELETE FROM bot_remote_runtime_bindings AS binding
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND binding.bot_id = sqlc.arg(bot_id)
+  AND binding.id = sqlc.arg(target_id)
 RETURNING id;
 
 -- name: ListBotRemoteRuntimeGrantsByRuntimeOwner :many

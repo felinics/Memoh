@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
@@ -16,7 +20,9 @@ import (
 	"github.com/memohai/memoh/internal/apperror"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 type closedDiscussAgentStreamer struct{}
@@ -133,6 +139,21 @@ func (s *failNthPersistMessageService) Persist(
 	return s.recordingMessageService.Persist(ctx, input)
 }
 
+// PersistRound mirrors the per-message failure for the atomic round path: a
+// round whose write would cross failAt fails as one transaction.
+func (s *failNthPersistMessageService) PersistRound(
+	ctx context.Context,
+	inputs []messagepkg.PersistInput,
+	options messagepkg.RoundPersistenceOptions,
+) ([]messagepkg.Message, bool, error) {
+	if s.calls+len(inputs) >= s.failAt {
+		s.calls = s.failAt
+		return nil, true, s.err
+	}
+	s.calls += len(inputs)
+	return s.recordingMessageService.PersistRound(ctx, inputs, options)
+}
+
 func TestACPGenericPromptFailurePublishesSanitizedErroredTerminalToChatAndDiscuss(t *testing.T) {
 	const privateDetail = "PRIVATE_ACP_PROVIDER_FAILURE"
 	pool := &recordingACPPrompter{err: errors.New(privateDetail)}
@@ -215,6 +236,19 @@ func TestACPPersistFailureReplacesSuccessTerminalWithSanitizedErrorAbort(t *test
 	if !row.ErrorCode.Valid || row.ErrorCode.String != string(apperror.CodeSessionHistoryInconsistent) {
 		t.Fatalf("lifecycle error code = %#v, want %q", row.ErrorCode, apperror.CodeSessionHistoryInconsistent)
 	}
+	// The eagerly persisted leading user message is deliberately KEPT on a
+	// definite round rollback: the user watched their message send, a visible
+	// message must never vanish, and keeping it can never destroy a committed
+	// turn the way a misclassified rollback deletion would. This pin exists
+	// because reviewers have proposed both directions; the keep decision is
+	// intentional, not an omission.
+	for _, batch := range messages.deleted {
+		for _, id := range batch {
+			if id == "message-id" {
+				t.Fatalf("round rollback deleted the leading user message: %#v", messages.deleted)
+			}
+		}
+	}
 }
 
 func TestACPExplicitCancellationDoesNotPublishProviderError(t *testing.T) {
@@ -290,4 +324,186 @@ func assertPublishedErroredTerminal(t *testing.T, events []native.StreamEvent) {
 		}
 	}
 	t.Fatalf("published events = %#v, want error and abort", events)
+}
+
+// reconcileOutcomeQueries fakes the commit-unknown reconciliation store: it
+// answers LockSessionForCommitReconciliation + GetACPRoundOutcome inside a
+// pass-through transaction, can fail a configurable number of attempts first,
+// and signals when the background retry's projection cleanup runs.
+type reconcileOutcomeQueries struct {
+	dbstore.Queries
+	mu               sync.Mutex
+	outcome          string // "" means no committed round (proven rollback)
+	failFirst        int    // reconcile attempts to fail before answering
+	projectionsSwept chan struct{}
+}
+
+func (*reconcileOutcomeQueries) SupportsTransactions() bool { return true }
+
+func (q *reconcileOutcomeQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
+	q.mu.Lock()
+	if q.failFirst > 0 {
+		q.failFirst--
+		q.mu.Unlock()
+		return errors.New("reconciliation store temporarily unavailable")
+	}
+	q.mu.Unlock()
+	return fn(q)
+}
+
+// GetBotByID satisfies the incidental timezone lookup on this path.
+func (*reconcileOutcomeQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
+	return sqlc.GetBotByIDRow{}, pgx.ErrNoRows
+}
+
+func (*reconcileOutcomeQueries) LockSessionForCommitReconciliation(
+	context.Context, sqlc.LockSessionForCommitReconciliationParams,
+) (pgtype.UUID, error) {
+	return pgtype.UUID{}, nil
+}
+
+func (q *reconcileOutcomeQueries) GetACPRoundOutcome(context.Context, sqlc.GetACPRoundOutcomeParams) (string, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.outcome == "" {
+		return "", pgx.ErrNoRows
+	}
+	return q.outcome, nil
+}
+
+func (q *reconcileOutcomeQueries) DeleteACPDecisionProjectionsByRun(
+	context.Context, sqlc.DeleteACPDecisionProjectionsByRunParams,
+) (int64, error) {
+	select {
+	case q.projectionsSwept <- struct{}{}:
+	default:
+	}
+	return 0, nil
+}
+
+// TestACPCommitUnknownResolutionMatrix pins the three-way commit-unknown
+// resolution contract of resolveACPRoundPersistFailure through the completed
+// -turn path, plus the incomplete-abort rollback path. Two invariants hold in
+// every cell: the eagerly persisted leading user message is never deleted,
+// and the warm runtime is only discarded on a PROVEN rollback of a completed
+// turn.
+func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
+	assertUserMessageKept := func(t *testing.T, messages *recordingMessageService) {
+		t.Helper()
+		for _, batch := range messages.deleted {
+			for _, id := range batch {
+				if id == "message-id" {
+					t.Fatalf("leading user message was deleted: %#v", messages.deleted)
+				}
+			}
+		}
+	}
+
+	t.Run("committed", func(t *testing.T) {
+		messages := &recordingMessageService{roundPersistErr: db.ErrCommitOutcomeUnknown}
+		pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"}}
+		service := newACPLifecycleService(t, pool, messages, &recordingContextLifecycleStore{})
+		service.queries = &reconcileOutcomeQueries{outcome: "succeeded"}
+		eventCh := make(chan WSStreamEvent, 16)
+
+		if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+			BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
+			RunID: lifecycleTestRunID, Query: "inspect",
+		}, eventCh, make(chan struct{})); err != nil {
+			t.Fatalf("streamACPAgentWS() error = %v", err)
+		}
+		events := drainAgentEvents(t, eventCh)
+		if !containsStreamEvent(events, native.EventEnd) {
+			t.Fatalf("proven-committed round did not terminate as completed: %#v", events)
+		}
+		if len(pool.closed) != 0 {
+			t.Fatalf("proven-committed round closed the runtime: %v", pool.closed)
+		}
+		assertUserMessageKept(t, messages)
+	})
+
+	t.Run("rolled back", func(t *testing.T) {
+		messages := &recordingMessageService{roundPersistErr: db.ErrCommitOutcomeUnknown}
+		pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"}}
+		service := newACPLifecycleService(t, pool, messages, &recordingContextLifecycleStore{})
+		service.queries = &reconcileOutcomeQueries{outcome: ""}
+		eventCh := make(chan WSStreamEvent, 16)
+
+		if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+			BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
+			RunID: lifecycleTestRunID, Query: "inspect",
+		}, eventCh, make(chan struct{})); err != nil {
+			t.Fatalf("streamACPAgentWS() error = %v", err)
+		}
+		events := drainAgentEvents(t, eventCh)
+		if !containsStreamEvent(events, native.EventError) || containsStreamEvent(events, native.EventEnd) {
+			t.Fatalf("proven rollback of a completed turn must surface a sanitized error abort: %#v", events)
+		}
+		if len(pool.closed) != 1 || pool.closed[0] != lifecycleTestSessionID {
+			t.Fatalf("proven rollback must discard the diverged warm runtime once: %v", pool.closed)
+		}
+		assertUserMessageKept(t, messages)
+	})
+
+	t.Run("unresolved", func(t *testing.T) {
+		messages := &recordingMessageService{roundPersistErr: db.ErrCommitOutcomeUnknown}
+		pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"}}
+		service := newACPLifecycleService(t, pool, messages, &recordingContextLifecycleStore{})
+		queries := &reconcileOutcomeQueries{
+			outcome:          "succeeded",
+			failFirst:        1, // the in-turn reconcile fails; the background retry succeeds
+			projectionsSwept: make(chan struct{}, 1),
+		}
+		service.queries = queries
+		eventCh := make(chan WSStreamEvent, 16)
+
+		err := service.streamACPAgentWS(context.Background(), ChatRequest{
+			BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
+			RunID: lifecycleTestRunID, Query: "inspect",
+		}, eventCh, make(chan struct{}))
+		if err == nil || apperror.CodeOf(err) != apperror.CodeSessionHistoryInconsistent {
+			t.Fatalf("unresolved outcome must fail closed, got %v", err)
+		}
+		if len(pool.closed) != 0 {
+			t.Fatalf("unresolved outcome must not touch the runtime: %v", pool.closed)
+		}
+		assertUserMessageKept(t, messages)
+		// The background reconciliation owns the deferred projection sweep.
+		select {
+		case <-queries.projectionsSwept:
+		case <-time.After(5 * time.Second):
+			t.Fatal("background reconciliation never swept the projections")
+		}
+		assertUserMessageKept(t, messages)
+	})
+
+	t.Run("incomplete abort rollback keeps runtime", func(t *testing.T) {
+		messages := &recordingMessageService{roundPersistErr: errors.New("definite rollback")}
+		started := make(chan struct{})
+		pool := &recordingACPPrompter{promptFn: func(ctx context.Context, _ acpagent.PromptInput) (acpclient.PromptResult, error) {
+			close(started)
+			<-ctx.Done()
+			return acpclient.PromptResult{Text: "partial"}, context.Cause(ctx)
+		}}
+		service := newACPLifecycleService(t, pool, messages, &recordingContextLifecycleStore{})
+		service.queries = &reconcileOutcomeQueries{}
+		eventCh := make(chan WSStreamEvent, 16)
+		abortCh := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- service.streamACPAgentWS(context.Background(), ChatRequest{
+				BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
+				RunID: lifecycleTestRunID, Query: "inspect",
+			}, eventCh, abortCh)
+		}()
+		<-started
+		close(abortCh)
+		if err := <-done; err != nil {
+			t.Fatalf("streamACPAgentWS() error = %v", err)
+		}
+		if len(pool.closed) != 0 {
+			t.Fatalf("incomplete abort must keep the runtime (head never needed to move): %v", pool.closed)
+		}
+		assertUserMessageKept(t, messages)
+	})
 }

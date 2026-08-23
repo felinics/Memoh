@@ -1,6 +1,7 @@
 package native
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -37,7 +38,7 @@ func TestWrapPrepareStepWithForkSnapshotDoesNotRewriteToolResults(t *testing.T) 
 	}
 
 	snapshot := agenttools.NewMessageSnapshot(nil)
-	prepareStep := wrapPrepareStepWithForkSnapshot(nil, snapshot)
+	prepareStep := wrapPrepareStepWithForkSnapshot(context.Background(), nil, snapshot)
 	params := &sdk.GenerateParams{Messages: messages}
 	got := prepareStep(params)
 	if got != params {

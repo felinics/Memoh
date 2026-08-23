@@ -315,18 +315,43 @@ WITH target_sessions AS MATERIALIZED (
 ),
 invalidated_sessions AS (
   UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
+  SET compaction_epoch = session.compaction_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
   FROM target_sessions target
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
+),
+deleted_acp_states AS (
+  DELETE FROM acp_session_states state
+  USING invalidated_sessions invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM acp_session_state_lines line
+  USING invalidated_sessions invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+),
+deleted_acp_publications AS (
+  DELETE FROM acp_session_publications publication
+  USING invalidated_sessions invalidated
+  WHERE publication.team_id = public.memoh_current_team_id()
+    AND publication.session_id = invalidated.id
+  RETURNING publication.session_id
 ),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.bot_id = $1
-    AND (SELECT count(*) FROM target_sessions) >= 0
+    AND (SELECT count(*) FROM invalidated_sessions) >= 0
+    AND (SELECT count(*) FROM deleted_acp_states) >= 0
+    AND (SELECT count(*) FROM deleted_acp_lines) >= 0
+    AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
 ),
@@ -368,18 +393,43 @@ WITH target_session AS MATERIALIZED (
 ),
 invalidated_session AS (
   UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
+  SET compaction_epoch = session.compaction_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
   FROM target_session target
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
+),
+deleted_acp_state AS (
+  DELETE FROM acp_session_states state
+  USING invalidated_session invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM acp_session_state_lines line
+  USING invalidated_session invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+),
+deleted_acp_publications AS (
+  DELETE FROM acp_session_publications publication
+  USING invalidated_session invalidated
+  WHERE publication.team_id = public.memoh_current_team_id()
+    AND publication.session_id = invalidated.id
+  RETURNING publication.session_id
 ),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.session_id = $1
-    AND (SELECT count(*) FROM target_session) >= 0
+    AND (SELECT count(*) FROM invalidated_session) >= 0
+    AND (SELECT count(*) FROM deleted_acp_state) >= 0
+    AND (SELECT count(*) FROM deleted_acp_lines) >= 0
+    AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
 ),
@@ -1354,7 +1404,7 @@ type CreateMessageWithHistoryTurnRow struct {
 // from this same counter (SR-TURN-001, SR-DUR-002), so bumping again would
 // spend a second position and file the message under a turn the client was
 // never told about. Entry points with no admission — channel inbound,
-// schedules, heartbeats — pass NULL and keep allocating here.
+// schedules — pass NULL and keep allocating here.
 func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg CreateMessageWithHistoryTurnParams) (CreateMessageWithHistoryTurnRow, error) {
 	row := q.db.QueryRow(ctx, createMessageWithHistoryTurn,
 		arg.SessionID,

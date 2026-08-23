@@ -574,7 +574,7 @@ func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFallback(t *testing.T) {
 		Content: mustUIMessageJSON(t, turn.ModelMessage{
 			Role: "user",
 			Content: mustUIRawJSON(t, `<message id="msg-image-only" sender="Test User (@test_user)" t="2026-05-08T19:08:58Z" channel="telegram" conversation="Test Group" type="group" target="test-group">
-<attachment path="/data/media/test/test-image.webp"/>
+<attachment path="/data/.memoh/media/test/test-image.webp"/>
 
 </message>`),
 		}),
@@ -592,6 +592,44 @@ func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFallback(t *testing.T) {
 	}
 	if turns[0].Text != "" {
 		t.Fatalf("expected XML envelope to be stripped, got %q", turns[0].Text)
+	}
+	if len(turns[0].Attachments) != 1 || turns[0].Attachments[0].Type != "image" {
+		t.Fatalf("expected image attachment to remain, got %#v", turns[0].Attachments)
+	}
+}
+
+// Attachment-only turns persisted before the display-text fix stored the
+// headerified envelope as display content. History must not render it.
+func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFromDisplayContent(t *testing.T) {
+	now := time.Now().UTC()
+	envelope := `<message sender="User" t="2026-08-20T17:37:14+08:00" channel="web" type="private" target="115e7013-dc2a-4437-8e21-b49fbb21dfef">
+<attachment path="/data/.memoh/media/b2/b2edf40e.png"/>
+
+</message>`
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
+		ID:             "user-1",
+		BotID:          "bot-1",
+		SessionID:      "session-1",
+		Role:           "user",
+		DisplayContent: envelope,
+		Content: mustUIMessageJSON(t, turn.ModelMessage{
+			Role:    "user",
+			Content: mustUIRawJSON(t, envelope),
+		}),
+		Assets: []messagepkg.MessageAsset{{
+			ContentHash: "test-image-hash",
+			Mime:        "image/png",
+			StorageKey:  "media/b2/b2edf40e.png",
+			Name:        "image.png",
+		}},
+		CreatedAt: now,
+	}})
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if turns[0].Text != "" {
+		t.Fatalf("expected display content envelope to be stripped, got %q", turns[0].Text)
 	}
 	if len(turns[0].Attachments) != 1 || turns[0].Attachments[0].Type != "image" {
 		t.Fatalf("expected image attachment to remain, got %#v", turns[0].Attachments)

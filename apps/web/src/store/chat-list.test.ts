@@ -255,6 +255,12 @@ function wsRunId(index = 0): string {
 beforeEach(() => {
     pinia = createPinia()
     setActivePinia(pinia)
+    // The runtime client coalesces delta projections to one per animation
+    // frame; run frames synchronously so existing per-event assertions hold.
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 0
+    })
     h.streamHandler = null
     h.sessionsActivityHandler = null
     h.lastRunId = ''

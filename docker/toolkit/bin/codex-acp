@@ -7,28 +7,8 @@ if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "$TOOLKIT_CA_BUNDLE" ]; then
   export SSL_CERT_FILE="$TOOLKIT_CA_BUNDLE"
 fi
 
-fallback_codex_acp() {
-  old_ifs="$IFS"
-  IFS=:
-  for dir in $PATH; do
-    IFS="$old_ifs"
-    [ -n "$dir" ] || dir=.
-    case "$dir" in
-      "$TOOLKIT/bin") ;;
-      *)
-        if [ -x "$dir/codex-acp" ]; then
-          exec "$dir/codex-acp" "$@"
-        fi
-        ;;
-    esac
-    IFS=:
-  done
-  IFS="$old_ifs"
-}
-
 if [ ! -f "$CODEX_ACP" ]; then
-  fallback_codex_acp "$@"
-  echo "codex-acp is not installed in the Memoh workspace toolkit and no fallback codex-acp command was found: $CODEX_ACP" >&2
+  echo "the pinned Memoh codex-acp adapter is not installed: $CODEX_ACP" >&2
   exit 127
 fi
 
@@ -38,7 +18,6 @@ case "$(uname -m)" in
   *) GLIBC_LOADER= ;;
 esac
 if ls /lib/ld-musl-*.so.1 >/dev/null 2>&1 && { [ -z "$GLIBC_LOADER" ] || [ ! -e "$GLIBC_LOADER" ]; }; then
-  fallback_codex_acp "$@"
   echo "codex-acp requires a glibc workspace image. Use the default Debian workspace image for ACP Codex sessions." >&2
   exit 127
 fi

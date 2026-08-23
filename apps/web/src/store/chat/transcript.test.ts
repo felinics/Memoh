@@ -589,3 +589,38 @@ describe('chat transcript controller', () => {
     expect(transcript.hasLoadedOlder.value).toBe(false)
   })
 })
+
+describe('idle runtime snapshot reconciliation', () => {
+  // Regression: an idle snapshot (settled run, no streamed content — the shape
+  // every runtime_snapshot takes after a backend restart) must not erase the
+  // settled database turn's blocks. The projection emits no assistant turn for
+  // such runs, so the merge keeps the settled twin intact.
+  it('keeps settled blocks when the idle slice carries only the user turn', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([
+      rawUser('user-1'),
+      rawAssistant('assistant-1', [
+        { id: 0, type: 'reasoning', content: 'thinking' },
+        { id: 1, type: 'text', content: 'answer' },
+      ]),
+    ], 'session-1')
+
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-user-1',
+      status: 'completed',
+      operation: null,
+      turns: [{
+        id: 'runtime:turn-user-1:user',
+        turn_id: 'turn-user-1',
+        role: 'user',
+        text: 'hello',
+        timestamp: '2026-01-01T00:00:00.000Z',
+      }],
+      streaming: false,
+    })
+
+    const assistant = transcript.messages.find(turn => turn.role === 'assistant') as ChatAssistantTurn
+    expect(assistant.messages.map(block => block.type)).toEqual(['reasoning', 'text'])
+  })
+})

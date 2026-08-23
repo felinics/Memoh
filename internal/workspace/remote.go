@@ -258,11 +258,10 @@ func (s *RemoteWorkspaceService) DeleteMount(ctx context.Context, botID, targetI
 	if !ok {
 		return ErrWorkspaceTargetNotFound
 	}
-	if err := s.store.DeleteMount(ctx, botID, targetID); errors.Is(err, db.ErrNotFound) {
-		return ErrWorkspaceTargetNotFound
-	} else {
+	if _, err := s.getRecord(ctx, botID, targetID); err != nil {
 		return err
 	}
+	return s.store.DeleteMount(ctx, botID, targetID)
 }
 
 func (s *RemoteWorkspaceService) ResolveMount(ctx context.Context, botID, targetID string) (ResolvedWorkspaceTarget, error) {

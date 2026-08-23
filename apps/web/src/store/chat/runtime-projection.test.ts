@@ -267,3 +267,33 @@ describe('runtime projection', () => {
     expect(isRuntimeRunActive('lost')).toBe(false)
   })
 })
+
+describe('idle settled run projection', () => {
+  it('emits no assistant turn for a settled run without streamed content', () => {
+    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
+      status: 'completed',
+      messages: null as unknown as RuntimeCurrentRunView['messages'],
+    })))
+
+    expect(state.transcript.turns.map(turn => turn.role)).toEqual(['user'])
+  })
+
+  it('emits an empty slice when the settled run also lacks a user turn', () => {
+    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
+      status: 'completed',
+      messages: null as unknown as RuntimeCurrentRunView['messages'],
+      request_user_turn: undefined,
+    })))
+
+    expect(state.transcript.turns).toEqual([])
+  })
+
+  it('still projects the assistant turn for an active run without content yet', () => {
+    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
+      status: 'running',
+      messages: [],
+    })))
+
+    expect(state.transcript.turns.map(turn => turn.role)).toEqual(['user', 'assistant'])
+  })
+})

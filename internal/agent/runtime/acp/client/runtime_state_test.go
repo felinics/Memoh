@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path"
@@ -12,8 +13,216 @@ import (
 	"testing"
 	"time"
 
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
+
+func TestRuntimeLeaseSessionStateRoundTripUsesOnlyDeclaredRoots(t *testing.T) {
+	cleanupRoot := t.TempDir()
+	now := time.Now()
+	staleSpool := filepath.Join(cleanupRoot, runtimeSessionSpoolPrefix+"stale")
+	freshSpool := filepath.Join(cleanupRoot, runtimeSessionSpoolPrefix+"fresh")
+	unrelatedOldDir := filepath.Join(cleanupRoot, "unrelated-old")
+	for _, dir := range []string{staleSpool, freshSpool, unrelatedOldDir} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := now.Add(-runtimeSessionSpoolStaleAge - time.Hour)
+	for _, dir := range []string{staleSpool, unrelatedOldDir} {
+		if err := os.Chtimes(dir, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cleanupStaleSessionSpools(cleanupRoot, now)
+	if _, err := os.Stat(staleSpool); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale ACP spool still exists: %v", err)
+	}
+	for _, dir := range []string{freshSpool, unrelatedOldDir} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("spool cleanup removed protected directory %q: %v", dir, err)
+		}
+	}
+
+	bridgeClient, server := newRecordingBridgeClient(t)
+	lease, err := prepareRuntimeLease(context.Background(), bridgeClient, processOptions{
+		BotID:     "bot-1",
+		AgentID:   "claude-code",
+		SetupMode: SetupModeSelf,
+	})
+	if err != nil {
+		t.Fatalf("prepare RuntimeLease: %v", err)
+	}
+	t.Cleanup(func() { _ = lease.cleanup(context.Background()) })
+	proc := &bridgeProcess{lease: lease}
+
+	const sessionID = "claude-session-123"
+	transcript := "state/projects/-data-project/" + sessionID + ".jsonl"
+	subagent := "state/projects/-data-project/" + sessionID + "/subagents/agent-research.jsonl"
+	empty := "state/projects/-data-project/" + sessionID + "/subagents/empty.jsonl"
+	unrelated := "state/projects/-data-other/unrelated-session.jsonl"
+	largeText := strings.Repeat("x", 128*1024)
+	want := snapshotFromRecordsForTest(t, acpprofile.RuntimeSessionLocatorClaudeProject, []string{"state/projects"}, SessionState{
+		SessionID:      sessionID,
+		TranscriptPath: transcript,
+	}, []SessionStateRecord{
+		{FilePath: transcript, LineNumber: 1, Content: json.RawMessage(`{"type":"user","sessionId":"` + sessionID + `"}`)},
+		{FilePath: transcript, LineNumber: 2, Content: json.RawMessage(` { "type" : "message", "text" : "hello" } `)},
+		{FilePath: subagent, LineNumber: 1, Content: json.RawMessage(`{"type":"tool","text":"` + largeText + `"}`)},
+	})
+	if err := proc.RestoreSessionState(context.Background(), want); err != nil {
+		t.Fatalf("RestoreSessionState: %v", err)
+	}
+	writeRuntimeTestFile(t, bridgeClient, path.Join(lease.root, empty), nil)
+	writeRuntimeTestFile(t, bridgeClient, path.Join(lease.root, unrelated), []byte("not-json\n"))
+	if server.exists("/data/.claude/projects/-data-project/" + sessionID + ".jsonl") {
+		t.Fatal("database-supplied session state was restored into /data")
+	}
+	if got := string(readRuntimeTestFile(t, bridgeClient, path.Join(lease.root, transcript))); got !=
+		`{"type":"user","sessionId":"`+sessionID+`"}`+"\n"+`{"type":"message","text":"hello"}`+"\n" {
+		t.Fatalf("restored primary JSONL = %q", got)
+	}
+
+	got, err := proc.SnapshotSessionState(context.Background(), sessionID, SessionStateCursor{}, nil, nil)
+	if err != nil {
+		t.Fatalf("SnapshotSessionState: %v", err)
+	}
+	defer func() { _ = got.Close() }()
+	if got.State().SessionID != sessionID || got.State().TranscriptPath != transcript {
+		t.Fatalf("snapshot identity = %#v", got.State())
+	}
+	records := drainSnapshotRecordsForTest(t, got)
+	if len(records) != 3 || records[0].FilePath != transcript || records[1].LineNumber != 2 || records[2].FilePath != subagent || len(records[2].Content) < len(largeText) {
+		t.Fatalf("snapshot did not preserve multi-file record order: %#v", records)
+	}
+
+	// Finished snapshots hand their capture-admission slot back (converted
+	// into a byte reservation), so both live snapshots above must not block a
+	// third spool: the capture semaphore only bounds in-progress captures.
+	blockedRecord := SessionStateRecord{
+		FilePath: transcript, LineNumber: 1,
+		Content: json.RawMessage(`{"type":"user","sessionId":"` + sessionID + `"}`),
+	}
+	releasedIndex := 0
+	released, err := SpoolSessionState(
+		context.Background(),
+		acpprofile.RuntimeSessionLocatorClaudeProject,
+		[]string{"state/projects"},
+		SessionState{SessionID: sessionID, TranscriptPath: transcript},
+		func(context.Context) (SessionStateRecord, error) {
+			if releasedIndex > 0 {
+				return SessionStateRecord{}, io.EOF
+			}
+			releasedIndex++
+			return blockedRecord, nil
+		},
+		1,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("spool while two finished snapshots are alive: %v", err)
+	}
+	if err := released.Close(); err != nil {
+		t.Fatalf("close released snapshot: %v", err)
+	}
+	if err := want.Close(); err != nil {
+		t.Fatalf("close restored snapshot: %v", err)
+	}
+}
+
+func TestRuntimeLeaseCodexSnapshotValidatesHeaderAndExcludesOtherRollouts(t *testing.T) {
+	bridgeClient, _ := newRecordingBridgeClient(t)
+	lease, err := prepareRuntimeLease(context.Background(), bridgeClient, processOptions{
+		BotID:     "bot-1",
+		AgentID:   "codex",
+		SetupMode: SetupModeAPIKey,
+	})
+	if err != nil {
+		t.Fatalf("prepare RuntimeLease: %v", err)
+	}
+	t.Cleanup(func() { _ = lease.cleanup(context.Background()) })
+	proc := &bridgeProcess{lease: lease}
+
+	const sessionID = "019c1234-abcd-7000-8000-123456789abc"
+	transcript := "state/sessions/2026/08/12/rollout-2026-08-12T10-11-12-" + sessionID + ".jsonl"
+	writeRuntimeTestFile(t, bridgeClient, path.Join(lease.root, transcript), []byte(
+		`{"type":"session_meta","payload":{"id":"`+sessionID+`"}}`+"\n"+
+			`{"type":"event_msg","payload":{"type":"task_complete"}}`+"\n",
+	))
+	// Invalid unrelated JSONL proves snapshotting does not parse every rollout
+	// in Codex's date tree.
+	writeRuntimeTestFile(t, bridgeClient, path.Join(lease.root, "state/sessions/2026/08/11/rollout-other.jsonl"), []byte("not-json\n"))
+	writeRuntimeTestFile(t, bridgeClient, path.Join(lease.root, "state/sessions/2026/08/12/rollout-"+sessionID+"-copy.jsonl"), []byte(
+		`{"type":"session_meta","payload":{"id":"`+sessionID+`"}}`+"\n",
+	))
+
+	got, err := proc.SnapshotSessionState(context.Background(), sessionID, SessionStateCursor{}, nil, nil)
+	if err != nil {
+		t.Fatalf("SnapshotSessionState: %v", err)
+	}
+	defer func() { _ = got.Close() }()
+	records := drainSnapshotRecordsForTest(t, got)
+	if got.State().TranscriptPath != transcript || len(records) != 2 || records[0].FilePath != transcript {
+		t.Fatalf("Codex snapshot selected unrelated rollouts: state=%#v records=%#v", got.State(), records)
+	}
+
+	writeRuntimeTestFile(t, bridgeClient, path.Join(lease.root, transcript), []byte(
+		`{"type":"session_meta","payload":{"id":"different-session"}}`+"\n",
+	))
+	if _, err := proc.SnapshotSessionState(context.Background(), sessionID, SessionStateCursor{}, nil, nil); !errors.Is(err, ErrSessionStateNotFound) {
+		t.Fatalf("SnapshotSessionState() error = %v, want content-validated ErrSessionStateNotFound", err)
+	}
+}
+
+func snapshotFromRecordsForTest(
+	t *testing.T,
+	locator acpprofile.RuntimeSessionLocator,
+	roots []string,
+	state SessionState,
+	records []SessionStateRecord,
+) *SessionStateSnapshot {
+	t.Helper()
+	index := 0
+	reader := func(context.Context) (SessionStateRecord, error) {
+		if index == len(records) {
+			return SessionStateRecord{}, io.EOF
+		}
+		record := records[index]
+		index++
+		return record, nil
+	}
+	files := int32(0)
+	for index, record := range records {
+		if index == 0 || record.FilePath != records[index-1].FilePath {
+			files++
+		}
+	}
+	snapshot, err := SpoolSessionState(context.Background(), locator, roots, state, reader, files, int64(len(records)))
+	if err != nil {
+		t.Fatalf("SpoolSessionState() error = %v", err)
+	}
+	t.Cleanup(func() { _ = snapshot.Close() })
+	return snapshot
+}
+
+func drainSnapshotRecordsForTest(t *testing.T, snapshot *SessionStateSnapshot) []SessionStateRecord {
+	t.Helper()
+	reader, err := snapshot.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []SessionStateRecord
+	for {
+		record, err := reader(context.Background())
+		if errors.Is(err, io.EOF) {
+			return records
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, record)
+	}
+}
 
 func TestRuntimeLeaseUsesUniqueHomesAndStagesOnlyAllowlistedState(t *testing.T) {
 	client, server := newRecordingBridgeClient(t)

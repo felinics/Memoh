@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,10 +14,12 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/botbackup"
 	"github.com/memohai/memoh/internal/botbackup/secure"
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 type BotBackupHandler struct {
@@ -201,6 +204,11 @@ func (h *BotBackupHandler) Import(c echo.Context) error {
 	}
 	result, err := h.service.Import(c.Request().Context(), userID, raw, opts, c.FormValue("passphrase"))
 	if err != nil {
+		if errors.Is(err, runtimefence.ErrResetLeaseLost) ||
+			errors.Is(err, runtimefence.ErrTransactionsUnsupported) ||
+			errors.Is(err, botbackup.ErrHistoryResetUnavailable) {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return c.JSON(http.StatusOK, result)

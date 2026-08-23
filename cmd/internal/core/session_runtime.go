@@ -22,7 +22,7 @@ func provideSessionRunLedger(postgresStore *postgresstore.Store) (ledger.Store, 
 	if postgresStore == nil {
 		return nil, errors.New("session run ledger requires postgres")
 	}
-	return ledger.NewPostgres(postgresStore.SQLC()), nil
+	return ledger.NewPostgres(postgresStore.SQLC(), postgresStore.Pool()), nil
 }
 
 // provideRuntimeFenceActivator supplies the second half of a claim. The ledger

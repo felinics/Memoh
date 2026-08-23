@@ -480,6 +480,54 @@ func TestSpawnAgentSessionInheritsParentUserIdentity(t *testing.T) {
 	}
 }
 
+func TestSpawnAgentPropagatesContextBudgetAndToolExchangePolicy(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 10}
+	session := SessionContext{
+		BotID:                     "bot1",
+		SessionID:                 "parent1",
+		ContextBudgetMaxTokens:    128000,
+		ContextToolExchangePolicy: policy,
+	}
+
+	mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"task": "alpha"})
+
+	call, ok := agent.callAt(0)
+	if !ok {
+		t.Fatal("expected spawn_agent call")
+	}
+	if call.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", call.ContextBudgetMaxTokens)
+	}
+	if call.ContextToolExchangePolicy != policy {
+		t.Fatalf("ContextToolExchangePolicy = %p, want same pointer %p", call.ContextToolExchangePolicy, policy)
+	}
+}
+
+func TestSpawnAgentUsesResolvedModelContextBudgetOverParent(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	p.modelResolver = func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+		return resolvedSubagentModel{Model: &sdk.Model{}, ModelID: "model-2", ContextBudgetMaxTokens: 64000}, nil
+	}
+	session := SessionContext{
+		BotID:                  "bot1",
+		SessionID:              "parent1",
+		ContextBudgetMaxTokens: 128000,
+	}
+
+	mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"task": "alpha"})
+
+	call, ok := agent.callAt(0)
+	if !ok {
+		t.Fatal("expected spawn_agent call")
+	}
+	if call.ContextBudgetMaxTokens != 64000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 64000 (the resolved subagent model's own context window, not the parent's 128000)", call.ContextBudgetMaxTokens)
+	}
+}
+
 func TestSpawnAgentIDsAndDuplicateValidation(t *testing.T) {
 	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
 	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
@@ -707,6 +755,66 @@ func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	}
 	if snap.Status != background.TaskCompleted {
 		t.Fatalf("expected third task completed, got %+v", snap)
+	}
+}
+
+func TestQueuedSpawnAgentUsesExecutionModelContextBudget(t *testing.T) {
+	block := make(chan struct{})
+	agent := &fakeSpawnAgent{block: block}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	var resolverMu sync.Mutex
+	resolverBudgets := []int{128000, 128000, 128000, 64000, 32000}
+	resolverCall := 0
+	p.modelResolver = func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+		resolverMu.Lock()
+		defer resolverMu.Unlock()
+		if resolverCall >= len(resolverBudgets) {
+			return resolvedSubagentModel{}, errors.New("unexpected model resolution")
+		}
+		budget := resolverBudgets[resolverCall]
+		resolverCall++
+		return resolvedSubagentModel{
+			Model:                  &sdk.Model{},
+			ModelID:                "model-2",
+			ProviderName:           "provider-2",
+			ContextBudgetMaxTokens: budget,
+		}, nil
+	}
+	session := SessionContext{
+		BotID:                  "bot1",
+		SessionID:              "parent1",
+		ContextBudgetMaxTokens: 256000,
+	}
+
+	mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
+		"id":                "worker",
+		"task":              "first",
+		"run_in_background": true,
+	})
+	waitUntil(t, 2*time.Second, func() bool {
+		return reflect.DeepEqual(agent.queries(), []string{"first"})
+	})
+	queued := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{
+		"id":      "worker",
+		"message": "second",
+	}))
+	if queued["status"] != string(background.TaskQueued) {
+		t.Fatalf("expected second request queued, got %v", queued)
+	}
+
+	close(block)
+	waitUntil(t, 2*time.Second, func() bool {
+		return reflect.DeepEqual(agent.queries(), []string{"first", "second"})
+	})
+	secondCall, ok := agent.callAt(1)
+	if !ok {
+		t.Fatal("expected queued request to execute")
+	}
+	if secondCall.ContextBudgetMaxTokens != 32000 {
+		t.Fatalf(
+			"queued ContextBudgetMaxTokens = %d, want latest execution resolution 32000",
+			secondCall.ContextBudgetMaxTokens,
+		)
 	}
 }
 

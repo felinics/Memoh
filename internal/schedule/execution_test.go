@@ -204,19 +204,6 @@ func TestNormalizeExecutionExistingSessionRejectsForeignAndInternalSessions(t *t
 			t.Fatalf("error = %v, want ErrTargetSessionNotFound", err)
 		}
 	})
-
-	t.Run("heartbeat session", func(t *testing.T) {
-		queries := &executionQueries{sessions: map[string]sqlc.BotSession{
-			execTestSessionID: chatSession(t, execTestBotID, "model", "heartbeat", "heartbeat"),
-		}}
-		svc := newExecutionService(t, queries, nil)
-		_, err := svc.normalizeExecution(context.Background(), execTestBotID, ExecutionConfig{
-			RunTarget: RunTargetExistingSession, TargetSessionID: execTestSessionID,
-		})
-		if err == nil || !strings.Contains(err.Error(), "mode") {
-			t.Fatalf("error = %v, want session mode rejection", err)
-		}
-	})
 }
 
 func TestNormalizeExecutionNewSessionRules(t *testing.T) {

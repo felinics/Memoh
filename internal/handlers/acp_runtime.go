@@ -39,11 +39,8 @@ type acpRuntimePool interface {
 	RuntimeStatusByID(botID, runtimeID string) (acpagent.RuntimeStatus, error)
 	SetRuntimeModel(ctx context.Context, botID, runtimeID, modelID string) (acpagent.RuntimeStatus, error)
 	SetRuntimeReasoning(ctx context.Context, botID, runtimeID, effort string) (acpagent.RuntimeStatus, error)
-	CloseRuntime(botID, runtimeID string) error
-}
-
-type acpRuntimeModePool interface {
 	SetRuntimeMode(ctx context.Context, botID, runtimeID, modeID string) (acpagent.RuntimeStatus, error)
+	CloseRuntime(botID, runtimeID string) error
 }
 
 type acpRuntimeCreateRequest struct {
@@ -263,11 +260,7 @@ func (h *ACPRuntimeHandler) SetRuntimeMode(c echo.Context) error {
 	if strings.TrimSpace(req.ModeID) == "" {
 		return apperror.New(apperror.CodeACPModeIDRequired, nil)
 	}
-	modePool, ok := h.pool.(acpRuntimeModePool)
-	if !ok {
-		return apperror.New(apperror.CodeACPModeSelectionUnsupported, nil)
-	}
-	status, err := modePool.SetRuntimeMode(context.WithoutCancel(c.Request().Context()), bot.ID, runtimeID, req.ModeID)
+	status, err := h.pool.SetRuntimeMode(context.WithoutCancel(c.Request().Context()), bot.ID, runtimeID, req.ModeID)
 	if err != nil {
 		return runtimePoolError(err)
 	}

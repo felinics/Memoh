@@ -64,7 +64,6 @@ func settingsTestUpsertParams(botID uuid.UUID) sqlc.UpsertBotSettingsParams {
 	return sqlc.UpsertBotSettingsParams{
 		Language:           "en",
 		ReasoningEffort:    "medium",
-		HeartbeatInterval:  1440,
 		ChatRuntime:        "model",
 		ChatAcpProjectMode: "project",
 		ToolApprovalConfig: []byte(`{}`),

@@ -16,6 +16,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/providers"
 )
@@ -53,6 +54,7 @@ type ACPCodexOAuthHandler struct {
 	botService     *bots.Service
 	accountService *accounts.Service
 	acpWorkspace   acpWorkspaceConfigProvider
+	runtimeResets  oauthRuntimeResetService
 	callbackURL    string
 	logger         *slog.Logger
 
@@ -79,6 +81,12 @@ func NewACPCodexOAuthHandler(provider *providers.Service, botService *bots.Servi
 		states:         map[string]acpCodexOAuthState{},
 		deviceSessions: map[string]*acpCodexDeviceAuthSession{},
 	}
+}
+
+// SetRuntimeResetService installs the distributed operation boundary used when
+// OAuth completion replaces the bot's Codex launch credentials.
+func (h *ACPCodexOAuthHandler) SetRuntimeResetService(closer oauthRuntimeResetService) {
+	h.runtimeResets = closer
 }
 
 func (h *ACPCodexOAuthHandler) Register(e *echo.Echo) {
@@ -211,6 +219,9 @@ func (h *ACPCodexOAuthHandler) Callback(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := h.writeCodexOAuthAuth(c.Request().Context(), oauthState.BotID, creds); err != nil {
+		if apperror.CodeOf(err) != "" {
+			return err
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -261,25 +272,72 @@ func (h *ACPCodexOAuthHandler) writeCodexOAuthAuth(ctx context.Context, botID st
 	if h.acpWorkspace == nil {
 		return errors.New("workspace manager is not configured")
 	}
-	if err := h.ensureManagedWorkspace(ctx, botID); err != nil {
-		return err
+	if h.runtimeResets == nil {
+		return apperror.Wrap(
+			apperror.CodeSessionHistoryInconsistent,
+			errors.New("runtime reset is not configured"),
+			nil,
+		)
 	}
-	client, err := h.acpWorkspace.MCPClient(ctx, botID)
+	if h.botService == nil {
+		return apperror.Wrap(
+			apperror.CodeSessionHistoryInconsistent,
+			errors.New("bot service is not configured"),
+			nil,
+		)
+	}
+	resetCtx, release, err := h.runtimeResets.BeginBotHistoryReset(ctx, botID)
 	if err != nil {
-		return err
+		return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
 	}
-	return acpclient.WriteCodexManagedConfigWithAuthForBot(ctx, client, botID, acpclient.CodexManagedConfig{
-		Mode: acpclient.SetupModeOAuth,
-		OAuth: &acpclient.CodexOAuthCredentials{
-			AccessToken:  creds.AccessToken,
-			IDToken:      creds.IDToken,
-			RefreshToken: creds.RefreshToken,
-			AccountID:    creds.AccountID,
-			BaseURL:      creds.BaseURL,
-			ExpiresAt:    creds.ExpiresAt,
-			LastRefresh:  creds.LastRefresh,
-		},
+	defer release()
+
+	publishErr := h.botService.PublishRuntimeConfig(resetCtx, botID, func(publishCtx context.Context) error {
+		// BeginBotHistoryReset intentionally detaches the mutation lifecycle from
+		// its request context. Device-flow cancellation is different: it revokes
+		// this credential write and must still interrupt a blocked bridge call.
+		// The guarded publisher already precommitted the epoch, so canceling the
+		// external I/O cannot make a partial write visible to an old runtime.
+		writeCtx, cancelWrite := context.WithCancelCause(publishCtx)
+		stopCancelForward := context.AfterFunc(ctx, func() {
+			cause := context.Cause(ctx)
+			if cause == nil {
+				cause = context.Canceled
+			}
+			cancelWrite(cause)
+		})
+		defer func() {
+			stopCancelForward()
+			cancelWrite(context.Canceled)
+		}()
+		if cause := context.Cause(ctx); cause != nil {
+			cancelWrite(cause)
+		}
+
+		if err := h.ensureManagedWorkspace(writeCtx, botID); err != nil {
+			return err
+		}
+		client, clientErr := h.acpWorkspace.MCPClient(writeCtx, botID)
+		if clientErr != nil {
+			return clientErr
+		}
+		return acpclient.WriteCodexManagedConfigWithAuthForBot(writeCtx, client, botID, acpclient.CodexManagedConfig{
+			Mode: acpclient.SetupModeOAuth,
+			OAuth: &acpclient.CodexOAuthCredentials{
+				AccessToken:  creds.AccessToken,
+				IDToken:      creds.IDToken,
+				RefreshToken: creds.RefreshToken,
+				AccountID:    creds.AccountID,
+				BaseURL:      creds.BaseURL,
+				ExpiresAt:    creds.ExpiresAt,
+				LastRefresh:  creds.LastRefresh,
+			},
+		})
 	})
+	if publishErr != nil {
+		return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, publishErr, nil)
+	}
+	return nil
 }
 
 func (h *ACPCodexOAuthHandler) takeState(state string) (acpCodexOAuthState, error) {

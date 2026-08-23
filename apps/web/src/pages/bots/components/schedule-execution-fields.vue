@@ -20,8 +20,8 @@
       v-if="form.runTarget === 'existing_session'"
       :label="t('bots.schedule.execution.session')"
     >
-      <!-- Only chat and schedule sessions can host a scheduled run; heartbeat,
-           discuss and subagent threads back their own loops. -->
+      <!-- Only chat and schedule sessions can host a scheduled run; discuss
+           and subagent threads back their own loops. -->
       <SessionSelect
         v-model="sessionModel"
         :bot-id="botId"

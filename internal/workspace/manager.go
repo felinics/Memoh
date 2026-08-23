@@ -266,6 +266,9 @@ func (m *Manager) NativeMCPClient(ctx context.Context, botID string) (*bridge.Cl
 // override before falling back to the Bot's persisted Primary target.
 func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
+		if targetID == WorkspaceTargetNative {
+			return m.nativeMCPClient(ctx, botID)
+		}
 		target, err := m.ResolveWorkspaceTarget(ctx, botID, targetID)
 		return target.Client, err
 	}
@@ -275,6 +278,25 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, 
 		}
 	}
 	return m.nativeMCPClient(ctx, botID)
+}
+
+// CurrentWorkspaceTargetID resolves only the request or persisted target ID.
+// It intentionally avoids connecting to a runtime or loading target settings.
+func (m *Manager) CurrentWorkspaceTargetID(ctx context.Context, botID string) (string, error) {
+	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
+		return targetID, nil
+	}
+	if m.remote == nil {
+		return WorkspaceTargetNative, nil
+	}
+	record, err := m.remote.getPrimaryRecord(ctx, botID)
+	if errors.Is(err, ErrRemoteWorkspaceNotBound) {
+		return WorkspaceTargetNative, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return record.ID, nil
 }
 
 func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (ResolvedWorkspaceTarget, error) {

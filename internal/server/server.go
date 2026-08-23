@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"log/slog"
 	neturl "net/url"
 	"strings"
@@ -109,6 +110,9 @@ func shouldSkipJWT(path string) bool {
 	if strings.HasPrefix(path, "/assets/") {
 		return true
 	}
+	if isPublicSupermarketSkillIconPath(path) {
+		return true
+	}
 	if strings.HasPrefix(path, "/api/docs") {
 		return true
 	}
@@ -134,6 +138,15 @@ func shouldSkipJWT(path string) bool {
 		return true
 	}
 	return false
+}
+
+func isPublicSupermarketSkillIconPath(path string) bool {
+	digest, found := strings.CutPrefix(path, "/supermarket/artifacts/icon/")
+	if !found || len(digest) != 64 || strings.ToLower(digest) != digest {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
 }
 
 func shouldLimitPublicRequestBody(path string) bool {

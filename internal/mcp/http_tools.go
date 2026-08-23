@@ -155,6 +155,13 @@ func ToolGatewayMiddleware(gateway *ToolGatewayService, contexts *ToolSessionCon
 					return nil, err
 				}
 				return &sdkmcp.ListToolsResult{
+					// Tool availability is scoped by the authenticated bot/session/runtime.
+					// Set the v1.7 cache metadata explicitly because this middleware bypasses
+					// the SDK's built-in tools/list handler and its default initialization.
+					Cacheable: sdkmcp.Cacheable{
+						TTLMs:      0,
+						CacheScope: "private",
+					},
 					Tools: ConvertGatewayToolsToSDK(tools),
 				}, nil
 			case "tools/call":

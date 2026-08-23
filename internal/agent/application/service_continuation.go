@@ -27,6 +27,12 @@ func (s *Service) prepareContinuationRunConfig(
 	loaded = projectInterruptedHistoryReasoning(loaded)
 	messages, retained, _ := trimMessagesAndRecordsByTokens(s.logger, loaded, 0)
 	messages = sanitizeMessages(messages)
+	historyEstimates := make([]int, len(messages))
+	for i := range messages {
+		historyEstimates[i] = estimateMessageTokens(messages[i])
+	}
+	base.ContextHistoryTokenEstimates = historyEstimates
+	base.ContextTrimmableMessages = len(messages)
 
 	base.ContextFrags = historyContextFragsForMessages(messages, retained)
 	// Close any tool call left open by an interrupted turn before the transcript
@@ -39,6 +45,9 @@ func (s *Service) prepareContinuationRunConfig(
 	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
 	base.ContextCurrentUserMessageIndex = nil
 	base.ContextMemoryMessageIndex = nil
+	if base.ContextToolExchangePolicy == nil {
+		base.ContextToolExchangePolicy = defaultToolExchangePolicy()
+	}
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)

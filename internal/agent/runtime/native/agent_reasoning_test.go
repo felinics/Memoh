@@ -61,7 +61,7 @@ func TestBuildGenerateOptionsPreservesDeepSeekReasoningDisabled(t *testing.T) {
 		ChatCompletionsCompat: models.ChatCompletionsCompatDeepSeek,
 	}
 
-	opts := (*Agent)(nil).buildGenerateOptions(cfg, nil, nil, nil)
+	opts := (*Agent)(nil).buildGenerateOptions(context.Background(), cfg, nil, nil, nil)
 	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
 		t.Fatalf("generate text result: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestBuildGenerateOptionsBackgroundPrepareKeepsCachedAnthropicSystemPromoted
 			return "ok", nil
 		},
 	}}
-	opts := (*Agent)(nil).buildGenerateOptions(cfg, testTools, testTools, nil)
+	opts := (*Agent)(nil).buildGenerateOptions(context.Background(), cfg, testTools, testTools, nil)
 
 	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
 		t.Fatalf("generate text result: %v", err)
@@ -250,7 +250,7 @@ func TestBuildGenerateOptionsBackgroundPrepareKeepsCachedAnthropicSystemPromoted
 	}
 }
 
-func TestBuildGenerateOptionsRunningTaskSummaryAppendsToCachedAnthropicSystemMessage(t *testing.T) {
+func TestBuildGenerateOptionsRunningTaskSummaryInjectsUserMessageNotSystem(t *testing.T) {
 	t.Parallel()
 
 	provider := &recordingPromptCacheProvider{}
@@ -292,7 +292,7 @@ func TestBuildGenerateOptionsRunningTaskSummaryAppendsToCachedAnthropicSystemMes
 			return "ok", nil
 		},
 	}}
-	opts := (*Agent)(nil).buildGenerateOptions(cfg, testTools, testTools, nil)
+	opts := (*Agent)(nil).buildGenerateOptions(context.Background(), cfg, testTools, testTools, nil)
 
 	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
 		t.Fatalf("generate text result: %v", err)
@@ -312,33 +312,47 @@ func TestBuildGenerateOptionsRunningTaskSummaryAppendsToCachedAnthropicSystemMes
 	if firstCacheControl == nil || firstCacheControl.Type != "ephemeral" {
 		t.Fatalf("first call system message cache control = %#v, want ephemeral", firstCacheControl)
 	}
+	if got := backgroundSummaryCount(params[0].Messages); got != 0 {
+		t.Fatalf("first call summary messages = %d, want 0 before the first prepared step", got)
+	}
 
 	p := params[1]
 	if p.System != "" {
 		t.Fatalf("second call system = %q, want empty because Anthropic prompt cache promoted it to a cached system message", p.System)
 	}
 	cachedText, cachedCacheControl := firstSystemTextPart(t, p.Messages)
-	if !strings.Contains(cachedText, "base system") {
-		t.Fatalf("second call cached system message missing base system:\n%s", cachedText)
-	}
-	if strings.Contains(cachedText, "Currently running background tasks:") {
-		t.Fatalf("second call cached system message should not contain volatile running task summary:\n%s", cachedText)
+	if cachedText != firstText {
+		t.Fatalf("second call cached system message must stay byte-identical:\nfirst: %q\nsecond: %q", firstText, cachedText)
 	}
 	if cachedCacheControl == nil || cachedCacheControl.Type != "ephemeral" {
 		t.Fatalf("second call cached system message cache control = %#v, want ephemeral", cachedCacheControl)
 	}
-	summaryText, summaryCacheControl := systemTextPartAt(t, p.Messages, 1)
-	if !strings.Contains(summaryText, "Currently running background tasks:") {
-		t.Fatalf("second call summary system message missing running task summary:\n%s", summaryText)
+	for _, msg := range p.Messages {
+		if msg.Role != sdk.MessageRoleSystem {
+			continue
+		}
+		for _, part := range msg.Content {
+			if tp, ok := part.(sdk.TextPart); ok && strings.Contains(tp.Text, "Currently running background tasks:") {
+				t.Fatalf("running task summary must not ride a system message:\n%s", tp.Text)
+			}
+		}
 	}
-	if strings.Count(summaryText, "Currently running background tasks:") != 1 {
-		t.Fatalf("second call summary system message should contain one running task summary, got:\n%s", summaryText)
+	if got := backgroundSummaryCount(p.Messages); got != 1 {
+		t.Fatalf("second call summary messages = %d, want exactly 1", got)
 	}
-	if !strings.Contains(summaryText, "Run tests") {
-		t.Fatalf("second call summary system message missing task description:\n%s", summaryText)
+	last := p.Messages[len(p.Messages)-1]
+	if last.Role != sdk.MessageRoleUser {
+		t.Fatalf("second call last message role = %q, want summary as tail user message", last.Role)
 	}
-	if summaryCacheControl != nil {
-		t.Fatalf("second call summary system message cache control = %#v, want nil", summaryCacheControl)
+	summaryPart, ok := last.Content[0].(sdk.TextPart)
+	if !ok || !strings.HasPrefix(summaryPart.Text, testBackgroundSummaryPrefix) {
+		t.Fatalf("second call tail message is not the background summary: %#v", last.Content[0])
+	}
+	if !strings.Contains(summaryPart.Text, "Currently running background tasks:") || !strings.Contains(summaryPart.Text, "Run tests") {
+		t.Fatalf("second call summary message missing running task summary:\n%s", summaryPart.Text)
+	}
+	if summaryPart.CacheControl != nil {
+		t.Fatalf("second call summary message cache control = %#v, want nil", summaryPart.CacheControl)
 	}
 }
 

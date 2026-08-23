@@ -304,6 +304,25 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 			txService := *s
 			txService.queries = queries
 			txService.publisher = nil
+			if options.CleanupACPDecisionProjections {
+				pgBotID, parseErr := dbpkg.ParseUUID(botID)
+				if parseErr != nil {
+					return parseErr
+				}
+				pgSessionID, parseErr := dbpkg.ParseUUID(sessionID)
+				if parseErr != nil {
+					return parseErr
+				}
+				pgRunID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(inputs[0].RunID))
+				if parseErr != nil {
+					return fmt.Errorf("ACP projection cleanup requires run_id: %w", parseErr)
+				}
+				if _, deleteErr := queries.DeleteACPDecisionProjectionsByRun(ctx, sqlc.DeleteACPDecisionProjectionsByRunParams{
+					BotID: pgBotID, SessionID: pgSessionID, RunID: pgRunID,
+				}); deleteErr != nil {
+					return deleteErr
+				}
+			}
 			turnRequestMessageID := strings.TrimSpace(inputs[0].TurnRequestMessageID)
 			for _, original := range inputs {
 				input := original
@@ -322,6 +341,35 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 			if options.Replacement != nil {
 				if err := txService.replacePersistedRound(ctx, sessionID, persisted, *options.Replacement); err != nil {
 					return err
+				}
+			}
+			if options.ACPPublication != nil {
+				pgBotID, parseErr := dbpkg.ParseUUID(botID)
+				if parseErr != nil {
+					return parseErr
+				}
+				pgSessionID, parseErr := dbpkg.ParseUUID(sessionID)
+				if parseErr != nil {
+					return parseErr
+				}
+				pgRunID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(options.ACPPublication.RunID))
+				if parseErr != nil {
+					return fmt.Errorf("ACP publication requires run_id: %w", parseErr)
+				}
+				moved, upsertErr := queries.UpsertACPSessionPublication(ctx, sqlc.UpsertACPSessionPublicationParams{
+					SessionID:       pgSessionID,
+					BotID:           pgBotID,
+					RunID:           pgRunID,
+					CheckpointReset: options.ACPPublication.CheckpointReset,
+				})
+				if upsertErr != nil {
+					return fmt.Errorf("publish ACP session head: %w", upsertErr)
+				}
+				if moved == 0 {
+					// The guarded insert matched no run: the session's fencing
+					// generation moved underneath this round. Publishing nothing
+					// would silently promote a stale native context on restart.
+					return runtimefence.ErrStale
 				}
 			}
 			return nil
@@ -884,7 +932,7 @@ func sessionSnapshotFromRow(row sqlc.BotSession) (string, string) {
 
 func normalizeSessionMode(mode string) string {
 	switch strings.TrimSpace(mode) {
-	case "chat", "discuss", "heartbeat", "schedule", "subagent":
+	case "chat", "discuss", "schedule", "subagent":
 		return strings.TrimSpace(mode)
 	default:
 		return ""
@@ -904,7 +952,7 @@ func legacySessionMode(typ string) string {
 	switch strings.TrimSpace(typ) {
 	case "acp_agent":
 		return "chat"
-	case "discuss", "heartbeat", "schedule", "subagent":
+	case "discuss", "schedule", "subagent":
 		return strings.TrimSpace(typ)
 	default:
 		return "chat"
@@ -1463,7 +1511,13 @@ func (s *DBService) DeleteByBot(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
-	return s.queries.ClearHistoryByBot(ctx, pgBotID)
+	// ClearHistoryByBot also removes the ACP publication heads, version
+	// headers, and line sets in the same statement: cleared history has no
+	// canonical ACP head, and a headless snapshot would be unreachable orphan
+	// storage a fresh runtime must never resurrect.
+	return runtimefence.InResetTransaction(ctx, s.queries, botID, "", func(queries dbstore.Queries) error {
+		return queries.ClearHistoryByBot(ctx, pgBotID)
+	})
 }
 
 // DeleteByIDs deletes specific messages by id.
@@ -1495,7 +1549,13 @@ func (s *DBService) DeleteBySession(ctx context.Context, sessionID string) error
 	if err != nil {
 		return err
 	}
-	return s.queries.ClearHistoryBySession(ctx, pgSessionID)
+	// ClearHistoryBySession also removes the ACP publication head, version
+	// headers, and line set in the same statement: cleared history has no
+	// canonical ACP head, and a headless snapshot would be unreachable orphan
+	// storage a fresh runtime must never resurrect.
+	return runtimefence.InResetTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
+		return queries.ClearHistoryBySession(ctx, pgSessionID)
+	})
 }
 
 // --- Conversion helpers ---

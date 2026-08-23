@@ -804,7 +804,7 @@ func TestLocalChannelWSMessageAuthorizesSessionBeforeSlashCommand(t *testing.T) 
 		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 		agentService:   &application.Service{},
-		commandHandler: command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
+		commandHandler: command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
 		logger:         slog.Default(),
 	}
 
@@ -1666,9 +1666,9 @@ func (*localChannelMemoryProvider) Delete(context.Context, string) error { retur
 func (*localChannelMemoryProvider) AccessPath(_ context.Context, key string) string {
 	parts := strings.SplitN(key, "/", 2)
 	if len(parts) != 2 {
-		return "/data/media/" + key
+		return "/data/.memoh/media/" + key
 	}
-	return "/data/media/" + parts[1]
+	return "/data/.memoh/media/" + parts[1]
 }
 
 func (p *localChannelMemoryProvider) OpenContainerFile(ctx context.Context, botID, containerPath string) (io.ReadCloser, error) {

@@ -42,7 +42,7 @@ func TestIsInteractiveApprovalSession(t *testing.T) {
 		}
 	}
 
-	for _, sessionType := range []string{sessionmode.Discuss, sessionmode.Schedule, sessionmode.Heartbeat, sessionmode.Subagent} {
+	for _, sessionType := range []string{sessionmode.Discuss, sessionmode.Schedule, sessionmode.Subagent} {
 		if isInteractiveApprovalSession(sessionType) {
 			t.Fatalf("expected %q to reject interactive approvals", sessionType)
 		}
@@ -163,12 +163,11 @@ func TestAgentSessionModesMatchPersistedSessionTypes(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		sessionmode.Chat:      session.TypeChat,
-		sessionmode.Heartbeat: session.TypeHeartbeat,
-		sessionmode.Schedule:  session.TypeSchedule,
-		sessionmode.Subagent:  session.TypeSubagent,
-		sessionmode.Discuss:   session.TypeDiscuss,
-		sessionmode.ACPAgent:  session.TypeACPAgent,
+		sessionmode.Chat:     session.TypeChat,
+		sessionmode.Schedule: session.TypeSchedule,
+		sessionmode.Subagent: session.TypeSubagent,
+		sessionmode.Discuss:  session.TypeDiscuss,
+		sessionmode.ACPAgent: session.TypeACPAgent,
 	}
 	for got, want := range cases {
 		if got != want {

@@ -7,7 +7,8 @@ import "github.com/memohai/memoh/internal/agent/runtime/native"
 // Produced by application.Service.ResolveRunConfig and consumed by the turn
 // runtime adapters.
 type ResolveRunConfigResult struct {
-	RunConfig   native.RunConfig
-	ModelID     string // database UUID of the selected model
-	RuntimeType string
+	RunConfig              native.RunConfig
+	ModelID                string // database UUID of the selected model
+	RuntimeType            string
+	ContextBudgetMaxTokens int
 }

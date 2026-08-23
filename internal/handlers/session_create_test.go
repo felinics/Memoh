@@ -242,18 +242,26 @@ func TestCreateSessionDefaultsACPProjectPath(t *testing.T) {
 }
 
 type recordingRuntimeBinder struct {
+	bindCtx  context.Context
 	bindArgs []string
 	bindErr  error
 }
 
 func (*recordingRuntimeBinder) CloseSession(string) error { return nil }
 
-func (b *recordingRuntimeBinder) BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+func (*recordingRuntimeBinder) BeginSessionHistoryReset(ctx context.Context, _, _ string) (context.Context, func(), error) {
+	return ctx, func() {}, nil
+}
+
+func (b *recordingRuntimeBinder) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+	b.bindCtx = ctx
 	b.bindArgs = []string{botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID}
 	return b.bindErr
 }
 
 func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
+	type contextKey struct{}
+
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := &sessionCreateQueries{
 		bot: testBotRow(botID, map[string]any{
@@ -274,12 +282,20 @@ func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
 	)
 
 	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex"},"acp_runtime_id":"rt_warm"}`
-	if err := callCreateSession(handler, botID, body); err != nil {
+	requestCtx := context.WithValue(context.Background(), contextKey{}, "create-session-scope")
+	req := httptest.NewRequestWithContext(requestCtx, http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
+	if err := callCreateSessionRequest(handler, botID, req); err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
 	want := []string{botID, "rt_warm", "22222222-2222-2222-2222-222222222222", "codex", session.DefaultACPProjectPath, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}
 	if len(binder.bindArgs) != len(want) {
 		t.Fatalf("bind args = %#v, want %#v", binder.bindArgs, want)
+	}
+	if binder.bindCtx == nil {
+		t.Fatal("BindRuntime context is nil")
+	}
+	if got := binder.bindCtx.Value(contextKey{}); got != "create-session-scope" {
+		t.Fatalf("BindRuntime context value = %v, want create-session-scope", got)
 	}
 	for i := range want {
 		if binder.bindArgs[i] != want[i] {
@@ -320,8 +336,12 @@ func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
 }
 
 func callCreateSession(handler *SessionHandler, botID string, body string) error {
-	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
+	return callCreateSessionRequest(handler, botID, req)
+}
+
+func callCreateSessionRequest(handler *SessionHandler, botID string, req *http.Request) error {
+	e := echo.New()
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")

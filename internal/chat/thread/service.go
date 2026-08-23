@@ -60,7 +60,6 @@ type Thread struct {
 
 const (
 	TypeChat              = "chat"
-	TypeHeartbeat         = "heartbeat"
 	TypeSchedule          = "schedule"
 	TypeSubagent          = "subagent"
 	TypeDiscuss           = "discuss"
@@ -72,7 +71,7 @@ const (
 )
 
 // userFacingSessionTypes lists the session types intended to appear in
-// user-facing session lists. Heartbeat, schedule, and subagent sessions are
+// user-facing session lists. Schedule and subagent sessions are
 // system-internal — they back agent-driven loops and never surface in the UI.
 var userFacingSessionTypes = []string{TypeChat, TypeDiscuss, TypeACPAgent}
 
@@ -89,7 +88,7 @@ func UserFacingSessionTypes() []string {
 // always demand an explicit type filter; callers that filter by visibility
 // instead pass this list to make the type predicate a no-op.
 func AllSessionTypes() []string {
-	return []string{TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent}
+	return []string{TypeChat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent}
 }
 
 var (
@@ -103,11 +102,12 @@ var (
 	ErrForkSourceNotFound     = errors.New("fork source session not found")
 	ErrForkSourceNotReply     = errors.New("fork source must be a visible assistant reply")
 	ErrForkSourceNotChat      = errors.New("fork source must be a chat session")
+	ErrSessionHasMessages     = errors.New("session has visible messages")
 )
 
 func IsKnownType(typ string) bool {
 	switch strings.TrimSpace(typ) {
-	case TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent:
+	case TypeChat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent:
 		return true
 	default:
 		return false
@@ -207,6 +207,22 @@ type CreateSubagentInput struct {
 
 type subagentTransactionalQueries interface {
 	InTx(context.Context, func(dbstore.Queries) error) error
+}
+
+type sessionDescriptorTransactionalQueries interface {
+	InTx(context.Context, func(dbstore.Queries) error) error
+	SupportsTransactions() bool
+}
+
+type sessionDescriptorTransactionQueries interface {
+	Queries
+	LockBotForSessionWrite(context.Context, pgtype.UUID) (pgtype.UUID, error)
+	LockSessionRuntimeFenceForActivation(context.Context, sqlc.LockSessionRuntimeFenceForActivationParams) (int64, error)
+	NextSessionRuntimeFenceToken(context.Context) (int64, error)
+	ActivateSessionRuntimeFence(context.Context, sqlc.ActivateSessionRuntimeFenceParams) (int64, error)
+	DeleteACPSessionStatesBySession(context.Context, pgtype.UUID) (int64, error)
+	DeleteACPSessionStateLinesBySession(context.Context, pgtype.UUID) (int64, error)
+	DeleteACPSessionPublicationsBySession(context.Context, pgtype.UUID) (int64, error)
 }
 
 // Queries is the storage surface owned by the Thread domain. Route lookup and
@@ -717,17 +733,103 @@ func (s *Service) UpdateTypeAndMetadataWithOwner(ctx context.Context, sessionID,
 }
 
 func (s *Service) updateTypeAndMetadata(ctx context.Context, sessionID, typ string, metadata map[string]any, runtimeOwnerUserID string) (Thread, error) {
-	return s.updateDescriptorAndMetadata(ctx, sessionID, typ, "", "", metadata, nil, strings.TrimSpace(runtimeOwnerUserID))
+	return s.updateDescriptorAndMetadata(ctx, s.queries, sessionID, typ, "", "", metadata, nil, strings.TrimSpace(runtimeOwnerUserID))
 }
 
 // UpdateDescriptorAndMetadataWithOwner updates the session mode/runtime
 // descriptor directly. Callers that only patch metadata for a Phase 3 session
 // must pass the existing descriptor so discuss+ACP sessions keep their runtime.
 func (s *Service) UpdateDescriptorAndMetadataWithOwner(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, runtimeOwnerUserID string) (Thread, error) {
-	return s.updateDescriptorAndMetadata(ctx, sessionID, typ, sessionMode, runtimeType, metadata, runtimeMetadata, strings.TrimSpace(runtimeOwnerUserID))
+	return s.updateDescriptorAndMetadata(ctx, s.queries, sessionID, typ, sessionMode, runtimeType, metadata, runtimeMetadata, strings.TrimSpace(runtimeOwnerUserID))
 }
 
-func (s *Service) updateDescriptorAndMetadata(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, runtimeOwnerUserID string) (Thread, error) {
+// UpdateEmptyDescriptorAndMetadataWithOwner updates a session runtime identity
+// only while its visible history is still empty. PostgreSQL-backed stores lock
+// the bot and session in the same transaction as the message check, descriptor
+// update, runtime-fence bump, and ACP snapshot invalidation. The lock ordering
+// matches runtime activation, so an already-running turn linearizes before the
+// empty-history check and an old runtime token cannot write after the update.
+func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, runtimeOwnerUserID string) (Thread, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return Thread{}, fmt.Errorf("invalid session id: %w", err)
+	}
+	existing, err := s.queries.GetSessionByID(ctx, pgSessionID)
+	if err != nil {
+		return Thread{}, err
+	}
+	pgBotID := existing.BotID
+
+	update := func(queries Queries) (Thread, error) {
+		count, countErr := queries.CountMessagesBySession(ctx, pgSessionID)
+		if countErr != nil {
+			return Thread{}, countErr
+		}
+		if count > 0 {
+			return Thread{}, ErrSessionHasMessages
+		}
+		return s.updateDescriptorAndMetadata(ctx, queries, sessionID, typ, sessionMode, runtimeType, metadata, runtimeMetadata, strings.TrimSpace(runtimeOwnerUserID))
+	}
+
+	txer, ok := s.queries.(sessionDescriptorTransactionalQueries)
+	if !ok || !txer.SupportsTransactions() {
+		if _, fenced := runtimefence.ResetFromContext(ctx); fenced {
+			return Thread{}, runtimefence.ErrTransactionsUnsupported
+		}
+		return update(s.queries)
+	}
+
+	var updated Thread
+	err = txer.InTx(ctx, func(raw dbstore.Queries) error {
+		queries, ok := raw.(sessionDescriptorTransactionQueries)
+		if !ok {
+			return errors.New("session descriptor transaction queries unavailable")
+		}
+		if _, lockErr := queries.LockBotForSessionWrite(ctx, pgBotID); lockErr != nil {
+			return lockErr
+		}
+		if resetErr := runtimefence.ValidateResetLocked(ctx, raw, existing.BotID.String(), sessionID); resetErr != nil {
+			return resetErr
+		}
+		if _, lockErr := queries.LockSessionRuntimeFenceForActivation(ctx, sqlc.LockSessionRuntimeFenceForActivationParams{
+			SessionID: pgSessionID,
+			BotID:     pgBotID,
+		}); lockErr != nil {
+			return lockErr
+		}
+
+		var updateErr error
+		updated, updateErr = update(queries)
+		if updateErr != nil {
+			return updateErr
+		}
+		token, tokenErr := queries.NextSessionRuntimeFenceToken(ctx)
+		if tokenErr != nil {
+			return tokenErr
+		}
+		if _, activateErr := queries.ActivateSessionRuntimeFence(ctx, sqlc.ActivateSessionRuntimeFenceParams{
+			RuntimeFencingToken: token,
+			SessionID:           pgSessionID,
+			BotID:               pgBotID,
+		}); activateErr != nil {
+			return activateErr
+		}
+		if _, deleteErr := queries.DeleteACPSessionPublicationsBySession(ctx, pgSessionID); deleteErr != nil {
+			return deleteErr
+		}
+		if _, deleteErr := queries.DeleteACPSessionStatesBySession(ctx, pgSessionID); deleteErr != nil {
+			return deleteErr
+		}
+		_, deleteErr := queries.DeleteACPSessionStateLinesBySession(ctx, pgSessionID)
+		return deleteErr
+	})
+	if err != nil {
+		return Thread{}, err
+	}
+	return updated, nil
+}
+
+func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queries, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, runtimeOwnerUserID string) (Thread, error) {
 	pgID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return Thread{}, fmt.Errorf("invalid session id: %w", err)
@@ -742,7 +844,7 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, sessionID, ty
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	existing, err := s.queries.GetSessionByID(ctx, pgID)
+	existing, err := queries.GetSessionByID(ctx, pgID)
 	if err != nil {
 		return Thread{}, err
 	}
@@ -780,7 +882,7 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, sessionID, ty
 		if err := validateACPMetadata(metadata); err != nil {
 			return Thread{}, err
 		}
-		if err := s.validateACPCreatePolicy(ctx, existing.BotID, metadata); err != nil {
+		if err := s.validateACPCreatePolicyWithQueries(ctx, queries, existing.BotID, metadata); err != nil {
 			return Thread{}, err
 		}
 	}
@@ -792,7 +894,7 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, sessionID, ty
 	if err != nil {
 		return Thread{}, fmt.Errorf("marshal runtime metadata: %w", err)
 	}
-	row, err := s.queries.UpdateSessionTypeAndMetadata(ctx, sqlc.UpdateSessionTypeAndMetadataParams{
+	row, err := queries.UpdateSessionTypeAndMetadata(ctx, sqlc.UpdateSessionTypeAndMetadataParams{
 		ID:              pgID,
 		Type:            sessionType,
 		SessionMode:     desc.SessionMode,
@@ -1212,7 +1314,16 @@ func (s *Service) SoftDelete(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("invalid session id: %w", err)
 	}
-	return s.queries.SoftDeleteSession(ctx, pgID)
+	if _, fenced := runtimefence.ResetFromContext(ctx); !fenced {
+		return s.queries.SoftDeleteSession(ctx, pgID)
+	}
+	queries, ok := s.queries.(dbstore.Queries)
+	if !ok {
+		return runtimefence.ErrTransactionsUnsupported
+	}
+	return runtimefence.InResetTransaction(ctx, queries, "", sessionID, func(txQueries dbstore.Queries) error {
+		return txQueries.SoftDeleteSession(ctx, pgID)
+	})
 }
 
 func (s *Service) MessageCount(ctx context.Context, sessionID string) (int64, error) {
@@ -1406,8 +1517,6 @@ func descriptorFromLegacyType(typ string) (string, string) {
 		return TypeChat, RuntimeACPAgent
 	case TypeDiscuss:
 		return TypeDiscuss, RuntimeModel
-	case TypeHeartbeat:
-		return TypeHeartbeat, RuntimeModel
 	case TypeSchedule:
 		return TypeSchedule, RuntimeModel
 	case TypeSubagent:
@@ -1438,7 +1547,7 @@ func LegacyTypeForDescriptor(sessionMode, runtimeType string) string {
 
 func IsKnownSessionMode(mode string) bool {
 	switch strings.TrimSpace(mode) {
-	case TypeChat, TypeDiscuss, TypeHeartbeat, TypeSchedule, TypeSubagent:
+	case TypeChat, TypeDiscuss, TypeSchedule, TypeSubagent:
 		return true
 	default:
 		return false
@@ -1520,6 +1629,10 @@ func nonNilMap(in map[string]any) map[string]any {
 }
 
 func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, meta map[string]any) error {
+	return s.validateACPCreatePolicyWithQueries(ctx, s.queries, botID, meta)
+}
+
+func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, queries Queries, botID pgtype.UUID, meta map[string]any) error {
 	agentID := metadataString(meta, "acp_agent_id")
 	if s.acpSetupValidator == nil {
 		return fmt.Errorf("%w: ACP setup validator unavailable", ErrACPAgentNotConfigured)
@@ -1527,7 +1640,7 @@ func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID
 	if validation := s.acpSetupValidator.ValidateACPSetup(agentID, nil); !validation.Known {
 		return fmt.Errorf("%w: %s", ErrACPUnknownAgent, agentID)
 	}
-	bot, err := s.queries.GetBotByID(ctx, botID)
+	bot, err := queries.GetBotByID(ctx, botID)
 	if err != nil {
 		return err
 	}

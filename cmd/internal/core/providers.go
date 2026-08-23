@@ -61,7 +61,6 @@ import (
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
 	hookspkg "github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
@@ -78,7 +77,6 @@ import (
 	"github.com/memohai/memoh/internal/models"
 	netctl "github.com/memohai/memoh/internal/network"
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/providertemplates"
@@ -329,14 +327,8 @@ func (p nativeWorkspaceBridgeProvider) MCPClient(ctx context.Context, botID stri
 	return p.manager.NativeMCPClient(ctx, botID)
 }
 
-func providePluginBridgeProvider(provider bridge.Provider) pluginspkg.BridgeProvider {
-	return pluginspkg.BridgeProvider{Provider: provider}
-}
-
-func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginService *pluginspkg.Service) *hookspkg.Service {
-	service := hookspkg.NewService(log, provider)
-	service.SetPluginService(pluginService)
-	return service
+func provideHooksService(log *slog.Logger, provider bridge.Provider) *hookspkg.Service {
+	return hookspkg.NewService(log, provider)
 }
 
 func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries, remote *workspace.RemoteWorkspaceService) (*workspace.Manager, error) {
@@ -415,10 +407,6 @@ func provideScheduleTriggerer(service *application.Service) schedule.Triggerer {
 	return application.NewScheduleGateway(service)
 }
 
-func provideHeartbeatTriggerer(service *application.Service) heartbeat.Triggerer {
-	return application.NewHeartbeatGateway(service)
-}
-
 type sessionCreatorAdapter struct {
 	svc      *sessionpkg.Service
 	workdirs *workdir.Service
@@ -475,10 +463,6 @@ func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec 
 	return sess.ID, nil
 }
 
-func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbeat.SessionCreator {
-	return &sessionCreatorAdapter{svc: sessionService}
-}
-
 func provideScheduleSessionCreator(sessionService *sessionpkg.Service, workdirService *workdir.Service) schedule.SessionCreator {
 	return &sessionCreatorAdapter{svc: sessionService, workdirs: workdirService}
 }
@@ -490,6 +474,7 @@ func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hooks
 		Logger:             log,
 		Limits:             agentLimitsFromConfig(cfg.Agent),
 		ContextViewApplier: contextview.ProviderRunConfigApplier(log),
+		LoopReselectMode:   agentLoopReselectModeFromConfig(log, cfg.Agent),
 	})
 }
 
@@ -499,6 +484,14 @@ func agentLimitsFromConfig(cfg config.AgentConfig) native.Limits {
 		cfg.ToolOutputMaxLines,
 		cfg.SystemFilesMaxBytes,
 	)
+}
+
+func agentLoopReselectModeFromConfig(log *slog.Logger, cfg config.AgentConfig) native.LoopReselectMode {
+	mode, recognized := cfg.EffectiveContextLoopReselectMode()
+	if !recognized {
+		log.Warn("unrecognized agent.context_loop_reselect value; defaulting to active", slog.String("value", cfg.ContextLoopReselect))
+	}
+	return native.LoopReselectMode(mode)
 }
 
 func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, providers []agenttools.ToolProvider) {
@@ -530,12 +523,18 @@ func injectBotConnectorLifecycle(botService *bots.Service, connectorService *con
 	botService.SetConnectorLifecycle(connectorService)
 }
 
+func injectBotContainerLifecycle(botService *bots.Service, manager *workspace.Manager) {
+	botService.SetContainerLifecycle(manager)
+}
+
 func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.Runner {
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, acpsessionadapter.NewSource(sessionService))
+	pool.SetSessionRuntime(sessionRuntime)
+	pool.SetSessionStateStore(acpsessionadapter.NewStateStore(queries))
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
 	pool.SetToolApprovalService(toolApproval)
@@ -610,10 +609,9 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
-	h.SetPluginService(pluginService)
 	return h
 }
 
@@ -787,12 +785,16 @@ func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.
 	return media.NewService(log, storageProvider)
 }
 
-func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPCodexOAuthHandler {
-	return handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
+func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool) *handlers.ACPCodexOAuthHandler {
+	handler := handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
+	handler.SetRuntimeResetService(acpPool)
+	return handler
 }
 
-func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPClaudeCodeOAuthHandler {
-	return handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
+func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool) *handlers.ACPClaudeCodeOAuthHandler {
+	handler := handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
+	handler.SetRuntimeResetService(acpPool)
+	return handler
 }
 
 func provideAudioRegistry() *audiopkg.Registry {
@@ -886,14 +888,6 @@ func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			return scheduleService.Bootstrap(ctx)
-		},
-	})
-}
-
-func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			return heartbeatService.Bootstrap(ctx)
 		},
 	})
 }

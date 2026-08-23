@@ -73,7 +73,7 @@ func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
 	// Action tokens stay literal (a command token must never be translated:
 	// showing "列出" but rejecting a typed "列出" is exactly the bug this guards).
 	// Only the trailing summary is localized.
-	for _, want := range []string{"**/model** — 切换对话模型", "`/model list` — 列出可用对话模型", "`/model set-heartbeat` — 设置心跳模型", "选择操作："} {
+	for _, want := range []string{"**/model** — 切换对话模型", "`/model list` — 列出可用对话模型", "选择操作："} {
 		if !strings.Contains(group.Interactive.Choices.Title, want) {
 			t.Fatalf("zh group help missing %q:\n%s", want, group.Interactive.Choices.Title)
 		}
@@ -90,7 +90,7 @@ func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
 	}
 	// Buttons carry the literal canonical token so the visible action matches
 	// what re-dispatches and what a user would type.
-	if !labels["list"] || !labels["set-heartbeat"] {
+	if !labels["list"] || !labels["set"] {
 		t.Fatalf("group help buttons should carry literal action tokens, got %#v", group.Interactive.Choices.Choices)
 	}
 
@@ -98,7 +98,7 @@ func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteResult /help model current: %v", err)
 	}
-	for _, want := range []string{"说明： 查看当前对话模型和心跳模型", "用法：", "查看同组操作"} {
+	for _, want := range []string{"说明： 查看当前对话模型", "用法：", "查看同组操作"} {
 		if action == nil || !strings.Contains(action.Text, want) {
 			t.Fatalf("zh action help missing %q:\n%v", want, action)
 		}

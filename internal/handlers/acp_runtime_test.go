@@ -51,6 +51,10 @@ type fakeACPRuntimePool struct {
 	reasoningBotID     string
 	reasoningRuntimeID string
 	reasoningEffort    string
+	modeBotID          string
+	modeRuntimeID      string
+	modeID             string
+	modeContextErr     error
 	closedBotID        string
 	closedRuntimeID    string
 	closeErr           error
@@ -110,6 +114,14 @@ func (p *fakeACPRuntimePool) SetRuntimeReasoning(_ context.Context, botID, runti
 	p.reasoningBotID = botID
 	p.reasoningRuntimeID = runtimeID
 	p.reasoningEffort = effort
+	return p.status, p.statusErr
+}
+
+func (p *fakeACPRuntimePool) SetRuntimeMode(ctx context.Context, botID, runtimeID, modeID string) (acpagent.RuntimeStatus, error) {
+	p.modeBotID = botID
+	p.modeRuntimeID = runtimeID
+	p.modeID = modeID
+	p.modeContextErr = ctx.Err()
 	return p.status, p.statusErr
 }
 
@@ -876,6 +888,49 @@ func TestACPRuntimeHandlerSetRuntimeReasoning(t *testing.T) {
 	}
 	if pool.reasoningBotID != botID || pool.reasoningRuntimeID != "rt_warm" || pool.reasoningEffort != "low" {
 		t.Fatalf("SetRuntimeReasoning call = %q %q %q", pool.reasoningBotID, pool.reasoningRuntimeID, pool.reasoningEffort)
+	}
+}
+
+func TestACPRuntimeHandlerSetRuntimeMode(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := acpRuntimeQueries{bot: testBotRow(botID, acpEnabledBotMetadata())}
+	pool := &fakeACPRuntimePool{status: acpagent.RuntimeStatus{
+		RuntimeID:             "rt_warm",
+		AgentID:               acpprofile.AgentCodexID,
+		State:                 "idle",
+		RuntimeOwnerAccountID: "user-1",
+	}}
+	handler := newACPRuntimeHandler(
+		pool,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/bots/"+botID+"/acp-runtimes/rt_warm/mode",
+		bytes.NewBufferString(`{"mode_id":"plan"}`),
+	)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	requestCtx, cancelRequest := context.WithCancel(req.Context())
+	cancelRequest()
+	req = req.WithContext(requestCtx)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx.SetPath("/bots/:bot_id/acp-runtimes/:runtime_id/mode")
+	ctx.SetParamNames("bot_id", "runtime_id")
+	ctx.SetParamValues(botID, "rt_warm")
+
+	if err := handler.SetRuntimeMode(ctx); err != nil {
+		t.Fatalf("SetRuntimeMode() error = %v", err)
+	}
+	if pool.modeBotID != botID || pool.modeRuntimeID != "rt_warm" || pool.modeID != "plan" {
+		t.Fatalf("SetRuntimeMode call = %q %q %q", pool.modeBotID, pool.modeRuntimeID, pool.modeID)
+	}
+	if pool.modeContextErr != nil {
+		t.Fatalf("SetRuntimeMode context error = %v, want request cancellation detached", pool.modeContextErr)
 	}
 }
 

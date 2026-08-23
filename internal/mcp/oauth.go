@@ -43,6 +43,16 @@ func NewOAuthService(log *slog.Logger, queries dbstore.Queries, callbackURL stri
 	}
 }
 
+// WithQueries returns a shallow service copy bound to the supplied queries.
+func (s *OAuthService) WithQueries(queries dbstore.Queries) *OAuthService {
+	if s == nil {
+		return nil
+	}
+	clone := *s
+	clone.queries = queries
+	return &clone
+}
+
 // DiscoveryResult holds the result of an OAuth discovery flow.
 type DiscoveryResult struct {
 	ResourceMetadataURL    string   `json:"resource_metadata_url"`

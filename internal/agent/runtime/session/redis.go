@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,16 @@ type RedisBackend struct {
 	closeOnce       sync.Once
 	closeDone       chan struct{}
 	closeErr        error
+}
+
+type redisHistoryResetState struct {
+	Bot      *redisHistoryResetRecord           `json:"bot,omitempty"`
+	Sessions map[string]redisHistoryResetRecord `json:"sessions,omitempty"`
+}
+
+type redisHistoryResetRecord struct {
+	Token       string `json:"token"`
+	ExpiresAtMS int64  `json:"expires_at_ms"`
 }
 
 // renewRedisLeaseScript also carries the lease index forward. The index score is
@@ -402,10 +413,23 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref RunRef, update
 	}
 	stateKey := b.stateKey(key)
 	runKey := b.runKey(key, runID)
+	resetKey := b.historyResetKey(key.BotID)
 	for {
 		var updated Snapshot
 		var changed bool
 		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
+			now, err := tx.Time(ctx).Result()
+			if err != nil {
+				return err
+			}
+			resetState, err := loadRedisHistoryResetState(ctx, tx, resetKey)
+			if err != nil {
+				return err
+			}
+			purgeRedisHistoryResetState(&resetState, now.UnixMilli())
+			if _, blocked := effectiveRedisHistoryReset(resetState, key.BotID, key.SessionID, now.UnixMilli()); blocked {
+				return ErrHistoryResetInProgress
+			}
 			if existing, ok, err := loadRedisRunRef(ctx, tx, runKey); err != nil {
 				return err
 			} else if ok {
@@ -450,12 +474,189 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref RunRef, update
 			updated = next
 			changed = true
 			return nil
-		}, stateKey, runKey)
+		}, stateKey, runKey, resetKey)
 		if errors.Is(err, redis.TxFailedErr) {
 			continue
 		}
 		return updated, changed, err
 	}
+}
+
+func (b *RedisBackend) AcquireHistoryReset(ctx context.Context, scope ResetScope, token string, ttl time.Duration) (ResetLease, bool, error) {
+	scope = scope.normalized()
+	token = strings.TrimSpace(token)
+	if !scope.valid() || token == "" || ttl <= 0 {
+		return ResetLease{}, false, errors.New("reset scope, token, and positive ttl are required")
+	}
+	key := b.historyResetKey(scope.BotID)
+	for {
+		var acquired ResetLease
+		var ok bool
+		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
+			now, err := tx.Time(ctx).Result()
+			if err != nil {
+				return err
+			}
+			state, err := loadRedisHistoryResetState(ctx, tx, key)
+			if err != nil {
+				return err
+			}
+			nowMS := now.UnixMilli()
+			purgeRedisHistoryResetState(&state, nowMS)
+			if _, blocked := effectiveRedisHistoryReset(state, scope.BotID, scope.SessionID, nowMS); blocked {
+				return nil
+			}
+			expiresAt := now.Add(ttl)
+			record := redisHistoryResetRecord{Token: token, ExpiresAtMS: expiresAt.UnixMilli()}
+			if scope.SessionID == "" {
+				if len(state.Sessions) != 0 {
+					return nil
+				}
+				state.Bot = &record
+			} else {
+				if state.Sessions == nil {
+					state.Sessions = make(map[string]redisHistoryResetRecord)
+				}
+				state.Sessions[scope.SessionID] = record
+			}
+			if err := storeRedisHistoryResetState(ctx, tx, key, state, nowMS); err != nil {
+				return err
+			}
+			acquired = ResetLease{Scope: scope, Token: token, ExpiresAt: expiresAt}
+			ok = true
+			return nil
+		}, key)
+		if errors.Is(err, redis.TxFailedErr) {
+			continue
+		}
+		return acquired, ok, err
+	}
+}
+
+func (b *RedisBackend) RenewHistoryReset(ctx context.Context, lease ResetLease, ttl time.Duration) (ResetLease, bool, error) {
+	if !lease.valid() || ttl <= 0 {
+		return ResetLease{}, false, errors.New("valid reset lease and positive ttl are required")
+	}
+	key := b.historyResetKey(lease.Scope.BotID)
+	for {
+		var renewed ResetLease
+		var ok bool
+		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
+			now, err := tx.Time(ctx).Result()
+			if err != nil {
+				return err
+			}
+			state, err := loadRedisHistoryResetState(ctx, tx, key)
+			if err != nil {
+				return err
+			}
+			nowMS := now.UnixMilli()
+			purgeRedisHistoryResetState(&state, nowMS)
+			record := redisHistoryResetRecord{}
+			if lease.Scope.SessionID == "" {
+				if state.Bot == nil || state.Bot.Token != strings.TrimSpace(lease.Token) || len(state.Sessions) != 0 {
+					return nil
+				}
+				record = *state.Bot
+			} else {
+				if state.Bot != nil {
+					return nil
+				}
+				var found bool
+				record, found = state.Sessions[lease.Scope.SessionID]
+				if !found || record.Token != strings.TrimSpace(lease.Token) {
+					return nil
+				}
+			}
+			expiresAt := now.Add(ttl)
+			record.ExpiresAtMS = expiresAt.UnixMilli()
+			if lease.Scope.SessionID == "" {
+				state.Bot = &record
+			} else {
+				state.Sessions[lease.Scope.SessionID] = record
+			}
+			if err := storeRedisHistoryResetState(ctx, tx, key, state, nowMS); err != nil {
+				return err
+			}
+			renewed = ResetLease{Scope: lease.Scope, Token: lease.Token, ExpiresAt: expiresAt}
+			ok = true
+			return nil
+		}, key)
+		if errors.Is(err, redis.TxFailedErr) {
+			continue
+		}
+		return renewed, ok, err
+	}
+}
+
+func (b *RedisBackend) ReleaseHistoryReset(ctx context.Context, lease ResetLease) (bool, error) {
+	if !lease.Scope.valid() || strings.TrimSpace(lease.Token) == "" {
+		return false, nil
+	}
+	key := b.historyResetKey(lease.Scope.BotID)
+	for {
+		var released bool
+		err := b.client.Watch(ctx, func(tx *redis.Tx) error {
+			now, err := tx.Time(ctx).Result()
+			if err != nil {
+				return err
+			}
+			state, err := loadRedisHistoryResetState(ctx, tx, key)
+			if err != nil {
+				return err
+			}
+			nowMS := now.UnixMilli()
+			purgeRedisHistoryResetState(&state, nowMS)
+			if lease.Scope.SessionID == "" {
+				if state.Bot == nil || state.Bot.Token != strings.TrimSpace(lease.Token) {
+					return nil
+				}
+				state.Bot = nil
+			} else {
+				record, found := state.Sessions[lease.Scope.SessionID]
+				if !found || record.Token != strings.TrimSpace(lease.Token) {
+					return nil
+				}
+				delete(state.Sessions, lease.Scope.SessionID)
+			}
+			if err := storeRedisHistoryResetState(ctx, tx, key, state, nowMS); err != nil {
+				return err
+			}
+			released = true
+			return nil
+		}, key)
+		if errors.Is(err, redis.TxFailedErr) {
+			continue
+		}
+		return released, err
+	}
+}
+
+func (b *RedisBackend) EffectiveHistoryReset(ctx context.Context, scope ResetScope) (ResetLease, bool, error) {
+	scope = scope.normalized()
+	if !scope.valid() {
+		return ResetLease{}, false, nil
+	}
+	now, err := b.client.Time(ctx).Result()
+	if err != nil {
+		return ResetLease{}, false, err
+	}
+	data, err := b.client.Get(ctx, b.historyResetKey(scope.BotID)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return ResetLease{}, false, nil
+	}
+	if err != nil {
+		return ResetLease{}, false, err
+	}
+	var state redisHistoryResetState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return ResetLease{}, false, err
+	}
+	lease, blocked := effectiveRedisHistoryReset(state, scope.BotID, scope.SessionID, now.UnixMilli())
+	if !blocked {
+		return ResetLease{}, false, nil
+	}
+	return lease, true, nil
 }
 
 func (b *RedisBackend) RenewLease(ctx context.Context, key Key, runID, ownerID, generation string, renewedAt, expiresAt time.Time) error {
@@ -830,6 +1031,90 @@ func loadRedisRunRef(ctx context.Context, tx *redis.Tx, key string) (RunRef, boo
 	return ref, true, nil
 }
 
+func loadRedisHistoryResetState(ctx context.Context, tx *redis.Tx, key string) (redisHistoryResetState, error) {
+	data, err := tx.Get(ctx, key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return redisHistoryResetState{}, nil
+	}
+	if err != nil {
+		return redisHistoryResetState{}, err
+	}
+	var state redisHistoryResetState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return redisHistoryResetState{}, err
+	}
+	return state, nil
+}
+
+func storeRedisHistoryResetState(ctx context.Context, tx *redis.Tx, key string, state redisHistoryResetState, nowMS int64) error {
+	maxExpiry := int64(0)
+	if state.Bot != nil {
+		maxExpiry = state.Bot.ExpiresAtMS
+	}
+	for _, record := range state.Sessions {
+		if record.ExpiresAtMS > maxExpiry {
+			maxExpiry = record.ExpiresAtMS
+		}
+	}
+	if maxExpiry <= nowMS {
+		_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Del(ctx, key)
+			return nil
+		})
+		return err
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.Set(ctx, key, data, time.Duration(maxExpiry-nowMS)*time.Millisecond)
+		return nil
+	})
+	return err
+}
+
+func purgeRedisHistoryResetState(state *redisHistoryResetState, nowMS int64) {
+	if state == nil {
+		return
+	}
+	if state.Bot != nil && state.Bot.ExpiresAtMS <= nowMS {
+		state.Bot = nil
+	}
+	for sessionID, record := range state.Sessions {
+		if record.ExpiresAtMS <= nowMS {
+			delete(state.Sessions, sessionID)
+		}
+	}
+}
+
+// effectiveRedisHistoryReset decodes the per-bot state blob into leases and
+// applies the shared effectiveResetLease precedence rule, so the Redis reader
+// cannot drift from the memory and PostgreSQL readers.
+func effectiveRedisHistoryReset(state redisHistoryResetState, botID, sessionID string, nowMS int64) (ResetLease, bool) {
+	var bot *ResetLease
+	if state.Bot != nil && state.Bot.ExpiresAtMS > nowMS {
+		lease := ResetLease{
+			Scope: ResetScope{BotID: botID}, Token: state.Bot.Token,
+			ExpiresAt: time.UnixMilli(state.Bot.ExpiresAtMS).UTC(),
+		}
+		bot = &lease
+	}
+	sessions := make([]ResetLease, 0, len(state.Sessions))
+	for id, record := range state.Sessions {
+		if record.ExpiresAtMS > nowMS {
+			sessions = append(sessions, ResetLease{
+				Scope: ResetScope{BotID: botID, SessionID: id}, Token: record.Token,
+				ExpiresAt: time.UnixMilli(record.ExpiresAtMS).UTC(),
+			})
+		}
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Scope.SessionID < sessions[j].Scope.SessionID
+	})
+	return effectiveResetLease(ResetScope{BotID: botID, SessionID: sessionID}, bot, sessions)
+}
+
 func (b *RedisBackend) stateKey(key Key) string {
 	return b.keyPrefix + "state:" + key.String()
 }
@@ -848,4 +1133,8 @@ func (b *RedisBackend) commandChannel(ownerID string) string {
 
 func (b *RedisBackend) commandResultKey(commandID string) string {
 	return b.keyPrefix + "command_result:" + strings.TrimSpace(commandID)
+}
+
+func (b *RedisBackend) historyResetKey(botID string) string {
+	return b.keyPrefix + "history_reset:" + strings.TrimSpace(botID)
 }

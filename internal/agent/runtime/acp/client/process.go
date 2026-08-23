@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -21,6 +22,21 @@ const (
 	containerToolkitBin  = "/opt/memoh/toolkit/bin"
 	noProjectWorkDirPart = "/.memoh/acp-work/no-project/"
 )
+
+// requiresPinnedToolkitAdapter reports whether the agent's profile declares
+// database-resumable session state. Durable JSONL resume is audited against
+// the pinned toolkit adapters, so a resumable profile must never silently
+// execute a same-named PATH binary whose transcript layout was never audited.
+// Deriving this from the profile keeps the launcher free of agent-name
+// conditionals: a future resumable agent is pinned the moment its profile
+// declares session roots.
+func requiresPinnedToolkitAdapter(agentID string) bool {
+	profile, ok := acpprofile.Lookup(acpprofile.NormalizeAgentID(agentID))
+	if !ok {
+		return false
+	}
+	return len(profile.RuntimeStorage.SessionRoots) > 0
+}
 
 var (
 	commandResolveWindow = 5 * time.Second
@@ -42,28 +58,31 @@ const (
 )
 
 type processOptions struct {
-	Backend   WorkspaceBackend
-	BotID     string
-	AgentID   string
-	SetupMode SetupMode
-	Env       []string
-	CleanEnv  bool
-	UnsetEnv  []string
-	NoTimeout bool
-	Logger    *slog.Logger
+	Backend          WorkspaceBackend
+	BotID            string
+	AgentID          string
+	SetupMode        SetupMode
+	Resume           *SessionStateSnapshot
+	Env              []string
+	CleanEnv         bool
+	UnsetEnv         []string
+	NoTimeout        bool
+	Logger           *slog.Logger
+	RuntimeSyncGuard RuntimeSyncGuard
 }
 
 type bridgeProcess struct {
-	stream   *bridge.ExecStream
-	stdin    *io.PipeWriter
-	stdout   *io.PipeReader
-	tail     *stderrTail
-	done     chan struct{}
-	env      []string
-	toolEnv  []string
-	unsetEnv []string
-	lease    *runtimeLease
-	logger   *slog.Logger
+	stream       *bridge.ExecStream
+	stdin        *io.PipeWriter
+	stdout       *io.PipeReader
+	tail         *stderrTail
+	done         chan struct{}
+	lifecycleCtx context.Context
+	env          []string
+	toolEnv      []string
+	unsetEnv     []string
+	lease        *runtimeLease
+	logger       *slog.Logger
 
 	stateMu      sync.Mutex
 	activated    bool
@@ -96,6 +115,16 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 	lease, err := prepareRuntimeLease(ctx, client, opts)
 	if err != nil {
 		return nil, err
+	}
+	if opts.Resume != nil {
+		// Materialize the database checkpoint before the adapter (and any
+		// child app-server it launches) can scan its process-local home.
+		if err := lease.restoreSessionState(ctx, opts.Resume); err != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = lease.finalize(cleanupCtx, false)
+			return nil, fmt.Errorf("restore ACP session state: %w", err)
+		}
 	}
 	env := lease.agentEnv
 	runtimeOpts := opts
@@ -130,6 +159,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		stdout:       stdoutR,
 		tail:         &stderrTail{},
 		done:         make(chan struct{}),
+		lifecycleCtx: ctx,
 		env:          append([]string(nil), env...),
 		toolEnv:      append([]string(nil), lease.toolEnv...),
 		unsetEnv:     append([]string(nil), lease.unsetEnv...),
@@ -207,7 +237,7 @@ func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir
 		if resolved != "" || err != nil {
 			return resolved, err
 		}
-		return "", commandNotAvailableError(command, lastResult, opts.Backend)
+		return "", commandNotAvailableError(command, lastResult, requiresPinnedToolkitAdapter(opts.AgentID))
 	}
 
 	deadline := time.Now().Add(commandResolveWindow)
@@ -231,7 +261,7 @@ func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir
 			return resolved, nil
 		}
 	}
-	return "", commandNotAvailableError(command, lastResult, opts.Backend)
+	return "", commandNotAvailableError(command, lastResult, requiresPinnedToolkitAdapter(opts.AgentID))
 }
 
 func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts processOptions) (string, *bridge.ExecResult, error) {
@@ -249,6 +279,22 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 			return command, result, nil
 		}
 		return "", result, nil
+	}
+
+	// Durable JSONL resume is audited against the pinned adapters shipped in
+	// the Memoh toolkit. A same-named binary earlier on PATH may use a different
+	// transcript layout or omit the Claude flush/receipt contract, so built-in
+	// resumable profiles must never silently execute it.
+	if requiresPinnedToolkitAdapter(opts.AgentID) {
+		toolkitCommand := containerToolkitBin + "/" + command
+		toolkitResult, err := checkCommand(ctx, client, "test -x "+escapeShellArg(toolkitCommand), workDir, env, opts)
+		if err != nil {
+			return "", nil, fmt.Errorf("check pinned ACP command %q: %w", toolkitCommand, err)
+		}
+		if toolkitResult.ExitCode == 0 {
+			return toolkitCommand, toolkitResult, nil
+		}
+		return "", toolkitResult, nil
 	}
 
 	result, err := checkCommand(ctx, client, "command -v "+escapeShellArg(command)+" >/dev/null 2>&1", workDir, env, opts)
@@ -278,7 +324,7 @@ func checkCommand(ctx context.Context, client *bridge.Client, check, workDir str
 	})
 }
 
-func commandNotAvailableError(command string, result *bridge.ExecResult, _ WorkspaceBackend) error {
+func commandNotAvailableError(command string, result *bridge.ExecResult, pinned bool) error {
 	detail := ""
 	if result != nil {
 		detail = strings.TrimSpace(result.Stderr)
@@ -288,6 +334,12 @@ func commandNotAvailableError(command string, result *bridge.ExecResult, _ Works
 	}
 	if detail != "" {
 		detail = ": " + detail
+	}
+	if pinned {
+		// Resumable agents deliberately never fall back to PATH, so pointing
+		// at PATH here would send operators of custom images down the wrong
+		// road: the only fix is shipping the audited toolkit adapter payload.
+		return fmt.Errorf("ACP command %q requires the pinned adapter at %s/%s, which is missing from this workspace image%s. Resumable agents never use a PATH-installed copy; rebuild the workspace image with the Memoh toolkit adapter payload", command, containerToolkitBin, command, detail)
 	}
 	return fmt.Errorf("ACP command %q is not available in the workspace PATH or %s%s. Install it in the workspace or rebuild the Memoh workspace runtime with %s available", command, containerToolkitBin, detail, containerToolkitBin)
 }
@@ -366,25 +418,39 @@ func (p *bridgeProcess) Activate() {
 	p.stateMu.Lock()
 	if !p.activated {
 		p.activated = true
-		go p.syncLoop()
+		go p.syncLoop(runtimeSyncInterval)
 	}
 	p.stateMu.Unlock()
 }
 
-func (p *bridgeProcess) syncLoop() {
-	if p == nil || p.lease == nil {
+func (p *bridgeProcess) syncLoop(interval time.Duration) {
+	if p == nil || p.lease == nil || p.lifecycleCtx == nil {
 		return
 	}
-	ticker := time.NewTicker(runtimeSyncInterval)
+	if interval <= 0 {
+		interval = runtimeSyncInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-p.done:
 			return
+		case <-p.lifecycleCtx.Done():
+			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(p.lifecycleCtx, 10*time.Second)
 			err := p.lease.syncLiveState(ctx)
 			cancel()
+			if errors.Is(err, ErrRuntimeSyncGenerationStale) {
+				if p.logger != nil {
+					p.logger.Info("stopping stale ACP runtime synchronization",
+						slog.String("agent_id", p.lease.agentID),
+						slog.String("bot_id", p.lease.botID),
+						slog.Any("error", err))
+				}
+				return
+			}
 			if err != nil && p.logger != nil {
 				p.logger.Warn("failed to refresh ACP runtime lease",
 					slog.String("agent_id", p.lease.agentID),

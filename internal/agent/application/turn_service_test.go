@@ -509,12 +509,12 @@ func TestBoundaryValuesPassThrough(t *testing.T) {
 	activation := &turn.SkillActivation{
 		Skills: []turn.SkillActivationSkill{{
 			Name: "skill", DisplayName: "Skill", Description: "desc",
-			SourceKind: "plugin", State: "effective",
+			SourceKind: "registry", State: "effective",
 		}},
 		Prompt: "prompt",
 	}
 	requested := []turn.RequestedSkillContext{{
-		Name: "skill", Description: "desc", Content: "body", SourceKind: "plugin",
+		Name: "skill", Description: "desc", Content: "body", SourceKind: "registry",
 		OpaqueSourceID: "opaque", ContentHash: "hash", Identity: "identity",
 	}}
 	request := chatRequestFromCommand(turn.StartTurnCommand{

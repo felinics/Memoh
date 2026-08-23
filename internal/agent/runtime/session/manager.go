@@ -57,6 +57,7 @@ type Manager struct {
 	decisionStore          DecisionStore
 	terminalObserver       func(context.Context, TerminalRun)
 	terminalReconciler     func(context.Context) error
+	historyResetHandler    HistoryResetHandler
 	pendingCommands        map[string]map[*commandWaiter]struct{}
 	inflightCommandTargets map[string]struct{}
 	commandExecutions      map[string]chan struct{}
@@ -813,6 +814,8 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		claimedSnapshot, changed, err = m.distributed.StartRun(ctx, key, RunRef{
 			BotID: botID, SessionID: sessionID, RunID: runID, OwnerID: m.ownerID, Generation: runGeneration, FencingToken: start.fencingToken,
 		}, claim)
+	} else if gated, ok := m.backend.(historyResetStartBackend); ok {
+		claimedSnapshot, changed, err = gated.StartRunIfNoHistoryReset(ctx, key, claim)
 	} else {
 		claimedSnapshot, changed, err = m.backend.Update(ctx, key, claim)
 	}

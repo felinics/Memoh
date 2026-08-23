@@ -22,7 +22,6 @@ import (
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -44,11 +43,10 @@ func (q *directLifecycleQueries) GetSettingsByBotID(
 	botID pgtype.UUID,
 ) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
-		BotID:             botID,
-		Language:          "auto",
-		ReasoningEffort:   "medium",
-		HeartbeatInterval: 30,
-		ChatModelID:       q.modelID,
+		BotID:           botID,
+		Language:        "auto",
+		ReasoningEffort: "medium",
+		ChatModelID:     q.modelID,
 	}, nil
 }
 
@@ -222,7 +220,7 @@ func newDirectLifecycleFixture(t *testing.T, mode directLifecycleModelMode) dire
 				"finish_reason": "stop",
 				"message": map[string]any{
 					"role":    "assistant",
-					"content": "HEARTBEAT_OK " + directLifecycleResponse,
+					"content": directLifecycleResponse,
 				},
 			}},
 		})
@@ -355,27 +353,6 @@ func TestDirectChatProviderFailurePersistsFailedProviderLifecycle(t *testing.T) 
 	assertDirectLifecycle(t, fixture.lifecycles, runID, contextLifecycleStatusFailedProvider, "")
 	if creates[0].ErrorCode.Valid {
 		t.Fatalf("private provider diagnostic became stable error code: %#v", creates[0].ErrorCode)
-	}
-}
-
-func TestTriggerHeartbeatPersistsAdmittedLifecycleBeforeFinishingRun(t *testing.T) {
-	fixture := newDirectLifecycleFixture(t, directLifecycleModelSuccess)
-
-	result, err := fixture.service.TriggerHeartbeat(context.Background(), lifecycleTestBotID, heartbeat.TriggerPayload{
-		BotID:           lifecycleTestBotID,
-		SessionID:       lifecycleTestSessionID,
-		Interval:        30,
-		LastHeartbeatAt: directLifecyclePrompt,
-	}, "")
-	if err != nil {
-		t.Fatalf("TriggerHeartbeat() error = %v", err)
-	}
-	if result.Status != "ok" {
-		t.Fatalf("TriggerHeartbeat() status = %q, want ok", result.Status)
-	}
-	assertDirectLifecycle(t, fixture.lifecycles, lifecycleTestRunID, contextLifecycleStatusCompleted, "message-id")
-	if len(fixture.runtime.finishes) != 1 || fixture.runtime.finishes[0].status != sessionruntime.RunStatusCompleted {
-		t.Fatalf("runtime finishes = %#v, want one completed finish", fixture.runtime.finishes)
 	}
 }
 

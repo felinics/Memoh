@@ -7,7 +7,17 @@
          flex-1, grows to fill the freed space — content shifts rather than being
          covered. dockview relays out per frame (no gating) to keep panels matched
          the whole way. -->
-    <div class="flex h-full min-h-0 overflow-hidden">
+    <!-- This row is also the BASE file-drop zone: files dragged anywhere that
+         no region zone claims (e.g. the sidebar on a non-Files view) go to the
+         focused chat pane's composer. Region zones sit on top and claim their
+         own rect (see the nesting rules in useFileDropZone). The overlay is
+         anchored over the receiving pane (measureTarget), so the page only ever
+         shows TWO anchors — a region's, or the composer's pane — never a third
+         window-centred one. -->
+    <div
+      class="flex h-full min-h-0 overflow-hidden"
+      v-on="baseDropHandlers"
+    >
       <SideBar
         v-if="!isMobile"
         :mac-traffic-reserve="macTrafficReserve"
@@ -17,6 +27,12 @@
         <MainContainer />
       </div>
       <MobileNavSheet v-if="isMobile" />
+      <FileDropOverlay
+        :active="baseDropActive"
+        :bounds="baseDropBounds"
+        :icon="ImagePlus"
+        :label="t('chat.dropToAttach')"
+      />
     </div>
   </div>
 </template>
@@ -35,6 +51,28 @@ import { safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useI18n } from 'vue-i18n'
+import { ImagePlus } from 'lucide-vue-next'
+import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
+import { useFileDropZone } from '@/composables/useFileDropZone'
+import { getChatFileDropTarget } from '@/pages/home/composables/chat-file-drop-target'
+
+const { t } = useI18n()
+
+// Base layer of the page's drop model: EVERYWHERE defaults to the focused chat
+// pane's composer. It answers only where no region zone claimed the drag —
+// region zones stop propagation when they accept (see useFileDropZone). With no
+// registered pane (settings/onboarding, or the pane's own gate closed) the zone
+// stays dark and the global file-drop guard swallows the drop instead. The
+// anchor is measured from the receiving pane, not this window-wide host.
+const { active: baseDropActive, bounds: baseDropBounds, handlers: baseDropHandlers } = useFileDropZone({
+  disabled: () => {
+    const target = getChatFileDropTarget()
+    return !target || target.disabled()
+  },
+  onDrop: transfer => getChatFileDropTarget()?.onDrop(transfer),
+  measureTarget: () => getChatFileDropTarget()?.hostEl() ?? null,
+})
 
 const desktopShell = inject(DesktopShellKey, false)
 const macTrafficReserve = computed(() =>

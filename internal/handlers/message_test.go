@@ -39,7 +39,7 @@ func TestIsUserFacingSessionType(t *testing.T) {
 			t.Fatalf("expected %q to be user-facing", typ)
 		}
 	}
-	for _, typ := range []string{session.TypeHeartbeat, session.TypeSchedule, session.TypeSubagent, ""} {
+	for _, typ := range []string{session.TypeSchedule, session.TypeSubagent, ""} {
 		if session.IsUserFacingType(typ) {
 			t.Fatalf("expected %q to be filtered out of user-facing surfaces", typ)
 		}

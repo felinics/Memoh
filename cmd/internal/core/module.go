@@ -12,17 +12,17 @@ import (
 	"github.com/memohai/memoh/internal/channelaccess"
 	"github.com/memohai/memoh/internal/chat/event"
 	"github.com/memohai/memoh/internal/connectors"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthclients"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providertemplates"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
+	"github.com/memohai/memoh/internal/skillpackages"
 	"github.com/memohai/memoh/internal/userruntime"
 	videopkg "github.com/memohai/memoh/internal/video"
 	"github.com/memohai/memoh/internal/workdir"
@@ -79,7 +79,6 @@ func ServerModule() fx.Option {
 			provideWorkspaceManager,
 			workdir.NewService,
 			provideBridgeProvider,
-			providePluginBridgeProvider,
 			provideMemoryLLM,
 			memprovider.NewService,
 			provideMemoryProviderRegistry,
@@ -96,7 +95,7 @@ func ServerModule() fx.Option {
 			mcp.NewConnectionService,
 			connectors.NewService,
 			connectors.NewSource,
-			pluginspkg.NewService,
+			provideSkillPackageService,
 			mcp.NewToolSessionContextStore,
 			provideAudioRegistry,
 			audiopkg.NewService,
@@ -111,11 +110,8 @@ func ServerModule() fx.Option {
 			provideAgentService,
 			provideTurnService,
 			provideScheduleTriggerer,
-			provideHeartbeatSessionCreator,
 			provideScheduleSessionCreator,
 			schedule.NewService,
-			provideHeartbeatTriggerer,
-			heartbeat.NewService,
 			compaction.NewService,
 			provideContainerdHandler,
 			provideBotBackupService,
@@ -130,15 +126,19 @@ func ServerModule() fx.Option {
 			injectToolProviders,
 			injectACPToolProviders,
 			injectBotConnectorLifecycle,
+			injectBotContainerLifecycle,
 			configureMemoryProviderRegistry,
 			startProviderTemplateSync,
 			startScheduleService,
-			startHeartbeatService,
 			startContainerReconciliation,
 			startBackgroundTaskCleanup,
 			startAudioTempStoreCleanup,
 		),
 	)
+}
+
+func provideSkillPackageService(queries dbstore.Queries) *skillpackages.Service {
+	return skillpackages.NewService(queries)
 }
 
 // Module preserves the all-in-one composition API for tests and transitional

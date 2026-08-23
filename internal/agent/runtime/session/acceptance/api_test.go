@@ -176,7 +176,6 @@ func (c *apiClient) configureBot(botID, modelID string) error {
 		"chat_model_id":      modelID,
 		"chat_runtime":       "model",
 		"compaction_enabled": false,
-		"heartbeat_enabled":  false,
 		"reasoning_enabled":  false,
 		"tool_approval_config": map[string]any{
 			"enabled": false,

@@ -257,6 +257,18 @@ WHERE team_id = public.memoh_current_team_id()
   AND deleted_at IS NULL
 FOR UPDATE;
 
+-- name: LockSessionForCommitReconciliation :one
+-- Commit-unknown reconciliation must wait for the original writer even when a
+-- concurrent reset has soft-deleted the session. A missing row after this lock
+-- attempt is terminal (the session was hard-deleted and its history cascaded),
+-- not a transient condition to retry forever.
+SELECT id
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(session_id)
+  AND bot_id = sqlc.arg(bot_id)
+FOR UPDATE;
+
 -- name: LockSessionRuntimeFence :one
 SELECT runtime_fencing_token
 FROM bot_sessions
@@ -412,14 +424,46 @@ SET type = sqlc.arg(type),
     runtime_type = sqlc.arg(runtime_type),
     runtime_metadata = sqlc.arg(runtime_metadata),
     metadata = sqlc.arg(metadata),
+    runtime_config_epoch = runtime_config_epoch + 1,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id) AND deleted_at IS NULL
 RETURNING *;
 
 -- name: SoftDeleteSession :exec
-UPDATE bot_sessions
-SET deleted_at = now(), updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id) AND deleted_at IS NULL;
+-- ACP state is removed in full: soft delete never fires the hard-delete FK
+-- cascades, so headers, the shared line set, and the publication head must
+-- all be dropped here or they orphan forever.
+WITH invalidated_session AS MATERIALIZED (
+  UPDATE bot_sessions
+  SET deleted_at = now(),
+      updated_at = now(),
+      runtime_config_epoch = runtime_config_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+  WHERE team_id = public.memoh_current_team_id()
+    AND id = sqlc.arg(id)
+    AND deleted_at IS NULL
+  RETURNING id
+),
+deleted_acp_states AS (
+  DELETE FROM acp_session_states state
+  USING invalidated_session invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM acp_session_state_lines line
+  USING invalidated_session invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+)
+DELETE FROM acp_session_publications publication
+USING invalidated_session invalidated
+WHERE publication.team_id = public.memoh_current_team_id()
+  AND publication.session_id = invalidated.id
+  AND (SELECT count(*) FROM deleted_acp_states) >= 0
+  AND (SELECT count(*) FROM deleted_acp_lines) >= 0;
 
 -- name: TouchSession :exec
 UPDATE bot_sessions
@@ -493,6 +537,43 @@ WHERE team_id = public.memoh_current_team_id()
 ORDER BY created_at DESC;
 
 -- name: SoftDeleteSessionsByBot :exec
-UPDATE bot_sessions
-SET deleted_at = now(), updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id) AND deleted_at IS NULL;
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.bot_id = sqlc.arg(bot_id)
+    AND session.deleted_at IS NULL
+  ORDER BY session.id
+  FOR UPDATE
+),
+invalidated_sessions AS MATERIALIZED (
+  UPDATE bot_sessions session
+  SET deleted_at = now(),
+      updated_at = now(),
+      runtime_config_epoch = session.runtime_config_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+  FROM target_sessions target
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
+  RETURNING session.id
+),
+deleted_acp_states AS (
+  DELETE FROM acp_session_states state
+  USING invalidated_sessions invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM acp_session_state_lines line
+  USING invalidated_sessions invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+)
+DELETE FROM acp_session_publications publication
+USING invalidated_sessions invalidated
+WHERE publication.team_id = public.memoh_current_team_id()
+  AND publication.session_id = invalidated.id
+  AND (SELECT count(*) FROM deleted_acp_states) >= 0
+  AND (SELECT count(*) FROM deleted_acp_lines) >= 0;

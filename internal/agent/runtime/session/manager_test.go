@@ -1052,7 +1052,7 @@ func runManagerDoesNotRetryFinishAfterOwnershipLoss(t *testing.T, suite distribu
 	if err := manager.StartRun(context.Background(), testBotID, testSessionID, "stream-expired-finish", make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	manager.stopLeaseRenewal(manager.localControl("stream-expired-finish"))
+	_ = manager.stopLeaseRenewalContext(context.Background(), manager.localControl("stream-expired-finish"))
 	time.Sleep(leaseTTL + leaseTTL/2)
 	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, "stream-expired-finish"), RunStatusCompleted, ""); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("finish expired run error = %v, want ErrRunOwnershipLost", err)
@@ -1957,7 +1957,7 @@ func runRuntimeManagerExpiredCleanupScopesLocalControlToGeneration(t *testing.T,
 		t.Fatalf("start old generation: %v", err)
 	}
 	backend.targetGeneration = oldHandle.Generation
-	manager.stopLeaseRenewal(manager.localControlForHandle(oldHandle))
+	_ = manager.stopLeaseRenewalContext(context.Background(), manager.localControlForHandle(oldHandle))
 	time.Sleep(leaseTTL + 30*time.Millisecond)
 
 	snapshotDone := make(chan error, 1)
@@ -2023,7 +2023,7 @@ func runRuntimeManagerRejectsValidationAfterLocalLeaseDeadline(t *testing.T, sui
 	if err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	manager.stopLeaseRenewal(manager.localControlForHandle(handle))
+	_ = manager.stopLeaseRenewalContext(context.Background(), manager.localControlForHandle(handle))
 
 	result := make(chan error, 1)
 	go func() {
@@ -2162,7 +2162,7 @@ func runRuntimeManagerRejectsExpiredLeaseRevivalContract(t *testing.T, suite dis
 	if ctrl == nil {
 		t.Fatal("local run control is missing")
 	}
-	manager.stopLeaseRenewal(ctrl)
+	_ = manager.stopLeaseRenewalContext(context.Background(), ctrl)
 
 	initial, ok, err := backend.Load(context.Background(), Key{BotID: testBotID, SessionID: testSessionID})
 	if err != nil || !ok || initial.CurrentRunView == nil {
@@ -3452,7 +3452,7 @@ func runRuntimeManagerFencesStaleOwnerEventsContract(t *testing.T, suite distrib
 		t.Fatalf("start stale owner run: %v", err)
 	}
 	staleControl := oldOwner.localControl("stream-stale")
-	oldOwner.stopLeaseRenewal(staleControl)
+	_ = oldOwner.stopLeaseRenewalContext(context.Background(), staleControl)
 	time.Sleep(80 * time.Millisecond)
 
 	lost, err := newOwner.Snapshot(context.Background(), testBotID, testSessionID)
@@ -3567,7 +3567,7 @@ func runRuntimeManagerNotifiesLeaseLostContract(t *testing.T, suite distributedR
 	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	owner.stopLeaseRenewal(owner.localControl(testRunID))
+	_ = owner.stopLeaseRenewalContext(context.Background(), owner.localControl(testRunID))
 
 	deadline := time.After(5 * time.Second)
 	for {

@@ -1872,12 +1872,96 @@ definitions:
           $ref: '#/definitions/connectors.Connector'
         type: array
     type: object
+  contextfrag.CacheClass:
+    enum:
+    - stable
+    - dynamic
+    - never
+    type: string
+    x-enum-varnames:
+    - CacheStable
+    - CacheDynamic
+    - CacheNever
+  contextfrag.CachePlan:
+    properties:
+      stable_message_count:
+        type: integer
+      stable_prefix_hash:
+        type: string
+      stable_prefix_token_estimate:
+        type: integer
+    type: object
+  contextfrag.ContentRange:
+    properties:
+      end:
+        type: integer
+      start:
+        type: integer
+    type: object
+  contextfrag.ContextBudgetPlan:
+    properties:
+      actual_system_cost:
+        type: integer
+      current_request_cost:
+        type: integer
+      estimator:
+        type: string
+      estimator_safety_factor_percent:
+        type: integer
+      history_budget:
+        type: integer
+      output_reserve:
+        type: integer
+      system_budget:
+        type: integer
+      tool_defs_cost:
+        type: integer
+      window:
+        type: integer
+    type: object
+  contextfrag.ContextRef:
+    properties:
+      content_hash:
+        type: string
+      durability:
+        $ref: '#/definitions/contextfrag.RefDurability'
+      hash_algo:
+        type: string
+      hash_scope:
+        type: string
+      id:
+        type: string
+      namespace:
+        type: string
+      range:
+        $ref: '#/definitions/contextfrag.ContentRange'
+      schema:
+        type: string
+      version:
+        type: integer
+    type: object
   contextfrag.LifecycleSnapshot:
     properties:
       assistant_message_id:
         type: string
+      budget_plan:
+        $ref: '#/definitions/contextfrag.ContextBudgetPlan'
+      cache_plan:
+        $ref: '#/definitions/contextfrag.CachePlan'
       counts:
         $ref: '#/definitions/contextfrag.ManifestCounts'
+      final_input_hash:
+        type: string
+      mutations:
+        items:
+          $ref: '#/definitions/contextfrag.MutationRecord'
+        type: array
+      selection:
+        $ref: '#/definitions/contextfrag.SelectionTrace'
+      selection_decisions:
+        items:
+          $ref: '#/definitions/contextfrag.SelectionDecision'
+        type: array
       version:
         type: integer
       view:
@@ -1902,6 +1986,121 @@ definitions:
     type: string
     x-enum-varnames:
     - ViewRunConfigPreProvider
+  contextfrag.MutationKind:
+    enum:
+    - before_model_call_hook
+    - background_summary
+    - mid_task_prune
+    - injected_message
+    - context_view_fallback
+    - context_budget_failure
+    - context_budget_disabled
+    - capability_gate
+    - read_media
+    type: string
+    x-enum-varnames:
+    - MutationBeforeModelCallHook
+    - MutationBackgroundSummary
+    - MutationMidTaskPrune
+    - MutationInjectedMessage
+    - MutationContextViewFallback
+    - MutationContextBudgetFailure
+    - MutationContextBudgetDisabled
+    - MutationCapabilityGate
+    - MutationReadMedia
+  contextfrag.MutationRecord:
+    properties:
+      detail:
+        type: string
+      kind:
+        $ref: '#/definitions/contextfrag.MutationKind'
+    type: object
+  contextfrag.RefDurability:
+    enum:
+    - durable
+    - synthetic
+    - debug
+    type: string
+    x-enum-varnames:
+    - RefDurable
+    - RefSynthetic
+    - RefDebug
+  contextfrag.RetentionTier:
+    enum:
+    - ""
+    - required
+    - preferred
+    - optional
+    type: string
+    x-enum-varnames:
+    - RetentionUnspecified
+    - RetentionRequired
+    - RetentionPreferred
+    - RetentionOptional
+  contextfrag.SelectionDecision:
+    properties:
+      cache_class:
+        $ref: '#/definitions/contextfrag.CacheClass'
+      decision:
+        $ref: '#/definitions/contextfrag.SelectionDecisionKind'
+      id:
+        type: string
+      image_count:
+        type: integer
+      reason:
+        type: string
+      ref:
+        $ref: '#/definitions/contextfrag.ContextRef'
+      retention_tier:
+        $ref: '#/definitions/contextfrag.RetentionTier'
+      slot:
+        $ref: '#/definitions/contextfrag.Slot'
+      source:
+        type: string
+      source_id:
+        type: string
+      text_bytes:
+        type: integer
+      token_estimate:
+        type: integer
+    type: object
+  contextfrag.SelectionDecisionKind:
+    enum:
+    - selected
+    - trimmed
+    - dropped
+    type: string
+    x-enum-varnames:
+    - DecisionSelected
+    - DecisionTrimmed
+    - DecisionDropped
+  contextfrag.SelectionTrace:
+    properties:
+      drop_reasons:
+        additionalProperties:
+          type: integer
+        type: object
+      dropped:
+        type: integer
+      selected:
+        type: integer
+    type: object
+  contextfrag.Slot:
+    enum:
+    - system
+    - before_history
+    - history
+    - after_history_before_current
+    - current_user
+    - after_current
+    type: string
+    x-enum-varnames:
+    - SlotSystem
+    - SlotBeforeHistory
+    - SlotHistory
+    - SlotAfterHistoryBeforeCurrent
+    - SlotCurrentUser
+    - SlotAfterCurrent
   conversation.SkillActivation:
     properties:
       prompt:
@@ -2437,13 +2636,6 @@ definitions:
         type: boolean
       last_probed_at:
         type: string
-      managed_by_plugin_installation_id:
-        type: string
-      managed_resource_key:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
       name:
         type: string
       status:
@@ -2458,8 +2650,6 @@ definitions:
         type: string
       updated_at:
         type: string
-      visible:
-        type: boolean
     type: object
   handlers.ACPClaudeCodeOAuthAuthorizeResponse:
     properties:
@@ -3097,19 +3287,75 @@ definitions:
           $ref: '#/definitions/handlers.HookEventInfo'
         type: array
     type: object
-  handlers.InstallPluginRequest:
+  handlers.InstallPackageRequest:
     properties:
-      plugin_id:
+      package_id:
         type: string
-      variables:
-        additionalProperties:
-          type: string
-        type: object
+      registry_id:
+        type: string
+      revision:
+        type: string
+      workspace_target_id:
+        type: string
+    required:
+    - package_id
+    - registry_id
+    - revision
     type: object
-  handlers.InstallSkillRequest:
+  handlers.InstallRegistryPackageResponse:
     properties:
+      installation:
+        $ref: '#/definitions/skillpackages.Installation'
+      ok:
+        type: boolean
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/handlers.InstallRegistrySkillResponse'
+        type: array
+      workspace_target_id:
+        type: string
+    required:
+    - installation
+    - ok
+    - package_id
+    - registry_id
+    - revision
+    - skills
+    - workspace_target_id
+    type: object
+  handlers.InstallRegistrySkillResponse:
+    properties:
+      artifact_digest:
+        type: string
+      files_written:
+        type: integer
+      install_id:
+        type: string
+      ok:
+        type: boolean
+      package_id:
+        type: string
+      registry_id:
+        type: string
       skill_id:
         type: string
+      workspace_target_id:
+        type: string
+    required:
+    - artifact_digest
+    - files_written
+    - install_id
+    - ok
+    - package_id
+    - registry_id
+    - skill_id
+    - workspace_target_id
     type: object
   handlers.ListSnapshotsResponse:
     properties:
@@ -3282,8 +3528,12 @@ definitions:
     properties:
       content:
         type: string
+      deletable:
+        type: boolean
       description:
         type: string
+      editable:
+        type: boolean
       managed:
         type: boolean
       metadata:
@@ -3291,9 +3541,15 @@ definitions:
         type: object
       name:
         type: string
+      package_id:
+        type: string
       raw:
         type: string
+      registry_id:
+        type: string
       shadowed_by:
+        type: string
+      skill_id:
         type: string
       source_kind:
         type: string
@@ -3313,7 +3569,10 @@ definitions:
     type: object
   handlers.SkillsDeleteRequest:
     properties:
-      names:
+      source_paths:
+        description: |-
+          SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
+          cannot address registry skills, which are nested by registry and package.
         items:
           type: string
         type: array
@@ -3331,6 +3590,12 @@ definitions:
         items:
           type: string
         type: array
+      source_path:
+        description: |-
+          SourcePath is the existing SKILL.md being edited when saving a single skill.
+          Empty means create (or overwrite by frontmatter name under
+          /data/skills/user/personal/<name>/).
+        type: string
     type: object
   handlers.SnapshotInfo:
     properties:
@@ -3367,23 +3632,19 @@ definitions:
         type: string
       name:
         type: string
+    required:
+    - email
+    - name
     type: object
-  handlers.SupermarketPluginListResponse:
+  handlers.SupermarketCatalogSkill:
     properties:
-      data:
-        items:
-          $ref: '#/definitions/plugins.Manifest'
-        type: array
-      limit:
-        type: integer
-      page:
-        type: integer
-      total:
-        type: integer
-    type: object
-  handlers.SupermarketSkillEntry:
-    properties:
-      content:
+      artifact:
+        $ref: '#/definitions/handlers.SupermarketSkillArtifact'
+      author:
+        $ref: '#/definitions/handlers.SupermarketAuthor'
+      category:
+        type: string
+      category_name:
         type: string
       description:
         type: string
@@ -3391,18 +3652,51 @@ definitions:
         items:
           type: string
         type: array
-      id:
+      homepage:
         type: string
-      metadata:
-        $ref: '#/definitions/handlers.SupermarketSkillMetadata'
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      install_id:
+        type: string
       name:
         type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      schema_version:
+        type: string
+      skill_id:
+        type: string
+      source:
+        $ref: '#/definitions/handlers.SupermarketSkillSource'
+      source_category:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+    required:
+    - artifact
+    - author
+    - category
+    - category_name
+    - description
+    - files
+    - install_id
+    - name
+    - package_id
+    - registry_id
+    - schema_version
+    - skill_id
+    - source
+    - tags
     type: object
-  handlers.SupermarketSkillListResponse:
+  handlers.SupermarketCatalogSkillListResponse:
     properties:
       data:
         items:
-          $ref: '#/definitions/handlers.SupermarketSkillEntry'
+          $ref: '#/definitions/handlers.SupermarketCatalogSkill'
         type: array
       limit:
         type: integer
@@ -3410,24 +3704,266 @@ definitions:
         type: integer
       total:
         type: integer
+    required:
+    - data
+    - limit
+    - page
+    - total
     type: object
-  handlers.SupermarketSkillMetadata:
+  handlers.SupermarketRegistry:
     properties:
-      author:
-        $ref: '#/definitions/handlers.SupermarketAuthor'
-      homepage:
+      adapter:
         type: string
-      tags:
-        items:
-          type: string
-        type: array
+      category_count:
+        type: integer
+      enabled:
+        type: boolean
+      id:
+        type: string
+      name:
+        type: string
+      package_count:
+        type: integer
+      priority:
+        type: integer
+      published_at:
+        type: string
+      revision:
+        type: string
+      skill_count:
+        type: integer
+      skipped_package_count:
+        type: integer
+    required:
+    - adapter
+    - category_count
+    - enabled
+    - id
+    - name
+    - package_count
+    - priority
+    - skill_count
+    - skipped_package_count
     type: object
-  handlers.SupermarketTagsResponse:
+  handlers.SupermarketRegistryListResponse:
     properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketRegistry'
+        type: array
+    required:
+    - data
+    type: object
+  handlers.SupermarketSkillArtifact:
+    properties:
+      archive_size:
+        type: integer
+      content_type:
+        type: string
+      digest:
+        type: string
+      download_url:
+        type: string
+      file_count:
+        type: integer
+      format:
+        type: string
+      size:
+        type: integer
+      uncompressed_size:
+        type: integer
+    required:
+    - archive_size
+    - content_type
+    - digest
+    - download_url
+    - file_count
+    - format
+    - size
+    - uncompressed_size
+    type: object
+  handlers.SupermarketSkillCategory:
+    properties:
+      count:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      registries:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillCategoryRegistry'
+        type: array
+    required:
+    - count
+    - id
+    - name
+    - registries
+    type: object
+  handlers.SupermarketSkillCategoryListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillCategory'
+        type: array
+    required:
+    - data
+    type: object
+  handlers.SupermarketSkillCategoryRegistry:
+    properties:
+      count:
+        type: integer
+      id:
+        type: string
+    required:
+    - count
+    - id
+    type: object
+  handlers.SupermarketSkillIcon:
+    properties:
+      brand_color:
+        type: string
+      card:
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
+      dark:
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
+      detail:
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
+    type: object
+  handlers.SupermarketSkillIconAsset:
+    properties:
+      content_type:
+        type: string
+      digest:
+        type: string
+      size:
+        type: integer
+    required:
+    - content_type
+    - digest
+    - size
+    type: object
+  handlers.SupermarketSkillPackageCategory:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      skill_count:
+        type: integer
+    required:
+    - id
+    - name
+    - skill_count
+    type: object
+  handlers.SupermarketSkillPackageDescriptor:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillPackageCategory'
+        type: array
+      description:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      name:
+        type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      schema_version:
+        type: string
+      skill_count:
+        type: integer
+      skills:
+        items:
+          $ref: '#/definitions/handlers.SupermarketCatalogSkill'
+        type: array
       tags:
         items:
           type: string
         type: array
+    required:
+    - categories
+    - description
+    - name
+    - package_id
+    - registry_id
+    - revision
+    - schema_version
+    - skill_count
+    - skills
+    - tags
+    type: object
+  handlers.SupermarketSkillPackageListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillPackageSummary'
+        type: array
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+    required:
+    - data
+    - limit
+    - page
+    - total
+    type: object
+  handlers.SupermarketSkillPackageSummary:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillPackageCategory'
+        type: array
+      description:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      name:
+        type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      schema_version:
+        type: string
+      skill_count:
+        type: integer
+      tags:
+        items:
+          type: string
+        type: array
+    required:
+    - categories
+    - description
+    - name
+    - package_id
+    - registry_id
+    - schema_version
+    - skill_count
+    - tags
+    type: object
+  handlers.SupermarketSkillSource:
+    properties:
+      path:
+        type: string
+      repository:
+        type: string
+      revision:
+        type: string
+      type:
+        type: string
+    required:
+    - path
+    - revision
+    - type
     type: object
   handlers.TokenUsageRecord:
     properties:
@@ -3480,10 +4016,6 @@ definitions:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
       discuss:
-        items:
-          $ref: '#/definitions/handlers.DailyTokenUsage'
-        type: array
-      heartbeat:
         items:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
@@ -3907,35 +4439,6 @@ definitions:
       type:
         type: string
     type: object
-  heartbeat.ListLogsResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/heartbeat.Log'
-        type: array
-      total_count:
-        type: integer
-    type: object
-  heartbeat.Log:
-    properties:
-      bot_id:
-        type: string
-      completed_at:
-        type: string
-      error_message:
-        type: string
-      id:
-        type: string
-      result_text:
-        type: string
-      session_id:
-        type: string
-      started_at:
-        type: string
-      status:
-        type: string
-      usage: {}
-    type: object
   hooks.ActionResult:
     properties:
       action_type:
@@ -4196,8 +4699,9 @@ definitions:
           which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
           token budget while 3.x takes a named level, and the two are mutually
           exclusive on the same request. Declared per model because the alternative is
-          sniffing the model id, and an id is not a capability. Empty means the
-          provider's modern default.
+          sniffing the model id, and an id is not a capability. Empty leaves provider
+          policy in charge; Google's adaptor deliberately sends no thinking control so
+          pre-dialect rows retain their safe pre-upgrade request shape.
         type: string
       reasoning_efforts:
         items:
@@ -4272,234 +4776,6 @@ definitions:
         type: string
       type:
         $ref: '#/definitions/models.ModelType'
-    type: object
-  plugins.AuthRequirement:
-    properties:
-      client_ref:
-        type: string
-      key:
-        type: string
-      scopes:
-        items:
-          type: string
-        type: array
-      type:
-        type: string
-      variables:
-        items:
-          type: string
-        type: array
-    type: object
-  plugins.Author:
-    properties:
-      email:
-        type: string
-      name:
-        type: string
-    type: object
-  plugins.ConfigVar:
-    properties:
-      defaultValue:
-        type: string
-      description:
-        type: string
-      key:
-        type: string
-      required:
-        type: boolean
-      secret:
-        type: boolean
-    type: object
-  plugins.Icon:
-    properties:
-      kind:
-        type: string
-      name:
-        type: string
-      url:
-        type: string
-    type: object
-  plugins.Installation:
-    properties:
-      bot_id:
-        type: string
-      config:
-        additionalProperties: {}
-        type: object
-      enabled:
-        type: boolean
-      id:
-        type: string
-      installed_at:
-        type: string
-      manifest:
-        $ref: '#/definitions/plugins.Manifest'
-      metadata:
-        additionalProperties: {}
-        type: object
-      plugin_id:
-        type: string
-      plugin_name:
-        type: string
-      resources:
-        items:
-          $ref: '#/definitions/plugins.Resource'
-        type: array
-      status:
-        type: string
-      updated_at:
-        type: string
-      version:
-        type: string
-    type: object
-  plugins.ListResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/plugins.Installation'
-        type: array
-    type: object
-  plugins.MCPResource:
-    properties:
-      args:
-        items:
-          type: string
-        type: array
-      auth_ref:
-        type: string
-      capabilities:
-        items:
-          type: string
-        type: array
-      command:
-        type: string
-      cwd:
-        type: string
-      description:
-        type: string
-      display_name:
-        type: string
-      env:
-        items:
-          $ref: '#/definitions/plugins.ConfigVar'
-        type: array
-      headers:
-        items:
-          $ref: '#/definitions/plugins.ConfigVar'
-        type: array
-      key:
-        type: string
-      name:
-        type: string
-      transport:
-        type: string
-      url:
-        type: string
-      visibility:
-        type: string
-    type: object
-  plugins.Manifest:
-    properties:
-      auth_requirements:
-        items:
-          $ref: '#/definitions/plugins.AuthRequirement'
-        type: array
-      author:
-        $ref: '#/definitions/plugins.Author'
-      bundled_skills:
-        items:
-          $ref: '#/definitions/plugins.SkillEntry'
-        type: array
-      capabilities:
-        items:
-          type: string
-        type: array
-      description:
-        type: string
-      homepage:
-        type: string
-      icon:
-        $ref: '#/definitions/plugins.Icon'
-      id:
-        type: string
-      install:
-        items:
-          type: string
-        type: array
-      mcps:
-        items:
-          $ref: '#/definitions/plugins.MCPResource'
-        type: array
-      name:
-        type: string
-      schema_version:
-        type: string
-      skills:
-        items:
-          $ref: '#/definitions/plugins.SkillResource'
-        type: array
-      tags:
-        items:
-          type: string
-        type: array
-      variables:
-        items:
-          $ref: '#/definitions/plugins.ConfigVar'
-        type: array
-      version:
-        type: string
-    type: object
-  plugins.OAuthAuthorizeRequest:
-    properties:
-      callback_url:
-        type: string
-    type: object
-  plugins.Resource:
-    properties:
-      created_at:
-        type: string
-      id:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      resource_id:
-        type: string
-      resource_key:
-        type: string
-      resource_type:
-        type: string
-      status:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  plugins.SkillEntry:
-    properties:
-      content:
-        type: string
-      description:
-        type: string
-      files:
-        items:
-          type: string
-        type: array
-      id:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-    type: object
-  plugins.SkillResource:
-    properties:
-      key:
-        type: string
-      name:
-        type: string
-      path:
-        type: string
     type: object
   providers.CountResponse:
     properties:
@@ -5149,12 +5425,6 @@ definitions:
         type: boolean
       fetch_provider_id:
         type: string
-      heartbeat_enabled:
-        type: boolean
-      heartbeat_interval:
-        type: integer
-      heartbeat_model_id:
-        type: string
       image_model_id:
         type: string
       language:
@@ -5277,15 +5547,6 @@ definitions:
         type: boolean
       fetch_provider_id:
         type: string
-      heartbeat_enabled:
-        type: boolean
-      heartbeat_interval:
-        type: integer
-      heartbeat_model_id:
-        description: |-
-          HeartbeatModelID joins the pointer group above (nil/""/value) so the
-          heartbeat tab's autosave can clear a model override.
-        type: string
       image_model_id:
         type: string
       language:
@@ -5321,6 +5582,34 @@ definitions:
       video_model_id:
         type: string
     type: object
+  skillpackages.Installation:
+    properties:
+      bot_id:
+        type: string
+      id:
+        type: string
+      installed_at:
+        type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      updated_at:
+        type: string
+      workspace_target_id:
+        type: string
+    required:
+    - bot_id
+    - id
+    - installed_at
+    - package_id
+    - registry_id
+    - revision
+    - updated_at
+    - workspace_target_id
+    type: object
   skills.SafeCatalogItem:
     properties:
       description:
@@ -5333,6 +5622,16 @@ definitions:
         type: string
       state:
         type: string
+    type: object
+  supermarket.UninstallPackageResponse:
+    properties:
+      installation:
+        $ref: '#/definitions/skillpackages.Installation'
+      ok:
+        type: boolean
+    required:
+    - installation
+    - ok
     type: object
   userinput.UIAnswer:
     properties:
@@ -8024,6 +8323,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -8041,6 +8344,10 @@ paths:
         in: path
         name: bot_id
         required: true
+        type: string
+      - description: Workspace target ID
+        in: query
+        name: workspace_target_id
         type: string
       responses:
         "200":
@@ -8092,10 +8399,14 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -8130,6 +8441,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -8510,63 +8825,6 @@ paths:
       summary: Get outbox email detail
       tags:
       - email-outbox
-  /bots/{bot_id}/heartbeat/logs:
-    delete:
-      description: Delete all heartbeat execution logs for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete heartbeat logs
-      tags:
-      - heartbeat
-    get:
-      description: List heartbeat execution logs for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - default: 50
-        description: Limit
-        in: query
-        name: limit
-        type: integer
-      - default: 0
-        description: Offset
-        in: query
-        name: offset
-        type: integer
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/heartbeat.ListLogsResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List heartbeat logs
-      tags:
-      - heartbeat
   /bots/{bot_id}/hooks/events:
     get:
       parameters:
@@ -8632,11 +8890,6 @@ paths:
   /bots/{bot_id}/mcp:
     get:
       description: List MCP connections for a bot
-      parameters:
-      - description: Include plugin-managed hidden MCP connections
-        in: query
-        name: include_managed
-        type: boolean
       responses:
         "200":
           description: OK
@@ -8720,6 +8973,61 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Batch delete MCP connections
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp-ops/export:
+    get:
+      description: Export all MCP connections for a bot in standard mcpServers format.
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.ExportResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Export MCP connections
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp-ops/import:
+    put:
+      description: Batch import MCP connections from standard mcpServers format. Existing
+        connections (matched by name) get config updated with is_active preserved.
+        New connections are created as active.
+      parameters:
+      - description: mcpServers dict
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/mcp.ImportRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.ListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Import MCP connections
       tags:
       - mcp
   /bots/{bot_id}/mcp-stdio:
@@ -9060,61 +9368,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Probe MCP connection
-      tags:
-      - mcp
-  /bots/{bot_id}/mcp/export:
-    get:
-      description: Export all MCP connections for a bot in standard mcpServers format.
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/mcp.ExportResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Export MCP connections
-      tags:
-      - mcp
-  /bots/{bot_id}/mcp/import:
-    put:
-      description: Batch import MCP connections from standard mcpServers format. Existing
-        connections (matched by name) get config updated with is_active preserved.
-        New connections are created as active.
-      parameters:
-      - description: mcpServers dict
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/mcp.ImportRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/mcp.ListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Import MCP connections
       tags:
       - mcp
   /bots/{bot_id}/memory:
@@ -9768,271 +10021,6 @@ paths:
       summary: Locate a bot history message
       tags:
       - messages
-  /bots/{bot_id}/plugins:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.ListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List bot plugins
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}:
-    delete:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Purge bot plugin installation
-      tags:
-      - plugins
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get bot plugin installation
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/disable:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Disable bot plugin
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/enable:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Enable bot plugin
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/oauth/authorize:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: OAuth authorize request
-        in: body
-        name: payload
-        schema:
-          $ref: '#/definitions/plugins.OAuthAuthorizeRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/mcp.AuthorizeResult'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Start managed OAuth for a bot plugin
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/oauth/status:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Refresh managed OAuth status for a bot plugin
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/uninstall:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Uninstall bot plugin
-      tags:
-      - plugins
   /bots/{bot_id}/quick-actions/execute:
     post:
       consumes:
@@ -10873,7 +10861,7 @@ paths:
         Lightweight SSE for sidebar live-sort. Carries only session
         identifiers and minimal metadata (touched timestamps, titles).
         Never includes message bodies. Filters out internal session
-        types such as heartbeat, schedule, subagent.
+        types such as schedule and subagent.
       parameters:
       - description: Bot ID
         in: path
@@ -11049,7 +11037,7 @@ paths:
       summary: List runtime-safe skills for chat-time skill selection
       tags:
       - skills
-  /bots/{bot_id}/supermarket/install-plugin:
+  /bots/{bot_id}/supermarket/install-package:
     post:
       parameters:
       - description: Bot ID
@@ -11057,17 +11045,17 @@ paths:
         name: bot_id
         required: true
         type: string
-      - description: Install plugin request
+      - description: Install Package request
         in: body
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/handlers.InstallPluginRequest'
+          $ref: '#/definitions/handlers.InstallPackageRequest'
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/plugins.Installation'
+            $ref: '#/definitions/handlers.InstallRegistryPackageResponse'
         "400":
           description: Bad Request
           schema:
@@ -11075,55 +11063,77 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Install plugin from supermarket to bot
+            $ref: '#/definitions/apperror.Problem'
+      summary: Install an immutable Skill Package release to a bot workspace
       tags:
       - supermarket
-  /bots/{bot_id}/supermarket/install-skill:
-    post:
+  /bots/{bot_id}/supermarket/packages:
+    get:
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Install skill request
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.InstallSkillRequest'
+      - description: Workspace target ID
+        in: query
+        name: workspace_target_id
+        type: string
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: boolean
-            type: object
-        "400":
-          description: Bad Request
+            items:
+              $ref: '#/definitions/skillpackages.Installation'
+            type: array
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skill Packages installed for a bot
+      tags:
+      - supermarket
+  /bots/{bot_id}/supermarket/packages/{installation_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Package installation ID
+        in: path
+        name: installation_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/supermarket.UninstallPackageResponse'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Install skill from supermarket to bot workspace
+      summary: Uninstall a Skill Package from a bot
       tags:
       - supermarket
   /bots/{bot_id}/token-usage:
     get:
       description: Get daily aggregated token usage for a bot, split by chat, discuss,
-        heartbeat, and schedule session types, with optional model filter and per-model
-        breakdown
+        and schedule session types, with optional model filter and per-model breakdown
       parameters:
       - description: Bot ID
         in: path
@@ -11144,8 +11154,8 @@ paths:
         in: query
         name: model_id
         type: string
-      - description: 'Optional session type: chat, discuss, heartbeat, schedule, or
-          acp_agent. acp_agent filters by runtime.'
+      - description: 'Optional session type: chat, discuss, schedule, or acp_agent.
+          acp_agent filters by runtime.'
         in: query
         name: session_type
         type: string
@@ -11193,8 +11203,8 @@ paths:
         in: query
         name: model_id
         type: string
-      - description: 'Optional session type: chat, discuss, heartbeat, schedule, or
-          acp_agent. acp_agent filters by runtime.'
+      - description: 'Optional session type: chat, discuss, schedule, or acp_agent.
+          acp_agent filters by runtime.'
         in: query
         name: session_type
         type: string
@@ -14570,14 +14580,50 @@ paths:
       summary: List speech provider metadata
       tags:
       - speech-providers
-  /supermarket/plugins:
+  /supermarket/artifacts/icon/{digest}:
+    get:
+      parameters:
+      - description: SHA-256 digest
+        in: path
+        name: digest
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a mirrored Skill icon
+      tags:
+      - supermarket
+  /supermarket/packages:
     get:
       parameters:
       - description: Search query
         in: query
         name: q
         type: string
-      - description: Filter by tag
+      - description: Registry ID
+        in: query
+        name: registry
+        type: string
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
         in: query
         name: tag
         type: string
@@ -14589,31 +14635,57 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: Sort order
+        in: query
+        name: sort
+        type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketPluginListResponse'
+            $ref: '#/definitions/handlers.SupermarketSkillPackageListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List plugins from supermarket
+      summary: List Skill Packages across supermarket Registries
       tags:
       - supermarket
-  /supermarket/plugins/{id}:
+  /supermarket/registries:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketRegistryListResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skill Registries from supermarket
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/categories:
     get:
       parameters:
-      - description: Plugin ID
+      - description: Registry ID
         in: path
-        name: id
+        name: registry_id
         required: true
         type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/plugins.Manifest'
+            $ref: '#/definitions/handlers.SupermarketSkillCategoryListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -14622,7 +14694,168 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get plugin detail from supermarket
+      summary: List categories in a Skill Registry
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
+        in: query
+        name: tag
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Sort order
+        in: query
+        name: sort
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillPackageListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skill Packages in one Registry
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages/{package_id}:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Package ID
+        in: path
+        name: package_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillPackageDescriptor'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a namespaced Skill Package
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Package ID
+        in: path
+        name: package_id
+        required: true
+        type: string
+      - description: Package revision
+        in: path
+        name: revision
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillPackageDescriptor'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get an immutable Skill Package release
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Package ID
+        in: path
+        name: package_id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skill_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketCatalogSkill'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a namespaced Registry Skill
       tags:
       - supermarket
   /supermarket/skills:
@@ -14632,7 +14865,19 @@ paths:
         in: query
         name: q
         type: string
-      - description: Filter by tag
+      - description: Registry ID
+        in: query
+        name: registry
+        type: string
+      - description: Package ID
+        in: query
+        name: package
+        type: string
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
         in: query
         name: tag
         type: string
@@ -14644,54 +14889,24 @@ paths:
         in: query
         name: limit
         type: integer
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.SupermarketSkillListResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List skills from supermarket
-      tags:
-      - supermarket
-  /supermarket/skills/{id}:
-    get:
-      parameters:
-      - description: Skill ID
-        in: path
-        name: id
-        required: true
+      - description: Sort order
+        in: query
+        name: sort
         type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketSkillEntry'
-        "404":
-          description: Not Found
+            $ref: '#/definitions/handlers.SupermarketCatalogSkillListResponse'
+        "400":
+          description: Bad Request
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get skill detail from supermarket
-      tags:
-      - supermarket
-  /supermarket/tags:
-    get:
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.SupermarketTagsResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List all tags from supermarket
+      summary: List Skills across supermarket Registries
       tags:
       - supermarket
   /transcription-models:

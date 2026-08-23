@@ -36,7 +36,6 @@
   "apps/web/src/pages/home/components/chat-scroll-rail.vue": 1,
   "apps/web/src/pages/home/components/display-pane.vue": 5,
   "apps/web/src/pages/home/components/dockview/prefix-header-actions.vue": 1,
-  "apps/web/src/pages/home/components/heartbeat-trigger-block.vue": 1,
   "apps/web/src/pages/home/components/message-item.vue": 3,
   "apps/web/src/pages/home/components/schedule-trigger-block.vue": 3,
   "apps/web/src/pages/home/components/tool-call-detail-exec.vue": 1,
@@ -44,7 +43,5 @@
   "apps/web/src/pages/onboarding/steps/Step1Intro.vue": 2,
   "apps/web/src/pages/people/index.vue": 3,
   "apps/web/src/pages/providers/components/model-item.vue": 1,
-  "apps/web/src/pages/supermarket/components/install-plugin-dialog.vue": 1,
-  "apps/web/src/pages/supermarket/components/install-skill-dialog.vue": 2,
   "apps/web/src/pages/usage/index.vue": 3
 }

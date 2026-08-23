@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 )
 
 var (
 	ErrStale                        = errors.New("session runtime persistence fence is stale")
+	ErrResetLeaseLost               = errors.New("session history reset lease was lost")
 	ErrTransactionsUnsupported      = errors.New("session runtime persistence fencing requires real transactions")
 	ErrPreservedDecisionUnavailable = errors.New("preserved runtime decision is no longer pending")
 )
@@ -49,6 +51,43 @@ func (f Fence) Valid() bool {
 }
 
 type contextKey struct{}
+
+type resetContextKey struct{}
+
+type ResetFence struct {
+	Scope     string
+	BotID     string
+	SessionID string
+	Token     string
+	LeaseTTL  time.Duration
+}
+
+func (f ResetFence) Valid() bool {
+	f.Scope = strings.TrimSpace(f.Scope)
+	f.BotID = strings.TrimSpace(f.BotID)
+	f.SessionID = strings.TrimSpace(f.SessionID)
+	f.Token = strings.TrimSpace(f.Token)
+	return f.BotID != "" && f.Token != "" && (f.Scope == "bot" || f.Scope == "session" && f.SessionID != "")
+}
+
+func WithResetContext(ctx context.Context, fence ResetFence) context.Context {
+	if ctx == nil || !fence.Valid() {
+		return ctx
+	}
+	fence.Scope = strings.TrimSpace(fence.Scope)
+	fence.BotID = strings.TrimSpace(fence.BotID)
+	fence.SessionID = strings.TrimSpace(fence.SessionID)
+	fence.Token = strings.TrimSpace(fence.Token)
+	return context.WithValue(ctx, resetContextKey{}, fence)
+}
+
+func ResetFromContext(ctx context.Context) (ResetFence, bool) {
+	if ctx == nil {
+		return ResetFence{}, false
+	}
+	fence, ok := ctx.Value(resetContextKey{}).(ResetFence)
+	return fence, ok && fence.Valid()
+}
 
 func WithContext(ctx context.Context, fence Fence) context.Context {
 	if ctx == nil || !fence.Valid() {

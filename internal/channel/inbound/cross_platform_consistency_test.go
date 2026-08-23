@@ -72,7 +72,7 @@ func TestNonTelegramPlatformsRenderEquivalently(t *testing.T) {
 						Choices: []command.ListItem{
 							{Action: &command.ItemAction{Resource: "reasoning", Action: "show"}},
 							{Action: &command.ItemAction{Resource: "model", Action: "list"}},
-							{Action: &command.ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", "true"}}},
+							{Action: &command.ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", "deny"}}},
 							{Action: &command.ItemAction{Resource: "search", Action: "list"}},
 							{Action: &command.ItemAction{Resource: "memory", Action: "list"}},
 							{Action: &command.ItemAction{Resource: "settings", Action: "language"}},
@@ -83,7 +83,7 @@ func TestNonTelegramPlatformsRenderEquivalently(t *testing.T) {
 			mustContain: []string{
 				"Bot Settings", "推理", "心跳", // body content
 				"/reasoning show", "/model list", // cross-nav commands
-				"/settings update --heartbeat_enabled true",
+				"/settings update --acl_default_effect deny",
 				"/search list", "/memory list",
 				"/settings language",
 			},

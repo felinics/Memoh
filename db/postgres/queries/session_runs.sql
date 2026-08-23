@@ -1,13 +1,13 @@
--- name: AdmitSessionRun :one
+-- name: AdmitLockedSessionRun :one
 -- Durable admission. There is no queue: SR-OWN-001 permits answering busy, so a
 -- second concurrent invocation is rejected rather than parked.
 --
 -- Busy is rejected in two layers. The adapter's indexed pre-read catches the
 -- common case before this statement runs at all, so contended submissions never
 -- reach the write path. This statement handles only what slipped through that
--- unlocked read: session_runs_single_active raises, and because the statement is
--- one implicit transaction the rollback takes the allocated turn position with
--- it, leaving nothing behind for the caller to clean up.
+-- unlocked read: session_runs_single_active raises, and because the adapter
+-- runs this after a separate parent lock in one transaction, rollback takes the
+-- allocated turn position with it and leaves nothing for the caller to clean up.
 --
 -- Returns no rows when this invocation_id was already admitted — ON CONFLICT
 -- keeps the ordinary retry path free of errors, which matters because channel
@@ -20,12 +20,23 @@
 -- invocation_id, where both pass the guard against the statement snapshot and
 -- the loser's increment commits with no row. That leaves a gap in turn_position,
 -- which is ordering-only and never read as a count.
-WITH target_session AS (
+WITH target_session AS MATERIALIZED (
   SELECT s.id AS session_id
   FROM bot_sessions AS s
+  JOIN bots bot ON bot.team_id = s.team_id AND bot.id = s.bot_id
   WHERE s.team_id = public.memoh_current_team_id()
     AND s.id = sqlc.arg(session_id)
+    AND s.bot_id = sqlc.arg(bot_id)
     AND s.deleted_at IS NULL
+    AND bot.status <> 'deleting'
+    AND (
+      bot.runtime_reset_expires_at IS NULL
+      OR bot.runtime_reset_expires_at <= clock_timestamp()
+    )
+    AND (
+      s.runtime_reset_expires_at IS NULL
+      OR s.runtime_reset_expires_at <= clock_timestamp()
+    )
 ),
 existing AS (
   SELECT 1 AS present
@@ -89,6 +100,14 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
   AND state IN ('accepted', 'running', 'waiting_decision');
 
+-- name: ListActiveSessionRunsByBot :many
+SELECT *
+FROM session_runs
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND state IN ('accepted', 'running', 'waiting_decision')
+ORDER BY session_id, run_id;
+
 -- name: GetLatestSessionRun :one
 SELECT *
 FROM session_runs
@@ -97,24 +116,50 @@ WHERE team_id = public.memoh_current_team_id()
 ORDER BY created_at DESC, run_id DESC
 LIMIT 1;
 
--- name: ClaimSessionRun :one
+-- name: LockBotForSessionRunClaim :one
+-- Claim uses a real transaction and a fresh statement after this parent lock.
+-- Reset acquisition takes the same lock, so neither can cross the other's
+-- committed gate using a statement snapshot captured while waiting.
+SELECT id
+FROM bots
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(bot_id)
+FOR UPDATE;
+
+-- name: ClaimLockedSessionRun :one
 -- Ownership change: the only write that touches owner_id, fencing_token,
 -- owner_since and live_generation. live_generation is stamped once here and
 -- never updated, which keeps idx_session_runs_recovery a stable keyset cursor.
 -- Fencing tokens come from a monotonic sequence, so a newer claim always
 -- carries a strictly larger token than the one it replaces.
-UPDATE session_runs
+WITH target_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  JOIN bots bot ON bot.team_id = session.team_id AND bot.id = session.bot_id
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = sqlc.arg(session_id)
+    AND session.bot_id = sqlc.arg(bot_id)
+    AND session.deleted_at IS NULL
+    AND bot.status <> 'deleting'
+    AND (bot.runtime_reset_expires_at IS NULL OR bot.runtime_reset_expires_at <= clock_timestamp())
+    AND (session.runtime_reset_expires_at IS NULL OR session.runtime_reset_expires_at <= clock_timestamp())
+  FOR UPDATE OF session
+)
+UPDATE session_runs run
 SET owner_id = sqlc.arg(owner_id),
     owner_since = now(),
     fencing_token = sqlc.arg(fencing_token),
     live_generation = sqlc.arg(live_generation),
     state = 'running',
     updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND run_id = sqlc.arg(run_id)
-  AND state = 'accepted'
-  AND fencing_token < sqlc.arg(fencing_token)
-RETURNING *;
+FROM target_session target
+WHERE run.team_id = public.memoh_current_team_id()
+  AND run.run_id = sqlc.arg(run_id)
+  AND run.bot_id = sqlc.arg(bot_id)
+  AND run.session_id = target.id
+  AND run.state = 'accepted'
+  AND run.fencing_token < sqlc.arg(fencing_token)
+RETURNING run.*;
 
 -- name: SetSessionRunWaitingDecision :one
 UPDATE session_runs
@@ -177,6 +222,20 @@ WHERE team_id = public.memoh_current_team_id()
   AND fencing_token = sqlc.arg(fencing_token)
   AND state IN ('accepted', 'running', 'waiting_decision')
 RETURNING *;
+
+-- name: LockActiveSessionRunForHistoryReset :one
+-- The reset finalizer already holds the bot parent lock. Locking the target
+-- run in a fresh statement makes the old fencing token/state an atomic
+-- predicate for advancing the session persistence fence and terminalizing it.
+SELECT *
+FROM session_runs
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = sqlc.arg(run_id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND fencing_token = sqlc.arg(fencing_token)
+  AND state IN ('accepted', 'running', 'waiting_decision')
+FOR UPDATE;
 
 -- name: RequestSessionRunAbort :one
 -- Not fenced: abort is a user intent that may arrive at any instance, and the

@@ -145,7 +145,6 @@ Memoh/
 │   ├── fetchproviders/         #   Web-fetch provider management (native, Jina, Cloudflare Markdown)
 │   ├── handlers/               #   HTTP request handlers (REST API endpoints)
 │   ├── healthcheck/            #   Health check adapter system (MCP, channel checkers)
-│   ├── heartbeat/              #   Heartbeat scheduling service (cron-based)
 │   ├── hooks/                  #   Bot-defined lifecycle hooks (PreToolUse, TurnEnd, … from hooks.json)
 │   ├── identity/               #   Identity type utilities (human vs bot)
 │   ├── i18n/                   #   Command and message internationalization
@@ -158,7 +157,6 @@ Memoh/
 │   ├── network/                #   Workspace container network configuration
 │   ├── oauthclients/           #   Built-in OAuth client registry (TOML)
 │   ├── oauthctx/               #   OAuth context helpers
-│   ├── plugins/                #   Plugin system (manifests, installations, lifecycle)
 │   ├── policy/                 #   Access policy resolution (guest access)
 │   ├── providers/              #   LLM provider management (OpenAI, Anthropic, etc.)
 │   ├── prune/                  #   Text pruning utilities (truncation with head/tail)
@@ -168,9 +166,11 @@ Memoh/
 │   ├── searchproviders/        #   Search engine provider management (Brave, etc.)
 │   ├── server/                 #   HTTP server wrapper (Echo setup, middleware, shutdown)
 │   ├── settings/               #   Bot settings management
+│   ├── skillpackages/          #   Installed Supermarket Package state
 │   ├── skills/                 #   Skill registry and activation
 │   ├── slash/                  #   Slash-command classification and metadata (channel + web surfaces)
 │   ├── storage/                #   Storage provider interface (filesystem, container FS)
+│   ├── supermarket/            #   Supermarket protocol client and Package installer
 │   ├── team/                   #   Singleton team identity (DefaultTeamID)
 │   ├── textutil/               #   UTF-8 safe text utilities
 │   ├── timezone/               #   Timezone utilities
@@ -388,7 +388,7 @@ PostgreSQL migrations live in `db/postgres/migrations/`:
 The codebase has grown beyond the original agent/channel/container core. When working near these areas, read the local `AGENTS.md` and treat the corresponding `internal/` package as the source of truth; do not guess tool or schema details.
 
 - **ACP (`internal/agent/runtime/acp/`)** — runtime pool, client process manager, profiles, and OAuth integration for external ACP agents such as Claude Code and Codex. Stable user-facing ACP errors live in `internal/agent/decision/feedback/`.
-- **Plugin system (`internal/plugins/`)** — plugin manifests, installations, enable/disable lifecycle, and OAuth client bindings. The web Supermarket pages (`apps/web/src/pages/supermarket/`) consume this API to discover and install plugins/skills.
+- **Skill Packages (`internal/skillpackages/`, `internal/supermarket/`)** — Supermarket Package discovery and installation state. Installed Packages expand into immutable Registry Skills in the selected workspace target.
 - **User input / `ask_user` (`internal/agent/decision/input/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.
 - **Bot backup / import / export (`internal/botbackup/`)** — archive-based bot portability with preview and merge/replace/skip strategies.
 - **Workspace resource limits (`internal/workspace/resource_limits.go`)** — per-bot CPU/memory/storage quotas and runtime metrics.
@@ -431,9 +431,8 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `mcp_connections` — MCP connection configurations per bot
 - `mcp_oauth_tokens` — MCP OAuth tokens
 
-**Plugins**
-- `bot_plugin_installations` — Installed plugins per bot and their enabled state
-- `bot_plugin_resources` — Plugin-scoped resources and OAuth client bindings
+**Skill Packages**
+- `bot_skill_package_installations` — Installed Registry Package revision per bot and workspace target
 
 **Containers**
 - `containers` — Bot container instances
@@ -451,7 +450,6 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 **Scheduling & Automation**
 - `schedule` — Scheduled tasks (cron)
 - `schedule_logs` — Schedule execution logs
-- `bot_heartbeat_logs` — Heartbeat execution records
 **Storage**
 - `storage_providers` — Pluggable object storage backends
 - `bot_storage_bindings` — Per-bot storage backend selection

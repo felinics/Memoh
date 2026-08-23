@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -14,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/turn"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/memohai/memoh/internal/contextview"
 	"github.com/memohai/memoh/internal/models"
 )
 
@@ -164,21 +166,26 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	runConfig.Query = ""
 	runConfig.ContextCurrentUserMessageIndex = nil
 	runConfig.ContextMemoryMessageIndex = nil
-	runConfig.ContextSourceFrags = nil
 	if runConfig.ContextLifecycle == nil {
 		runConfig.ContextLifecycle = contextfrag.NewLifecycleHolder()
+	}
+	runConfig.ContextBudgetMaxTokens = resolved.ContextBudgetMaxTokens
+	if runConfig.ContextToolExchangePolicy == nil {
+		runConfig.ContextToolExchangePolicy = defaultToolExchangePolicy()
 	}
 
 	// Inline image attachments from new RC segments so the model receives
 	// them as native vision input (ImagePart) on the first encounter.
+	var imageParts []sdk.ImagePart
 	if runConfig.SupportsImageInput && len(cmd.DiscussImageRefs) > 0 {
 		refs := make([]timeline.ImageAttachmentRef, len(cmd.DiscussImageRefs))
 		for i, r := range cmd.DiscussImageRefs {
 			refs[i] = timeline.ImageAttachmentRef{ContentHash: r.ContentHash, Mime: r.Mime}
 		}
-		imageParts := s.inlineDiscussImages(ctx, cmd.BotID, refs)
+		imageParts = s.inlineDiscussImages(ctx, cmd.BotID, refs)
 		injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
 	}
+	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, cmd.DiscussMessages, imageParts)
 	runConfig = runConfig.RefreshContextFrag()
 	terminal := s.contextLifecycleTerminal(ctx, runConfig)
 	var lifecycleCause error
@@ -315,6 +322,61 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if compactable := discussCompactableTokens(cmd.DiscussMessages); compactable > 0 && s.compactionService != nil && s.settingsService != nil {
 		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
 	}
+}
+
+func (s *Service) collectDiscussSourceFrags(
+	ctx context.Context,
+	runConfig native.RunConfig,
+	messages []turn.DiscussMessage,
+	inlineImages []sdk.ImagePart,
+) []contextfrag.ContextFrag {
+	var systemFrags []contextfrag.ContextFrag
+	var memoryFrags []contextfrag.ContextFrag
+	var hookFrags []contextfrag.ContextFrag
+	for _, frag := range runConfig.ContextSourceFrags {
+		switch {
+		case frag.Slot == contextfrag.SlotSystem:
+			systemFrags = append(systemFrags, frag)
+		case frag.Kind == contextfrag.KindMemoryRecall:
+			memoryFrags = append(memoryFrags, frag)
+		case frag.Kind == contextfrag.KindHookContext:
+			hookFrags = append(hookFrags, frag)
+		}
+	}
+	frags, err := (&contextview.DiscussSDKContextBuilder{}).CollectDiscussSourceFrags(
+		ctx,
+		runConfig.ContextScope,
+		runConfig.System,
+		contextview.DiscussContextInput{
+			ComposedMessages: discussMessagesToTimeline(messages),
+			InlineImages:     inlineImages,
+			SystemFrags:      systemFrags,
+		},
+	)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("collect typed discuss context failed", slog.Any("error", err))
+		}
+		return nil
+	}
+	dynamic := make([]contextfrag.ContextFrag, 0, len(memoryFrags)+len(hookFrags))
+	dynamic = append(dynamic, memoryFrags...)
+	dynamic = append(dynamic, hookFrags...)
+	if len(dynamic) == 0 {
+		return frags
+	}
+	currentIndex := len(frags)
+	for i, frag := range frags {
+		if frag.Kind == contextfrag.KindCurrentUserMessage {
+			currentIndex = i
+			break
+		}
+	}
+	out := make([]contextfrag.ContextFrag, 0, len(frags)+len(dynamic))
+	out = append(out, frags[:currentIndex]...)
+	out = append(out, dynamic...)
+	out = append(out, frags[currentIndex:]...)
+	return out
 }
 
 // maybeCompactDiscuss re-evaluates compaction pressure after a native discuss
@@ -524,6 +586,19 @@ func discussMessagesToSDK(messages []turn.DiscussMessage) []sdk.Message {
 			result = append(result, sdk.AssistantMessage(m.Content))
 		default:
 			result = append(result, sdk.UserMessage(m.Content))
+		}
+	}
+	return result
+}
+
+func discussMessagesToTimeline(messages []turn.DiscussMessage) []timeline.ContextMessage {
+	result := make([]timeline.ContextMessage, len(messages))
+	for i, message := range messages {
+		result[i] = timeline.ContextMessage{
+			Role:                 message.Role,
+			Content:              message.Content,
+			RawContent:           message.RawContent,
+			CompactionArtifactID: message.CompactionArtifactID,
 		}
 	}
 	return result

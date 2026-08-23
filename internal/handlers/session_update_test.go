@@ -99,7 +99,7 @@ func TestUpdateSessionSwitchesEmptyChatToACPAgent(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		nil,
+		&recordingACPSessionCloser{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -236,7 +236,7 @@ func TestUpdateSessionAllowsConcordantACPTypeAndRuntime(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		nil,
+		&recordingACPSessionCloser{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -284,7 +284,7 @@ func TestUpdateSessionSwitchToACPDoesNotInheritOwnerFromNonACPMetadata(t *testin
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		nil,
+		&recordingACPSessionCloser{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -337,7 +337,7 @@ func TestUpdateSessionSwitchToACPRequiresWorkspaceExec(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		nil,
+		&recordingACPSessionCloser{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
 	)
@@ -374,7 +374,7 @@ func TestUpdateSessionDefaultsACPProjectPath(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		nil,
+		&recordingACPSessionCloser{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -467,7 +467,7 @@ func TestUpdateSessionRejectsAgentChangeAfterFirstMessage(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		nil,
+		&recordingACPSessionCloser{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -623,8 +623,8 @@ func TestUpdateSessionAllowsEmptyACPAgentChangeAndClosesRuntime(t *testing.T) {
 	if !queries.updateCalled {
 		t.Fatal("UpdateSessionTypeAndMetadata was not called")
 	}
-	if len(closer.closed) != 1 || closer.closed[0] != sessionID {
-		t.Fatalf("closed ACP sessions = %#v, want [%s]", closer.closed, sessionID)
+	if len(closer.closed) != 0 {
+		t.Fatalf("UpdateSession bypassed the reset gate through CloseSession: %#v", closer.closed)
 	}
 	var metadata map[string]any
 	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
@@ -761,8 +761,8 @@ func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *te
 	if len(runtimeMetadata) != 0 {
 		t.Fatalf("runtime metadata = %#v, want cleared", runtimeMetadata)
 	}
-	if len(closer.closed) != 1 || closer.closed[0] != sessionID {
-		t.Fatalf("closed ACP sessions = %#v, want [%s]", closer.closed, sessionID)
+	if len(closer.closed) != 0 {
+		t.Fatalf("UpdateSession bypassed the reset gate through CloseSession: %#v", closer.closed)
 	}
 }
 

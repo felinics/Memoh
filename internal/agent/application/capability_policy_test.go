@@ -19,6 +19,20 @@ func TestRouteAttachmentsByCapability_VisionSupported(t *testing.T) {
 	assert.Equal(t, "audio", result.Fallback[0].Type)
 }
 
+func TestRouteAttachmentsByCapability_SVGFallsBack(t *testing.T) {
+	attachments := []gatewayAttachment{{
+		Type:         "image",
+		Mime:         "image/svg+xml",
+		Transport:    gatewayTransportInlineDataURL,
+		Payload:      "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+		FallbackPath: "/data/media/logo.svg",
+	}}
+
+	result := routeAttachmentsByCapability([]string{"vision"}, attachments)
+	assert.Empty(t, result.Native)
+	assert.Equal(t, attachments, result.Fallback)
+}
+
 func TestRouteAttachmentsByCapability_NoVision(t *testing.T) {
 	compatibilities := []string{"tool-call"}
 	attachments := []gatewayAttachment{

@@ -63,6 +63,58 @@ func TestWorkspaceTargetContextIsRequestScoped(t *testing.T) {
 	}
 }
 
+func TestManagerCurrentWorkspaceTargetID(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{
+		{
+			ID:        remoteTestTargetID,
+			BotID:     remoteTestBotID,
+			RuntimeID: remoteTestRuntimeID,
+			IsPrimary: true,
+		},
+	}}
+	manager := NewManager(slog.Default(), nil, nil, config.WorkspaceConfig{}, "", nil)
+	manager.SetRemoteWorkspaceService(&RemoteWorkspaceService{store: store})
+
+	tests := []struct {
+		name  string
+		ctx   context.Context
+		botID string
+		want  string
+	}{
+		{
+			name:  "request override",
+			ctx:   WithWorkspaceTarget(context.Background(), remoteTestTargetID2),
+			botID: remoteTestBotID,
+			want:  remoteTestTargetID2,
+		},
+		{
+			name:  "persisted remote primary",
+			ctx:   context.Background(),
+			botID: remoteTestBotID,
+			want:  remoteTestTargetID,
+		},
+		{
+			name:  "native fallback",
+			ctx:   context.Background(),
+			botID: remoteTestBotID2,
+			want:  WorkspaceTargetNative,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := manager.CurrentWorkspaceTargetID(test.ctx, test.botID)
+			if err != nil {
+				t.Fatalf("CurrentWorkspaceTargetID: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("CurrentWorkspaceTargetID = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestManagerWorkspaceTargetOverridePrecedenceAndConcurrentIsolation(t *testing.T) {
 	primaryClient, _ := newRemoteScopeTestClient(t)
 	requestClient, requestMetadata := newRemoteScopeTestClient(t)

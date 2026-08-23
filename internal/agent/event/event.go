@@ -53,6 +53,7 @@ type StreamEvent struct {
 	Messages       json.RawMessage  `json:"messages,omitempty"`
 	Usage          json.RawMessage  `json:"usage,omitempty"`
 	Reasoning      []string         `json:"reasoning,omitempty"`
+	Code           string           `json:"code,omitempty"`
 	Error          string           `json:"error,omitempty"`
 	Attempt        int              `json:"attempt,omitempty"`
 	MaxAttempt     int              `json:"maxAttempt,omitempty"`

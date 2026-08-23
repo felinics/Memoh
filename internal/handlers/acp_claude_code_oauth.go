@@ -21,6 +21,8 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 )
 
@@ -55,11 +57,16 @@ type ACPClaudeCodeOAuthHandler struct {
 	botService     *bots.Service
 	accountService *accounts.Service
 	acpWorkspace   acpWorkspaceConfigProvider
+	runtimeResets  oauthRuntimeResetService
 	tokenURL       string
 	httpClient     *http.Client
 
 	mu     sync.Mutex
 	states map[string]acpClaudeCodeOAuthState
+}
+
+type oauthRuntimeResetService interface {
+	BeginBotHistoryReset(ctx context.Context, botID string) (resetCtx context.Context, release func(), err error)
 }
 
 type acpClaudeCodeOAuthState struct {
@@ -86,6 +93,12 @@ func NewACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *acco
 		httpClient:     http.DefaultClient,
 		states:         map[string]acpClaudeCodeOAuthState{},
 	}
+}
+
+// SetRuntimeResetService installs the distributed operation boundary used when
+// OAuth exchange changes the bot's ACP launch configuration.
+func (h *ACPClaudeCodeOAuthHandler) SetRuntimeResetService(closer oauthRuntimeResetService) {
+	h.runtimeResets = closer
 }
 
 func (h *ACPClaudeCodeOAuthHandler) Register(e *echo.Echo) {
@@ -191,6 +204,9 @@ func (h *ACPClaudeCodeOAuthHandler) Exchange(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "oauth token response did not include an access token")
 	}
 	if err := h.saveOAuthToken(c.Request().Context(), bot, token); err != nil {
+		if apperror.CodeOf(err) != "" {
+			return err
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, ACPClaudeCodeOAuthStatus{Configured: true, HasToken: true})
@@ -256,10 +272,32 @@ func (h *ACPClaudeCodeOAuthHandler) saveOAuthToken(ctx context.Context, bot bots
 	if h.botService == nil {
 		return errors.New("bot service is not configured")
 	}
-	_, err := h.botService.Update(ctx, bot.ID, bots.UpdateBotRequest{
+	if h.runtimeResets == nil {
+		return apperror.Wrap(
+			apperror.CodeSessionHistoryInconsistent,
+			errors.New("runtime reset is not configured"),
+			nil,
+		)
+	}
+	resetCtx, release, err := h.runtimeResets.BeginBotHistoryReset(ctx, bot.ID)
+	if err != nil {
+		return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+	}
+	defer release()
+
+	_, updateErr := h.botService.Update(resetCtx, bot.ID, bots.UpdateBotRequest{
 		Metadata: upsertClaudeCodeOAuthMetadata(bot.Metadata, token),
 	})
-	return err
+	if errors.Is(updateErr, sessionruntime.ErrHistoryResetLeaseLost) {
+		return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, updateErr, nil)
+	}
+	if cause := context.Cause(resetCtx); errors.Is(cause, sessionruntime.ErrHistoryResetLeaseLost) {
+		if updateErr != nil {
+			cause = errors.Join(cause, updateErr)
+		}
+		return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, cause, nil)
+	}
+	return updateErr
 }
 
 func (h *ACPClaudeCodeOAuthHandler) takeState(state string) (acpClaudeCodeOAuthState, error) {

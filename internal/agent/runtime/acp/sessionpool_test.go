@@ -2,11 +2,16 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +42,9 @@ import (
 // injectRuntime registers a hand-built handle for tests that exercise
 // internal state without booting a real agent process.
 func injectRuntime(p *SessionPool, h *runtimeHandle) {
+	if h.ownerCtx == nil {
+		h.ownerCtx = context.Background()
+	}
 	p.mu.Lock()
 	p.runtimes[h.id] = h
 	if h.boundSession != "" {
@@ -48,23 +56,6 @@ func injectRuntime(p *SessionPool, h *runtimeHandle) {
 func newFakeScriptPool(t *testing.T) *SessionPool {
 	pool, _ := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-container-byok"}))
 	return pool
-}
-
-// Built-in profiles deliberately use the adapter binaries pinned in the
-// workspace image. These tests exercise the optional dynamic-launch extension
-// itself, so they temporarily opt the Codex profile into that mechanism.
-func enableDynamicCodexProfileForTest(t *testing.T) {
-	t.Helper()
-	original, ok := acpprofile.Lookup(acpprofile.AgentCodexID)
-	if !ok {
-		t.Fatal("Codex profile is not registered")
-	}
-	dynamic := original
-	dynamic.DynamicCommand = "npx"
-	dynamic.DynamicArgs = []string{"-y"}
-	dynamic.DynamicPackage = "@agentclientprotocol/codex-acp"
-	acpprofile.Register(dynamic)
-	t.Cleanup(func() { acpprofile.Register(original) })
 }
 
 func newFakeScriptPoolForBot(t *testing.T, bot bots.Bot) (*SessionPool, string) {
@@ -203,6 +194,140 @@ func TestSessionPoolPromptForceFreshRuntimeReplacesBoundRuntime(t *testing.T) {
 	}
 }
 
+func TestSessionPoolRestoresOnlyMatchingDurableACPState(t *testing.T) {
+	baseState := PersistedSessionState{
+		AgentID:        acpprofile.AgentCodexID,
+		ACPSessionID:   "native-session-1",
+		ThroughRunID:   "22222222-2222-4222-8222-222222222222",
+		Cwd:            "/data/project",
+		TranscriptPath: "state/sessions/2026/08/12/rollout-native-session-1.jsonl",
+		FileCount:      1,
+		RecordCount:    1,
+	}
+	baseRecords := []SessionStateRecord{{
+		FilePath: baseState.TranscriptPath, LineNumber: 1,
+		Content: json.RawMessage(`{"type":"session_meta","payload":{"id":"native-session-1"}}`),
+	}}
+
+	tests := []struct {
+		name        string
+		mutate      func(*PersistedSessionState)
+		forceFresh  bool
+		wantResume  bool
+		wantLoads   int
+		wantSyncErr bool
+	}{
+		{name: "matching", wantResume: true, wantLoads: 1},
+		{name: "different agent", mutate: func(state *PersistedSessionState) { state.AgentID = acpprofile.AgentClaudeCodeID }, wantLoads: 1, wantSyncErr: true},
+		{name: "different cwd", mutate: func(state *PersistedSessionState) { state.Cwd = "/data/other" }, wantLoads: 1, wantSyncErr: true},
+		{name: "force fresh bypasses state", forceFresh: true, wantLoads: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := baseState
+			if tt.mutate != nil {
+				tt.mutate(&state)
+			}
+			store := &recordingSessionStateStore{state: state, records: baseRecords, found: true}
+			runner := &recordingRunner{
+				info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+				startErr: errors.New("started"),
+			}
+			pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})})
+			pool.SetSessionStateStore(store)
+
+			_, err := pool.Prompt(context.Background(), PromptInput{
+				BotID:                 "bot-1",
+				SessionID:             "session-1",
+				AgentID:               acpprofile.AgentCodexID,
+				ProjectPath:           "/data/project",
+				Prompt:                "continue",
+				RuntimeOwnerAccountID: "user-1",
+				ForceFreshRuntime:     tt.forceFresh,
+			})
+			if tt.wantSyncErr {
+				if !errors.Is(err, ErrSessionStateOutOfSync) {
+					t.Fatalf("Prompt() error = %v, want ErrSessionStateOutOfSync", err)
+				}
+			} else if err == nil || err.Error() != "started" {
+				t.Fatalf("Prompt() error = %v, want runner sentinel", err)
+			}
+			if store.loadCalls != tt.wantLoads {
+				t.Fatalf("state Load calls = %d, want %d", store.loadCalls, tt.wantLoads)
+			}
+			if got := runner.req.Resume != nil; got != tt.wantResume {
+				t.Fatalf("runner Resume present = %v, want %v", got, tt.wantResume)
+			}
+			if tt.wantResume {
+				resumeState := runner.req.Resume.State()
+				if resumeState.SessionID != baseState.ACPSessionID || resumeState.TranscriptPath != baseState.TranscriptPath {
+					t.Fatalf("runner Resume = %#v", resumeState)
+				}
+			}
+		})
+	}
+}
+
+func TestSessionPoolCheckpointsJSONLAfterSuccessfulPrompt(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("strict anchored checkpoint I/O requires Linux openat2")
+	}
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_WRITE_STATE", "1")
+	pool := newFakeScriptPool(t)
+	store := &recordingSessionStateStore{}
+	pool.SetSessionStateStore(store)
+	fence := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 17}
+	runID := "33333333-3333-4333-8333-333333333333"
+
+	result, err := pool.Prompt(runtimefence.WithContext(context.Background(), fence), PromptInput{
+		BotID:                 fence.BotID,
+		SessionID:             fence.SessionID,
+		RunID:                 runID,
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		Prompt:                "remember this turn",
+		RuntimeOwnerAccountID: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if !strings.Contains(result.Text, "session-pool-ok") {
+		t.Fatalf("Prompt() result = %#v", result)
+	}
+	if !result.CheckpointStaged {
+		t.Fatal("successful durable prompt did not report a staged checkpoint")
+	}
+	// The handle's native head must have advanced to the staged run so the
+	// next prompt matches once the application commits the same durable head.
+	handle := pool.sessionHandle(fence.SessionID)
+	if handle == nil {
+		t.Fatal("staged prompt lost its runtime handle")
+	}
+	handle.state.Lock()
+	nativeHead, nativeHeadFound := handle.nativeHead, handle.nativeHeadFound
+	handle.state.Unlock()
+	if !nativeHeadFound || nativeHead.RunID != runID || nativeHead.Kind != SessionPublicationCheckpoint {
+		t.Fatalf("native head = %#v found=%v, want staged checkpoint run", nativeHead, nativeHeadFound)
+	}
+	store.setHead(SessionPublicationHead{RunID: runID, Kind: SessionPublicationCheckpoint}, true)
+	if store.headCalls != 2 || store.loadCalls != 0 || store.replaceCalls != 1 {
+		t.Fatalf("state store calls = head:%d load:%d replace:%d, want 2/0/1", store.headCalls, store.loadCalls, store.replaceCalls)
+	}
+	if store.replaceFence != fence {
+		t.Fatalf("Replace fence = %#v, want %#v", store.replaceFence, fence)
+	}
+	state := store.replaced
+	if state.AgentID != acpprofile.AgentCodexID || state.ACPSessionID != "session-pool-fake-session" || state.ThroughRunID != runID || state.Cwd != "/data/project" {
+		t.Fatalf("checkpoint identity = %#v", state)
+	}
+	if state.FileCount != 1 || state.RecordCount != 3 || len(store.replacedRecords) != 3 {
+		t.Fatalf("checkpoint counts/records = %#v/%#v", state, store.replacedRecords)
+	}
+	if !strings.Contains(string(store.replacedRecords[1].Content), "remember this turn") {
+		t.Fatalf("checkpoint prompt line = %s", store.replacedRecords[1].Content)
+	}
+}
+
 func TestSessionPoolPromptSupportsImageOnly(t *testing.T) {
 	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_IMAGE", "1")
 	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_EXPECT_IMAGE", "1")
@@ -254,10 +379,10 @@ func TestSessionPoolPromptFallsBackToAttachmentReferenceWhenImageUnsupported(t *
 		ProjectPath:              "/data/project",
 		Prompt:                   "inspect the image",
 		Images:                   []client.PromptImage{{Data: "aW1hZ2U=", MimeType: "image/png"}},
-		AttachmentReferences:     []string{"/data/media/aa/image.png"},
+		AttachmentReferences:     []string{"/data/.memoh/media/aa/image.png"},
 		CanFallbackImagesToFiles: true,
 		ContextURI:               "memoh://context/current-turn",
-		ContextMarkdown:          "Attachment path: /data/media/aa/image.png",
+		ContextMarkdown:          "Attachment path: /data/.memoh/media/aa/image.png",
 		RuntimeOwnerAccountID:    "user-1",
 	})
 	if err != nil {
@@ -276,9 +401,9 @@ func TestSessionPoolPromptSupportsAttachmentOnly(t *testing.T) {
 		SessionID:             "session-1",
 		AgentID:               acpprofile.AgentCodexID,
 		ProjectPath:           "/data/project",
-		AttachmentReferences:  []string{"/data/media/aa/pasted-text.txt"},
+		AttachmentReferences:  []string{"/data/.memoh/media/aa/pasted-text.txt"},
 		ContextURI:            "memoh://context/current-turn",
-		ContextMarkdown:       "Attachment path: /data/media/aa/pasted-text.txt",
+		ContextMarkdown:       "Attachment path: /data/.memoh/media/aa/pasted-text.txt",
 		RuntimeOwnerAccountID: "user-1",
 	})
 	if err != nil {
@@ -449,6 +574,8 @@ func TestSessionPoolCreateRuntimeGeneratesIDAndReportsModels(t *testing.T) {
 }
 
 func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
+	type contextKey struct{}
+
 	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
 	pool := newFakeScriptPool(t)
 
@@ -465,12 +592,29 @@ func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 		t.Fatalf("SetRuntimeModel() error = %v", err)
 	}
 
-	if err := pool.BindRuntime("bot-1", created.RuntimeID, "session-1", acpprofile.AgentCodexID, "/data/project", "user-1"); err != nil {
+	bindCtx, cancelBind := context.WithCancel(
+		context.WithValue(context.Background(), contextKey{}, "bind-scope"),
+	)
+	defer cancelBind()
+	if err := pool.BindRuntime(bindCtx, "bot-1", created.RuntimeID, "session-1", acpprofile.AgentCodexID, "/data/project", "user-1"); err != nil {
 		t.Fatalf("BindRuntime() error = %v", err)
 	}
+	cancelBind()
 	h := pool.sessionHandle("session-1")
 	if h == nil || h.id != created.RuntimeID {
 		t.Fatalf("session index does not point at the bound runtime")
+	}
+	h.state.Lock()
+	ownerCtx := h.ownerCtx
+	h.state.Unlock()
+	if ownerCtx == nil {
+		t.Fatal("bound runtime owner context is nil")
+	}
+	if got := ownerCtx.Value(contextKey{}); got != "bind-scope" {
+		t.Fatalf("bound runtime owner context value = %v, want bind-scope", got)
+	}
+	if err := ownerCtx.Err(); err != nil {
+		t.Fatalf("bound runtime owner context error = %v, want request cancellation detached", err)
 	}
 
 	// The bound session reuses the warm process - including its model.
@@ -495,7 +639,7 @@ func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 	}
 
 	// A bound runtime cannot be bound again.
-	if err := pool.BindRuntime("bot-1", created.RuntimeID, "session-2", acpprofile.AgentCodexID, "/data/project", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+	if err := pool.BindRuntime(context.Background(), "bot-1", created.RuntimeID, "session-2", acpprofile.AgentCodexID, "/data/project", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
 		t.Fatalf("second BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 }
@@ -577,30 +721,30 @@ func TestSessionPoolBindRuntimeRejectsMismatches(t *testing.T) {
 		{"wrong project", "bot-2", "real", acpprofile.AgentCodexID, "/other", ErrRuntimeBindRejected},
 	}
 	for _, tc := range cases {
-		if err := pool.BindRuntime(tc.botID, pending.id, tc.sessionID, tc.agent, tc.path, "user-1"); !errors.Is(err, tc.wantErr) {
+		if err := pool.BindRuntime(context.Background(), tc.botID, pending.id, tc.sessionID, tc.agent, tc.path, "user-1"); !errors.Is(err, tc.wantErr) {
 			t.Fatalf("%s: BindRuntime() error = %v, want %v", tc.name, err, tc.wantErr)
 		}
 	}
-	if err := pool.BindRuntime("bot-2", "rt_missing", "real", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
+	if err := pool.BindRuntime(context.Background(), "bot-2", "rt_missing", "real", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("missing runtime: BindRuntime() error = %v, want ErrRuntimeNotFound", err)
 	}
 
 	// Session already served by another runtime.
 	other := &runtimeHandle{id: newRuntimeID(), botID: "bot-2", boundSession: "real", status: stateIdle}
 	injectRuntime(pool, other)
-	if err := pool.BindRuntime("bot-2", pending.id, "real", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
 		t.Fatalf("occupied session: BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 
 	// A still-starting runtime (no live process yet) is not bindable.
 	starting := &runtimeHandle{id: newRuntimeID(), botID: "bot-2", agentID: acpprofile.AgentCodexID, projectPath: "/data", status: stateStarting}
 	injectRuntime(pool, starting)
-	if err := pool.BindRuntime("bot-2", starting.id, "real-2", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+	if err := pool.BindRuntime(context.Background(), "bot-2", starting.id, "real-2", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
 		t.Fatalf("starting runtime: BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 
 	// Everything matching succeeds.
-	if err := pool.BindRuntime("bot-2", pending.id, "real-2", acpprofile.AgentCodexID, "/data", "user-1"); err != nil {
+	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real-2", acpprofile.AgentCodexID, "/data", "user-1"); err != nil {
 		t.Fatalf("matching BindRuntime() error = %v", err)
 	}
 	if pool.sessionHandle("real-2") != pending {
@@ -631,7 +775,7 @@ func TestSessionPoolOwnedGateHasZeroSideEffectsAcrossBots(t *testing.T) {
 	if err := pool.CloseRuntime("bot-1", foreign.id); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("CloseRuntime(cross bot) error = %v, want ErrRuntimeNotFound", err)
 	}
-	if err := pool.BindRuntime("bot-1", foreign.id, "my-session", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
+	if err := pool.BindRuntime(context.Background(), "bot-1", foreign.id, "my-session", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("BindRuntime(cross bot) error = %v, want ErrRuntimeNotFound", err)
 	}
 	if _, ok := pool.ResolveRuntimeToolContext("bot-1", foreign.id, "runtime-token-1"); ok {
@@ -892,7 +1036,7 @@ func TestSessionPoolPromptAppliesModelThenReasoningAndSkipsMatchingValues(t *tes
 		"config:model=gpt-5.1-codex-high",
 		"config:thinking=xhigh",
 		"prompt:model=gpt-5.1-codex-high,reasoning=xhigh",
-	}; !equalStrings(got, want) {
+	}; !slices.Equal(got, want) {
 		t.Fatalf("first turn config log = %#v, want suffix %#v (all %#v)", got, want, lines)
 	}
 
@@ -905,7 +1049,7 @@ func TestSessionPoolPromptAppliesModelThenReasoningAndSkipsMatchingValues(t *tes
 	}
 	if got, want := nonEmptyLines(readOptionalFile(t, configLog)), []string{
 		"prompt:model=gpt-5.1-codex-high,reasoning=xhigh",
-	}; !equalStrings(got, want) {
+	}; !slices.Equal(got, want) {
 		t.Fatalf("matching turn config log = %#v, want %#v", got, want)
 	}
 
@@ -920,7 +1064,7 @@ func TestSessionPoolPromptAppliesModelThenReasoningAndSkipsMatchingValues(t *tes
 	if got, want := nonEmptyLines(readOptionalFile(t, configLog)), []string{
 		"config:thinking=low",
 		"prompt:model=gpt-5.1-codex-high,reasoning=low",
-	}; !equalStrings(got, want) {
+	}; !slices.Equal(got, want) {
 		t.Fatalf("reasoning-only config log = %#v, want %#v", got, want)
 	}
 }
@@ -1062,18 +1206,6 @@ func readOptionalFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-func equalStrings(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func TestSessionPoolRuntimeStatusReportsActiveDuringColdStart(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -1119,608 +1251,6 @@ func TestSessionPoolRuntimeStatusReportsActiveDuringColdStart(t *testing.T) {
 	status = pool.RuntimeStatus("session-1", "codex", "/data/project")
 	if status.State != "idle" || status.ACPSession != "" {
 		t.Fatalf("RuntimeStatus after failed start = %#v, want idle without process", status)
-	}
-}
-
-func TestSessionPoolPinsExactAdapterVersionForProcess(t *testing.T) {
-	enableDynamicCodexProfileForTest(t)
-	runner := &dynamicRecordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		versions: []string{"1.2.0"},
-		starts: []dynamicStartResult{
-			{session: &client.Session{}},
-			{session: &client.Session{}},
-		},
-	}
-	pool := newSessionPool(
-		nil,
-		runner,
-		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
-	)
-	ensure := func(sessionID string) RuntimeStatus {
-		t.Helper()
-		status, err := pool.Ensure(context.Background(), PromptInput{
-			BotID:                 "bot-1",
-			SessionID:             sessionID,
-			AgentID:               acpprofile.AgentCodexID,
-			ProjectPath:           "/data/project",
-			RuntimeOwnerAccountID: "user-1",
-		})
-		if err != nil {
-			t.Fatalf("Ensure(%s) error = %v", sessionID, err)
-		}
-		return status
-	}
-
-	if status := ensure("session-1"); status.State != stateIdle {
-		t.Fatalf("first status = %#v", status)
-	}
-	if got := runner.resolveCallCount(); got != 1 {
-		t.Fatalf("version lookups after first cold start = %d, want 1", got)
-	}
-	requests := runner.requests()
-	if len(requests) != 1 || len(requests[0].Args) != 2 || requests[0].Args[1] != "@agentclientprotocol/codex-acp@1.2.0" {
-		t.Fatalf("first dynamic request = %#v", requests)
-	}
-
-	ensure("session-2")
-	if got := runner.resolveCallCount(); got != 1 {
-		t.Fatalf("version lookups after second cold start = %d, want 1", got)
-	}
-	requests = runner.requests()
-	if len(requests) != 2 || requests[1].Args[1] != "@agentclientprotocol/codex-acp@1.2.0" {
-		t.Fatalf("cached exact-version request = %#v", requests)
-	}
-}
-
-func TestSessionPoolPinsAdapterVersionsPerBot(t *testing.T) {
-	runner := &dynamicRecordingRunner{versions: []string{"1.2.0", "1.3.0"}}
-	pool := newSessionPool(nil, runner, fakeBotGetter{})
-	const packageName = "@agentclientprotocol/codex-acp"
-
-	for _, tc := range []struct {
-		botID string
-		want  string
-	}{
-		{botID: "bot-1", want: "1.2.0"},
-		{botID: "bot-2", want: "1.3.0"},
-	} {
-		version, err := resolveAdapterVersionForTest(pool, tc.botID, packageName)
-		if err != nil {
-			t.Fatalf("resolveDynamicAdapter(%s) error = %v", tc.botID, err)
-		}
-		if version != tc.want {
-			t.Fatalf("resolveDynamicAdapter(%s) = %q, want %q", tc.botID, version, tc.want)
-		}
-	}
-
-	for _, tc := range []struct {
-		botID string
-		want  string
-	}{
-		{botID: "bot-1", want: "1.2.0"},
-		{botID: "bot-2", want: "1.3.0"},
-	} {
-		version, err := resolveAdapterVersionForTest(pool, tc.botID, packageName)
-		if err != nil || version != tc.want {
-			t.Fatalf("cached resolveDynamicAdapter(%s) = %q, %v; want %q, nil", tc.botID, version, err, tc.want)
-		}
-	}
-	if got := runner.resolveCallCount(); got != 2 {
-		t.Fatalf("version lookups = %d, want one per bot", got)
-	}
-}
-
-func TestSessionPoolSharesAdapterLookupAcrossConcurrentColdStarts(t *testing.T) {
-	enableDynamicCodexProfileForTest(t)
-	started := make(chan struct{})
-	release := make(chan struct{})
-	runner := &dynamicRecordingRunner{
-		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		versions:       []string{"1.2.0"},
-		starts:         []dynamicStartResult{{session: &client.Session{}}, {session: &client.Session{}}},
-		blockDynamic:   true,
-		dynamicStarted: started,
-		dynamicRelease: release,
-	}
-	pool := newSessionPool(
-		nil,
-		runner,
-		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
-	)
-
-	errCh := make(chan error, 2)
-	ensure := func(sessionID string) {
-		_, err := pool.Ensure(context.Background(), PromptInput{
-			BotID:                 "bot-1",
-			SessionID:             sessionID,
-			AgentID:               acpprofile.AgentCodexID,
-			ProjectPath:           "/data/project",
-			RuntimeOwnerAccountID: "user-1",
-		})
-		errCh <- err
-	}
-	go ensure("session-1")
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("dynamic adapter did not start")
-	}
-	go ensure("session-2")
-	deadline := time.Now().Add(2 * time.Second)
-	for len(runner.requests()) != 2 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if got := len(runner.requests()); got != 2 {
-		t.Fatalf("concurrent StartSession calls = %d, want 2", got)
-	}
-	if got := runner.resolveCallCount(); got != 1 {
-		t.Fatalf("concurrent version lookups = %d, want 1", got)
-	}
-	close(release)
-	for range 2 {
-		if err := <-errCh; err != nil {
-			t.Fatalf("Ensure() error = %v", err)
-		}
-	}
-	requests := runner.requests()
-	if len(requests) != 2 || requests[0].Args[1] != "@agentclientprotocol/codex-acp@1.2.0" || requests[1].Args[1] != "@agentclientprotocol/codex-acp@1.2.0" {
-		t.Fatalf("concurrent exact-version requests = %#v", requests)
-	}
-}
-
-func TestSessionPoolCanceledAdapterLookupCanRetry(t *testing.T) {
-	enableDynamicCodexProfileForTest(t)
-	started := make(chan struct{})
-	runner := &dynamicRecordingRunner{
-		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		versions:       []string{"1.2.0"},
-		starts:         []dynamicStartResult{{session: &client.Session{}}},
-		blockResolve:   true,
-		resolveStarted: started,
-	}
-	pool := newSessionPool(
-		nil,
-		runner,
-		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
-	)
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := pool.Ensure(ctx, PromptInput{
-			BotID:                 "bot-1",
-			SessionID:             "session-1",
-			AgentID:               acpprofile.AgentCodexID,
-			ProjectPath:           "/data/project",
-			RuntimeOwnerAccountID: "user-1",
-		})
-		errCh <- err
-	}()
-
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("adapter version lookup did not start")
-	}
-	cancel()
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("Ensure() error = %v, want context.Canceled", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Ensure did not return after lookup cancellation")
-	}
-	if requests := runner.requests(); len(requests) != 0 {
-		t.Fatalf("StartSession requests after lookup cancellation = %#v", requests)
-	}
-
-	runner.mu.Lock()
-	runner.blockResolve = false
-	runner.mu.Unlock()
-	if _, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-2",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	}); err != nil {
-		t.Fatalf("Ensure after lookup cancellation error = %v", err)
-	}
-	if got := runner.resolveCallCount(); got != 2 {
-		t.Fatalf("version lookups = %d, want canceled lookup followed by retry", got)
-	}
-	requests := runner.requests()
-	if len(requests) != 1 || len(requests[0].Args) != 2 || requests[0].Args[1] != "@agentclientprotocol/codex-acp@1.2.0" {
-		t.Fatalf("dynamic request after lookup retry = %#v", requests)
-	}
-}
-
-func TestSessionPoolAdapterLookupWaiterCanCancel(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	runner := &dynamicRecordingRunner{
-		versions:       []string{"1.2.0"},
-		blockResolve:   true,
-		resolveStarted: started,
-		resolveRelease: release,
-	}
-	pool := newSessionPool(nil, runner, fakeBotGetter{})
-	const packageName = "@agentclientprotocol/codex-acp"
-
-	type result struct {
-		version string
-		err     error
-	}
-	leaderResult := make(chan result, 1)
-	go func() {
-		version, err := resolveAdapterVersionForTest(pool, "bot-1", packageName)
-		leaderResult <- result{version: version, err: err}
-	}()
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("adapter version lookup did not start")
-	}
-
-	waiterCtx, cancelWaiter := context.WithCancel(context.Background())
-	waiterResult := make(chan error, 1)
-	go func() {
-		_, _, err := pool.resolveDynamicAdapter(waiterCtx, "bot-1", packageName, nil)
-		waiterResult <- err
-	}()
-	cancelWaiter()
-	select {
-	case err := <-waiterResult:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("waiting resolveDynamicAdapter() error = %v, want context.Canceled", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("waiting resolveDynamicAdapter did not return after cancellation")
-	}
-	if got := runner.resolveCallCount(); got != 1 {
-		t.Fatalf("version lookups while waiter canceled = %d, want 1", got)
-	}
-
-	close(release)
-	select {
-	case got := <-leaderResult:
-		if got.err != nil || got.version != "1.2.0" {
-			t.Fatalf("leading resolveDynamicAdapter() = %q, %v", got.version, got.err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("leading resolveDynamicAdapter did not finish")
-	}
-	version, err := resolveAdapterVersionForTest(pool, "bot-1", packageName)
-	if err != nil || version != "1.2.0" {
-		t.Fatalf("cached resolveDynamicAdapter() = %q, %v", version, err)
-	}
-	if got := runner.resolveCallCount(); got != 1 {
-		t.Fatalf("version lookups after cached result = %d, want 1", got)
-	}
-}
-
-func TestSessionPoolAdapterLookupTimeoutFallsBackAndDisables(t *testing.T) {
-	enableDynamicCodexProfileForTest(t)
-	started := make(chan struct{})
-	runner := &dynamicRecordingRunner{
-		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		blockResolve:   true,
-		resolveStarted: started,
-		starts: []dynamicStartResult{
-			{session: &client.Session{}},
-			{session: &client.Session{}},
-		},
-	}
-	pool := newSessionPool(
-		nil,
-		runner,
-		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
-	)
-	pool.dynamicAdapterStartTimeout = 20 * time.Millisecond
-
-	if _, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	}); err != nil {
-		t.Fatalf("Ensure() error = %v", err)
-	}
-	select {
-	case <-started:
-	default:
-		t.Fatal("adapter version lookup did not start")
-	}
-	if got := runner.resolveCallCount(); got != 1 {
-		t.Fatalf("version lookups after timeout = %d, want 1", got)
-	}
-	requests := runner.requests()
-	if len(requests) != 1 || requests[0].Command != "codex-acp" {
-		t.Fatalf("requests after lookup timeout = %#v, want bundled fallback", requests)
-	}
-
-	if _, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-2",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	}); err != nil {
-		t.Fatalf("second Ensure() error = %v", err)
-	}
-	if got := runner.resolveCallCount(); got != 1 {
-		t.Fatalf("version lookups after disabled timeout = %d, want 1", got)
-	}
-	requests = runner.requests()
-	if len(requests) != 2 || requests[1].Command != "codex-acp" {
-		t.Fatalf("requests after disabled timeout = %#v, want bundled fallback", requests)
-	}
-}
-
-func TestSessionPoolDynamicAdapterFailureFallsBackAndBinds(t *testing.T) {
-	enableDynamicCodexProfileForTest(t)
-	fallbackSession := &client.Session{}
-	runner := &dynamicRecordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		versions: []string{"1.2.0"},
-		starts: []dynamicStartResult{
-			{err: errors.New("dynamic unavailable")},
-			{session: fallbackSession},
-			{session: &client.Session{}},
-		},
-	}
-	pool := newSessionPool(
-		nil,
-		runner,
-		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
-	)
-
-	status, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err != nil {
-		t.Fatalf("Ensure() error = %v", err)
-	}
-	if status.State != stateIdle {
-		t.Fatalf("fallback status = %#v", status)
-	}
-	h := pool.sessionHandle("session-1")
-	if h == nil || h.session != fallbackSession {
-		t.Fatalf("fallback session was not bound: %#v", h)
-	}
-	requests := runner.requests()
-	if len(requests) != 2 {
-		t.Fatalf("StartSession calls = %d, want dynamic then fallback", len(requests))
-	}
-	dynamic := requests[0]
-	if dynamic.Command != "npx" || len(dynamic.Args) != 2 || dynamic.Args[1] != "@agentclientprotocol/codex-acp@1.2.0" {
-		t.Fatalf("dynamic request = command %q args %#v", dynamic.Command, dynamic.Args)
-	}
-	if !startRequestEnvHas(dynamic.Env, "NPM_CONFIG_CACHE", "/data/.memoh/acp/npm-cache") {
-		t.Fatalf("dynamic request env = %#v, want persistent npm cache", dynamic.Env)
-	}
-	fallback := requests[1]
-	if fallback.Command != "codex-acp" {
-		t.Fatalf("fallback request = command %q", fallback.Command)
-	}
-	if startRequestEnvHas(fallback.Env, "NPM_CONFIG_CACHE", "/data/.memoh/acp/npm-cache") {
-		t.Fatalf("fallback request unexpectedly carries dynamic cache env: %#v", fallback.Env)
-	}
-	if _, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-2",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	}); err != nil {
-		t.Fatalf("second Ensure() error = %v", err)
-	}
-	requests = runner.requests()
-	if runner.resolveCallCount() != 1 || len(requests) != 3 || requests[2].Command != "codex-acp" {
-		t.Fatalf("failed candidate was retried: lookups=%d requests=%#v", runner.resolveCallCount(), requests)
-	}
-}
-
-func TestSessionPoolDynamicAdapterCancellationDoesNotFallback(t *testing.T) {
-	enableDynamicCodexProfileForTest(t)
-	started := make(chan struct{})
-	runner := &dynamicRecordingRunner{
-		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		versions:       []string{"1.2.0"},
-		starts:         []dynamicStartResult{{session: &client.Session{}}},
-		blockDynamic:   true,
-		dynamicStarted: started,
-	}
-	pool := newSessionPool(
-		nil,
-		runner,
-		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
-	)
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := pool.Ensure(ctx, PromptInput{
-			BotID:                 "bot-1",
-			SessionID:             "session-1",
-			AgentID:               acpprofile.AgentCodexID,
-			ProjectPath:           "/data/project",
-			RuntimeOwnerAccountID: "user-1",
-		})
-		errCh <- err
-	}()
-
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("dynamic adapter did not start")
-	}
-	cancel()
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("Ensure() error = %v, want context.Canceled", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Ensure did not return after cancellation")
-	}
-	if got := len(runner.requests()); got != 1 {
-		t.Fatalf("StartSession calls = %d, want no fallback after cancellation", got)
-	}
-	runner.mu.Lock()
-	runner.blockDynamic = false
-	runner.mu.Unlock()
-	if _, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-2",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	}); err != nil {
-		t.Fatalf("Ensure after caller cancellation error = %v", err)
-	}
-	if got := runner.resolveCallCount(); got != 1 {
-		t.Fatalf("version lookups after caller cancellation = %d, want cached exact version", got)
-	}
-}
-
-func TestSessionPoolDynamicAdapterTimeoutFallsBack(t *testing.T) {
-	enableDynamicCodexProfileForTest(t)
-	started := make(chan struct{})
-	runner := &dynamicRecordingRunner{
-		info:           bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		versions:       []string{"1.2.0"},
-		blockDynamic:   true,
-		dynamicStarted: started,
-		starts:         []dynamicStartResult{{session: &client.Session{}}, {session: &client.Session{}}},
-	}
-	pool := newSessionPool(
-		nil,
-		runner,
-		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
-	)
-	pool.dynamicAdapterStartTimeout = 20 * time.Millisecond
-
-	status, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err != nil {
-		t.Fatalf("Ensure() error = %v", err)
-	}
-	if status.State != stateIdle {
-		t.Fatalf("timeout fallback status = %#v", status)
-	}
-	if got := len(runner.requests()); got != 2 {
-		t.Fatalf("StartSession calls = %d, want timed-out dynamic then fallback", got)
-	}
-	if _, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-2",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	}); err != nil {
-		t.Fatalf("second Ensure() error = %v", err)
-	}
-	if runner.resolveCallCount() != 1 || len(runner.requests()) != 3 {
-		t.Fatalf("timed-out candidate was retried: lookups=%d requests=%#v", runner.resolveCallCount(), runner.requests())
-	}
-}
-
-func TestSessionPoolAdapterLookupFailureDisablesDynamicLaunchForProcess(t *testing.T) {
-	enableDynamicCodexProfileForTest(t)
-	runner := &dynamicRecordingRunner{
-		info:        bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		resolveErrs: []error{errors.New("registry unavailable")},
-		starts: []dynamicStartResult{
-			{session: &client.Session{}},
-			{session: &client.Session{}},
-		},
-	}
-	pool := newSessionPool(
-		nil,
-		runner,
-		fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})},
-	)
-
-	for _, sessionID := range []string{"session-1", "session-2"} {
-		if _, err := pool.Ensure(context.Background(), PromptInput{
-			BotID:                 "bot-1",
-			SessionID:             sessionID,
-			AgentID:               acpprofile.AgentCodexID,
-			ProjectPath:           "/data/project",
-			RuntimeOwnerAccountID: "user-1",
-		}); err != nil {
-			t.Fatalf("Ensure(%s) error = %v", sessionID, err)
-		}
-	}
-	if got := runner.resolveCallCount(); got != 1 {
-		t.Fatalf("version lookups after disabled lookup = %d, want 1", got)
-	}
-	for i, req := range runner.requests() {
-		if req.Command != "codex-acp" {
-			t.Fatalf("request %d command = %q, want bundled fallback", i, req.Command)
-		}
-	}
-}
-
-func TestDynamicACPEnvAddsToolkitCAOnlyWhenAvailableAndUnset(t *testing.T) {
-	env := dynamicACPEnv([]string{"CUSTOM=1"}, true)
-	if !startRequestEnvHas(env, "SSL_CERT_FILE", containerToolkitCABundle) {
-		t.Fatalf("dynamic env = %#v, want toolkit CA bundle", env)
-	}
-
-	env = dynamicACPEnv([]string{"SSL_CERT_FILE=/custom/ca.pem"}, true)
-	if !startRequestEnvHas(env, "SSL_CERT_FILE", "/custom/ca.pem") || startRequestEnvHas(env, "SSL_CERT_FILE", containerToolkitCABundle) {
-		t.Fatalf("dynamic env replaced explicit CA bundle: %#v", env)
-	}
-
-	env = dynamicACPEnv(nil, false)
-	if startRequestEnvHas(env, "SSL_CERT_FILE", containerToolkitCABundle) {
-		t.Fatalf("dynamic env added missing toolkit CA bundle: %#v", env)
-	}
-}
-
-func TestSessionPoolDetectsContainerToolkitCABundle(t *testing.T) {
-	client, statServer := newCABundleStatClient(t)
-	runner := &caBundleRunner{client: client}
-	pool := newSessionPool(nil, runner, nil)
-	info := bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"}
-	if !pool.containerToolkitCABundleAvailable(context.Background(), "bot-1", info) {
-		t.Fatal("container toolkit CA bundle was not detected")
-	}
-	statServer.mu.Lock()
-	gotPath := statServer.path
-	statServer.mu.Unlock()
-	if gotPath != containerToolkitCABundle {
-		t.Fatalf("Stat path = %q, want %q", gotPath, containerToolkitCABundle)
-	}
-}
-
-func TestAdapterLookupEnvExcludesAgentCredentials(t *testing.T) {
-	env := adapterLookupEnv([]string{
-		"NPM_CONFIG_CACHE=/data/.memoh/acp/npm-cache",
-		"SSL_CERT_FILE=/opt/memoh/toolkit/certs/ca-certificates.crt",
-		"ANTHROPIC_API_KEY=sk-secret",
-		"CUSTOM_FLAG=1",
-	})
-	if len(env) != 2 || !startRequestEnvHas(env, "NPM_CONFIG_CACHE", "/data/.memoh/acp/npm-cache") ||
-		!startRequestEnvHas(env, "SSL_CERT_FILE", containerToolkitCABundle) {
-		t.Fatalf("adapter lookup env = %#v", env)
-	}
-	for _, key := range []string{"ANTHROPIC_API_KEY", "CUSTOM_FLAG"} {
-		if envHasKey(env, key) {
-			t.Fatalf("adapter lookup env unexpectedly contains %s: %#v", key, env)
-		}
 	}
 }
 
@@ -2730,6 +2260,7 @@ func TestSessionPoolReapIdlePolicies(t *testing.T) {
 
 func TestCloseSessionCancelsPendingDecisions(t *testing.T) {
 	t.Parallel()
+	type contextKey struct{}
 
 	approval := &fakeToolApprovalService{}
 	userInput := &fakeUserInputCanceller{}
@@ -2743,6 +2274,7 @@ func TestCloseSessionCancelsPendingDecisions(t *testing.T) {
 		boundSession: "session-1",
 		lastActive:   time.Now(),
 		hadPrompt:    true,
+		ownerCtx:     context.WithValue(context.Background(), contextKey{}, "runtime-scope"),
 	})
 
 	if err := pool.CloseSession("session-1"); err != nil {
@@ -2756,6 +2288,12 @@ func TestCloseSessionCancelsPendingDecisions(t *testing.T) {
 	}
 	if approval.cancelCount != 2 || userInput.cancelCount != 2 {
 		t.Fatalf("decision cleanup count = approval:%d user_input:%d, want pre and final cleanup", approval.cancelCount, userInput.cancelCount)
+	}
+	if got := approval.cancelCtx.Value(contextKey{}); got != "runtime-scope" {
+		t.Fatalf("approval cleanup context value = %v, want runtime-scope", got)
+	}
+	if got := userInput.cancelCtx.Value(contextKey{}); got != "runtime-scope" {
+		t.Fatalf("user input cleanup context value = %v, want runtime-scope", got)
 	}
 }
 
@@ -2778,6 +2316,72 @@ func TestCloseSessionWithoutPromptDoesNotCancelPendingDecisions(t *testing.T) {
 	if approval.cancelCount != 0 || userInput.cancelCount != 0 {
 		t.Fatalf("ensure-only cleanup reached session decisions: approval=%d user_input=%d", approval.cancelCount, userInput.cancelCount)
 	}
+}
+
+// A handle built without an owner context still has pending approvals and
+// questions to release. Cleanup degrades to a value-less context rather than
+// skipping, which would strand those decisions in the UI.
+func TestCloseSessionCancelsPendingDecisionsWithoutOwnerContext(t *testing.T) {
+	t.Parallel()
+
+	approval := &fakeToolApprovalService{}
+	userInput := &fakeUserInputCanceller{}
+	logs := &countingLogHandler{}
+	pool := newSessionPool(slog.New(logs), nil, fakeBotGetter{})
+	pool.SetToolApprovalService(approval)
+	pool.SetUserInputService(userInput)
+	h := &runtimeHandle{
+		id: "rt-no-owner-ctx", botID: "bot-1", status: stateIdle,
+		boundSession: "session-1", lastActive: time.Now(), hadPrompt: true,
+	}
+	pool.mu.Lock()
+	pool.runtimes[h.id] = h
+	pool.bySession[h.boundSession] = h.id
+	pool.mu.Unlock()
+
+	if err := pool.CloseSession("session-1"); err != nil {
+		t.Fatalf("CloseSession() error = %v", err)
+	}
+	if approval.cancelCount != 2 || userInput.cancelCount != 2 {
+		t.Fatalf("decision cleanup count = approval:%d user_input:%d, want pre and final cleanup", approval.cancelCount, userInput.cancelCount)
+	}
+	// closeHandle and teardown both reach the cleanup path; the malformed
+	// handle is still reported once.
+	if got := logs.count(slog.LevelError); got != 1 {
+		t.Fatalf("fallback error logs = %d, want 1", got)
+	}
+}
+
+// countingLogHandler records log levels so tests can assert how often a
+// condition is reported.
+type countingLogHandler struct {
+	mu     sync.Mutex
+	levels []slog.Level
+}
+
+func (*countingLogHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *countingLogHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.levels = append(h.levels, r.Level)
+	return nil
+}
+
+func (h *countingLogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+
+func (h *countingLogHandler) WithGroup(string) slog.Handler { return h }
+
+func (h *countingLogHandler) count(level slog.Level) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, l := range h.levels {
+		if l == level {
+			n++
+		}
+	}
+	return n
 }
 
 func TestPendingDecisionCleanupRunsServicesIndependently(t *testing.T) {
@@ -2880,7 +2484,129 @@ func (g fakeSessionGetter) Get(context.Context, string) (SessionDescriptor, erro
 	return g.session, g.err
 }
 
+type recordingSessionStateStore struct {
+	mu              sync.Mutex
+	head            SessionPublicationHead
+	headSet         bool
+	headFound       bool
+	headErr         error
+	headCalls       int
+	epoch           RuntimeConfigEpoch
+	epochErr        error
+	epochCalls      int
+	state           PersistedSessionState
+	records         []SessionStateRecord
+	found           bool
+	loadErr         error
+	replaceErr      error
+	loadCalls       int
+	replaceCalls    int
+	replaced        PersistedSessionState
+	replacedRecords []SessionStateRecord
+	replaceFence    runtimefence.Fence
+	guardCalls      int
+	guardErr        error
+}
+
+func (s *recordingSessionStateStore) RuntimeConfigEpoch(context.Context, string, string) (RuntimeConfigEpoch, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.epochCalls++
+	return s.epoch, s.epochErr
+}
+
+func (s *recordingSessionStateStore) GuardRuntimeSync(ctx context.Context, _ string, _ int64, fn func(context.Context) error) error {
+	s.mu.Lock()
+	s.guardCalls++
+	err := s.guardErr
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return fn(ctx)
+}
+
+func (s *recordingSessionStateStore) CanonicalShape(context.Context, string, string) (map[string]SessionStateFileShape, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.found {
+		return nil, false, nil
+	}
+	shapes := make(map[string]SessionStateFileShape, len(s.state.Files))
+	for _, file := range s.state.Files {
+		shapes[file.Path] = file.SessionStateFileShape
+	}
+	return shapes, true, nil
+}
+
+func (s *recordingSessionStateStore) Head(context.Context, string, string) (SessionPublicationHead, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.headCalls++
+	if s.headSet {
+		return s.head, s.headFound, s.headErr
+	}
+	if s.found {
+		return SessionPublicationHead{
+			RunID: s.state.ThroughRunID,
+			Kind:  SessionPublicationCheckpoint,
+		}, true, s.headErr
+	}
+	return SessionPublicationHead{}, false, s.headErr
+}
+
+func (s *recordingSessionStateStore) Load(ctx context.Context, _, _ string, consume SessionStateRecordConsumer) (bool, error) {
+	s.mu.Lock()
+	s.loadCalls++
+	state, found, loadErr := s.state, s.found, s.loadErr
+	records := append([]SessionStateRecord(nil), s.records...)
+	s.mu.Unlock()
+	if loadErr != nil || !found {
+		return found, loadErr
+	}
+	index := 0
+	reader := func(context.Context) (SessionStateRecord, error) {
+		if index == len(records) {
+			return SessionStateRecord{}, io.EOF
+		}
+		record := records[index]
+		index++
+		return record, nil
+	}
+	return true, consume(ctx, state, reader)
+}
+
+func (s *recordingSessionStateStore) Replace(ctx context.Context, _, _ string, state PersistedSessionState, reader SessionStateRecordReader) error {
+	var records []SessionStateRecord
+	for {
+		record, err := reader(ctx)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		records = append(records, record)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.replaceCalls++
+	s.replaced = state
+	s.replacedRecords = records
+	s.replaceFence, _ = runtimefence.FromContext(ctx)
+	return s.replaceErr
+}
+
+func (s *recordingSessionStateStore) setHead(head SessionPublicationHead, found bool) {
+	s.mu.Lock()
+	s.head = head
+	s.headSet = true
+	s.headFound = found
+	s.mu.Unlock()
+}
+
 type fakeToolApprovalService struct {
+	cancelCtx       context.Context
 	cancelBotID     string
 	cancelSessionID string
 	cancelReason    string
@@ -2921,6 +2647,7 @@ func (f *fakeToolApprovalService) CancelPendingForSession(ctx context.Context, b
 	if f.cancelRelease != nil {
 		<-f.cancelRelease
 	}
+	f.cancelCtx = ctx
 	f.cancelBotID = botID
 	f.cancelSessionID = sessionID
 	f.cancelReason = reason
@@ -2930,6 +2657,7 @@ func (f *fakeToolApprovalService) CancelPendingForSession(ctx context.Context, b
 }
 
 type fakeUserInputCanceller struct {
+	cancelCtx       context.Context
 	cancelBotID     string
 	cancelSessionID string
 	cancelReason    string
@@ -2958,6 +2686,7 @@ func (f *fakeUserInputCanceller) CancelPendingForSession(ctx context.Context, bo
 	if f.cancelStarted != nil {
 		f.cancelStarted <- struct{}{}
 	}
+	f.cancelCtx = ctx
 	f.cancelBotID = botID
 	f.cancelSessionID = sessionID
 	f.cancelReason = reason
@@ -2970,39 +2699,6 @@ type recordingRunner struct {
 	info     bridge.WorkspaceInfo
 	req      client.StartRequest
 	startErr error
-}
-
-type dynamicStartResult struct {
-	session *client.Session
-	err     error
-}
-
-type dynamicRecordingRunner struct {
-	mu             sync.Mutex
-	info           bridge.WorkspaceInfo
-	versions       []string
-	resolveErrs    []error
-	resolveCalls   int
-	blockResolve   bool
-	resolveStarted chan struct{}
-	resolveRelease <-chan struct{}
-	resolveOnce    sync.Once
-	reqs           []client.StartRequest
-	starts         []dynamicStartResult
-	blockDynamic   bool
-	dynamicStarted chan struct{}
-	dynamicRelease <-chan struct{}
-	startOnce      sync.Once
-}
-
-type caBundleRunner struct {
-	client *bridge.Client
-}
-
-type caBundleStatServer struct {
-	pb.UnimplementedContainerServiceServer
-	mu   sync.Mutex
-	path string
 }
 
 type hermesRecordingRunner struct {
@@ -3070,111 +2766,6 @@ func (r *recordingRunner) WorkspaceInfo(context.Context, string) (bridge.Workspa
 func (r *recordingRunner) StartSession(_ context.Context, req client.StartRequest, _ client.EventSink) (*client.Session, error) {
 	r.req = req
 	return nil, r.startErr
-}
-
-func (r *dynamicRecordingRunner) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
-	return r.info, nil
-}
-
-func (r *dynamicRecordingRunner) ResolveACPAdapterVersion(ctx context.Context, _ string, _ string, _ []string) (string, error) {
-	r.mu.Lock()
-	r.resolveCalls++
-	block := r.blockResolve
-	started := r.resolveStarted
-	release := r.resolveRelease
-	r.mu.Unlock()
-	if block {
-		r.resolveOnce.Do(func() {
-			if started != nil {
-				close(started)
-			}
-		})
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-release:
-		}
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var err error
-	if len(r.resolveErrs) > 0 {
-		err = r.resolveErrs[0]
-		r.resolveErrs = r.resolveErrs[1:]
-	}
-	if err != nil {
-		return "", err
-	}
-	if len(r.versions) == 0 {
-		return "", errors.New("no fake npm version configured")
-	}
-	version := r.versions[0]
-	r.versions = r.versions[1:]
-	return version, nil
-}
-
-func (r *dynamicRecordingRunner) StartSession(ctx context.Context, req client.StartRequest, _ client.EventSink) (*client.Session, error) {
-	r.mu.Lock()
-	r.reqs = append(r.reqs, req)
-	block := r.blockDynamic && req.Command == "npx"
-	r.mu.Unlock()
-	if block {
-		r.startOnce.Do(func() {
-			if r.dynamicStarted != nil {
-				close(r.dynamicStarted)
-			}
-		})
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-r.dynamicRelease:
-		}
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.starts) == 0 {
-		return nil, errors.New("no fake session start result configured")
-	}
-	result := r.starts[0]
-	r.starts = r.starts[1:]
-	return result.session, result.err
-}
-
-func (r *dynamicRecordingRunner) requests() []client.StartRequest {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]client.StartRequest(nil), r.reqs...)
-}
-
-func (r *dynamicRecordingRunner) resolveCallCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.resolveCalls
-}
-
-func resolveAdapterVersionForTest(pool *SessionPool, botID, packageName string) (string, error) {
-	_, version, err := pool.resolveDynamicAdapter(context.Background(), botID, packageName, nil)
-	return version, err
-}
-
-func (*caBundleRunner) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
-	return bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"}, nil
-}
-
-func (*caBundleRunner) StartSession(context.Context, client.StartRequest, client.EventSink) (*client.Session, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (r *caBundleRunner) MCPClient(context.Context, string) (*bridge.Client, error) {
-	return r.client, nil
-}
-
-func (s *caBundleStatServer) Stat(_ context.Context, req *pb.StatRequest) (*pb.StatResponse, error) {
-	s.mu.Lock()
-	s.path = req.GetPath()
-	s.mu.Unlock()
-	return &pb.StatResponse{Entry: &pb.FileEntry{Path: filepath.Base(req.GetPath())}}, nil
 }
 
 func (r *hermesRecordingRunner) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
@@ -3319,33 +2910,6 @@ func (s *sessionPoolExecStream) Recv() (*pb.ExecInput, error) {
 	return input, nil
 }
 
-func newCABundleStatClient(t *testing.T) (*bridge.Client, *caBundleStatServer) {
-	t.Helper()
-	listener := bufconn.Listen(1024 * 1024)
-	server := grpc.NewServer()
-	statServer := &caBundleStatServer{}
-	pb.RegisterContainerServiceServer(server, statServer)
-	go func() {
-		_ = server.Serve(listener)
-	}()
-	t.Cleanup(func() {
-		server.Stop()
-		_ = listener.Close()
-	})
-
-	conn, err := grpc.NewClient("passthrough:///acpagent-ca-bundle-test",
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return listener.DialContext(ctx)
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return bridge.NewClientFromConn(conn), statServer
-}
-
 func readSessionPoolFile(t *testing.T, root string, parts ...string) string {
 	t.Helper()
 	pathParts := append([]string{root}, parts...)
@@ -3454,6 +3018,65 @@ func (a *sessionPoolFakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) 
 		image := p.Prompt[0].Image
 		if image.Data != "aW1hZ2U=" || image.MimeType != "image/png" {
 			return acp.PromptResponse{}, fmt.Errorf("image block = %#v, want inline PNG", image)
+		}
+	}
+	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_WRITE_STATE") == "1" {
+		home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+		if home == "" {
+			return acp.PromptResponse{}, errors.New("CODEX_HOME is missing")
+		}
+		dir := filepath.Join(home, "sessions", "2026", "08", "12")
+		if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // fake agent writes beneath its process-owned test home.
+			return acp.PromptResponse{}, err
+		}
+		var promptText strings.Builder
+		for _, block := range p.Prompt {
+			if block.Text != nil {
+				promptText.WriteString(block.Text.Text)
+			}
+		}
+		meta, err := json.Marshal(map[string]any{
+			"type":    "session_meta",
+			"payload": map[string]string{"id": string(p.SessionId)},
+		})
+		if err != nil {
+			return acp.PromptResponse{}, err
+		}
+		line, err := json.Marshal(map[string]string{"type": "message", "prompt": promptText.String()})
+		if err != nil {
+			return acp.PromptResponse{}, err
+		}
+		transcript := filepath.Join(dir, "rollout-"+string(p.SessionId)+".jsonl")
+		terminal, err := json.Marshal(map[string]any{
+			"type": "event_msg",
+			"payload": map[string]string{
+				"type": "task_complete",
+			},
+		})
+		if err != nil {
+			return acp.PromptResponse{}, err
+		}
+		data := make([]byte, 0, len(meta)+len(line)+len(terminal)+3)
+		if _, statErr := os.Stat(transcript); errors.Is(statErr, os.ErrNotExist) { //nolint:gosec // fake session ID is generated by the in-process test agent.
+			data = append(data, meta...)
+			data = append(data, '\n')
+		} else if statErr != nil {
+			return acp.PromptResponse{}, statErr
+		}
+		data = append(data, line...)
+		data = append(data, '\n')
+		data = append(data, terminal...)
+		data = append(data, '\n')
+		file, err := os.OpenFile(transcript, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // fake agent writes its process-owned test transcript.
+		if err != nil {
+			return acp.PromptResponse{}, err
+		}
+		if _, err := file.Write(data); err != nil {
+			_ = file.Close()
+			return acp.PromptResponse{}, err
+		}
+		if err := file.Close(); err != nil {
+			return acp.PromptResponse{}, err
 		}
 	}
 	a.appendConfigLog(fmt.Sprintf("prompt:model=%s,reasoning=%s", a.modelID, a.reasoningEffort))

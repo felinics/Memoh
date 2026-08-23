@@ -22,10 +22,6 @@ func NewSource(threads *thread.Service) *Source {
 	return &Source{threads: threads}
 }
 
-func newSource(threads threadGetter) *Source {
-	return &Source{threads: threads}
-}
-
 func (s *Source) Get(ctx context.Context, sessionID string) (acp.SessionDescriptor, error) {
 	if s == nil || s.threads == nil {
 		return acp.SessionDescriptor{}, errors.New("thread service unavailable")

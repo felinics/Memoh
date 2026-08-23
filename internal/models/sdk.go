@@ -99,8 +99,8 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			anthropicmessages.WithAPIKey(cfg.APIKey),
 		}
 		opts = append(opts, anthropicmessages.WithHTTPClient(cfg.HTTPClient))
-		if cfg.BaseURL != "" {
-			opts = append(opts, anthropicmessages.WithBaseURL(cfg.BaseURL))
+		if baseURL := anthropicMessagesBaseURL(cfg.BaseURL); baseURL != "" {
+			opts = append(opts, anthropicmessages.WithBaseURL(baseURL))
 		}
 		// Anthropic extended thinking has two wire shapes by model generation:
 		//   - 4.6+ (Adaptive): thinking{type:"adaptive"}; effort is carried
@@ -296,6 +296,21 @@ func legacyAnthropicBudgetFor(effort string) int {
 		return b
 	}
 	return anthropicLegacyBudget[ReasoningEffortMedium]
+}
+
+// anthropicMessagesBaseURL normalizes a configured Anthropic base URL to the
+// versioned API root the SDK joins /messages onto. Provider configs follow the
+// template convention of a bare origin (https://api.anthropic.com), which
+// model import already bridged by appending /v1; every other construction
+// site passed the origin through verbatim, sending requests to
+// {origin}/messages and failing on any endpoint. Normalizing here covers
+// them all.
+func anthropicMessagesBaseURL(baseURL string) string {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if baseURL == "" || strings.HasSuffix(baseURL, "/v1") {
+		return baseURL
+	}
+	return baseURL + "/v1"
 }
 
 // ResolveClientType infers the client type string from an SDK Model's provider name.

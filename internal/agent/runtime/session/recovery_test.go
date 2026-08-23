@@ -187,6 +187,7 @@ func (f *waitingDecisionRecoveryFence) recordedReclaims() [][2]int64 {
 }
 
 func TestWaitingDecisionRecoveryRetriesAfterFenceCommitWhenLiveReservationFails(t *testing.T) {
+	type contextKey struct{}
 	const (
 		runID      = "run-waiting-recovery"
 		sessionID  = "session-waiting-recovery"
@@ -221,8 +222,9 @@ func TestWaitingDecisionRecoveryRetriesAfterFenceCommitWhenLiveReservationFails(
 	manager.SetDecisionStore(decisions)
 	reaper := newTestReaperWithLiveness(t, runs, backend, "generation-new")
 	reaper.SetWaitingDecisionRecoverer(manager.recoverWaitingDecision)
+	reaperCtx := context.WithValue(context.Background(), contextKey{}, "reaper-scope")
 
-	reaper.tick(context.Background())
+	reaper.tick(reaperCtx)
 
 	firstRun, err := runs.Get(context.Background(), runID)
 	if err != nil {
@@ -242,7 +244,7 @@ func TestWaitingDecisionRecoveryRetriesAfterFenceCommitWhenLiveReservationFails(
 		t.Fatalf("retry pointer changed after reservation failure: indexed=%+v release_calls=%d applied=%d", indexed, releaseCalls, releaseApplied)
 	}
 
-	reaper.tick(context.Background())
+	reaper.tick(reaperCtx)
 
 	secondRun, err := runs.Get(context.Background(), runID)
 	if err != nil {
@@ -257,6 +259,10 @@ func TestWaitingDecisionRecoveryRetriesAfterFenceCommitWhenLiveReservationFails(
 	}
 	if startCalls != 2 || ref.FencingToken != 7 || manager.localControlForScope(testBotID, sessionID, runID) == nil {
 		t.Fatalf("retried live reservation = starts:%d ref:%+v", startCalls, ref)
+	}
+	ctrl := manager.localControlForScope(testBotID, sessionID, runID)
+	if got := ctrl.lifecycleCtx.Value(contextKey{}); got != "reaper-scope" {
+		t.Fatalf("recovered run context value = %v, want reaper-scope", got)
 	}
 	if indexed.FencingToken != 7 || releaseCalls != 1 || releaseApplied != 0 {
 		t.Fatalf("stale release changed successor lease: indexed=%+v release_calls=%d applied=%d", indexed, releaseCalls, releaseApplied)

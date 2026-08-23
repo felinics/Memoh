@@ -1140,6 +1140,7 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 			StopReason: "end_turn",
 		}),
 		nil,
+		true,
 		nil,
 	)
 	if err != nil {
@@ -1158,6 +1159,16 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 	}
 	if assistantMeta["stop_reason"] != "end_turn" {
 		t.Fatalf("stop_reason = %#v, want end_turn", assistantMeta["stop_reason"])
+	}
+	if assistantMeta["acp_turn_outcome"] != "succeeded" {
+		t.Fatalf("ACP outcome metadata = %#v", assistantMeta)
+	}
+	if len(messages.roundOptions) == 0 {
+		t.Fatal("round persisted without atomic options")
+	}
+	publication := messages.roundOptions[len(messages.roundOptions)-1].ACPPublication
+	if publication == nil || publication.CheckpointReset {
+		t.Fatalf("ACP publication = %#v, want resumable checkpoint", publication)
 	}
 }
 
@@ -1195,6 +1206,7 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 			StopReason: "end_turn",
 		}),
 		nil,
+		true,
 		nil,
 	)
 	if err != nil {
@@ -1230,6 +1242,16 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 	if got := after.TextContent(); got != "After" {
 		t.Fatalf("last assistant text = %q, want After", got)
 	}
+	if messages.persisted[1].Metadata["acp_turn_outcome"] != nil {
+		t.Fatalf("intermediate assistant unexpectedly claims the turn outcome: %#v", messages.persisted[1].Metadata)
+	}
+	if messages.persisted[3].Metadata["acp_turn_outcome"] != "succeeded" {
+		t.Fatalf("final assistant outcome metadata = %#v", messages.persisted[3].Metadata)
+	}
+	publication := messages.roundOptions[len(messages.roundOptions)-1].ACPPublication
+	if publication == nil || publication.CheckpointReset {
+		t.Fatalf("ACP publication = %#v, want resumable checkpoint", publication)
+	}
 }
 
 func TestPersistACPRoundAttachesLifecycleOnlyToFinalAssistant(t *testing.T) {
@@ -1257,6 +1279,7 @@ func TestPersistACPRoundAttachesLifecycleOnlyToFinalAssistant(t *testing.T) {
 			},
 		}),
 		nil,
+		true,
 		holder,
 	)
 	if err != nil {
@@ -1295,6 +1318,7 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 			StopReason: "end_turn",
 		}),
 		nil,
+		true,
 		nil,
 	)
 	if err != nil {
@@ -1328,6 +1352,7 @@ func TestPersistACPRoundEmptyTextLeavesAssistantBlank(t *testing.T) {
 		"/data/app",
 		acpclient.PromptResult{},
 		nil,
+		true,
 		nil,
 	); err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)
@@ -1360,6 +1385,7 @@ func TestPersistACPRoundEmptyOutputKeepsUsage(t *testing.T) {
 			},
 		},
 		nil,
+		true,
 		nil,
 	); err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)
@@ -1432,6 +1458,12 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	}
 	if got, _ := messages.persisted[1].Metadata["error_code"].(string); got != "acp_runtime_prompt_failed" {
 		t.Fatalf("assistant error code metadata = %#v", messages.persisted[1].Metadata)
+	}
+	if got := messages.persisted[1].Metadata["acp_turn_outcome"]; got != "failed" {
+		t.Fatalf("assistant failure outcome = %#v, want failed", got)
+	}
+	if publication := messages.roundOptions[len(messages.roundOptions)-1].ACPPublication; publication != nil {
+		t.Fatalf("failed turn unexpectedly published head: %#v", publication)
 	}
 	events := drainAgentEvents(t, eventCh)
 	abort := requireStreamEvent(t, events, native.EventAbort)
@@ -2064,6 +2096,8 @@ type recordingACPPrompter struct {
 	onPrompt     func()
 	streamEvents []event.StreamEvent
 	afterEvents  func()
+	closed       []string
+	closeErr     error
 }
 
 type storeRoundMemoryProvider struct {
@@ -2089,7 +2123,6 @@ func (*storeRoundSettingsQueries) GetSettingsByBotID(_ context.Context, botID pg
 		BotID:                   botID,
 		Language:                "auto",
 		ReasoningEffort:         "medium",
-		HeartbeatInterval:       30,
 		CompactionTargetPercent: pgtype.Int4{},
 		MemoryProviderID:        flowTestUUID(storeRoundMemoryProviderID),
 	}, nil
@@ -2125,6 +2158,11 @@ func (p *recordingACPPrompter) Prompt(ctx context.Context, input acpagent.Prompt
 		p.afterEvents()
 	}
 	return p.result, p.err
+}
+
+func (p *recordingACPPrompter) CloseSession(sessionID string) error {
+	p.closed = append(p.closed, sessionID)
+	return p.closeErr
 }
 
 type fakeBotPermissionChecker struct {
@@ -2306,6 +2344,7 @@ func transcriptModelMessages(result acpclient.PromptResult) []ModelMessage {
 // withTranscriptOutput fills PromptResult.Output from streamed events.
 func withTranscriptOutput(result acpclient.PromptResult) acpclient.PromptResult {
 	result.Output = acpclient.TranscriptFromEvents(result.Events, result.Text)
+	result.CheckpointStaged = true
 	return result
 }
 

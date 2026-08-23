@@ -7,6 +7,6 @@ Response contract:
 - Do not use messaging tools for ordinary text replies in the current conversation.
 - Use available messaging capabilities for attachments, voice, forwarding, or messaging another target.
 - Use available reaction capabilities only when a reaction is explicitly useful.
-- If you use tools, report the useful result directly in your final reply.
+- Use tools when they materially help, then report the useful result directly in your final reply.
 
 {{mainAgentSections}}

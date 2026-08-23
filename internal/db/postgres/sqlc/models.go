@@ -8,6 +8,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AcpSessionPublication struct {
+	TeamID          pgtype.UUID        `json:"team_id"`
+	SessionID       pgtype.UUID        `json:"session_id"`
+	RunID           pgtype.UUID        `json:"run_id"`
+	CheckpointReset bool               `json:"checkpoint_reset"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AcpSessionState struct {
+	TeamID              pgtype.UUID        `json:"team_id"`
+	SessionID           pgtype.UUID        `json:"session_id"`
+	ThroughRunID        pgtype.UUID        `json:"through_run_id"`
+	AgentID             string             `json:"agent_id"`
+	AcpSessionID        string             `json:"acp_session_id"`
+	Cwd                 string             `json:"cwd"`
+	TranscriptPath      string             `json:"transcript_path"`
+	RuntimeFencingToken int64              `json:"runtime_fencing_token"`
+	FileCount           int32              `json:"file_count"`
+	RecordCount         int64              `json:"record_count"`
+	FileShapes          []byte             `json:"file_shapes"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AcpSessionStateLine struct {
+	TeamID       pgtype.UUID `json:"team_id"`
+	SessionID    pgtype.UUID `json:"session_id"`
+	FilePath     string      `json:"file_path"`
+	LineNumber   int64       `json:"line_number"`
+	Content      string      `json:"content"`
+	ContentBytes int32       `json:"content_bytes"`
+}
+
 type Bot struct {
 	ID                      pgtype.UUID        `json:"id"`
 	OwnerUserID             pgtype.UUID        `json:"owner_user_id"`
@@ -28,10 +61,6 @@ type Bot struct {
 	SearchProviderID        pgtype.UUID        `json:"search_provider_id"`
 	FetchProviderID         pgtype.UUID        `json:"fetch_provider_id"`
 	MemoryProviderID        pgtype.UUID        `json:"memory_provider_id"`
-	HeartbeatEnabled        bool               `json:"heartbeat_enabled"`
-	HeartbeatInterval       int32              `json:"heartbeat_interval"`
-	HeartbeatPrompt         string             `json:"heartbeat_prompt"`
-	HeartbeatModelID        pgtype.UUID        `json:"heartbeat_model_id"`
 	CompactionEnabled       bool               `json:"compaction_enabled"`
 	CompactionThreshold     int32              `json:"compaction_threshold"`
 	CompactionTargetPercent pgtype.Int4        `json:"compaction_target_percent"`
@@ -49,6 +78,9 @@ type Bot struct {
 	OverlayEnabled          bool               `json:"overlay_enabled"`
 	OverlayConfig           []byte             `json:"overlay_config"`
 	Metadata                []byte             `json:"metadata"`
+	RuntimeResetToken       pgtype.UUID        `json:"runtime_reset_token"`
+	RuntimeResetExpiresAt   pgtype.Timestamptz `json:"runtime_reset_expires_at"`
+	RuntimeConfigEpoch      int64              `json:"runtime_config_epoch"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 	AclDefaultEffect        string             `json:"acl_default_effect"`
@@ -131,20 +163,6 @@ type BotEmailBinding struct {
 	TeamID          pgtype.UUID        `json:"team_id"`
 }
 
-type BotHeartbeatLog struct {
-	ID           pgtype.UUID        `json:"id"`
-	BotID        pgtype.UUID        `json:"bot_id"`
-	SessionID    pgtype.UUID        `json:"session_id"`
-	Status       string             `json:"status"`
-	ResultText   string             `json:"result_text"`
-	ErrorMessage string             `json:"error_message"`
-	Usage        []byte             `json:"usage"`
-	ModelID      pgtype.UUID        `json:"model_id"`
-	StartedAt    pgtype.Timestamptz `json:"started_at"`
-	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
-	TeamID       pgtype.UUID        `json:"team_id"`
-}
-
 type BotHistoryMessage struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
@@ -214,35 +232,6 @@ type BotHistoryMessageCompact struct {
 	TeamID          pgtype.UUID        `json:"team_id"`
 }
 
-type BotPluginInstallation struct {
-	ID          pgtype.UUID        `json:"id"`
-	BotID       pgtype.UUID        `json:"bot_id"`
-	PluginID    string             `json:"plugin_id"`
-	PluginName  string             `json:"plugin_name"`
-	Version     string             `json:"version"`
-	Status      string             `json:"status"`
-	Enabled     bool               `json:"enabled"`
-	Config      []byte             `json:"config"`
-	Metadata    []byte             `json:"metadata"`
-	Manifest    []byte             `json:"manifest"`
-	InstalledAt pgtype.Timestamptz `json:"installed_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	TeamID      pgtype.UUID        `json:"team_id"`
-}
-
-type BotPluginResource struct {
-	ID             pgtype.UUID        `json:"id"`
-	InstallationID pgtype.UUID        `json:"installation_id"`
-	ResourceType   string             `json:"resource_type"`
-	ResourceKey    string             `json:"resource_key"`
-	ResourceID     string             `json:"resource_id"`
-	Status         string             `json:"status"`
-	Metadata       []byte             `json:"metadata"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	TeamID         pgtype.UUID        `json:"team_id"`
-}
-
 type BotRemoteRuntimeBinding struct {
 	ID                 pgtype.UUID        `json:"id"`
 	BotID              pgtype.UUID        `json:"bot_id"`
@@ -255,27 +244,30 @@ type BotRemoteRuntimeBinding struct {
 }
 
 type BotSession struct {
-	ID                  pgtype.UUID        `json:"id"`
-	BotID               pgtype.UUID        `json:"bot_id"`
-	RouteID             pgtype.UUID        `json:"route_id"`
-	ChannelType         pgtype.Text        `json:"channel_type"`
-	Type                string             `json:"type"`
-	SessionMode         string             `json:"session_mode"`
-	RuntimeType         string             `json:"runtime_type"`
-	RuntimeMetadata     []byte             `json:"runtime_metadata"`
-	Visibility          string             `json:"visibility"`
-	Title               string             `json:"title"`
-	Metadata            []byte             `json:"metadata"`
-	NextTurnPosition    int64              `json:"next_turn_position"`
-	CompactionEpoch     int64              `json:"compaction_epoch"`
-	RuntimeFencingToken int64              `json:"runtime_fencing_token"`
-	ParentSessionID     pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID     pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
-	TeamID              pgtype.UUID        `json:"team_id"`
-	WorkdirID           pgtype.UUID        `json:"workdir_id"`
+	ID                    pgtype.UUID        `json:"id"`
+	BotID                 pgtype.UUID        `json:"bot_id"`
+	RouteID               pgtype.UUID        `json:"route_id"`
+	ChannelType           pgtype.Text        `json:"channel_type"`
+	Type                  string             `json:"type"`
+	SessionMode           string             `json:"session_mode"`
+	RuntimeType           string             `json:"runtime_type"`
+	RuntimeMetadata       []byte             `json:"runtime_metadata"`
+	Visibility            string             `json:"visibility"`
+	Title                 string             `json:"title"`
+	Metadata              []byte             `json:"metadata"`
+	NextTurnPosition      int64              `json:"next_turn_position"`
+	CompactionEpoch       int64              `json:"compaction_epoch"`
+	RuntimeFencingToken   int64              `json:"runtime_fencing_token"`
+	RuntimeResetToken     pgtype.UUID        `json:"runtime_reset_token"`
+	RuntimeResetExpiresAt pgtype.Timestamptz `json:"runtime_reset_expires_at"`
+	RuntimeConfigEpoch    int64              `json:"runtime_config_epoch"`
+	ParentSessionID       pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID       pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
+	TeamID                pgtype.UUID        `json:"team_id"`
+	WorkdirID             pgtype.UUID        `json:"workdir_id"`
 }
 
 type BotSessionDiscussCursor struct {
@@ -300,6 +292,18 @@ type BotSessionEvent struct {
 	ReceivedAtMs            int64              `json:"received_at_ms"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	TeamID                  pgtype.UUID        `json:"team_id"`
+}
+
+type BotSkillPackageInstallation struct {
+	ID                pgtype.UUID        `json:"id"`
+	TeamID            pgtype.UUID        `json:"team_id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	WorkspaceTargetID string             `json:"workspace_target_id"`
+	RegistryID        string             `json:"registry_id"`
+	PackageID         string             `json:"package_id"`
+	Revision          string             `json:"revision"`
+	InstalledAt       pgtype.Timestamptz `json:"installed_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotStorageBinding struct {
@@ -508,24 +512,20 @@ type LifecycleEvent struct {
 }
 
 type McpConnection struct {
-	ID                            pgtype.UUID        `json:"id"`
-	BotID                         pgtype.UUID        `json:"bot_id"`
-	Name                          string             `json:"name"`
-	Type                          string             `json:"type"`
-	Config                        []byte             `json:"config"`
-	IsActive                      bool               `json:"is_active"`
-	Status                        string             `json:"status"`
-	ToolsCache                    []byte             `json:"tools_cache"`
-	LastProbedAt                  pgtype.Timestamptz `json:"last_probed_at"`
-	StatusMessage                 string             `json:"status_message"`
-	AuthType                      string             `json:"auth_type"`
-	ManagedByPluginInstallationID pgtype.UUID        `json:"managed_by_plugin_installation_id"`
-	ManagedResourceKey            string             `json:"managed_resource_key"`
-	Visible                       bool               `json:"visible"`
-	Metadata                      []byte             `json:"metadata"`
-	CreatedAt                     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt                     pgtype.Timestamptz `json:"updated_at"`
-	TeamID                        pgtype.UUID        `json:"team_id"`
+	ID            pgtype.UUID        `json:"id"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	Name          string             `json:"name"`
+	Type          string             `json:"type"`
+	Config        []byte             `json:"config"`
+	IsActive      bool               `json:"is_active"`
+	Status        string             `json:"status"`
+	ToolsCache    []byte             `json:"tools_cache"`
+	LastProbedAt  pgtype.Timestamptz `json:"last_probed_at"`
+	StatusMessage string             `json:"status_message"`
+	AuthType      string             `json:"auth_type"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	TeamID        pgtype.UUID        `json:"team_id"`
 }
 
 type McpOauthToken struct {

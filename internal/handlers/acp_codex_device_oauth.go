@@ -202,7 +202,7 @@ func (h *ACPCodexOAuthHandler) PollDevice(c echo.Context) error {
 		updated := h.finishDevicePollError(sessionID, generation, exchangeErr, time.Now().UTC())
 		return c.JSON(http.StatusOK, deviceStatusResponse(updated))
 	}
-	writeCtx, err := h.beginDeviceAuthWrite(c.Request().Context(), sessionID, generation, time.Now().UTC())
+	writeCtx, writeCancel, err := h.beginDeviceAuthWrite(c.Request().Context(), sessionID, generation, time.Now().UTC())
 	if err != nil {
 		updated := h.deviceSessionSnapshot(sessionID)
 		if updated == nil {
@@ -210,6 +210,7 @@ func (h *ACPCodexOAuthHandler) PollDevice(c echo.Context) error {
 		}
 		return c.JSON(http.StatusOK, deviceStatusResponse(updated))
 	}
+	defer writeCancel()
 	writeErr := h.writeCodexOAuthAuth(writeCtx, botID, creds)
 	updated := h.finishDeviceAuthWrite(sessionID, generation, creds.AccountID, writeErr, time.Now().UTC())
 	return c.JSON(http.StatusOK, deviceStatusResponse(updated))
@@ -319,16 +320,21 @@ func (h *ACPCodexOAuthHandler) finishDevicePollError(sessionID string, generatio
 	return session.clone()
 }
 
-func (h *ACPCodexOAuthHandler) beginDeviceAuthWrite(parentCtx context.Context, sessionID string, generation int64, now time.Time) (context.Context, error) {
+func (h *ACPCodexOAuthHandler) beginDeviceAuthWrite(
+	parentCtx context.Context,
+	sessionID string,
+	generation int64,
+	now time.Time,
+) (context.Context, context.CancelFunc, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	session := h.deviceSessions[sessionID]
 	if !deviceSessionMatchesGeneration(session, generation) {
-		return nil, errors.New("device authorization session changed before auth write")
+		return nil, nil, errors.New("device authorization session changed before auth write")
 	}
 	if !session.ExpiresAt.IsZero() && now.After(session.ExpiresAt) {
 		expireDeviceSessionLocked(session, now)
-		return nil, errors.New("device authorization session expired before auth write")
+		return nil, nil, errors.New("device authorization session expired before auth write")
 	}
 	var writeCtx context.Context
 	var writeCancel context.CancelFunc
@@ -339,7 +345,7 @@ func (h *ACPCodexOAuthHandler) beginDeviceAuthWrite(parentCtx context.Context, s
 	}
 	session.Status = acpCodexDeviceAuthStatusWriting
 	session.WriteCancel = writeCancel
-	return writeCtx, nil
+	return writeCtx, writeCancel, nil
 }
 
 func (h *ACPCodexOAuthHandler) finishDeviceAuthWrite(sessionID string, generation int64, accountID string, writeErr error, now time.Time) *acpCodexDeviceAuthSession {

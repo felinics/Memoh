@@ -59,7 +59,7 @@ func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available Ava
 	listSessionsRef := ""
 	if ref, ok := available.Ref(ToolListSessions()); ok {
 		listSessionsRef = ref
-		parts = append(parts, ref+": List accessible chat sessions with their bound contact/route info. Filter by `type` (chat/heartbeat/schedule) or `platform`.")
+		parts = append(parts, ref+": List accessible chat sessions with their bound contact/route info. Filter by `type` (chat/schedule) or `platform`.")
 	}
 	if ref, ok := available.Ref(ToolGetMessages()); ok {
 		parts = append(parts, ref+": Get recent messages from the current or selected session, or resolve one exact `message_id`.")
@@ -89,8 +89,8 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 				"properties": map[string]any{
 					"type": map[string]any{
 						"type":        "string",
-						"description": "Filter by session type: chat, heartbeat, or schedule. Returns all types when omitted.",
-						"enum":        []string{"chat", "heartbeat", "schedule"},
+						"description": "Filter by session type: chat or schedule. Returns all types when omitted.",
+						"enum":        []string{"chat", "schedule"},
 					},
 					"platform": map[string]any{
 						"type":        "string",
