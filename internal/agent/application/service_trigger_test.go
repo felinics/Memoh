@@ -195,6 +195,61 @@ func TestConsumeTriggeredStreamSkipsPersistenceOnOwnershipLoss(t *testing.T) {
 	}
 }
 
+func TestConsumeTriggeredStreamReportsAbortWithPartialTranscript(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	svc := newTriggerStreamService(messages, &recordingTurnEventPublisher{})
+
+	// A routed abort (web stop, runtime revoke) cancels the run context with
+	// a cause; the terminal event still carries the partial transcript.
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(context.Canceled)
+
+	messagesJSON, err := json.Marshal([]sdk.Message{sdk.AssistantMessage("partial answer")})
+	if err != nil {
+		t.Fatalf("marshal abort messages: %v", err)
+	}
+	events := make(chan native.StreamEvent, 2)
+	events <- native.StreamEvent{Type: native.EventTextDelta, Delta: "working"}
+	events <- native.StreamEvent{Type: native.EventAgentAbort, Messages: messagesJSON}
+	close(events)
+
+	_, err = svc.consumeTriggeredStream(ctx, events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("consumeTriggeredStream() error = %v, want the abort cause, not a success", err)
+	}
+	// The abort changes the reported outcome, not the history discipline: the
+	// partial transcript persists for audit exactly like a clean terminal.
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted %d messages, want user + partial assistant", len(messages.persisted))
+	}
+}
+
+func TestConsumeTriggeredStreamDeferredApprovalIsNotAnAbort(t *testing.T) {
+	t.Parallel()
+
+	svc := newTriggerStreamService(&recordingMessageService{}, &recordingTurnEventPublisher{})
+
+	messagesJSON, err := json.Marshal([]sdk.Message{sdk.AssistantMessage("needs approval")})
+	if err != nil {
+		t.Fatalf("marshal deferred messages: %v", err)
+	}
+	events := make(chan native.StreamEvent, 1)
+	// A deferred approval pauses the run for a decision; it is not a stopped
+	// run, so the outcome stays ok (mirrors the WS loop's deferred guard).
+	events <- native.StreamEvent{Type: native.EventAgentAbort, ApprovalID: "appr-1", Messages: messagesJSON}
+	close(events)
+
+	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	if err != nil {
+		t.Fatalf("consumeTriggeredStream() error = %v, want nil for a deferred approval", err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("result.Status = %q, want ok", result.Status)
+	}
+}
+
 func TestConsumeTriggeredStreamWithStepCommitterDoesNotDoublePersist(t *testing.T) {
 	t.Parallel()
 

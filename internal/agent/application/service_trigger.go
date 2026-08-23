@@ -260,10 +260,11 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 // watch the run live; persistence follows the same discipline as the WS loop
 // (streamChatWSResultWithHooks): steps persist as they complete via the step
 // committer, with one terminal-snapshot write as the fallback when step
-// persistence is unavailable. What a trigger deliberately does NOT have is
-// the WS client plumbing — no push channel, no abort channel, no idle
-// timeout — because there is no client; the runtime lease and routed abort
-// already bound execution.
+// persistence is unavailable, and an abort terminal is reported as an error
+// outcome while its partial transcript still persists. What a trigger
+// deliberately does NOT have is the WS client plumbing — no push channel, no
+// abort channel, no idle timeout — because there is no client; the runtime
+// lease and routed abort already bound execution.
 //
 // The events channel is a parameter (rather than this function calling
 // agent.Stream itself) so tests can drive the loop directly; the caller owns
@@ -277,6 +278,7 @@ func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan nati
 		hasSnapshot      bool
 		hasVisibleOutput bool
 		stored           bool
+		terminalAborted  bool
 		streamErr        error
 	)
 	for event := range events {
@@ -288,6 +290,18 @@ func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan nati
 			)
 			if streamErr == nil {
 				streamErr = eventErr
+			}
+		}
+		if event.IsTerminal() && event.Type == native.EventAgentAbort && strings.TrimSpace(event.ApprovalID) == "" {
+			// A stopped run is not a success: mirror the WS loop, which maps
+			// an abort terminal to agentAbortCause (a deferred approval is a
+			// pending pause, not an abort, so it is excluded). The partial
+			// transcript still persists below; only the reported outcome
+			// changes — without this the schedule log would mark a stopped
+			// run "ok", a regression from the Generate era, which errored.
+			terminalAborted = true
+			if streamErr == nil {
+				streamErr = agentAbortCause(ctx)
 			}
 		}
 		if hasVisibleAgentStreamOutput(event) {
@@ -361,6 +375,10 @@ func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan nati
 		// The reaper names this run's outcome; a superseded owner must not
 		// report a result for it (SR-DUR-002).
 		return schedule.TriggerResult{}, sessionruntime.ErrRunOwnershipLost
+	case terminalAborted:
+		// The transcript already persisted above; report the abort as the
+		// outcome so the schedule log records the stop, not a success.
+		return schedule.TriggerResult{}, streamErr
 	case streamErr != nil && !hasSnapshot:
 		return schedule.TriggerResult{}, streamErr
 	case !hasSnapshot:
