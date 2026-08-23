@@ -267,6 +267,34 @@ func TestUpsertBotLegacyNativeRuntimeClearsDefaultAgent(t *testing.T) {
 	}
 }
 
+func TestUpsertBotUnrelatedWritePreservesDefaultAgentWithoutRevalidation(t *testing.T) {
+	t.Parallel()
+
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000732"), Valid: true}
+	agentID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000733"), Valid: true}
+	queries := &reasoningPolicyQueries{
+		botID:          botID,
+		defaultAgentID: agentID,
+	}
+	// No Bot Agent service is installed on purpose: an unrelated write must not
+	// look up or validate the already persisted default Agent.
+	service := NewService(slog.Default(), queries, nil, nil)
+	language := "zh"
+
+	got, err := service.UpsertBot(context.Background(), uuid.UUID(botID.Bytes).String(), UpsertRequest{
+		Language: &language,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queries.lastUpsert.DefaultBotAgentIDSet {
+		t.Fatal("DefaultBotAgentIDSet = true, want existing binding preserved by partial update")
+	}
+	if got.DefaultBotAgentID != uuid.UUID(agentID.Bytes).String() {
+		t.Fatalf("DefaultBotAgentID = %q, want %q", got.DefaultBotAgentID, uuid.UUID(agentID.Bytes).String())
+	}
+}
+
 func TestUpsertBotReconcilesReasoningOnModelChange(t *testing.T) {
 	t.Parallel()
 

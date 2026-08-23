@@ -530,6 +530,9 @@ function buildCreatePayload(): BotsCreateBotRequest {
 }
 
 function createStartOptions() {
+  const setupMode = selectedAcpProfile.value
+    ? acpSetupPanelRef.value?.selection().setupMode
+    : undefined
   return {
     display: {
       display_name: form.display_name.trim(),
@@ -547,6 +550,7 @@ function createStartOptions() {
       agent: {
         name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
         provider: normalizeACPAgentID(selectedAcpProfile.value.id),
+        deferDefault: setupMode === 'oauth',
       },
     }),
   }

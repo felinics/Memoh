@@ -233,7 +233,11 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		current.DefaultBotAgentID = ""
 		defaultBotAgentIDSet = true
 	}
-	if current.DefaultBotAgentID != "" {
+	// Availability and credential validation belong to an explicit default
+	// Agent assignment. Revalidating the already stored Agent on every partial
+	// settings write would make unrelated changes (language, display, model,
+	// etc.) impossible after that Agent's credentials become incomplete.
+	if req.DefaultBotAgentID != nil && current.DefaultBotAgentID != "" {
 		if s.botAgents == nil {
 			return Settings{}, errors.New("bot agent service not configured")
 		}

@@ -55,6 +55,8 @@
         :models="models"
         :providers="providers"
         :bot-agents="botAgents"
+        :bot-metadata="bot?.metadata"
+        :acp-profiles="acpProfiles"
       />
 
       <SettingsContextCard
@@ -117,8 +119,8 @@ import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
 import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability } from '@memohai/sdk'
-import type { BotagentsBotAgent, SettingsSettings, SettingsUpsertRequest } from '@memohai/sdk'
+import { getBotsById, putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
+import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, SettingsUpsertRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
@@ -210,6 +212,14 @@ const { data: botAgentData } = useQuery({
   enabled: () => !!botIdRef.value,
 })
 
+const { data: acpProfileData } = useQuery({
+  key: ['acp-profiles'],
+  query: async () => {
+    const { data } = await getAcpProfiles({ throwOnError: true })
+    return data
+  },
+})
+
 const { data: searchProviderData } = useQuery({
   key: ['search-providers'],
   query: async () => {
@@ -295,6 +305,7 @@ const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 const botAgents = computed<BotagentsBotAgent[]>(() => botAgentData.value?.items ?? [])
+const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
 const imageCapableModels = computed(() =>
   models.value.filter((m) => m.config?.compatibilities?.includes('image-output')),
 )

@@ -97,8 +97,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Settings
 import { useI18n } from 'vue-i18n'
 import ModelSelect from './model-select.vue'
 import { reconcileStoredEffort } from './reasoning-effort'
-import type { BotagentsBotAgent, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
+import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { botAgentIcon, botAgentName, botAgentProvider } from '@/utils/bot-agent'
 
 type InteractionSettingsForm = SettingsSettings & {
@@ -114,6 +114,8 @@ const props = defineProps<{
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
   botAgents: BotagentsBotAgent[]
+  botMetadata?: Record<string, unknown>
+  acpProfiles: AcpprofilePublicProfile[]
 }>()
 
 const { t } = useI18n()
@@ -121,7 +123,17 @@ const { t } = useI18n()
 const MEMOH_AGENT_VALUE = 'memoh'
 const BOT_AGENT_VALUE_PREFIX = 'agent:'
 
-const selectableAgents = computed(() => props.botAgents.filter(agent => agent.enabled !== false && !!agent.id))
+function isAgentConfigured(agent: BotagentsBotAgent): boolean {
+  const provider = botAgentProvider(agent)
+  const profile = props.acpProfiles.find(item => normalizeACPAgentID(item.id) === provider)
+  if (!profile || !isACPAgentEnabled(props.botMetadata, provider)) return false
+  const config = readACPAgentConfig(props.botMetadata, provider)
+  return !config.setupModeSet || findMissingRequiredManagedField(profile, config.managed, config.setupMode) === null
+}
+
+const selectableAgents = computed(() => props.botAgents.filter(agent =>
+  agent.enabled !== false && !!agent.id && isAgentConfigured(agent),
+))
 
 const defaultBotAgentID = computed(() => props.form.default_bot_agent_id?.trim() ?? '')
 const selectedAgent = computed(() => props.botAgents.find(agent => agent.id === defaultBotAgentID.value))
@@ -131,7 +143,7 @@ const defaultAgentValue = computed(() =>
     : MEMOH_AGENT_VALUE,
 )
 const selectedAgentUnavailable = computed(() =>
-  !!defaultBotAgentID.value && (!selectedAgent.value || selectedAgent.value.enabled === false),
+  !!defaultBotAgentID.value && (!selectedAgent.value || selectedAgent.value.enabled === false || !isAgentConfigured(selectedAgent.value)),
 )
 const defaultAgentDescription = computed(() =>
   selectedAgentUnavailable.value

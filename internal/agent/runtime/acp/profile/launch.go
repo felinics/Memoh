@@ -13,27 +13,30 @@ const (
 	maxGenericACPArgumentBytes = 16 * 1024
 )
 
-// ResolveLaunch returns the executable and argv for an ACP profile. Built-in
-// profiles keep their pinned command, while the generic ACP profile reads an
-// explicit executable and newline-delimited argv from managed bot metadata.
+// ResolveLaunch returns the executable and argv declared by an ACP profile.
+// Profiles may pin a command or source the command and newline-delimited argv
+// from managed bot metadata.
 func ResolveLaunch(profile Profile, setup AgentSetup) (string, []string, error) {
-	command := strings.TrimSpace(profile.Command)
-	if NormalizeAgentID(profile.ID) != AgentACPID {
+	policy := profile.Launch
+	if policy.ManagedCommandField == "" {
+		command := strings.TrimSpace(policy.Command)
 		if command == "" {
 			return "", nil, fmt.Errorf("ACP command is required for %s", profile.DisplayName)
 		}
 		return command, nil, nil
 	}
 
-	command = strings.TrimSpace(setup.Managed[genericACPCommandFieldID])
+	commandField := NormalizeAgentID(policy.ManagedCommandField)
+	command := strings.TrimSpace(setup.Managed[commandField])
 	if command == "" {
-		return "", nil, fmt.Errorf("%s required", genericACPCommandFieldID)
+		return "", nil, fmt.Errorf("%s required", commandField)
 	}
 	if strings.ContainsAny(command, "\x00\r\n") {
-		return "", nil, fmt.Errorf("%s contains an invalid control character", genericACPCommandFieldID)
+		return "", nil, fmt.Errorf("%s contains an invalid control character", commandField)
 	}
 
-	arguments, err := parseGenericACPArguments(setup.Managed[genericACPArgumentsFieldID])
+	argumentsField := NormalizeAgentID(policy.ManagedArgumentsField)
+	arguments, err := parseGenericACPArguments(setup.Managed[argumentsField])
 	if err != nil {
 		return "", nil, err
 	}

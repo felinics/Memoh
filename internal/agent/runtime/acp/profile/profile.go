@@ -27,7 +27,7 @@ type Profile struct {
 	ID          string
 	DisplayName string
 	Description string
-	Command     string
+	Launch      LaunchPolicy
 	// SessionModeID, when set, is the ACP session mode Memoh pins right after
 	// session/new so tool permissions flow through ACP regardless of ambient
 	// agent-side configuration (e.g. a host ~/.claude/settings.json).
@@ -53,6 +53,16 @@ type Profile struct {
 	ManagedFields     []ManagedField
 	SupportedBackends []string
 	SetupModes        []string
+}
+
+// LaunchPolicy declares how an ACP profile resolves its process command. A
+// pinned Command is used by built-in adapters. ManagedCommandField and
+// ManagedArgumentsField let a profile opt into bot-metadata-driven launch
+// configuration without teaching the runtime about that profile's ID.
+type LaunchPolicy struct {
+	Command               string
+	ManagedCommandField   string
+	ManagedArgumentsField string
 }
 
 type ManagedField struct {
@@ -198,9 +208,13 @@ func Register(profile Profile) {
 
 func genericACPProfile() Profile {
 	return Profile{
-		ID:             AgentACPID,
-		DisplayName:    AgentACPName,
-		Description:    "Run a custom Agent Client Protocol command",
+		ID:          AgentACPID,
+		DisplayName: AgentACPName,
+		Description: "Run a custom Agent Client Protocol command",
+		Launch: LaunchPolicy{
+			ManagedCommandField:   genericACPCommandFieldID,
+			ManagedArgumentsField: genericACPArgumentsFieldID,
+		},
 		RuntimeStorage: genericACPRuntimeStorage(),
 		ManagedFields: []ManagedField{
 			{
@@ -231,7 +245,7 @@ func codexProfile() Profile {
 		ID:                     AgentCodexID,
 		DisplayName:            AgentCodexName,
 		Description:            "OpenAI Codex ACP adapter",
-		Command:                "codex-acp",
+		Launch:                 LaunchPolicy{Command: "codex-acp"},
 		DefaultReasoningEffort: "medium",
 		RuntimeStorage:         codexRuntimeStorage(),
 		ManagedFields: []ManagedField{
@@ -263,7 +277,7 @@ func claudeCodeProfile() Profile {
 		ID:          AgentClaudeCodeID,
 		DisplayName: AgentClaudeCodeName,
 		Description: "Claude Code ACP adapter",
-		Command:     "claude-agent-acp",
+		Launch:      LaunchPolicy{Command: "claude-agent-acp"},
 		// "default" routes every gated tool through session/request_permission;
 		// without the pin a host-level Claude settings file (defaultMode auto /
 		// acceptEdits) silently bypasses Memoh's approval flow.
@@ -313,7 +327,7 @@ func hermesProfile() Profile {
 		ID:          AgentHermesID,
 		DisplayName: AgentHermesName,
 		Description: "Hermes Agent ACP adapter",
-		Command:     "hermes-acp",
+		Launch:      LaunchPolicy{Command: "hermes-acp"},
 		ToolQuirks: &ToolQuirks{
 			WriteTitleKeywords: []string{"write", "write file", "create", "create file", "new file"},
 			GenericExecTitles: []string{
