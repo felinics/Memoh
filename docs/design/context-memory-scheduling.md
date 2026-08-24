@@ -190,6 +190,14 @@ The admission budget MUST be
 - The check MUST run on **all** paths that reach a provider: Discuss native, Discuss
   ACP (including the concatenated prompt), pipeline chat, and legacy chat.
 
+Admission measures MUST be obtainable without materializing message payloads. For
+DB-backed history, counts and byte sums MUST come from metadata-only queries
+(SQL-side aggregation, e.g. `COUNT(*)` + `SUM(octet_length(...))` over the
+uncompacted range) or from already-persisted size measures — never from loading the
+full payloads in order to measure them. Coarse SQL aggregates are an acceptable
+admission source ahead of the per-fragment persisted costs required by CM-REP-002;
+that coarse measurement infrastructure is part of PR 1, not PR 4 (see §7).
+
 ### CM-ADM-002: Deterministic over-budget trimming
 
 When the raw context exceeds the admission budget, the system MUST deterministically
@@ -232,6 +240,20 @@ substitute for it.
 There MUST be a way to compact a specific session without triggering a new turn, so an
 operator can recover a session that has already grown past safe size.
 
+### CM-CMP-003: Backstop latency must be measured and gated
+
+The synchronous backstop adds a full LLM summarization call to turn latency (seconds
+to minutes), and Discuss group conversations are latency-sensitive. Therefore:
+
+- The backstop MUST fire only at the hard threshold; the soft-threshold path stays
+  asynchronous. In steady state (async compaction keeping up), the synchronous path
+  is a rare last resort, not the common case.
+- Backstop runs MUST be measurable in turn-latency terms (count, duration, p50/p95
+  impact on affected turns) — see CM-OBS-001.
+- Rollout MUST be gatable (per-bot setting or server config), with a shadow mode
+  that logs would-have-fired decisions without blocking, so latency impact can be
+  assessed before enforcement is enabled everywhere.
+
 ### CM-RPL-001: Bounded replay
 
 Session replay MUST NOT require loading all events unbounded:
@@ -250,12 +272,28 @@ no full node-slice clone per event (`cloneIC`) and no full re-render per event
 (`PushEvent` → `Render`). Full re-rendering MAY still occur on explicit invalidation
 (e.g. render-parameter changes).
 
+Incremental rendering MUST be correct under mutation, not only under append:
+
+- Dirty tracking MUST be per-node. A message edit, delete, or reaction can invalidate
+  previously rendered segments — including coalesced neighbors — so a global
+  "tail is dirty" model is insufficient.
+- The incremental result MUST be verified against full re-rendering as an oracle: for
+  any event sequence (including edits and deletes), the incremental output must be
+  byte-equal to `Render` over the fully reduced context. This equivalence runs as a
+  package-level property/fuzz test and MAY additionally run as a sampled shadow
+  check behind a debug flag.
+
 ### CM-CCH-001: Bounded pipeline cache
 
 `Pipeline.sessions` / `Pipeline.rendered` MUST be bounded by an eviction policy (LRU
 and/or TTL and/or resident-bytes cap). Eviction MUST actually be wired (`DropSession`
 or equivalent must have callers). A cold session MUST be recoverable via (bounded)
 replay, so eviction is always safe.
+
+Sequencing is a hard constraint: eviction MUST NOT be enabled before bounded replay
+(CM-RPL-001) has landed. Evicting a session whose cold-start recovery is still an
+unbounded full replay converts a standing leak into repeated load/evict thrash —
+memory spikes plus CPU churn. The two mechanisms ship together, or replay-first.
 
 ### CM-REP-001: Single materialized representation, zero-copy raw payloads
 
@@ -266,6 +304,14 @@ truth (refs + per-item size measures + drop reasons + artifact frontier — a
 reference between representations; the current marshal/unmarshal round-trips in
 `discussMessagesToSDK`, `discussContextMessageToSDK`, and `messageconv` MUST be
 eliminated or collapsed into the single final render.
+
+Zero-copy sharing requires an explicit immutability contract. Every consumer of a
+shared `json.RawMessage` / `[]byte` payload MUST treat it as read-only; aliased-write
+bugs on shared byte slices are among the hardest to diagnose in Go. The contract
+MUST be enforced, not merely documented: a stated read-only convention at the
+type/field level, plus test protection (e.g. tests that checksum shared buffers
+before and after a full pipeline pass, run under `-race`). Any step that genuinely
+needs to mutate MUST copy first.
 
 ### CM-REP-002: Incremental budget accounting
 
@@ -300,7 +346,8 @@ The following MUST be observable (metrics and/or structured logs with stable key
 
 - oversized-admission events (count, estimated size, applied action);
 - context size before/after materialization and the provider's final input tokens;
-- synchronous-compaction backstop runs and outcomes (success/failure/cooldown);
+- synchronous-compaction backstop runs, outcomes (success/failure/cooldown), and
+  per-run duration / turn-latency impact;
 - replay event count and bytes; pipeline-cache evictions;
 - `context_too_large` occurrences.
 
@@ -309,7 +356,7 @@ The following MUST be observable (metrics and/or structured logs with stable key
 | Layer | Mechanism | Requirements served |
 |---|---|---|
 | L1 Hard boundary | Metadata-based admission check ahead of `trigger.Build` / pipeline composition / ACP prompt build; deterministic trim; `context_too_large` fail-closed | CM-ADM-001/002/003, CM-EST-001 |
-| L2 Pre-turn compaction | Synchronous hard-threshold backstop on Discuss native, Discuss ACP, and pipeline chat; then re-admission via L1 | CM-CMP-001/002 |
+| L2 Pre-turn compaction | Synchronous hard-threshold backstop on Discuss native, Discuss ACP, and pipeline chat; then re-admission via L1; shadow-first gated rollout | CM-CMP-001/002/003 |
 | L3 Bounded replay & caches | Frontier-first replay, paginated tail loads, incremental IC, render-on-demand, LRU/TTL/bytes-bounded pipeline cache | CM-RPL-001/002, CM-CCH-001 |
 | L4 Representation convergence | `DiscussContextPlan` (refs + measures before selection; single render after), zero-copy `RawContent`, incremental budget accounting, raw-bytes persistence, copy-on-write snapshots | CM-REP-001/002/003/004 |
 | L5 Process scheduling | `GOMEMLIMIT`, container memory limits, admission/compaction/eviction metrics | CM-PRC-001, CM-OBS-001 |
@@ -346,6 +393,11 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       message count / `min(window − reserve, absolute cap)`; absolute cap effective
       when the model window is unset (fixes `providerContextBudgetPlan` disable
       semantics) — CM-ADM-001
+- [ ] Metadata-only admission measures: SQL-side aggregates (`COUNT(*)` +
+      `SUM(octet_length(...))`) over the uncompacted range for DB-backed history, so
+      admission never loads payloads in order to measure them. This is the coarse
+      measurement foundation that PR 4's persisted per-fragment costs later refine —
+      CM-ADM-001, CM-REP-002
 - [ ] Deterministic over-budget trim (system + current message + artifact summary +
       recent window); `context_too_large` stable error when even that does not fit —
       CM-ADM-002
@@ -370,13 +422,30 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       CM-ADM-001
 - [ ] Session-targeted compaction entry point that does not trigger a turn —
       CM-CMP-002
+- [ ] Latency impact assessment + gated rollout: shadow mode first (log
+      would-have-fired without blocking), per-bot/config gate, p50/p95 turn-latency
+      metrics for backstop runs — CM-CMP-003
+- [ ] Adapt the compaction input to the Discuss corpus explicitly (turn responses +
+      timeline vocabulary, unified estimator). Do not assume `runCompactionSync` is
+      a drop-in: its input is plain history messages; only its
+      single-flight/epoch/cooldown semantics carry over unchanged — CM-CMP-001,
+      CM-EST-001
 
 ### PR 3 (P1) — Bounded replay + pipeline cache eviction
+
+Landing order inside this PR is a hard constraint: paginated, frontier-first replay
+ships before — or atomically with — cache eviction, never eviction first
+(CM-CCH-001).
 
 - [ ] `Pipeline.sessions`/`rendered`: LRU + TTL + resident-bytes bound; wire
       `DropSession` — CM-CCH-001
 - [ ] Remove per-event `cloneIC` full copy (incremental IC or append-only nodes);
-      remove per-event full `Render` (dirty marking / render-on-read) — CM-RPL-002
+      remove per-event full `Render` with per-node dirty marking (edits/deletes
+      invalidate affected nodes and coalesced neighbors, not a global tail) —
+      CM-RPL-002
+- [ ] Incremental-render equivalence oracle: property/fuzz test asserting
+      byte-equality with full re-render over event sequences including edits and
+      deletes — CM-RPL-002
 - [ ] `ListSessionEventsBySession` pagination/keyset; replay applies the compaction
       frontier before loading covered payloads — CM-RPL-001
 - [ ] `ListUncompactedMessagesBySession` / `ListHistoryTurnsByBot`: LIMIT or
@@ -389,7 +458,8 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       of the selected set — CM-REP-001
 - [ ] Eliminate `RawContent` marshal/unmarshal round-trips (`discussMessagesToSDK`,
       `discussContextMessageToSDK`) — frags reference `json.RawMessage` bytes
-      directly — CM-REP-001
+      directly, under the read-only contract with checksum test protection —
+      CM-REP-001
 - [ ] Step reselection: replace per-attempt full `ProviderPayloadHashAndBytes` with
       incremental accounting over persisted per-fragment serialized costs —
       CM-REP-002
@@ -407,8 +477,12 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
 - [ ] Post-artifact message edits preserved; concurrent new messages during
       compaction do not skew the frontier
 - [ ] Production-scale regression (8,000 history messages / 5,000 events / zero
-      artifacts) + heap benchmark: peak well under the container limit (target
-      < 1 GiB)
+      artifacts): record the pre-fix baseline peak, then assert (a) **decoupling** —
+      peak RSS at 2× history scale stays within a small constant factor (≤ ~15%) of
+      peak at 1×, per the §6 invariant — and (b) a **relative reduction** vs the
+      recorded baseline, with the percentage target fixed once the baseline run is
+      recorded. Absolute byte figures are reported for visibility, not used as the
+      merge gate.
 
 ### Downstream (non-OSS)
 
@@ -443,12 +517,15 @@ They complement but never replace black-box acceptance.
 | missing context window | model with `context_window = 0` | Absolute cap enforced; no unbounded provider call | CM-ADM-001 |
 | artifact store outage | frontier load fails on long thread | No silent full recomposition; controlled degrade or retryable error | CM-ADM-003 |
 | pre-turn backstop | compaction on, pressure ≥ hard threshold | Compaction runs before the model call; recomposed context in budget | CM-CMP-001 |
+| backstop latency & rollout | backstop behind gate, shadow vs enforced | Shadow logs decisions without blocking; enforced mode's p50/p95 turn-latency impact measured | CM-CMP-003 |
 | backstop unavailable | compaction fails / cooldown / no model | L1 trim engages; turn still bounded | CM-CMP-001, CM-ADM-002 |
 | ACP long thread | Discuss ACP, oversized history | Prompt built within budget; no unbounded `Query` | CM-ADM-001 |
 | replay at scale | cold start with 5k events | Paginated loads; frontier skips covered payloads; bounded replay memory | CM-RPL-001/002 |
 | cache pressure | many concurrent sessions | Evictions occur; evicted sessions recover via replay; resident bytes bounded | CM-CCH-001 |
 | streaming long run | long tool-loop run with streaming | Per-delta work bounded by delta size; no O(messages²) churn | CM-REP-004 |
-| equivalence guard | same inputs, old vs new path | Selected/rendered provider payload byte-identical (or semantically equal under a documented normalization) | CM-REP-001/002/003 |
+| memory scaling | same scenario at 1× and 2× history scale | Peak RSS at 2× within a small constant factor of 1× (§6 invariant) | §6 |
+| incremental render oracle | event sequences incl. edits/deletes | Incremental render byte-equal to full re-render | CM-RPL-002 |
+| equivalence guard | same inputs, old vs new path | Selected/rendered provider payload byte-identical (or semantically equal under a documented normalization); shared buffers unmodified (checksum) | CM-REP-001/002/003 |
 
 ## 10. Pass criteria
 
@@ -456,8 +533,10 @@ The context memory scheduling work is complete when, simultaneously:
 
 1. Every **MUST** in §4 has a corresponding implementation or an explicitly documented
    deployment boundary.
-2. The §6 invariant holds in the production-scale regression scenario (peak RSS
-   independent of total history size; target < 1 GiB at 8k messages / 5k events).
+2. The §6 invariant holds empirically in the production-scale regression: peak RSS
+   at 2× history scale stays within a small constant factor of peak at 1×, and the
+   relative reduction vs the recorded pre-fix baseline meets the target fixed at
+   baseline time. Absolute byte figures are reported, not gated on.
 3. Black-box acceptance passes for every scenario in §9.
 4. `GOMEMLIMIT` and container memory limits ship in the default compose deployment.
 5. No provider-bound path exists that can materialize an unbounded context — verified
