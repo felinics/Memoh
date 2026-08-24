@@ -47,6 +47,7 @@ import (
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/reasoning"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/tokenest"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
@@ -137,6 +138,7 @@ type Service struct {
 	sessionCompactions                map[string]*sessionCompactionGate
 	timeout                           time.Duration
 	memorySearchTimeout               time.Duration
+	contextAbsoluteCapTokens          int
 	clockLocation                     *time.Location
 	logger                            *slog.Logger
 	allowedTeam                       string
@@ -202,6 +204,36 @@ func NewService(
 		clockLocation:       clockLocation,
 		logger:              log.With(slog.String("service", "agent/application")),
 	}
+}
+
+// SetContextAbsoluteMaxTokens sets the server-wide context admission cap
+// (CM-ADM-001). Zero keeps the shared default; the cap is never disabled.
+func (s *Service) SetContextAbsoluteMaxTokens(v int) {
+	s.contextAbsoluteCapTokens = v
+}
+
+// contextAbsoluteMaxTokens resolves the effective admission cap.
+func (s *Service) contextAbsoluteMaxTokens() int {
+	if s.contextAbsoluteCapTokens > 0 {
+		return s.contextAbsoluteCapTokens
+	}
+	return tokenest.DefaultAbsoluteCapTokens
+}
+
+// effectiveContextTokenBudget derives the per-turn context budget as
+// min(model context window, absolute cap), falling back to the cap alone
+// when the model has no configured window. A missing window therefore
+// degrades to a smaller bounded context, never to an unbounded one.
+func (s *Service) effectiveContextTokenBudget(chatModel models.GetResponse) int {
+	budget := contextBudgetFromChatModel(chatModel)
+	capTokens := s.contextAbsoluteMaxTokens()
+	if budget <= 0 {
+		s.logger.Warn("context budget: model context window missing, applying absolute cap",
+			slog.String("model_id", chatModel.ID),
+			slog.Int("absolute_cap_tokens", capTokens))
+		return capTokens
+	}
+	return min(budget, capTokens)
 }
 
 // SetMemoryRegistry sets the provider registry for memory operations.
@@ -434,7 +466,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		}
 	}
 
-	contextTokenBudget := contextBudgetFromChatModel(chatModel)
+	contextTokenBudget := s.effectiveContextTokenBudget(chatModel)
 	runCfg.ContextBudgetMaxTokens = contextTokenBudget
 
 	var messages []ModelMessage
@@ -1182,7 +1214,7 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 		return ResolveRunConfigResult{}, err
 	}
 
-	contextBudget := contextBudgetFromChatModel(chatModel)
+	contextBudget := s.effectiveContextTokenBudget(chatModel)
 	cfg.ContextBudgetMaxTokens = contextBudget
 	cfg = s.prepareRunConfig(ctx, cfg)
 	return ResolveRunConfigResult{

@@ -389,24 +389,36 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
 
 ### PR 1 (P0) — Pre-materialization hard boundary + process backstop
 
-- [ ] Admission check ahead of `trigger.Build`: max bytes / estimated tokens /
+- [x] Admission check ahead of `trigger.Build`: max bytes / estimated tokens /
       message count / `min(window − reserve, absolute cap)`; absolute cap effective
       when the model window is unset (fixes `providerContextBudgetPlan` disable
-      semantics) — CM-ADM-001
+      semantics at its application-level source) — CM-ADM-001.
+      Landed as `timeline.ComposeContextWithArtifactsBudgeted` (entry-metadata
+      selection before materialization), `[agent] context_absolute_max_tokens`
+      (default 200k, never disabled), and `Service.effectiveContextTokenBudget`
+      clamping every provider-bound budget.
 - [ ] Metadata-only admission measures: SQL-side aggregates (`COUNT(*)` +
       `SUM(octet_length(...))`) over the uncompacted range for DB-backed history, so
       admission never loads payloads in order to measure them. This is the coarse
       measurement foundation that PR 4's persisted per-fragment costs later refine —
-      CM-ADM-001, CM-REP-002
-- [ ] Deterministic over-budget trim (system + current message + artifact summary +
-      recent window); `context_too_large` stable error when even that does not fit —
-      CM-ADM-002
-- [ ] `loadArtifacts` / `loadTimelineArtifacts` failure: controlled failure or
-      degrade into hard-boundary trim; never silent full recomposition — CM-ADM-003
-- [ ] Unify token estimation (eliminate chars/2 vs len/4 split) — CM-EST-001
-- [ ] `GOMEMLIMIT` + compose memory limits for `server` — CM-PRC-001
-- [ ] Metrics: oversized-admission counter, pre/post-materialization sizes, provider
-      final input tokens — CM-OBS-001
+      CM-ADM-001, CM-REP-002. *(Partially deferred: current admission measures
+      lengths of already-loaded RC/TR references without materializing or
+      serializing; the SQL-side aggregate that also bounds the loads themselves
+      lands with PR 3's paginated queries.)*
+- [x] Deterministic over-budget trim (artifact summaries + newest message + recent
+      contiguous window, no orphaned tool responses); `context.protected_overflow`
+      stable error when even the protected set does not fit — CM-ADM-002
+- [x] `loadArtifacts` / `loadTimelineArtifacts` failure: degrade into the bounded
+      admission window with a stable `context_admission_degraded` log; never silent
+      unbounded recomposition — CM-ADM-003
+- [x] Unify token estimation on `internal/tokenest` (eliminates chars/2 vs len/4
+      split; `contextfrag` delegates to it) — CM-EST-001
+- [x] `GOMEMLIMIT` + compose memory limits for `server` (production and devenv) —
+      CM-PRC-001
+- [x] Observability: `context_admission` / `context_admission_rejected` /
+      `context_admission_degraded` structured logs with stable keys (estimated,
+      selected, budget, dropped) on discuss compose, discuss turn, ACP prompt, and
+      pipeline paths — CM-OBS-001
 
 ### PR 2 (P0) — Synchronous pre-turn compaction
 

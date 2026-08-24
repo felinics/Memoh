@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/memohai/memoh/internal/tokenest"
 )
 
 const (
@@ -223,6 +225,21 @@ type AgentConfig struct {
 	ToolOutputMaxLines  int    `toml:"tool_output_max_lines"`
 	SystemFilesMaxBytes int    `toml:"system_files_max_bytes"`
 	ContextLoopReselect string `toml:"context_loop_reselect"`
+	// ContextAbsoluteMaxTokens is the server-wide context admission cap
+	// (CM-ADM-001): the effective per-turn budget is
+	// min(model context window − reserve, this cap), and the cap alone when
+	// the model has no configured window. Zero or negative selects the
+	// built-in default; the cap can be raised but never disabled.
+	ContextAbsoluteMaxTokens int `toml:"context_absolute_max_tokens"`
+}
+
+// EffectiveContextAbsoluteMaxTokens resolves the server-wide context
+// admission cap, falling back to the shared default when unset.
+func (c AgentConfig) EffectiveContextAbsoluteMaxTokens() int {
+	if c.ContextAbsoluteMaxTokens > 0 {
+		return c.ContextAbsoluteMaxTokens
+	}
+	return tokenest.DefaultAbsoluteCapTokens
 }
 
 const (

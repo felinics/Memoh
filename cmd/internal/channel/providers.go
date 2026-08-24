@@ -91,12 +91,13 @@ func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.Even
 	return timeline.NewEventStore(log, queries)
 }
 
-func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, queries dbstore.Queries) *discuss.DiscussDriver {
+func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, queries dbstore.Queries, cfg config.Config) *discuss.DiscussDriver {
 	return discuss.NewDiscussDriver(discuss.DiscussDriverDeps{
-		MessageService: msgService,
-		CursorStore:    eventStore,
-		Artifacts:      compaction.NewTimelineArtifactSource(queries),
-		Logger:         log,
+		MessageService:     msgService,
+		CursorStore:        eventStore,
+		Artifacts:          compaction.NewTimelineArtifactSource(queries),
+		Logger:             log,
+		AdmissionMaxTokens: cfg.Agent.EffectiveContextAbsoluteMaxTokens(),
 	})
 }
 

@@ -2,12 +2,11 @@ package timeline
 
 import (
 	"encoding/json"
-	"math"
 	"sort"
 	"strings"
-)
 
-const charsPerToken = 2
+	"github.com/memohai/memoh/internal/tokenest"
+)
 
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
 // used as the "TR" stream in context composition.
@@ -156,6 +155,11 @@ func appendActiveTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEnt
 }
 
 func mergeEntries(entries []mergeEntry) []ContextMessage {
+	sortMergeEntries(entries)
+	return materializeMergeEntries(entries)
+}
+
+func sortMergeEntries(entries []mergeEntry) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].time != entries[j].time {
 			return entries[i].time < entries[j].time
@@ -166,7 +170,6 @@ func mergeEntries(entries []mergeEntry) []ContextMessage {
 		}
 		return entries[i].step < entries[j].step
 	})
-	return materializeMergeEntries(entries)
 }
 
 func mergeKindOrder(kind string) int {
@@ -233,6 +236,21 @@ func ComposeContext(rc RenderedContext, trs []TurnResponseEntry) *ComposeContext
 // ComposeContextWithArtifacts replaces covered RC/TR sources with each active
 // artifact at the covered rendered slot when available, or its durable anchor.
 func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact) *ComposeContextResult {
+	allMessages := mergeEntries(composeMergeEntries(rc, trs, artifacts))
+	if len(allMessages) == 0 {
+		return nil
+	}
+
+	return &ComposeContextResult{
+		Messages:        allMessages,
+		EstimatedTokens: estimateMessagesTokens(allMessages),
+	}
+}
+
+// composeMergeEntries builds the unsorted merge-entry list for composition.
+// Entries hold references into rc/trs plus small summary strings; nothing
+// large is materialized here, so admission can measure before it selects.
+func composeMergeEntries(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact) []mergeEntry {
 	coveredMessages := coveredExternalMessages(artifacts)
 	coveredResponseIDs := coveredHistoryMessageIDs(artifacts)
 	entries := make([]mergeEntry, 0, len(rc)+len(trs)+len(artifacts))
@@ -251,14 +269,157 @@ func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, ar
 		})
 	}
 	entries = appendActiveTurnResponseEntries(entries, trs, coveredResponseIDs)
-	allMessages := mergeEntries(entries)
-	if len(allMessages) == 0 {
-		return nil
+	return entries
+}
+
+// ComposeBudget bounds composition before materialization (CM-ADM-001).
+type ComposeBudget struct {
+	// MaxTokens is the admission budget in shared-estimator tokens. Zero or
+	// negative disables budgeting (legacy behavior).
+	MaxTokens int
+}
+
+// ComposeAdmission reports the admission decision made for one composition.
+type ComposeAdmission struct {
+	// EstimatedTokens is the pre-selection estimate of the full raw context.
+	EstimatedTokens int
+	// SelectedTokens is the estimate of what was actually materialized.
+	SelectedTokens int
+	// TotalEntries and DroppedEntries count merge entries, not messages.
+	TotalEntries   int
+	DroppedEntries int
+	// ProtectedOverflow is set when the protected set alone (artifact
+	// summaries plus the newest entry) exceeds the budget; the caller must
+	// fail closed instead of materializing (CM-ADM-002).
+	ProtectedOverflow bool
+}
+
+// ComposeContextWithArtifactsBudgeted composes like
+// ComposeContextWithArtifacts but makes the admission decision on entry
+// metadata before materializing anything. Over budget it keeps every artifact
+// summary plus the newest contiguous window that fits, dropping older raw
+// entries deterministically. When even the protected set does not fit it
+// returns a nil result with ProtectedOverflow set.
+func ComposeContextWithArtifactsBudgeted(
+	rc RenderedContext,
+	trs []TurnResponseEntry,
+	artifacts []CompactionArtifact,
+	budget ComposeBudget,
+) (*ComposeContextResult, ComposeAdmission) {
+	entries := composeMergeEntries(rc, trs, artifacts)
+	if len(entries) == 0 {
+		return nil, ComposeAdmission{}
+	}
+	sortMergeEntries(entries)
+
+	costs := make([]int, len(entries))
+	total := 0
+	for i := range entries {
+		costs[i] = mergeEntryTokens(entries[i])
+		total += costs[i]
+	}
+	admission := ComposeAdmission{EstimatedTokens: total, TotalEntries: len(entries)}
+
+	if budget.MaxTokens <= 0 || total <= budget.MaxTokens {
+		messages := materializeMergeEntries(entries)
+		if len(messages) == 0 {
+			return nil, admission
+		}
+		admission.SelectedTokens = total
+		return &ComposeContextResult{Messages: messages, EstimatedTokens: total}, admission
 	}
 
-	return &ComposeContextResult{
-		Messages:        allMessages,
-		EstimatedTokens: estimateMessagesTokens(allMessages),
+	selected := make([]bool, len(entries))
+	used := 0
+	for i := range entries {
+		if isSummaryMergeKind(entries[i].kind) {
+			selected[i] = true
+			used += costs[i]
+		}
+	}
+	newest := len(entries) - 1
+	for newest >= 0 && selected[newest] {
+		newest--
+	}
+	if newest >= 0 {
+		used += costs[newest]
+		selected[newest] = true
+	}
+	if used > budget.MaxTokens {
+		admission.SelectedTokens = used
+		admission.ProtectedOverflow = true
+		return nil, admission
+	}
+	// Fill a contiguous recent window: stop at the first entry that does not
+	// fit so selection stays a suffix (plus pinned summaries) and remains
+	// deterministic.
+	for i := newest - 1; i >= 0; i-- {
+		if selected[i] {
+			continue
+		}
+		if used+costs[i] > budget.MaxTokens {
+			break
+		}
+		used += costs[i]
+		selected[i] = true
+	}
+	// Never start the raw window on an orphaned tool response: drop leading
+	// tool-role entries whose call fell outside the window.
+	for i := range entries {
+		if !selected[i] || isSummaryMergeKind(entries[i].kind) {
+			continue
+		}
+		if entries[i].kind == "tr" && strings.EqualFold(strings.TrimSpace(entries[i].trRole), "tool") {
+			selected[i] = false
+			used -= costs[i]
+			continue
+		}
+		break
+	}
+
+	kept := make([]mergeEntry, 0, len(entries))
+	for i := range entries {
+		if selected[i] {
+			kept = append(kept, entries[i])
+		}
+	}
+	admission.SelectedTokens = used
+	admission.DroppedEntries = len(entries) - len(kept)
+	messages := materializeMergeEntries(kept)
+	if len(messages) == 0 {
+		return nil, admission
+	}
+	return &ComposeContextResult{Messages: messages, EstimatedTokens: used}, admission
+}
+
+func isSummaryMergeKind(kind string) bool {
+	switch kind {
+	case "summary", "summary_slot", "summary_before_rc", "summary_tr_slot":
+		return true
+	default:
+		return false
+	}
+}
+
+// mergeEntryTokens estimates one entry's cost from lengths alone, without
+// materializing the entry.
+func mergeEntryTokens(entry mergeEntry) int {
+	switch entry.kind {
+	case "rc":
+		n := 0
+		for _, piece := range entry.rcContent {
+			if piece.Type == "text" {
+				n += len(piece.Text)
+			}
+		}
+		return tokenest.FromBytes(n)
+	case "tr":
+		if len(entry.trRawContent) > 0 {
+			return tokenest.FromBytes(len(entry.trRawContent))
+		}
+		return tokenest.FromBytes(len(entry.trContent))
+	default:
+		return tokenest.FromBytes(len(entry.summaryContent))
 	}
 }
 
@@ -390,7 +551,7 @@ func estimateMessagesTokens(messages []ContextMessage) int {
 
 func estimateMessageTokens(m ContextMessage) int {
 	if len(m.RawContent) > 0 {
-		return int(math.Ceil(float64(len(m.RawContent)) / charsPerToken))
+		return tokenest.FromBytes(len(m.RawContent))
 	}
-	return int(math.Ceil(float64(len(m.Content)) / charsPerToken))
+	return tokenest.FromBytes(len(m.Content))
 }

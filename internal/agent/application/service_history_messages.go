@@ -63,14 +63,20 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 }
 
 // loadTimelineArtifacts projects the session's active compaction frontier for
-// timeline composition. Failures degrade to uncompacted context.
+// timeline composition. A load failure degrades into the bounded admission
+// window — the pipeline trim below still caps the recomposed raw history —
+// and is surfaced with a stable key instead of passing silently (CM-ADM-003).
 func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID string) []timeline.CompactionArtifact {
 	if s.queries == nil {
 		return nil
 	}
 	artifacts, err := compaction.NewTimelineArtifactSource(s.queries).ActiveCompactionArtifacts(ctx, botID, sessionID)
 	if err != nil {
-		s.logger.Warn("load compaction artifacts failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		s.logger.Warn("context_admission_degraded",
+			slog.String("path", "pipeline_chat"),
+			slog.String("reason", "artifact_load_failed"),
+			slog.String("session_id", sessionID),
+			slog.Any("error", err))
 		return nil
 	}
 	return artifacts
