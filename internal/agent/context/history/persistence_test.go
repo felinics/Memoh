@@ -87,6 +87,81 @@ func TestDecodeStoredModelMessageSupportsLegacyShapes(t *testing.T) {
 	}
 }
 
+func TestStoredModelMessageToSDKMessageRestoresLegacyToolResultFields(t *testing.T) {
+	t.Parallel()
+
+	got := StoredModelMessageToSDKMessage(turn.ModelMessage{
+		Role:       "tool",
+		Content:    mustPersistenceJSON(t, map[string]any{"status": "ok"}),
+		ToolCallID: "legacy-call-id",
+		Name:       "legacy-tool",
+	})
+	want := sdk.Message{
+		Role: sdk.MessageRoleTool,
+		Content: []sdk.MessagePart{sdk.ToolResultPart{
+			ToolCallID: "legacy-call-id",
+			ToolName:   "legacy-tool",
+			Result:     map[string]any{"status": "ok"},
+		}},
+	}
+	assertPersistenceJSON(t, got, want)
+}
+
+func TestStoredModelMessageToSDKMessageRestoresLegacyToolCalls(t *testing.T) {
+	t.Parallel()
+
+	got := StoredModelMessageToSDKMessage(turn.ModelMessage{
+		Role:    "assistant",
+		Content: json.RawMessage(`""`),
+		ToolCalls: []turn.ToolCall{{
+			ID: "legacy-call",
+			Function: turn.ToolCallFunction{
+				Name:      "lookup",
+				Arguments: `{"query":"memoh"}`,
+			},
+		}},
+	})
+	want := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "legacy-call",
+			ToolName:   "lookup",
+			Input:      map[string]any{"query": "memoh"},
+		}},
+	}
+	assertPersistenceJSON(t, got, want)
+}
+
+func TestStoredModelMessageToSDKMessageDoesNotDuplicateModernToolParts(t *testing.T) {
+	t.Parallel()
+
+	got := StoredModelMessageToSDKMessage(turn.ModelMessage{
+		Role:    "assistant",
+		Content: mustPersistenceJSON(t, []map[string]any{{"type": "tool-call", "toolCallId": "call-1", "toolName": "lookup", "input": map[string]any{"q": "memoh"}}}),
+		ToolCalls: []turn.ToolCall{{
+			ID: "call-1", Function: turn.ToolCallFunction{Name: "lookup", Arguments: `{"q":"memoh"}`},
+		}},
+	})
+	if len(got.Content) != 1 {
+		t.Fatalf("content parts = %d, want 1: %#v", len(got.Content), got.Content)
+	}
+}
+
+func TestStoredModelMessageToSDKMessageKeepsModernToolResult(t *testing.T) {
+	t.Parallel()
+
+	got := StoredModelMessageToSDKMessage(turn.ModelMessage{
+		Role:       "tool",
+		Content:    mustPersistenceJSON(t, []map[string]any{{"type": "tool-result", "toolCallId": "call-1", "toolName": "lookup", "result": "ok"}}),
+		ToolCallID: "legacy-call",
+		Name:       "legacy-lookup",
+	})
+	if len(got.Content) != 1 {
+		t.Fatalf("content parts = %d, want 1: %#v", len(got.Content), got.Content)
+	}
+	assertPersistenceJSON(t, got.Content[0], sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: "ok"})
+}
+
 func TestRedactFilePartsPreservesOrderAndDoesNotMutateInput(t *testing.T) {
 	t.Parallel()
 
@@ -161,4 +236,13 @@ func mustPersistenceJSON(t *testing.T, value any) []byte {
 		t.Fatalf("marshal %T: %v", value, err)
 	}
 	return raw
+}
+
+func assertPersistenceJSON(t *testing.T, got, want any) {
+	t.Helper()
+	gotRaw := mustPersistenceJSON(t, got)
+	wantRaw := mustPersistenceJSON(t, want)
+	if string(gotRaw) != string(wantRaw) {
+		t.Fatalf("JSON mismatch:\ngot  %s\nwant %s", gotRaw, wantRaw)
+	}
 }

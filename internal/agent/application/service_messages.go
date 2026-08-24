@@ -30,7 +30,7 @@ func redactFilePartsForStorage(msgs []sdk.Message) []sdk.Message {
 // modelMessageToSDKMessage converts a persistence format message to SDK message
 // at the resolver boundary using sdk.Message's native JSON deserialization.
 func modelMessageToSDKMessage(mm ModelMessage) sdk.Message {
-	return messageconv.ModelMessageToSDKMessage(mm)
+	return historyfrag.StoredModelMessageToSDKMessage(mm)
 }
 
 func prependTurnUserMessage(req ChatRequest, output []ModelMessage) []ModelMessage {
@@ -54,5 +54,5 @@ func modelQueryText(req ChatRequest) string {
 
 // modelMessagesToSDKMessages converts a slice of persistence messages to SDK messages.
 func modelMessagesToSDKMessages(msgs []ModelMessage) []sdk.Message {
-	return messageconv.ModelMessagesToSDKMessages(msgs)
+	return historyfrag.StoredModelMessagesToSDKMessages(msgs)
 }

@@ -65,6 +65,100 @@ func DecodeStoredModelMessage(log *slog.Logger, messageID, role string, raw json
 	return message
 }
 
+// StoredModelMessageToSDKMessage upgrades legacy database envelope fields at
+// the history replay boundary. Generic ModelMessage conversions deliberately
+// remain unaware of durable compatibility shapes.
+func StoredModelMessageToSDKMessage(message turn.ModelMessage) sdk.Message {
+	return restoreLegacyFields(message, messageconv.ModelMessageToSDKMessage(message))
+}
+
+func StoredModelMessagesToSDKMessages(messages []turn.ModelMessage) []sdk.Message {
+	result := make([]sdk.Message, 0, len(messages))
+	for _, message := range messages {
+		result = append(result, StoredModelMessageToSDKMessage(message))
+	}
+	return result
+}
+
+func restoreLegacyFields(message turn.ModelMessage, sdkMessage sdk.Message) sdk.Message {
+	if strings.EqualFold(strings.TrimSpace(message.Role), "assistant") && len(message.ToolCalls) > 0 {
+		if len(sdkMessage.Content) == 1 {
+			if text, ok := sdkMessage.Content[0].(sdk.TextPart); ok && strings.TrimSpace(text.Text) == "" {
+				sdkMessage.Content = nil
+			}
+		}
+		for _, call := range message.ToolCalls {
+			if hasToolCallPart(sdkMessage.Content, call.ID) {
+				continue
+			}
+			sdkMessage.Content = append(sdkMessage.Content, sdk.ToolCallPart{
+				ToolCallID: call.ID,
+				ToolName:   call.Function.Name,
+				Input:      decodeLegacyJSON(call.Function.Arguments),
+			})
+		}
+	}
+
+	if strings.EqualFold(strings.TrimSpace(message.Role), "tool") &&
+		strings.TrimSpace(message.ToolCallID) != "" &&
+		!hasAnyToolResultPart(sdkMessage.Content) {
+		sdkMessage.Content = []sdk.MessagePart{sdk.ToolResultPart{
+			ToolCallID: message.ToolCallID,
+			ToolName:   message.Name,
+			Result:     decodeLegacyRaw(message.Content),
+		}}
+	}
+
+	return sdkMessage
+}
+
+func hasToolCallPart(parts []sdk.MessagePart, id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for _, part := range parts {
+		call, ok := part.(sdk.ToolCallPart)
+		if ok && strings.TrimSpace(call.ToolCallID) == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnyToolResultPart(parts []sdk.MessagePart) bool {
+	for _, part := range parts {
+		if _, ok := part.(sdk.ToolResultPart); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeLegacyJSON(raw string) any {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return map[string]any{}
+	}
+	var value any
+	if json.Unmarshal([]byte(trimmed), &value) == nil {
+		return value
+	}
+	return trimmed
+}
+
+func decodeLegacyRaw(raw json.RawMessage) any {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return nil
+	}
+	var value any
+	if json.Unmarshal(raw, &value) == nil {
+		return value
+	}
+	return trimmed
+}
+
 // storedModelMessageV0 is the JSON shape already present in
 // bot_history_messages.content. It deliberately remains private: callers use
 // turn.ModelMessage while this package owns the durable representation.

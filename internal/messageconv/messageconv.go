@@ -49,11 +49,10 @@ func SDKMessagesToModelMessagesWithLogger(log *slog.Logger, msgs []sdk.Message) 
 func ModelMessageToSDKMessage(mm turn.ModelMessage) sdk.Message {
 	var s string
 	if err := json.Unmarshal(mm.Content, &s); err == nil {
-		msg := sdk.Message{
+		return sdk.Message{
 			Role:    sdk.MessageRole(mm.Role),
 			Content: []sdk.MessagePart{sdk.TextPart{Text: s}},
 		}
-		return restoreLegacyFields(mm, msg)
 	}
 
 	envelope, _ := json.Marshal(struct {
@@ -65,90 +64,10 @@ func ModelMessageToSDKMessage(mm turn.ModelMessage) sdk.Message {
 	})
 	var msg sdk.Message
 	if err := json.Unmarshal(envelope, &msg); err == nil {
-		return restoreLegacyFields(mm, msg)
+		return msg
 	}
 
-	return restoreLegacyFields(mm, sdk.Message{Role: sdk.MessageRole(mm.Role)})
-}
-
-// restoreLegacyFields upgrades the OpenAI-style envelope fields that existed
-// in older history rows into Twilight message parts. New rows already carry
-// these values in Content, so matching parts are left untouched.
-func restoreLegacyFields(mm turn.ModelMessage, msg sdk.Message) sdk.Message {
-	if strings.EqualFold(strings.TrimSpace(mm.Role), "assistant") && len(mm.ToolCalls) > 0 {
-		if len(msg.Content) == 1 {
-			if text, ok := msg.Content[0].(sdk.TextPart); ok && strings.TrimSpace(text.Text) == "" {
-				msg.Content = nil
-			}
-		}
-		for _, call := range mm.ToolCalls {
-			if hasToolCallPart(msg.Content, call.ID) {
-				continue
-			}
-			msg.Content = append(msg.Content, sdk.ToolCallPart{
-				ToolCallID: call.ID,
-				ToolName:   call.Function.Name,
-				Input:      decodeLegacyJSON(call.Function.Arguments),
-			})
-		}
-	}
-
-	if strings.EqualFold(strings.TrimSpace(mm.Role), "tool") && strings.TrimSpace(mm.ToolCallID) != "" && !hasAnyToolResultPart(msg.Content) {
-		msg.Content = []sdk.MessagePart{sdk.ToolResultPart{
-			ToolCallID: mm.ToolCallID,
-			ToolName:   mm.Name,
-			Result:     decodeLegacyRaw(mm.Content),
-		}}
-	}
-
-	return msg
-}
-
-func hasToolCallPart(parts []sdk.MessagePart, id string) bool {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return false
-	}
-	for _, part := range parts {
-		call, ok := part.(sdk.ToolCallPart)
-		if ok && strings.TrimSpace(call.ToolCallID) == id {
-			return true
-		}
-	}
-	return false
-}
-
-func hasAnyToolResultPart(parts []sdk.MessagePart) bool {
-	for _, part := range parts {
-		if _, ok := part.(sdk.ToolResultPart); ok {
-			return true
-		}
-	}
-	return false
-}
-
-func decodeLegacyJSON(raw string) any {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return map[string]any{}
-	}
-	var value any
-	if json.Unmarshal([]byte(trimmed), &value) == nil {
-		return value
-	}
-	return trimmed
-}
-
-func decodeLegacyRaw(raw json.RawMessage) any {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" {
-		return nil
-	}
-	var value any
-	if json.Unmarshal(raw, &value) == nil {
-		return value
-	}
-	return trimmed
+	return sdk.Message{Role: sdk.MessageRole(mm.Role)}
 }
 
 func ModelMessagesToSDKMessages(msgs []turn.ModelMessage) []sdk.Message {
