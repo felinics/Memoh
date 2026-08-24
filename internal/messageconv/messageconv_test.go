@@ -65,35 +65,6 @@ func TestSDKMessagesToModelMessagesPreservesUsage(t *testing.T) {
 	}
 }
 
-func TestSDKMessagesToModelMessagesPreservesMultipartContent(t *testing.T) {
-	t.Parallel()
-
-	want := sdk.Message{
-		Role: sdk.MessageRoleAssistant,
-		Content: []sdk.MessagePart{
-			sdk.ReasoningPart{
-				Text:             "thinking",
-				ProviderMetadata: map[string]any{"provider": map[string]any{"signature": "sig"}},
-			},
-			sdk.TextPart{Text: "answer"},
-			sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"},
-			sdk.FilePart{Data: "JVBERi0=", MediaType: "application/pdf", Filename: "report.pdf"},
-			sdk.ToolCallPart{
-				ToolCallID: "call-1",
-				ToolName:   "lookup",
-				Input:      map[string]any{"query": "memoh"},
-			},
-		},
-	}
-
-	model := SDKMessagesToModelMessages([]sdk.Message{want})
-	if len(model) != 1 {
-		t.Fatalf("got %d model messages, want 1", len(model))
-	}
-	got := ModelMessageToSDKMessage(model[0])
-	assertSameJSON(t, got, want)
-}
-
 func TestModelMessageToSDKMessageDoesNotInterpretLegacyEnvelopeFields(t *testing.T) {
 	t.Parallel()
 

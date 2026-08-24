@@ -224,7 +224,7 @@ func RedactFileParts(messages []sdk.Message) []sdk.Message {
 	for i, message := range messages {
 		hasFile := false
 		for _, part := range message.Content {
-			if _, ok := part.(sdk.FilePart); ok {
+			if _, ok := filePartValue(part); ok {
 				hasFile = true
 				break
 			}
@@ -238,7 +238,7 @@ func RedactFileParts(messages []sdk.Message) []sdk.Message {
 		}
 		kept := make([]sdk.MessagePart, 0, len(message.Content))
 		for _, part := range message.Content {
-			file, ok := part.(sdk.FilePart)
+			file, ok := filePartValue(part)
 			if !ok {
 				kept = append(kept, part)
 				continue
@@ -258,4 +258,16 @@ func RedactFileParts(messages []sdk.Message) []sdk.Message {
 		out[i].Content = kept
 	}
 	return out
+}
+
+func filePartValue(part sdk.MessagePart) (sdk.FilePart, bool) {
+	switch file := part.(type) {
+	case sdk.FilePart:
+		return file, true
+	case *sdk.FilePart:
+		if file != nil {
+			return *file, true
+		}
+	}
+	return sdk.FilePart{}, false
 }

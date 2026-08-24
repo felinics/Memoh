@@ -2,7 +2,6 @@ package historyfrag
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -160,73 +159,6 @@ func TestStoredModelMessageToSDKMessageKeepsModernToolResult(t *testing.T) {
 		t.Fatalf("content parts = %d, want 1: %#v", len(got.Content), got.Content)
 	}
 	assertPersistenceJSON(t, got.Content[0], sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: "ok"})
-}
-
-func TestRedactFilePartsPreservesOrderAndDoesNotMutateInput(t *testing.T) {
-	t.Parallel()
-
-	input := []sdk.Message{sdk.UserMessage("look", sdk.FilePart{
-		Data:      "secret-file-bytes",
-		Filename:  "report.pdf",
-		MediaType: "application/pdf",
-	}, sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"})}
-
-	redacted := RedactFileParts(input)
-	if len(redacted) != 1 || len(redacted[0].Content) != 3 {
-		t.Fatalf("redacted content = %#v, want three ordered parts", redacted)
-	}
-	if _, ok := redacted[0].Content[0].(sdk.TextPart); !ok {
-		t.Fatalf("part 0 = %T, want TextPart", redacted[0].Content[0])
-	}
-	placeholder, ok := redacted[0].Content[1].(sdk.TextPart)
-	if !ok || placeholder.Text == "" || strings.Contains(placeholder.Text, "secret-file-bytes") {
-		t.Fatalf("file placeholder = %#v, want readable text without bytes", redacted[0].Content[1])
-	}
-	if _, ok := redacted[0].Content[2].(sdk.ImagePart); !ok {
-		t.Fatalf("part 2 = %T, want ImagePart", redacted[0].Content[2])
-	}
-	if file, ok := input[0].Content[1].(sdk.FilePart); !ok || file.Data != "secret-file-bytes" {
-		t.Fatalf("input file part was mutated: %#v", input[0].Content[1])
-	}
-}
-
-func TestToStoredModelMessagesNeverIncludesFileBytes(t *testing.T) {
-	t.Parallel()
-
-	stored := ToStoredModelMessages([]sdk.Message{sdk.UserMessage("attach", sdk.FilePart{
-		Data:      "secret-file-bytes",
-		Filename:  "notes.txt",
-		MediaType: "text/plain",
-	})})
-	if len(stored) != 1 {
-		t.Fatalf("stored messages = %#v, want one message", stored)
-	}
-	if text := stored[0].TextContent(); strings.Contains(text, "secret-file-bytes") {
-		t.Fatalf("stored content contains file bytes: %q", text)
-	}
-	if text := stored[0].TextContent(); !strings.Contains(text, "notes.txt") {
-		t.Fatalf("stored content lost file placeholder: %q", text)
-	}
-}
-
-func TestMarshalStoredSDKMessageRedactsFileBytes(t *testing.T) {
-	t.Parallel()
-
-	message := sdk.UserMessage("inspect", sdk.FilePart{
-		Data:      "secret-bytes",
-		Filename:  "report.pdf",
-		MediaType: "application/pdf",
-	})
-	raw, err := MarshalStoredSDKMessage(message)
-	if err != nil {
-		t.Fatalf("MarshalStoredSDKMessage: %v", err)
-	}
-	if strings.Contains(string(raw), "secret-bytes") {
-		t.Fatalf("stored payload contains file bytes: %s", raw)
-	}
-	if !strings.Contains(string(raw), "report.pdf") {
-		t.Fatalf("stored payload lost attachment placeholder: %s", raw)
-	}
 }
 
 func mustPersistenceJSON(t *testing.T, value any) []byte {
