@@ -16,6 +16,7 @@ import (
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	tools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/agent/turn"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/runtimefence"
 )
@@ -85,11 +86,16 @@ func (s *Service) admitTurnRun(
 		InvocationID: invocationID,
 		Payload:      payload,
 		Execution: sessionruntime.Execution{
-			// The subscriber-facing view stays empty until thread subscriptions
-			// replace per-run event forwarding: a channel turn's only reader is
-			// the adapter consuming this handle's events.
-			Admission: func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
-				return sessionruntime.RunAdmissionView{}, nil
+			// Project the inbound user message so subscribers (an open web
+			// session on the thread) see what fired the run while it still
+			// executes — the same contract the ws and schedule admissions
+			// already honor. NewRequestUserTurn returns nil for commands that
+			// persist no user message (discuss-shaped, attachment-only), and
+			// those runs stay contentless in the projection.
+			Admission: func(_ context.Context, handle sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+				return sessionruntime.RunAdmissionView{
+					RequestUserTurn: chatview.NewRequestUserTurn(cmd, handle.TurnID),
+				}, nil
 			},
 			Cancel: cancel,
 			// Nil for discuss, which has no reader for steering messages.
