@@ -436,26 +436,35 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
 
 ### PR 2 (P0) — Synchronous pre-turn compaction
 
-- [ ] `pumpDiscussNative` / `pumpDiscussACP`: compute raw compactable pressure before
-      the model call; ≥ hard threshold → synchronous compaction (reuse
-      `runCompactionSync` single-flight/epoch/cooldown) → reload artifacts →
-      recompose → re-admission — CM-CMP-001
-- [ ] Compaction failure / cooldown / no compaction model → fall into L1 trim —
+- [x] Discuss backstop before any model call (native and ACP): raw compactable
+      pressure ≥ hard threshold → synchronous compaction → the run ends with
+      `DiscussEventRecompose` and the driver reloads the artifact frontier,
+      rebuilds the plan, re-admits, and resubmits (bounded retry cycles, cursor
+      never advances on recompose) — CM-CMP-001. Landed as
+      `Service.maybeSyncCompactDiscuss` + the worker recompose loop; the
+      recompose signal travels the existing opaque event vocabulary, so no
+      transport change.
+- [x] Compaction failure / cooldown / disabled settings / missing summarizer →
+      the turn proceeds with the L1 admission-trimmed context — CM-CMP-001
+- [x] Same synchronous backstop for the pipeline chat path (pressure measured in
+      `buildMessagesFromPipeline`, recompose is a same-process rebuild) —
       CM-CMP-001
-- [ ] Same synchronous backstop for the pipeline chat path
-      (`buildMessagesFromPipeline`) — CM-CMP-001
-- [ ] Budget the ACP prompt before concatenation (`discussACPFullContextPrompt`) —
-      CM-ADM-001
-- [ ] Session-targeted compaction entry point that does not trigger a turn —
-      CM-CMP-002
-- [ ] Latency impact assessment + gated rollout: shadow mode first (log
-      would-have-fired without blocking), per-bot/config gate, p50/p95 turn-latency
-      metrics for backstop runs — CM-CMP-003
-- [ ] Adapt the compaction input to the Discuss corpus explicitly (turn responses +
-      timeline vocabulary, unified estimator). Do not assume `runCompactionSync` is
-      a drop-in: its input is plain history messages; only its
-      single-flight/epoch/cooldown semantics carry over unchanged — CM-CMP-001,
-      CM-EST-001
+- [x] Budget the ACP prompt before concatenation — CM-ADM-001 *(landed in PR 1:
+      `admitDiscussMessages` runs before `discussACPFullContextPrompt`)*
+- [x] Session-targeted compaction entry point that does not trigger a turn —
+      CM-CMP-002 *(already satisfied by the `/compact run` command,
+      `internal/command/compact.go`: manual `RunCompactionSync` with full ratio,
+      no agent turn started)*
+- [x] Gated rollout: `[agent] sync_compaction = off | shadow | active`, default
+      shadow (logs would-have-fired without blocking); active-mode backstop runs
+      log status + duration + pressure/threshold under the stable
+      `sync_compaction_backstop` key for latency assessment — CM-CMP-003.
+      *(p50/p95 aggregation happens in the log pipeline; per-run duration_ms is
+      the exported measure.)*
+- [x] Compaction input adapted explicitly: discuss pressure comes from
+      `discussCompactableTokens` over the composed context (artifact summaries
+      excluded) in the unified estimator; only `runCompactionSync`'s
+      single-flight/epoch/cooldown semantics are reused — CM-CMP-001, CM-EST-001
 
 ### PR 3 (P1) — Bounded replay + pipeline cache eviction
 

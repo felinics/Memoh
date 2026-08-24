@@ -6,9 +6,11 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
@@ -155,10 +157,75 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 			}
 			return
 		}
+		if s.maybeSyncCompactDiscuss(ctx, cmd, resolved, h.id) {
+			if h.emit(turn.DiscussEventRecompose, nil) {
+				h.contentLightTerminal = true
+			}
+			return
+		}
 		s.pumpDiscussAgent(ctx, cmd, h)
 		return
 	}
+	if s.maybeSyncCompactDiscuss(ctx, cmd, resolved, h.id) {
+		if h.emit(turn.DiscussEventRecompose, nil) {
+			h.contentLightTerminal = true
+		}
+		return
+	}
 	s.pumpDiscussNative(ctx, cmd, h, resolved)
+}
+
+// maybeSyncCompactDiscuss is the pre-turn synchronous compaction backstop
+// (CM-CMP-001): when raw compactable pressure reaches the hard threshold it
+// compacts synchronously before any model call and reports true so the caller
+// ends the run with DiscussEventRecompose — the driver then recomposes
+// against the refreshed artifact frontier and resubmits. Compaction failure,
+// cooldown, disabled settings, or a missing summarizer model all return
+// false: the turn proceeds with the admission-trimmed context (CM-ADM-002
+// remains the hard boundary). Rollout is gated per CM-CMP-003: shadow mode
+// only logs the decision.
+func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTurnCommand, resolved ResolveRunConfigResult, runID string) bool {
+	mode := s.effectiveSyncCompactionMode()
+	if mode == syncCompactionModeOff || s.compactionService == nil || s.settingsService == nil {
+		return false
+	}
+	compactable := discussCompactableTokens(cmd.DiscussMessages)
+	budget := resolved.ContextBudgetMaxTokens
+	if budget <= 0 {
+		budget = s.contextAbsoluteMaxTokens()
+	}
+	if !syncCompactionShouldRun(compactable, budget) {
+		return false
+	}
+	threshold := hardCompactionThreshold(budget)
+	if mode == syncCompactionModeShadow {
+		s.logger.Info("sync_compaction_backstop",
+			slog.String("path", "discuss"),
+			slog.String("mode", "shadow"),
+			slog.Bool("would_fire", true),
+			slog.String("bot_id", cmd.BotID),
+			slog.String("session_id", cmd.ThreadID),
+			slog.Int("pressure_tokens", compactable),
+			slog.Int("threshold_tokens", threshold))
+		return false
+	}
+	start := time.Now()
+	res := s.runCompactionSync(ctx, ChatRequest{
+		BotID:    cmd.BotID,
+		ChatID:   cmd.BotID,
+		ThreadID: cmd.ThreadID,
+		RunID:    runID,
+	}, compactable, budget, resolved.ModelID)
+	s.logger.Info("sync_compaction_backstop",
+		slog.String("path", "discuss"),
+		slog.String("mode", "active"),
+		slog.String("status", res.Status),
+		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+		slog.String("bot_id", cmd.BotID),
+		slog.String("session_id", cmd.ThreadID),
+		slog.Int("pressure_tokens", compactable),
+		slog.Int("threshold_tokens", threshold))
+	return res.Status == compaction.StatusOK
 }
 
 func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved ResolveRunConfigResult) {

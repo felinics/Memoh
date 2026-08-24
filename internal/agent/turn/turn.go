@@ -143,6 +143,11 @@ const (
 	// DiscussEventSkipped signals the runtime declined to start (e.g. ACP
 	// participation gate); the run ends after this event.
 	DiscussEventSkipped = "discuss_skipped"
+	// DiscussEventRecompose signals the runtime compacted the thread
+	// synchronously before calling the model; the run ends after this event
+	// and the driver must recompose against the refreshed artifact frontier
+	// and resubmit (CM-CMP-001). The cursor must not advance.
+	DiscussEventRecompose = "discuss_recompose"
 )
 
 // DiscussRunResolvedPayload is the payload of DiscussEventRunResolved.

@@ -142,6 +142,7 @@ type Service struct {
 	timeout                           time.Duration
 	memorySearchTimeout               time.Duration
 	contextAbsoluteCapTokens          int
+	syncCompactionMode                string
 	clockLocation                     *time.Location
 	logger                            *slog.Logger
 	allowedTeam                       string
@@ -243,6 +244,32 @@ func (s *Service) effectiveContextTokenBudget(chatModel models.GetResponse) int 
 		return capTokens
 	}
 	return min(budget, capTokens)
+}
+
+// Pre-turn synchronous compaction backstop rollout modes (CM-CMP-003). The
+// wire values match config.SyncCompactionMode*; the application keeps its own
+// constants so the domain layer does not import the config package.
+const (
+	syncCompactionModeActive = "active"
+	syncCompactionModeShadow = "shadow"
+	syncCompactionModeOff    = "off"
+)
+
+// SetSyncCompactionMode sets the rollout mode for the pre-turn synchronous
+// compaction backstop on the discuss and pipeline-chat paths.
+func (s *Service) SetSyncCompactionMode(mode string) {
+	s.syncCompactionMode = mode
+}
+
+// effectiveSyncCompactionMode normalizes the configured mode; anything
+// unrecognized (including unset) observes in shadow rather than enforcing.
+func (s *Service) effectiveSyncCompactionMode() string {
+	switch s.syncCompactionMode {
+	case syncCompactionModeActive, syncCompactionModeOff:
+		return s.syncCompactionMode
+	default:
+		return syncCompactionModeShadow
+	}
 }
 
 // SetMemoryRegistry sets the provider registry for memory operations.
@@ -494,7 +521,40 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	var compactableTokensKnown bool
 	var currentMessageIndex *int
 	if usePipeline {
-		messages = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+		messages, compactableTokens = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+		compactableTokensKnown = true
+		// Pre-turn synchronous compaction backstop (CM-CMP-001), gated per
+		// CM-CMP-003. Mirrors the legacy path below: only a pass that
+		// actually produced a summary triggers recomposition; a noop keeps
+		// this turn's (already trimmed) context untouched.
+		if mode := s.effectiveSyncCompactionMode(); mode != syncCompactionModeOff && syncCompactionShouldRun(compactableTokens, contextTokenBudget) {
+			threshold := hardCompactionThreshold(contextTokenBudget)
+			if mode == syncCompactionModeShadow {
+				s.logger.Info("sync_compaction_backstop",
+					slog.String("path", "pipeline_chat"),
+					slog.String("mode", "shadow"),
+					slog.Bool("would_fire", true),
+					slog.String("bot_id", req.BotID),
+					slog.String("session_id", req.ThreadID),
+					slog.Int("pressure_tokens", compactableTokens),
+					slog.Int("threshold_tokens", threshold))
+			} else {
+				start := time.Now()
+				res := s.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget, chatModel.ID)
+				s.logger.Info("sync_compaction_backstop",
+					slog.String("path", "pipeline_chat"),
+					slog.String("mode", "active"),
+					slog.String("status", res.Status),
+					slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+					slog.String("bot_id", req.BotID),
+					slog.String("session_id", req.ThreadID),
+					slog.Int("pressure_tokens", compactableTokens),
+					slog.Int("threshold_tokens", threshold))
+				if res.Status == compaction.StatusOK {
+					messages, compactableTokens = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+				}
+			}
+		}
 		currentMessageIndex = latestModelUserMessageIndex(messages)
 	} else {
 		historyFallback := historyScopeFallbackFromChatRequest(req)

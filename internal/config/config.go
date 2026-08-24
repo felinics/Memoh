@@ -232,6 +232,13 @@ type AgentConfig struct {
 	// the model has no configured window. Zero or negative selects the
 	// built-in default; the cap can be raised but never disabled.
 	ContextAbsoluteMaxTokens int `toml:"context_absolute_max_tokens"`
+	// SyncCompaction gates the pre-turn synchronous compaction backstop on
+	// the discuss and pipeline-chat paths (CM-CMP-001/003): "shadow"
+	// (default) logs would-have-fired decisions without blocking, "active"
+	// compacts synchronously before the model call at the hard threshold,
+	// "off" disables the backstop. The legacy history chat path keeps its
+	// existing always-on synchronous backstop regardless of this setting.
+	SyncCompaction string `toml:"sync_compaction"`
 }
 
 // EffectiveContextAbsoluteMaxTokens resolves the server-wide context
@@ -248,6 +255,28 @@ const (
 	ContextLoopReselectModeShadow = "shadow"
 	ContextLoopReselectModeOff    = "off"
 )
+
+const (
+	SyncCompactionModeActive = "active"
+	SyncCompactionModeShadow = "shadow"
+	SyncCompactionModeOff    = "off"
+)
+
+// EffectiveSyncCompactionMode normalizes the pre-turn synchronous compaction
+// rollout mode. Empty defaults to shadow (observe before enforcing, per the
+// CM-CMP-003 rollout gate). recognized is false when a non-empty value does
+// not match active/shadow/off.
+func (c AgentConfig) EffectiveSyncCompactionMode() (mode string, recognized bool) {
+	value := strings.TrimSpace(strings.ToLower(c.SyncCompaction))
+	switch value {
+	case "":
+		return SyncCompactionModeShadow, true
+	case SyncCompactionModeActive, SyncCompactionModeShadow, SyncCompactionModeOff:
+		return value, true
+	default:
+		return SyncCompactionModeShadow, false
+	}
+}
 
 // EffectiveContextLoopReselectMode normalizes the configured in-loop context
 // step reselector rollout mode. Empty defaults to active. recognized is false
