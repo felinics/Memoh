@@ -10,8 +10,11 @@ import (
 
 // EstimateBytesPerToken is the byte-per-token heuristic shared by every
 // context ledger (selection budgets, compaction triggers, manifest
-// accounting). The authoritative value lives in internal/tokenest, the
-// single swap point for a real tokenizer (CM-EST-001).
+// accounting), and the single swap point for a real tokenizer. The numeric
+// value is anchored in internal/tokenest, the dependency-free re-export that
+// the chat/channel-side estimators use because the architecture guards
+// forbid them from importing this package (CM-EST-001); swapping in a real
+// tokenizer changes both together.
 const EstimateBytesPerToken = tokenest.BytesPerToken
 
 const (
@@ -32,7 +35,10 @@ const EstimateImageTokens = 1500
 
 // TokensFromBytes converts a byte count to the shared token estimate.
 func TokensFromBytes(n int) int {
-	return tokenest.FromBytes(n)
+	if n <= 0 {
+		return 0
+	}
+	return n / EstimateBytesPerToken
 }
 
 // ProviderBudgetTokensFromBytes converts bytes for provider-envelope decisions,

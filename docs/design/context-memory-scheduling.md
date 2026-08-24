@@ -108,7 +108,7 @@ Representations materialized per Discuss turn, in order:
 | 3 | `[]sdk.Message` | `turn_discuss.go` `discussMessagesToSDK` | **Full `json.Marshal` + `json.Unmarshal` round-trip per RawContent message** |
 | 4 | `[]contextfrag.ContextFrag` (source frags) | `internal/contextview/collector_discuss.go` `discussContextMessageToSDK` | **A second identical per-message marshal/unmarshal round-trip**; tail messages pay it twice via `latestComposedUserMessageIndex` |
 | 5 | Compiled frags + rendered assembly | `internal/agent/context/fragment/compile.go` `CompileFrags` + `Render` | Two `cloneMessage` passes — O(parts) header copies, payloads shared |
-| 6 | Provider view + step reselection | `internal/contextview/provider_run_config.go`, `provider_step_reselection.go` | Prefix `cloneSDKMessages` per changed attempt; **up to `len(frags)+2` full `ProviderPayloadHashAndBytes` serializations of the whole payload per step**, plus one per-fragment serialization per step in `applyProviderStepSerializedCosts` |
+| 6 | Provider view + step reselection | `internal/contextview/provider_run_config.go`, `provider_step_reselection.go` | Prefix `cloneSDKMessages` per changed attempt; **up to `len(frags)+2` full `ProviderPayloadHashAndBytes` serializations of the whole payload per step**, plus one per-fragment serialization per step in `applyProviderStepSerializedCosts`. *In-flight fix: #1072 makes every envelope decision price through the estimator and `ProviderPayloadHash` hash-only.* |
 | 7 | Terminal persistence | `turn_discuss.go` → `internal/messageconv` → `service_store.go` | **Four serializations**: `event.Messages` + a retained `json.Marshal(event)` terminal payload, `json.Unmarshal` back to SDK messages, then a per-message marshal/unmarshal in `messageconv` before the DB write |
 
 The genuinely payload-doubling steps are the three JSON round-trips (#3, #4, #7); the
@@ -415,8 +415,13 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
 - [x] `loadArtifacts` / `loadTimelineArtifacts` failure: degrade into the bounded
       admission window with a stable `context_admission_degraded` log; never silent
       unbounded recomposition — CM-ADM-003
-- [x] Unify token estimation on `internal/tokenest` (eliminates chars/2 vs len/4
-      split; `contextfrag` delegates to it) — CM-EST-001
+- [x] Unify token estimation — CM-EST-001. The authority is `contextfrag`'s
+      `EstimateBytesPerToken` from the unified context-budget work (#1012);
+      `internal/tokenest` is its dependency-free anchor for the packages the
+      architecture guards keep out of `agent/context` (chat/timeline,
+      channel, config). `contextfrag` aliases its constant to the anchor, so
+      the chars/2 vs len/4 split is gone and a real tokenizer swaps both
+      sides together.
 - [x] `GOMEMLIMIT` + compose memory limits for `server` (production and devenv) —
       CM-PRC-001
 - [x] Observability: `context_admission` / `context_admission_rejected` /
@@ -476,9 +481,12 @@ ships before — or atomically with — cache eviction, never eviction first
       `discussContextMessageToSDK`) — frags reference `json.RawMessage` bytes
       directly, under the read-only contract with checksum test protection —
       CM-REP-001
-- [ ] Step reselection: replace per-attempt full `ProviderPayloadHashAndBytes` with
-      incremental accounting over persisted per-fragment serialized costs —
-      CM-REP-002
+- [ ] Step reselection: stop serializing the full payload per attempt —
+      CM-REP-002. **Defer to #1072** (`ProviderEnvelopeTokens`: every envelope
+      decision prices through the estimator, `ProviderPayloadHash` becomes
+      hash-only), which is in flight in the context-budget landing stack;
+      this roadmap only adds persisted per-fragment costs on top if a gap
+      remains after it lands, rather than re-implementing the accounting.
 - [ ] Terminal persistence: pass `json.RawMessage` through to the store; drop the
       decode/re-encode chain (`turn_discuss.go` → `messageconv`) — CM-REP-003
 - [ ] Snapshot backend: copy-on-write per-delta updates instead of full

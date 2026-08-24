@@ -1,9 +1,14 @@
-// Package tokenest is the single token-estimation authority shared by every
-// subsystem that sizes context before a provider call: timeline composition,
-// discuss/pipeline admission, compaction triggers, and fragment budget
-// ledgers (docs/design/context-memory-scheduling.md, CM-EST-001). It is the
-// one swap point for a real tokenizer; no package may keep a private
-// bytes-per-token constant.
+// Package tokenest is the dependency-free anchor of the token-estimation
+// authority defined by internal/agent/context/fragment (contextfrag's
+// EstimateBytesPerToken, the shared ledger heuristic from the unified
+// context-budget work). It exists because the architecture guards
+// (internal/arch: TestTimelineOnlyDependsOnTurnPort,
+// TestChannelAgentDependenciesStayOnPorts) forbid chat/timeline and channel
+// packages from importing agent/context — yet CM-EST-001
+// (docs/design/context-memory-scheduling.md) requires their estimators to
+// agree with the fragment ledger. contextfrag aliases its constant to
+// BytesPerToken, so both sides swap together when a real tokenizer lands;
+// no package may keep a private bytes-per-token constant.
 package tokenest
 
 // BytesPerToken is the shared byte-per-token heuristic.
