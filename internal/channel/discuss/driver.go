@@ -100,14 +100,22 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 	}
 	logger = logger.With(slog.String("service", "channel/discuss"))
 	projector := newDiscussEventProjector(deps.Broadcaster)
+	capTokens := deps.AdmissionMaxTokens
+	if capTokens <= 0 {
+		capTokens = tokenest.DefaultAbsoluteCapTokens
+	}
 	return &DiscussDriver{
-		turn:               deps.Turn,
-		sessions:           make(map[string]*discussSession),
-		history:            discussHistoryReader{messages: deps.MessageService, logger: logger},
+		turn:     deps.Turn,
+		sessions: make(map[string]*discussSession),
+		history: discussHistoryReader{
+			messages: deps.MessageService,
+			maxBytes: int64(capTokens) * tokenest.BytesPerToken,
+			logger:   logger,
+		},
 		cursor:             discussCursorTracker{store: deps.CursorStore},
 		runner:             discussTurnRunner{projector: projector},
 		artifacts:          deps.Artifacts,
-		admissionCapTokens: deps.AdmissionMaxTokens,
+		admissionCapTokens: capTokens,
 		logger:             logger,
 	}
 }

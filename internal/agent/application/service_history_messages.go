@@ -12,6 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/context/compaction"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/memohai/memoh/internal/tokenest"
 )
 
 // buildMessagesFromPipeline assembles chat context from the DCP pipeline's
@@ -28,7 +29,7 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 		return nil
 	}
 
-	trs := s.loadTurnResponses(ctx, sessionID)
+	trs := s.loadTurnResponses(ctx, sessionID, contextTokenBudget)
 	artifacts := s.loadTimelineArtifacts(ctx, req.BotID, sessionID)
 
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
@@ -126,18 +127,31 @@ func trimPipelineMessagesByTokens(log *slog.Logger, messages []ModelMessage, pin
 }
 
 // loadTurnResponses loads recent assistant/tool messages from bot_history_messages
-// for use as the TR stream in pipeline-based context assembly.
-func (s *Service) loadTurnResponses(ctx context.Context, sessionID string) []timeline.TurnResponseEntry {
+// for use as the TR stream in pipeline-based context assembly. The load is
+// byte-budgeted on the database side (CM-ADM-001): rows are admitted
+// newest-first within the context budget, so a dense 24-hour window can
+// never materialize more than the budget's worth of payload.
+func (s *Service) loadTurnResponses(ctx context.Context, sessionID string, contextTokenBudget int) []timeline.TurnResponseEntry {
 	if s.messageService == nil {
 		return nil
 	}
 	since := time.Now().UTC().Add(-24 * time.Hour)
-	msgs, err := s.messageService.ListActiveSinceBySession(ctx, sessionID, since)
+	msgs, err := s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, s.historyLoadMaxBytes(contextTokenBudget))
 	if err != nil {
 		s.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil
 	}
 	return timeline.DecodeTurnResponseEntries(msgs)
+}
+
+// historyLoadMaxBytes converts a token budget into the byte budget used for
+// database-side history admission; a missing budget falls back to the
+// absolute cap so no load path is ever unbounded.
+func (s *Service) historyLoadMaxBytes(contextTokenBudget int) int64 {
+	if contextTokenBudget <= 0 {
+		contextTokenBudget = s.contextAbsoluteMaxTokens()
+	}
+	return int64(contextTokenBudget) * tokenest.BytesPerToken
 }
 
 // stripToolMessages removes bulky tool interactions from the context while

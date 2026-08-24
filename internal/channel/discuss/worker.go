@@ -80,7 +80,15 @@ func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg DiscussSessionCon
 // workers obtain the current service through turnServiceSnapshot.
 func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger, turnSvc turn.Service) {
 	cfg := d.sessionConfigSnapshot(sess)
-	trs := d.history.Load(ctx, cfg.ThreadID)
+	trs, historyMeasure := d.history.Load(ctx, cfg.ThreadID)
+	if historyMeasure.TotalMessages > int64(historyMeasure.Loaded) {
+		log.Info("context_admission",
+			slog.String("path", "discuss_history_load"),
+			slog.Int64("history_total_messages", historyMeasure.TotalMessages),
+			slog.Int64("history_total_bytes", historyMeasure.TotalBytes),
+			slog.Int("history_loaded_messages", historyMeasure.Loaded),
+			slog.Int("budget_tokens", d.admissionMaxTokens()))
+	}
 
 	// Cold-start / post-idle initialisation combines the durable position with
 	// the persisted-reply anchor; each segment is then gated inside its own

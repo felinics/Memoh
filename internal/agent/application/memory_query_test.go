@@ -20,6 +20,18 @@ func (s *memoryQueryMessageService) ListActiveSinceBySession(context.Context, st
 	return append([]messagepkg.Message(nil), s.messages...), nil
 }
 
+func (s *memoryQueryMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return append([]messagepkg.Message(nil), s.messages...), nil
+}
+
+func (s *memoryQueryMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return append([]messagepkg.Message(nil), s.messages...), nil
+}
+
+func (*memoryQueryMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
+	return messagepkg.ActiveMessagesMeasure{}, nil
+}
+
 func TestMemoryQueryBuilderCombinesRecentUserMessages(t *testing.T) {
 	t.Parallel()
 

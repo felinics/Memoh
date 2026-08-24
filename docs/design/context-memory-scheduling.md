@@ -397,14 +397,18 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       selection before materialization), `[agent] context_absolute_max_tokens`
       (default 200k, never disabled), and `Service.effectiveContextTokenBudget`
       clamping every provider-bound budget.
-- [ ] Metadata-only admission measures: SQL-side aggregates (`COUNT(*)` +
-      `SUM(octet_length(...))`) over the uncompacted range for DB-backed history, so
-      admission never loads payloads in order to measure them. This is the coarse
-      measurement foundation that PR 4's persisted per-fragment costs later refine —
-      CM-ADM-001, CM-REP-002. *(Partially deferred: current admission measures
-      lengths of already-loaded RC/TR references without materializing or
-      serializing; the SQL-side aggregate that also bounds the loads themselves
-      lands with PR 3's paginated queries.)*
+- [x] Metadata-only admission measures and byte-budgeted history loads —
+      CM-ADM-001, CM-REP-002. Landed as `MeasureActiveMessagesBySession`
+      (SQL-side `COUNT(*)` + `SUM(octet_length(content::text))`) plus the
+      `…WithinBytes` query variants that admit rows newest-first on the
+      database side until the budget's byte equivalent is spent. Every
+      DB-backed history load that feeds composition is bounded by the budget:
+      the discuss TR load (previously unbounded since the Unix epoch), the
+      pipeline-chat TR load, and the legacy `loadHistoryRecords` (both
+      session- and bot-scoped). Total history size never bounds process
+      memory; the budget does. Remaining resident-state bounds — the RC
+      pipeline cache and event replay — are CM-CCH-001/CM-RPL-001 and land
+      in PR 3; PR 4's persisted per-fragment costs refine the measures.
 - [x] Deterministic over-budget trim (artifact summaries + newest message + recent
       contiguous window, no orphaned tool responses); `context.protected_overflow`
       stable error when even the protected set does not fit — CM-ADM-002
