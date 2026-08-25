@@ -181,7 +181,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		cfg := rc.runConfig
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = s.canDeliverUserInputStream()
-		reasoningTiming := newReasoningTimingTracker(streamReq.RunID, nil)
+		reasoningTiming := newReasoningTimingTracker(nil)
 		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
 		configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
 		cfg = s.prepareRunConfig(streamCtx, cfg)
@@ -209,6 +209,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		var agentStreamErr error
 		for event := range eventCh {
 			idleCancel.Reset() // each event resets the idle timer
+
 			// Track tool calls for adaptive idle timeout and progress events
 			if event.Type == native.EventToolCallStart {
 				toolCallCount++
@@ -482,7 +483,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	cfg := rc.runConfig
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
-	reasoningTiming := newReasoningTimingTracker(req.RunID, nil)
+	reasoningTiming := newReasoningTimingTracker(nil)
 	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
 	cfg = s.prepareRunConfig(streamCtx, cfg)
@@ -512,6 +513,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	terminalEventSeen := false
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
+
 		// Track tool calls for adaptive idle timeout
 		if event.Type == native.EventToolCallStart {
 			toolCallCount++

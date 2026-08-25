@@ -128,9 +128,9 @@ const connectors = computed(() => {
 // acts as a live ticker via `running`/`headerLabel`, so the user can follow
 // progress without the body being forced open.
 const collapseKey = computed(() => groupCollapseKey(props.messageId, props.items))
-const open = ref(getCollapseOpen(collapseKey.value))
+const open = ref(getCollapseOpen(collapseKey.value) ?? false)
 watch(collapseKey, (key) => {
-  open.value = getCollapseOpen(key)
+  open.value = getCollapseOpen(key) ?? false
 })
 function toggle() {
   open.value = !open.value

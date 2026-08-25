@@ -72,14 +72,7 @@ type UIMessage struct {
 // block. It is absent for legacy rows and non-streaming responses whose block
 // boundaries were not observable.
 type UIReasoningTiming struct {
-	SegmentID     string    `json:"segment_id"`
-	StartedAt     time.Time `json:"started_at" format:"date-time"`
-	EndedAt       time.Time `json:"ended_at" format:"date-time"`
-	DurationMS    int64     `json:"duration_ms"`
-	State         string    `json:"state"`
-	StartBoundary string    `json:"start_boundary"`
-	EndBoundary   string    `json:"end_boundary"`
-	Measurement   string    `json:"measurement"`
+	DurationMS int64 `json:"duration_ms"`
 } // @name conversation.UIReasoningTiming
 
 type UIExecutionLocation struct {

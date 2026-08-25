@@ -18571,29 +18571,6 @@ const docTemplate = `{
             "properties": {
                 "duration_ms": {
                     "type": "integer"
-                },
-                "end_boundary": {
-                    "type": "string"
-                },
-                "ended_at": {
-                    "type": "string",
-                    "format": "date-time"
-                },
-                "measurement": {
-                    "type": "string"
-                },
-                "segment_id": {
-                    "type": "string"
-                },
-                "start_boundary": {
-                    "type": "string"
-                },
-                "started_at": {
-                    "type": "string",
-                    "format": "date-time"
-                },
-                "state": {
-                    "type": "string"
                 }
             }
         },

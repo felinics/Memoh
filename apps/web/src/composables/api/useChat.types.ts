@@ -162,14 +162,7 @@ export interface UIReasoningMessage {
 }
 
 export interface UIReasoningTiming {
-  segment_id: string
-  started_at: string | Date
-  ended_at: string | Date
   duration_ms: number
-  state: string
-  start_boundary: string
-  end_boundary: string
-  measurement: string
 }
 
 export interface UIToolMessage {

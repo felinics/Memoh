@@ -223,7 +223,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 	}()
 
-	reasoningTiming := newReasoningTimingTracker(runConfig.RunID, nil)
+	reasoningTiming := newReasoningTimingTracker(nil)
 	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
 	eventCh := s.streamDiscussAgent(ctx, runConfig)
 
@@ -564,7 +564,7 @@ func (s *Service) storeDiscussRound(
 	messages []sdk.Message,
 	modelID string,
 	lifecycle *contextfrag.LifecycleHolder,
-	reasoningTimings ...[]messagepkg.ReasoningTimingSegment,
+	reasoningTiming []messagepkg.ReasoningTimingSegment,
 ) error {
 	if s.turnHooks != nil && s.turnHooks.storeRound != nil {
 		return s.turnHooks.storeRound(
@@ -578,10 +578,6 @@ func (s *Service) storeDiscussRound(
 			modelID,
 			lifecycle,
 		)
-	}
-	var reasoningTiming []messagepkg.ReasoningTimingSegment
-	if len(reasoningTimings) > 0 {
-		reasoningTiming = reasoningTimings[0]
 	}
 	return s.storeRoundWithOptions(ctx, ChatRequest{
 		RunID:                   runID,

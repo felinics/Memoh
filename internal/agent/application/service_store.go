@@ -74,10 +74,6 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 	if len(filtered) == 0 {
 		return nil, nil
 	}
-	// Timing metadata is projected only after skip/filter/repair has produced
-	// the exact rows that will be persisted. Computing indexes earlier can put
-	// assistant metadata on a skipped user row or an injected tool closure.
-	opts = opts.withReasoningTimingMetadata(filtered)
 	opts = opts.withContextLifecycleMetadata(s.logger, req, filtered)
 
 	persisted, persistErr := s.storeMessagesResult(ctx, req, filtered, modelID, opts)
@@ -252,6 +248,9 @@ func (s *Service) storeMessagesResult(ctx context.Context, req ChatRequest, mess
 }
 
 func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.PersistInput, error) {
+	// Project timing only at the final persistence boundary, after callers have
+	// finished filtering, repairing, or augmenting the rows being stored.
+	opts = opts.withReasoningTimingMetadata(messages)
 	// Check bot setting for full tool result persistence.
 	pruneToolResults := true
 	if botSettings, err := s.loadBotSettings(ctx, req.BotID); err == nil {

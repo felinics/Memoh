@@ -45,7 +45,7 @@ func TestAgentStepCommitterPersistsOnlyStepDelta(t *testing.T) {
 		t.Fatal("step committer was not enabled for an admitted fenced turn")
 	}
 	clock := newReasoningTimingTestClock()
-	committer.reasoningTiming = newReasoningTimingTracker(runID, clock.read)
+	committer.reasoningTiming = newReasoningTimingTracker(clock.read)
 	for i, text := range []string{"first", "second"} {
 		if err := committer.commit(ctx, i, &sdk.StepResult{Messages: []sdk.Message{sdk.AssistantMessage(text)}}); err != nil {
 			t.Fatalf("commit step %d: %v", i, err)

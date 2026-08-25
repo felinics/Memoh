@@ -2358,22 +2358,6 @@ definitions:
     properties:
       duration_ms:
         type: integer
-      end_boundary:
-        type: string
-      ended_at:
-        format: date-time
-        type: string
-      measurement:
-        type: string
-      segment_id:
-        type: string
-      start_boundary:
-        type: string
-      started_at:
-        format: date-time
-        type: string
-      state:
-        type: string
     type: object
   conversation.UIReplyRef:
     properties:

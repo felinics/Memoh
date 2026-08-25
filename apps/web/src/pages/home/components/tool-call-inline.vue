@@ -217,9 +217,9 @@ const executionLocationLabel = computed(() => {
 
 // Persisted, user-driven toggle (survives the post-turn refetch/remount).
 const collapseKey = computed(() => toolCollapseKey(props.messageId, props.block))
-const open = ref(getCollapseOpen(collapseKey.value) || display.value.defaultOpen === true)
+const open = ref(getCollapseOpen(collapseKey.value) ?? (display.value.defaultOpen === true))
 watch(collapseKey, (key) => {
-  open.value = getCollapseOpen(key) || display.value.defaultOpen === true
+  open.value = getCollapseOpen(key) ?? (display.value.defaultOpen === true)
 })
 
 const expandable = computed(

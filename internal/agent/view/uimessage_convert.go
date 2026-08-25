@@ -729,14 +729,7 @@ func uiReasoningTimingsByOrdinal(metadata map[string]any) map[int]*UIReasoningTi
 			continue
 		}
 		timings[segment.Ordinal] = &UIReasoningTiming{
-			SegmentID:     segment.SegmentID,
-			StartedAt:     segment.StartedAt,
-			EndedAt:       segment.EndedAt,
-			DurationMS:    segment.DurationMS,
-			State:         segment.State,
-			StartBoundary: segment.StartBoundary,
-			EndBoundary:   segment.EndBoundary,
-			Measurement:   segment.Measurement,
+			DurationMS: segment.DurationMS,
 		}
 	}
 	return timings

@@ -75,12 +75,10 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	}
 	messages := sdkMessagesToModelMessages(step.Messages)
 	timingState := "completed"
-	timingBoundary := "step_commit"
 	if interrupted {
 		timingState = "interrupted"
-		timingBoundary = "step_interrupted"
 	}
-	reasoningTiming := c.reasoningTiming.take(timingState, timingBoundary)
+	reasoningTiming := c.reasoningTiming.take(timingState)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -120,7 +118,6 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 			}
 		}
 	}
-	opts = opts.withReasoningTimingMetadata(messages)
 	opts = opts.withContextLifecycleMetadata(c.service.logger, storeReq, messages)
 	inputs, err := c.service.buildPersistInputs(context.WithoutCancel(ctx), storeReq, messages, c.rc.model.ID, opts)
 	if err != nil {

@@ -1330,13 +1330,6 @@ export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachm
 
 export type ConversationUiReasoningTiming = {
     duration_ms?: number;
-    end_boundary?: string;
-    ended_at?: Date;
-    measurement?: string;
-    segment_id?: string;
-    start_boundary?: string;
-    started_at?: Date;
-    state?: string;
 };
 
 export type ConversationUiReplyRef = {

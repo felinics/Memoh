@@ -52,9 +52,9 @@ const { t } = useI18n()
 
 // Persisted, user-driven toggle (survives the post-turn refetch/remount).
 const collapseKey = computed(() => reasoningCollapseKey(props.messageId, props.block))
-const open = ref(getCollapseOpen(collapseKey.value))
+const open = ref(getCollapseOpen(collapseKey.value) ?? false)
 watch(collapseKey, (key) => {
-  open.value = getCollapseOpen(key)
+  open.value = getCollapseOpen(key) ?? false
 })
 
 // Trimmed so the expanded body doesn't open with leading blank lines/space.

@@ -1142,6 +1142,7 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 		nil,
 		true,
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("persistACPRound returned error: %v", err)
@@ -1207,6 +1208,7 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 		}),
 		nil,
 		true,
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -1281,6 +1283,7 @@ func TestPersistACPRoundAttachesLifecycleOnlyToFinalAssistant(t *testing.T) {
 		nil,
 		true,
 		holder,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)
@@ -1321,14 +1324,8 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 		true,
 		nil,
 		[]messagepkg.ReasoningTimingSegment{{
-			SegmentID:     "run-acp:reasoning:0",
-			StartedAt:     time.Date(2026, 8, 26, 1, 2, 3, 0, time.UTC),
-			EndedAt:       time.Date(2026, 8, 26, 1, 2, 5, 0, time.UTC),
-			DurationMS:    2000,
-			State:         "completed",
-			StartBoundary: string(native.EventReasoningDelta),
-			EndBoundary:   string(native.EventTextDelta),
-			Measurement:   reasoningTimingMeasurement,
+			DurationMS: 2000,
+			State:      "completed",
 		}},
 	)
 	if err != nil {
@@ -1368,6 +1365,7 @@ func TestPersistACPRoundEmptyTextLeavesAssistantBlank(t *testing.T) {
 		nil,
 		true,
 		nil,
+		nil,
 	); err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)
 	}
@@ -1400,6 +1398,7 @@ func TestPersistACPRoundEmptyOutputKeepsUsage(t *testing.T) {
 		},
 		nil,
 		true,
+		nil,
 		nil,
 	); err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)

@@ -155,14 +155,7 @@ describe('ThinkingBlock', () => {
       false,
       messageId,
       {
-        segment_id: 'run-1:reasoning:0',
-        started_at: '2026-08-26T01:02:03Z',
-        ended_at: '2026-08-26T01:02:07.2Z',
         duration_ms: 4_200,
-        state: 'completed',
-        start_boundary: 'reasoning_start',
-        end_boundary: 'reasoning_end',
-        measurement: 'server_monotonic',
       },
     )
 

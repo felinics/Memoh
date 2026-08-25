@@ -1,9 +1,6 @@
 package message
 
-import (
-	"encoding/json"
-	"time"
-)
+import "encoding/json"
 
 const (
 	// ReasoningTimingMetadataKey stores server-observed reasoning segment timing
@@ -21,18 +18,11 @@ type ReasoningTimingMetadata struct {
 }
 
 // ReasoningTimingSegment describes one visible reasoning block. DurationMS is
-// computed from Go's monotonic clock; the wall-clock timestamps are retained
-// only for audit and correlation.
+// observed by the server and intentionally excludes presentation-only details.
 type ReasoningTimingSegment struct {
-	SegmentID     string    `json:"segment_id"`
-	Ordinal       int       `json:"ordinal"`
-	StartedAt     time.Time `json:"started_at"`
-	EndedAt       time.Time `json:"ended_at"`
-	DurationMS    int64     `json:"duration_ms"`
-	State         string    `json:"state"`
-	StartBoundary string    `json:"start_boundary"`
-	EndBoundary   string    `json:"end_boundary"`
-	Measurement   string    `json:"measurement"`
+	Ordinal    int    `json:"ordinal"`
+	DurationMS int64  `json:"duration_ms"`
+	State      string `json:"state"`
 }
 
 // ReasoningTimingFromMetadata decodes the versioned timing envelope from a
@@ -56,7 +46,7 @@ func ReasoningTimingFromMetadata(metadata map[string]any) []ReasoningTimingSegme
 	}
 	valid := make([]ReasoningTimingSegment, 0, len(envelope.Segments))
 	for _, segment := range envelope.Segments {
-		if segment.Ordinal < 0 || segment.DurationMS < 0 || segment.StartedAt.IsZero() || segment.EndedAt.IsZero() {
+		if segment.Ordinal < 0 || segment.DurationMS < 0 {
 			continue
 		}
 		valid = append(valid, segment)

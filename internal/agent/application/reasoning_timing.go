@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -13,36 +12,27 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 )
 
-const reasoningTimingMeasurement = "server_monotonic"
-
 type reasoningTimingActiveSegment struct {
-	segmentID     string
-	startedAt     time.Time
-	startBoundary string
-	hasContent    bool
+	startedAt  time.Time
+	hasContent bool
 }
 
 // reasoningTimingTracker observes the same normalized stream vocabulary used
 // by Native and ACP. It keeps only the current, uncommitted model attempt so a
 // retry cannot leak discarded timing into durable history.
 type reasoningTimingTracker struct {
-	mu          sync.Mutex
-	runID       string
-	now         func() time.Time
-	nextSegment int
-	active      *reasoningTimingActiveSegment
-	segments    []messagepkg.ReasoningTimingSegment
-	committed   []messagepkg.ReasoningTimingSegment
+	mu        sync.Mutex
+	now       func() time.Time
+	active    *reasoningTimingActiveSegment
+	segments  []messagepkg.ReasoningTimingSegment
+	committed []messagepkg.ReasoningTimingSegment
 }
 
-func newReasoningTimingTracker(runID string, now func() time.Time) *reasoningTimingTracker {
+func newReasoningTimingTracker(now func() time.Time) *reasoningTimingTracker {
 	if now == nil {
 		now = time.Now
 	}
-	return &reasoningTimingTracker{
-		runID: strings.TrimSpace(runID),
-		now:   now,
-	}
+	return &reasoningTimingTracker{now: now}
 }
 
 func (t *reasoningTimingTracker) observe(event native.StreamEvent) {
@@ -62,27 +52,19 @@ func (t *reasoningTimingTracker) observe(event native.StreamEvent) {
 		t.active = nil
 		t.segments = nil
 	case native.EventReasoningStart:
-		t.finishActiveLocked(now, "completed", string(native.EventReasoningStart))
-		t.startLocked(now, string(native.EventReasoningStart))
+		t.finishActiveLocked(now, "completed")
+		t.startLocked(now)
 	case native.EventReasoningDelta:
 		if t.active == nil {
-			t.startLocked(now, string(native.EventReasoningDelta))
+			t.startLocked(now)
 		}
 		if strings.TrimSpace(event.Delta) != "" {
 			t.active.hasContent = true
 		}
 	case native.EventReasoningEnd:
-		t.finishActiveLocked(now, "completed", string(native.EventReasoningEnd))
-	default:
-		state, boundary, ok := reasoningEndBoundary(event.Type)
-		if ok {
-			t.finishActiveLocked(now, state, boundary)
-		}
-	}
-}
-
-func reasoningEndBoundary(eventType native.StreamEventType) (state, boundary string, ok bool) {
-	switch eventType {
+		t.finishActiveLocked(now, "completed")
+	case native.EventAgentAbort:
+		t.finishActiveLocked(now, "interrupted")
 	case native.EventTextStart,
 		native.EventTextDelta,
 		native.EventTextEnd,
@@ -97,28 +79,15 @@ func reasoningEndBoundary(eventType native.StreamEventType) (state, boundary str
 		native.EventReaction,
 		native.EventSpeech,
 		native.EventAgentEnd:
-		return "completed", string(eventType), true
-	case native.EventAgentAbort:
-		return "interrupted", string(eventType), true
-	default:
-		return "", "", false
+		t.finishActiveLocked(now, "completed")
 	}
 }
 
-func (t *reasoningTimingTracker) startLocked(now time.Time, boundary string) {
-	segmentScope := t.runID
-	if segmentScope == "" {
-		segmentScope = "unscoped"
-	}
-	t.active = &reasoningTimingActiveSegment{
-		segmentID:     fmt.Sprintf("%s:reasoning:%d", segmentScope, t.nextSegment),
-		startedAt:     now,
-		startBoundary: boundary,
-	}
-	t.nextSegment++
+func (t *reasoningTimingTracker) startLocked(now time.Time) {
+	t.active = &reasoningTimingActiveSegment{startedAt: now}
 }
 
-func (t *reasoningTimingTracker) finishActiveLocked(now time.Time, state, boundary string) {
+func (t *reasoningTimingTracker) finishActiveLocked(now time.Time, state string) {
 	active := t.active
 	t.active = nil
 	if active == nil || !active.hasContent {
@@ -129,14 +98,8 @@ func (t *reasoningTimingTracker) finishActiveLocked(now time.Time, state, bounda
 		duration = 0
 	}
 	t.segments = append(t.segments, messagepkg.ReasoningTimingSegment{
-		SegmentID:     active.segmentID,
-		StartedAt:     active.startedAt.UTC(),
-		EndedAt:       now.UTC(),
-		DurationMS:    duration.Milliseconds(),
-		State:         state,
-		StartBoundary: active.startBoundary,
-		EndBoundary:   boundary,
-		Measurement:   reasoningTimingMeasurement,
+		DurationMS: duration.Milliseconds(),
+		State:      state,
 	})
 }
 
@@ -144,28 +107,28 @@ func (t *reasoningTimingTracker) finishActiveLocked(now time.Time, state, bounda
 // EventRetry marker emitted when the next provider call begins. Step-backed
 // persistence uses take directly; terminal-snapshot paths checkpoint each
 // completed step and take the full accumulated result at the end.
-func (t *reasoningTimingTracker) checkpoint(state, boundary string) {
+func (t *reasoningTimingTracker) checkpoint(state string) {
 	if t == nil {
 		return
 	}
 	now := t.now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.finishActiveLocked(now, state, boundary)
+	t.finishActiveLocked(now, state)
 	t.committed = append(t.committed, t.segments...)
 	t.segments = nil
 }
 
 // take closes an unterminated block at the persistence boundary, returns all
 // segments for the current durable unit, and resets the unit for the next step.
-func (t *reasoningTimingTracker) take(state, boundary string) []messagepkg.ReasoningTimingSegment {
+func (t *reasoningTimingTracker) take(state string) []messagepkg.ReasoningTimingSegment {
 	if t == nil {
 		return nil
 	}
 	now := t.now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.finishActiveLocked(now, state, boundary)
+	t.finishActiveLocked(now, state)
 	segments := make([]messagepkg.ReasoningTimingSegment, 0, len(t.committed)+len(t.segments))
 	segments = append(segments, t.committed...)
 	segments = append(segments, t.segments...)
@@ -179,7 +142,7 @@ func takeTerminalReasoningTiming(t *reasoningTimingTracker, eventType native.Str
 	if eventType == native.EventAgentAbort {
 		state = "interrupted"
 	}
-	return t.take(state, string(eventType))
+	return t.take(state)
 }
 
 // configureNativeReasoningTiming samples provider parts before Twilight's
@@ -216,7 +179,7 @@ func configureNativeReasoningTiming(
 				return err
 			}
 		}
-		tracker.checkpoint("completed", "step_commit")
+		tracker.checkpoint("completed")
 		return nil
 	}
 	previousInterrupt := cfg.OnStepInterrupted
@@ -226,7 +189,7 @@ func configureNativeReasoningTiming(
 				return err
 			}
 		}
-		tracker.checkpoint("interrupted", "step_interrupted")
+		tracker.checkpoint("interrupted")
 		return nil
 	}
 }

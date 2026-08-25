@@ -416,7 +416,7 @@ func (s *Service) continueUserInputSession(
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	reasoningTiming := newReasoningTimingTracker(chatReq.RunID, nil)
+	reasoningTiming := newReasoningTimingTracker(nil)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
 	stream := s.agent.Stream(ctx, cfg)
 	stored := false

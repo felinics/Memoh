@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { groupCollapseKey, reasoningCollapseKey, toolCollapseKey } from './process-collapse'
+import {
+  getCollapseOpen,
+  groupCollapseKey,
+  reasoningCollapseKey,
+  setCollapseOpen,
+  toolCollapseKey,
+} from './process-collapse'
 
 describe('process collapse identity', () => {
+  it('distinguishes an explicit close from an unseen block', () => {
+    const key = 'tool/message-a/1'
+
+    expect(getCollapseOpen(key)).toBeUndefined()
+    setCollapseOpen(key, false)
+    expect(getCollapseOpen(key)).toBe(false)
+  })
+
   it('keeps a reasoning key stable as its content grows', () => {
     const block = { id: 4, type: 'reasoning', content: 'first token' }
     const initial = reasoningCollapseKey('assistant-message', block)

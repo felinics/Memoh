@@ -125,7 +125,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	// complete, and every stream event is projected to the session runtime so
 	// the run is visible while it executes. The previous Generate-based path
 	// emitted nothing until storeRound wrote the whole round at the end.
-	reasoningTiming := newReasoningTimingTracker(req.RunID, nil)
+	reasoningTiming := newReasoningTimingTracker(nil)
 	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
 
@@ -202,7 +202,7 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 		return schedule.TriggerResult{}, fmt.Errorf("persist scheduled ACP user message: %w", leadingErr)
 	}
 
-	reasoningTiming := newReasoningTimingTracker(runID, nil)
+	reasoningTiming := newReasoningTimingTracker(nil)
 	result, promptErr := s.acpPool.Prompt(ctx, acpagent.PromptInput{
 		BotID:             botID,
 		ChatID:            botID,
@@ -231,7 +231,7 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 	if promptErr != nil {
 		s.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the scheduled run ended before a decision arrived")
 		failedResult, _ := acpFailureResult(ensureACPPromptOutput(result), promptErr)
-		if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, failedResult, promptErr, false, contextLifecycle, reasoningTiming.take("interrupted", string(native.EventAgentAbort))); err != nil {
+		if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, failedResult, promptErr, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); err != nil {
 			lifecycleCause = runtimeHistoryError(err)
 			s.logger.Error("ACP schedule failure persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
 		}
@@ -239,7 +239,7 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 	}
 
 	result = ensureACPPromptOutput(result)
-	if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, result, nil, true, contextLifecycle, reasoningTiming.take("completed", string(native.EventAgentEnd))); err != nil {
+	if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, result, nil, true, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentEnd)); err != nil {
 		lifecycleCause = runtimeHistoryError(err)
 		s.logger.Error("ACP schedule persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
 		return schedule.TriggerResult{}, err
@@ -271,11 +271,10 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 // agent.Stream itself) so tests can drive the loop directly; the caller owns
 // the stream context and must cancel it to unwind a still-running Stream
 // goroutine when this returns early.
-func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan native.StreamEvent, req ChatRequest, rc resolvedContext, handle sessionruntime.RunHandle, stepCommitter *agentStepCommitter, timingTrackers ...*reasoningTimingTracker) (schedule.TriggerResult, error) {
+func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan native.StreamEvent, req ChatRequest, rc resolvedContext, handle sessionruntime.RunHandle, stepCommitter *agentStepCommitter, reasoningTiming *reasoningTimingTracker) (schedule.TriggerResult, error) {
 	publishEvent := s.turnAgentEventPublisher(handle)
-	reasoningTiming := newReasoningTimingTracker(req.RunID, nil)
-	if len(timingTrackers) > 0 && timingTrackers[0] != nil {
-		reasoningTiming = timingTrackers[0]
+	if reasoningTiming == nil {
+		reasoningTiming = newReasoningTimingTracker(nil)
 	}
 
 	var (

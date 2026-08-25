@@ -28,30 +28,24 @@ func (c *reasoningTimingTestClock) advance(duration time.Duration) {
 	c.now = c.now.Add(duration)
 }
 
-func TestReasoningTimingTrackerExplicitBoundaries(t *testing.T) {
+func TestReasoningTimingTrackerMeasuresExplicitBlock(t *testing.T) {
 	t.Parallel()
 
 	clock := newReasoningTimingTestClock()
-	tracker := newReasoningTimingTracker("run-1", clock.read)
+	tracker := newReasoningTimingTracker(clock.read)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningStart})
 	clock.advance(400 * time.Millisecond)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningDelta, Delta: "inspect"})
 	clock.advance(1600 * time.Millisecond)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningEnd})
 
-	segments := tracker.take("completed", "step_commit")
+	segments := tracker.take("completed")
 	if len(segments) != 1 {
 		t.Fatalf("segments = %#v, want one", segments)
 	}
 	got := segments[0]
-	if got.SegmentID != "run-1:reasoning:0" || got.DurationMS != 2000 || got.State != "completed" {
-		t.Fatalf("segment identity/duration/state = %#v", got)
-	}
-	if got.StartBoundary != string(native.EventReasoningStart) || got.EndBoundary != string(native.EventReasoningEnd) {
-		t.Fatalf("segment boundaries = %q -> %q", got.StartBoundary, got.EndBoundary)
-	}
-	if got.Measurement != reasoningTimingMeasurement {
-		t.Fatalf("measurement = %q", got.Measurement)
+	if got.DurationMS != 2000 || got.State != "completed" {
+		t.Fatalf("segment duration/state = %#v", got)
 	}
 }
 
@@ -59,18 +53,18 @@ func TestReasoningTimingTrackerDeltaOnlyFallback(t *testing.T) {
 	t.Parallel()
 
 	clock := newReasoningTimingTestClock()
-	tracker := newReasoningTimingTracker("run-acp", clock.read)
+	tracker := newReasoningTimingTracker(clock.read)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningDelta, Delta: "plan"})
 	clock.advance(1250 * time.Millisecond)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningDelta, Delta: " more"})
 	clock.advance(750 * time.Millisecond)
 	tracker.observe(native.StreamEvent{Type: native.EventTextDelta, Delta: "answer"})
 
-	segments := tracker.take("completed", string(native.EventAgentEnd))
+	segments := tracker.take("completed")
 	if len(segments) != 1 {
 		t.Fatalf("segments = %#v, want one", segments)
 	}
-	if got := segments[0]; got.DurationMS != 2000 || got.StartBoundary != string(native.EventReasoningDelta) || got.EndBoundary != string(native.EventTextDelta) {
+	if got := segments[0]; got.DurationMS != 2000 || got.State != "completed" {
 		t.Fatalf("delta-only segment = %#v", got)
 	}
 }
@@ -79,7 +73,7 @@ func TestReasoningTimingTrackerRetryKeepsOnlySurvivingAttempt(t *testing.T) {
 	t.Parallel()
 
 	clock := newReasoningTimingTestClock()
-	tracker := newReasoningTimingTracker("run-retry", clock.read)
+	tracker := newReasoningTimingTracker(clock.read)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningDelta, Delta: "discarded"})
 	clock.advance(time.Second)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningEnd})
@@ -89,11 +83,11 @@ func TestReasoningTimingTrackerRetryKeepsOnlySurvivingAttempt(t *testing.T) {
 	clock.advance(3 * time.Second)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningEnd})
 
-	segments := tracker.take("completed", "step_commit")
+	segments := tracker.take("completed")
 	if len(segments) != 1 {
 		t.Fatalf("segments = %#v, want surviving attempt only", segments)
 	}
-	if got := segments[0]; got.SegmentID != "run-retry:reasoning:1" || got.DurationMS != 3000 {
+	if got := segments[0]; got.DurationMS != 3000 {
 		t.Fatalf("surviving segment = %#v", got)
 	}
 }
@@ -102,7 +96,7 @@ func TestConfigureNativeReasoningTimingKeepsCompletedStepsAcrossProviderCalls(t 
 	t.Parallel()
 
 	clock := newReasoningTimingTestClock()
-	tracker := newReasoningTimingTracker("run-multistep", clock.read)
+	tracker := newReasoningTimingTracker(clock.read)
 	cfg := native.RunConfig{}
 	configureNativeReasoningTiming(&cfg, tracker, nil)
 
@@ -120,7 +114,7 @@ func TestConfigureNativeReasoningTimingKeepsCompletedStepsAcrossProviderCalls(t 
 		t.Fatalf("commit second timing checkpoint: %v", err)
 	}
 
-	segments := tracker.take("completed", string(native.EventAgentEnd))
+	segments := tracker.take("completed")
 	if len(segments) != 2 {
 		t.Fatalf("segments = %#v, want both completed steps", segments)
 	}
@@ -133,15 +127,15 @@ func TestReasoningTimingTrackerMarksOpenSegmentInterrupted(t *testing.T) {
 	t.Parallel()
 
 	clock := newReasoningTimingTestClock()
-	tracker := newReasoningTimingTracker("run-stop", clock.read)
+	tracker := newReasoningTimingTracker(clock.read)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningDelta, Delta: "partial"})
 	clock.advance(2300 * time.Millisecond)
 
-	segments := tracker.take("interrupted", "step_interrupted")
+	segments := tracker.take("interrupted")
 	if len(segments) != 1 {
 		t.Fatalf("segments = %#v, want one", segments)
 	}
-	if got := segments[0]; got.DurationMS != 2300 || got.State != "interrupted" || got.EndBoundary != "step_interrupted" {
+	if got := segments[0]; got.DurationMS != 2300 || got.State != "interrupted" {
 		t.Fatalf("interrupted segment = %#v", got)
 	}
 }
@@ -150,12 +144,12 @@ func TestReasoningTimingTrackerOmitsUnmeasuredEmptyReasoning(t *testing.T) {
 	t.Parallel()
 
 	clock := newReasoningTimingTestClock()
-	tracker := newReasoningTimingTracker("run-empty", clock.read)
+	tracker := newReasoningTimingTracker(clock.read)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningStart})
 	clock.advance(time.Second)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningDelta, Delta: "  "})
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningEnd})
-	if got := tracker.take("completed", "step_commit"); len(got) != 0 {
+	if got := tracker.take("completed"); len(got) != 0 {
 		t.Fatalf("empty reasoning timing = %#v, want absent", got)
 	}
 }
@@ -176,16 +170,9 @@ func TestStoreRoundAttachesReasoningTimingAfterPersistedUserIsSkipped(t *testing
 		},
 	}
 	round := append([]ModelMessage{{Role: "user", Content: newTextContent("hello")}}, sdkMessagesToModelMessages([]sdk.Message{assistant})...)
-	startedAt := time.Date(2026, 8, 26, 1, 2, 3, 0, time.UTC)
 	segment := messagepkg.ReasoningTimingSegment{
-		SegmentID:     "run-1:reasoning:0",
-		StartedAt:     startedAt,
-		EndedAt:       startedAt.Add(2 * time.Second),
-		DurationMS:    2000,
-		State:         "completed",
-		StartBoundary: string(native.EventReasoningStart),
-		EndBoundary:   string(native.EventReasoningEnd),
-		Measurement:   reasoningTimingMeasurement,
+		DurationMS: 2000,
+		State:      "completed",
 	}
 
 	_, err := service.storeRoundWithOptionsResult(t.Context(), ChatRequest{

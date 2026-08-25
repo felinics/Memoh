@@ -2,27 +2,7 @@
 
 import type { GetBotsByBotIdMessagesLocateResponse, GetBotsByBotIdMessagesResponse } from './types.gen';
 
-const conversationUiReasoningTimingSchemaResponseTransformer = (data: any) => {
-    if (data.ended_at) {
-        data.ended_at = new Date(data.ended_at);
-    }
-    if (data.started_at) {
-        data.started_at = new Date(data.started_at);
-    }
-    return data;
-};
-
-const conversationUiMessageSchemaResponseTransformer = (data: any) => {
-    if (data.reasoning_timing) {
-        data.reasoning_timing = conversationUiReasoningTimingSchemaResponseTransformer(data.reasoning_timing);
-    }
-    return data;
-};
-
 const conversationUiTurnSchemaResponseTransformer = (data: any) => {
-    if (data.messages) {
-        data.messages = data.messages.map((item: any) => conversationUiMessageSchemaResponseTransformer(item));
-    }
     data.timestamp = new Date(data.timestamp);
     return data;
 };

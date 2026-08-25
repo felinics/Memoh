@@ -490,7 +490,7 @@ func (s *Service) continueToolApprovalSession(
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	reasoningTiming := newReasoningTimingTracker(req.RunID, nil)
+	reasoningTiming := newReasoningTimingTracker(nil)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
 	stream := s.agent.Stream(ctx, cfg)
 	stored := false

@@ -244,7 +244,6 @@ func TestStoreDiscussRoundPersistsAdmittedRunIDAndLifecycleAssociation(t *testin
 	messages := &recordingMessageService{}
 	holder := contextfrag.NewLifecycleHolder()
 	holder.SetManifest(contextfrag.BuildManifest(nil))
-	startedAt := time.Date(2026, 8, 26, 1, 2, 3, 0, time.UTC)
 	service := &Service{
 		messageService: messages,
 		logger:         slog.New(slog.DiscardHandler),
@@ -267,14 +266,8 @@ func TestStoreDiscussRoundPersistsAdmittedRunIDAndLifecycleAssociation(t *testin
 		"model-id",
 		holder,
 		[]messagepkg.ReasoningTimingSegment{{
-			SegmentID:     admittedRunID + ":reasoning:0",
-			StartedAt:     startedAt,
-			EndedAt:       startedAt.Add(2 * time.Second),
-			DurationMS:    2000,
-			State:         "completed",
-			StartBoundary: string(native.EventReasoningStart),
-			EndBoundary:   string(native.EventReasoningEnd),
-			Measurement:   reasoningTimingMeasurement,
+			DurationMS: 2000,
+			State:      "completed",
 		}},
 	)
 	if err != nil {

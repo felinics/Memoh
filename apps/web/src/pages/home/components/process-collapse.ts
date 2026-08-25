@@ -20,8 +20,8 @@ const MAX_OPEN_STATES = 2048
 // the full lifetime of a long-running desktop renderer.
 const openState = new Map<string, boolean>()
 
-export function getCollapseOpen(key: string): boolean {
-  return key ? openState.get(key) ?? false : false
+export function getCollapseOpen(key: string): boolean | undefined {
+  return key ? openState.get(key) : undefined
 }
 
 export function setCollapseOpen(key: string, open: boolean): void {
