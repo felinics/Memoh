@@ -13,7 +13,7 @@ import (
 )
 
 func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
-	t.Run("backfills legacy ACP bindings and reverses", func(t *testing.T) {
+	t.Run("adds schema without backfilling legacy ACP data and reverses", func(t *testing.T) {
 		ctx := context.Background()
 		dsn := teamMigrationDSN(t)
 		pool := freshMigratedDB(t)
@@ -76,33 +76,28 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 
 		stepUp(t, dsn, 1)
 		assertBotAgentsSchema(t, ctx, pool, true)
+		assertBotAgentConstraintsValidated(t, ctx, pool, false)
 
-		var agentID, provider string
-		var enabled bool
-		if err := pool.QueryRow(ctx, `
-			SELECT id::text, enabled, metadata->>'provider'
-			FROM public.bot_agents
-			WHERE team_id = $1 AND bot_id = $2`,
-			team.DefaultTeamID, botID,
-		).Scan(&agentID, &enabled, &provider); err != nil {
-			t.Fatalf("inspect backfilled Agent: %v", err)
+		var agentRows int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM public.bot_agents`).Scan(&agentRows); err != nil {
+			t.Fatalf("inspect Bot Agent rows: %v", err)
 		}
-		if !enabled || provider != "codex" {
-			t.Fatalf("backfilled Agent enabled=%t provider=%q", enabled, provider)
+		if agentRows != 0 {
+			t.Fatalf("migration created %d Bot Agent rows, want schema-only migration", agentRows)
 		}
 
-		var defaultID, sessionAgentID, scheduleAgentID string
+		var defaultNull, sessionAgentNull, scheduleAgentNull bool
 		if err := pool.QueryRow(ctx, `
 			SELECT
-				(SELECT default_bot_agent_id::text FROM public.bots WHERE id = $1),
-				(SELECT bot_agent_id::text FROM public.bot_sessions WHERE id = $2),
-				(SELECT bot_agent_id::text FROM public.schedule WHERE id = $3)`,
+				(SELECT default_bot_agent_id IS NULL FROM public.bots WHERE id = $1),
+				(SELECT bot_agent_id IS NULL FROM public.bot_sessions WHERE id = $2),
+				(SELECT bot_agent_id IS NULL FROM public.schedule WHERE id = $3)`,
 			botID, sessionID, scheduleID,
-		).Scan(&defaultID, &sessionAgentID, &scheduleAgentID); err != nil {
-			t.Fatalf("inspect backfilled bindings: %v", err)
+		).Scan(&defaultNull, &sessionAgentNull, &scheduleAgentNull); err != nil {
+			t.Fatalf("inspect legacy bindings: %v", err)
 		}
-		if defaultID != agentID || sessionAgentID != agentID || scheduleAgentID != agentID {
-			t.Fatalf("bindings default=%q session=%q schedule=%q, want %q", defaultID, sessionAgentID, scheduleAgentID, agentID)
+		if !defaultNull || !sessionAgentNull || !scheduleAgentNull {
+			t.Fatalf("migration populated bindings: default_null=%t session_null=%t schedule_null=%t", defaultNull, sessionAgentNull, scheduleAgentNull)
 		}
 
 		var nativeRows int
@@ -117,6 +112,7 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		assertBotAgentsSchema(t, ctx, pool, false)
 		stepUp(t, dsn, 1)
 		assertBotAgentsSchema(t, ctx, pool, true)
+		assertBotAgentConstraintsValidated(t, ctx, pool, false)
 	})
 
 	t.Run("canonical init contains final Bot Agent schema", func(t *testing.T) {
@@ -125,7 +121,30 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		pool := resetToEmpty(t)
 		applyCanonicalInitOnly(t, dsn)
 		assertBotAgentsSchema(t, ctx, pool, true)
+		assertBotAgentConstraintsValidated(t, ctx, pool, true)
 	})
+}
+
+func assertBotAgentConstraintsValidated(t *testing.T, ctx context.Context, pool *pgxpool.Pool, want bool) {
+	t.Helper()
+	var count int
+	var allValidated bool
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*), bool_and(convalidated)
+		FROM pg_constraint
+		WHERE conname IN (
+			'bots_default_bot_agent_id_fkey',
+			'bot_sessions_bot_agent_id_fkey',
+			'schedule_bot_agent_id_fkey',
+			'schedule_existing_session_check',
+			'schedule_acp_fields_check'
+		)
+	`).Scan(&count, &allValidated); err != nil {
+		t.Fatalf("inspect Bot Agent constraint validation: %v", err)
+	}
+	if count != 5 || allValidated != want {
+		t.Fatalf("Bot Agent constraints: count=%d all_validated=%t, want count=5 all_validated=%t", count, allValidated, want)
+	}
 }
 
 func assertBotAgentsSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool, want bool) {

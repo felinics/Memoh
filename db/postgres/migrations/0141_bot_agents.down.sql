@@ -14,12 +14,12 @@ ALTER TABLE public.schedule
     ADD CONSTRAINT schedule_existing_session_check CHECK (
         run_target <> 'existing_session'
         OR (runtime_type IS NULL AND acp_agent_id IS NULL AND workdir_id IS NULL)
-    ),
+    ) NOT VALID,
     ADD CONSTRAINT schedule_acp_fields_check CHECK (
         run_target <> 'new_session'
         OR (runtime_type = 'acp_agent' AND acp_agent_id IS NOT NULL AND model_id IS NULL)
         OR (COALESCE(runtime_type, 'model') = 'model' AND acp_agent_id IS NULL AND acp_model_id IS NULL)
-    );
+    ) NOT VALID;
 
 ALTER TABLE public.bot_sessions
     DROP CONSTRAINT IF EXISTS bot_sessions_bot_agent_id_fkey,
