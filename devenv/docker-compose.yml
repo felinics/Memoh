@@ -92,7 +92,7 @@ services:
   # Connect-It owns the connect_it schema and creates it on startup; it only
   # needs postgres, never Memoh's migrations.
   connect-it:
-    image: "${MEMOH_DEV_CONNECT_IT_IMAGE:-ghcr.io/memohai/connect-it:0.2.0}"
+    image: "${MEMOH_DEV_CONNECT_IT_IMAGE:-ghcr.io/memohai/connect-it:0.3.0}"
     container_name: memoh-dev-connect-it
     environment:
       DATABASE_URL: "postgres://memoh:memoh123@postgres:5432/memoh?sslmode=disable&search_path=connect_it"
