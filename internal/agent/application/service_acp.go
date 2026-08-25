@@ -106,6 +106,7 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		return errors.New("ACP session pool is not configured")
 	}
 	req.RunID = runIDForChatRequest(req.RunID)
+	reasoningTiming := newReasoningTimingTracker(req.RunID, nil)
 	sess, err := s.sessionService.Get(ctx, req.ThreadID)
 	if err != nil {
 		return err
@@ -252,6 +253,7 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	cleanupProjections := func() { cleanupProjectionsIn(context.WithoutCancel(ctx)) }
 
 	emitWithContext := func(deliveryCtx context.Context, ev native.StreamEvent) {
+		reasoningTiming.observe(ev)
 		if isACPDecisionProjectionEvent(ev) && recordProjection(ev) {
 			completeProjection(ev.ToolCallID, s.persistACPDecisionProjection(context.WithoutCancel(ctx), req, ev))
 		}
@@ -371,7 +373,7 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 			// remains reusable and a cold start resumes the last complete turn.
 			abortedReq := req
 			abortedReq.SkipMemoryExtraction = true
-			if persistErr := s.persistACPRound(context.WithoutCancel(ctx), abortedReq, agentID, projectPath, result, nil, false, contextLifecycle); persistErr != nil {
+			if persistErr := s.persistACPRound(context.WithoutCancel(ctx), abortedReq, agentID, projectPath, result, nil, false, contextLifecycle, reasoningTiming.take("interrupted", string(native.EventAgentAbort))); persistErr != nil {
 				lifecycleCause = persistErr
 				s.logger.Error("ACP abort persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 				// The runtime stays valid regardless of the resolution: the
@@ -390,7 +392,7 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		if failureDelta != "" {
 			emit(native.StreamEvent{Type: native.EventTextDelta, Delta: failureDelta})
 		}
-		if persistErr := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err, false, contextLifecycle); persistErr != nil {
+		if persistErr := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, err, false, contextLifecycle, reasoningTiming.take("interrupted", string(native.EventAgentAbort))); persistErr != nil {
 			lifecycleCause = runtimeHistoryError(persistErr)
 			s.logger.Error("ACP failure persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 			switch s.resolveACPRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
@@ -430,7 +432,7 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		// disconnect is not a stop: the completed turn persists normally below.
 		abortedReq := req
 		abortedReq.SkipMemoryExtraction = true
-		if persistErr := s.persistACPRound(context.WithoutCancel(ctx), abortedReq, agentID, projectPath, result, nil, true, contextLifecycle); persistErr != nil {
+		if persistErr := s.persistACPRound(context.WithoutCancel(ctx), abortedReq, agentID, projectPath, result, nil, true, contextLifecycle, reasoningTiming.take("completed", string(native.EventAgentEnd))); persistErr != nil {
 			lifecycleCause = persistErr
 			s.logger.Error("ACP abort persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 			switch s.resolveACPRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
@@ -462,7 +464,7 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		return nil
 	}
 	emit(native.StreamEvent{Type: native.EventTextEnd})
-	if persistErr := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil, true, contextLifecycle); persistErr != nil {
+	if persistErr := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, result, nil, true, contextLifecycle, reasoningTiming.take("completed", string(native.EventAgentEnd))); persistErr != nil {
 		lifecycleCause = runtimeHistoryError(persistErr)
 		s.logger.Error("ACP persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 		switch s.resolveACPRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
@@ -1201,6 +1203,7 @@ func (s *Service) persistACPRound(
 	promptErr error,
 	turnCompleted bool,
 	contextLifecycle *contextfrag.LifecycleHolder,
+	reasoningTimings ...[]messagepkg.ReasoningTimingSegment,
 ) error {
 	meta := map[string]any{
 		"acp_agent_id": agentID,
@@ -1293,11 +1296,16 @@ func (s *Service) persistACPRound(
 		}
 	}
 	skipMemory := promptErr != nil || req.UserMessagePersisted || req.ReusePersistedUserMessage || req.SkipMemoryExtraction
+	var reasoningTiming []messagepkg.ReasoningTimingSegment
+	if len(reasoningTimings) > 0 {
+		reasoningTiming = reasoningTimings[0]
+	}
 	persisted, err := s.storeRoundWithOptionsResult(ctx, req, round, "", storeRoundOptions{
 		AllowPendingToolCalls:         true,
 		SkipMemory:                    skipMemory,
 		AllowEmptyAssistantText:       true,
 		MessageMetadataByIndex:        metadataByIndex,
+		ReasoningTiming:               reasoningTiming,
 		RequireCompletePersist:        true,
 		CleanupACPDecisionProjections: true,
 		ACPPublication:                publication,

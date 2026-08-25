@@ -60,11 +60,16 @@ watch(collapseKey, (key) => {
 // Trimmed so the expanded body doesn't open with leading blank lines/space.
 const bodyText = computed(() => (props.block.content ?? '').trim())
 
-// Duration is measured centrally in message-item (every reasoning block, not
-// just the streaming tail) and cached by stable block identity, so the
-// re-mounted "done" block recovers it here. Historical blocks (never streamed
-// this session) have no timing and fall back to a plain "Thought".
-const durationMs = computed(() => getReasoningDuration(props.messageId, props.block))
+// Settled/history blocks prefer the server-observed duration persisted on the
+// assistant row. The client timer remains a compatibility fallback for legacy
+// rows, older servers, and the live interval before the settled row arrives.
+const durationMs = computed(() => {
+  const persisted = props.block.reasoning_timing?.duration_ms
+  if (typeof persisted === 'number' && Number.isFinite(persisted) && persisted >= 0) {
+    return persisted
+  }
+  return getReasoningDuration(props.messageId, props.block)
+})
 
 const label = computed(() => {
   if (props.streaming) return t('chat.thinkingInProgress')

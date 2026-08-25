@@ -490,6 +490,8 @@ func (s *Service) continueToolApprovalSession(
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
+	reasoningTiming := newReasoningTimingTracker(req.RunID, nil)
+	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
 	stream := s.agent.Stream(ctx, cfg)
 	stored := false
 	for event := range stream {
@@ -516,6 +518,7 @@ func (s *Service) continueToolApprovalSession(
 		}
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
+				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
 				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
 					lifecycleCause = agentAbortCause(ctx)

@@ -150,6 +150,61 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 	}
 }
 
+func TestConvertMessagesToUITurnsProjectsPersistedReasoningTiming(t *testing.T) {
+	t.Parallel()
+
+	createdAt := time.Date(2026, 8, 26, 1, 2, 5, 0, time.UTC)
+	rawMetadata := json.RawMessage(`{
+		"reasoning_timing": {
+			"version": 1,
+			"segments": [{
+				"segment_id": "run-1:reasoning:0",
+				"ordinal": 0,
+				"started_at": "2026-08-26T01:02:03Z",
+				"ended_at": "2026-08-26T01:02:05Z",
+				"duration_ms": 2000,
+				"state": "completed",
+				"start_boundary": "reasoning_start",
+				"end_boundary": "reasoning_end",
+				"measurement": "server_monotonic"
+			}, {
+				"segment_id": "run-1:reasoning:1",
+				"ordinal": 1,
+				"started_at": "2026-08-26T01:02:06Z",
+				"ended_at": "2026-08-26T01:02:09.5Z",
+				"duration_ms": 3500,
+				"state": "completed",
+				"start_boundary": "reasoning_start",
+				"end_boundary": "reasoning_end",
+				"measurement": "server_monotonic"
+			}]
+		}
+	}`)
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
+		ID:          "assistant-1",
+		Role:        "assistant",
+		Content:     json.RawMessage(`{"role":"assistant","content":[{"type":"reasoning","text":"thinking"},{"type":"reasoning","text":"thinking again"},{"type":"text","text":"answer"}]}`),
+		RawMetadata: rawMetadata,
+		CreatedAt:   createdAt,
+	}})
+	if len(turns) != 1 || len(turns[0].Messages) != 3 {
+		t.Fatalf("turns = %#v", turns)
+	}
+	reasoning := turns[0].Messages[0]
+	if reasoning.Type != UIMessageReasoning || reasoning.ReasoningTiming == nil {
+		t.Fatalf("reasoning block = %#v", reasoning)
+	}
+	if got := reasoning.ReasoningTiming; got.SegmentID != "run-1:reasoning:0" || got.DurationMS != 2000 || got.State != "completed" {
+		t.Fatalf("reasoning timing = %#v", got)
+	}
+	if got := turns[0].Messages[1].ReasoningTiming; got == nil || got.SegmentID != "run-1:reasoning:1" || got.DurationMS != 3500 {
+		t.Fatalf("second reasoning timing = %#v", got)
+	}
+	if turns[0].Messages[2].ReasoningTiming != nil {
+		t.Fatalf("text block unexpectedly received timing: %#v", turns[0].Messages[2])
+	}
+}
+
 // A "talk while acting" reply persists as several separate assistant messages
 // that interleave plain text with tool calls. They are one logical reply to a
 // single user message, so they must collapse into a single assistant turn (one

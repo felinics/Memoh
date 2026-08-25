@@ -158,6 +158,18 @@ export interface UIReasoningMessage {
   id: number
   type: 'reasoning'
   content: string
+  reasoning_timing?: UIReasoningTiming
+}
+
+export interface UIReasoningTiming {
+  segment_id: string
+  started_at: string | Date
+  ended_at: string | Date
+  duration_ms: number
+  state: string
+  start_boundary: string
+  end_boundary: string
+  measurement: string
 }
 
 export interface UIToolMessage {

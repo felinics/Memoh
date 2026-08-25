@@ -2331,6 +2331,8 @@ definitions:
       progress:
         items: {}
         type: array
+      reasoning_timing:
+        $ref: '#/definitions/conversation.UIReasoningTiming'
       running:
         type: boolean
       tool_call_id:
@@ -2352,6 +2354,27 @@ definitions:
     - UIMessageReasoning
     - UIMessageTool
     - UIMessageAttachments
+  conversation.UIReasoningTiming:
+    properties:
+      duration_ms:
+        type: integer
+      end_boundary:
+        type: string
+      ended_at:
+        format: date-time
+        type: string
+      measurement:
+        type: string
+      segment_id:
+        type: string
+      start_boundary:
+        type: string
+      started_at:
+        format: date-time
+        type: string
+      state:
+        type: string
+    type: object
   conversation.UIReplyRef:
     properties:
       attachments:

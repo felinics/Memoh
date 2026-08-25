@@ -281,6 +281,7 @@ func sendEvent(ctx context.Context, ch chan<- StreamEvent, evt StreamEvent) bool
 }
 
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
+	cfg.Model = modelWithProviderStreamEventObserver(cfg.Model, cfg.OnProviderStreamEventObserved)
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}

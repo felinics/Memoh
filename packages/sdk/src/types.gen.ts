@@ -1319,6 +1319,7 @@ export type ConversationUiMessage = {
     name?: string;
     output?: unknown;
     progress?: Array<unknown>;
+    reasoning_timing?: ConversationUiReasoningTiming;
     running?: boolean;
     tool_call_id?: string;
     type?: ConversationUiMessageType;
@@ -1326,6 +1327,17 @@ export type ConversationUiMessage = {
 };
 
 export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments';
+
+export type ConversationUiReasoningTiming = {
+    duration_ms?: number;
+    end_boundary?: string;
+    ended_at?: Date;
+    measurement?: string;
+    segment_id?: string;
+    start_boundary?: string;
+    started_at?: Date;
+    state?: string;
+};
 
 export type ConversationUiReplyRef = {
     attachments?: Array<ConversationUiAttachment>;

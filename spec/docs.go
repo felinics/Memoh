@@ -18534,6 +18534,9 @@ const docTemplate = `{
                     "type": "array",
                     "items": {}
                 },
+                "reasoning_timing": {
+                    "$ref": "#/definitions/conversation.UIReasoningTiming"
+                },
                 "running": {
                     "type": "boolean"
                 },
@@ -18562,6 +18565,37 @@ const docTemplate = `{
                 "UIMessageTool",
                 "UIMessageAttachments"
             ]
+        },
+        "conversation.UIReasoningTiming": {
+            "type": "object",
+            "properties": {
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "end_boundary": {
+                    "type": "string"
+                },
+                "ended_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "measurement": {
+                    "type": "string"
+                },
+                "segment_id": {
+                    "type": "string"
+                },
+                "start_boundary": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
         },
         "conversation.UIReplyRef": {
             "type": "object",

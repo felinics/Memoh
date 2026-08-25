@@ -65,7 +65,22 @@ type UIMessage struct {
 	UserInput         *UIUserInput         `json:"user_input,omitempty"`
 	Attachments       []UIAttachment       `json:"attachments,omitempty"`
 	Background        *UIBackgroundTask    `json:"background_task,omitempty"`
+	ReasoningTiming   *UIReasoningTiming   `json:"reasoning_timing,omitempty"`
 } // @name conversation.UIMessage
+
+// UIReasoningTiming is the persisted server observation for one reasoning
+// block. It is absent for legacy rows and non-streaming responses whose block
+// boundaries were not observable.
+type UIReasoningTiming struct {
+	SegmentID     string    `json:"segment_id"`
+	StartedAt     time.Time `json:"started_at" format:"date-time"`
+	EndedAt       time.Time `json:"ended_at" format:"date-time"`
+	DurationMS    int64     `json:"duration_ms"`
+	State         string    `json:"state"`
+	StartBoundary string    `json:"start_boundary"`
+	EndBoundary   string    `json:"end_boundary"`
+	Measurement   string    `json:"measurement"`
+} // @name conversation.UIReasoningTiming
 
 type UIExecutionLocation struct {
 	Kind string `json:"kind"`

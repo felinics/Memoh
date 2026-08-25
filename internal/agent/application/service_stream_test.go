@@ -250,6 +250,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 		},
 		resolvedContext{},
 		nil,
+		nil,
 		0,
 		false,
 		true,

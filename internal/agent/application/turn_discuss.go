@@ -14,6 +14,7 @@ import (
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/apperror"
+	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
 	"github.com/memohai/memoh/internal/contextview"
@@ -222,9 +223,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 	}()
 
+	reasoningTiming := newReasoningTimingTracker(runConfig.RunID, nil)
+	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
 	eventCh := s.streamDiscussAgent(ctx, runConfig)
 
 	var finalMessages json.RawMessage
+	var finalReasoningTiming []messagepkg.ReasoningTimingSegment
 	var terminalEvent native.StreamEvent
 	var terminalPayload []byte
 	var hasTerminalEvent bool
@@ -235,6 +239,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		terminal := event.Type == native.EventAgentEnd || event.Type == native.EventAgentAbort
 		if terminal {
 			finalMessages = event.Messages
+			finalReasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
 			terminalEvent = event
 			terminalPayload, _ = json.Marshal(event)
 			hasTerminalEvent = true
@@ -297,6 +302,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 				cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
 				sdkMsgs, resolved.ModelID,
 				runConfig.ContextLifecycle,
+				finalReasoningTiming,
 			); storeErr != nil {
 				historyErr := runtimeHistoryError(storeErr)
 				lifecycleCause = historyErr
@@ -558,6 +564,7 @@ func (s *Service) storeDiscussRound(
 	messages []sdk.Message,
 	modelID string,
 	lifecycle *contextfrag.LifecycleHolder,
+	reasoningTimings ...[]messagepkg.ReasoningTimingSegment,
 ) error {
 	if s.turnHooks != nil && s.turnHooks.storeRound != nil {
 		return s.turnHooks.storeRound(
@@ -572,6 +579,10 @@ func (s *Service) storeDiscussRound(
 			lifecycle,
 		)
 	}
+	var reasoningTiming []messagepkg.ReasoningTimingSegment
+	if len(reasoningTimings) > 0 {
+		reasoningTiming = reasoningTimings[0]
+	}
 	return s.storeRoundWithOptions(ctx, ChatRequest{
 		RunID:                   runID,
 		BotID:                   botID,
@@ -580,7 +591,10 @@ func (s *Service) storeDiscussRound(
 		SourceChannelIdentityID: channelIdentityID,
 		CurrentChannel:          currentPlatform,
 		UserMessagePersisted:    true,
-	}, sdkMessagesToModelMessages(messages), modelID, storeRoundOptions{ContextLifecycle: lifecycle})
+	}, sdkMessagesToModelMessages(messages), modelID, storeRoundOptions{
+		ContextLifecycle: lifecycle,
+		ReasoningTiming:  reasoningTiming,
+	})
 }
 
 // discussMessagesToSDK converts composed context messages into SDK

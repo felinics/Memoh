@@ -4,6 +4,7 @@ import { createApp, defineComponent, h, nextTick, shallowRef } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ThinkingBlock as ThinkingBlockType } from '@/store/chat-list'
+import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
 import ThinkingBlock from './thinking-block.vue'
 
 interface MountedThinkingBlock {
@@ -27,8 +28,9 @@ function mountThinkingBlock(
   content: string,
   streaming = true,
   messageId = `thinking-message-${nextMessageId++}`,
+  reasoningTiming?: ThinkingBlockType['reasoning_timing'],
 ): MountedThinkingBlock {
-  const block = shallowRef<ThinkingBlockType>({ id: 1, type: 'reasoning', content })
+  const block = shallowRef<ThinkingBlockType>({ id: 1, type: 'reasoning', content, reasoning_timing: reasoningTiming })
   const harness = defineComponent({
     setup() {
       return () => h(ThinkingBlock, { block: block.value, messageId, streaming })
@@ -46,6 +48,7 @@ function mountThinkingBlock(
           thinkingInProgress: 'Thinking',
           process: {
             thoughtBriefly: 'Thought briefly',
+            thoughtSeconds: 'Thought for {seconds}s',
           },
         },
       },
@@ -139,5 +142,30 @@ describe('ThinkingBlock', () => {
     const separateMessage = mountThinkingBlock(content, false, 'message-with-closed-thought')
 
     expect(isExpanded(disclosureButton(separateMessage.root))).toBe(false)
+  })
+
+  it('uses persisted server timing for a historical reasoning block', () => {
+    const messageId = 'persisted-reasoning-message'
+    const blockIdentity = { id: 1, type: 'reasoning' }
+    markReasoningSeen(messageId, blockIdentity)
+    finalizeReasoning(messageId, blockIdentity)
+
+    const historical = mountThinkingBlock(
+      'reasoning loaded from history',
+      false,
+      messageId,
+      {
+        segment_id: 'run-1:reasoning:0',
+        started_at: '2026-08-26T01:02:03Z',
+        ended_at: '2026-08-26T01:02:07.2Z',
+        duration_ms: 4_200,
+        state: 'completed',
+        start_boundary: 'reasoning_start',
+        end_boundary: 'reasoning_end',
+        measurement: 'server_monotonic',
+      },
+    )
+
+    expect(disclosureButton(historical.root).textContent).toContain('Thought for 4s')
   })
 })

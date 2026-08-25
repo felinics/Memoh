@@ -1,10 +1,10 @@
 import { processBlockKey } from './process-block-key'
 
-// Memoh's stream doesn't carry reasoning duration. To keep "Thought for Ns"
-// through the live -> terminal handover, measure it while streaming and retain
-// it by the stable message/block render key. Cross-reload it's gone (there is
-// no persisted backend timing) — that's acceptable: the turn just watched
-// keeps its timer.
+// The live stream doesn't carry the server's persisted reasoning duration yet.
+// Measure it while streaming and retain it by the stable message/block render
+// key. Once a settled/history block has reasoning_timing, the component treats
+// that server value as authoritative; this store remains the compatibility
+// fallback for legacy rows and older servers.
 //
 // Measurement is driven centrally from message-item so it covers *every*
 // reasoning block, not only the last (tail) one: `markReasoningSeen` stamps a

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -61,6 +62,44 @@ func finishedTextTestProvider(text string) agentStreamTestProvider {
 			&sdk.TextDeltaPart{ID: "text", Text: text},
 			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop},
 		), nil
+	}
+}
+
+func TestAgentStreamObservesReasoningEndBeforeStepCommit(t *testing.T) {
+	t.Parallel()
+
+	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+		return closedAgentTestStream(
+			&sdk.StartPart{},
+			&sdk.StartStepPart{},
+			&sdk.ReasoningStartPart{ID: "reasoning-1"},
+			&sdk.ReasoningDeltaPart{ID: "reasoning-1", Text: "inspect"},
+			&sdk.ReasoningEndPart{ID: "reasoning-1"},
+			&sdk.TextDeltaPart{ID: "text-1", Text: "done"},
+			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop},
+			&sdk.FinishPart{FinishReason: sdk.FinishReasonStop},
+		), nil
+	})
+
+	var observed []StreamEventType
+	commitSawReasoningEnd := false
+	events := New(Deps{}).Stream(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages: []sdk.Message{sdk.UserMessage("task")},
+		Identity: SessionContext{BotID: "bot-1"},
+		OnProviderStreamEventObserved: func(event StreamEvent) {
+			observed = append(observed, event.Type)
+		},
+		OnStepCommitted: func(context.Context, int, *sdk.StepResult) error {
+			commitSawReasoningEnd = slices.Contains(observed, EventReasoningEnd)
+			return nil
+		},
+	})
+	for range events {
+	}
+
+	if !commitSawReasoningEnd {
+		t.Fatalf("step commit ran before reasoning_end observation: %#v", observed)
 	}
 }
 

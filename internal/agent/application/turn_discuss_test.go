@@ -16,6 +16,7 @@ import (
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
 	"github.com/memohai/memoh/internal/apperror"
+	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
 	"github.com/memohai/memoh/internal/contextview"
@@ -243,6 +244,7 @@ func TestStoreDiscussRoundPersistsAdmittedRunIDAndLifecycleAssociation(t *testin
 	messages := &recordingMessageService{}
 	holder := contextfrag.NewLifecycleHolder()
 	holder.SetManifest(contextfrag.BuildManifest(nil))
+	startedAt := time.Date(2026, 8, 26, 1, 2, 3, 0, time.UTC)
 	service := &Service{
 		messageService: messages,
 		logger:         slog.New(slog.DiscardHandler),
@@ -255,9 +257,25 @@ func TestStoreDiscussRoundPersistsAdmittedRunIDAndLifecycleAssociation(t *testin
 		lifecycleTestSessionID,
 		"",
 		"local",
-		[]sdk.Message{sdk.AssistantMessage("done")},
+		[]sdk.Message{{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{
+				sdk.ReasoningPart{Text: "thinking"},
+				sdk.TextPart{Text: "done"},
+			},
+		}},
 		"model-id",
 		holder,
+		[]messagepkg.ReasoningTimingSegment{{
+			SegmentID:     admittedRunID + ":reasoning:0",
+			StartedAt:     startedAt,
+			EndedAt:       startedAt.Add(2 * time.Second),
+			DurationMS:    2000,
+			State:         "completed",
+			StartBoundary: string(native.EventReasoningStart),
+			EndBoundary:   string(native.EventReasoningEnd),
+			Measurement:   reasoningTimingMeasurement,
+		}},
 	)
 	if err != nil {
 		t.Fatalf("storeDiscussRound() error = %v", err)
@@ -270,6 +288,9 @@ func TestStoreDiscussRoundPersistsAdmittedRunIDAndLifecycleAssociation(t *testin
 	}
 	if _, ok := messages.persisted[0].Metadata[contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot); !ok {
 		t.Fatalf("assistant metadata = %#v, want lifecycle snapshot", messages.persisted[0].Metadata)
+	}
+	if timings := messagepkg.ReasoningTimingFromMetadata(messages.persisted[0].Metadata); len(timings) != 1 || timings[0].DurationMS != 2000 {
+		t.Fatalf("assistant reasoning timing = %#v, want persisted discuss timing", timings)
 	}
 	snapshot, ok := holder.Snapshot()
 	if !ok || snapshot.AssistantMessageID != "message-id" {

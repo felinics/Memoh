@@ -212,6 +212,12 @@ type RunConfig struct {
 	// by the resolver to interleave injected messages in storeRound.
 	InjectedRecorder func(headerifiedText string, insertAfter int)
 
+	// OnProviderStreamEventObserved receives normalized provider parts before
+	// Twilight buffers them or invokes the step commit barrier. Persistence uses
+	// this production boundary to measure reasoning without putting timing on
+	// the public event wire.
+	OnProviderStreamEventObserved func(StreamEvent)
+
 	// OnStepCommitted is a synchronous durability barrier. The callback sees
 	// the complete step plus any user/read-media messages prepared immediately
 	// before it, with persistence-only tool metadata already attached.

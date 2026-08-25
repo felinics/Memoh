@@ -1320,6 +1320,16 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 		nil,
 		true,
 		nil,
+		[]messagepkg.ReasoningTimingSegment{{
+			SegmentID:     "run-acp:reasoning:0",
+			StartedAt:     time.Date(2026, 8, 26, 1, 2, 3, 0, time.UTC),
+			EndedAt:       time.Date(2026, 8, 26, 1, 2, 5, 0, time.UTC),
+			DurationMS:    2000,
+			State:         "completed",
+			StartBoundary: string(native.EventReasoningDelta),
+			EndBoundary:   string(native.EventTextDelta),
+			Measurement:   reasoningTimingMeasurement,
+		}},
 	)
 	if err != nil {
 		t.Fatalf("persistACPRound returned error: %v", err)
@@ -1334,6 +1344,10 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 	parts := assistant.ContentParts()
 	if len(parts) < 2 || parts[0].Type != "reasoning" || parts[0].Text != "I should inspect first." {
 		t.Fatalf("assistant parts = %#v, want leading reasoning part", parts)
+	}
+	segments := messagepkg.ReasoningTimingFromMetadata(messages.persisted[1].Metadata)
+	if len(segments) != 1 || segments[0].DurationMS != 2000 {
+		t.Fatalf("assistant reasoning timing = %#v", segments)
 	}
 }
 
