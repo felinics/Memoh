@@ -15,6 +15,15 @@ import (
 
 type agentStreamTestProvider func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error)
 
+type streamEmitterCaptureProvider struct {
+	emitter chan agenttools.StreamEmitter
+}
+
+func (p *streamEmitterCaptureProvider) Tools(_ context.Context, session agenttools.SessionContext) ([]sdk.Tool, error) {
+	p.emitter <- session.Emitter
+	return nil, nil
+}
+
 func (agentStreamTestProvider) Name() string { return "stream-mock" }
 func (agentStreamTestProvider) ListModels(context.Context) ([]sdk.Model, error) {
 	return nil, nil
@@ -165,7 +174,7 @@ func TestStreamEmitterGateRejectsLateEventsAndWaitsForInFlightSend(t *testing.T)
 
 	sendDone := make(chan struct{})
 	go func() {
-		gate.emit(agenttools.ToolStreamEvent{Type: agenttools.StreamEventSpawnHeartbeat})
+		gate.emit(agenttools.ToolStreamEvent{Type: agenttools.StreamEventSpawnProgress})
 		close(sendDone)
 	}()
 
@@ -183,8 +192,51 @@ func TestStreamEmitterGateRejectsLateEventsAndWaitsForInFlightSend(t *testing.T)
 		t.Fatal("gate did not wait for in-flight emitter")
 	}
 
-	gate.emit(agenttools.ToolStreamEvent{Type: agenttools.StreamEventSpawnHeartbeat})
+	gate.emit(agenttools.ToolStreamEvent{Type: agenttools.StreamEventSpawnProgress})
 	close(ch)
+}
+
+func TestAgentStreamRejectsCapturedEmitterAfterClose(t *testing.T) {
+	capture := &streamEmitterCaptureProvider{emitter: make(chan agenttools.StreamEmitter, 1)}
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{capture})
+
+	var terminal StreamEvent
+	for event := range a.Stream(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: finishedTextTestProvider("done")},
+		Messages:         []sdk.Message{sdk.UserMessage("finish normally")},
+		SupportsToolCall: true,
+		Identity:         SessionContext{BotID: "bot-1"},
+	}) {
+		if event.IsTerminal() {
+			terminal = event
+		}
+	}
+	if terminal.Type != EventAgentEnd {
+		t.Fatalf("terminal event = %q, want %q", terminal.Type, EventAgentEnd)
+	}
+
+	emitter := <-capture.emitter
+	if emitter == nil {
+		t.Fatal("captured emitter is nil")
+	}
+	emitDone := make(chan struct{})
+	go func() {
+		emitter(agenttools.ToolStreamEvent{Type: agenttools.StreamEventSpawnProgress})
+		close(emitDone)
+	}()
+	select {
+	case <-emitDone:
+	case <-time.After(time.Second):
+		t.Fatal("captured emitter blocked after stream close")
+	}
+}
+
+func TestSpawnProgressPreservesWireStatus(t *testing.T) {
+	event := toolStreamEventToAgentEvent(agenttools.ToolStreamEvent{Type: agenttools.StreamEventSpawnProgress})
+	if event.Type != EventProgress || event.ProgressStatus != "spawn_running" {
+		t.Fatalf("spawn progress event = %#v, want progress/spawn_running", event)
+	}
 }
 
 func TestAgentStreamPersistsInterruptedInferenceStep(t *testing.T) {
