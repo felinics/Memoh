@@ -2,6 +2,7 @@ package historyfrag
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -159,6 +160,69 @@ func TestStoredModelMessageToSDKMessageKeepsModernToolResult(t *testing.T) {
 		t.Fatalf("content parts = %d, want 1: %#v", len(got.Content), got.Content)
 	}
 	assertPersistenceJSON(t, got.Content[0], sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: "ok"})
+}
+
+func TestDecodeStoredModelMessageSupportsPreviousSDKEnvelope(t *testing.T) {
+	t.Parallel()
+
+	previous := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "call-old-sdk",
+			ToolName:   "lookup",
+			Input:      map[string]any{"query": "memoh"},
+		}},
+		Usage: &sdk.Usage{InputTokens: 7, OutputTokens: 3},
+	}
+	raw := mustPersistenceJSON(t, previous)
+
+	stored := DecodeStoredModelMessage(nil, "row-old-sdk", "assistant", raw)
+	if stored.Usage != nil {
+		t.Fatalf("embedded SDK usage should remain ignored; usage belongs to the message column: %s", stored.Usage)
+	}
+	assertPersistenceJSON(t, StoredModelMessageToSDKMessage(stored), sdk.Message{
+		Role:    previous.Role,
+		Content: previous.Content,
+	})
+}
+
+func TestMarshalStoredSDKMessageRedactsPointerFilePartWithoutMutatingInput(t *testing.T) {
+	t.Parallel()
+
+	file := &sdk.FilePart{
+		Data:      "secret-file-bytes",
+		Filename:  "report.pdf",
+		MediaType: "application/pdf",
+	}
+	message := sdk.UserMessage("inspect", file, sdk.ImagePart{
+		Image:     "data:image/png;base64,abc",
+		MediaType: "image/png",
+	})
+
+	raw, err := MarshalStoredSDKMessage(message)
+	if err != nil {
+		t.Fatalf("MarshalStoredSDKMessage: %v", err)
+	}
+	if strings.Contains(string(raw), file.Data) {
+		t.Fatalf("stored payload contains file bytes: %s", raw)
+	}
+	if !strings.Contains(string(raw), file.Filename) {
+		t.Fatalf("stored payload lost the attachment placeholder: %s", raw)
+	}
+	if file.Data != "secret-file-bytes" {
+		t.Fatalf("input file part was mutated: %#v", file)
+	}
+
+	replayed := StoredModelMessageToSDKMessage(DecodeStoredModelMessage(nil, "row-file", "user", raw))
+	if len(replayed.Content) != 3 {
+		t.Fatalf("replayed content parts = %d, want text, placeholder, and image: %#v", len(replayed.Content), replayed.Content)
+	}
+	if _, ok := replayed.Content[1].(sdk.TextPart); !ok {
+		t.Fatalf("replayed file part = %T, want redacted TextPart", replayed.Content[1])
+	}
+	if _, ok := replayed.Content[2].(sdk.ImagePart); !ok {
+		t.Fatalf("replayed sibling part = %T, want ImagePart", replayed.Content[2])
+	}
 }
 
 func mustPersistenceJSON(t *testing.T, value any) []byte {

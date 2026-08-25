@@ -144,6 +144,7 @@ type turnResponsePart struct {
 
 func nativeAssistantContent(msg turn.ModelMessage, liveCheckpoint bool) json.RawMessage {
 	var out []map[string]any
+	modernToolCallIDs := make(map[string]struct{})
 	// 1) Plain-string content (legacy format).
 	if len(msg.Content) > 0 {
 		var plain string
@@ -207,6 +208,9 @@ func nativeAssistantContent(msg turn.ModelMessage, liveCheckpoint bool) json.Raw
 			}
 			out = append(out, reasoning)
 		case "tool-call":
+			if id := strings.TrimSpace(p.ToolCallID); id != "" {
+				modernToolCallIDs[id] = struct{}{}
+			}
 			out = append(out, nativeToolCallPart(p.ToolCallID, p.ToolName, p.Input, p.ProviderMetadata))
 		case "tool-result":
 			payload := p.Output
@@ -219,6 +223,9 @@ func nativeAssistantContent(msg turn.ModelMessage, liveCheckpoint bool) json.Raw
 	// 3) Top-level ToolCalls field (older OpenAI-style wire format).
 	for _, call := range msg.ToolCalls {
 		id := strings.TrimSpace(call.ID)
+		if _, alreadyProjected := modernToolCallIDs[id]; id != "" && alreadyProjected {
+			continue
+		}
 		name := strings.TrimSpace(call.Function.Name)
 		args := strings.TrimSpace(call.Function.Arguments)
 		var input json.RawMessage
