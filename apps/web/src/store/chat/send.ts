@@ -114,7 +114,9 @@ export interface ChatSendDeps {
   ) => Promise<ChatViewTarget>
   startSessionRuntime: (botId: string, sessionId: string) => void
   recordUserSent: (target: ChatViewTarget, sessionId: string, wasDraft: boolean) => void
-  ensureWebSocketConnected: (botId: string) => boolean
+  // True when a socket handle exists for the bot; the ws layer queues until
+  // open, so sends are not refused during the first-open handshake.
+  ensureWebSocket: (botId: string) => boolean
   trackAssistantStream: (input: TrackStreamInput) => Promise<void>
   sendWebSocketMessage: (botId: string, message: WSClientMessage) => boolean
   createdSessionIdForInvocation: (invocationId: string) => string
@@ -306,7 +308,7 @@ export function createChatSend(deps: ChatSendDeps) {
         transcript.appendToView(userTurn, assistantTurn)
       }
 
-      if (!deps.ensureWebSocketConnected(botId)) {
+      if (!deps.ensureWebSocket(botId)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
@@ -468,7 +470,7 @@ export function createChatSend(deps: ChatSendDeps) {
     )
     const replacedTurns = transcript.replaceTailFromTurn(target, [assistantTurn])
     try {
-      if (!deps.ensureWebSocketConnected(botId)) {
+      if (!deps.ensureWebSocket(botId)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
@@ -555,7 +557,7 @@ export function createChatSend(deps: ChatSendDeps) {
     )
     const replacedTurns = transcript.replaceTailFromTurn(target, [userTurn, assistantTurn])
     try {
-      if (!deps.ensureWebSocketConnected(botId)) {
+      if (!deps.ensureWebSocket(botId)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
