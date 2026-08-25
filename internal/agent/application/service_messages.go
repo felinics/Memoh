@@ -6,7 +6,6 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	"github.com/memohai/memoh/internal/messageconv"
 )
 
 // sdkMessagesToModelMessages converts SDK messages to the persistence/API format
