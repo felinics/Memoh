@@ -135,6 +135,34 @@ func TestContextLifecycleErrorCatalog(t *testing.T) {
 	}
 }
 
+func TestAgentResponseErrorCatalog(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		code   Code
+		status int
+		detail string
+	}{
+		{CodeAgentResponseTimeout, http.StatusGatewayTimeout, "The model did not respond in time. Please try again."},
+		{CodeAgentResponseInterrupted, http.StatusBadGateway, "The model response was interrupted. Please try again."},
+	}
+	for _, test := range tests {
+		t.Run(string(test.code), func(t *testing.T) {
+			t.Parallel()
+			definition, ok := Lookup(test.code)
+			if !ok {
+				t.Fatalf("Lookup(%q) did not find catalog definition", test.code)
+			}
+			if definition.HTTPStatus != test.status || definition.Detail != test.detail {
+				t.Fatalf("Lookup(%q) = %#v, want status %d and detail %q", test.code, definition, test.status, test.detail)
+			}
+			if len(definition.AllowedArgs) != 0 {
+				t.Fatalf("Lookup(%q).AllowedArgs = %#v, want none", test.code, definition.AllowedArgs)
+			}
+		})
+	}
+}
+
 func TestSkillLayoutErrorsUseConflictContract(t *testing.T) {
 	for _, code := range []Code{
 		CodeSkillBuiltinReadOnly,

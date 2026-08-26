@@ -89,6 +89,15 @@ func (a *lifecycleTurnAdmitter) FinishRun(
 	return a.finishErr
 }
 
+func (a *lifecycleTurnAdmitter) FinishRunWithErrorCode(
+	_ context.Context,
+	handle sessionruntime.RunHandle,
+	status, code string,
+) error {
+	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: code})
+	return a.finishErr
+}
+
 func (s *recordingContextLifecycleStore) GetContextLifecycleByRunID(
 	_ context.Context,
 	_ pgtype.UUID,
@@ -399,6 +408,9 @@ func TestTurnRunFinisherCreatesFallbackOnlyAfterFencedTerminalFinish(t *testing.
 
 			if len(admitter.finishes) != 1 {
 				t.Fatalf("FinishRun calls = %d, want 1", len(admitter.finishes))
+			}
+			if tt.name == "pre-context failure" && admitter.finishes[0].message != string(apperror.CodeWorkspaceUnreachable) {
+				t.Fatalf("stable finish code = %q", admitter.finishes[0].message)
 			}
 			if len(store.creates) != tt.wantCreates {
 				t.Fatalf("lifecycle creates = %d, want %d", len(store.creates), tt.wantCreates)

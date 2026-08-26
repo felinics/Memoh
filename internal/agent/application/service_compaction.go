@@ -263,6 +263,6 @@ func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, bo
 	cfg.BotID = req.BotID
 	cfg.SessionID = req.ThreadID
 	cfg.TotalInputTokens = inputTokens
-	cfg.HTTPClient = s.streamHTTPClient
+	cfg.HTTPClient = s.compactionHTTPClient
 	return cfg, nil
 }

@@ -83,59 +83,6 @@ func (*fullBufferTerminalDiscussStreamer) Stream(context.Context, native.RunConf
 	return ch
 }
 
-type idleDiscussAgentStreamer struct{}
-
-func (*idleDiscussAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
-	ch := make(chan native.StreamEvent, 1)
-	go func() {
-		defer close(ch)
-		<-ctx.Done()
-		ch <- native.StreamEvent{Type: native.EventAgentAbort}
-	}()
-	return ch
-}
-
-func TestDiscussIdleTimeoutPersistsInterruptedTurnMarker(t *testing.T) {
-	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
-	service := newDiscussTestService(&fakeRunner{}, &idleDiscussAgentStreamer{}, resolver)
-	service.streamIdleTimeout = 10 * time.Millisecond
-
-	h, err := service.StartTurn(context.Background(), discussCommand())
-	if err != nil {
-		t.Fatal(err)
-	}
-	drainDiscuss(t, h)
-
-	if resolver.storeCalls != 1 {
-		t.Fatalf("store calls = %d, want one interrupted turn", resolver.storeCalls)
-	}
-	if len(resolver.storedMessages) != 1 || resolver.storedMessages[0].Content[0].(sdk.TextPart).Text != interruptedTurnMarker {
-		t.Fatalf("stored messages = %#v, want interrupted marker", resolver.storedMessages)
-	}
-}
-
-func TestDiscussExplicitCancellationWithoutOutputSkipsInterruptedMarker(t *testing.T) {
-	agent := &canceledDiscussTerminalReporter{started: make(chan struct{})}
-	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
-	service := newDiscussTestService(&fakeRunner{}, agent, resolver)
-
-	h, err := service.StartTurn(context.Background(), discussCommand())
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-agent.started:
-	case <-time.After(time.Second):
-		t.Fatal("discuss stream did not start")
-	}
-	h.Cancel()
-	drainDiscuss(t, h)
-
-	if resolver.storeCalls != 0 {
-		t.Fatalf("store calls = %d, want no synthetic message for explicit cancellation", resolver.storeCalls)
-	}
-}
-
 func TestDiscussCancellationPersistsAndPublishesTerminalOnDetachedContext(t *testing.T) {
 	agent := &canceledDiscussMessagesReporter{started: make(chan struct{})}
 	resolver := &fakeDiscussService{

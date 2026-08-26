@@ -25,6 +25,18 @@ type fakeAgentStreamer struct {
 	lastConfig *native.RunConfig
 }
 
+type silentDiscussAgentStreamer struct{}
+
+func (*silentDiscussAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
+	ch := make(chan native.StreamEvent, 1)
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+		ch <- native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)}
+	}()
+	return ch
+}
+
 func (f *fakeAgentStreamer) Stream(_ context.Context, cfg native.RunConfig) <-chan native.StreamEvent {
 	f.lastConfig = &cfg
 	ch := make(chan native.StreamEvent, 1)
@@ -40,7 +52,6 @@ type fakeDiscussService struct {
 	resolveResult  ResolveRunConfigResult
 	inlineFn       func(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart
 	storeCalls     int
-	storedMessages []sdk.Message
 	lastStoreRunID string
 	lastLifecycle  *contextfrag.LifecycleHolder
 	storeErr       error
@@ -58,9 +69,8 @@ func (f *fakeDiscussService) InlineImageAttachments(ctx context.Context, botID s
 	return nil
 }
 
-func (f *fakeDiscussService) StoreRound(_ context.Context, runID, _, _, _, _ string, messages []sdk.Message, _ string, lifecycle *contextfrag.LifecycleHolder) error {
+func (f *fakeDiscussService) StoreRound(_ context.Context, runID, _, _, _, _ string, _ []sdk.Message, _ string, lifecycle *contextfrag.LifecycleHolder) error {
 	f.storeCalls++
-	f.storedMessages = append([]sdk.Message(nil), messages...)
 	f.lastStoreRunID = runID
 	f.lastLifecycle = lifecycle
 	if f.storeFn != nil {
@@ -302,6 +312,43 @@ func TestAdmittedDiscussCancellationPersistsAbortedLifecycle(t *testing.T) {
 	}
 	if len(runtime.finishes) != 1 || runtime.finishes[0].status != sessionruntime.RunStatusAborted {
 		t.Fatalf("runtime finishes = %#v, want one aborted finish", runtime.finishes)
+	}
+}
+
+func TestAdmittedDiscussSilencePublishesStableTimeoutFailure(t *testing.T) {
+	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
+	service := newDiscussTestService(&fakeRunner{}, &silentDiscussAgentStreamer{}, resolver)
+	service.streamIdleTimeout = 10 * time.Millisecond
+	runtime, lifecycles := configureDiscussLifecycle(service)
+
+	handle, err := service.StartTurn(context.Background(), lifecycleDiscussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drainDiscuss(t, handle)
+
+	var failurePayload json.RawMessage
+	for _, event := range events {
+		if event.Kind == string(native.EventError) {
+			failurePayload = event.Payload
+			break
+		}
+	}
+	if len(failurePayload) == 0 {
+		t.Fatalf("events = %#v, want a structural error", events)
+	}
+	var failure native.StreamEvent
+	if err := json.Unmarshal(failurePayload, &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Code != string(apperror.CodeAgentResponseTimeout) || strings.Contains(failure.Error, "deadline") {
+		t.Fatalf("public timeout event = %#v", failure)
+	}
+	if len(lifecycles.creates) != 1 || lifecycles.creates[0].ErrorCode.String != string(apperror.CodeAgentResponseTimeout) {
+		t.Fatalf("lifecycle creates = %#v", lifecycles.creates)
+	}
+	if len(runtime.finishes) != 1 || runtime.finishes[0].status != sessionruntime.RunStatusErrored || runtime.finishes[0].message != string(apperror.CodeAgentResponseTimeout) {
+		t.Fatalf("runtime finishes = %#v", runtime.finishes)
 	}
 }
 

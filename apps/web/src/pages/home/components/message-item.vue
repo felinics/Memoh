@@ -254,11 +254,11 @@
 
               <!-- Error block -->
               <div
-                v-else-if="node.block.type === 'error' && node.block.content"
+                v-else-if="node.block.type === 'error' && (node.block.code || node.block.content)"
                 class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
               >
                 <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-                <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
+                <span class="min-w-0 whitespace-pre-wrap break-words">{{ errorBlockContent(node.block) }}</span>
               </div>
 
               <!-- Attachment block. An assistant turn posts images as reply
@@ -381,6 +381,7 @@ import type {
   AttachmentItem,
   ChatMessage,
   ContentBlock,
+  ErrorBlock,
   ToolCallBlock as ToolCallBlockType,
   ThinkingBlock as ThinkingBlockType,
   AttachmentBlock as AttachmentBlockType,
@@ -446,7 +447,7 @@ const isSelf = computed(() =>
 )
 
 
-const { t, tm, rt, locale } = useI18n()
+const { t, te, tm, rt, locale } = useI18n()
 const editTextarea = ref<InstanceType<typeof Textarea> | null>(null)
 const isEditingUserMessage = ref(false)
 const editDraft = ref('')
@@ -766,9 +767,16 @@ const shouldRenderMessage = computed(() =>
 
 function isVisibleAssistantBlock(block: ContentBlock): boolean {
   if (block.type === 'tool') return true
-  if (block.type === 'text' || block.type === 'error') return Boolean(block.content)
+  if (block.type === 'text') return Boolean(block.content)
+  if (block.type === 'error') return Boolean(block.code || block.content)
   if (block.type === 'attachments') return block.attachments.length > 0
   return true
+}
+
+function errorBlockContent(block: ErrorBlock): string {
+  const code = block.code?.trim()
+  const key = code ? `errors.${code}` : ''
+  return key && te(key) ? t(key) : block.content
 }
 
 // Project the flat assistant block list into render nodes.

@@ -22,13 +22,13 @@ import (
 //
 // A zero fencing token means the run was started through a pre-ledger entry
 // point and has no durable row to transition, not that fencing was skipped.
-func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, status, message string) (TerminalRun, error) {
+func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, status, errorCode, message string) (TerminalRun, error) {
 	if m.runs == nil || handle.FencingToken <= 0 {
 		return TerminalRun{}, nil
 	}
 	state := terminalLedgerState(status, message)
-	errorCode := ""
-	if state == ledger.StateFailed {
+	errorCode = strings.TrimSpace(errorCode)
+	if state == ledger.StateFailed && errorCode == "" {
 		errorCode = "runtime_run_failed"
 	}
 	run, applied, err := m.runs.Finalize(ctx, ledger.FinalizeParams{

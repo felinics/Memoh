@@ -128,6 +128,10 @@
       "budget_unsatisfied": "The model context window is too small for this request.",
       "protected_overflow": "Required context exceeds the model context budget."
     },
+    "agent": {
+      "response_timeout": "The model did not respond in time. Please try again.",
+      "response_interrupted": "The model response was interrupted. Please try again."
+    },
     "profile": {
       "request_invalid": "The profile update request is invalid.",
       "title_model_invalid": "The selected title model is unavailable or is not a chat model.",
@@ -606,7 +610,6 @@
     "emptySystemSession": "No messages recorded for this system session",
     "selectBot": "Select a Bot",
     "selectBotHint": "Choose a bot from the sidebar to start chatting",
-    "interruptedTurn": "⚠️ This turn was interrupted before producing visible output (no response or timeout).",
     "thinking": "Thinking…",
     "thinkingInProgress": "Thinking…",
     "thinkingDone": "Thinking complete",

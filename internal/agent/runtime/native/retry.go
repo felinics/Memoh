@@ -39,26 +39,6 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
-// IsTimeoutStreamError reports whether err represents a timeout-class stream
-// failure. Application-level persistence uses the same classification as the
-// retry policy so a timeout made terminal here cannot silently disappear there.
-func IsTimeoutStreamError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-	// EventError flattens provider failures to text, so keep a text fallback for
-	// http.Client and transport timeout messages after their concrete type is lost.
-	detail := strings.ToLower(err.Error())
-	return strings.Contains(detail, "timeout") || strings.Contains(detail, "deadline exceeded")
-}
-
 // isRetryableStreamError returns true for errors worth retrying.
 func isRetryableStreamError(err error) bool {
 	if err == nil {
@@ -69,13 +49,7 @@ func isRetryableStreamError(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	// Network-level errors: connection refused/reset, EOF, DNS. These are
-	// transient connectivity failures worth reconnecting for. BUT a pure
-	// network timeout must NOT be retried — retrying a timeout multiplies the
-	// already-long silent wait (issue #1010 family).
-	if IsTimeoutStreamError(err) {
-		return false
-	}
+	// Network-level errors (connection refused, timeout, DNS)
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return true

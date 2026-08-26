@@ -277,23 +277,6 @@ describe('chat transcript controller', () => {
     expect(tool.done).toBe(true)
   })
 
-  it('localizes the persisted interrupted-turn marker', () => {
-    const { transcript } = makeTranscript()
-    const turns = transcript.normalizeTurns([
-      rawAssistant('assistant-interrupted', [{
-        id: 1,
-        type: 'text',
-        content: '[turn-interrupted]',
-      }]),
-    ])
-
-    const message = (turns[0] as ChatAssistantTurn).messages[0]
-    expect(message).toMatchObject({
-      type: 'text',
-      content: expect.not.stringContaining('[turn-interrupted]'),
-    })
-  })
-
   it('rekeys an optimistic invocation from run acceptance before terminal refresh', async () => {
     const { transcript, fetchMessages } = makeTranscript()
     const assistantTurn = transcript.createOptimisticAssistantTurn('invocation-1')

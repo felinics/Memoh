@@ -3,7 +3,6 @@ import type {
   UISystemTurn,
   UITurn,
 } from '@/composables/api/useChat.types'
-import i18n from '@/i18n'
 import {
   nextId,
   normalizeAttachment,
@@ -25,12 +24,6 @@ import type {
   ContentBlock,
   ToolCallBlock,
 } from './types'
-
-export const interruptedTurnMarker = '[turn-interrupted]'
-
-export function interruptedTurnText(): string {
-  return String(i18n.global.t('chat.interruptedTurn'))
-}
 
 export function createTranscriptHistory(deps: {
   messages: ChatMessage[]
@@ -70,19 +63,6 @@ export function createTranscriptHistory(deps: {
         return {
           ...msg,
           attachments: msg.attachments.map(normalizeAttachment),
-        }
-      case 'text':
-        if (msg.content !== interruptedTurnMarker) return { ...msg }
-        // Preserve interruption as semantic state instead of baking the locale
-        // selected at history-load time into a plain string. Vue reads this
-        // accessor during render; i18n.global.t() depends on the reactive locale,
-        // so an already-loaded interrupted turn updates immediately when the
-        // user changes language without refetching or renormalizing history.
-        return {
-          ...msg,
-          get content() {
-            return interruptedTurnText()
-          },
         }
       default:
         return { ...msg }

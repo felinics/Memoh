@@ -103,39 +103,40 @@ type compactionRunner interface {
 
 // Service orchestrates chat with the internal agent.
 type Service struct {
-	agent              *native.Agent
-	modelsService      *models.Service
-	queries            dbstore.Queries
-	memoryRegistry     *memprovider.Registry
-	messageService     messagepkg.Service
-	settingsService    *settings.Service
-	accountService     *accounts.Service
-	sessionService     SessionService
-	acpPool            acpPrompter
-	compactionService  compactionRunner
-	eventPublisher     messageevent.Publisher
-	skillLoader        SkillLoader
-	assetLoader        gatewayAssetLoader
-	platformIdentities PlatformIdentitySource
-	botPermissions     botPermissionChecker
-	workspaceTargets   workspaceTargetResolver
-	workdirs           sessionWorkdirResolver
-	pipeline           *timeline.Pipeline
-	streamHTTPClient   *http.Client
-	bgManager          *background.Manager
-	toolApproval       *toolapproval.Service
-	userInput          userInputService
-	hookService        *hooks.Service
-	memoryContextMu    sync.Mutex
-	memoryContextCache *memprovider.MemoryContextCache
-	acpPromptMu        sync.Mutex
-	acpPromptHubs      map[string]*acpActivePromptHub
+	agent                *native.Agent
+	modelsService        *models.Service
+	queries              dbstore.Queries
+	memoryRegistry       *memprovider.Registry
+	messageService       messagepkg.Service
+	settingsService      *settings.Service
+	accountService       *accounts.Service
+	sessionService       SessionService
+	acpPool              acpPrompter
+	compactionService    compactionRunner
+	eventPublisher       messageevent.Publisher
+	skillLoader          SkillLoader
+	assetLoader          gatewayAssetLoader
+	platformIdentities   PlatformIdentitySource
+	botPermissions       botPermissionChecker
+	workspaceTargets     workspaceTargetResolver
+	workdirs             sessionWorkdirResolver
+	pipeline             *timeline.Pipeline
+	streamHTTPClient     *http.Client
+	compactionHTTPClient *http.Client
+	streamIdleTimeout    time.Duration
+	bgManager            *background.Manager
+	toolApproval         *toolapproval.Service
+	userInput            userInputService
+	hookService          *hooks.Service
+	memoryContextMu      sync.Mutex
+	memoryContextCache   *memprovider.MemoryContextCache
+	acpPromptMu          sync.Mutex
+	acpPromptHubs        map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn               func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
 	sessionCompactionMu               sync.Mutex
 	sessionCompactions                map[string]*sessionCompactionGate
-	streamIdleTimeout                 time.Duration
 	timeout                           time.Duration
 	memorySearchTimeout               time.Duration
 	clockLocation                     *time.Location
@@ -170,38 +171,42 @@ func NewService(
 	if clockLocation == nil {
 		clockLocation = time.UTC
 	}
-	// HTTP client with timeouts for LLM provider streaming.
-	// - DialTimeout: fail fast on connection issues
-	// - ResponseHeaderTimeout: catch servers that accept TCP but never respond
-	// - Timeout: overall request lifetime cap (prevents stuck SSE body reads)
+	// Streaming requests keep transport establishment bounded, while the
+	// application idle watchdog owns first-byte and between-event silence. A
+	// client-wide or response-header deadline would otherwise preempt that
+	// policy and turn one intentional timeout into repeated transport retries.
+	streamTransport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
 	streamHTTPClient := &http.Client{
-		Timeout: 10 * time.Minute, // overall cap, matches the application timeout
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 30 * time.Second,
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   10,
-			IdleConnTimeout:       90 * time.Second,
-		},
+		Transport: streamTransport,
+	}
+	compactionHTTPClient := &http.Client{
+		Transport: streamTransport,
+		Timeout:   10 * time.Minute,
 	}
 
 	return &Service{
-		agent:               a,
-		modelsService:       modelsService,
-		queries:             queries,
-		contextLifecycles:   queries,
-		messageService:      messageService,
-		settingsService:     settingsService,
-		accountService:      accountService,
-		streamHTTPClient:    streamHTTPClient,
-		timeout:             timeout,
-		memorySearchTimeout: defaultMemorySearchTimeout,
-		clockLocation:       clockLocation,
-		logger:              log.With(slog.String("service", "agent/application")),
+		agent:                a,
+		modelsService:        modelsService,
+		queries:              queries,
+		contextLifecycles:    queries,
+		messageService:       messageService,
+		settingsService:      settingsService,
+		accountService:       accountService,
+		streamHTTPClient:     streamHTTPClient,
+		compactionHTTPClient: compactionHTTPClient,
+		timeout:              timeout,
+		memorySearchTimeout:  defaultMemorySearchTimeout,
+		clockLocation:        clockLocation,
+		logger:               log.With(slog.String("service", "agent/application")),
 	}
 }
 

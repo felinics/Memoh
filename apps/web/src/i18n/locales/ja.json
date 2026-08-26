@@ -125,6 +125,10 @@
       "budget_unsatisfied": "モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。",
       "protected_overflow": "必須コンテキストがモデルのコンテキスト予算を超えています。"
     },
+    "agent": {
+      "response_timeout": "モデルから時間内に応答がありませんでした。もう一度お試しください。",
+      "response_interrupted": "モデルの応答が中断されました。もう一度お試しください。"
+    },
     "profile": {
       "request_invalid": "プロフィール更新リクエストが無効です。",
       "title_model_invalid": "選択したタイトルModelは利用できないか、チャットModelではありません。",
@@ -592,7 +596,6 @@
     "emptySystemSession": "このシステムセッションにはメッセージが記録されていません",
     "selectBot": "Botを選択してください",
     "selectBotHint": "サイドバーからBotを選択してチャットを開始します",
-    "interruptedTurn": "⚠️ このターンは表示可能な出力を生成する前に中断されました（応答なしまたはタイムアウト）。",
     "thinking": "考えています…",
     "thinkingInProgress": "考え…",
     "thinkingDone": "思考完了",

@@ -75,6 +75,8 @@ const (
 	CodeSessionBusy                      Code = "session_runtime.session_busy"
 	CodeSessionInvocationConflict        Code = "session_runtime.invocation_conflict"
 	CodeSessionHistoryInconsistent       Code = "session_runtime.history_inconsistent"
+	CodeAgentResponseTimeout             Code = "agent.response_timeout"
+	CodeAgentResponseInterrupted         Code = "agent.response_interrupted"
 
 	CodeContextLifecycleRequestInvalid         Code = "context_lifecycle.request_invalid"
 	CodeContextLifecycleAuthenticationRequired Code = "context_lifecycle.authentication_required"
@@ -360,6 +362,14 @@ var catalog = map[Code]Definition{
 	CodeSessionHistoryInconsistent: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The conversation history could not be reconciled. Refresh and try again.",
+	},
+	CodeAgentResponseTimeout: {
+		HTTPStatus: http.StatusGatewayTimeout,
+		Detail:     "The model did not respond in time. Please try again.",
+	},
+	CodeAgentResponseInterrupted: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The model response was interrupted. Please try again.",
 	},
 	CodeContextLifecycleRequestInvalid: {
 		HTTPStatus: http.StatusBadRequest,

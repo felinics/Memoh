@@ -75,6 +75,8 @@ func runtimeRunPatch(snapshot Snapshot, status, runError, steer, lease bool) Run
 		patch.Status = &value
 	}
 	if runError {
+		code := run.ErrorCode
+		patch.ErrorCode = &code
 		value := run.Error
 		patch.Error = &value
 	}

@@ -32,6 +32,10 @@ type turnAdmitter interface {
 	FinishRun(ctx context.Context, handle sessionruntime.RunHandle, status, message string) error
 }
 
+type codedTurnFinisher interface {
+	FinishRunWithErrorCode(ctx context.Context, handle sessionruntime.RunHandle, status, errorCode string) error
+}
+
 // SetSessionRuntime injects the durable admission gate. Setter injection rather
 // than a constructor argument because the manager and this service are wired
 // into the same fx graph and each is reachable from the other's dependencies.
@@ -155,13 +159,17 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 			lifecycleCause,
 			contextLifecycleCandidateMinimal,
 		)
-		message := ""
-		if cause != nil {
-			message = string(apperror.CodeOf(cause))
-		}
+		errorCode := strings.TrimSpace(string(apperror.CodeOf(cause)))
 		ctx, cancel := context.WithTimeout(writeCtx, terminalWriteTimeout)
 		defer cancel()
-		err := s.sessionRuntime.FinishRun(ctx, handle, status, message)
+		var err error
+		if coded, ok := s.sessionRuntime.(codedTurnFinisher); ok && errorCode != "" {
+			err = coded.FinishRunWithErrorCode(ctx, handle, status, errorCode)
+		} else {
+			// Compatibility implementations still receive only stable codes; raw
+			// provider diagnostics never cross this terminal boundary.
+			err = s.sessionRuntime.FinishRun(ctx, handle, status, errorCode)
+		}
 		switch {
 		case err == nil:
 			if !staged && (status != "" || cause != nil) {

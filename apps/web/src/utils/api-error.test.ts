@@ -181,6 +181,19 @@ describe('resolveApiErrorMessage', () => {
     }, 'fallback')).toBe(expected)
   })
 
+  it.each([
+    ['agent.response_timeout', 'en', 'The model did not respond in time. Please try again.'],
+    ['agent.response_timeout', 'zh', '模型未能及时响应，请重试。'],
+    ['agent.response_timeout', 'ja', 'モデルから時間内に応答がありませんでした。もう一度お試しください。'],
+    ['agent.response_interrupted', 'en', 'The model response was interrupted. Please try again.'],
+    ['agent.response_interrupted', 'zh', '模型响应意外中断，请重试。'],
+    ['agent.response_interrupted', 'ja', 'モデルの応答が中断されました。もう一度お試しください。'],
+  ])('localizes structural stream failure %s for %s', (code, language, expected) => {
+    locale = language
+
+    expect(resolveApiErrorMessage({ code, detail: 'backend fallback' }, 'fallback')).toBe(expected)
+  })
+
   it('keeps unknown codes as open strings and uses their safe fallback', () => {
     const error = {
       code: 'future.new_condition',

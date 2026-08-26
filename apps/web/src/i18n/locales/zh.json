@@ -128,6 +128,10 @@
       "budget_unsatisfied": "模型上下文窗口不足，无法处理当前请求。",
       "protected_overflow": "必要的上下文内容超出了模型上下文预算。"
     },
+    "agent": {
+      "response_timeout": "模型未能及时响应，请重试。",
+      "response_interrupted": "模型响应意外中断，请重试。"
+    },
     "profile": {
       "request_invalid": "个人资料更新请求无效。",
       "title_model_invalid": "所选标题模型不可用或不是聊天模型。",
@@ -606,7 +610,6 @@
     "emptySystemSession": "系统会话暂无记录",
     "selectBot": "选择一个 Bot",
     "selectBotHint": "从侧边栏选择一个 Bot 开始对话",
-    "interruptedTurn": "⚠️ 本轮在产出可见内容前被中断（无响应或超时）。",
     "thinking": "思考中…",
     "thinkingInProgress": "思考中…",
     "thinkingDone": "思考完成",

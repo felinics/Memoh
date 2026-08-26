@@ -42,6 +42,54 @@ func TestFinishRunObservesAuthoritativeLedgerTerminal(t *testing.T) {
 	}
 }
 
+func TestFinishRunWithErrorCodePersistsStableCodeWithoutDiagnostic(t *testing.T) {
+	t.Parallel()
+	fixture := newAdmitFixture(t)
+	admission, err := fixture.manager.Admit(context.Background(), fixture.input("inv-coded-terminal", `{"text":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.manager.FinishRunWithErrorCode(
+		context.Background(), admission.Handle, RunStatusErrored, "agent.response_timeout",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	writes := fixture.runs.terminalWrites()
+	if len(writes) != 1 {
+		t.Fatalf("terminal writes = %d, want 1", len(writes))
+	}
+	if writes[0].ErrorCode != "agent.response_timeout" || writes[0].ErrorMessage != "" {
+		t.Fatalf("terminal error = code:%q message:%q", writes[0].ErrorCode, writes[0].ErrorMessage)
+	}
+}
+
+func TestUnnamedFinishCarriesProjectedStableErrorCodeToLedger(t *testing.T) {
+	t.Parallel()
+	fixture := newAdmitFixture(t)
+	admission, err := fixture.manager.Admit(context.Background(), fixture.input("inv-projected-code", `{"text":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.manager.HandleAgentEvent(context.Background(), admission.Handle, native.StreamEvent{
+		Type: native.EventError, Code: "agent.response_interrupted", Error: "public fallback",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.manager.HandleAgentEvent(context.Background(), admission.Handle, native.StreamEvent{Type: native.EventAgentAbort}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	writes := fixture.runs.terminalWrites()
+	if len(writes) != 1 || writes[0].ErrorCode != "agent.response_interrupted" || writes[0].ErrorMessage != "" {
+		t.Fatalf("terminal writes = %#v", writes)
+	}
+}
+
 func TestFinishRunReplaysAlreadyTerminalLedgerOutcome(t *testing.T) {
 	t.Parallel()
 	fixture := newAdmitFixture(t)

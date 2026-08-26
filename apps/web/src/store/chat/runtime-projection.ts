@@ -127,7 +127,10 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
   // database history is authoritative, and idle snapshots arrive with
   // messages:null (e.g. after a backend restart, whose ledger view carries no
   // streamed blocks).
-  const projectsAssistantContent = isRuntimeRunActive(run.status) || run.messages.length > 0 || Boolean(run.error)
+  const projectsAssistantContent = isRuntimeRunActive(run.status)
+    || run.messages.length > 0
+    || Boolean(run.error_code)
+    || Boolean(run.error)
   if (projectsAssistantContent) {
     turns.push({
       turn_id: turnId,
@@ -139,13 +142,18 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
       // every message per projection was pure O(all-content) waste.
       messages: [...run.messages],
     })
-    if (run.error && !run.messages.some(message => message.type === 'error')) {
+    if ((run.error_code || run.error) && !run.messages.some(message => message.type === 'error')) {
       turns[turns.length - 1] = {
         ...turns[turns.length - 1]!,
         role: 'assistant',
         messages: [
           ...run.messages,
-          { id: nextMessageId(run.messages), type: 'error', content: run.error },
+          {
+            id: nextMessageId(run.messages),
+            type: 'error',
+            code: run.error_code,
+            content: run.error ?? '',
+          },
         ],
       }
     }
@@ -187,6 +195,7 @@ function applyRunPatch(
     next = {
       ...next,
       ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.error_code !== undefined ? { error_code: patch.error_code } : {}),
       ...(patch.error !== undefined ? { error: patch.error } : {}),
       ...(patch.steer !== undefined ? { steer: { ...patch.steer } } : {}),
       ...(patch.updated_at !== undefined ? { updated_at: patch.updated_at } : {}),

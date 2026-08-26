@@ -490,30 +490,18 @@ func (s *Service) continueToolApprovalSession(
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	// Guard against a silent provider stall (issue #1010 family): if no stream
-	// events arrive within the adaptive idle timeout, cancel the underlying
-	// context so the continuation terminates instead of hanging forever with no
-	// message to the user.
-	idleCtx, idleCancel := withIdleTimeout(ctx)
+	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx)
 	defer idleCancel.Stop()
-
 	stream := s.agent.Stream(idleCtx, cfg)
 	stored := false
-	var hasVisibleOutput bool
-	var visibleText strings.Builder
-	var providerTimedOut bool
+	failureEventForwarded := false
 	for event := range stream {
-		idleCancel.Reset() // each event resets the idle timer
+		idleCancel.Reset()
 		if event.Type == native.EventToolCallStart {
 			idleCancel.RecordToolCall()
 		}
-		if eventErr := agentStreamEventError(event); eventErr != nil {
-			if native.IsTimeoutStreamError(eventErr) {
-				providerTimedOut = true
-			}
-			if lifecycleCause == nil {
-				lifecycleCause = eventErr
-			}
+		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
+			lifecycleCause = eventErr
 		}
 		if event.IsTerminal() {
 			terminalEventSeen = true
@@ -522,45 +510,50 @@ func (s *Service) continueToolApprovalSession(
 				switch event.Type {
 				case native.EventAgentEnd:
 					lifecycleCause = nil
-					providerTimedOut = false
 				case native.EventAgentAbort:
-					if context.Cause(ctx) != nil || lifecycleCause == nil {
+					if idleCancel.DidFire() {
+						lifecycleCause = context.Cause(idleCtx)
+					} else if context.Cause(ctx) != nil || lifecycleCause == nil {
 						lifecycleCause = agentAbortCause(ctx)
 					}
 				}
 			}
 		}
-		recordVisibleAgentText(&visibleText, event)
-		if hasVisibleAgentStreamOutput(event) {
-			hasVisibleOutput = true
+		if event.Type == native.EventAgentAbort && idleCancel.DidFire() && eventCh != nil {
+			if failureData, marshalErr := json.Marshal(agentFailureStreamEvent(context.Cause(idleCtx))); marshalErr == nil {
+				select {
+				case eventCh <- json.RawMessage(failureData):
+					failureEventForwarded = true
+				case <-ctx.Done():
+					lifecycleCause = context.Cause(ctx)
+					return lifecycleCause
+				}
+			}
 		}
-		data, err := json.Marshal(event)
+		data, err := json.Marshal(publicAgentStreamEvent(event))
 		if err != nil {
 			continue
 		}
-		if !stored && shouldPersistTerminalEvent(event, idleCancel, hasVisibleOutput, providerTimedOut) {
+		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
-				snap.visibleOutput = hasVisibleOutput
-				restoreVisibleTextSnapshot(&snap, visibleText.String())
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
 				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
 					lifecycleCause = agentAbortCause(ctx)
 				}
-				persisted, storeErr := s.persistTerminalSnapshotResult(
+				if storeErr := s.persistTerminalSnapshot(
 					context.WithoutCancel(ctx),
 					req,
 					resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}},
 					snap,
-				)
-				if storeErr != nil {
+				); storeErr != nil {
 					lifecycleCause = storeErr
 					lifecycleDeferred = false
 					return storeErr
 				}
-				stored = len(persisted) > 0
+				stored = true
 			}
 		}
-		if eventCh != nil {
+		if eventCh != nil && !failureEventForwarded {
 			select {
 			case eventCh <- json.RawMessage(data):
 			case <-ctx.Done():
@@ -569,16 +562,21 @@ func (s *Service) continueToolApprovalSession(
 			}
 		}
 	}
+	if idleCancel.DidFire() {
+		lifecycleCause = context.Cause(idleCtx)
+		if eventCh != nil && !failureEventForwarded {
+			if data, marshalErr := json.Marshal(agentFailureStreamEvent(lifecycleCause)); marshalErr == nil {
+				select {
+				case eventCh <- json.RawMessage(data):
+				case <-ctx.Done():
+				}
+			}
+		}
+		return lifecycleCause
+	}
 	if ctx.Err() != nil {
 		lifecycleCause = context.Cause(ctx)
 		return lifecycleCause
-	}
-	// The stream produced no events within the adaptive idle window and was
-	// cancelled by the watchdog backstop. Record the true cause (a deadline)
-	// so the terminal lifecycle reflects the stall rather than a generic
-	// "no terminal event" error.
-	if idleCancel.DidFire() && lifecycleCause == nil && !lifecycleDeferred {
-		lifecycleCause = context.DeadlineExceeded
 	}
 	if lifecycleCause == nil && !lifecycleDeferred && !terminalEventSeen {
 		lifecycleCause = errors.New("agent continuation ended without a terminal event")

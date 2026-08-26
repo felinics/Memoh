@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -41,14 +40,58 @@ func TestAgentStreamEventErrorConversion(t *testing.T) {
 	})
 	t.Run("legacy detail", func(t *testing.T) {
 		err := agentStreamEventError(native.StreamEvent{Type: native.EventError, Error: " provider stopped "})
-		if err == nil || err.Error() != "provider stopped" {
+		if err == nil || apperror.CodeOf(err) != apperror.CodeAgentResponseInterrupted {
 			t.Fatalf("agentStreamEventError() = %v", err)
+		}
+		if cause := apperror.CauseOf(err); cause == nil || cause.Error() != "provider stopped" {
+			t.Fatalf("private diagnostic cause = %v", cause)
 		}
 	})
 	t.Run("empty legacy detail", func(t *testing.T) {
 		err := agentStreamEventError(native.StreamEvent{Type: native.EventError})
-		if err == nil || err.Error() != "agent stream failed" {
+		if err == nil || apperror.CodeOf(err) != apperror.CodeAgentResponseInterrupted {
 			t.Fatalf("agentStreamEventError() = %v", err)
+		}
+	})
+}
+
+func TestPublicAgentStreamEventRedactsPrivateFailure(t *testing.T) {
+	event := publicAgentStreamEvent(native.StreamEvent{
+		Type: native.EventError, Error: "SECRET provider payload",
+	})
+	if event.Code != string(apperror.CodeAgentResponseInterrupted) {
+		t.Fatalf("public code = %q", event.Code)
+	}
+	if strings.Contains(event.Error, "SECRET") {
+		t.Fatalf("private detail leaked: %q", event.Error)
+	}
+}
+
+func TestAgentFailureStreamEventExposesOnlyStablePublicContract(t *testing.T) {
+	t.Parallel()
+
+	t.Run("timeout", func(t *testing.T) {
+		cause := apperror.Wrap(apperror.CodeAgentResponseTimeout, errors.New("SECRET provider timeout"), nil)
+		event := agentFailureStreamEvent(cause)
+		if event.Type != native.EventError || event.Code != string(apperror.CodeAgentResponseTimeout) {
+			t.Fatalf("timeout event = %#v", event)
+		}
+		definition, _ := apperror.Lookup(apperror.CodeAgentResponseTimeout)
+		if event.Error != definition.Detail {
+			t.Fatalf("timeout detail = %q, want %q", event.Error, definition.Detail)
+		}
+		if strings.Contains(event.Error, "SECRET") {
+			t.Fatalf("private timeout cause leaked: %q", event.Error)
+		}
+	})
+
+	t.Run("uncatalogued failure", func(t *testing.T) {
+		event := agentFailureStreamEvent(errors.New("SECRET provider response"))
+		if event.Code != string(apperror.CodeAgentResponseInterrupted) {
+			t.Fatalf("fallback code = %q", event.Code)
+		}
+		if strings.Contains(event.Error, "SECRET") {
+			t.Fatalf("private failure cause leaked: %q", event.Error)
 		}
 	})
 }
@@ -308,7 +351,7 @@ func TestPersistTerminalSnapshotSkipsEmptyAssistantSnapshot(t *testing.T) {
 	}
 }
 
-func TestPersistTerminalSnapshotPersistsInterruptedMarkerWhenAbortedBeforeVisibleOutput(t *testing.T) {
+func TestPersistTerminalSnapshotSkipsAbortedSnapshotBeforeVisibleOutput(t *testing.T) {
 	t.Parallel()
 
 	messages := &recordingMessageService{}
@@ -328,107 +371,13 @@ func TestPersistTerminalSnapshotPersistsInterruptedMarkerWhenAbortedBeforeVisibl
 		terminalSnapshot{
 			sdkMessages: []sdk.Message{sdk.AssistantMessage("partial answer")},
 			aborted:     true,
-			// visibleOutput defaults to false: the turn produced nothing visible
-			// before being interrupted.
 		},
 	); err != nil {
 		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
 	}
 
-	// Issue #1010 family: an aborted turn with no visible output must leave a
-	// trace instead of silently vanishing from history.
-	if len(messages.persisted) != 2 {
-		t.Fatalf("persisted messages = %d, want user + interrupted marker, got %#v", len(messages.persisted), messages.persisted)
-	}
-	if messages.persisted[0].Role != "user" {
-		t.Fatalf("unexpected first persisted role: %q", messages.persisted[0].Role)
-	}
-	if messages.persisted[1].Role != "assistant" {
-		t.Fatalf("unexpected second persisted role: %q", messages.persisted[1].Role)
-	}
-	markerText := persistedTextContent(t, messages.persisted[1].Content)
-	if !strings.Contains(markerText, "[turn-interrupted]") {
-		t.Fatalf("persisted marker content %q missing [turn-interrupted] prefix", markerText)
-	}
-}
-
-func TestExtractTerminalSnapshotAcceptsEmptyAbortedMessages(t *testing.T) {
-	t.Parallel()
-
-	data, err := json.Marshal(native.StreamEvent{
-		Type:     native.EventAgentAbort,
-		Messages: json.RawMessage("[]"),
-	})
-	if err != nil {
-		t.Fatalf("marshal aborted event: %v", err)
-	}
-
-	snapshot, ok := extractTerminalSnapshot(data)
-	if !ok {
-		t.Fatal("extractTerminalSnapshot returned ok=false for an empty aborted event")
-	}
-	if !snapshot.aborted {
-		t.Fatal("empty aborted snapshot was not marked aborted")
-	}
-	if len(snapshot.sdkMessages) != 0 {
-		t.Fatalf("snapshot messages = %d, want 0", len(snapshot.sdkMessages))
-	}
-}
-
-func TestPersistTerminalSnapshotPersistsInterruptedMarkerWithoutMessages(t *testing.T) {
-	t.Parallel()
-
-	messages := &recordingMessageService{}
-	resolver := &Service{
-		messageService: messages,
-		logger:         slog.New(slog.DiscardHandler),
-	}
-
-	if err := resolver.persistTerminalSnapshot(
-		context.Background(),
-		ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "hello"},
-		resolvedContext{},
-		terminalSnapshot{aborted: true},
-	); err != nil {
-		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
-	}
-
-	if len(messages.persisted) != 2 {
-		t.Fatalf("persisted messages = %d, want user + interrupted marker", len(messages.persisted))
-	}
-	markerText := persistedTextContent(t, messages.persisted[1].Content)
-	if markerText != interruptedTurnMarker {
-		t.Fatalf("persisted marker = %q, want %q", markerText, interruptedTurnMarker)
-	}
-}
-
-func TestPersistTerminalSnapshotKeepsVisiblePartialOutputAfterAbort(t *testing.T) {
-	t.Parallel()
-
-	messages := &recordingMessageService{}
-	resolver := &Service{
-		messageService: messages,
-		logger:         slog.New(slog.DiscardHandler),
-	}
-
-	if err := resolver.persistTerminalSnapshot(
-		context.Background(),
-		ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "hello"},
-		resolvedContext{},
-		terminalSnapshot{
-			sdkMessages:   []sdk.Message{sdk.AssistantMessage("partial answer")},
-			aborted:       true,
-			visibleOutput: true,
-		},
-	); err != nil {
-		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
-	}
-
-	if len(messages.persisted) != 2 {
-		t.Fatalf("persisted messages = %d, want user + partial assistant", len(messages.persisted))
-	}
-	if got := persistedTextContent(t, messages.persisted[1].Content); got != "partial answer" {
-		t.Fatalf("persisted assistant content = %q, want partial answer", got)
+	if len(messages.persisted) != 0 {
+		t.Fatalf("expected pre-output abort not to persist, got %#v", messages.persisted)
 	}
 }
 

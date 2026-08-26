@@ -269,6 +269,7 @@ type CurrentRunView struct {
 	UpdatedAt           time.Time            `json:"updated_at"`
 	Messages            []chatview.UIMessage `json:"messages"`
 	RequestUserTurn     *chatview.UITurn     `json:"request_user_turn,omitempty"`
+	ErrorCode           string               `json:"error_code,omitempty"`
 	Error               string               `json:"error,omitempty"`
 	Steer               *SteerState          `json:"steer,omitempty"`
 	Operation           *RunOperationView    `json:"operation,omitempty"`
@@ -325,6 +326,7 @@ type RuntimeDelta struct {
 type CurrentRunPatch struct {
 	RunID               string      `json:"run_id"`
 	Status              *string     `json:"status,omitempty"`
+	ErrorCode           *string     `json:"error_code,omitempty"`
 	Error               *string     `json:"error,omitempty"`
 	Steer               *SteerState `json:"steer,omitempty"`
 	UpdatedAt           *time.Time  `json:"updated_at,omitempty"`

@@ -204,16 +204,10 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	var terminalEvent native.StreamEvent
 	var terminalPayload []byte
 	var hasTerminalEvent bool
-	var hasVisibleOutput bool
-	var visibleRecovery strings.Builder
 	for event := range eventCh {
 		idleCancel.Reset()
 		if event.Type == native.EventToolCallStart {
 			idleCancel.RecordToolCall()
-		}
-		recordVisibleAgentText(&visibleRecovery, event)
-		if hasVisibleAgentStreamOutput(event) {
-			hasVisibleOutput = true
 		}
 		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
 			lifecycleCause = eventErr
@@ -231,7 +225,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 					lifecycleCause = nil
 				case native.EventAgentAbort:
 					if idleCancel.DidFire() {
-						lifecycleCause = context.DeadlineExceeded
+						lifecycleCause = context.Cause(idleCtx)
 					} else if context.Cause(ctx) != nil || lifecycleCause == nil {
 						lifecycleCause = agentAbortCause(ctx)
 					}
@@ -240,14 +234,14 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			continue
 		}
 		if h.publishAgentEvent != nil {
-			if publishErr := h.publishAgentEvent(ctx, event); publishErr != nil {
+			if publishErr := h.publishAgentEvent(ctx, publicAgentStreamEvent(event)); publishErr != nil {
 				lifecycleCause = publishErr
 				lifecycleDeferred = false
 				h.emitErr(publishErr)
 				return
 			}
 		}
-		payload, marshalErr := json.Marshal(event)
+		payload, marshalErr := json.Marshal(publicAgentStreamEvent(event))
 		if marshalErr != nil {
 			continue
 		}
@@ -257,6 +251,22 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			}
 			return
 		}
+	}
+	if idleCancel.DidFire() {
+		lifecycleCause = context.Cause(idleCtx)
+		lifecycleDeferred = false
+		failureEvent := agentFailureStreamEvent(lifecycleCause)
+		if h.publishAgentEvent != nil {
+			if publishErr := h.publishAgentEvent(context.WithoutCancel(ctx), failureEvent); publishErr != nil {
+				h.emitErr(publishErr)
+				return
+			}
+		}
+		if payload, marshalErr := json.Marshal(failureEvent); marshalErr == nil {
+			h.emit(string(failureEvent.Type), payload)
+		}
+		h.emitErr(lifecycleCause)
+		return
 	}
 	if !hasTerminalEvent {
 		if lifecycleCause == nil {
@@ -277,31 +287,21 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// detaching cancellation so that terminal history and runtime publication
 	// can cross the same durable boundary as the main chat stream.
 	terminalCtx := context.WithoutCancel(ctx)
-	var sdkMsgs []sdk.Message
 	if len(finalMessages) > 0 {
-		_ = json.Unmarshal(finalMessages, &sdkMsgs)
-	}
-	if len(sdkMsgs) == 0 && terminalEvent.Type == native.EventAgentAbort && hasVisibleOutput {
-		recovered := terminalSnapshot{aborted: true, visibleOutput: true}
-		restoreVisibleTextSnapshot(&recovered, visibleRecovery.String())
-		sdkMsgs = recovered.sdkMessages
-	}
-	interruptedByTimeout := idleCancel.DidFire() || native.IsTimeoutStreamError(lifecycleCause)
-	if len(sdkMsgs) == 0 && terminalEvent.Type == native.EventAgentAbort && interruptedByTimeout && !hasVisibleOutput {
-		sdkMsgs = []sdk.Message{sdk.AssistantMessage(interruptedTurnMarker)}
-	}
-	if len(sdkMsgs) > 0 {
-		if storeErr := s.storeDiscussRound(terminalCtx,
-			runConfig.RunID,
-			cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
-			sdkMsgs, resolved.ModelID,
-			runConfig.ContextLifecycle,
-		); storeErr != nil {
-			historyErr := runtimeHistoryError(storeErr)
-			lifecycleCause = historyErr
-			lifecycleDeferred = false
-			h.emitErr(historyErr)
-			return
+		var sdkMsgs []sdk.Message
+		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
+			if storeErr := s.storeDiscussRound(terminalCtx,
+				runConfig.RunID,
+				cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
+				sdkMsgs, resolved.ModelID,
+				runConfig.ContextLifecycle,
+			); storeErr != nil {
+				historyErr := runtimeHistoryError(storeErr)
+				lifecycleCause = historyErr
+				lifecycleDeferred = false
+				h.emitErr(historyErr)
+				return
+			}
 		}
 	}
 	if hasTerminalEvent && h.publishAgentEvent != nil {
@@ -624,6 +624,7 @@ func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePa
 			msgs[i].Content = append(msgs[i].Content, extra...)
 			return
 		}
+	}
 }
 
 // discussACPFullContextPrompt renders the composed context into the single
