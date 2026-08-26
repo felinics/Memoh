@@ -1,6 +1,7 @@
 package contextfrag
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -17,6 +18,43 @@ const LifecycleSnapshotVersion = 2
 
 // LifecycleSnapshotFromMetadata extracts the persisted lifecycle snapshot
 // from a message metadata JSON payload, reporting whether one was present.
+// LifecycleSnapshotRawFromMetadata extracts the nested lifecycle snapshot
+// exactly as persisted, validating that it decodes. Persistence paths must
+// carry these raw bytes: decoding into the typed snapshot drops fields a
+// newer schema may have written.
+func LifecycleSnapshotRawFromMetadata(raw []byte) (json.RawMessage, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var metadata struct {
+		ContextLifecycle json.RawMessage `json:"context_lifecycle"`
+	}
+	if json.Unmarshal(raw, &metadata) != nil || len(metadata.ContextLifecycle) == 0 {
+		return nil, false
+	}
+	if _, err := DecodeLifecycleSnapshot(metadata.ContextLifecycle); err != nil {
+		return nil, false
+	}
+	return metadata.ContextLifecycle, true
+}
+
+// StampLifecycleAssistantMessageID sets assistant_message_id on a raw
+// snapshot without losing fields the current schema does not know about.
+func StampLifecycleAssistantMessageID(raw json.RawMessage, messageID string) (json.RawMessage, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return raw, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var fields map[string]any
+	if err := decoder.Decode(&fields); err != nil {
+		return nil, err
+	}
+	fields["assistant_message_id"] = messageID
+	return json.Marshal(fields)
+}
+
 func LifecycleSnapshotFromMetadata(raw []byte) (LifecycleSnapshot, bool) {
 	if len(raw) == 0 {
 		return LifecycleSnapshot{}, false
@@ -223,8 +261,11 @@ func DecodeLifecycleSnapshot(raw []byte) (LifecycleSnapshot, error) {
 	if snapshot.Version <= 0 {
 		return LifecycleSnapshot{}, fmt.Errorf("lifecycle snapshot is unversioned (version %d)", snapshot.Version)
 	}
-	// Known past versions normalize to the current schema; versions from the
-	// future are preserved as-is so a rollback reader never misrepresents them.
+	// Known past versions normalize to the current schema. Versions from the
+	// future keep their version number, but this typed view necessarily drops
+	// fields the current schema does not know: it is a read projection only.
+	// Any path that persists a snapshot again must carry the raw bytes (see
+	// LifecycleSnapshotRawFromMetadata and StampLifecycleAssistantMessageID).
 	if snapshot.Version < LifecycleSnapshotVersion {
 		snapshot.Version = LifecycleSnapshotVersion
 	}

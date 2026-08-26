@@ -187,16 +187,16 @@ func (s *Service) assistantContextLifecycleSnapshot(
 	if err != nil {
 		return nil, false, err
 	}
-	snapshot, ok := contextfrag.LifecycleSnapshotFromMetadata(metadata)
+	raw, ok := contextfrag.LifecycleSnapshotRawFromMetadata(metadata)
 	if !ok {
 		return nil, false, nil
 	}
 	if assistantID.Valid {
-		snapshot.AssistantMessageID = assistantID.String()
-	}
-	raw, err := json.Marshal(snapshot)
-	if err != nil {
-		return nil, false, err
+		stamped, stampErr := contextfrag.StampLifecycleAssistantMessageID(raw, assistantID.String())
+		if stampErr != nil {
+			return nil, false, stampErr
+		}
+		raw = stamped
 	}
 	return raw, true, nil
 }

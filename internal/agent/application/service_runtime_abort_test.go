@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -220,8 +221,18 @@ func TestAbortRuntimeRunReconcilesAssistantLifecycleWithoutChangingAck(t *testin
 			}
 			waitForAbortedLifecycleUpsert(t, queries)
 			upserts := queries.recordedUpserts()
-			if len(upserts) != 1 || !bytes.Equal(upserts[0].Snapshot, wantRaw) {
-				t.Fatalf("aborted upserts = %#v, want recovered snapshot %s", upserts, wantRaw)
+			if len(upserts) != 1 {
+				t.Fatalf("aborted upserts = %#v, want one recovered snapshot", upserts)
+			}
+			var gotFields, wantFields map[string]any
+			if err := json.Unmarshal(upserts[0].Snapshot, &gotFields); err != nil {
+				t.Fatalf("decode recovered snapshot: %v", err)
+			}
+			if err := json.Unmarshal(wantRaw, &wantFields); err != nil {
+				t.Fatalf("decode expected snapshot: %v", err)
+			}
+			if !reflect.DeepEqual(gotFields, wantFields) {
+				t.Fatalf("recovered snapshot = %s, want %s", upserts[0].Snapshot, wantRaw)
 			}
 			waitForLifecycleFailureCount(t, service, tt.wantFailureCount)
 		})

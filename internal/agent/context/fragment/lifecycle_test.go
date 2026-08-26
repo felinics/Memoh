@@ -463,3 +463,35 @@ func TestDecodeLifecycleSnapshotVersionPolicy(t *testing.T) {
 		t.Fatalf("future version = %d, want preserved 9", future.Version)
 	}
 }
+
+func TestStampLifecycleAssistantMessageIDPreservesUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	metadata := []byte(`{"context_lifecycle": {
+		"version": 9,
+		"counts": {"fragments": 1},
+		"attempt_receipts": [{"step": 0, "receipt": "future-proof"}],
+		"observation_scope": "provider_wire"
+	}}`)
+	raw, ok := contextfrag.LifecycleSnapshotRawFromMetadata(metadata)
+	if !ok {
+		t.Fatal("future snapshot raw should extract")
+	}
+	stamped, err := contextfrag.StampLifecycleAssistantMessageID(raw, "assistant-1")
+	if err != nil {
+		t.Fatalf("stamp assistant id: %v", err)
+	}
+	var round map[string]any
+	if err := json.Unmarshal(stamped, &round); err != nil {
+		t.Fatalf("re-decode stamped snapshot: %v", err)
+	}
+	if round["assistant_message_id"] != "assistant-1" {
+		t.Fatalf("stamped = %#v, want assistant id set", round)
+	}
+	if _, ok := round["attempt_receipts"]; !ok {
+		t.Fatalf("stamped = %#v, want unknown future fields preserved", round)
+	}
+	if round["observation_scope"] != "provider_wire" || round["version"] != float64(9) {
+		t.Fatalf("stamped = %#v, want future version and fields intact", round)
+	}
+}
