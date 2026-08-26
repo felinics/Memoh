@@ -57,11 +57,23 @@ func (p *triggerLifecycleProvider) DoGenerate(
 	}, nil
 }
 
-func (*triggerLifecycleProvider) DoStream(
-	context.Context,
-	sdk.GenerateParams,
+func (p *triggerLifecycleProvider) DoStream(
+	ctx context.Context,
+	params sdk.GenerateParams,
 ) (*sdk.StreamResult, error) {
-	return nil, errors.New("unexpected streaming call")
+	result, err := p.DoGenerate(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	ch := make(chan sdk.StreamPart, 8)
+	ch <- &sdk.StartPart{}
+	ch <- &sdk.StartStepPart{}
+	ch <- &sdk.TextStartPart{ID: "answer"}
+	ch <- &sdk.TextDeltaPart{ID: "answer", Text: result.Text}
+	ch <- &sdk.FinishStepPart{FinishReason: result.FinishReason}
+	ch <- &sdk.FinishPart{FinishReason: result.FinishReason}
+	close(ch)
+	return &sdk.StreamResult{Stream: ch}, nil
 }
 
 func (p *triggerLifecycleProvider) callCount() int {
@@ -215,8 +227,8 @@ func TestTriggerScheduleProviderBudgetFailurePersistsFailedBudgetWithoutAssistan
 	provider := configureTriggerLifecycleContextView(t, fixture, nil)
 
 	_, err := triggerDirectSchedule(t, fixture.service)
-	if !errors.Is(err, contextfrag.ErrBudgetUnsatisfied) {
-		t.Fatalf("TriggerSchedule() error = %v, want %v", err, contextfrag.ErrBudgetUnsatisfied)
+	if apperror.CodeOf(err) != apperror.CodeContextBudgetUnsatisfied {
+		t.Fatalf("TriggerSchedule() error = %v, want code %v", err, apperror.CodeContextBudgetUnsatisfied)
 	}
 	if provider.callCount() != 0 {
 		t.Fatalf("provider calls = %d, want 0 after provider-budget rejection", provider.callCount())
