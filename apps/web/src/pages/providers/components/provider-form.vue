@@ -182,14 +182,19 @@
           <HoverCardContent
             v-if="testError"
             class="w-80 text-xs whitespace-pre-wrap break-words"
-            :class="testStatus === 'unverified' ? 'text-muted-foreground' : 'text-destructive'"
+            :class="testStatus === 'unverified' ? '' : 'text-destructive'"
           >
-            <!-- unverified 不是失败:端点已连通,只是 models 列表无法证实可用,
-                 先给指引文案再附上游细节,不涂成 destructive。 -->
+            <!-- unverified 不是失败:引导文案为主信息(正文色),上游细节
+                 降为次要点色自成一行,不和文案挤在一句里。 -->
             <template v-if="testStatus === 'unverified'">
-              {{ $t('provider.testUnverifiedHint') }} ·
+              <p>{{ $t('provider.testUnverifiedHint') }}</p>
+              <p class="mt-1.5 text-muted-foreground">
+                {{ testError }}
+              </p>
             </template>
-            {{ testError }}
+            <template v-else>
+              {{ testError }}
+            </template>
           </HoverCardContent>
         </HoverCard>
 
