@@ -170,3 +170,22 @@ func TestApplyPromptCache_AnthropicDoesNotMutateInput(t *testing.T) {
 		t.Errorf("source tool slice was mutated: %+v", tools[1].CacheControl)
 	}
 }
+
+func TestPromptCacheKeyOpenAIFamilyOnly(t *testing.T) {
+	openai := newOpenAITestModel(t)
+	if got := PromptCacheKey(openai, "5m", "sess-1"); got != "memoh-session-sess-1" {
+		t.Errorf("openai completions key = %q, want memoh-session-sess-1", got)
+	}
+	if got := PromptCacheKey(openai, "off", "sess-1"); got != "" {
+		t.Errorf("ttl off key = %q, want empty", got)
+	}
+	if got := PromptCacheKey(openai, "5m", ""); got != "" {
+		t.Errorf("empty session key = %q, want empty", got)
+	}
+	if got := PromptCacheKey(newAnthropicTestModel(t), "5m", "sess-1"); got != "" {
+		t.Errorf("anthropic key = %q, want empty (breakpoints, not routing keys)", got)
+	}
+	if got := PromptCacheKey(nil, "5m", "sess-1"); got != "" {
+		t.Errorf("nil model key = %q, want empty", got)
+	}
+}

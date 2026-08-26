@@ -98,14 +98,30 @@ func ApplyPromptCacheWithPlan(
 		return system, messages, tools, false, plan.StableMessageCount
 	}
 	// OpenAI-family vendors identify cache-warm backends via a
-	// prompt_cache_key on the request rather than explicit breakpoints;
-	// wiring that through needs upstream support in the twilight-ai SDK,
-	// which isn't available yet, so the default branch below is a no-op.
+	// prompt_cache_key on the request rather than explicit breakpoints; that
+	// key comes from PromptCacheKey and rides the request options, so the
+	// payload itself stays untouched in the default branch below.
 	switch ResolveClientType(model) {
 	case string(ClientTypeAnthropicMessages):
 		return applyAnthropicPromptCache(normalized, plan, system, messages, tools)
 	default:
 		return system, messages, tools, false, plan.StableMessageCount
+	}
+}
+
+// PromptCacheKey returns the per-session cache-routing key for OpenAI-family
+// clients. prompt_cache_key groups requests that share a prefix lineage onto
+// cache-warm backends, and the session is exactly that lineage; providers that
+// cache via explicit breakpoints get no key.
+func PromptCacheKey(model *sdk.Model, ttl, sessionID string) string {
+	if model == nil || sessionID == "" || NormalizePromptCacheTTL(ttl) == PromptCacheTTLOff {
+		return ""
+	}
+	switch ResolveClientType(model) {
+	case string(ClientTypeOpenAIResponses), string(ClientTypeOpenAICompletions):
+		return "memoh-session-" + sessionID
+	default:
+		return ""
 	}
 }
 

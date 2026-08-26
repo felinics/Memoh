@@ -1223,6 +1223,9 @@ func (a *Agent) buildGenerateOptions(ctx context.Context, cfg RunConfig, tools [
 	}
 	opts = append(opts, sdk.WithPrepareStep(stepPrepare))
 
+	if key := models.PromptCacheKey(cfg.Model, cfg.PromptCacheTTL, cfg.Identity.SessionID); key != "" {
+		opts = append(opts, sdk.WithPromptCacheKey(key))
+	}
 	opts = append(opts, models.BuildReasoningOptions(models.SDKModelConfig{
 		ClientType:            models.ResolveClientType(cfg.Model),
 		ChatCompletionsCompat: cfg.ChatCompletionsCompat,
