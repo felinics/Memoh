@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"unicode/utf8"
@@ -18,6 +19,7 @@ import (
 // lifecycle snapshot alongside the persisted round. Legacy assembly fallback
 // returns a content-light manifest that records why the view was not used.
 func acpContextViaContextView(ctx context.Context, logger *slog.Logger, sections []contextview.ACPSection, query string) (string, string, *contextfrag.Manifest) {
+	ledger := contextfrag.NewMutationLedger()
 	builder := contextview.NewBuilder(
 		contextview.NewMapCollectorRegistry(&contextview.ACPSectionsCollector{}, &contextview.CurrentUserCollector{}),
 		&contextview.FragmentSelector{},
@@ -33,13 +35,14 @@ func acpContextViaContextView(ctx context.Context, logger *slog.Logger, sections
 			{Name: "acp_sections", Config: contextview.ACPSectionsConfig{Sections: sections}},
 			{Name: "current_user", Config: contextview.CurrentUserConfig{Query: query}},
 		},
-		Targets: []contextfrag.RenderTarget{contextfrag.RenderACPFullContext},
+		Targets:   []contextfrag.RenderTarget{contextfrag.RenderACPFullContext},
+		Mutations: ledger,
 	})
 	if err != nil {
 		if logger != nil {
 			logger.Error("acp context view build failed; assembling sections directly", slog.Any("error", err))
 		}
-		return finalizeACPSections(sections), acpContextURI, acpContextFallbackManifest("build_error")
+		return finalizeACPSectionsWithAudit(sections, ledger), acpContextURI, acpContextFallbackManifest("build_error", ledger)
 	}
 	rendered := view.Rendered[contextfrag.RenderACPFullContext]
 	payload, ok := rendered.Data.(*contextview.ACPRenderedPayload)
@@ -47,14 +50,16 @@ func acpContextViaContextView(ctx context.Context, logger *slog.Logger, sections
 		if logger != nil {
 			logger.Error("acp context view rendered unexpected payload; assembling sections directly")
 		}
-		return finalizeACPSections(sections), acpContextURI, acpContextFallbackManifest("render_payload_mismatch")
+		return finalizeACPSectionsWithAudit(sections, ledger), acpContextURI, acpContextFallbackManifest("render_payload_mismatch", ledger)
 	}
 	manifest := view.Manifest
 	return payload.ContextMarkdown, payload.ContextURI, &manifest
 }
 
-func acpContextFallbackManifest(reason string) *contextfrag.Manifest {
-	ledger := contextfrag.NewMutationLedger()
+func acpContextFallbackManifest(reason string, ledger *contextfrag.MutationLedger) *contextfrag.Manifest {
+	if ledger == nil {
+		ledger = contextfrag.NewMutationLedger()
+	}
 	ledger.Record(contextfrag.MutationContextViewFallback, reason)
 	manifest := contextfrag.BuildManifest(nil)
 	manifest.View = contextfrag.ViewACPRuntimePrompt
@@ -63,6 +68,10 @@ func acpContextFallbackManifest(reason string) *contextfrag.Manifest {
 }
 
 func finalizeACPSections(sections []contextview.ACPSection) string {
+	return finalizeACPSectionsWithAudit(sections, nil)
+}
+
+func finalizeACPSectionsWithAudit(sections []contextview.ACPSection, ledger *contextfrag.MutationLedger) string {
 	blocks := make([]string, 0, len(sections))
 	for _, section := range sections {
 		text := strings.TrimSpace(section.Text)
@@ -72,5 +81,13 @@ func finalizeACPSections(sections []contextview.ACPSection) string {
 		}
 		blocks = append(blocks, text)
 	}
-	return contextview.FinalizeACPContextMarkdown(blocks)
+	joined := contextview.JoinACPContextBlocks(blocks)
+	finalized := contextview.FinalizeACPContextMarkdownFromJoined(joined)
+	if finalized != joined {
+		ledger.Record(
+			contextfrag.MutationRendererPrune,
+			fmt.Sprintf("acp_context_bytes:%d->%d", len(joined), len(finalized)),
+		)
+	}
+	return finalized
 }

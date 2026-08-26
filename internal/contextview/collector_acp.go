@@ -94,11 +94,12 @@ func (*ACPSectionsCollector) Collect(_ context.Context, req CollectRequest) ([]c
 // FinalizeACPContextMarkdown joins section blocks with the legacy ACP document
 // spacing and bounds the complete resource.
 func FinalizeACPContextMarkdown(blocks []string) string {
-	finalized, _ := finalizeACPContextMarkdownWithAudit(joinACPContextBlocks(blocks))
-	return finalized
+	return FinalizeACPContextMarkdownFromJoined(JoinACPContextBlocks(blocks))
 }
 
-func joinACPContextBlocks(blocks []string) string {
+// JoinACPContextBlocks joins section blocks with the legacy ACP document
+// spacing without bounding the result.
+func JoinACPContextBlocks(blocks []string) string {
 	var result strings.Builder
 	for _, block := range blocks {
 		block = strings.TrimSpace(block)
@@ -114,8 +115,9 @@ func joinACPContextBlocks(blocks []string) string {
 // finalizeACPContextMarkdownWithAudit bounds the joined document and reports
 // the pre-prune byte size so renderers can audit a raw head/tail cut that
 // happened after selection.
-func finalizeACPContextMarkdownWithAudit(joined string) (string, int) {
-	pruned := prune.PruneWithEdges(joined, "ACP context", prune.Config{
+// FinalizeACPContextMarkdownFromJoined bounds an already-joined document.
+func FinalizeACPContextMarkdownFromJoined(joined string) string {
+	return prune.PruneWithEdges(joined, "ACP context", prune.Config{
 		MaxBytes:  64 * 1024,
 		MaxLines:  1600,
 		HeadBytes: 48 * 1024,
@@ -123,5 +125,4 @@ func finalizeACPContextMarkdownWithAudit(joined string) (string, int) {
 		HeadLines: 1200,
 		TailLines: 300,
 	})
-	return pruned, len(joined)
 }

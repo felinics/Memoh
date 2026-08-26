@@ -86,6 +86,7 @@ func (b *Builder) Build(ctx context.Context, input BuildInput) (*ContextView, er
 	manifest := contextfrag.BuildManifest(result.Selected)
 	manifest.View = input.Intent.ManifestView()
 	manifest.DynamicMutators = normalizeDynamicMutators(input.DynamicMutators)
+	manifest.Mutations = input.Mutations
 	manifest.Selection = selectionTrace(result.Summary)
 	manifest.SelectionDecisions = selectionDecisions(sourceFrags, result)
 	if input.Budget.Plan != nil {

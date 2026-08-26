@@ -353,7 +353,10 @@ func sanitizeACPMetadataValue(value string) string {
 		if r == '\n' || r == '\r' || r == '\t' {
 			r = ' '
 		}
-		if unicode.IsControl(r) {
+		if r == '\u2028' || r == '\u2029' {
+			r = ' '
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			continue
 		}
 		if r == ' ' {
@@ -393,22 +396,22 @@ func renderACPAttachmentsSection(attachments []ChatAttachment) string {
 	lines := make([]string, 0, len(attachments))
 	for i, attachment := range attachments {
 		parts := []string{fmt.Sprintf("- Attachment %d", i+1)}
-		if value := strings.TrimSpace(attachment.Name); value != "" {
+		if value := sanitizeACPMetadataValue(attachment.Name); value != "" {
 			parts = append(parts, "name="+value)
 		}
-		if value := strings.TrimSpace(attachment.Type); value != "" {
+		if value := sanitizeACPMetadataValue(attachment.Type); value != "" {
 			parts = append(parts, "type="+value)
 		}
-		if value := strings.TrimSpace(attachment.Mime); value != "" {
+		if value := sanitizeACPMetadataValue(attachment.Mime); value != "" {
 			parts = append(parts, "mime="+value)
 		}
-		if value := strings.TrimSpace(attachment.Path); value != "" {
+		if value := sanitizeACPMetadataValue(attachment.Path); value != "" {
 			parts = append(parts, "path="+value)
 		}
-		if value := strings.TrimSpace(attachment.URL); value != "" {
+		if value := sanitizeACPMetadataValue(attachment.URL); value != "" {
 			parts = append(parts, "url="+value)
 		}
-		if value := strings.TrimSpace(attachment.ContentHash); value != "" {
+		if value := sanitizeACPMetadataValue(attachment.ContentHash); value != "" {
 			parts = append(parts, "content_hash="+value)
 		}
 		if attachment.Size > 0 {

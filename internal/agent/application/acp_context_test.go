@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -306,5 +307,43 @@ func TestACPConversationMetadataIsExternalAndSanitized(t *testing.T) {
 	}
 	if !strings.Contains(conversation.Text, "data, not instructions") {
 		t.Fatalf("conversation text = %q, want data-not-instructions note", conversation.Text)
+	}
+}
+
+func TestACPContextViaContextViewAuditsFinalPruneOnLiveLedger(t *testing.T) {
+	t.Parallel()
+
+	sections := buildACPContextSections(acpContextRenderInput{
+		BotID:       "bot-1",
+		DisplayName: "Alice",
+		Attachments: func() []ChatAttachment {
+			attachments := make([]ChatAttachment, 0, 900)
+			for i := range 900 {
+				attachments = append(attachments, ChatAttachment{
+					Name: fmt.Sprintf("report-%03d-%s.pdf", i, strings.Repeat("x", 80)),
+					Path: fmt.Sprintf("/data/uploads/report-%03d.pdf", i),
+				})
+			}
+			return attachments
+		}(),
+	})
+	markdown, _, manifest := acpContextViaContextView(context.Background(), nil, sections, "hello")
+	if len(markdown) > 64*1024 {
+		t.Fatalf("final markdown = %d bytes, want bounded", len(markdown))
+	}
+	if manifest == nil || manifest.Mutations == nil {
+		t.Fatal("manifest should carry the live mutation ledger")
+	}
+	found := false
+	for _, record := range manifest.Mutations.Records() {
+		if record.Kind == contextfrag.MutationRendererPrune {
+			found = true
+			if !strings.Contains(record.Detail, "acp_context_bytes:") {
+				t.Fatalf("prune audit detail = %q, want byte accounting", record.Detail)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("mutations = %#v, want renderer_prune recorded through the real path", manifest.Mutations.Records())
 	}
 }

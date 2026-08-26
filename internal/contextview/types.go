@@ -10,6 +10,9 @@ type BuildInput struct {
 	Budget          BudgetEnvelope
 	DynamicMutators []contextfrag.DynamicMutator
 	Options         BuildOptions
+	// Mutations is the run's live mutation ledger; renderers record
+	// post-selection changes such as a final render prune onto it.
+	Mutations *contextfrag.MutationLedger
 }
 
 type SourceSpec struct {

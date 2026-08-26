@@ -53,10 +53,11 @@ type ContextLifecycleTurn struct {
 	Snapshot           contextfrag.LifecycleSnapshot `json:"snapshot"`
 }
 
-// ContextLifecycleAggregates sums facts observed on the returned page. Cache
-// totals come from provider usage; derived cache-comparison ratios and
-// tool-roster churn are intentionally absent until a durable comparator
-// exists — a zero here must always mean "measured zero", never "unknown".
+// ContextLifecycleAggregates sums facts observed on the returned page at
+// Memoh's own boundary: native runs report SDK/provider usage, while ACP runs
+// expose only protocol-level input, so an ACP zero means "not observable
+// here", not "measured zero". Derived cache-comparison ratios and tool-roster
+// churn are intentionally absent until a durable comparator exists.
 type ContextLifecycleAggregates struct {
 	Turns                 int            `json:"turns"`
 	TotalCacheReadTokens  int            `json:"total_cache_read_tokens"`

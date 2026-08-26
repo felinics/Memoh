@@ -96,12 +96,12 @@ func renderACPSelectedMarkdown(input RenderInput) (string, error) {
 			}
 		}
 	}
-	joined := joinACPContextBlocks(blocks)
-	finalized, preBytes := finalizeACPContextMarkdownWithAudit(joined)
-	if len(finalized) < preBytes && input.Manifest != nil {
+	joined := JoinACPContextBlocks(blocks)
+	finalized := FinalizeACPContextMarkdownFromJoined(joined)
+	if finalized != joined && input.Manifest != nil {
 		input.Manifest.Mutations.Record(
 			contextfrag.MutationRendererPrune,
-			fmt.Sprintf("acp_context_bytes:%d->%d", preBytes, len(finalized)),
+			fmt.Sprintf("acp_context_bytes:%d->%d", len(joined), len(finalized)),
 		)
 	}
 	return finalized, nil
