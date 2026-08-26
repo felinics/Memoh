@@ -36,6 +36,8 @@ type contextLifecycleQueryStub struct {
 	lifecycleParams []sqlc.ListRecentContextLifecyclesBySessionParams
 	legacyRows      []sqlc.ListRecentAssistantMessagesBySessionRow
 	legacyErr       error
+	unmaterialized  bool
+	probeCalls      int
 	legacyParams    []sqlc.ListRecentAssistantMessagesBySessionParams
 }
 
@@ -61,6 +63,11 @@ func (q *contextLifecycleQueryStub) ListRecentAssistantMessagesBySession(
 ) ([]sqlc.ListRecentAssistantMessagesBySessionRow, error) {
 	q.legacyParams = append(q.legacyParams, arg)
 	return q.legacyRows, q.legacyErr
+}
+
+func (q *contextLifecycleQueryStub) HasUnmaterializedContextLifecycleMetadataBySession(context.Context, pgtype.UUID) (bool, error) {
+	q.probeCalls++
+	return q.unmaterialized, nil
 }
 
 func lifecycleSnapshotJSON(t *testing.T, snapshot contextfrag.LifecycleSnapshot) []byte {
@@ -183,8 +190,11 @@ func TestGetSessionContextLifecycleReturnsFailedRunWithoutAssistantMessage(t *te
 	if response.Aggregates.Turns != 2 {
 		t.Fatalf("aggregate turns = %d, want 2", response.Aggregates.Turns)
 	}
-	if len(queries.legacyParams) != 1 || queries.legacyParams[0].MaxCount != 1 {
-		t.Fatalf("legacy query calls = %#v, want one era probe with limit 1", queries.legacyParams)
+	if len(queries.legacyParams) != 0 {
+		t.Fatalf("legacy query calls = %#v, want none when run rows exist", queries.legacyParams)
+	}
+	if queries.probeCalls != 1 {
+		t.Fatalf("era probe calls = %d, want exactly one", queries.probeCalls)
 	}
 	if len(queries.lifecycleParams) != 1 || queries.lifecycleParams[0].MaxCount != 3 {
 		t.Fatalf("run query params = %#v, want limit 2", queries.lifecycleParams)
@@ -232,8 +242,11 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 	if turn.Snapshot.FinalInputHash != "failed-before-assistant" {
 		t.Fatalf("snapshot = %#v, want persisted run snapshot", turn.Snapshot)
 	}
-	if len(queries.legacyParams) != 1 || queries.legacyParams[0].MaxCount != 1 {
-		t.Fatalf("legacy query calls = %#v, want one era probe with limit 1", queries.legacyParams)
+	if len(queries.legacyParams) != 0 {
+		t.Fatalf("legacy query calls = %#v, want none when run rows exist", queries.legacyParams)
+	}
+	if queries.probeCalls != 1 {
+		t.Fatalf("era probe calls = %d, want exactly one", queries.probeCalls)
 	}
 	if len(queries.lifecycleParams) != 1 || queries.lifecycleParams[0].MaxCount != 8 {
 		t.Fatalf("run query params = %#v, want one probe call with limit+1", queries.lifecycleParams)
@@ -273,8 +286,11 @@ func TestLoadContextLifecycleTurnsPreservesRunOrderingAndLimit(t *testing.T) {
 	if len(turns) != 2 || turns[0].Snapshot.Counts.Fragments != 1 || turns[1].Snapshot.Counts.Fragments != 2 {
 		t.Fatalf("turns = %#v, want query order bounded to two rows", turns)
 	}
-	if len(queries.legacyParams) != 1 || queries.legacyParams[0].MaxCount != 1 {
-		t.Fatalf("legacy query calls = %#v, want one era probe with limit 1", queries.legacyParams)
+	if len(queries.legacyParams) != 0 {
+		t.Fatalf("legacy query calls = %#v, want none when run rows exist", queries.legacyParams)
+	}
+	if queries.probeCalls != 1 {
+		t.Fatalf("era probe calls = %d, want exactly one", queries.probeCalls)
 	}
 }
 

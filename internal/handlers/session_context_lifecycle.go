@@ -207,6 +207,7 @@ type contextLifecycleQueries interface {
 		context.Context,
 		sqlc.ListRecentAssistantMessagesBySessionParams,
 	) ([]sqlc.ListRecentAssistantMessagesBySessionRow, error)
+	HasUnmaterializedContextLifecycleMetadataBySession(ctx context.Context, sessionID pgtype.UUID) (bool, error)
 }
 
 type contextLifecycleLoad struct {
@@ -241,17 +242,14 @@ func loadContextLifecycleTurns(
 		if err != nil {
 			return contextLifecycleLoad{}, err
 		}
-		legacyProbe, err := queries.ListRecentAssistantMessagesBySession(ctx, sqlc.ListRecentAssistantMessagesBySessionParams{
-			SessionID: sessionID,
-			MaxCount:  1,
-		})
+		unmaterialized, err := queries.HasUnmaterializedContextLifecycleMetadataBySession(ctx, sessionID)
 		if err != nil {
-			return contextLifecycleLoad{}, fmt.Errorf("probe legacy assistant lifecycles: %w", err)
+			return contextLifecycleLoad{}, fmt.Errorf("probe unmaterialized legacy lifecycles: %w", err)
 		}
 		return contextLifecycleLoad{
 			Turns:                 turns,
 			HasMore:               len(rows) > limit,
-			LegacyHistoryMayExist: len(legacyLifecycleTurnsFromRows(legacyProbe, 1)) > 0,
+			LegacyHistoryMayExist: unmaterialized,
 		}, nil
 	}
 

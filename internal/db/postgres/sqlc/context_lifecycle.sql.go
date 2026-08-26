@@ -127,6 +127,29 @@ func (q *Queries) GetLatestAssistantContextLifecycleMetadataByRunID(ctx context.
 	return metadata, err
 }
 
+const hasUnmaterializedContextLifecycleMetadataBySession = `-- name: HasUnmaterializedContextLifecycleMetadataBySession :one
+SELECT EXISTS (
+  SELECT 1
+  FROM bot_history_messages AS messages
+  WHERE messages.session_id = $1
+    AND messages.role = 'assistant'
+    AND messages.metadata ? 'context_lifecycle'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM context_lifecycles AS lifecycles
+      WHERE lifecycles.team_id = public.memoh_current_team_id()
+        AND lifecycles.run_id = messages.run_id
+    )
+)
+`
+
+func (q *Queries) HasUnmaterializedContextLifecycleMetadataBySession(ctx context.Context, sessionID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasUnmaterializedContextLifecycleMetadataBySession, sessionID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listRecentAssistantMessagesBySession = `-- name: ListRecentAssistantMessagesBySession :many
 SELECT
   id,

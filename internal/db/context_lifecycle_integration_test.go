@@ -326,6 +326,33 @@ VALUES ($1, gen_random_uuid(), $2, $3, 'completed', '{}'::jsonb)
 	if sqlState(crossTeamErr) != "42501" {
 		t.Fatalf("cross-team lifecycle insert SQLSTATE = %q, want 42501", sqlState(crossTeamErr))
 	}
+
+	// The era probe reports metadata rows that never materialized into the
+	// run-keyed table (the paused run above), and clears once a lifecycle row
+	// exists for the same run.
+	unmaterialized, err := queries.HasUnmaterializedContextLifecycleMetadataBySession(ctx, parsedSessionID)
+	if err != nil {
+		t.Fatalf("probe unmaterialized lifecycles: %v", err)
+	}
+	if !unmaterialized {
+		t.Fatal("probe = false, want true while paused metadata has no lifecycle row")
+	}
+	if _, err := queries.CreateContextLifecycle(ctx, sqlc.CreateContextLifecycleParams{
+		RunID:     parsedPausedRunID,
+		BotID:     parsedBotID,
+		SessionID: parsedSessionID,
+		Status:    "aborted",
+		Snapshot:  created.Snapshot,
+	}); err != nil {
+		t.Fatalf("materialize paused lifecycle row: %v", err)
+	}
+	unmaterialized, err = queries.HasUnmaterializedContextLifecycleMetadataBySession(ctx, parsedSessionID)
+	if err != nil {
+		t.Fatalf("probe after materialization: %v", err)
+	}
+	if unmaterialized {
+		t.Fatal("probe = true, want false once every metadata run has a lifecycle row")
+	}
 }
 
 func TestUpsertTerminalContextLifecycleConvergesByRunIdentity(t *testing.T) {

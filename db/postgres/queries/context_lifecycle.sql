@@ -167,3 +167,18 @@ WHERE session_runs.team_id = public.memoh_current_team_id()
   )
 ORDER BY session_runs.updated_at, session_runs.run_id
 LIMIT sqlc.arg(batch_size);
+
+-- name: HasUnmaterializedContextLifecycleMetadataBySession :one
+SELECT EXISTS (
+  SELECT 1
+  FROM bot_history_messages AS messages
+  WHERE messages.session_id = sqlc.arg(session_id)
+    AND messages.role = 'assistant'
+    AND messages.metadata ? 'context_lifecycle'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM context_lifecycles AS lifecycles
+      WHERE lifecycles.team_id = public.memoh_current_team_id()
+        AND lifecycles.run_id = messages.run_id
+    )
+);
