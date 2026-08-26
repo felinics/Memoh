@@ -509,6 +509,10 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	return nil
 }
 
+// acpContextBudgetDefault estimates a context budget from the bot's default
+// chat model. It is a bot-default estimate, not the ACP runtime's authoritative
+// window: the external agent may run a different model whose real window Memoh
+// cannot observe. Tools receiving it must treat it as advisory sizing.
 func (s *Service) acpContextBudgetDefault(ctx context.Context, botID string) int {
 	botSettings, err := s.loadBotSettings(ctx, botID)
 	if err != nil {

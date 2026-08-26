@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"log/slog"
 	"sync"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/agent/application"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
 	chatview "github.com/memohai/memoh/internal/agent/view"

@@ -132,3 +132,47 @@ func acpTestSHA256(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
+
+func TestACPRendererAuditsFinalPrune(t *testing.T) {
+	t.Parallel()
+
+	oversized := acpRenderTextFrag(
+		"acp.section.huge", contextfrag.SlotSystem, contextfrag.KindSystemPrompt,
+		sdk.MessageRoleSystem, strings.Repeat("long section line\n", 8000),
+	)
+	selected := []contextfrag.ContextFrag{oversized}
+	ledger := contextfrag.NewMutationLedger()
+	manifest := contextfrag.BuildManifest(selected)
+	manifest.Mutations = ledger
+
+	rendered, err := (&ACPFullContextRenderer{}).Render(context.Background(), RenderInput{
+		Intent:    contextfrag.IntentACPRuntimePrompt,
+		Target:    contextfrag.RenderACPFullContext,
+		Selected:  selected,
+		Placement: IdentityPlacer{}.Place(selected, contextfrag.IntentACPRuntimePrompt),
+		Manifest:  &manifest,
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	payload, ok := rendered.Data.(*ACPRenderedPayload)
+	if !ok {
+		t.Fatalf("Data type = %T, want *ACPRenderedPayload", rendered.Data)
+	}
+	if len(payload.ContextMarkdown) > 64*1024 {
+		t.Fatalf("final markdown = %d bytes, want bounded", len(payload.ContextMarkdown))
+	}
+	records := ledger.Records()
+	found := false
+	for _, record := range records {
+		if record.Kind == contextfrag.MutationRendererPrune {
+			found = true
+			if !strings.Contains(record.Detail, "acp_context_bytes:") {
+				t.Fatalf("prune audit detail = %q, want byte accounting", record.Detail)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("mutations = %#v, want renderer_prune audit", records)
+	}
+}

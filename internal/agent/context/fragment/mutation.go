@@ -23,6 +23,7 @@ const (
 	MutationContextBudgetDisabled MutationKind = "context_budget_disabled"
 	MutationCapabilityGate        MutationKind = "capability_gate"
 	MutationReadMedia             MutationKind = "read_media"
+	MutationRendererPrune         MutationKind = "renderer_prune"
 	MutationMidStreamRetry        MutationKind = "mid_stream_retry"
 )
 

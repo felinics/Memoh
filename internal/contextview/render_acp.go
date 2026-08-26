@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
@@ -95,7 +96,15 @@ func renderACPSelectedMarkdown(input RenderInput) (string, error) {
 			}
 		}
 	}
-	return FinalizeACPContextMarkdown(blocks), nil
+	joined := joinACPContextBlocks(blocks)
+	finalized, preBytes := finalizeACPContextMarkdownWithAudit(joined)
+	if len(finalized) < preBytes && input.Manifest != nil {
+		input.Manifest.Mutations.Record(
+			contextfrag.MutationRendererPrune,
+			fmt.Sprintf("acp_context_bytes:%d->%d", preBytes, len(finalized)),
+		)
+	}
+	return finalized, nil
 }
 
 func acpTextContentHash(text string) string {
