@@ -27,6 +27,25 @@ const (
 	MutationMidStreamRetry        MutationKind = "mid_stream_retry"
 )
 
+// AllMutationKinds lists every mutation kind the ledger can record; the
+// generated API contract is pinned to this list.
+func AllMutationKinds() []MutationKind {
+	return []MutationKind{
+		MutationBeforeModelCallHook,
+		MutationBackgroundSummary,
+		MutationMidTaskPrune,
+		MutationLoopStepReselection,
+		MutationInjectedMessage,
+		MutationContextViewFallback,
+		MutationContextBudgetFailure,
+		MutationContextBudgetDisabled,
+		MutationCapabilityGate,
+		MutationReadMedia,
+		MutationRendererPrune,
+		MutationMidStreamRetry,
+	}
+}
+
 // MutationRecord is one ledger entry describing a post-render mutation.
 type MutationRecord struct {
 	Kind   MutationKind `json:"kind"`
