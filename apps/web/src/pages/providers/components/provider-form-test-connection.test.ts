@@ -90,9 +90,9 @@ describe('provider test connection states', () => {
     document.body.innerHTML = ''
   })
 
-  async function mountAndRunTest(status: string) {
+  async function mountAndRunTest(status: string, message = 'service error (404): not found') {
     mocks.postTest.mockResolvedValue({
-      data: { status, reachable: true, latency_ms: 12, message: 'service error (404): not found' },
+      data: { status, reachable: true, latency_ms: 12, message },
     })
     const providerForm = (await import('./provider-form.vue')).default
     const root = document.createElement('div')
@@ -134,6 +134,20 @@ describe('provider test connection states', () => {
   it('does not show the unverified hint on a plain error', async () => {
     const { app, root } = await mountAndRunTest('error')
     expect(root.textContent).not.toContain('provider.testUnverifiedHint')
+    app.unmount()
+    root.remove()
+  })
+
+  // Base URL 指向网页时,上游把整个 HTML 页面塞在错误体里;页面散文
+  // (含剥了链接的死文字)不是有用的 API 错误,必须整条丢掉,只留状态头。
+  it('drops HTML page prose from the upstream error body', async () => {
+    const { app, root } = await mountAndRunTest(
+      'unverified',
+      'api error 404: 404 Not Found [body: <!doctype html><html><body><h1>Example Domain</h1><a href="https://iana.org">Learn more</a></body></html>]',
+    )
+    expect(root.textContent).toContain('api error 404')
+    expect(root.textContent).not.toContain('Learn more')
+    expect(root.textContent).not.toContain('Example Domain')
     app.unmount()
     root.remove()
   })
