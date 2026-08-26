@@ -209,7 +209,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		if event.Type == native.EventToolCallStart {
 			idleCancel.RecordToolCall()
 		}
-		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
+		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
 			lifecycleCause = eventErr
 		}
 		terminal := event.Type == native.EventAgentEnd || event.Type == native.EventAgentAbort

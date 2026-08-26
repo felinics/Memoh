@@ -308,7 +308,7 @@ func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan nati
 			hasVisibleOutput = true
 		}
 		if publishEvent != nil {
-			if publishErr := publishEvent(ctx, event); publishErr != nil {
+			if publishErr := publishEvent(ctx, publicAgentStreamEvent(event)); publishErr != nil {
 				// A refused projection write (fence rejection, ownership
 				// handoff) means this process may no longer own the run, and
 				// continuing would persist history the runtime no longer

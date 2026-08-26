@@ -40,16 +40,20 @@ func TestAgentStreamEventErrorConversion(t *testing.T) {
 	})
 	t.Run("legacy detail", func(t *testing.T) {
 		err := agentStreamEventError(native.StreamEvent{Type: native.EventError, Error: " provider stopped "})
-		if err == nil || apperror.CodeOf(err) != apperror.CodeAgentResponseInterrupted {
+		if err == nil || err.Error() != "provider stopped" || apperror.CodeOf(err) != "" {
 			t.Fatalf("agentStreamEventError() = %v", err)
 		}
-		if cause := apperror.CauseOf(err); cause == nil || cause.Error() != "provider stopped" {
+		lifecycleErr := agentStreamLifecycleError(native.StreamEvent{Type: native.EventError, Error: " provider stopped "})
+		if apperror.CodeOf(lifecycleErr) != apperror.CodeAgentResponseInterrupted {
+			t.Fatalf("lifecycle code = %q", apperror.CodeOf(lifecycleErr))
+		}
+		if cause := apperror.CauseOf(lifecycleErr); cause == nil || cause.Error() != "provider stopped" {
 			t.Fatalf("private diagnostic cause = %v", cause)
 		}
 	})
 	t.Run("empty legacy detail", func(t *testing.T) {
 		err := agentStreamEventError(native.StreamEvent{Type: native.EventError})
-		if err == nil || apperror.CodeOf(err) != apperror.CodeAgentResponseInterrupted {
+		if err == nil || err.Error() != "agent stream failed" || apperror.CodeOf(err) != "" {
 			t.Fatalf("agentStreamEventError() = %v", err)
 		}
 	})

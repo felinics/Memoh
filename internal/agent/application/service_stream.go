@@ -64,7 +64,15 @@ func agentStreamEventError(event native.StreamEvent) error {
 	if detail == "" {
 		detail = "agent stream failed"
 	}
-	return apperror.Wrap(apperror.CodeAgentResponseInterrupted, errors.New(detail), nil)
+	return errors.New(detail)
+}
+
+func agentStreamLifecycleError(event native.StreamEvent) error {
+	err := agentStreamEventError(event)
+	if err == nil || apperror.CodeOf(err) != "" {
+		return err
+	}
+	return apperror.Wrap(apperror.CodeAgentResponseInterrupted, err, nil)
 }
 
 func agentFailureStreamEvent(cause error) native.StreamEvent {
@@ -83,7 +91,7 @@ func agentFailureStreamEvent(cause error) native.StreamEvent {
 }
 
 func publicAgentStreamEvent(event native.StreamEvent) native.StreamEvent {
-	if cause := agentStreamEventError(event); cause != nil {
+	if cause := agentStreamLifecycleError(event); cause != nil {
 		return agentFailureStreamEvent(cause)
 	}
 	return event
@@ -240,7 +248,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				idleCancel.RecordToolCall()
 			}
 
-			if eventErr := agentStreamEventError(event); eventErr != nil {
+			if eventErr := agentStreamLifecycleError(event); eventErr != nil {
 				if lifecycleCause == nil {
 					lifecycleCause = eventErr
 				}
@@ -554,7 +562,7 @@ func (s *Service) streamChatWSResultWithHooks(
 			idleCancel.RecordToolCall()
 		}
 
-		if eventErr := agentStreamEventError(event); eventErr != nil {
+		if eventErr := agentStreamLifecycleError(event); eventErr != nil {
 			if lifecycleCause == nil {
 				lifecycleCause = eventErr
 			}

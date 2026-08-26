@@ -500,7 +500,7 @@ func (s *Service) continueToolApprovalSession(
 		if event.Type == native.EventToolCallStart {
 			idleCancel.RecordToolCall()
 		}
-		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
+		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
 			lifecycleCause = eventErr
 		}
 		if event.IsTerminal() {

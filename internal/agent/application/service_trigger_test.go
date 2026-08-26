@@ -15,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	chatview "github.com/memohai/memoh/internal/agent/view"
+	"github.com/memohai/memoh/internal/apperror"
 )
 
 // recordingTurnEventPublisher stands in for the session-runtime projection
@@ -170,6 +171,33 @@ func TestConsumeTriggeredStreamSurfacesStreamErrorWithoutTerminal(t *testing.T) 
 	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "provider boom") {
 		t.Fatalf("consumeTriggeredStream() error = %v, want the provider error", err)
+	}
+}
+
+func TestConsumeTriggeredStreamKeepsDiagnosticsInternalAndPublishesStableFailure(t *testing.T) {
+	t.Parallel()
+
+	pub := &recordingTurnEventPublisher{}
+	svc := newTriggerStreamService(&recordingMessageService{}, pub)
+
+	events := make(chan native.StreamEvent, 1)
+	events <- native.StreamEvent{Type: native.EventError, Error: "SECRET provider boom"}
+	close(events)
+
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "SECRET provider boom") {
+		t.Fatalf("internal trigger error = %v, want private provider diagnostic", err)
+	}
+	published := pub.published()
+	if len(published) != 1 {
+		t.Fatalf("published events = %#v, want one stable failure", published)
+	}
+	failure := published[0]
+	if failure.Code != string(apperror.CodeAgentResponseInterrupted) {
+		t.Fatalf("published code = %q, want %q", failure.Code, apperror.CodeAgentResponseInterrupted)
+	}
+	if strings.Contains(failure.Error, "SECRET") {
+		t.Fatalf("private diagnostic leaked to runtime projection: %q", failure.Error)
 	}
 }
 

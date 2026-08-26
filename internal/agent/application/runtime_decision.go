@@ -373,7 +373,7 @@ func (s *Service) continueRuntimeDecision(
 		if err := json.Unmarshal(raw, &event); err != nil {
 			continue
 		}
-		if eventErr := agentStreamEventError(event); eventErr != nil && eventCause == nil {
+		if eventErr := agentStreamLifecycleError(event); eventErr != nil && eventCause == nil {
 			eventCause = eventErr
 		}
 		if event.IsTerminal() {
