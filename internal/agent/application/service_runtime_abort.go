@@ -187,7 +187,7 @@ func (s *Service) assistantContextLifecycleSnapshot(
 	if err != nil {
 		return nil, false, err
 	}
-	snapshot, ok := contextLifecycleSnapshotFromMetadata(metadata)
+	snapshot, ok := contextfrag.LifecycleSnapshotFromMetadata(metadata)
 	if !ok {
 		return nil, false, nil
 	}
@@ -199,23 +199,6 @@ func (s *Service) assistantContextLifecycleSnapshot(
 		return nil, false, err
 	}
 	return raw, true, nil
-}
-
-func contextLifecycleSnapshotFromMetadata(raw []byte) (contextfrag.LifecycleSnapshot, bool) {
-	if len(raw) == 0 {
-		return contextfrag.LifecycleSnapshot{}, false
-	}
-	var metadata struct {
-		ContextLifecycle json.RawMessage `json:"context_lifecycle"`
-	}
-	if json.Unmarshal(raw, &metadata) != nil || len(metadata.ContextLifecycle) == 0 {
-		return contextfrag.LifecycleSnapshot{}, false
-	}
-	decoded, err := contextfrag.DecodeLifecycleSnapshot(metadata.ContextLifecycle)
-	if err != nil || decoded.Version <= 0 {
-		return contextfrag.LifecycleSnapshot{}, false
-	}
-	return decoded, true
 }
 
 func (s *Service) upsertAbortedContextLifecycle(

@@ -2,6 +2,7 @@ package contextfrag
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -21,12 +22,16 @@ func LifecycleSnapshotFromMetadata(raw []byte) (LifecycleSnapshot, bool) {
 		return LifecycleSnapshot{}, false
 	}
 	var metadata struct {
-		ContextLifecycle *LifecycleSnapshot `json:"context_lifecycle"`
+		ContextLifecycle json.RawMessage `json:"context_lifecycle"`
 	}
-	if json.Unmarshal(raw, &metadata) != nil || metadata.ContextLifecycle == nil {
+	if json.Unmarshal(raw, &metadata) != nil || len(metadata.ContextLifecycle) == 0 {
 		return LifecycleSnapshot{}, false
 	}
-	return cloneLifecycleSnapshot(*metadata.ContextLifecycle), true
+	snapshot, err := DecodeLifecycleSnapshot(metadata.ContextLifecycle)
+	if err != nil {
+		return LifecycleSnapshot{}, false
+	}
+	return snapshot, true
 }
 
 const maxMemoryRecallTraceRefs = 32
@@ -215,6 +220,11 @@ func DecodeLifecycleSnapshot(raw []byte) (LifecycleSnapshot, error) {
 			snapshot.StablePrefixTokenEstimate = compat.LegacyCachePlan.StablePrefixTokenEstimate
 		}
 	}
+	if snapshot.Version <= 0 {
+		return LifecycleSnapshot{}, fmt.Errorf("lifecycle snapshot is unversioned (version %d)", snapshot.Version)
+	}
+	// Known past versions normalize to the current schema; versions from the
+	// future are preserved as-is so a rollback reader never misrepresents them.
 	if snapshot.Version < LifecycleSnapshotVersion {
 		snapshot.Version = LifecycleSnapshotVersion
 	}

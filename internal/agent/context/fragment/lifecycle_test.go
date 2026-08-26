@@ -423,3 +423,43 @@ func TestDecodeLifecycleSnapshotMapsVersionOneCachePlan(t *testing.T) {
 		t.Fatalf("snapshot = %#v, want version-1 cache_plan mapped onto flattened fields", snapshot)
 	}
 }
+
+func TestLifecycleSnapshotFromMetadataMigratesNestedVersionOne(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"context_lifecycle": {
+		"version": 1,
+		"view": "run_config_pre_provider",
+		"counts": {"fragments": 1},
+		"cache_plan": {
+			"stable_prefix_hash": "hash-meta-v1",
+			"stable_message_count": 2,
+			"stable_prefix_token_estimate": 128
+		}
+	}}`)
+	snapshot, ok := contextfrag.LifecycleSnapshotFromMetadata(raw)
+	if !ok {
+		t.Fatal("metadata snapshot should decode")
+	}
+	if snapshot.Version != contextfrag.LifecycleSnapshotVersion ||
+		snapshot.StablePrefixHash != "hash-meta-v1" ||
+		snapshot.StableMessageCount != 2 ||
+		snapshot.StablePrefixTokenEstimate != 128 {
+		t.Fatalf("snapshot = %#v, want nested v1 cache_plan migrated", snapshot)
+	}
+}
+
+func TestDecodeLifecycleSnapshotVersionPolicy(t *testing.T) {
+	t.Parallel()
+
+	if _, err := contextfrag.DecodeLifecycleSnapshot([]byte(`{"counts":{}}`)); err == nil {
+		t.Fatal("unversioned snapshot should be rejected")
+	}
+	future, err := contextfrag.DecodeLifecycleSnapshot([]byte(`{"version": 9, "counts":{}}`))
+	if err != nil {
+		t.Fatalf("future snapshot should decode: %v", err)
+	}
+	if future.Version != 9 {
+		t.Fatalf("future version = %d, want preserved 9", future.Version)
+	}
+}
