@@ -176,11 +176,11 @@ func kindForSDKMessage(msg sdk.Message) contextfrag.Kind {
 }
 
 func cacheForSDKMessage(msg sdk.Message) contextfrag.CacheClass {
-	if msg.Role == sdk.MessageRoleSystem {
-		return contextfrag.CacheDynamic
-	}
 	switch msg.Role {
-	case sdk.MessageRoleUser, sdk.MessageRoleAssistant, sdk.MessageRoleTool:
+	case sdk.MessageRoleSystem, sdk.MessageRoleUser, sdk.MessageRoleAssistant, sdk.MessageRoleTool:
+		// Mirrors contextfrag.cacheForMessage: history rows are frozen at
+		// persistence, system event rows included, so they belong to the
+		// stable prefix the cache plan hands to providers.
 		return contextfrag.CacheStable
 	default:
 		return contextfrag.CacheNever

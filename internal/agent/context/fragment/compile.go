@@ -435,9 +435,12 @@ func PriorityForMessage(msg sdk.Message) int {
 
 func cacheForMessage(msg sdk.Message) CacheClass {
 	switch msg.Role {
-	case sdk.MessageRoleSystem:
-		return CacheDynamic
-	case sdk.MessageRoleUser, sdk.MessageRoleAssistant, sdk.MessageRoleTool:
+	case sdk.MessageRoleSystem, sdk.MessageRoleUser, sdk.MessageRoleAssistant, sdk.MessageRoleTool:
+		// History messages render from the append-only timeline and are frozen
+		// at persistence; a system event row (session_created and friends) is
+		// as byte-stable within the session as a user row. Classifying it
+		// dynamic truncated the stable prefix at history position 0, which
+		// kept Anthropic message breakpoints off the conversation entirely.
 		return CacheStable
 	default:
 		return CacheNever

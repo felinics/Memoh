@@ -63,3 +63,27 @@ func TestStablePrefixPlacerHashIgnoresVolatileSuffix(t *testing.T) {
 		t.Fatalf("StablePrefixHash did not change after stable prefix edit: %q", first.StablePrefixHash)
 	}
 }
+
+func TestStablePrefixPlacerKeepsSystemHistoryMessagesStable(t *testing.T) {
+	t.Parallel()
+
+	sessionEvent := messageFrag("event", sdk.Message{
+		Role:    sdk.MessageRoleSystem,
+		Content: []sdk.MessagePart{sdk.TextPart{Text: `<event type="session_created" t="2026-08-26T21:14:40Z"/>`}},
+	})
+	sessionEvent.CacheClass = cacheForSDKMessage(sdk.Message{Role: sdk.MessageRoleSystem})
+	current := messageFrag("current", sdk.UserMessage("latest"))
+	current.CacheClass = contextfrag.CacheNever
+	frags := contextfrag.NormalizeContextRefs([]contextfrag.ContextFrag{
+		textFrag("system", contextfrag.SlotSystem, contextfrag.KindSystemPrompt, sdk.MessageRoleSystem, "system"),
+		sessionEvent,
+		messageFrag("turn1", sdk.UserMessage("hello")),
+		current,
+	})
+
+	plan := StablePrefixPlacer{}.Place(frags, contextfrag.IntentRunConfigPreProvider)
+
+	if plan.FirstVolatileIndex != 3 {
+		t.Fatalf("FirstVolatileIndex = %d, want 3 (session event and history stay in the stable prefix)", plan.FirstVolatileIndex)
+	}
+}

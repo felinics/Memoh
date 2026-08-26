@@ -110,13 +110,15 @@ func manifestHasKind(manifest Manifest, kind Kind) bool {
 	return false
 }
 
-// TestCacheForMessageMatchesHistoryCollectorMapping is the P5 RED test.
-// cacheForMessage backs the legacy/fallback compile path (contextfrag.Compile,
-// used by agent.RefreshContextFrag); contextview's history collector
-// (cacheForSDKMessage in internal/contextview/collector_history.go) backs the
-// newer contextview path. Both classify the same message roles, so they must
-// agree: history messages (user/assistant/tool) are CacheStable, matching
-// the view-side rule, instead of the legacy path's CacheNever.
+// TestCacheForMessageMatchesHistoryCollectorMapping pins the shared mapping
+// between the legacy/fallback compile path (contextfrag.Compile, used by
+// agent.RefreshContextFrag) and contextview's history collector
+// (cacheForSDKMessage in internal/contextview/collector_history.go). History
+// messages of every role are CacheStable: they render from the append-only
+// timeline and are frozen at persistence, so a system event row (for example
+// session_created) is as byte-stable within the session as a user row —
+// classifying it dynamic truncated the stable prefix at history position 0
+// and kept Anthropic message breakpoints off the conversation entirely.
 func TestCacheForMessageMatchesHistoryCollectorMapping(t *testing.T) {
 	t.Parallel()
 
@@ -124,7 +126,7 @@ func TestCacheForMessageMatchesHistoryCollectorMapping(t *testing.T) {
 		role sdk.MessageRole
 		want CacheClass
 	}{
-		{sdk.MessageRoleSystem, CacheDynamic},
+		{sdk.MessageRoleSystem, CacheStable},
 		{sdk.MessageRoleUser, CacheStable},
 		{sdk.MessageRoleAssistant, CacheStable},
 		{sdk.MessageRoleTool, CacheStable},
