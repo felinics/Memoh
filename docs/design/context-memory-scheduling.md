@@ -411,17 +411,22 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       in PR 3; PR 4's persisted per-fragment costs refine the measures.
 - [x] Deterministic over-budget trim (artifact summaries + newest message + recent
       contiguous window, no orphaned tool responses); `context.protected_overflow`
-      stable error when even the protected set does not fit — CM-ADM-002
+      stable error when even the protected set does not fit — CM-ADM-002. Both
+      admission sites (channel-side compose, agent-side re-admission) delegate to
+      the single `turn.AdmitContextEntries` core, which also fails closed when the
+      newest entry is itself an orphaned tool response instead of silently
+      admitting an empty or summaries-only window.
 - [x] `loadArtifacts` / `loadTimelineArtifacts` failure: degrade into the bounded
       admission window with a stable `context_admission_degraded` log; never silent
       unbounded recomposition — CM-ADM-003
 - [x] Unify token estimation — CM-EST-001. The authority is `contextfrag`'s
-      `EstimateBytesPerToken` from the unified context-budget work (#1012);
-      `internal/tokenest` is its dependency-free anchor for the packages the
-      architecture guards keep out of `agent/context` (chat/timeline,
-      channel, config). `contextfrag` aliases its constant to the anchor, so
-      the chars/2 vs len/4 split is gone and a real tokenizer swaps both
-      sides together.
+      `EstimateBytesPerToken` from the unified context-budget work (#1012).
+      For the packages the architecture guards keep out of `agent/context`
+      (chat/timeline, channel), the turn port re-exports the vocabulary
+      (`turn.ContextBytesPerToken`, `turn.EstimateTokensFromBytes`,
+      `turn.DefaultContextCapTokens`) as thin aliases of the `contextfrag`
+      definitions, so the chars/2 vs len/4 split is gone and a real tokenizer
+      swaps every consumer together.
 - [x] `GOMEMLIMIT` + compose memory limits for `server` (production and devenv) —
       CM-PRC-001
 - [x] Observability: `context_admission` / `context_admission_rejected` /

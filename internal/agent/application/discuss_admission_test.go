@@ -92,3 +92,21 @@ func TestDiscussCompactableTokensUsesSharedEstimator(t *testing.T) {
 		t.Fatalf("discussCompactableTokens = %d, want 100", got)
 	}
 }
+
+func TestAdmitDiscussMessagesNewestOrphanToolFailsClosed(t *testing.T) {
+	// When the budget fits only a newest tool response whose call fell
+	// outside the window, admission must fail closed instead of handing the
+	// provider an empty or summary-only context.
+	messages := []turn.DiscussMessage{
+		{Role: "assistant", Content: strings.Repeat("a", 8000)},
+		{Role: "user", Content: "summary", CompactionArtifactID: "a1"},
+		{Role: "tool", Content: strings.Repeat("t", 40)},
+	}
+	admitted, admission := admitDiscussMessages(messages, 50)
+	if admitted != nil {
+		t.Fatalf("expected nil admitted messages, got %d", len(admitted))
+	}
+	if !admission.ProtectedOverflow {
+		t.Fatalf("expected ProtectedOverflow, admission %+v", admission)
+	}
+}

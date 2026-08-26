@@ -95,6 +95,29 @@ func TestComposeBudgetedProtectedOverflowFailsClosed(t *testing.T) {
 	}
 }
 
+func TestComposeBudgetedNewestOrphanToolFailsClosed(t *testing.T) {
+	// A tool result persisted after the triggering user message sorts newest.
+	// When the budget fits only that tool entry, the turn must fail closed
+	// with ProtectedOverflow instead of silently skipping or running against
+	// a summaries-only context.
+	trs := []TurnResponseEntry{
+		{RequestedAtMs: 100, Role: "assistant", Content: strings.Repeat("a", 8000)},
+		{RequestedAtMs: 400, Role: "tool", Content: strings.Repeat("t", 40)},
+	}
+	rc := RenderedContext{{
+		MessageID:    "m-new",
+		ReceivedAtMs: 300,
+		Content:      []RenderedContentPiece{{Type: "text", Text: strings.Repeat("c", 400)}},
+	}}
+	composed, admission := ComposeContextWithArtifactsBudgeted(rc, trs, nil, ComposeBudget{MaxTokens: 50})
+	if composed != nil {
+		t.Fatal("newest orphan tool response must not materialize a result")
+	}
+	if !admission.ProtectedOverflow {
+		t.Fatalf("expected ProtectedOverflow, admission %+v", admission)
+	}
+}
+
 func TestComposeBudgetedDropsLeadingOrphanToolResponse(t *testing.T) {
 	huge := strings.Repeat("a", 8000)
 	trs := []TurnResponseEntry{

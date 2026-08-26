@@ -9,7 +9,6 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/tokenest"
 )
 
 type DiscussCursorStore interface {
@@ -81,7 +80,7 @@ func (d *DiscussDriver) admissionMaxTokens() int {
 	if d.admissionCapTokens > 0 {
 		return d.admissionCapTokens
 	}
-	return tokenest.DefaultAbsoluteCapTokens
+	return turn.DefaultContextCapTokens
 }
 
 type discussSession struct {
@@ -102,14 +101,14 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 	projector := newDiscussEventProjector(deps.Broadcaster)
 	capTokens := deps.AdmissionMaxTokens
 	if capTokens <= 0 {
-		capTokens = tokenest.DefaultAbsoluteCapTokens
+		capTokens = turn.DefaultContextCapTokens
 	}
 	return &DiscussDriver{
 		turn:     deps.Turn,
 		sessions: make(map[string]*discussSession),
 		history: discussHistoryReader{
 			messages: deps.MessageService,
-			maxBytes: int64(capTokens) * tokenest.BytesPerToken,
+			maxBytes: int64(capTokens) * turn.ContextBytesPerToken,
 			logger:   logger,
 		},
 		cursor:             discussCursorTracker{store: deps.CursorStore},

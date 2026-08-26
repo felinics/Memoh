@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/memohai/memoh/internal/tokenest"
+	"github.com/memohai/memoh/internal/agent/turn"
 )
 
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
@@ -312,84 +312,40 @@ func ComposeContextWithArtifactsBudgeted(
 	}
 	sortMergeEntries(entries)
 
-	costs := make([]int, len(entries))
-	total := 0
+	admitted := make([]turn.AdmissionEntry, len(entries))
 	for i := range entries {
-		costs[i] = mergeEntryTokens(entries[i])
-		total += costs[i]
-	}
-	admission := ComposeAdmission{EstimatedTokens: total, TotalEntries: len(entries)}
-
-	if budget.MaxTokens <= 0 || total <= budget.MaxTokens {
-		messages := materializeMergeEntries(entries)
-		if len(messages) == 0 {
-			return nil, admission
-		}
-		admission.SelectedTokens = total
-		return &ComposeContextResult{Messages: messages, EstimatedTokens: total}, admission
-	}
-
-	selected := make([]bool, len(entries))
-	used := 0
-	for i := range entries {
-		if isSummaryMergeKind(entries[i].kind) {
-			selected[i] = true
-			used += costs[i]
+		admitted[i] = turn.AdmissionEntry{
+			Cost:   mergeEntryTokens(entries[i]),
+			Pinned: isSummaryMergeKind(entries[i].kind),
+			ToolResponse: entries[i].kind == "tr" &&
+				strings.EqualFold(strings.TrimSpace(entries[i].trRole), "tool"),
 		}
 	}
-	newest := len(entries) - 1
-	for newest >= 0 && selected[newest] {
-		newest--
+	decision := turn.AdmitContextEntries(admitted, budget.MaxTokens)
+	admission := ComposeAdmission{
+		EstimatedTokens:   decision.EstimatedTokens,
+		SelectedTokens:    decision.SelectedTokens,
+		TotalEntries:      len(entries),
+		DroppedEntries:    decision.DroppedEntries,
+		ProtectedOverflow: decision.ProtectedOverflow,
 	}
-	if newest >= 0 {
-		used += costs[newest]
-		selected[newest] = true
-	}
-	if used > budget.MaxTokens {
-		admission.SelectedTokens = used
-		admission.ProtectedOverflow = true
+	if decision.ProtectedOverflow {
 		return nil, admission
 	}
-	// Fill a contiguous recent window: stop at the first entry that does not
-	// fit so selection stays a suffix (plus pinned summaries) and remains
-	// deterministic.
-	for i := newest - 1; i >= 0; i-- {
-		if selected[i] {
-			continue
-		}
-		if used+costs[i] > budget.MaxTokens {
-			break
-		}
-		used += costs[i]
-		selected[i] = true
-	}
-	// Never start the raw window on an orphaned tool response: drop leading
-	// tool-role entries whose call fell outside the window.
-	for i := range entries {
-		if !selected[i] || isSummaryMergeKind(entries[i].kind) {
-			continue
-		}
-		if entries[i].kind == "tr" && strings.EqualFold(strings.TrimSpace(entries[i].trRole), "tool") {
-			selected[i] = false
-			used -= costs[i]
-			continue
-		}
-		break
-	}
-
-	kept := make([]mergeEntry, 0, len(entries))
-	for i := range entries {
-		if selected[i] {
-			kept = append(kept, entries[i])
+	kept := entries
+	if decision.DroppedEntries > 0 {
+		kept = make([]mergeEntry, 0, len(entries)-decision.DroppedEntries)
+		for i := range entries {
+			if decision.Selected[i] {
+				kept = append(kept, entries[i])
+			}
 		}
 	}
-	admission.SelectedTokens = used
-	admission.DroppedEntries = len(entries) - len(kept)
 	messages := materializeMergeEntries(kept)
 	if len(messages) == 0 {
 		return nil, admission
 	}
-	return &ComposeContextResult{Messages: messages, EstimatedTokens: used}, admission
+	return &ComposeContextResult{Messages: messages, EstimatedTokens: decision.SelectedTokens}, admission
 }
 
 func isSummaryMergeKind(kind string) bool {
@@ -412,14 +368,14 @@ func mergeEntryTokens(entry mergeEntry) int {
 				n += len(piece.Text)
 			}
 		}
-		return tokenest.FromBytes(n)
+		return turn.EstimateTokensFromBytes(n)
 	case "tr":
 		if len(entry.trRawContent) > 0 {
-			return tokenest.FromBytes(len(entry.trRawContent))
+			return turn.EstimateTokensFromBytes(len(entry.trRawContent))
 		}
-		return tokenest.FromBytes(len(entry.trContent))
+		return turn.EstimateTokensFromBytes(len(entry.trContent))
 	default:
-		return tokenest.FromBytes(len(entry.summaryContent))
+		return turn.EstimateTokensFromBytes(len(entry.summaryContent))
 	}
 }
 
@@ -551,7 +507,7 @@ func estimateMessagesTokens(messages []ContextMessage) int {
 
 func estimateMessageTokens(m ContextMessage) int {
 	if len(m.RawContent) > 0 {
-		return tokenest.FromBytes(len(m.RawContent))
+		return turn.EstimateTokensFromBytes(len(m.RawContent))
 	}
-	return tokenest.FromBytes(len(m.Content))
+	return turn.EstimateTokensFromBytes(len(m.Content))
 }

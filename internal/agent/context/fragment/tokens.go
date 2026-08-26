@@ -4,18 +4,12 @@ import (
 	"encoding/json"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
-
-	"github.com/memohai/memoh/internal/tokenest"
 )
 
 // EstimateBytesPerToken is the byte-per-token heuristic shared by every
 // context ledger (selection budgets, compaction triggers, manifest
-// accounting), and the single swap point for a real tokenizer. The numeric
-// value is anchored in internal/tokenest, the dependency-free re-export that
-// the chat/channel-side estimators use because the architecture guards
-// forbid them from importing this package (CM-EST-001); swapping in a real
-// tokenizer changes both together.
-const EstimateBytesPerToken = tokenest.BytesPerToken
+// accounting), and the single swap point for a real tokenizer.
+const EstimateBytesPerToken = 4
 
 const (
 	// ProviderBudgetEstimator identifies the conservative estimator used only

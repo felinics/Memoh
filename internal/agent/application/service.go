@@ -47,7 +47,6 @@ import (
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/reasoning"
 	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/tokenest"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
@@ -217,7 +216,7 @@ func (s *Service) contextAbsoluteMaxTokens() int {
 	if s.contextAbsoluteCapTokens > 0 {
 		return s.contextAbsoluteCapTokens
 	}
-	return tokenest.DefaultAbsoluteCapTokens
+	return contextfrag.DefaultAbsoluteCapTokens
 }
 
 // effectiveContextTokenBudget derives the per-turn context budget as

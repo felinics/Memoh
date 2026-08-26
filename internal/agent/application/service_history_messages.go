@@ -10,9 +10,9 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
 	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/tokenest"
 )
 
 // buildMessagesFromPipeline assembles chat context from the DCP pipeline's
@@ -151,7 +151,7 @@ func (s *Service) historyLoadMaxBytes(contextTokenBudget int) int64 {
 	if contextTokenBudget <= 0 {
 		contextTokenBudget = s.contextAbsoluteMaxTokens()
 	}
-	return int64(contextTokenBudget) * tokenest.BytesPerToken
+	return int64(contextTokenBudget) * contextfrag.EstimateBytesPerToken
 }
 
 // stripToolMessages removes bulky tool interactions from the context while

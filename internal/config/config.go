@@ -10,7 +10,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/memohai/memoh/internal/tokenest"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 )
 
 const (
@@ -239,7 +239,7 @@ func (c AgentConfig) EffectiveContextAbsoluteMaxTokens() int {
 	if c.ContextAbsoluteMaxTokens > 0 {
 		return c.ContextAbsoluteMaxTokens
 	}
-	return tokenest.DefaultAbsoluteCapTokens
+	return contextfrag.DefaultAbsoluteCapTokens
 }
 
 const (

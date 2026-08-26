@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/tokenest"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 )
 
 func TestLoadRejectsLegacyMCPSection(t *testing.T) {
@@ -651,11 +651,11 @@ func TestAgentConfigEffectiveContextLoopReselectMode(t *testing.T) {
 }
 
 func TestAgentConfigEffectiveContextAbsoluteMaxTokens(t *testing.T) {
-	if got := (AgentConfig{}).EffectiveContextAbsoluteMaxTokens(); got != tokenest.DefaultAbsoluteCapTokens {
-		t.Fatalf("unset cap = %d, want default %d", got, tokenest.DefaultAbsoluteCapTokens)
+	if got := (AgentConfig{}).EffectiveContextAbsoluteMaxTokens(); got != contextfrag.DefaultAbsoluteCapTokens {
+		t.Fatalf("unset cap = %d, want default %d", got, contextfrag.DefaultAbsoluteCapTokens)
 	}
-	if got := (AgentConfig{ContextAbsoluteMaxTokens: -5}).EffectiveContextAbsoluteMaxTokens(); got != tokenest.DefaultAbsoluteCapTokens {
-		t.Fatalf("negative cap = %d, want default %d", got, tokenest.DefaultAbsoluteCapTokens)
+	if got := (AgentConfig{ContextAbsoluteMaxTokens: -5}).EffectiveContextAbsoluteMaxTokens(); got != contextfrag.DefaultAbsoluteCapTokens {
+		t.Fatalf("negative cap = %d, want default %d", got, contextfrag.DefaultAbsoluteCapTokens)
 	}
 	if got := (AgentConfig{ContextAbsoluteMaxTokens: 500_000}).EffectiveContextAbsoluteMaxTokens(); got != 500_000 {
 		t.Fatalf("explicit cap = %d, want 500000", got)
