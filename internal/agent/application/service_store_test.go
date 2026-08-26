@@ -313,7 +313,7 @@ func TestStoreRoundPersistsLifecycleMetadataOnLastAssistant(t *testing.T) {
 	if !ok {
 		t.Fatalf("lifecycle metadata = %#v, want LifecycleSnapshot", finalMeta[contextfrag.MetadataContextLifecycleKey])
 	}
-	if metadataSnapshot.Version != 1 || metadataSnapshot.Counts.Messages != 2 {
+	if metadataSnapshot.Version != contextfrag.LifecycleSnapshotVersion || metadataSnapshot.Counts.Messages != 2 {
 		t.Fatalf("lifecycle metadata snapshot = %#v", metadataSnapshot)
 	}
 	raw, err := json.Marshal(metadataSnapshot)

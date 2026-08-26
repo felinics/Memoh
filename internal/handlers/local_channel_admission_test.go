@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	"log/slog"
 	"sync"
 	"testing"
@@ -617,7 +618,7 @@ func TestFinishWSRunPersistsPreContextFailureAfterFencedFinish(t *testing.T) {
 	if err := json.Unmarshal(row.Snapshot, &snapshot); err != nil {
 		t.Fatalf("decode lifecycle snapshot: %v", err)
 	}
-	if snapshot.Version != 1 {
+	if snapshot.Version != contextfrag.LifecycleSnapshotVersion {
 		t.Fatalf("snapshot version = %d, want 1", snapshot.Version)
 	}
 }

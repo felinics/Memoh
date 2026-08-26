@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -232,8 +231,8 @@ func lifecycleTurnsFromRunRows(
 		if len(turns) >= limit {
 			break
 		}
-		var snapshot contextfrag.LifecycleSnapshot
-		if err := json.Unmarshal(row.Snapshot, &snapshot); err != nil {
+		snapshot, err := contextfrag.DecodeLifecycleSnapshot(row.Snapshot)
+		if err != nil {
 			return nil, fmt.Errorf("decode lifecycle snapshot for run %s: %w", row.RunID.String(), err)
 		}
 		errorCode := ""

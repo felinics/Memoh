@@ -349,7 +349,7 @@ func TestLifecycleHolderSnapshotAvailableWithMemoryRecallOnly(t *testing.T) {
 	holder.SetMemoryRecall(contextfrag.MemoryRecallTrace{ProviderID: "provider-1", CacheState: "miss"})
 
 	snapshot, ok := holder.Snapshot()
-	if !ok || snapshot.Version != 1 || snapshot.MemoryRecall == nil || snapshot.MemoryRecall.ProviderID != "provider-1" {
+	if !ok || snapshot.Version != contextfrag.LifecycleSnapshotVersion || snapshot.MemoryRecall == nil || snapshot.MemoryRecall.ProviderID != "provider-1" {
 		t.Fatalf("snapshot = %#v ok=%v, want versioned memory-only lifecycle", snapshot, ok)
 	}
 }
@@ -377,7 +377,7 @@ func TestLifecycleHolderSnapshotIsContentLight(t *testing.T) {
 	if !ok {
 		t.Fatal("expected snapshot after SetManifest")
 	}
-	if snapshot.Version != 1 || snapshot.View != contextfrag.ViewRunConfigPreProvider {
+	if snapshot.Version != contextfrag.LifecycleSnapshotVersion || snapshot.View != contextfrag.ViewRunConfigPreProvider {
 		t.Fatalf("snapshot identity = (%d, %q), want (1, %q)", snapshot.Version, snapshot.View, contextfrag.ViewRunConfigPreProvider)
 	}
 	if snapshot.Counts != (contextfrag.ManifestCounts{Fragments: 4, Messages: 2, Images: 1, TextBytes: 512}) {
@@ -393,5 +393,33 @@ func TestLifecycleHolderSnapshotIsContentLight(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "private-content-marker") || strings.Contains(string(raw), `"items"`) {
 		t.Fatalf("content-light snapshot leaked manifest items: %s", raw)
+	}
+}
+
+func TestDecodeLifecycleSnapshotMapsVersionOneCachePlan(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+		"version": 1,
+		"view": "run_config_pre_provider",
+		"counts": {"fragments": 2, "messages": 1},
+		"cache_plan": {
+			"stable_prefix_hash": "hash-v1",
+			"stable_message_count": 3,
+			"mid_stable_message_count": 1,
+			"stable_prefix_token_estimate": 512
+		}
+	}`)
+	snapshot, err := contextfrag.DecodeLifecycleSnapshot(raw)
+	if err != nil {
+		t.Fatalf("DecodeLifecycleSnapshot() error = %v", err)
+	}
+	if snapshot.Version != contextfrag.LifecycleSnapshotVersion {
+		t.Fatalf("version = %d, want normalized %d", snapshot.Version, contextfrag.LifecycleSnapshotVersion)
+	}
+	if snapshot.StablePrefixHash != "hash-v1" ||
+		snapshot.StableMessageCount != 3 ||
+		snapshot.StablePrefixTokenEstimate != 512 {
+		t.Fatalf("snapshot = %#v, want version-1 cache_plan mapped onto flattened fields", snapshot)
 	}
 }

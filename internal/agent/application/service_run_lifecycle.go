@@ -256,8 +256,8 @@ func (s *Service) recoverContextLifecycleFromAssistantMetadata(
 	if !ready {
 		return
 	}
-	var snapshot contextfrag.LifecycleSnapshot
-	if err := json.Unmarshal(raw, &snapshot); err != nil {
+	snapshot, err := contextfrag.DecodeLifecycleSnapshot(raw)
+	if err != nil {
 		s.recordContextLifecyclePersistenceError(err, runID, botID, sessionID, status)
 		return
 	}
@@ -389,12 +389,6 @@ func (s *Service) reconcileTerminalContextLifecycle(ctx context.Context, run ses
 		)
 		candidateReady = false
 	}
-	if candidateReady && contextLifecycleStatusCompatibleWithTerminalRun(run.State, candidate.status) {
-		status = candidate.status
-	} else if existingReady && contextLifecycleStatusCompatibleWithTerminalRun(run.State, existing.Status) {
-		status = existing.Status
-	}
-
 	var (
 		snapshot        []byte
 		replaceSnapshot bool
@@ -426,7 +420,23 @@ func (s *Service) reconcileTerminalContextLifecycle(ctx context.Context, run ses
 		}
 	}
 
-	errorCode := terminalContextLifecycleErrorCode(run, status, candidate, candidateReady, existing, existingReady)
+	defaultStatus := status
+	refinedCode := ""
+	switch {
+	case candidateReady && candidate.status != defaultStatus &&
+		contextLifecycleStatusCompatibleWithTerminalRun(run.State, candidate.status):
+		status = candidate.status
+	case existingReady && existing.Status != defaultStatus &&
+		contextLifecycleStatusCompatibleWithTerminalRun(run.State, existing.Status):
+		status = existing.Status
+	default:
+		status, refinedCode = refineTerminalContextLifecycleStatus(run, defaultStatus, snapshot)
+	}
+
+	errorCode := refinedCode
+	if errorCode == "" {
+		errorCode = terminalContextLifecycleErrorCode(run, status, candidate, candidateReady, existing, existingReady)
+	}
 	var code pgtype.Text
 	if errorCode != "" {
 		code = pgtype.Text{String: errorCode, Valid: true}
@@ -581,13 +591,7 @@ func terminalContextLifecycleErrorCode(
 	return ""
 }
 
-func classifyContextLifecycleTerminal(
-	ctx context.Context,
-	snapshot contextfrag.LifecycleSnapshot,
-	cause error,
-) (string, string) {
-	var budgetFailure, fallback bool
-	var budgetReason string
+func lifecycleBudgetEvidence(snapshot contextfrag.LifecycleSnapshot) (budgetFailure bool, budgetReason string, fallback bool) {
 	for _, mutation := range snapshot.Mutations {
 		switch mutation.Kind {
 		case contextfrag.MutationContextBudgetFailure:
@@ -597,6 +601,54 @@ func classifyContextLifecycleTerminal(
 			fallback = true
 		}
 	}
+	return budgetFailure, budgetReason, fallback
+}
+
+// refineTerminalContextLifecycleStatus upgrades a state-derived terminal
+// status with durable evidence recovered from the chosen snapshot and the
+// run's stable error code, so fallback and failed_budget survive restarts
+// that lost the in-memory candidate. It never crosses the run-state
+// compatibility boundary.
+func refineTerminalContextLifecycleStatus(
+	run sessionruntime.TerminalRun,
+	status string,
+	snapshot []byte,
+) (string, string) {
+	state := strings.ToLower(strings.TrimSpace(run.State))
+	if state != "completed" && state != "failed" {
+		return status, ""
+	}
+	var budgetFailure, fallback bool
+	var budgetReason string
+	if decoded, err := contextfrag.DecodeLifecycleSnapshot(snapshot); err == nil {
+		budgetFailure, budgetReason, fallback = lifecycleBudgetEvidence(decoded)
+	}
+	runCode := strings.TrimSpace(run.ErrorCode)
+	switch state {
+	case "completed":
+		if fallback {
+			return contextLifecycleStatusFallback, ""
+		}
+	case "failed":
+		switch {
+		case runCode == string(apperror.CodeContextProtectedOverflow) ||
+			runCode == string(apperror.CodeContextBudgetUnsatisfied):
+			return contextLifecycleStatusFailedBudget, runCode
+		case budgetFailure && budgetReason == "protected_context_overflow":
+			return contextLifecycleStatusFailedBudget, string(apperror.CodeContextProtectedOverflow)
+		case budgetFailure:
+			return contextLifecycleStatusFailedBudget, string(apperror.CodeContextBudgetUnsatisfied)
+		}
+	}
+	return status, ""
+}
+
+func classifyContextLifecycleTerminal(
+	ctx context.Context,
+	snapshot contextfrag.LifecycleSnapshot,
+	cause error,
+) (string, string) {
+	budgetFailure, budgetReason, fallback := lifecycleBudgetEvidence(snapshot)
 	privateCause := apperror.CauseOf(cause)
 	code := apperror.CodeOf(cause)
 	protectedOverflow := errors.Is(cause, contextfrag.ErrProtectedContextOverflow) ||

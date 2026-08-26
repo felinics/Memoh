@@ -582,3 +582,120 @@ func assertLifecycleSnapshot(t *testing.T, raw []byte, want contextfrag.Lifecycl
 		t.Fatalf("lifecycle snapshot = %#v, want %#v", got, want)
 	}
 }
+
+func TestTerminalLifecycleRepairRecoversFallbackFromAssistantMetadata(t *testing.T) {
+	fallback := lifecycleSnapshotWithMutations(t, contextfrag.MutationRecord{
+		Kind:   contextfrag.MutationContextViewFallback,
+		Detail: "collector_error",
+	})
+	meta, err := json.Marshal(map[string]any{"context_lifecycle": fallback})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &recordingContextLifecycleStore{metadata: meta}
+	service := &Service{contextLifecycles: store}
+
+	service.reconcileTerminalContextLifecycle(
+		context.Background(),
+		lifecycleTerminalRun(31, "completed", ""),
+	)
+	if len(store.terminalUpserts) != 1 {
+		t.Fatalf("terminal upserts = %d, want 1", len(store.terminalUpserts))
+	}
+	upsert := store.terminalUpserts[0]
+	if upsert.Status != contextLifecycleStatusFallback || upsert.ErrorCode.Valid {
+		t.Fatalf("repaired terminal = (%q, %#v), want fallback recovered from metadata", upsert.Status, upsert.ErrorCode)
+	}
+	if !upsert.ReplaceSnapshot {
+		t.Fatal("recovered metadata snapshot should be authoritative")
+	}
+}
+
+func TestTerminalLifecycleRepairRecoversFailedBudgetFromRecoveredMutations(t *testing.T) {
+	budget := lifecycleSnapshotWithMutations(t, contextfrag.MutationRecord{
+		Kind:   contextfrag.MutationContextBudgetFailure,
+		Detail: "budget_unsatisfied",
+	})
+	meta, err := json.Marshal(map[string]any{"context_lifecycle": budget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &recordingContextLifecycleStore{metadata: meta}
+	service := &Service{contextLifecycles: store}
+
+	service.reconcileTerminalContextLifecycle(
+		context.Background(),
+		lifecycleTerminalRun(32, "failed", "runtime_run_failed"),
+	)
+	if len(store.terminalUpserts) != 1 {
+		t.Fatalf("terminal upserts = %d, want 1", len(store.terminalUpserts))
+	}
+	upsert := store.terminalUpserts[0]
+	if upsert.Status != contextLifecycleStatusFailedBudget ||
+		!upsert.ErrorCode.Valid || upsert.ErrorCode.String != string(apperror.CodeContextBudgetUnsatisfied) {
+		t.Fatalf("repaired terminal = (%q, %#v), want failed_budget from recovered mutations", upsert.Status, upsert.ErrorCode)
+	}
+}
+
+func TestTerminalLifecycleRepairClassifiesBudgetErrorCodeWithoutSnapshot(t *testing.T) {
+	store := &recordingContextLifecycleStore{}
+	service := &Service{contextLifecycles: store}
+
+	service.reconcileTerminalContextLifecycle(
+		context.Background(),
+		lifecycleTerminalRun(33, "failed", string(apperror.CodeContextBudgetUnsatisfied)),
+	)
+	if len(store.terminalUpserts) != 1 {
+		t.Fatalf("terminal upserts = %d, want 1", len(store.terminalUpserts))
+	}
+	upsert := store.terminalUpserts[0]
+	if upsert.Status != contextLifecycleStatusFailedBudget ||
+		!upsert.ErrorCode.Valid || upsert.ErrorCode.String != string(apperror.CodeContextBudgetUnsatisfied) {
+		t.Fatalf("repaired terminal = (%q, %#v), want failed_budget from run error code", upsert.Status, upsert.ErrorCode)
+	}
+}
+
+func TestTerminalLifecycleRepairKeepsRicherExistingOverMinimalCandidate(t *testing.T) {
+	runUUID, botUUID, sessionUUID, err := parseContextLifecycleIDs(
+		lifecycleTestRunID,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingRaw, err := json.Marshal(minimalContextLifecycleSnapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &recordingContextLifecycleStore{existing: &sqlc.ContextLifecycle{
+		RunID:     runUUID,
+		BotID:     botUUID,
+		SessionID: sessionUUID,
+		Status:    contextLifecycleStatusFallback,
+		Snapshot:  existingRaw,
+	}}
+	service := &Service{contextLifecycles: store}
+	minimal := minimalContextLifecycleSnapshot()
+	service.stageContextLifecycleCandidate(
+		lifecycleFencedContext(34),
+		lifecycleTestRunID,
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		&minimal,
+		nil,
+		contextLifecycleCandidateMinimal,
+	)
+
+	service.reconcileTerminalContextLifecycle(
+		context.Background(),
+		lifecycleTerminalRun(34, "completed", ""),
+	)
+	if len(store.terminalUpserts) != 1 {
+		t.Fatalf("terminal upserts = %d, want 1", len(store.terminalUpserts))
+	}
+	upsert := store.terminalUpserts[0]
+	if upsert.Status != contextLifecycleStatusFallback {
+		t.Fatalf("repaired terminal status = %q, want richer existing fallback preserved", upsert.Status)
+	}
+}

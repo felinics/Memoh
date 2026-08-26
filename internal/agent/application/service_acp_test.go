@@ -156,7 +156,7 @@ func TestStreamACPAgentWSPersistsMinimalCompletedLifecycle(t *testing.T) {
 	if row.ErrorCode.Valid {
 		t.Fatalf("completed lifecycle error code = %#v, want none", row.ErrorCode)
 	}
-	if snapshot.Version != 1 || snapshot.View != contextfrag.ViewACPRuntimePrompt || snapshot.Counts.Fragments == 0 {
+	if snapshot.Version != contextfrag.LifecycleSnapshotVersion || snapshot.View != contextfrag.ViewACPRuntimePrompt || snapshot.Counts.Fragments == 0 {
 		t.Fatalf("ACP context-view snapshot = %#v, want populated ACP manifest", snapshot)
 	}
 	if len(snapshot.SelectionDecisions) == 0 {

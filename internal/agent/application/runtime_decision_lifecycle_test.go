@@ -58,7 +58,7 @@ func TestRuntimeDecisionTerminalWithoutRecoverableSnapshotPersistsMinimalLifecyc
 			if err := json.Unmarshal(lifecycles.creates[0].Snapshot, &snapshot); err != nil {
 				t.Fatalf("decode minimal lifecycle: %v", err)
 			}
-			if snapshot.Version != 1 || snapshot.Counts != (contextfrag.ManifestCounts{}) {
+			if snapshot.Version != contextfrag.LifecycleSnapshotVersion || snapshot.Counts != (contextfrag.ManifestCounts{}) {
 				t.Fatalf("lifecycle snapshot = %#v, want minimal version 1 snapshot", snapshot)
 			}
 			if bytes.Contains(lifecycles.creates[0].Snapshot, []byte("private provider detail")) {

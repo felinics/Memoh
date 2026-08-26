@@ -8,6 +8,12 @@ import (
 
 const MetadataContextLifecycleKey = "context_lifecycle"
 
+// LifecycleSnapshotVersion is the durable snapshot schema version. Version 2
+// flattened the version-1 cache_plan object into stable_prefix_hash,
+// stable_message_count, and stable_prefix_token_estimate and added the
+// enriched attempt, breakdown, and memory recall audits.
+const LifecycleSnapshotVersion = 2
+
 // LifecycleSnapshotFromMetadata extracts the persisted lifecycle snapshot
 // from a message metadata JSON payload, reporting whether one was present.
 func LifecycleSnapshotFromMetadata(raw []byte) (LifecycleSnapshot, bool) {
@@ -94,7 +100,7 @@ func (h *LifecycleHolder) SetMemoryRecall(trace MemoryRecallTrace) {
 	}
 	trace.Result.Refs = normalizeMemoryRecallRefs(trace.Result.Refs)
 	h.mu.Lock()
-	h.snapshot.Version = 1
+	h.snapshot.Version = LifecycleSnapshotVersion
 	h.snapshot.MemoryRecall = cloneMemoryRecallTrace(&trace)
 	h.set = true
 	h.mu.Unlock()
@@ -153,7 +159,7 @@ func (h *LifecycleHolder) Snapshot() (LifecycleSnapshot, bool) {
 
 func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 	snapshot := LifecycleSnapshot{
-		Version:            1,
+		Version:            LifecycleSnapshotVersion,
 		View:               manifest.View,
 		Counts:             manifest.Counts,
 		Breakdown:          append([]KindBreakdown(nil), manifest.Breakdown...),
@@ -183,6 +189,36 @@ func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 		snapshot.Steps = manifest.Mutations.StepSnapshots()
 	}
 	return snapshot
+}
+
+// DecodeLifecycleSnapshot parses a durable snapshot of any persisted version.
+// Version-1 rows carried a nested cache_plan object; its fields map onto the
+// flattened version-2 fields and the decoded snapshot is normalized to the
+// current version.
+func DecodeLifecycleSnapshot(raw []byte) (LifecycleSnapshot, error) {
+	var compat struct {
+		LifecycleSnapshot
+		LegacyCachePlan *CachePlan `json:"cache_plan"`
+	}
+	if err := json.Unmarshal(raw, &compat); err != nil {
+		return LifecycleSnapshot{}, err
+	}
+	snapshot := compat.LifecycleSnapshot
+	if compat.LegacyCachePlan != nil {
+		if snapshot.StablePrefixHash == "" {
+			snapshot.StablePrefixHash = compat.LegacyCachePlan.StablePrefixHash
+		}
+		if snapshot.StableMessageCount == 0 {
+			snapshot.StableMessageCount = compat.LegacyCachePlan.StableMessageCount
+		}
+		if snapshot.StablePrefixTokenEstimate == 0 {
+			snapshot.StablePrefixTokenEstimate = compat.LegacyCachePlan.StablePrefixTokenEstimate
+		}
+	}
+	if snapshot.Version < LifecycleSnapshotVersion {
+		snapshot.Version = LifecycleSnapshotVersion
+	}
+	return snapshot, nil
 }
 
 func cloneLifecycleSnapshot(snapshot LifecycleSnapshot) LifecycleSnapshot {

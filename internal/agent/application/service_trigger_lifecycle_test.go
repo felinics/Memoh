@@ -149,7 +149,7 @@ func assertDeferredLifecycleRow(
 	if err := json.Unmarshal(row.Snapshot, &snapshot); err != nil {
 		t.Fatalf("decode lifecycle snapshot: %v", err)
 	}
-	if snapshot.Version != 1 {
+	if snapshot.Version != contextfrag.LifecycleSnapshotVersion {
 		t.Fatalf("snapshot version = %d, want 1", snapshot.Version)
 	}
 	return snapshot
@@ -193,7 +193,7 @@ func TestTriggerScheduleResolveFailurePersistsAdmittedMinimalLifecycle(t *testin
 	if err := json.Unmarshal(row.Snapshot, &snapshot); err != nil {
 		t.Fatalf("decode minimal lifecycle: %v", err)
 	}
-	if snapshot.Version != 1 || snapshot.View != "" || snapshot.Counts != (contextfrag.ManifestCounts{}) ||
+	if snapshot.Version != contextfrag.LifecycleSnapshotVersion || snapshot.View != "" || snapshot.Counts != (contextfrag.ManifestCounts{}) ||
 		snapshot.AssistantMessageID != "" {
 		t.Fatalf("pre-context lifecycle is not minimal: %#v", snapshot)
 	}

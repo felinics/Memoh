@@ -383,7 +383,7 @@ func TestEnsureTerminalContextLifecycleCreatesMinimalFallbackOnlyWhenMissing(t *
 	if err := json.Unmarshal(row.Snapshot, &snapshot); err != nil {
 		t.Fatalf("decode fallback snapshot: %v", err)
 	}
-	if snapshot.Version != 1 || snapshot.Counts != (contextfrag.ManifestCounts{}) {
+	if snapshot.Version != contextfrag.LifecycleSnapshotVersion || snapshot.Counts != (contextfrag.ManifestCounts{}) {
 		t.Fatalf("minimal fallback snapshot = %#v", snapshot)
 	}
 
@@ -522,7 +522,7 @@ func TestSubagentTerminalPersistsSnapshotAndPreContextFallbackExactlyOnce(t *tes
 			},
 			wantStatus:   contextLifecycleStatusCompleted,
 			wantFinish:   sessionruntime.RunStatusCompleted,
-			wantSnapshot: contextfrag.LifecycleSnapshot{Version: 1},
+			wantSnapshot: contextfrag.LifecycleSnapshot{Version: contextfrag.LifecycleSnapshotVersion},
 		},
 		{
 			name: "failure before context",
@@ -531,7 +531,7 @@ func TestSubagentTerminalPersistsSnapshotAndPreContextFallbackExactlyOnce(t *tes
 			},
 			wantStatus:   contextLifecycleStatusFailedProvider,
 			wantFinish:   sessionruntime.RunStatusErrored,
-			wantSnapshot: contextfrag.LifecycleSnapshot{Version: 1},
+			wantSnapshot: contextfrag.LifecycleSnapshot{Version: contextfrag.LifecycleSnapshotVersion},
 		},
 	}
 	for _, tt := range tests {

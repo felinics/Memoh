@@ -301,7 +301,7 @@ func assertDirectLifecycle(
 	if err := json.Unmarshal(row.Snapshot, &snapshot); err != nil {
 		t.Fatalf("decode lifecycle snapshot: %v", err)
 	}
-	if snapshot.Version != 1 || snapshot.View == "" || snapshot.AssistantMessageID != wantAssistantID {
+	if snapshot.Version != contextfrag.LifecycleSnapshotVersion || snapshot.View == "" || snapshot.AssistantMessageID != wantAssistantID {
 		t.Fatalf("lifecycle snapshot = %#v, want authoritative version 1 and assistant %q", snapshot, wantAssistantID)
 	}
 }
