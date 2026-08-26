@@ -40,6 +40,9 @@ type SDKModelConfig struct {
 	// ReasoningDefaultOn reports whether omitting the thinking field leaves the
 	// model thinking. nil means unknown.
 	ReasoningDefaultOn *bool
+	// ContextWindow is the configured context window the turn budgets against;
+	// legacy Anthropic thinking budgets are fitted to it. Zero means unknown.
+	ContextWindow int
 }
 
 // ReasoningConfig is the resolved extended-thinking decision for one call,
@@ -127,7 +130,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			case rc.Active:
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 					Type:         "enabled",
-					BudgetTokens: legacyAnthropicBudgetFor(rc.Effort),
+					BudgetTokens: AnthropicThinkingBudget(rc.Effort, cfg.ContextWindow),
 				}))
 			case rc.Disabled && anthropicNeedsExplicitOff(cfg.ReasoningOffSupport, cfg.ReasoningDefaultOn):
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{

@@ -56,7 +56,7 @@ func TestGenerateAppliesContextViewBeforeProviderOptions(t *testing.T) {
 	if params.System != "compiled system" || !reflect.DeepEqual(params.Messages, []sdk.Message{sdk.UserMessage("compiled message")}) {
 		t.Fatalf("provider payload = system %q messages %#v", params.System, params.Messages)
 	}
-	wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(params.System, params.Messages, params.Tools)
+	wantHash := contextfrag.ProviderPayloadHash(params.System, params.Messages, params.Tools)
 	if ledger.FinalInputHash() != wantHash {
 		t.Fatalf("final input hash = %q, want %q", ledger.FinalInputHash(), wantHash)
 	}
@@ -93,7 +93,7 @@ func TestGenerateFinalInputHashTracksLastProviderStep(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Generate error: %v", err)
 	}
-	wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(lastParams.System, lastParams.Messages, lastParams.Tools)
+	wantHash := contextfrag.ProviderPayloadHash(lastParams.System, lastParams.Messages, lastParams.Tools)
 	if ledger.FinalInputHash() != wantHash {
 		t.Fatalf("final input hash = %q, want last provider step %q", ledger.FinalInputHash(), wantHash)
 	}

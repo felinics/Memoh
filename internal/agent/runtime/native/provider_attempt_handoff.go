@@ -97,7 +97,7 @@ func (h *providerAttemptHandoff) publish(params sdk.GenerateParams) error {
 	}
 
 	h.cfg.preparedStepMessages.reconcile(params.Messages, pending.provenance)
-	hash, _ := contextfrag.ProviderPayloadHashAndBytes(params.System, params.Messages, params.Tools)
+	hash := contextfrag.ProviderPayloadHash(params.System, params.Messages, params.Tools)
 	h.cfg.providerAttemptState.store(&params, pending.snapshot.StepIndex, pending.systemPrepended, pending.provenance)
 	h.cfg.ContextMutations.SetFinalInputHash(hash)
 	pending.snapshot.PostPrepareInputHash = hash

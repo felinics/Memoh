@@ -23,18 +23,19 @@ func toolCallMessageFrag(text string) contextfrag.ContextFrag {
 	})
 }
 
-func TestFragTokenEstimateAddsToolPayloadToText(t *testing.T) {
+func TestTagFragmentsPricesWithSharedEstimator(t *testing.T) {
 	t.Parallel()
 
 	text := "Running the search now."
 	frag := toolCallMessageFrag(text)
 
-	got := fragTokenEstimate(frag)
+	tagged := tagFragments([]contextfrag.ContextFrag{frag}, IntentProfile{Intent: contextfrag.IntentRunConfigPreProvider})
+	got := tagged[0].Tokens
 	if want := contextfrag.ResolveFragTokens(frag); got != want {
-		t.Fatalf("fragTokenEstimate = %d, want shared estimator value %d", got, want)
+		t.Fatalf("tagged tokens = %d, want shared estimator value %d", got, want)
 	}
 	if textOnly := len(text) / 4; got <= textOnly {
-		t.Fatalf("fragTokenEstimate = %d, must exceed text-only estimate %d", got, textOnly)
+		t.Fatalf("tagged tokens = %d, must exceed text-only estimate %d", got, textOnly)
 	}
 }
 

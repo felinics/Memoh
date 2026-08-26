@@ -329,7 +329,7 @@ func TestAgentGenerateRecordsOneStepSnapshotPerModelStepWithDistinctHashes(t *te
 		if step.PostPrepareInputHash == "" {
 			t.Fatalf("steps[%d].PostPrepareInputHash empty", i)
 		}
-		wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(callParams[i].System, callParams[i].Messages, callParams[i].Tools)
+		wantHash := contextfrag.ProviderPayloadHash(callParams[i].System, callParams[i].Messages, callParams[i].Tools)
 		if step.PostPrepareInputHash != wantHash {
 			t.Fatalf("steps[%d].PostPrepareInputHash = %q, want hash of call %d's actual input %q", i, step.PostPrepareInputHash, i, wantHash)
 		}

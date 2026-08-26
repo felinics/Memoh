@@ -129,7 +129,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
   }
 
   function pendingACPIdentityKey(botId: string, input: ACPAgentSessionInput): string {
-    return [botId, input.sessionMode ?? 'chat', input.agentId, input.projectPath ?? '', input.projectMode ?? ''].join('\u0000')
+    return [botId, input.sessionMode ?? 'chat', input.botAgentId ?? '', input.agentId, input.projectPath ?? '', input.projectMode ?? ''].join('\u0000')
   }
 
   function pendingACPStagingKey(snapshot: Pick<PendingACPStageSnapshot, 'identityKey' | 'generation'>): string {
@@ -181,6 +181,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
     const existing = pendingACPSessionInput.value
     const samePendingAgent = Boolean(existing
       && pendingACPBotId.value === ownerBotId
+      && (existing.botAgentId ?? '') === (input.botAgentId?.trim() ?? '')
       && existing.agentId === metadata.acp_agent_id
       && (existing.sessionMode || 'chat') === (input.sessionMode || 'chat')
       && (existing.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
@@ -194,6 +195,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
     pendingACPBotId.value = ownerBotId
     pendingACPSessionInput.value = {
       ...input,
+      botAgentId: input.botAgentId?.trim() || undefined,
       agentId: String(metadata.acp_agent_id ?? ''),
       projectPath: String(metadata.project_path ?? ''),
       projectMode: String(metadata.acp_project_mode ?? ''),
@@ -424,6 +426,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
     if (!pending || sessionId.value) return false
     const metadata = acpSessionMetadata(input)
     return pending.agentId === metadata.acp_agent_id
+      && (pending.botAgentId ?? '') === (input.botAgentId?.trim() ?? '')
       && (pending.sessionMode || 'chat') === (input.sessionMode || 'chat')
       && (pending.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
       && (pending.projectMode || ACP_DEFAULT_PROJECT_MODE) === metadata.acp_project_mode

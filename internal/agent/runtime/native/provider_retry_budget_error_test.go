@@ -12,18 +12,23 @@ import (
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 )
 
-// hiddenErrContext models cancellation becoming visible after the retry
-// loop's ctx.Err check but before it handles the provider's ErrorPart. Cause
-// still reaches the embedded cancel-cause context, as it does in the race.
-type hiddenErrContext struct {
+// delayedErrContext models cancellation becoming visible after the retry
+// loop's ctx.Err check but before it handles the provider's ErrorPart. The
+// first Err call is the retry preflight and the second is the loop guard;
+// the third call is the ErrorPart budget check.
+type delayedErrContext struct {
 	context.Context
+	errCalls atomic.Int32
 }
 
-func (hiddenErrContext) Err() error {
-	return nil
+func (c *delayedErrContext) Err() error {
+	if c.errCalls.Add(1) <= 2 {
+		return nil
+	}
+	return c.Context.Err()
 }
 
-func (hiddenErrContext) Done() <-chan struct{} {
+func (*delayedErrContext) Done() <-chan struct{} {
 	return nil
 }
 
@@ -31,7 +36,7 @@ func TestRunMidStreamRetrySuppressesRawErrorAfterStepBudgetCancellation(t *testi
 	t.Parallel()
 
 	baseCtx, cancel := context.WithCancelCause(context.Background())
-	streamCtx := hiddenErrContext{Context: baseCtx}
+	streamCtx := &delayedErrContext{Context: baseCtx}
 	var providerCalls atomic.Int32
 	provider := &atomicMockProvider{
 		stream: func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {

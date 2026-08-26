@@ -34,6 +34,7 @@ import {
 import { fetchSessions } from '@/composables/api/useChat'
 import {
   bindBotIdInitializeWatch,
+  createInitializeRecovery,
   createSessionListSnapshot,
 } from './chat/session-list-init-recovery'
 
@@ -251,7 +252,7 @@ export const useChatStore = defineStore('chat', () => {
   const {
     startWebSocket,
     stopWebSocket,
-    ensureWebSocketConnected,
+    ensureWebSocket,
     sendWebSocketMessage,
     startSessionRuntime,
     stopSessionRuntime,
@@ -308,6 +309,7 @@ export const useChatStore = defineStore('chat', () => {
   const {
     pendingACPSessionInput, pendingACPRuntimeId, pendingACPSessionMetadata,
     pendingACPRuntimeStatus, pendingACPRuntimeEnsuring, pendingACPStateFor,
+    pendingACPMatchesInput,
     stageACPSession, stageDefaultACPSession, resetToEmptyComposer,
     ensurePendingACPRuntime, setPendingACPModel, setPendingACPMode, setPendingACPReasoning,
     saveLiveDraftACPStage, activateDraftACPStage, discardEvictedDraft,
@@ -491,6 +493,11 @@ export const useChatStore = defineStore('chat', () => {
   bindBotIdInitializeWatch({
     currentBotId, initialize, resetUserScopedState,
   })
+  // First-open recovery for the no-bot-selected entry (bare home route); the
+  // watch above only fires once a bot id exists.
+  const { initializeWithRecovery } = createInitializeRecovery({
+    currentBotId, initialize,
+  })
 
   const stopAuthSessionListener = onAuthSessionCleared(() => {
     resetUserScopedState({ clearSelection: true })
@@ -554,7 +561,7 @@ export const useChatStore = defineStore('chat', () => {
         seq: ++userSendSeq,
       }
     },
-    ensureWebSocketConnected,
+    ensureWebSocket,
     trackAssistantStream,
     sendWebSocketMessage,
     createdSessionIdForInvocation,
@@ -586,6 +593,7 @@ export const useChatStore = defineStore('chat', () => {
     acpRuntimeStatuses, acpRuntimePending, pendingACPSessionInput,
     pendingACPSessionMetadata, pendingACPRuntimeId, pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring, pendingACPStateFor,
+    pendingACPMatchesInput,
     sessionId, hasExplicitSessionSelection, currentBotId, bots,
     activeChatTarget, isSessionStreaming,
     loadingChats, loadingMessages, loadingOlder, hasMoreOlder,
@@ -596,7 +604,7 @@ export const useChatStore = defineStore('chat', () => {
     startupSendFailure, startupSendFailureFor,
     commandEvent, commandEventForScope, rememberCommandEvent, showCommandError,
     fsChangedAt, markFsChanged, affectsPath, fsEventForPath,
-    initialize, refreshBots, selectBot, selectSession, createNewSession,
+    initialize, initializeWithRecovery, refreshBots, selectBot, selectSession, createNewSession,
     selectDraft, userSentInSession, draftViewRequested, applyDraftViewRequest,
     forkedSessionRequested, guiToolUseRequested, deletedSession,
     stageACPSession, stageDefaultACPSession, cacheDefaultACPSession,

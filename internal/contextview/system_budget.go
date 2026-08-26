@@ -13,11 +13,6 @@ import (
 )
 
 const (
-	// DefaultOutputReserveTokens is the conservative large-window completion
-	// allowance ceiling used until model configuration exposes an explicit
-	// maximum output size. Default plans reserve the smaller of this ceiling
-	// and one quarter of the model context window.
-	DefaultOutputReserveTokens = 8192
 	// MinimumSystemBudgetTokens prevents an active plan from treating a tiny
 	// positive remainder as a usable system envelope.
 	MinimumSystemBudgetTokens = 256
@@ -30,8 +25,8 @@ const (
 )
 
 // ComputeContextBudgetPlan allocates the fixed reserves named by the provider
-// envelope contract. Passing outputReserve explicitly leaves the source seam
-// ready for a future model-level maximum without inventing one on RunConfig.
+// envelope contract. outputReserve is the resolved generation limit, so the
+// plan reserves exactly what the provider request may emit.
 func ComputeContextBudgetPlan(window, outputReserve, toolDefsCost, currentRequestCost int) (*contextfrag.ContextBudgetPlan, error) {
 	if window == 0 {
 		return nil, nil
@@ -167,10 +162,7 @@ func systemBudgetPlanActive(profile IntentProfile, plan *contextfrag.ContextBudg
 
 func finishSystemBudgetPlan(plan *contextfrag.ContextBudgetPlan, actual int) {
 	plan.ActualSystemCost = actual
-	plan.HistoryBudget = plan.SystemBudget - actual
-	if plan.HistoryBudget < 1 {
-		plan.HistoryBudget = 1
-	}
+	plan.HistoryBudget = max(plan.SystemBudget-actual, 0)
 }
 
 func systemFragCost(frags []contextfrag.ContextFrag) int {

@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
 	"github.com/memohai/memoh/internal/agent/event"
 	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
@@ -1057,7 +1058,7 @@ func (s *Service) persistACPLeadingUserMessage(ctx context.Context, req ChatRequ
 	if contentText == "" {
 		contentText = displayText
 	}
-	content, err := json.Marshal(ModelMessage{
+	content, err := historyfrag.MarshalStoredModelMessage(ModelMessage{
 		Role:    "user",
 		Content: newTextContent(contentText),
 	})
@@ -1127,7 +1128,7 @@ func (s *Service) persistACPDecisionProjection(ctx context.Context, req ChatRequ
 		if msg.Role != "assistant" {
 			continue
 		}
-		content, err := json.Marshal(msg)
+		content, err := historyfrag.MarshalStoredModelMessage(msg)
 		if err != nil {
 			s.logger.Warn("persist ACP decision projection: marshal failed",
 				slog.String("tool_call_id", ev.ToolCallID),

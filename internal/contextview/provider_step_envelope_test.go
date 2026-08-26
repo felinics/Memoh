@@ -13,7 +13,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
 )
 
-func TestProviderStepReselectionFailsClosedForSerializedS3HugeResult(t *testing.T) {
+func TestProviderStepReselectionFailsClosedForEnvelopeS3HugeResult(t *testing.T) {
 	t.Parallel()
 	const (
 		inputAllowance = 24_000
@@ -35,12 +35,10 @@ func TestProviderStepReselectionFailsClosedForSerializedS3HugeResult(t *testing.
 		Name: "exec", Description: "Execute a bounded command.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}},
 	}}
-	_, fixedBytes := contextfrag.ProviderPayloadHashAndBytes(system, prefix, tools)
-	_, candidateBytes := contextfrag.ProviderPayloadHashAndBytes(system, messages, tools)
-	if candidateTokens := contextfrag.ProviderBudgetTokensFromBytes(candidateBytes); candidateTokens <= inputAllowance {
+	if candidateTokens := contextfrag.ProviderEnvelopeTokens(system, messages, tools); candidateTokens <= inputAllowance {
 		t.Fatalf("literal S3 candidate = %d tokens, want over allowance %d", candidateTokens, inputAllowance)
 	}
-	suffixBudget := inputAllowance - contextfrag.ProviderBudgetTokensFromBytes(fixedBytes)
+	suffixBudget := inputAllowance - contextfrag.ProviderEnvelopeTokens(system, prefix, tools)
 
 	result := SelectProviderStepMessages(context.Background(), agentpkg.ContextStepSelectionInput{
 		Scope:                        contextfrag.Scope{BotID: "contextbench"},
@@ -55,11 +53,11 @@ func TestProviderStepReselectionFailsClosedForSerializedS3HugeResult(t *testing.
 		t.Fatalf("step reselection error = %v, want protected overflow for the newest tool closure", result.FatalError)
 	}
 	if result.Messages != nil {
-		t.Fatalf("fatal serialized overflow returned provider messages: %#v", result.Messages)
+		t.Fatalf("fatal envelope overflow returned provider messages: %#v", result.Messages)
 	}
 }
 
-func TestProviderStepReselectionTightensSerializedS3HugeResultWhenDroppable(t *testing.T) {
+func TestProviderStepReselectionTightensEnvelopeS3HugeResultWhenDroppable(t *testing.T) {
 	t.Parallel()
 	const (
 		inputAllowance = 24_000
@@ -79,9 +77,7 @@ func TestProviderStepReselectionTightensSerializedS3HugeResultWhenDroppable(t *t
 		Name: "exec", Description: "Execute a bounded command.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}},
 	}}
-	_, fixedBytes := contextfrag.ProviderPayloadHashAndBytes(system, prefix, tools)
-	_, candidateBytes := contextfrag.ProviderPayloadHashAndBytes(system, messages, tools)
-	if candidateTokens := contextfrag.ProviderBudgetTokensFromBytes(candidateBytes); candidateTokens <= inputAllowance {
+	if candidateTokens := contextfrag.ProviderEnvelopeTokens(system, messages, tools); candidateTokens <= inputAllowance {
 		t.Fatalf("literal S3 candidate = %d tokens, want over allowance %d", candidateTokens, inputAllowance)
 	}
 
@@ -89,7 +85,7 @@ func TestProviderStepReselectionTightensSerializedS3HugeResultWhenDroppable(t *t
 		Scope:                        contextfrag.Scope{BotID: "contextbench"},
 		InitialMessageCount:          len(prefix),
 		Messages:                     messages,
-		BudgetMaxTokens:              inputAllowance - contextfrag.ProviderBudgetTokensFromBytes(fixedBytes),
+		BudgetMaxTokens:              inputAllowance - contextfrag.ProviderEnvelopeTokens(system, prefix, tools),
 		ProviderSystem:               system,
 		ProviderTools:                tools,
 		ProviderInputAllowanceTokens: inputAllowance,
@@ -98,18 +94,17 @@ func TestProviderStepReselectionTightensSerializedS3HugeResultWhenDroppable(t *t
 		t.Fatalf("step reselection failed instead of tightening droppable history: %v", result.FatalError)
 	}
 	if result.Messages == nil || result.Dropped == 0 {
-		t.Fatalf("serialized overflow was not tightened: %+v", result)
+		t.Fatalf("envelope overflow was not tightened: %+v", result)
 	}
 	if !reflect.DeepEqual(result.Messages[:len(prefix)], prefix) {
 		t.Fatalf("immutable prefix changed: %#v", result.Messages[:len(prefix)])
 	}
-	_, selectedBytes := contextfrag.ProviderPayloadHashAndBytes(system, result.Messages, tools)
-	if got := contextfrag.ProviderBudgetTokensFromBytes(selectedBytes); got > inputAllowance {
+	if got := contextfrag.ProviderEnvelopeTokens(system, result.Messages, tools); got > inputAllowance {
 		t.Fatalf("nonfatal provider payload = %d tokens, want <= allowance %d", got, inputAllowance)
 	}
 }
 
-func TestProviderStepReselectionAllowsExactlyFittingProtectedSerializedSuffix(t *testing.T) {
+func TestProviderStepReselectionAllowsExactlyFittingProtectedEnvelopeSuffix(t *testing.T) {
 	t.Parallel()
 
 	prefix := []sdk.Message{sdk.UserMessage(strings.Repeat("prefix", 137))}
@@ -120,19 +115,10 @@ func TestProviderStepReselectionAllowsExactlyFittingProtectedSerializedSuffix(t 
 	messages := append(append([]sdk.Message(nil), prefix...), loop...)
 	system := strings.Repeat("system", 83)
 	tools := []sdk.Tool{{Name: "exec", Description: "Execute a bounded command."}}
-	_, fixedBytes := contextfrag.ProviderPayloadHashAndBytes(system, prefix, tools)
-	_, candidateBytes := contextfrag.ProviderPayloadHashAndBytes(system, messages, tools)
-	fixedTokens := contextfrag.ProviderBudgetTokensFromBytes(fixedBytes)
-	allowance := contextfrag.ProviderBudgetTokensFromBytes(candidateBytes)
-	suffixBudget := allowance - fixedTokens
-
-	singletonCost := 0
-	for _, message := range loop {
-		_, messageBytes := contextfrag.ProviderPayloadHashAndBytes("", []sdk.Message{message}, nil)
-		singletonCost += contextfrag.ProviderBudgetTokensFromBytes(messageBytes)
-	}
-	if singletonCost <= suffixBudget {
-		t.Fatalf("fixture singleton cost = %d, want greater than exact additive suffix %d", singletonCost, suffixBudget)
+	allowance := contextfrag.ProviderEnvelopeTokens(system, messages, tools)
+	suffixBudget := allowance - contextfrag.ProviderEnvelopeTokens(system, prefix, tools)
+	if selectionCost := contextfrag.ProviderEnvelopeTokens("", loop, nil); selectionCost != suffixBudget {
+		t.Fatalf("fixture suffix cost = %d, want exact additive suffix budget %d", selectionCost, suffixBudget)
 	}
 
 	result := SelectProviderStepMessages(context.Background(), agentpkg.ContextStepSelectionInput{
@@ -149,5 +135,16 @@ func TestProviderStepReselectionAllowsExactlyFittingProtectedSerializedSuffix(t 
 	}
 	if result.Messages != nil || result.Dropped != 0 || result.Truncated != 0 {
 		t.Fatalf("exact-fit protected suffix changed: %+v", result)
+	}
+	if result := SelectProviderStepMessages(context.Background(), agentpkg.ContextStepSelectionInput{
+		Scope:                        contextfrag.Scope{BotID: "contextbench"},
+		InitialMessageCount:          len(prefix),
+		Messages:                     messages,
+		BudgetMaxTokens:              suffixBudget - 1,
+		ProviderSystem:               system,
+		ProviderTools:                tools,
+		ProviderInputAllowanceTokens: allowance - 1,
+	}); !errors.Is(result.FatalError, contextfrag.ErrProtectedContextOverflow) {
+		t.Fatalf("one token short of the protected suffix must fail closed, got %v", result.FatalError)
 	}
 }

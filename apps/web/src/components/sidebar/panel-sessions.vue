@@ -78,25 +78,28 @@
          inner scrollbar; now overflow is handled once, for the whole list, so
          a folder is a peer of Recents rather than an item inside a box.
          Per-folder growth is bounded by its Show more page instead
-         (folder-sessions-list.vue). pr-1 keeps the scrollbar clear of the
-         rows' hover chips — the sections themselves keep their px-2. -->
-    <div
-      ref="listScrollEl"
-      class="sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1"
+         (folder-sessions-list.vue). The scroller is @felinic/ui's ScrollArea
+         (reka): its self-drawn bar fades in/out on hover — native scrollbar
+         pseudos can't transition, so a native bar could only snap. -->
+    <ScrollArea
+      ref="scrollAreaRef"
+      class="sidebar-scroll min-h-0 flex-1"
+      :scroll-hide-delay="300"
     >
       <FoldersSection />
 
       <Recents :scroll-el="listScrollEl" />
-    </div>
+    </ScrollArea>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { SquarePen, Settings2 } from 'lucide-vue-next'
+import { ScrollArea } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import SidebarPanelHeader from './panel-header.vue'
@@ -107,9 +110,17 @@ import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
 
-// The one scrollport for Folders + Recents. Recents needs the element itself
-// for its load-more sentinel root, so it is passed down rather than provided.
+// The one scrollport for Folders + Recents. Recents needs the scrolling
+// element itself for its load-more sentinel root, so it is passed down rather
+// than provided. With ScrollArea the scroller is the inner viewport node, not
+// the component root — grab it by its data-slot (the library's stable marker).
+// Assigned in onMounted: Recents reads it reactively through toRef(props).
+const scrollAreaRef = ref<InstanceType<typeof ScrollArea> | null>(null)
 const listScrollEl = ref<HTMLElement | null>(null)
+onMounted(() => {
+  const rootEl = (scrollAreaRef.value as unknown as { $el?: HTMLElement } | null)?.$el
+  listScrollEl.value = rootEl?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null
+})
 const router = useRouter()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()

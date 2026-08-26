@@ -103,6 +103,15 @@ const claudeManagedSettings = `{
 }
 `
 
+func genericACPRuntimeStorage() RuntimeStoragePolicy {
+	return RuntimeStoragePolicy{
+		AgentEnv: stateEnv(),
+		Modes: map[string]RuntimeStorageMode{
+			setupModeAPIKey: {},
+		},
+	}
+}
+
 func codexRuntimeStorage() RuntimeStoragePolicy {
 	return RuntimeStoragePolicy{
 		AgentEnv:       stateEnv("CODEX_HOME", "CODEX_SQLITE_HOME"),

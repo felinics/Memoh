@@ -194,7 +194,7 @@ func TestRunMidStreamRetryWindowZeroAppliesAccumulatedSuffixHygiene(t *testing.T
 		retryStep.Truncated != 6 {
 		t.Fatalf("retry step = %#v", retryStep)
 	}
-	wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(retryParams.System, retryParams.Messages, retryParams.Tools)
+	wantHash := contextfrag.ProviderPayloadHash(retryParams.System, retryParams.Messages, retryParams.Tools)
 	if retryStep.PostPrepareInputHash != wantHash || ledger.FinalInputHash() != wantHash {
 		t.Fatalf("retry/final hashes = %q/%q, want %q", retryStep.PostPrepareInputHash, ledger.FinalInputHash(), wantHash)
 	}

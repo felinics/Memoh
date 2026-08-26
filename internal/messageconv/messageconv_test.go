@@ -65,6 +65,24 @@ func TestSDKMessagesToModelMessagesPreservesUsage(t *testing.T) {
 	}
 }
 
+func TestModelMessageToSDKMessageDoesNotInterpretLegacyEnvelopeFields(t *testing.T) {
+	t.Parallel()
+
+	got := ModelMessageToSDKMessage(turn.ModelMessage{
+		Role:    "assistant",
+		Content: json.RawMessage(`""`),
+		ToolCalls: []turn.ToolCall{{
+			ID: "legacy-call", Function: turn.ToolCallFunction{Name: "lookup", Arguments: `{"q":"memoh"}`},
+		}},
+	})
+	if len(got.Content) != 1 {
+		t.Fatalf("content parts = %d, want only the encoded content: %#v", len(got.Content), got.Content)
+	}
+	if _, ok := got.Content[0].(sdk.TextPart); !ok {
+		t.Fatalf("content part = %T, want TextPart", got.Content[0])
+	}
+}
+
 func TestModelMessageToSDKMessageInvalidLegacyContentKeepsRole(t *testing.T) {
 	t.Parallel()
 

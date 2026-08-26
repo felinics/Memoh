@@ -53,6 +53,9 @@ func activateHistoryBudget(cfg *agentpkg.RunConfig, legacyBudget int) {
 		frags = CollectNonSystemProviderSourceFrags(context.Background(), *cfg)
 	}
 	tagged := tagFragments(frags, (&FragmentSelector{}).ProfileFor(contextfrag.IntentRunConfigPreProvider))
+	for i := range tagged {
+		tagged[i].Tokens = contextfrag.ResolveProviderBudgetFragTokens(tagged[i].Frag)
+	}
 	inputBudget += protectedHistoryTokenCost(tagged)
 	currentRequestCost, err := providerCurrentRequestCost(context.Background(), *cfg)
 	if err != nil {
@@ -74,6 +77,6 @@ func activeHistoryInputBudget(legacyBudget int) (inputBudget, scale int) {
 	if scaled := legacyBudget * scale; scaled < MinimumSystemBudgetTokens {
 		scale = (MinimumSystemBudgetTokens + legacyBudget - 1) / legacyBudget
 	}
-	noticeCost := contextfrag.ResolveFragTokens(TrimNoticeFrag(contextfrag.Scope{}))
+	noticeCost := contextfrag.ResolveProviderBudgetFragTokens(TrimNoticeFrag(contextfrag.Scope{}))
 	return legacyBudget*scale + noticeCost, scale
 }

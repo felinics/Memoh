@@ -26,7 +26,7 @@ func TestProviderAttemptHandoffRejectsCanceledDispatch(t *testing.T) {
 			t.Parallel()
 
 			oldParams := sdk.GenerateParams{Messages: []sdk.Message{sdk.UserMessage("last dispatched")}}
-			oldHash, _ := contextfrag.ProviderPayloadHashAndBytes(oldParams.System, oldParams.Messages, oldParams.Tools)
+			oldHash := contextfrag.ProviderPayloadHash(oldParams.System, oldParams.Messages, oldParams.Tools)
 			ledger := contextfrag.NewMutationLedger()
 			ledger.SetFinalInputHash(oldHash)
 			ledger.AppendStepSnapshot(contextfrag.StepSnapshot{StepIndex: 0, PostPrepareInputHash: oldHash})
@@ -138,7 +138,7 @@ func TestProviderAttemptHandoffPublishesBeforeProviderEntry(t *testing.T) {
 				Tools:    []sdk.Tool{{Name: "lookup"}},
 			}
 			params = *prepare(&params)
-			wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(params.System, params.Messages, params.Tools)
+			wantHash := contextfrag.ProviderPayloadHash(params.System, params.Messages, params.Tools)
 			ledger := contextfrag.NewMutationLedger()
 			fork := agenttools.NewMessageSnapshot(nil)
 			attemptState := &providerAttemptState{}

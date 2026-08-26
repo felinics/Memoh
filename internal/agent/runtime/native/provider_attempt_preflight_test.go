@@ -198,7 +198,7 @@ func TestAgentGenerateInitialHookProviderAttemptModes(t *testing.T) {
 				return
 			}
 
-			wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(providerParams.System, providerParams.Messages, providerParams.Tools)
+			wantHash := contextfrag.ProviderPayloadHash(providerParams.System, providerParams.Messages, providerParams.Tools)
 			if steps[0].PostPrepareInputHash != wantHash {
 				t.Fatalf("step hash = %q, want actual provider hash %q", steps[0].PostPrepareInputHash, wantHash)
 			}
@@ -324,7 +324,7 @@ func TestPrepareProviderAttemptStepZeroWindowZeroAppliesSuffixHygiene(t *testing
 		steps[0].Truncated != 6 {
 		t.Fatalf("step snapshots = %#v", steps)
 	}
-	wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(params.System, params.Messages, params.Tools)
+	wantHash := contextfrag.ProviderPayloadHash(params.System, params.Messages, params.Tools)
 	if steps[0].PostPrepareInputHash != wantHash || ledger.FinalInputHash() != wantHash {
 		t.Fatalf("step/final hashes = %q/%q, want %q", steps[0].PostPrepareInputHash, ledger.FinalInputHash(), wantHash)
 	}
@@ -377,7 +377,7 @@ func TestAgentGenerateSnapshotHashesResolvedMapToolSchema(t *testing.T) {
 	if len(steps) != 1 {
 		t.Fatalf("step snapshots = %#v, want one", steps)
 	}
-	wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(
+	wantHash := contextfrag.ProviderPayloadHash(
 		providerParams.System,
 		providerParams.Messages,
 		providerParams.Tools,
@@ -472,7 +472,7 @@ func TestAgentGenerateHookStaysGovernedAcrossAnthropicProviderSteps(t *testing.T
 			step.ReselectionOutcome != contextfrag.ReselectionOutcomeUnchanged {
 			t.Fatalf("steps[%d] = %#v", i, step)
 		}
-		wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(
+		wantHash := contextfrag.ProviderPayloadHash(
 			callParams[i].System, callParams[i].Messages, callParams[i].Tools,
 		)
 		if step.PostPrepareInputHash != wantHash {

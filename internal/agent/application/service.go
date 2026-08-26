@@ -802,6 +802,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ReasoningDefaultOn:    chatModel.Config.ReasoningDefaultOn,
 		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin,
 		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax,
+		ContextWindow:         contextBudgetFromChatModel(chatModel),
 	})
 
 	var agentSkills []native.SkillEntry

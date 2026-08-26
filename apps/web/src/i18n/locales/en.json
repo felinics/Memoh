@@ -114,6 +114,14 @@
     "bot": {
       "name_taken": "This name is already taken."
     },
+    "bot_agent": {
+      "not_found": "This Agent no longer exists.",
+      "name_taken": "An Agent with this name already exists for this Bot.",
+      "invalid_runtime": "This Agent runtime is not supported.",
+      "invalid_metadata": "This Agent configuration is invalid.",
+      "default_in_use": "Choose another default Agent before disabling or deleting this one.",
+      "unavailable": "This Agent is unavailable for new conversations."
+    },
     "channel": {
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly."
     },
@@ -2103,6 +2111,26 @@
       "terminal": "Terminal",
       "settings": "Settings"
     },
+    "agent": {
+      "add": "Add Agent",
+      "added": "Agent added",
+      "provider": "Provider",
+      "providerPlaceholder": "Select a provider",
+      "providerSearchPlaceholder": "Search providers...",
+      "providerEmpty": "No providers found",
+      "providerRequired": "Select a provider.",
+      "namePlaceholder": "Enter an Agent name",
+      "nameRequired": "Enter an Agent name.",
+      "emptyTitle": "No Agents yet",
+      "emptyDescription": "Add an Agent to let this Bot use Codex, Claude Code, or Hermes.",
+      "statusNeedsConfig": "Needs setup",
+      "statusOff": "Disabled",
+      "deleteTitle": "Delete Agent?",
+      "deleteDescription": "Delete \"{name}\"? Existing conversations keep their binding, but this Agent cannot be selected for new conversations.",
+      "deleted": "Agent deleted",
+      "deleteFailed": "Failed to delete Agent",
+      "nameDescription": "This name identifies the Agent in selectors and conversations."
+    },
     "folders": {
       "create": "New folder",
       "createTitle": "New folder",
@@ -2479,7 +2507,7 @@
         "interactionDescription": "Choose the chat model and configure how the bot engages in conversations.",
         "multimedia": "Multimedia",
         "multimediaDescription": "Configure voice and image generation models.",
-        "acp": "ACP Agent"
+        "acp": "Agent"
       },
       "chatLanguage": "Language",
       "chatLanguagePlaceholder": "e.g., English, zh-CN",
@@ -2530,6 +2558,11 @@
       "toolApproval": "Tool Call Approval",
       "toolApprovalDescription": "Require human approval for read, write, and exec operations, with bypass templates for safe paths or commands.",
       "acpSetupMode": "Setup",
+      "acpLaunchSection": "Launch",
+      "acpCommand": "Command",
+      "acpCommandHelp": "Executable name or absolute path available in the workspace.",
+      "acpArguments": "Arguments",
+      "acpArgumentsHelp": "Optional. Enter one argument per line; each line is passed directly without shell parsing.",
       "acpSetupApiKey": "API Key",
       "acpSetupOAuth": "OAuth",
       "acpSetupChatGPT": "ChatGPT",
@@ -2558,7 +2591,7 @@
       "acpClaudeOAuthCodeRequired": "Paste the Claude authorization code.",
       "acpClaudeOAuthExchange": "Save Token",
       "acpClaudeOAuthExchangeFailed": "Failed to save Claude token",
-      "acpSelfModeHint": "Uses the ACP agent you've already configured inside the workspace runtime (e.g. an existing login).",
+      "acpSelfModeHint": "Uses the Agent you've already configured inside the workspace runtime (e.g. an existing login).",
       "acpHermesSelfModeHint": "Uses the Hermes profile already configured in this workspace. Use API Key setup for Memoh-managed bot credentials.",
       "acpHermesSelfModeConfirm": "Use self-managed Hermes",
       "acpHermesProviderPlaceholder": "Select a provider",
@@ -2572,7 +2605,7 @@
       "acpStatusNeedsConfig": "Needs setup",
       "acpStatusOff": "Disabled",
       "acpEmptyTitle": "No agents available",
-      "acpEmptyDescription": "No ACP profiles are available for this server.",
+      "acpEmptyDescription": "No Agent profiles are available for this server.",
       "toolApprovalBypass": "Bypass",
       "toolApprovalMustReview": "Must review",
       "networkPageTitle": "Network",
@@ -3217,7 +3250,7 @@
     "allTypes": "All Types",
     "chat": "Chat",
     "discuss": "Discuss",
-    "acpAgent": "ACP Agent",
+    "acpAgent": "Agent",
     "schedule": "Schedule",
     "inputTokens": "Input Tokens",
     "outputTokens": "Output Tokens",

@@ -25,8 +25,9 @@
                 class="size-4 shrink-0"
               >
               <component
-                :is="acpAgentIcon(selectedACPProfile.id, true)"
-                v-else-if="selectedACPProfile"
+                :is="botAgentIcon(selectedAgent, true)"
+                v-else-if="selectedAgent"
+                class="size-4 shrink-0"
               />
               <span class="truncate">{{ selectedAgentLabel }}</span>
             </div>
@@ -44,13 +45,16 @@
             </div>
           </SelectItem>
           <SelectItem
-            v-for="profile in selectableACPProfiles"
-            :key="profile.id"
-            :value="agentOptionValue(profile.id)"
+            v-for="agent in selectableAgents"
+            :key="agent.id"
+            :value="agentOptionValue(agent.id)"
           >
             <div class="flex min-w-0 items-center gap-2">
-              <component :is="acpAgentIcon(profile.id, true)" />
-              <span class="truncate">{{ profile.display_name || profile.id }}</span>
+              <component
+                :is="botAgentIcon(agent, true)"
+                class="size-4 shrink-0"
+              />
+              <span class="truncate">{{ botAgentName(agent) }}</span>
             </div>
           </SelectItem>
         </SelectContent>
@@ -93,63 +97,67 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Settings
 import { useI18n } from 'vue-i18n'
 import ModelSelect from './model-select.vue'
 import { reconcileStoredEffort } from './reasoning-effort'
-import type { AcpprofilePublicProfile, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import { botAgentIcon, botAgentName, botAgentProvider } from '@/utils/bot-agent'
 
 type InteractionSettingsForm = SettingsSettings & {
   chat_runtime: string
   chat_acp_agent_id: string
   chat_acp_project_path: string
   chat_acp_project_mode: string
+  default_bot_agent_id: string
 }
 
 const props = defineProps<{
   form: InteractionSettingsForm
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
-  acpProfiles: AcpprofilePublicProfile[]
+  botAgents: BotagentsBotAgent[]
   botMetadata?: Record<string, unknown>
+  acpProfiles: AcpprofilePublicProfile[]
 }>()
 
 const { t } = useI18n()
 
 const MEMOH_AGENT_VALUE = 'memoh'
-const ACP_AGENT_VALUE_PREFIX = 'acp:'
+const BOT_AGENT_VALUE_PREFIX = 'agent:'
 
-const selectableACPProfiles = computed(() =>
-  props.acpProfiles.filter((profile) => {
-    if (!isACPAgentEnabled(props.botMetadata, profile.id)) return false
-    const config = readACPAgentConfig(props.botMetadata, profile.id)
-    return !config.setupModeSet || !findMissingRequiredManagedField(profile, config.managed, config.setupMode)
-  }),
-)
+function isAgentConfigured(agent: BotagentsBotAgent): boolean {
+  const provider = botAgentProvider(agent)
+  const profile = props.acpProfiles.find(item => normalizeACPAgentID(item.id) === provider)
+  if (!profile || !isACPAgentEnabled(props.botMetadata, provider)) return false
+  const config = readACPAgentConfig(props.botMetadata, provider)
+  return !config.setupModeSet || findMissingRequiredManagedField(profile, config.managed, config.setupMode) === null
+}
 
-const externalAgentEnabled = computed(() => props.form.chat_runtime === 'acp_agent')
-const normalizedDefaultAgentID = computed(() => normalizeACPAgentID(props.form.chat_acp_agent_id))
-const selectedACPProfile = computed(() =>
-  selectableACPProfiles.value.find(profile => normalizeACPAgentID(profile.id) === normalizedDefaultAgentID.value),
-)
+const selectableAgents = computed(() => props.botAgents.filter(agent =>
+  agent.enabled !== false && !!agent.id && isAgentConfigured(agent),
+))
+
+const defaultBotAgentID = computed(() => props.form.default_bot_agent_id?.trim() ?? '')
+const selectedAgent = computed(() => props.botAgents.find(agent => agent.id === defaultBotAgentID.value))
 const defaultAgentValue = computed(() =>
-  externalAgentEnabled.value
-    ? agentOptionValue(normalizedDefaultAgentID.value)
+  defaultBotAgentID.value
+    ? agentOptionValue(defaultBotAgentID.value)
     : MEMOH_AGENT_VALUE,
 )
-const selectedACPUnavailable = computed(() =>
-  externalAgentEnabled.value && !selectedACPProfile.value,
+const selectedAgentUnavailable = computed(() =>
+  !!defaultBotAgentID.value && (!selectedAgent.value || selectedAgent.value.enabled === false || !isAgentConfigured(selectedAgent.value)),
 )
 const defaultAgentDescription = computed(() =>
-  selectedACPUnavailable.value
+  selectedAgentUnavailable.value
     ? t('bots.settings.defaultAgentUnavailableDescription')
     : t('bots.settings.defaultAgentDescription'),
 )
 const selectedAgentLabel = computed(() => {
-  if (!externalAgentEnabled.value) return t('chat.agentMemoh')
-  if (selectedACPProfile.value) return selectedACPProfile.value.display_name || selectedACPProfile.value.id
+  if (!defaultBotAgentID.value) return t('chat.agentMemoh')
+  if (selectedAgent.value) return botAgentName(selectedAgent.value)
   return t('bots.settings.defaultAgentUnavailable')
 })
 
 function agentOptionValue(agentID: unknown): string {
-  return `${ACP_AGENT_VALUE_PREFIX}${normalizeACPAgentID(agentID)}`
+  return `${BOT_AGENT_VALUE_PREFIX}${typeof agentID === 'string' ? agentID.trim() : ''}`
 }
 
 function ensureDefaultACPProject() {
@@ -159,35 +167,34 @@ function ensureDefaultACPProject() {
   props.form.chat_acp_project_mode = props.form.chat_acp_project_mode || ACP_DEFAULT_PROJECT_MODE
 }
 
-function setDefaultACPAgent(agentID: string) {
+function setDefaultBotAgent(agent: BotagentsBotAgent) {
   // eslint-disable-next-line vue/no-mutating-props
-  props.form.chat_acp_agent_id = normalizeACPAgentID(agentID)
+  props.form.default_bot_agent_id = agent.id?.trim() ?? ''
+  // eslint-disable-next-line vue/no-mutating-props
+  props.form.chat_acp_agent_id = botAgentProvider(agent)
   ensureDefaultACPProject()
 }
 
 function setDefaultAgent(value: string) {
   if (value === MEMOH_AGENT_VALUE) {
     // eslint-disable-next-line vue/no-mutating-props
+    props.form.default_bot_agent_id = ''
+    // eslint-disable-next-line vue/no-mutating-props
     props.form.chat_runtime = 'model'
+    // eslint-disable-next-line vue/no-mutating-props
+    props.form.chat_acp_agent_id = ''
     return
   }
 
-  if (!value.startsWith(ACP_AGENT_VALUE_PREFIX)) return
-  const agentID = normalizeACPAgentID(value.slice(ACP_AGENT_VALUE_PREFIX.length))
-  if (!agentID) return
-  const profile = selectableACPProfiles.value.find(item => normalizeACPAgentID(item.id) === agentID)
-  if (!profile) return
+  if (!value.startsWith(BOT_AGENT_VALUE_PREFIX)) return
+  const agentID = value.slice(BOT_AGENT_VALUE_PREFIX.length).trim()
+  const agent = selectableAgents.value.find(item => item.id === agentID)
+  if (!agent) return
 
-  setDefaultACPAgent(agentID)
+  setDefaultBotAgent(agent)
   // eslint-disable-next-line vue/no-mutating-props
   props.form.chat_runtime = 'acp_agent'
 }
-
-watch(selectableACPProfiles, (profiles) => {
-  if (!externalAgentEnabled.value || profiles.length === 0 || normalizedDefaultAgentID.value || selectedACPProfile.value) return
-  const firstAgentID = normalizeACPAgentID(profiles[0]?.id)
-  if (firstAgentID) setDefaultACPAgent(firstAgentID)
-}, { immediate: true })
 
 const chatModelReasoning = computed(() => {
   if (!props.form.chat_model_id) return undefined

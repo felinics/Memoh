@@ -241,13 +241,13 @@ func (l *MutationLedger) LoopSelectionMode() string {
 
 // ProviderInputHash hashes the assembled provider payload deterministically.
 func ProviderInputHash(system string, messages any) string {
-	hash, _ := ProviderPayloadHashAndBytes(system, messages, nil)
-	return hash
+	return ProviderPayloadHash(system, messages, nil)
 }
 
-// ProviderPayloadHashAndBytes includes tool definitions when supplied while
-// preserving the legacy hash shape when tools are empty.
-func ProviderPayloadHashAndBytes(system string, messages any, tools any) (string, int) {
+// ProviderPayloadHash includes tool definitions when supplied while preserving
+// the legacy hash shape when tools are empty. It is a content fingerprint only;
+// envelope decisions price payloads through ProviderEnvelopeTokens.
+func ProviderPayloadHash(system string, messages any, tools any) string {
 	tools = nilIfEmptyValue(tools)
 	raw, err := json.Marshal(struct {
 		System   string `json:"system"`
@@ -255,10 +255,10 @@ func ProviderPayloadHashAndBytes(system string, messages any, tools any) (string
 		Tools    any    `json:"tools,omitempty"`
 	}{System: system, Messages: messages, Tools: tools})
 	if err != nil {
-		return "", 0
+		return ""
 	}
 	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:]), len(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func nilIfEmptyValue(value any) any {

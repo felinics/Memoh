@@ -20,6 +20,7 @@ SET language = 'auto',
     compaction_threshold = 0,
     compaction_target_percent = NULL,
     chat_model_id = NULL,
+    default_bot_agent_id = NULL,
     chat_runtime = 'model',
     chat_acp_agent_id = NULL,
     chat_acp_project_path = '/data',
@@ -58,6 +59,7 @@ SELECT
   bots.compaction_target_percent,
   bots.timezone,
   chat_models.id AS chat_model_id,
+  bots.default_bot_agent_id,
   bots.chat_runtime,
   bots.chat_acp_agent_id,
   bots.chat_acp_project_path,
@@ -100,6 +102,7 @@ type GetSettingsByBotIDRow struct {
 	CompactionTargetPercent pgtype.Int4 `json:"compaction_target_percent"`
 	Timezone                pgtype.Text `json:"timezone"`
 	ChatModelID             pgtype.UUID `json:"chat_model_id"`
+	DefaultBotAgentID       pgtype.UUID `json:"default_bot_agent_id"`
 	ChatRuntime             string      `json:"chat_runtime"`
 	ChatAcpAgentID          pgtype.Text `json:"chat_acp_agent_id"`
 	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
@@ -134,6 +137,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.CompactionTargetPercent,
 		&i.Timezone,
 		&i.ChatModelID,
+		&i.DefaultBotAgentID,
 		&i.ChatRuntime,
 		&i.ChatAcpAgentID,
 		&i.ChatAcpProjectPath,
@@ -175,53 +179,57 @@ WITH updated AS (
         WHEN $8::boolean THEN $9::uuid
         ELSE bots.chat_model_id
       END,
-      chat_runtime = $10,
-      chat_acp_agent_id = $11::text,
-      chat_acp_project_path = $12,
-      chat_acp_project_mode = $13,
+      default_bot_agent_id = CASE
+        WHEN $10::boolean THEN $11::uuid
+        ELSE bots.default_bot_agent_id
+      END,
+      chat_runtime = $12,
+      chat_acp_agent_id = $13::text,
+      chat_acp_project_path = $14,
+      chat_acp_project_mode = $15,
       compaction_model_id = CASE
-        WHEN $14::boolean THEN $15::uuid
+        WHEN $16::boolean THEN $17::uuid
         ELSE bots.compaction_model_id
       END,
       search_provider_id = CASE
-        WHEN $16::boolean THEN $17::uuid
+        WHEN $18::boolean THEN $19::uuid
         ELSE bots.search_provider_id
       END,
       fetch_provider_id = CASE
-        WHEN $18::boolean THEN $19::uuid
+        WHEN $20::boolean THEN $21::uuid
         ELSE bots.fetch_provider_id
       END,
       memory_provider_id = CASE
-        WHEN $20::boolean THEN $21::uuid
+        WHEN $22::boolean THEN $23::uuid
         ELSE bots.memory_provider_id
       END,
       image_model_id = CASE
-        WHEN $22::boolean THEN $23::uuid
+        WHEN $24::boolean THEN $25::uuid
         ELSE bots.image_model_id
       END,
       tts_model_id = CASE
-        WHEN $24::boolean THEN $25::uuid
+        WHEN $26::boolean THEN $27::uuid
         ELSE bots.tts_model_id
       END,
       transcription_model_id = CASE
-        WHEN $26::boolean THEN $27::uuid
+        WHEN $28::boolean THEN $29::uuid
         ELSE bots.transcription_model_id
       END,
       video_model_id = CASE
-        WHEN $28::boolean THEN $29::uuid
+        WHEN $30::boolean THEN $31::uuid
         ELSE bots.video_model_id
       END,
-      persist_full_tool_results = $30,
-      show_tool_calls_in_im = $31,
-      tool_approval_config = $32,
-      display_enabled = $33,
-      overlay_provider = $34,
-      overlay_enabled = $35,
-      overlay_config = $36,
-      command_ui_language = $37,
+      persist_full_tool_results = $32,
+      show_tool_calls_in_im = $33,
+      tool_approval_config = $34,
+      display_enabled = $35,
+      overlay_provider = $36,
+      overlay_enabled = $37,
+      overlay_config = $38,
+      command_ui_language = $39,
       updated_at = now()
-  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $38
-  RETURNING bots.id, bots.language, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $40
+  RETURNING bots.id, bots.language, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -232,6 +240,7 @@ SELECT
   updated.compaction_target_percent,
   updated.timezone,
   chat_models.id AS chat_model_id,
+  updated.default_bot_agent_id,
   updated.chat_runtime,
   updated.chat_acp_agent_id,
   updated.chat_acp_project_path,
@@ -274,6 +283,8 @@ type UpsertBotSettingsParams struct {
 	Timezone                   pgtype.Text `json:"timezone"`
 	ChatModelIDSet             bool        `json:"chat_model_id_set"`
 	ChatModelID                pgtype.UUID `json:"chat_model_id"`
+	DefaultBotAgentIDSet       bool        `json:"default_bot_agent_id_set"`
+	DefaultBotAgentID          pgtype.UUID `json:"default_bot_agent_id"`
 	ChatRuntime                string      `json:"chat_runtime"`
 	ChatAcpAgentID             pgtype.Text `json:"chat_acp_agent_id"`
 	ChatAcpProjectPath         string      `json:"chat_acp_project_path"`
@@ -314,6 +325,7 @@ type UpsertBotSettingsRow struct {
 	CompactionTargetPercent pgtype.Int4 `json:"compaction_target_percent"`
 	Timezone                pgtype.Text `json:"timezone"`
 	ChatModelID             pgtype.UUID `json:"chat_model_id"`
+	DefaultBotAgentID       pgtype.UUID `json:"default_bot_agent_id"`
 	ChatRuntime             string      `json:"chat_runtime"`
 	ChatAcpAgentID          pgtype.Text `json:"chat_acp_agent_id"`
 	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
@@ -347,6 +359,8 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.Timezone,
 		arg.ChatModelIDSet,
 		arg.ChatModelID,
+		arg.DefaultBotAgentIDSet,
+		arg.DefaultBotAgentID,
 		arg.ChatRuntime,
 		arg.ChatAcpAgentID,
 		arg.ChatAcpProjectPath,
@@ -387,6 +401,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.CompactionTargetPercent,
 		&i.Timezone,
 		&i.ChatModelID,
+		&i.DefaultBotAgentID,
 		&i.ChatRuntime,
 		&i.ChatAcpAgentID,
 		&i.ChatAcpProjectPath,

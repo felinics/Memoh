@@ -876,6 +876,25 @@ describe('chat-list store', () => {
       })
     })
 
+  it('does not match a staged default when only the BotAgent row changes', async () => {
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      store.stageDefaultACPSession({
+        botAgentId: 'agent-1',
+        agentId: 'codex',
+        projectPath: '/data',
+        projectMode: 'project',
+      })
+
+      expect(store.pendingACPMatchesInput({
+        botAgentId: 'agent-2',
+        agentId: 'codex',
+        projectPath: '/data',
+        projectMode: 'project',
+      })).toBe(false)
+    })
+
   it('restages the bot default ACP when opening a non-explicit draft after an ACP session', async () => {
       sdk.getBotsByBotIdSettings.mockResolvedValue({
         data: {

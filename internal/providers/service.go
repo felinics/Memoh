@@ -278,7 +278,12 @@ const (
 )
 
 // Test probes the provider using the Twilight AI SDK to check
-// reachability and authentication.
+// reachability and authentication. A successful models-list response is
+// conclusive; no follow-up generation probe is made. An earlier fake-model
+// probe was removed (#1042): some OpenAI-compatible gateways validate the
+// model before auth and answer 401 for an unknown model, which the probe
+// misclassified as "Invalid API key" even after the key had authenticated.
+// Per-model availability is covered by models.Service.Test instead.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -325,16 +330,6 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Message:   message,
 		}, nil
 	default:
-		if _, probeErr := sdkProvider.TestModel(ctx, "__ping__"); probeErr != nil {
-			if strings.Contains(probeErr.Error(), "authentication failed") {
-				return TestResponse{
-					Status:    TestStatusAuthError,
-					Reachable: true,
-					LatencyMs: time.Since(start).Milliseconds(),
-					Message:   probeErr.Error(),
-				}, nil
-			}
-		}
 		return TestResponse{
 			Status:    TestStatusOK,
 			Reachable: true,

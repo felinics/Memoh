@@ -68,7 +68,7 @@ func TestProviderStepReselectorPreservesPrefixAndDropsLoopSpan(t *testing.T) {
 		Messages:            messages,
 		// Leave room for the newest protected tool closure and the required
 		// trim notice while forcing the bulky older closure out.
-		BudgetMaxTokens: 100,
+		BudgetMaxTokens: 200,
 	})
 
 	if result.Dropped != 2 {
@@ -183,7 +183,7 @@ func TestProviderRunConfigApplierUsesInjectedLoggerShape(t *testing.T) {
 	}
 }
 
-func TestProviderRunConfigApplierInstallsStepReselectorOnlyOnSuccess(t *testing.T) {
+func TestProviderRunConfigApplierInstallsStepReselectorOnAssembledPayloads(t *testing.T) {
 	t.Parallel()
 
 	t.Run("success", func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestProviderRunConfigApplierInstallsStepReselectorOnlyOnSuccess(t *testing.
 			}),
 		)
 		result := out.ContextStepReselector(context.Background(), agentpkg.ContextStepSelectionInput{
-			InitialMessageCount: len(prefix), Messages: messages, BudgetMaxTokens: 100,
+			InitialMessageCount: len(prefix), Messages: messages, BudgetMaxTokens: 200,
 		})
 		if result.Dropped != 2 || len(result.Messages) != 4 {
 			t.Fatalf("step result = %#v, want the bulky old tool closure dropped", result)
@@ -233,8 +233,8 @@ func TestProviderRunConfigApplierInstallsStepReselectorOnlyOnSuccess(t *testing.
 		if err != nil {
 			t.Fatalf("fallback error = %v", err)
 		}
-		if out.ContextStepReselector != nil {
-			t.Fatal("legacy fallback installed the step reselector")
+		if out.ContextStepReselector == nil {
+			t.Fatal("legacy fallback is an assembly path and must keep step reselection")
 		}
 	})
 

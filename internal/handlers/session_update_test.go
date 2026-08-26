@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/memohai/memoh/internal/botagents"
 	"github.com/memohai/memoh/internal/bots"
 	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -24,6 +25,7 @@ import (
 type sessionUpdateQueries struct {
 	dbstore.Queries
 	bot          sqlc.GetBotByIDRow
+	botAgent     sqlc.BotAgent
 	session      sqlc.BotSession
 	messageCount int64
 	permissions  []byte
@@ -36,6 +38,10 @@ type sessionUpdateQueries struct {
 
 func (q *sessionUpdateQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return q.bot, nil
+}
+
+func (q *sessionUpdateQueries) GetBotAgentByID(_ context.Context, _ sqlc.GetBotAgentByIDParams) (sqlc.BotAgent, error) {
+	return q.botAgent, nil
 }
 
 func (q *sessionUpdateQueries) GetSessionByID(_ context.Context, _ pgtype.UUID) (sqlc.BotSession, error) {
@@ -65,9 +71,78 @@ func (q *sessionUpdateQueries) UpdateSessionTypeAndMetadata(_ context.Context, a
 	updated.Type = arg.Type
 	updated.SessionMode = arg.SessionMode
 	updated.RuntimeType = arg.RuntimeType
+	updated.BotAgentID = arg.BotAgentID
 	updated.RuntimeMetadata = arg.RuntimeMetadata
 	updated.Metadata = arg.Metadata
 	return updated, nil
+}
+
+func TestUpdateSessionResolvesPersistedBotAgentDescriptor(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "22222222-2222-2222-2222-222222222222"
+	botAgentID := "33333333-3333-3333-3333-333333333333"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": false, "setup_mode": "self"},
+				},
+			},
+		}),
+		botAgent: sqlc.BotAgent{
+			ID:       testUUID(botAgentID),
+			BotID:    testUUID(botID),
+			Name:     "Codex",
+			Runtime:  botagents.RuntimeACP,
+			Enabled:  true,
+			Metadata: testJSON(map[string]any{botagents.MetadataProviderKey: acpprofile.AgentCodexID}),
+		},
+		session: sqlc.BotSession{
+			ID:          testUUID(sessionID),
+			BotID:       testUUID(botID),
+			Type:        session.TypeChat,
+			SessionMode: session.TypeChat,
+			RuntimeType: session.RuntimeModel,
+			Metadata:    testJSON(map[string]any{}),
+		},
+	}
+	resetter := &recordingACPSessionCloser{}
+	handler := NewSessionHandler(
+		slog.Default(),
+		newThreadServiceForTest(queries),
+		resetter,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+	handler.SetBotAgents(botagents.NewService(slog.Default(), queries))
+
+	rec, err := callUpdateSession(handler, botID, sessionID, `{"bot_agent_id":"`+botAgentID+`"}`)
+	if err != nil {
+		t.Fatalf("UpdateSession() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if queries.updateParams.BotAgentID.String() != botAgentID {
+		t.Fatalf("bot_agent_id = %q, want %q", queries.updateParams.BotAgentID.String(), botAgentID)
+	}
+	if queries.updateParams.RuntimeType != session.RuntimeACPAgent || queries.updateParams.Type != session.TypeACPAgent {
+		t.Fatalf("descriptor = %q/%q, want acp_agent/acp_agent", queries.updateParams.Type, queries.updateParams.RuntimeType)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["acp_agent_id"] != acpprofile.AgentCodexID || metadata["project_path"] != session.DefaultACPProjectPath {
+		t.Fatalf("metadata = %#v, want resolved Codex descriptor", metadata)
+	}
+	var runtimeMetadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.RuntimeMetadata, &runtimeMetadata); err != nil {
+		t.Fatalf("runtime metadata json = %v", err)
+	}
+	if runtimeMetadata["acp_agent_id"] != acpprofile.AgentCodexID || runtimeMetadata["project_path"] != session.DefaultACPProjectPath {
+		t.Fatalf("runtime metadata = %#v, want resolved Codex descriptor", runtimeMetadata)
+	}
 }
 
 func (q *sessionUpdateQueries) UpdateSessionTitle(_ context.Context, arg sqlc.UpdateSessionTitleParams) (sqlc.BotSession, error) {

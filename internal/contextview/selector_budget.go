@@ -173,7 +173,7 @@ func mergeBudgetUnits(units []budgetUnit, dest, src int, open map[string]int) {
 
 func addFragToBudgetUnit(unit *budgetUnit, index int, frag contextfrag.ContextFrag, taggedFrag TaggedFrag, hasCall, hasResult bool) {
 	unit.indexes = append(unit.indexes, index)
-	unit.tokens += fragTokenEstimate(frag)
+	unit.tokens += taggedFrag.Tokens
 	if !taggedFrag.HasTag(TagCanDrop) {
 		unit.droppable = false
 	}
@@ -350,7 +350,7 @@ func protectedHistoryTokenCost(tagged []TaggedFrag) int {
 				frag.Kind == contextfrag.KindCurrentUserMessage {
 				continue
 			}
-			total += fragTokenEstimate(frag)
+			total += tagged[idx].Tokens
 		}
 	}
 	return total
@@ -367,10 +367,6 @@ func hasSpatialBudgetDrop(reasons map[int]string) bool {
 		}
 	}
 	return false
-}
-
-func fragTokenEstimate(frag contextfrag.ContextFrag) int {
-	return contextfrag.ResolveFragTokens(frag)
 }
 
 // TrimNoticeFrag is the synthetic fragment the builder splices in when budget

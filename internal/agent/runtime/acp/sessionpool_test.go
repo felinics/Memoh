@@ -1618,6 +1618,33 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		t.Fatalf("api_key mode must use Codex files, not credential env: %v", apiKeyRunner.req.Env)
 	}
 
+	genericRunner := &recordingRunner{
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+		startErr: errors.New("started"),
+	}
+	genericPool := newSessionPool(nil, genericRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentACPID, "api_key", map[string]any{
+		"command":   "custom-acp",
+		"arguments": "--stdio\nvalue with spaces",
+	})})
+	_, err = genericPool.Prompt(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentACPID,
+		ProjectPath:           "/data/project",
+		Prompt:                "run",
+		RuntimeOwnerAccountID: "user-1",
+	})
+	if err == nil || err.Error() != "started" {
+		t.Fatalf("generic ACP error = %v, want runner start error", err)
+	}
+	if genericRunner.req.Command != "custom-acp" {
+		t.Fatalf("generic ACP command = %q", genericRunner.req.Command)
+	}
+	wantGenericArgs := []string{"--stdio", "value with spaces"}
+	if !slices.Equal(genericRunner.req.Args, wantGenericArgs) {
+		t.Fatalf("generic ACP args = %#v, want %#v", genericRunner.req.Args, wantGenericArgs)
+	}
+
 	oauthRoot := t.TempDir()
 	oauthRunner := &hermesRecordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},

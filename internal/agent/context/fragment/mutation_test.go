@@ -53,15 +53,17 @@ func TestProviderInputHashDeterministic(t *testing.T) {
 func TestProviderPayloadHashTracksTools(t *testing.T) {
 	t.Parallel()
 
-	withoutTools, withoutToolsBytes := ProviderPayloadHashAndBytes("system", []string{"a"}, nil)
-	withEmptyTools, withEmptyToolsBytes := ProviderPayloadHashAndBytes("system", []string{"a"}, []string(nil))
-	withAllocatedEmptyTools, withAllocatedEmptyToolsBytes := ProviderPayloadHashAndBytes("system", []string{"a"}, []string{})
-	withTools, withToolsBytes := ProviderPayloadHashAndBytes("system", []string{"a"}, []string{"tool"})
-	if withoutTools != withEmptyTools || withoutToolsBytes != withEmptyToolsBytes ||
-		withoutTools != withAllocatedEmptyTools || withoutToolsBytes != withAllocatedEmptyToolsBytes {
+	withoutTools := ProviderPayloadHash("system", []string{"a"}, nil)
+	withEmptyTools := ProviderPayloadHash("system", []string{"a"}, []string(nil))
+	withAllocatedEmptyTools := ProviderPayloadHash("system", []string{"a"}, []string{})
+	withTools := ProviderPayloadHash("system", []string{"a"}, []string{"tool"})
+	if withoutTools != withEmptyTools || withoutTools != withAllocatedEmptyTools {
 		t.Fatal("empty tools must preserve the legacy payload identity")
 	}
-	if withTools == withoutTools || withToolsBytes <= withoutToolsBytes {
+	if withoutTools != ProviderInputHash("system", []string{"a"}) {
+		t.Fatal("ProviderInputHash must stay the tool-less payload identity")
+	}
+	if withTools == withoutTools {
 		t.Fatal("tool definitions must participate in provider payload identity")
 	}
 }

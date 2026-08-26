@@ -2444,5 +2444,32 @@ describe('workspace layout store', () => {
       expect(dock.panels.filter(panel => panel.id.startsWith('browser:'))).toHaveLength(1)
       expect(dock.activePanel?.id).toBe('browser:1')
     })
+
+    it('never opens or focuses Desktop when a GUI tool starts on mobile', async () => {
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+
+      // The runtime fires one guiToolUseRequested per GUI tool CALL, so a turn
+      // with several calls used to re-open/re-focus the viewer every time —
+      // on the single stack each focus steals the whole screen from chat.
+      const chatPanelId = dock.activePanel?.id
+      emitGuiToolUse()
+      emitGuiToolUse('computer_observe')
+
+      expect(dock.getPanel('display:1')).toBeUndefined()
+      expect(dock.activePanel?.id).toBe(chatPanelId)
+
+      // Even a Desktop the user opened MANUALLY must not be re-focused by
+      // later tool calls: after going back to chat, chat stays on top.
+      store.openDisplay()
+      expect(dock.activePanel?.id).toBe('display:1')
+      store.activateChatPanel()
+      emitGuiToolUse()
+      expect(dock.activePanel?.id).not.toBe('display:1')
+      expect(dock.activePanel?.id).toBe(chatPanelId)
+    })
   })
 })

@@ -121,7 +121,7 @@ func TestProviderViewFallbackPlacesHookAfterDynamicContextBeforeCurrent(t *testi
 			ContextMemoryMessageIndex:      &memoryIndex,
 			ContextQueryMaterialized:       true,
 			ContextHookText:                "workspace hook guidance",
-		}, contextfrag.NewMutationLedger(), "build_error", "fallback", nil)
+		}, contextfrag.NewMutationLedger(), nil, "build_error", "fallback", nil)
 
 		assertMessagesEqual(t, out.Messages, []sdk.Message{
 			sdk.UserMessage("memory recall"),
@@ -155,7 +155,7 @@ func TestProviderViewFallbackPlacesHookAfterDynamicContextBeforeCurrent(t *testi
 			},
 			ContextSourceFrags: []contextfrag.ContextFrag{current},
 			ContextHookText:    "discuss hook guidance",
-		}, contextfrag.NewMutationLedger(), "build_error", "fallback", nil)
+		}, contextfrag.NewMutationLedger(), nil, "build_error", "fallback", nil)
 
 		assertMessagesEqual(t, out.Messages, []sdk.Message{
 			sdk.AssistantMessage("previous answer"),

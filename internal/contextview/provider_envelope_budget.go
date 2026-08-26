@@ -9,10 +9,7 @@ import (
 func providerToolDefsCost(definitions []contextfrag.ToolDefAccounting) int {
 	total := 0
 	for _, definition := range definitions {
-		total += max(
-			definition.TokenEstimate,
-			contextfrag.ProviderBudgetTokensFromBytes(definition.Bytes),
-		)
+		total += contextfrag.ProviderToolDefTokens(definition)
 	}
 	return total
 }
@@ -24,12 +21,7 @@ func providerRenderedEnvelopeTokens(
 	if payload == nil {
 		return 0
 	}
-	total := contextfrag.ProviderBudgetTokensFromBytes(len(payload.System))
-	for _, message := range payload.Messages {
-		frag := contextfrag.MessageFrag(contextfrag.MessageFragInput{Message: message})
-		total += contextfrag.ResolveProviderBudgetFragTokens(frag)
-	}
-	return total + providerToolDefsCost(toolDefs)
+	return contextfrag.ProviderEnvelopeTokens(payload.System, payload.Messages, nil) + providerToolDefsCost(toolDefs)
 }
 
 func validateProviderRenderedEnvelope(

@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { BotCreateStreamEvent } from '@/composables/api/useBotCreateStream'
 
 const postBotsStream = vi.fn()
+const postBotsByBotIdAgents = vi.fn()
 const putBotsByBotIdSettings = vi.fn()
 
 vi.mock('@/composables/api/useBotCreateStream', async (importActual) => {
@@ -11,6 +12,7 @@ vi.mock('@/composables/api/useBotCreateStream', async (importActual) => {
 })
 
 vi.mock('@memohai/sdk', () => ({
+  postBotsByBotIdAgents: (...args: unknown[]) => postBotsByBotIdAgents(...args),
   putBotsByBotIdSettings: (...args: unknown[]) => putBotsByBotIdSettings(...args),
 }))
 
@@ -28,7 +30,9 @@ describe('useBotCreateProgressStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     postBotsStream.mockReset()
+    postBotsByBotIdAgents.mockReset()
     putBotsByBotIdSettings.mockReset()
+    postBotsByBotIdAgents.mockResolvedValue({ data: { id: 'agent-1' } })
     putBotsByBotIdSettings.mockResolvedValue({ data: {} })
   })
 
@@ -183,6 +187,104 @@ describe('useBotCreateProgressStore', () => {
     expect(store.status).toBe('ready')
     expect(store.bot).toEqual(bot)
     expect(result.settingsApplied).toBe(false)
+    expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'error')).toBe(true)
+  })
+
+  it('adds the selected Agent after the bot is created', async () => {
+    const bot = { id: 'bot-1', name: 'ada' }
+    postBotsStream.mockResolvedValue(streamOf([
+      { type: 'bot_created', bot },
+      { type: 'ready', bot },
+    ]))
+
+    const store = useBotCreateProgressStore()
+    const result = await store.start(
+      { name: 'ada', display_name: 'Ada' },
+      { agent: { name: 'Codex', provider: 'CODEX' } },
+    )
+
+    expect(postBotsByBotIdAgents).toHaveBeenCalledWith(expect.objectContaining({
+      path: { bot_id: 'bot-1' },
+      body: {
+        name: 'Codex',
+        runtime: 'acp',
+        metadata: { provider: 'codex' },
+      },
+    }))
+    expect(putBotsByBotIdSettings).toHaveBeenCalledWith(expect.objectContaining({
+      path: { bot_id: 'bot-1' },
+      body: { default_bot_agent_id: 'agent-1' },
+    }))
+    expect(result.agentApplied).toBe(true)
+    expect(result.agentId).toBe('agent-1')
+    expect(store.status).toBe('ready')
+  })
+
+  it('creates an OAuth Agent without assigning it as default before authorization', async () => {
+    const bot = { id: 'bot-1', name: 'ada' }
+    postBotsStream.mockResolvedValue(streamOf([
+      { type: 'bot_created', bot },
+      { type: 'ready', bot },
+    ]))
+
+    const store = useBotCreateProgressStore()
+    const result = await store.start(
+      { name: 'ada', display_name: 'Ada' },
+      {
+        settings: { memory_provider_id: 'memory-1' },
+        agent: { name: 'Claude Code', provider: 'claude-code', deferDefault: true },
+      },
+    )
+
+    expect(postBotsByBotIdAgents).toHaveBeenCalled()
+    expect(putBotsByBotIdSettings).toHaveBeenCalledWith(expect.objectContaining({
+      path: { bot_id: 'bot-1' },
+      body: { memory_provider_id: 'memory-1' },
+    }))
+    expect(result).toEqual({
+      settingsApplied: true,
+      agentApplied: true,
+      agentId: 'agent-1',
+    })
+    expect(store.status).toBe('ready')
+  })
+
+  it('does not report the Agent as applied when selecting it as default fails', async () => {
+    const bot = { id: 'bot-1', name: 'ada' }
+    postBotsStream.mockResolvedValue(streamOf([
+      { type: 'bot_created', bot },
+      { type: 'ready', bot },
+    ]))
+    putBotsByBotIdSettings.mockRejectedValue(new Error('default boom'))
+
+    const store = useBotCreateProgressStore()
+    const result = await store.start(
+      { name: 'ada', display_name: 'Ada' },
+      { agent: { name: 'Codex', provider: 'codex' } },
+    )
+
+    expect(result.agentApplied).toBe(false)
+    expect(store.status).toBe('ready')
+    expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'error')).toBe(true)
+  })
+
+  it('keeps the bot ready and reports setup failure when Agent creation fails', async () => {
+    const bot = { id: 'bot-1', name: 'ada' }
+    postBotsStream.mockResolvedValue(streamOf([
+      { type: 'bot_created', bot },
+      { type: 'ready', bot },
+    ]))
+    postBotsByBotIdAgents.mockRejectedValue(new Error('agent boom'))
+
+    const store = useBotCreateProgressStore()
+    const result = await store.start(
+      { name: 'ada', display_name: 'Ada' },
+      { agent: { name: 'Codex', provider: 'codex' } },
+    )
+
+    expect(result.agentApplied).toBe(false)
+    expect(store.status).toBe('ready')
+    expect(store.setupError).toBe('agent boom')
     expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'error')).toBe(true)
   })
 

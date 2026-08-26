@@ -45,7 +45,10 @@ func TestApplyProviderRunConfigContextbench16KRenderedEnvelope(t *testing.T) {
 	}
 
 	inputTokens := testRenderedProviderEnvelopeTokens(out.System, out.Messages, out.ContextToolDefs)
-	reserve := min(DefaultOutputReserveTokens, out.ContextBudgetMaxTokens/4)
+	if out.ContextManifest.BudgetPlan == nil {
+		t.Fatal("budget plan missing from manifest")
+	}
+	reserve := out.ContextManifest.BudgetPlan.OutputReserve
 	if envelope := inputTokens + reserve; envelope > out.ContextBudgetMaxTokens {
 		t.Fatalf("provider call allowed with rendered envelope %d > window %d (input=%d reserve=%d)",
 			envelope, out.ContextBudgetMaxTokens, inputTokens, reserve)
@@ -86,7 +89,7 @@ func TestProviderSelectorReservesConservativeHistoryTrimNotice(t *testing.T) {
 	}
 }
 
-func TestApplyProviderRunConfigFailsClosedOnRenderedEnvelopeOverflow(t *testing.T) {
+func TestApplyProviderRunConfigTrimsUnderchargedHistoryBeforeDispatch(t *testing.T) {
 	t.Parallel()
 
 	history := testBudgetMessageFrag(
@@ -104,17 +107,42 @@ func TestApplyProviderRunConfigFailsClosedOnRenderedEnvelopeOverflow(t *testing.
 		ContextSourceFrags:     []contextfrag.ContextFrag{history, current},
 		ContextBudgetMaxTokens: 1_000,
 	})
+	if err != nil {
+		t.Fatalf("preflight error = %v, want undercharged history trimmed by envelope pricing", err)
+	}
+	for _, message := range out.Messages {
+		if strings.Contains(messageText(t, message), "xxxx") {
+			t.Fatal("undercharged history reached the provider payload")
+		}
+	}
+	plan := out.ContextManifest.BudgetPlan
+	if plan == nil {
+		t.Fatal("budget plan missing from manifest")
+	}
+	if rendered := contextfrag.ProviderEnvelopeTokens(out.System, out.Messages, nil); rendered+plan.OutputReserve > plan.Window {
+		t.Fatalf("rendered envelope = %d + reserve %d exceeds window %d", rendered, plan.OutputReserve, plan.Window)
+	}
+	for _, record := range out.ContextMutations.Records() {
+		if record.Kind == contextfrag.MutationContextBudgetFailure {
+			t.Fatalf("trimmable history recorded %#v", record)
+		}
+	}
+}
+
+func TestValidateProviderRenderedEnvelopeFailsClosedOnOverflow(t *testing.T) {
+	t.Parallel()
+
+	payload := &SDKRenderedPayload{System: "system", Messages: []sdk.Message{sdk.UserMessage(strings.Repeat("x", 4_000))}}
+	plan := &contextfrag.ContextBudgetPlan{Window: 1_000, OutputReserve: 250}
+	err := validateProviderRenderedEnvelope(payload, nil, plan)
 	if !errors.Is(err, contextfrag.ErrBudgetUnsatisfied) {
-		t.Fatalf("preflight error = %v, want rendered-envelope ErrBudgetUnsatisfied", err)
+		t.Fatalf("validateProviderRenderedEnvelope() = %v, want ErrBudgetUnsatisfied", err)
 	}
-	if out.ContextMutations == nil {
-		t.Fatal("rendered-envelope failure lost mutation audit")
+	if want := "rendered_input=1252 output_reserve=250 window=1000"; !strings.Contains(err.Error(), want) {
+		t.Fatalf("validateProviderRenderedEnvelope() = %v, want detail %q", err, want)
 	}
-	records := out.ContextMutations.Records()
-	if len(records) != 1 || records[0] != (contextfrag.MutationRecord{
-		Kind: contextfrag.MutationContextBudgetFailure, Detail: "budget_unsatisfied",
-	}) {
-		t.Fatalf("rendered-envelope mutations = %#v, want one budget_unsatisfied record", records)
+	if err := validateProviderRenderedEnvelope(payload, nil, &contextfrag.ContextBudgetPlan{Window: 1_502, OutputReserve: 250}); err != nil {
+		t.Fatalf("exact fit rejected: %v", err)
 	}
 }
 

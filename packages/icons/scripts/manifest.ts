@@ -14,6 +14,7 @@ function withVariants(name: string, variants: string[]): string[] {
 // ---------------------------------------------------------------------------
 
 const llmProviders: string[] = [
+  ...withVariants('acp', []),
   ...withVariants('openai', []),
   ...withVariants('anthropic', []),
   ...withVariants('google', ['color', 'brand-color']),

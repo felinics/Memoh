@@ -1810,12 +1810,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!hasCurrentPermission('manage')) return
     const dock = api.value
     if (!dock) return
-    // Mobile has no right-side region: the desktop viewer joins the single
-    // stack as a tab, same as a manual open.
-    if (isMobile.value) {
-      openDisplay()
-      return
-    }
+    // Mobile never auto-opens the Desktop for agent activity. The single
+    // stack has no right-side region, so open/focus steals the WHOLE screen
+    // from the conversation — and the runtime fires one request per GUI tool
+    // call, so a single turn would rip the user back to the viewer over and
+    // over (issue #1071). Watching stays possible via the manual top-bar
+    // "+" → Desktop entry; the viewer connects on demand there.
+    if (isMobile.value) return
 
     const primaryGroup = dock.groups.find(group => !isTerminalOnlyGroup(group))
     if (!primaryGroup) {

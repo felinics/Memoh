@@ -430,6 +430,7 @@ type ContextBudgetPlan struct {
 	EstimatorSafetyFactorPercent int    `json:"estimator_safety_factor_percent"`
 	Window                       int    `json:"window"`
 	OutputReserve                int    `json:"output_reserve"`
+	OutputReserveResolution      string `json:"output_reserve_resolution,omitempty"`
 	ToolDefsCost                 int    `json:"tool_defs_cost"`
 	CurrentRequestCost           int    `json:"current_request_cost"`
 	SystemBudget                 int    `json:"system_budget"`

@@ -243,12 +243,17 @@ func providerContextBudgetPlan(ctx context.Context, cfg agentpkg.RunConfig) (*co
 	if err != nil {
 		return nil, err
 	}
-	return ComputeContextBudgetPlan(
+	limits := cfg.GenerationLimits()
+	plan, err := ComputeContextBudgetPlan(
 		cfg.ContextBudgetMaxTokens,
-		min(DefaultOutputReserveTokens, cfg.ContextBudgetMaxTokens/4),
+		limits.MaxOutputTokens,
 		providerToolDefsCost(cfg.ContextToolDefs),
 		currentRequestCost,
 	)
+	if plan != nil {
+		plan.OutputReserveResolution = limits.Resolution
+	}
+	return plan, err
 }
 
 func providerCurrentRequestCost(ctx context.Context, cfg agentpkg.RunConfig) (int, error) {
@@ -333,7 +338,7 @@ func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 	} else {
 		frags = CollectProviderSourceFrags(ctx, cfg)
 		if frags == nil {
-			return providerViewFallback(logger, cfg, ledger, "collect_error", "context view collection failed", nil), nil
+			return providerViewFallback(logger, cfg, ledger, nil, "collect_error", "context view collection failed", nil), nil
 		}
 		cfg = materializeLegacyQuery(cfg, false)
 	}
@@ -355,7 +360,7 @@ func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 		selector = gate
 	}
 	if budgetErr != nil && !isContextBudgetError(budgetErr) {
-		return providerViewFallback(logger, fallbackCfg, ledger, "budget_plan_error", "context budget plan failed", budgetErr), nil
+		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "budget_plan_error", "context budget plan failed", budgetErr), nil
 	}
 
 	registry := NewMapCollectorRegistry(StaticCollector{CollectorName: sourceFragsCollectorName, Frags: frags})
@@ -381,11 +386,11 @@ func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 			recordContextBudgetFailure(ledger, err)
 			return providerBudgetAuditConfig(cfg, view, ledger, budgetPlan), err
 		}
-		return providerViewFallback(logger, fallbackCfg, ledger, "build_error", "context view build failed", err), nil
+		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "build_error", "context view build failed", err), nil
 	}
 	payload, ok := view.Rendered[contextfrag.RenderSDKMessages].Data.(*SDKRenderedPayload)
 	if !ok {
-		return providerViewFallback(logger, fallbackCfg, ledger, "unexpected_payload", "context view rendered unexpected payload", nil), nil
+		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "unexpected_payload", "context view rendered unexpected payload", nil), nil
 	}
 	if err := validateProviderRenderedEnvelope(payload, cfg.ContextToolDefs, budgetPlan); err != nil {
 		recordContextBudgetFailure(ledger, err)
@@ -405,7 +410,7 @@ func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 	cfg.Messages = payload.Messages
 	ordered, err := orderedSelectedFrags(view.Selected, view.Placement)
 	if err != nil {
-		return providerViewFallback(logger, fallbackCfg, ledger, "placement_error", "context view placement invalid after render", err), nil
+		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "placement_error", "context view placement invalid after render", err), nil
 	}
 	currentIndex, memoryIndex := renderedSpecialMessageIndexes(ordered)
 	cfg.ContextMemoryMessageIndex = memoryIndex
@@ -494,7 +499,18 @@ func providerBudgetAuditConfig(
 	return cfg
 }
 
-func providerViewFallback(logger *slog.Logger, cfg agentpkg.RunConfig, ledger *contextfrag.MutationLedger, reason, message string, err error) agentpkg.RunConfig {
+// providerViewFallback assembles the legacy payload when the context view
+// cannot. It is an assembly path, not a budget-disabled path: the budget plan
+// and step reselection stay in force so every dispatch still meets the final
+// envelope check.
+func providerViewFallback(
+	logger *slog.Logger,
+	cfg agentpkg.RunConfig,
+	ledger *contextfrag.MutationLedger,
+	budgetPlan *contextfrag.ContextBudgetPlan,
+	reason, message string,
+	err error,
+) agentpkg.RunConfig {
 	warnProviderContextView(logger, cfg, message, err)
 	priorManifest := cfg.ContextManifest
 	cfg = legacyMaterializeQuery(cfg)
@@ -506,12 +522,19 @@ func providerViewFallback(logger *slog.Logger, cfg agentpkg.RunConfig, ledger *c
 	plan := contextfrag.CachePlan{}
 	manifest := cfg.ContextManifest
 	manifest.CachePlan = &plan
+	if budgetPlan != nil {
+		fallbackPlan := *budgetPlan
+		fallbackPlan.ActualSystemCost = 0
+		fallbackPlan.HistoryBudget = 0
+		manifest.BudgetPlan = &fallbackPlan
+	}
 	manifest.Mutations = ledger
 	manifest.ToolDefs = append([]contextfrag.ToolDefAccounting(nil), cfg.ContextToolDefs...)
 	appendContextSourceWarnings(&manifest, cfg.ContextSourceWarnings)
 	cfg.ContextManifest = manifest
 	cfg.ContextCachePlan = plan
 	cfg.ContextMutations = ledger
+	cfg.ContextStepReselector = SelectProviderStepMessages
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
 	}

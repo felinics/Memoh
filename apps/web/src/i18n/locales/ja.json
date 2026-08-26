@@ -111,6 +111,14 @@
     "bot": {
       "name_taken": "この名前はすでに使用されています。"
     },
+    "bot_agent": {
+      "not_found": "この Agent は存在しません。",
+      "name_taken": "この Bot には同じ名前の Agent が既にあります。",
+      "invalid_runtime": "この Agent ランタイムには対応していません。",
+      "invalid_metadata": "Agent の設定が無効です。",
+      "default_in_use": "別のデフォルト Agent を選択してから、この Agent を無効化または削除してください。",
+      "unavailable": "この Agent は新しい会話では利用できません。"
+    },
     "channel": {
       "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。"
     },
@@ -2092,6 +2100,26 @@
       "terminal": "Terminal",
       "settings": "設定"
     },
+    "agent": {
+      "add": "Agent を追加",
+      "added": "Agent を追加しました",
+      "provider": "タイプ",
+      "providerPlaceholder": "タイプを選択",
+      "providerSearchPlaceholder": "タイプを検索...",
+      "providerEmpty": "利用できるタイプがありません",
+      "providerRequired": "Agent のタイプを選択してください。",
+      "namePlaceholder": "Agent 名を入力",
+      "nameRequired": "Agent 名を入力してください。",
+      "emptyTitle": "Agent はまだありません",
+      "emptyDescription": "Agent を追加すると、この Bot で Codex、Claude Code、Hermes を利用できます。",
+      "statusNeedsConfig": "設定が必要",
+      "statusOff": "無効",
+      "deleteTitle": "Agent を削除しますか？",
+      "deleteDescription": "「{name}」を削除しますか？既存の会話は関連付けを維持しますが、新しい会話では選択できなくなります。",
+      "deleted": "Agent を削除しました",
+      "deleteFailed": "Agent を削除できませんでした",
+      "nameDescription": "選択画面や会話で Agent を識別する名前です。"
+    },
     "folders": {
       "create": "新しいフォルダ",
       "createTitle": "新しいフォルダ",
@@ -2477,7 +2505,7 @@
         "multimedia": "マルチメディア",
         "multimediaDescription": "音声と画像の生成Modelを構成します。",
         "acp": "エージェント",
-        "acpDescription": "有効にするACP-このBotと互換性のあるコーディング エージェント。"
+        "acpDescription": "この Bot で利用するコーディング Agent を選択します。"
       },
       "chatLanguage": "言語",
       "chatLanguagePlaceholder": "例: 英語、zh-CN",
@@ -2528,6 +2556,11 @@
       "toolApproval": "Tool呼び出しの承認",
       "toolApprovalDescription": "安全なパスまたはコマンドのバイパス テンプレートを使用して、機密性の高い書き込み、編集、および実行Toolの呼び出しには人間の承認が必要です。",
       "acpSetupMode": "設定",
+      "acpLaunchSection": "起動設定",
+      "acpCommand": "コマンド",
+      "acpCommandHelp": "Workspace 内で利用できる実行ファイル名または絶対パスです。",
+      "acpArguments": "起動引数",
+      "acpArgumentsHelp": "任意です。1 行に 1 つの引数を入力してください。各行は Shell で解析せず、そのまま個別の引数として渡されます。",
       "acpSetupApiKey": "APIキー",
       "acpSetupOAuth": "OAuth",
       "acpSetupChatGPT": "チャットGPT",
@@ -2556,7 +2589,7 @@
       "acpClaudeOAuthCodeRequired": "クロード認証コードを貼り付けます。",
       "acpClaudeOAuthExchange": "Tokenの保存",
       "acpClaudeOAuthExchangeFailed": "クロードTokenの保存に失敗しました",
-      "acpSelfModeHint": "を使用します。ACPWorkspace ランタイム内ですでに構成されているエージェント (既存のログインなど)。",
+      "acpSelfModeHint": "Workspace ランタイム内ですでに設定されている Agent（既存のログインなど）を使用します。",
       "acpHermesSelfModeHint": "この Workspace で構成済みの Hermes Profile を使用します。Memoh で Bot の認証情報を管理する場合は API Key 設定を使用してください。",
       "acpHermesSelfModeConfirm": "自己管理の Hermes を使用",
       "acpHermesProviderPlaceholder": "Providerを選択",
@@ -3202,7 +3235,7 @@
     "allTypes": "全種類",
     "chat": "チャット",
     "discuss": "ディスカッション",
-    "acpAgent": "ACP Agent",
+    "acpAgent": "Agent",
     "schedule": "スケジュール",
     "inputTokens": "入力トークン",
     "outputTokens": "出力トークン",

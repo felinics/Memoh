@@ -64,6 +64,9 @@ func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentP
 	trimDrops := budgetTrimDrops
 	hardBudget := budget.Plan != nil || budget.EnforceProtectedBudget
 	if hardBudget {
+		for i := range tagged {
+			tagged[i].Tokens = contextfrag.ResolveProviderBudgetFragTokens(tagged[i].Frag)
+		}
 		protectedCost := protectedHistoryTokenCost(tagged)
 		if protectedCost > historyBudget {
 			result := selectionResultFromTaggedReasons(tagged, allSelectedIndexes(tagged), nil)

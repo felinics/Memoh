@@ -5,20 +5,16 @@ import (
 	"github.com/memohai/memoh/internal/models"
 )
 
-// EffectiveHistoryBudgetTokens is the droppable-history budget after fixed
-// tool-definition overhead. Zero retains its unlimited-budget meaning.
-func (cfg RunConfig) EffectiveHistoryBudgetTokens() int {
-	budget := cfg.ContextBudgetMaxTokens
-	if budget <= 0 {
-		return budget
-	}
-	for _, def := range cfg.ContextToolDefs {
-		budget -= def.TokenEstimate
-	}
-	if budget < 1 {
-		return 1
-	}
-	return budget
+// GenerationLimits resolves the turn's output allowance from the model the
+// run dispatches to and the thinking decision it was constructed with. The
+// context budget plan reserves exactly this value and, when requested, the
+// provider request carries it as max_tokens.
+func (cfg RunConfig) GenerationLimits() models.GenerationLimits {
+	return models.ResolveGenerationLimits(
+		models.ClientType(models.ResolveClientType(cfg.Model)),
+		cfg.ReasoningConfig,
+		cfg.ContextBudgetMaxTokens,
+	)
 }
 
 // RefreshContextFrag rebuilds the typed context frag view from the legacy

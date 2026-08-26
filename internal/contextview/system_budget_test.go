@@ -120,8 +120,8 @@ func TestSystemBudgetDropsOptionalBeforePreferredInDeterministicOrder(t *testing
 	if plan.ActualSystemCost != plan.SystemBudget {
 		t.Fatalf("actual system cost = %d, want budget-accounted %d", plan.ActualSystemCost, plan.SystemBudget)
 	}
-	if plan.HistoryBudget != 1 {
-		t.Fatalf("history budget = %d, want floor 1", plan.HistoryBudget)
+	if plan.HistoryBudget != 0 {
+		t.Fatalf("history budget = %d, want nothing left for history", plan.HistoryBudget)
 	}
 }
 

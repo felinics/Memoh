@@ -168,6 +168,7 @@ type reasoningPolicyQueries struct {
 	dbstore.Queries
 	botID          pgtype.UUID
 	currentModelID pgtype.UUID
+	defaultAgentID pgtype.UUID
 	storedEffort   string
 	upsertCalls    int
 	lastUpsert     sqlc.UpsertBotSettingsParams
@@ -193,6 +194,7 @@ func (q *reasoningPolicyQueries) GetSettingsByBotID(context.Context, pgtype.UUID
 		CommandUiLanguage:      DefaultCommandUILanguage,
 		ReasoningEffort:        q.storedEffort,
 		ChatModelID:            q.currentModelID,
+		DefaultBotAgentID:      q.defaultAgentID,
 		ChatRuntime:            ChatRuntimeModel,
 		ChatAcpProjectPath:     DefaultACPProjectPath,
 		ChatAcpProjectMode:     DefaultACPProjectMode,
@@ -214,6 +216,10 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 	if arg.ChatModelIDSet {
 		modelID = arg.ChatModelID
 	}
+	defaultAgentID := q.defaultAgentID
+	if arg.DefaultBotAgentIDSet {
+		defaultAgentID = arg.DefaultBotAgentID
+	}
 	return sqlc.UpsertBotSettingsRow{
 		BotID:               q.botID,
 		Language:            arg.Language,
@@ -222,6 +228,7 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 		CompactionEnabled:   arg.CompactionEnabled,
 		CompactionThreshold: arg.CompactionThreshold,
 		ChatModelID:         modelID,
+		DefaultBotAgentID:   defaultAgentID,
 		ChatRuntime:         arg.ChatRuntime,
 		ChatAcpAgentID:      arg.ChatAcpAgentID,
 		ChatAcpProjectPath:  arg.ChatAcpProjectPath,
@@ -229,6 +236,63 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 		ToolApprovalConfig:  arg.ToolApprovalConfig,
 		OverlayConfig:       arg.OverlayConfig,
 	}, nil
+}
+
+func TestUpsertBotLegacyNativeRuntimeClearsDefaultAgent(t *testing.T) {
+	t.Parallel()
+
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000730"), Valid: true}
+	agentID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000731"), Valid: true}
+	queries := &reasoningPolicyQueries{
+		botID:          botID,
+		defaultAgentID: agentID,
+	}
+	service := NewService(slog.Default(), queries, nil, nil)
+	runtime := ChatRuntimeModel
+
+	got, err := service.UpsertBot(context.Background(), uuid.UUID(botID.Bytes).String(), UpsertRequest{
+		ChatRuntime: &runtime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !queries.lastUpsert.DefaultBotAgentIDSet {
+		t.Fatal("DefaultBotAgentIDSet = false, want true for legacy Native request")
+	}
+	if queries.lastUpsert.DefaultBotAgentID.Valid {
+		t.Fatalf("DefaultBotAgentID = %#v, want NULL", queries.lastUpsert.DefaultBotAgentID)
+	}
+	if got.DefaultBotAgentID != "" || got.ChatRuntime != ChatRuntimeModel {
+		t.Fatalf("settings = %#v, want Native without default Agent", got)
+	}
+}
+
+func TestUpsertBotUnrelatedWritePreservesDefaultAgentWithoutRevalidation(t *testing.T) {
+	t.Parallel()
+
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000732"), Valid: true}
+	agentID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000733"), Valid: true}
+	queries := &reasoningPolicyQueries{
+		botID:          botID,
+		defaultAgentID: agentID,
+	}
+	// No Bot Agent service is installed on purpose: an unrelated write must not
+	// look up or validate the already persisted default Agent.
+	service := NewService(slog.Default(), queries, nil, nil)
+	language := "zh"
+
+	got, err := service.UpsertBot(context.Background(), uuid.UUID(botID.Bytes).String(), UpsertRequest{
+		Language: &language,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queries.lastUpsert.DefaultBotAgentIDSet {
+		t.Fatal("DefaultBotAgentIDSet = true, want existing binding preserved by partial update")
+	}
+	if got.DefaultBotAgentID != uuid.UUID(agentID.Bytes).String() {
+		t.Fatalf("DefaultBotAgentID = %q, want %q", got.DefaultBotAgentID, uuid.UUID(agentID.Bytes).String())
+	}
 }
 
 func TestUpsertBotReconcilesReasoningOnModelChange(t *testing.T) {

@@ -435,6 +435,103 @@ func TestDecodeTurnResponseEntryLegacyToolCallsField(t *testing.T) {
 	}
 }
 
+func TestDecodeTurnResponseEntriesInterruptedLegacyToolCallIsNotDuplicated(t *testing.T) {
+	t.Parallel()
+
+	reasoning, err := json.Marshal([]map[string]any{{
+		"type": "reasoning",
+		"text": "still thinking",
+	}})
+	if err != nil {
+		t.Fatalf("marshal reasoning: %v", err)
+	}
+	modelMessage, err := json.Marshal(turn.ModelMessage{
+		Role:    "assistant",
+		Content: reasoning,
+		ToolCalls: []turn.ToolCall{{
+			ID:   "call-legacy",
+			Type: "function",
+			Function: turn.ToolCallFunction{
+				Name:      "send",
+				Arguments: `{"text":"hi"}`,
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+
+	entries := DecodeTurnResponseEntries([]messagepkg.Message{{
+		Role:    "assistant",
+		Content: modelMessage,
+		Metadata: map[string]any{
+			messagepkg.AgentStepInterruptedMetadataKey: true,
+		},
+	}})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want one live checkpoint", len(entries))
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal(entries[0].RawContent, &parts); err != nil {
+		t.Fatalf("unmarshal raw content: %v", err)
+	}
+	toolCalls := 0
+	for _, part := range parts {
+		if part["type"] == "tool-call" && part["toolCallId"] == "call-legacy" {
+			toolCalls++
+		}
+	}
+	if toolCalls != 1 {
+		t.Fatalf("legacy tool-call parts = %d, want 1: %#v", toolCalls, parts)
+	}
+}
+
+func TestDecodeTurnResponseEntryDoesNotDuplicateHybridToolCall(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{{
+		"type":       "tool-call",
+		"toolCallId": "call-hybrid",
+		"toolName":   "lookup",
+		"input":      map[string]any{"query": "memoh"},
+	}})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	modelMessage, err := json.Marshal(turn.ModelMessage{
+		Role:    "assistant",
+		Content: content,
+		ToolCalls: []turn.ToolCall{{
+			ID: "call-hybrid",
+			Function: turn.ToolCallFunction{
+				Name:      "lookup",
+				Arguments: `{"query":"memoh"}`,
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+
+	entry, ok := DecodeTurnResponseEntry(messagepkg.Message{Role: "assistant", Content: modelMessage})
+	if !ok {
+		t.Fatal("expected hybrid tool-call entry")
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal(entry.RawContent, &parts); err != nil {
+		t.Fatalf("unmarshal raw content: %v", err)
+	}
+	toolCalls := 0
+	for _, part := range parts {
+		if part["type"] == "tool-call" && part["toolCallId"] == "call-hybrid" {
+			toolCalls++
+		}
+	}
+	if toolCalls != 1 {
+		t.Fatalf("hybrid tool-call parts = %d, want 1: %#v", toolCalls, parts)
+	}
+}
+
 func assertRawPart(t *testing.T, raw json.RawMessage, partType, nameOrText, callID string) map[string]any {
 	t.Helper()
 	var parts []map[string]any

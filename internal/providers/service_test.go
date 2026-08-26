@@ -12,7 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 )
 
@@ -949,4 +952,55 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 			t.Fatalf("expected Name to fall back to ID when DisplayName is empty, got %q", remoteModels[0].Name)
 		}
 	})
+}
+
+// providerTestQueries stubs dbstore.Queries with the single row Test needs;
+// every other method nil-panics, which keeps this test honest about how
+// little the probe path is allowed to touch the database.
+type providerTestQueries struct {
+	dbstore.Queries
+	provider sqlc.Provider
+}
+
+func (s providerTestQueries) GetProviderByID(context.Context, pgtype.UUID) (sqlc.Provider, error) {
+	return s.provider, nil
+}
+
+// Regression for #1042: a successful models list is conclusive for
+// reachability + auth. The fake-model generation probe that used to run
+// afterwards turned into an "Invalid API key" false positive on gateways
+// that answer 401 for an unknown model. This test fails if any request
+// beyond the models list is attempted.
+func TestTestSkipsModelProbeAfterSuccessfulModelsList(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{"id": "real-model"}},
+			})
+			return
+		}
+		t.Errorf("unexpected probe request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	providerID := pgtype.UUID{Bytes: [16]byte{0x10, 0x42}, Valid: true}
+	service := &Service{queries: providerTestQueries{provider: sqlc.Provider{
+		ID:         providerID,
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"api_key":"sk-test","base_url":"` + server.URL + `"}`),
+	}}}
+
+	resp, err := service.Test(context.Background(), providerID.String())
+	if err != nil {
+		t.Fatalf("Test() error = %v", err)
+	}
+	if resp.Status != TestStatusOK {
+		t.Fatalf("status = %q, want %q (message: %s)", resp.Status, TestStatusOK, resp.Message)
+	}
+	if !resp.Reachable {
+		t.Fatal("reachable = false, want true")
+	}
 }

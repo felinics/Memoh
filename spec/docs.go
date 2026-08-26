@@ -1616,6 +1616,262 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/agents": {
+            "get": {
+                "description": "List active and disabled non-deleted Agents attached to a bot",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "List a bot's Agents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.ListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Add a named Agent backed by a runtime descriptor",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Add an Agent to a bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/botagents.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.BotAgent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}": {
+            "get": {
+                "description": "Get one Agent attached to a bot",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Get a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.BotAgent"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Soft-delete an Agent while preserving existing session bindings",
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Delete a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Rename, enable, or disable an Agent; runtime metadata is immutable",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Update a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent changes",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/botagents.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.BotAgent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/backup/export": {
             "post": {
                 "consumes": [
@@ -6324,6 +6580,15 @@ const docTemplate = `{
                     "schedule"
                 ],
                 "summary": "List schedules",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -6352,6 +6617,13 @@ const docTemplate = `{
                 ],
                 "summary": "Create schedule",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "description": "Schedule payload",
                         "name": "payload",
@@ -6479,6 +6751,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "Schedule ID",
                         "name": "id",
                         "in": "path",
@@ -6519,6 +6798,13 @@ const docTemplate = `{
                 ],
                 "summary": "Update schedule",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Schedule ID",
@@ -6564,6 +6850,13 @@ const docTemplate = `{
                 ],
                 "summary": "Delete schedule",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Schedule ID",
@@ -16138,6 +16431,76 @@ const docTemplate = `{
                 }
             }
         },
+        "botagents.BotAgent": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "botagents.CreateRequest": {
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "string"
+                }
+            }
+        },
+        "botagents.ListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/botagents.BotAgent"
+                    }
+                }
+            }
+        },
+        "botagents.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "botbackup.ExportRequest": {
             "type": "object",
             "properties": {
@@ -17585,6 +17948,9 @@ const docTemplate = `{
         "contextfrag.CachePlan": {
             "type": "object",
             "properties": {
+                "mid_stable_message_count": {
+                    "type": "integer"
+                },
                 "stable_message_count": {
                     "type": "integer"
                 },
@@ -17592,6 +17958,32 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "stable_prefix_token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.CacheUsageRecord": {
+            "type": "object",
+            "properties": {
+                "attempt": {
+                    "type": "integer"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_1h_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_5m_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "no_cache_tokens": {
+                    "type": "integer"
+                },
+                "step_index": {
                     "type": "integer"
                 }
             }
@@ -17683,10 +18075,31 @@ const docTemplate = `{
                 "cache_plan": {
                     "$ref": "#/definitions/contextfrag.CachePlan"
                 },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_usage": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.CacheUsageRecord"
+                    }
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "client_type": {
+                    "type": "string"
+                },
                 "counts": {
                     "$ref": "#/definitions/contextfrag.ManifestCounts"
                 },
                 "final_input_hash": {
+                    "type": "string"
+                },
+                "loop_selection_mode": {
+                    "type": "string"
+                },
+                "model": {
                     "type": "string"
                 },
                 "mutations": {
@@ -17702,6 +18115,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/contextfrag.SelectionDecision"
+                    }
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.StepSnapshot"
                     }
                 },
                 "version": {
@@ -17747,23 +18166,27 @@ const docTemplate = `{
                 "before_model_call_hook",
                 "background_summary",
                 "mid_task_prune",
+                "loop_step_reselection",
                 "injected_message",
                 "context_view_fallback",
                 "context_budget_failure",
                 "context_budget_disabled",
                 "capability_gate",
-                "read_media"
+                "read_media",
+                "mid_stream_retry"
             ],
             "x-enum-varnames": [
                 "MutationBeforeModelCallHook",
                 "MutationBackgroundSummary",
                 "MutationMidTaskPrune",
+                "MutationLoopStepReselection",
                 "MutationInjectedMessage",
                 "MutationContextViewFallback",
                 "MutationContextBudgetFailure",
                 "MutationContextBudgetDisabled",
                 "MutationCapabilityGate",
-                "MutationReadMedia"
+                "MutationReadMedia",
+                "MutationMidStreamRetry"
             ]
         },
         "contextfrag.MutationRecord": {
@@ -17894,6 +18317,38 @@ const docTemplate = `{
                 "SlotCurrentUser",
                 "SlotAfterCurrent"
             ]
+        },
+        "contextfrag.StepSnapshot": {
+            "type": "object",
+            "properties": {
+                "attempt": {
+                    "type": "integer"
+                },
+                "drop_reasons": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "dropped": {
+                    "type": "integer"
+                },
+                "post_prepare_input_hash": {
+                    "type": "string"
+                },
+                "reselection_applied": {
+                    "type": "boolean"
+                },
+                "reselection_outcome": {
+                    "type": "string"
+                },
+                "step_index": {
+                    "type": "integer"
+                },
+                "truncated": {
+                    "type": "integer"
+                }
+            }
         },
         "conversation.SkillActivation": {
             "type": "object",
@@ -20936,6 +21391,9 @@ const docTemplate = `{
                     "description": "ACPRuntimeID optionally binds a warm pre-session runtime (created via\nPOST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a\ntransient in-memory handle reference, never persisted in metadata.",
                     "type": "string"
                 },
+                "bot_agent_id": {
+                    "type": "string"
+                },
                 "channel_type": {
                     "type": "string"
                 },
@@ -21363,6 +21821,9 @@ const docTemplate = `{
         "handlers.updateSessionRequest": {
             "type": "object",
             "properties": {
+                "bot_agent_id": {
+                    "type": "string"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
@@ -21391,6 +21852,12 @@ const docTemplate = `{
                 "action_type": {
                     "type": "string"
                 },
+                "append_system_sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.SystemSectionOutput"
+                    }
+                },
                 "decision": {
                     "type": "string"
                 },
@@ -21416,6 +21883,29 @@ const docTemplate = `{
                 },
                 "stdout": {
                     "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.OutputWarning"
+                    }
+                }
+            }
+        },
+        "hooks.OutputWarning": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "hook_name": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "section_id": {
+                    "type": "string"
                 }
             }
         },
@@ -21434,6 +21924,12 @@ const docTemplate = `{
                 "append_context": {
                     "type": "string"
                 },
+                "append_system_sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.SystemSectionOutput"
+                    }
+                },
                 "decision": {
                     "type": "string"
                 },
@@ -21449,8 +21945,56 @@ const docTemplate = `{
                 },
                 "runtime_supported": {
                     "type": "boolean"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.OutputWarning"
+                    }
                 }
             }
+        },
+        "hooks.SystemSectionCache": {
+            "type": "string",
+            "enum": [
+                "dynamic",
+                "stable"
+            ],
+            "x-enum-varnames": [
+                "SystemSectionCacheDynamic",
+                "SystemSectionCacheStable"
+            ]
+        },
+        "hooks.SystemSectionOutput": {
+            "type": "object",
+            "properties": {
+                "cache": {
+                    "$ref": "#/definitions/hooks.SystemSectionCache"
+                },
+                "hook_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "retention": {
+                    "$ref": "#/definitions/hooks.SystemSectionRetention"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "hooks.SystemSectionRetention": {
+            "type": "string",
+            "enum": [
+                "optional",
+                "preferred"
+            ],
+            "x-enum-varnames": [
+                "SystemSectionRetentionOptional",
+                "SystemSectionRetentionPreferred"
+            ]
         },
         "hooks.ToolPayload": {
             "type": "object",
@@ -22254,6 +22798,10 @@ const docTemplate = `{
                     "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
                     "type": "string"
                 },
+                "bot_agent_id": {
+                    "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
+                    "type": "string"
+                },
                 "command": {
                     "type": "string"
                 },
@@ -22307,6 +22855,10 @@ const docTemplate = `{
                 },
                 "acp_model_id": {
                     "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
+                "bot_agent_id": {
+                    "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
                     "type": "string"
                 },
                 "model_id": {
@@ -22413,6 +22965,10 @@ const docTemplate = `{
                 },
                 "acp_model_id": {
                     "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
+                "bot_agent_id": {
+                    "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
                     "type": "string"
                 },
                 "bot_id": {
@@ -22648,6 +23204,9 @@ const docTemplate = `{
         "session.Session": {
             "type": "object",
             "properties": {
+                "bot_agent_id": {
+                    "type": "string"
+                },
                 "bot_id": {
                     "type": "string"
                 },
@@ -22740,6 +23299,9 @@ const docTemplate = `{
                 },
                 "compaction_threshold": {
                     "type": "integer"
+                },
+                "default_bot_agent_id": {
+                    "type": "string"
                 },
                 "discuss_probe_model_id": {
                     "type": "string"
@@ -22911,6 +23473,9 @@ const docTemplate = `{
                 },
                 "compaction_threshold": {
                     "type": "integer"
+                },
+                "default_bot_agent_id": {
+                    "type": "string"
                 },
                 "discuss_probe_model_id": {
                     "type": "string"

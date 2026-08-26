@@ -34,7 +34,9 @@ export interface ChatDecisionDeps {
   normalizeTarget: (target?: ChatViewTarget) => ChatViewTarget
   transcriptForTarget: (target?: ChatViewTarget) => Transcript
   currentRun: (sessionId: string) => RuntimeCurrentRunView | null
-  ensureConnected: (botId: string) => boolean
+  // True when a socket handle exists for the bot; messages queue until open,
+  // so this is not limited to fully-connected sockets.
+  ensureWebSocket: (botId: string) => boolean
   send: (botId: string, message: WSClientMessage) => boolean
   createControlId: () => string
   connectionLostMessage: () => string
@@ -164,7 +166,7 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
     const run = deps.currentRun(sessionId)
     if (!botId || !sessionId || !decisionId || !run) return false
     if (approval.status !== 'pending' || approval.can_approve === false) return false
-    if (!deps.ensureConnected(botId)) {
+    if (!deps.ensureWebSocket(botId)) {
       deps.showError(deps.connectionLostMessage())
       return false
     }
@@ -221,7 +223,7 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
     const run = deps.currentRun(sessionId)
     if (!botId || !sessionId || !decisionId || !run) return
     if (userInput.status !== 'pending' || userInput.can_respond === false) return
-    if (!deps.ensureConnected(botId)) {
+    if (!deps.ensureWebSocket(botId)) {
       deps.showError(deps.connectionLostMessage())
       return
     }

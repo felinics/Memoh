@@ -21,6 +21,11 @@ const (
 type TaggedFrag struct {
 	Frag contextfrag.ContextFrag
 	Tags []SelectionTag
+	// Tokens is the cost budget arithmetic charges for Frag. A hard provider
+	// budget prices it with the envelope estimator so selection and the
+	// rendered-envelope check agree; the fragment's own estimate is left
+	// untouched so selection decisions do not read as trims.
+	Tokens int
 }
 
 func (t TaggedFrag) HasTag(tag SelectionTag) bool {
@@ -30,7 +35,7 @@ func (t TaggedFrag) HasTag(tag SelectionTag) bool {
 func tagFragments(frags []contextfrag.ContextFrag, profile IntentProfile) []TaggedFrag {
 	tagged := make([]TaggedFrag, 0, len(frags))
 	for _, frag := range frags {
-		next := TaggedFrag{Frag: frag}
+		next := TaggedFrag{Frag: frag, Tokens: contextfrag.ResolveFragTokens(frag)}
 		if isMustKeepFrag(frag, profile) {
 			next.Tags = appendSelectionTag(next.Tags, TagMustKeep)
 		}

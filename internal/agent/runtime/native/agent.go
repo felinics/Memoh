@@ -1155,6 +1155,9 @@ func (a *Agent) buildGenerateOptions(ctx context.Context, cfg RunConfig, tools [
 		sdk.WithSystem(system),
 		sdk.WithMaxSteps(-1),
 	}
+	if limits := cfg.GenerationLimits(); limits.Requested {
+		opts = append(opts, sdk.WithMaxTokens(limits.MaxOutputTokens))
+	}
 	if len(providerTools) > 0 {
 		opts = append(opts, sdk.WithTools(providerTools))
 	}
@@ -1222,74 +1225,67 @@ func prepareProviderAttempt(
 	if mode == LoopReselectOff {
 		reselector = nil
 	}
-	if reselector == nil || prefixCount >= len(params.Messages) {
-		stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, "", provenance)
-		return params
-	}
-
-	beforeMessages := append([]sdk.Message(nil), params.Messages...)
 	inputAllowance := stepReselectionAllowance(cfg)
-	selection := reselector(ctx, ContextStepSelectionInput{
-		Scope: cfg.ContextScope, InitialMessageCount: prefixCount, Messages: params.Messages,
-		BudgetMaxTokens:              remainingStepBudget(inputAllowance, params, prefixCount),
-		ProviderSystem:               params.System,
-		ProviderTools:                params.Tools,
-		ProviderInputAllowanceTokens: inputAllowance,
-		RecentProtectTokens:          cfg.ContextRecentProtectTokens, KeepRecentToolResults: stepReselectKeepRecentToolResults,
-		MinMessages: stepReselectMinMessages,
-	})
-	if mode == LoopReselectShadow {
-		snapshot.Dropped = selection.Dropped
-		snapshot.Truncated = selection.Truncated
-		snapshot.DropReasons = copyDropReasons(selection.DropReasons)
+	reselectionDetail := ""
+	if reselector != nil && prefixCount < len(params.Messages) {
+		beforeMessages := append([]sdk.Message(nil), params.Messages...)
+		selection := reselector(ctx, ContextStepSelectionInput{
+			Scope: cfg.ContextScope, InitialMessageCount: prefixCount, Messages: params.Messages,
+			BudgetMaxTokens:              remainingStepBudget(inputAllowance, params, prefixCount),
+			ProviderSystem:               params.System,
+			ProviderTools:                params.Tools,
+			ProviderInputAllowanceTokens: inputAllowance,
+			RecentProtectTokens:          cfg.ContextRecentProtectTokens, KeepRecentToolResults: stepReselectKeepRecentToolResults,
+			MinMessages: stepReselectMinMessages,
+		})
 		switch {
+		case mode == LoopReselectShadow:
+			snapshot.Dropped = selection.Dropped
+			snapshot.Truncated = selection.Truncated
+			snapshot.DropReasons = copyDropReasons(selection.DropReasons)
+			switch {
+			case selection.FatalError != nil:
+				snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeWouldFail
+			case selection.Messages != nil || selection.Dropped > 0 || selection.Truncated > 0:
+				snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeWouldApply
+			default:
+				snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeUnchanged
+			}
 		case selection.FatalError != nil:
-			snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeWouldFail
-		case selection.Messages != nil || selection.Dropped > 0 || selection.Truncated > 0:
-			snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeWouldApply
+			return failPreparedProviderAttempt(cfg, handoff, params, snapshot, prefixCount, provenance, selection.FatalError)
+		case selection.Messages != nil && stepSelectionPreservesPrefix(beforeMessages, selection.Messages, prefixCount):
+			sourceIndexes, valid := selectionMessageSourceIndexes(beforeMessages, selection.Messages, prefixCount, selection)
+			if !valid {
+				return failPreparedProviderAttempt(cfg, handoff, params, snapshot, prefixCount, provenance, fmt.Errorf(
+					"%w: invalid provider step message provenance",
+					contextfrag.ErrBudgetUnsatisfied,
+				))
+			}
+			composed, composedOK := composePreparedMessageProvenance(provenance, len(beforeMessages), sourceIndexes)
+			if !composedOK {
+				composed = failClosedPreparedMessageProvenance(provenance, len(selection.Messages), prefixCount)
+			}
+			params.Messages = selection.Messages
+			provenance = composed
+			snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeApplied
+			snapshot.ReselectionApplied = true
+			snapshot.Dropped = selection.Dropped
+			snapshot.Truncated = selection.Truncated
+			snapshot.DropReasons = copyDropReasons(selection.DropReasons)
+			if selection.Dropped > 0 || selection.Truncated > 0 {
+				reselectionDetail = contextStepSelectionDetail(selection)
+			}
 		default:
 			snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeUnchanged
 		}
-		stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, "", provenance)
-		return params
-	}
-
-	switch {
-	case selection.FatalError != nil:
-		return failPreparedProviderAttempt(cfg, handoff, params, snapshot, prefixCount, provenance, selection.FatalError)
-	case selection.Messages != nil && stepSelectionPreservesPrefix(beforeMessages, selection.Messages, prefixCount):
-		sourceIndexes, valid := selectionMessageSourceIndexes(beforeMessages, selection.Messages, prefixCount, selection)
-		if !valid {
-			return failPreparedProviderAttempt(cfg, handoff, params, snapshot, prefixCount, provenance, fmt.Errorf(
-				"%w: invalid provider step message provenance",
-				contextfrag.ErrBudgetUnsatisfied,
-			))
-		}
-		composed, composedOK := composePreparedMessageProvenance(provenance, len(beforeMessages), sourceIndexes)
-		if !composedOK {
-			composed = failClosedPreparedMessageProvenance(provenance, len(selection.Messages), prefixCount)
-		}
-		params.Messages = selection.Messages
-		provenance = composed
-		snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeApplied
-		snapshot.ReselectionApplied = true
-		snapshot.Dropped = selection.Dropped
-		snapshot.Truncated = selection.Truncated
-		snapshot.DropReasons = copyDropReasons(selection.DropReasons)
-	default:
-		snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeUnchanged
 	}
 	if overflow := providerAttemptEnvelopeOverflow(params, inputAllowance); overflow > 0 {
 		return failPreparedProviderAttempt(cfg, handoff, params, snapshot, prefixCount, provenance, fmt.Errorf(
-			"%w: serialized_input_overflow=%d allowance=%d",
+			"%w: input_overflow=%d allowance=%d",
 			contextfrag.ErrBudgetUnsatisfied,
 			overflow,
 			inputAllowance,
 		))
-	}
-	reselectionDetail := ""
-	if snapshot.ReselectionApplied && (selection.Dropped > 0 || selection.Truncated > 0) {
-		reselectionDetail = contextStepSelectionDetail(selection)
 	}
 	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, reselectionDetail, provenance)
 	return params
@@ -1314,8 +1310,7 @@ func providerAttemptEnvelopeOverflow(params *sdk.GenerateParams, allowance int) 
 	if params == nil || allowance <= 0 {
 		return 0
 	}
-	_, payloadBytes := contextfrag.ProviderPayloadHashAndBytes(params.System, params.Messages, params.Tools)
-	return contextfrag.ProviderBudgetTokensFromBytes(payloadBytes) - allowance
+	return contextfrag.ProviderEnvelopeTokens(params.System, params.Messages, params.Tools) - allowance
 }
 
 func failPreparedProviderAttempt(
@@ -1327,7 +1322,11 @@ func failPreparedProviderAttempt(
 	provenance preparedMessageProvenance,
 	err error,
 ) *sdk.GenerateParams {
-	snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeFailed
+	switch snapshot.ReselectionOutcome {
+	case contextfrag.ReselectionOutcomeWouldApply, contextfrag.ReselectionOutcomeWouldFail:
+	default:
+		snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeFailed
+	}
 	snapshot.ReselectionApplied = false
 	params.Messages = append([]sdk.Message(nil), params.Messages[:prefixCount]...)
 	handoff.reject(provenance)
@@ -1349,18 +1348,20 @@ func copyDropReasons(reasons map[string]int) map[string]int {
 	return out
 }
 
+// stepReselectionAllowance is the input allowance every provider dispatch is
+// checked against: the window minus the output reserve, whether the plan
+// recorded it or the run assembled its context without a plan.
 func stepReselectionAllowance(cfg RunConfig) int {
+	window, reserve := cfg.ContextBudgetMaxTokens, 0
 	if plan := cfg.ContextManifest.BudgetPlan; plan != nil {
-		if plan.Window <= 0 {
-			return 0
-		}
-		allowance := plan.Window - plan.OutputReserve
-		if allowance < 1 {
-			return 1
-		}
-		return allowance
+		window, reserve = plan.Window, plan.OutputReserve
+	} else if window > 0 {
+		reserve = cfg.GenerationLimits().MaxOutputTokens
 	}
-	return cfg.EffectiveHistoryBudgetTokens()
+	if window <= 0 {
+		return 0
+	}
+	return max(window-reserve, 1)
 }
 
 func remainingStepBudget(maxTokens int, params *sdk.GenerateParams, prefixCount int) int {
@@ -1368,9 +1369,7 @@ func remainingStepBudget(maxTokens int, params *sdk.GenerateParams, prefixCount 
 		return 0
 	}
 	prefixCount = clampStableMessageCount(prefixCount, len(params.Messages))
-	prefixMessages := append([]sdk.Message(nil), params.Messages[:prefixCount]...)
-	_, bytes := contextfrag.ProviderPayloadHashAndBytes(params.System, prefixMessages, params.Tools)
-	remaining := maxTokens - contextfrag.ProviderBudgetTokensFromBytes(bytes)
+	remaining := maxTokens - contextfrag.ProviderEnvelopeTokens(params.System, params.Messages[:prefixCount], params.Tools)
 	if remaining < 1 {
 		return 1
 	}

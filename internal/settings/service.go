@@ -15,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/memohai/memoh/internal/botagents"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -32,6 +33,7 @@ type Service struct {
 	acl               *acl.Service
 	network           *netctl.Service
 	reasoningResolver ReasoningOptionsResolver
+	botAgents         *botagents.Service
 	logger            *slog.Logger
 }
 
@@ -61,6 +63,10 @@ func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Servi
 
 func (s *Service) SetReasoningOptionsResolver(resolver ReasoningOptionsResolver) {
 	s.reasoningResolver = resolver
+}
+
+func (s *Service) SetBotAgents(service *botagents.Service) {
+	s.botAgents = service
 }
 
 func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
@@ -138,6 +144,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	} else {
 		existingSettings := normalizeBotSettingsReadRow(settingsRow)
 		current.ChatModelID = existingSettings.ChatModelID
+		current.DefaultBotAgentID = existingSettings.DefaultBotAgentID
 		current.ChatRuntime = existingSettings.ChatRuntime
 		current.ChatACPAgentID = existingSettings.ChatACPAgentID
 		current.ChatACPProjectPath = existingSettings.ChatACPProjectPath
@@ -215,6 +222,48 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 				map[string]string{"project_mode": strings.TrimSpace(*req.ChatACPProjectMode)},
 			)
 		}
+	}
+	defaultBotAgentIDSet := req.DefaultBotAgentID != nil
+	if req.DefaultBotAgentID != nil {
+		current.DefaultBotAgentID = strings.TrimSpace(*req.DefaultBotAgentID)
+	} else if req.ChatRuntime != nil && current.ChatRuntime == ChatRuntimeModel {
+		// Legacy Web/Desktop clients know only chat_runtime. An explicit switch
+		// to Native must therefore clear a migrated Agent binding even when the
+		// newer default_bot_agent_id field is absent from their request.
+		current.DefaultBotAgentID = ""
+		defaultBotAgentIDSet = true
+	}
+	// Availability and credential validation belong to an explicit default
+	// Agent assignment. Revalidating the already stored Agent on every partial
+	// settings write would make unrelated changes (language, display, model,
+	// etc.) impossible after that Agent's credentials become incomplete.
+	if req.DefaultBotAgentID != nil && current.DefaultBotAgentID != "" {
+		if s.botAgents == nil {
+			return Settings{}, errors.New("bot agent service not configured")
+		}
+		agent, err := s.botAgents.GetActive(ctx, botID, current.DefaultBotAgentID)
+		if err != nil {
+			return Settings{}, err
+		}
+		if err := botagents.ValidateConfiguration(agent, normalizeJSONObject(botRow.Metadata)); err != nil {
+			return Settings{}, err
+		}
+		descriptor, err := botagents.DescriptorFor(agent)
+		if err != nil {
+			return Settings{}, err
+		}
+		switch descriptor.Runtime {
+		case botagents.RuntimeACP:
+			current.ChatRuntime = ChatRuntimeACPAgent
+			current.ChatACPAgentID = descriptor.Provider
+		default:
+			return Settings{}, botagents.ErrInvalidRuntime
+		}
+	} else if defaultBotAgentIDSet {
+		// Native is the built-in singleton and is represented by a NULL foreign
+		// key rather than a synthetic bot_agents row.
+		current.ChatRuntime = ChatRuntimeModel
+		current.ChatACPAgentID = ""
 	}
 	timezoneValue := pgtype.Text{}
 	if req.Timezone != nil {
@@ -388,6 +437,8 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		CompactionTargetPercent:    nullableCompactionTargetPercent(current.CompactionTargetPercent),
 		ChatModelID:                chatModelUUID,
 		ChatModelIDSet:             chatModelIDSet,
+		DefaultBotAgentID:          db.ParseUUIDOrEmpty(current.DefaultBotAgentID),
+		DefaultBotAgentIDSet:       defaultBotAgentIDSet,
 		ChatRuntime:                current.ChatRuntime,
 		ChatAcpAgentID:             nullableText(current.ChatACPAgentID),
 		ChatAcpProjectPath:         current.ChatACPProjectPath,
@@ -587,6 +638,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.CompactionTargetPercent,
 		row.Timezone,
 		row.ChatModelID,
+		row.DefaultBotAgentID,
 		row.ChatRuntime,
 		row.ChatAcpAgentID,
 		row.ChatAcpProjectPath,
@@ -619,6 +671,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.CompactionTargetPercent,
 		row.Timezone,
 		row.ChatModelID,
+		row.DefaultBotAgentID,
 		row.ChatRuntime,
 		row.ChatAcpAgentID,
 		row.ChatAcpProjectPath,
@@ -650,6 +703,7 @@ func normalizeBotSettingsFields(
 	compactionTargetPercent pgtype.Int4,
 	timezone pgtype.Text,
 	chatModelID pgtype.UUID,
+	defaultBotAgentID pgtype.UUID,
 	chatRuntime string,
 	chatACPAgentID pgtype.Text,
 	chatACPProjectPath string,
@@ -676,6 +730,9 @@ func normalizeBotSettingsFields(
 	}
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
+	}
+	if defaultBotAgentID.Valid {
+		settings.DefaultBotAgentID = uuid.UUID(defaultBotAgentID.Bytes).String()
 	}
 	settings.ChatRuntime = normalizeChatRuntimeValue(chatRuntime)
 	if settings.ChatRuntime == "" {
@@ -801,6 +858,11 @@ func normalizeChatRuntimeFields(current Settings) Settings {
 
 func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
 	current = normalizeChatRuntimeFields(current)
+	if strings.TrimSpace(current.DefaultBotAgentID) != "" {
+		// The BotAgent path validates availability and shared provider config
+		// before this compatibility validator is reached.
+		return nil
+	}
 	if current.ChatRuntime != ChatRuntimeACPAgent {
 		return nil
 	}

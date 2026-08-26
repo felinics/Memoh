@@ -12,6 +12,12 @@ type Code string
 
 const (
 	CodeBotNameTaken                     Code = "bot.name_taken"
+	CodeBotAgentNotFound                 Code = "bot_agent.not_found"
+	CodeBotAgentNameTaken                Code = "bot_agent.name_taken"
+	CodeBotAgentInvalidRuntime           Code = "bot_agent.invalid_runtime"
+	CodeBotAgentInvalidMetadata          Code = "bot_agent.invalid_metadata"
+	CodeBotAgentDefaultInUse             Code = "bot_agent.default_in_use"
+	CodeBotAgentUnavailable              Code = "bot_agent.unavailable"
 	CodeChannelRuntimeUnavailable        Code = "channel.runtime_unavailable"
 	CodeCompactionModelUnavailable       Code = "compaction.model_unavailable"
 	CodeSettingsReasoningEffortInvalid   Code = "settings.reasoning_effort_invalid"
@@ -100,6 +106,31 @@ var catalog = map[Code]Definition{
 	CodeBotNameTaken: {
 		HTTPStatus:  http.StatusConflict,
 		Detail:      "This name is already taken.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeBotAgentNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "This Agent is no longer available.",
+	},
+	CodeBotAgentNameTaken: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This Agent name is already taken.",
+	},
+	CodeBotAgentInvalidRuntime: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The selected Agent runtime is not supported.",
+	},
+	CodeBotAgentInvalidMetadata: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The Agent configuration is invalid.",
+	},
+	CodeBotAgentDefaultInUse: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Choose another default Agent before disabling or deleting this one.",
+	},
+	CodeBotAgentUnavailable: {
+		HTTPStatus:  http.StatusConflict,
+		Detail:      "This Agent is disabled or not configured.",
 		AllowedArgs: []string{"field"},
 	},
 	CodeChannelRuntimeUnavailable: {

@@ -4,6 +4,7 @@ import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
 import type { ACPAgentSessionInput } from './types'
 
 interface ACPSettings {
+  default_bot_agent_id?: string | null
   chat_runtime?: string
   chat_acp_agent_id?: string | null
   chat_acp_project_path?: string | null
@@ -70,6 +71,7 @@ export function createACPDefaults(deps: {
         return null
       }
       const input = {
+        botAgentId: settings.default_bot_agent_id?.trim() || undefined,
         agentId,
         projectPath: settings.chat_acp_project_path?.trim()
           || ACP_DEFAULT_PROJECT_PATH,

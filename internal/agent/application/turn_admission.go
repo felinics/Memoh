@@ -16,6 +16,7 @@ import (
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	tools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/agent/turn"
+	chatview "github.com/memohai/memoh/internal/agent/view"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/runtimefence"
 )
@@ -89,11 +90,16 @@ func (s *Service) admitTurnRun(
 		InvocationID: invocationID,
 		Payload:      payload,
 		Execution: sessionruntime.Execution{
-			// The subscriber-facing view stays empty until thread subscriptions
-			// replace per-run event forwarding: a channel turn's only reader is
-			// the adapter consuming this handle's events.
-			Admission: func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
-				return sessionruntime.RunAdmissionView{}, nil
+			// Project the inbound user message so subscribers (an open web
+			// session on the thread) see what fired the run while it still
+			// executes — the same contract the ws and schedule admissions
+			// already honor. NewRequestUserTurn returns nil for commands that
+			// persist no user message (discuss-shaped, attachment-only), and
+			// those runs stay contentless in the projection.
+			Admission: func(_ context.Context, handle sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+				return sessionruntime.RunAdmissionView{
+					RequestUserTurn: chatview.NewRequestUserTurn(cmd, handle.TurnID),
+				}, nil
 			},
 			Cancel: cancel,
 			// Nil for discuss, which has no reader for steering messages.
@@ -224,6 +230,10 @@ func runOwnershipLost(ctx context.Context) bool {
 // stop a long schedule run, and so a lost owner lease revokes execution instead
 // of letting a superseded owner keep writing.
 //
+// viewFn optionally supplies the subscriber-facing admission view (the request
+// user turn projection); nil keeps the run contentless in the projection, the
+// historical default for triggers and subagents alike.
+//
 // The finish function is always returned non-nil when the error is nil, so a
 // caller can defer it unconditionally.
 type triggeredRunTerminal struct {
@@ -231,7 +241,14 @@ type triggeredRunTerminal struct {
 	cause  error
 }
 
-func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, sessionruntime.Admission, func(triggeredRunTerminal), error) {
+// triggeredAdmissionView lets a triggered caller inject the subscriber-facing
+// projection for its run. The hook fires at activation, when the handle already
+// carries the allocated turn identity — which is why the view is a factory
+// rather than a value: the turn id only exists by then.
+// Nil means the run projects no request user turn (the historical default).
+type triggeredAdmissionView func(handle sessionruntime.RunHandle) *sessionruntime.RunAdmissionView
+
+func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invocationID string, submission []byte, viewFn triggeredAdmissionView) (context.Context, sessionruntime.Admission, func(triggeredRunTerminal), error) {
 	if s.sessionRuntime == nil {
 		return nil, sessionruntime.Admission{}, nil, errors.New("session runtime is not configured")
 	}
@@ -242,7 +259,13 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 		InvocationID: invocationID,
 		Payload:      submission,
 		Execution: sessionruntime.Execution{
-			Admission: func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+			Admission: func(_ context.Context, handle sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+				if viewFn == nil {
+					return sessionruntime.RunAdmissionView{}, nil
+				}
+				if view := viewFn(handle); view != nil {
+					return *view, nil
+				}
 				return sessionruntime.RunAdmissionView{}, nil
 			},
 			Cancel:          func() { cancelCause(context.Canceled) },
@@ -319,7 +342,7 @@ func (s *Service) AdmitSubagentRun(
 	botID, threadID, invocationID string,
 	submission []byte,
 ) (context.Context, tools.SubagentAdmission, func(tools.SubagentTerminal), error) {
-	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission)
+	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission, nil)
 	switch {
 	case errors.Is(err, sessionruntime.ErrSessionBusy):
 		return nil, tools.SubagentAdmission{}, nil, fmt.Errorf("%w: thread %s", turn.ErrSessionBusy, threadID)

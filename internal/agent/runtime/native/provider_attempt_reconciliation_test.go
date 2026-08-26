@@ -149,7 +149,7 @@ func TestAgentGenerateFailedPreflightKeepsLastDispatchedHashAndFork(t *testing.T
 	if !errors.Is(err, contextfrag.ErrProtectedContextOverflow) {
 		t.Fatalf("Generate() error = %v, want %v", err, contextfrag.ErrProtectedContextOverflow)
 	}
-	wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(
+	wantHash := contextfrag.ProviderPayloadHash(
 		firstProviderInput.System,
 		firstProviderInput.Messages,
 		firstProviderInput.Tools,
@@ -522,7 +522,7 @@ func TestAgentGenerateCanceledPreflightKeepsLastDispatchedHashAndFork(t *testing
 	if modelProvider.calls.Load() != 1 {
 		t.Fatalf("provider calls = %d, want 1", modelProvider.calls.Load())
 	}
-	wantHash, _ := contextfrag.ProviderPayloadHashAndBytes(
+	wantHash := contextfrag.ProviderPayloadHash(
 		firstProviderInput.System,
 		firstProviderInput.Messages,
 		firstProviderInput.Tools,

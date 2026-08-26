@@ -237,7 +237,7 @@ func TestStepReselectionDropsBulkyImagePayloadsUnderBudgetPressure(t *testing.T)
 	}
 	loopEstimate := 0
 	for _, msg := range selection.Messages[len(prefix):] {
-		loopEstimate += fragTokenEstimate(contextfrag.ContextFrag{
+		loopEstimate += contextfrag.ResolveProviderBudgetFragTokens(contextfrag.ContextFrag{
 			Parts: []contextfrag.Part{{Type: contextfrag.PartSDKMessage, SDKMessage: &msg}},
 		})
 	}

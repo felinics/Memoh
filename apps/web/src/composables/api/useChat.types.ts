@@ -5,6 +5,7 @@ export type Bot = BotsBot
 export interface SessionSummary {
   id: string
   bot_id: string
+  bot_agent_id?: string
   route_id?: string
   channel_type?: string
   type?: string

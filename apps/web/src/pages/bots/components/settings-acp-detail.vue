@@ -13,9 +13,10 @@
       </h2>
     </section>
 
-    <SettingsSection>
+    <SettingsSection :title="isGenericACP ? t('bots.settings.acpLaunchSection') : undefined">
       <div class="space-y-5 p-4">
         <SegmentedControl
+          v-if="!isGenericACP"
           :model-value="agent.setup_mode"
           :items="setupModeItems"
           :aria-label="$t('bots.settings.acpSetupMode')"
@@ -243,6 +244,7 @@ import {
   ensureACPAgentForm,
   ensureHermesManagedDefaults,
   findMissingRequiredManagedField,
+  isACPAgent,
   isClaudeCodeAgent,
   isCodexAgent,
   normalizeACPAgentID,
@@ -292,6 +294,7 @@ const {
 } = useACPOAuth(() => props.botId)
 
 const agent = computed<ACPAgentForm>(() => ensureACPAgentForm(props.form, props.profile))
+const isGenericACP = computed(() => isACPAgent(props.profile.id))
 const isCodex = computed(() => isCodexAgent(props.profile.id))
 const isClaude = computed(() => isClaudeCodeAgent(props.profile.id))
 const isHermes = computed(() => normalizeACPAgentID(props.profile.id) === 'hermes')

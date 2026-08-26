@@ -19,6 +19,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/background"
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -1610,7 +1611,7 @@ func (p *SpawnProvider) persistMessages(
 		if msg.Role == sdk.MessageRoleUser {
 			continue
 		}
-		content, err := json.Marshal(msg)
+		content, err := historyfrag.MarshalStoredSDKMessage(msg)
 		if err != nil {
 			continue
 		}
@@ -1655,10 +1656,7 @@ func (p *SpawnProvider) persistUserMessage(ctx context.Context, req *agentReques
 	if p.messageService == nil || strings.TrimSpace(req.agentSessionID) == "" {
 		return "", false
 	}
-	userContent, _ := json.Marshal(map[string]any{
-		"role":    "user",
-		"content": req.message,
-	})
+	userContent, _ := historyfrag.MarshalStoredSDKMessage(sdk.UserMessage(req.message))
 	input := messagepkg.PersistInput{
 		BotID:     req.parentSession.BotID,
 		SessionID: req.agentSessionID,
@@ -1839,6 +1837,10 @@ func (p *SpawnProvider) resolveModel(
 	if err != nil {
 		return resolvedSubagentModel{}, fmt.Errorf("resolve subagent reasoning: %w", err)
 	}
+	contextWindow := modelInfo.Config.ContextBudgetMaxTokens()
+	if contextWindow <= 0 {
+		contextWindow = session.ContextBudgetMaxTokens
+	}
 
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               modelInfo.ModelID,
@@ -1853,6 +1855,7 @@ func (p *SpawnProvider) resolveModel(
 		ReasoningDefaultOn:    modelInfo.Config.ReasoningDefaultOn,
 		ThinkingBudgetMin:     modelInfo.Config.ThinkingBudgetMin,
 		ThinkingBudgetMax:     modelInfo.Config.ThinkingBudgetMax,
+		ContextWindow:         contextWindow,
 	})
 	return resolvedSubagentModel{
 		Model:                  sdkModel,
@@ -1864,7 +1867,7 @@ func (p *SpawnProvider) resolveModel(
 		ChatCompletionsCompat:  chatCompletionsCompat,
 		SupportsImageInput:     modelInfo.HasCompatibility(models.CompatVision),
 		SupportsToolCall:       modelInfo.HasCompatibility(models.CompatToolCall),
-		ContextBudgetMaxTokens: modelInfo.Config.ContextBudgetMaxTokens(),
+		ContextBudgetMaxTokens: contextWindow,
 	}, nil
 }
 

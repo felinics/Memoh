@@ -47,7 +47,7 @@ function createSocket(connected = true): ChatWebSocket & {
   }
 }
 
-function makeController() {
+function makeController(options: { socketConnected?: boolean } = {}) {
   const sockets: Array<{
     botId: string
     handler: (event: UIStreamEvent) => void
@@ -65,7 +65,7 @@ function makeController() {
   }
   const transport: ChatRealtimeTransport = {
     connectWebSocket: vi.fn((botId, handler) => {
-      const socket = createSocket()
+      const socket = createSocket(options.socketConnected ?? true)
       sockets.push({ botId, handler, socket })
       return socket
     }),
@@ -136,6 +136,21 @@ describe('chat realtime controller', () => {
     expect(controller.sendWebSocketMessage('bot-2', message)).toBe(true)
     expect(sockets[0]!.socket.close).toHaveBeenCalledOnce()
     expect(sockets[1]!.socket.send).toHaveBeenCalledWith(message)
+  })
+
+  it('queues sends through a still-connecting socket instead of refusing them (#1070)', () => {
+    const { controller, sockets } = makeController({ socketConnected: false })
+    const message: WSClientMessage = {
+      type: 'message',
+      invocation_id: 'invocation-1',
+      text: 'hello',
+    }
+
+    // The socket exists but has not finished its first-open handshake; the ws
+    // layer queues the payload and flushes it on open, so the send must pass
+    // through rather than fail with "WebSocket is not connected".
+    expect(controller.sendWebSocketMessage('bot-1', message)).toBe(true)
+    expect(sockets[0]!.socket.send).toHaveBeenCalledWith(message)
   })
 
   it('aborts only a connected websocket for the matching bot', () => {

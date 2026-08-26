@@ -21,6 +21,7 @@ import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 import type { Bot, SessionSummary } from './useChat.types'
 
 export interface CreateSessionOptions {
+  botAgentId?: string
   title?: string
   type?: string
   sessionMode?: string
@@ -107,6 +108,7 @@ export async function createSession(botId: string, options?: string | CreateSess
     ? { title: options, channel_type: 'local' }
     : {
         title: options?.title ?? '',
+        bot_agent_id: options?.botAgentId?.trim() || undefined,
         channel_type: 'local',
         type: options?.type,
         session_mode: options?.sessionMode,
@@ -157,6 +159,7 @@ export async function updateSessionTitle(botId: string, sessionId: string, title
 }
 
 export interface UpdateSessionAgentOptions {
+  botAgentId?: string
   type?: string
   sessionMode?: string
   runtimeType?: string
@@ -168,6 +171,7 @@ export async function updateSessionAgent(botId: string, sessionId: string, optio
   const { data } = await patchBotsByBotIdSessionsBySessionId({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
     body: {
+      bot_agent_id: options.botAgentId,
       type: options.type,
       session_mode: options.sessionMode,
       runtime_type: options.runtimeType,

@@ -13,6 +13,7 @@ import (
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
+	"github.com/memohai/memoh/internal/models"
 )
 
 func contextWindowForDefaultOutputReserve(inputBudget int) int {
@@ -21,7 +22,7 @@ func contextWindowForDefaultOutputReserve(inputBudget int) int {
 	}
 	window := inputBudget
 	for {
-		resolved := inputBudget + min(DefaultOutputReserveTokens, window/4)
+		resolved := inputBudget + min(models.DefaultOutputReserveTokens, window/4)
 		if resolved == window {
 			return window
 		}

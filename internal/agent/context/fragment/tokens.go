@@ -35,9 +35,9 @@ func TokensFromBytes(n int) int {
 	return n / EstimateBytesPerToken
 }
 
-// ProviderBudgetTokensFromBytes converts bytes for provider-envelope decisions
-// only. Selection, compaction, cache metrics, and other ledger consumers keep
-// the legacy floor-based TokensFromBytes contract.
+// ProviderBudgetTokensFromBytes converts bytes for provider-envelope decisions,
+// including selection under a provider budget. Compaction, cache metrics, and
+// other ledger consumers keep the legacy floor-based TokensFromBytes contract.
 func ProviderBudgetTokensFromBytes(n int) int {
 	if n <= 0 {
 		return 0
@@ -120,6 +120,27 @@ func ResolveProviderBudgetFragTokens(frag ContextFrag) int {
 		return frag.TokenEstimate
 	}
 	return estimated
+}
+
+// ProviderEnvelopeTokens prices one provider payload for envelope decisions
+// with the estimator that selection applies per fragment, so a single-message
+// fragment costs the same whether it is being selected or has already been
+// frozen into a prefix.
+func ProviderEnvelopeTokens(system string, messages []sdk.Message, tools []sdk.Tool) int {
+	total := ProviderBudgetTokensFromBytes(len(system))
+	for _, message := range messages {
+		bytes, images := sdkMessageEstimate(message)
+		total += ProviderBudgetTokensFromBytes(bytes) + images*EstimateImageTokens
+	}
+	for _, tool := range tools {
+		total += ProviderToolDefTokens(ToolDefAccountingFor("", tool))
+	}
+	return total
+}
+
+// ProviderToolDefTokens prices one tool definition for envelope decisions.
+func ProviderToolDefTokens(def ToolDefAccounting) int {
+	return max(def.TokenEstimate, ProviderBudgetTokensFromBytes(def.Bytes))
 }
 
 // ToolDefAccountingFor measures one tool definition as the provider will

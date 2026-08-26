@@ -123,6 +123,7 @@ type IMDisplayOptionsReader interface {
 }
 
 type DefaultChatRuntimeSettings struct {
+	BotAgentID  string
 	Runtime     string
 	ACPAgentID  string
 	ProjectPath string
@@ -168,6 +169,7 @@ type SessionResult struct {
 }
 
 type NewSessionSpec struct {
+	BotAgentID            string
 	Mode                  string
 	Runtime               string
 	Type                  string
@@ -4455,6 +4457,7 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	}
 	spec.Runtime = sessionpkg.RuntimeACPAgent
 	spec.Type = sessionpkg.TypeACPAgent
+	spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
 	spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, "")
 	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{
 		"acp_agent_id":     agentID,
@@ -4589,7 +4592,7 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 		return err
 	}
 	setup := p.acpProfiles.ResolveACPSetupPreflight(profile.ID, metadata)
-	if !setup.Enabled {
+	if strings.TrimSpace(spec.BotAgentID) == "" && !setup.Enabled {
 		return acpfeedback.New(
 			acpfeedback.CodeAgentNotEnabled,
 			"agent_not_enabled",
