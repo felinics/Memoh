@@ -183,8 +183,8 @@ func TestGetSessionContextLifecycleReturnsFailedRunWithoutAssistantMessage(t *te
 	if response.Aggregates.Turns != 2 {
 		t.Fatalf("aggregate turns = %d, want 2", response.Aggregates.Turns)
 	}
-	if len(queries.legacyParams) != 0 {
-		t.Fatalf("legacy query calls = %d, want 0", len(queries.legacyParams))
+	if len(queries.legacyParams) != 1 || queries.legacyParams[0].MaxCount != 1 {
+		t.Fatalf("legacy query calls = %#v, want one era probe with limit 1", queries.legacyParams)
 	}
 	if len(queries.lifecycleParams) != 1 || queries.lifecycleParams[0].MaxCount != 3 {
 		t.Fatalf("run query params = %#v, want limit 2", queries.lifecycleParams)
@@ -210,7 +210,7 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 		}},
 	}
 
-	turns, _, _, err := loadContextLifecycleTurns(
+	load, err := loadContextLifecycleTurns(
 		context.Background(),
 		queries,
 		pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
@@ -219,6 +219,7 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
 	}
+	turns := load.Turns
 	if len(turns) != 1 {
 		t.Fatalf("turns = %d, want failed run without an assistant message", len(turns))
 	}
@@ -231,8 +232,8 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 	if turn.Snapshot.FinalInputHash != "failed-before-assistant" {
 		t.Fatalf("snapshot = %#v, want persisted run snapshot", turn.Snapshot)
 	}
-	if len(queries.legacyParams) != 0 {
-		t.Fatalf("legacy query calls = %d, want 0 when run rows exist", len(queries.legacyParams))
+	if len(queries.legacyParams) != 1 || queries.legacyParams[0].MaxCount != 1 {
+		t.Fatalf("legacy query calls = %#v, want one era probe with limit 1", queries.legacyParams)
 	}
 	if len(queries.lifecycleParams) != 1 || queries.lifecycleParams[0].MaxCount != 8 {
 		t.Fatalf("run query params = %#v, want one probe call with limit+1", queries.lifecycleParams)
@@ -256,7 +257,7 @@ func TestLoadContextLifecycleTurnsPreservesRunOrderingAndLimit(t *testing.T) {
 	}
 	queries := &contextLifecycleQueryStub{lifecycleRows: rows}
 
-	turns, legacySource, hasMore, err := loadContextLifecycleTurns(
+	load, err := loadContextLifecycleTurns(
 		context.Background(),
 		queries,
 		pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
@@ -265,14 +266,15 @@ func TestLoadContextLifecycleTurnsPreservesRunOrderingAndLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
 	}
-	if legacySource || !hasMore {
-		t.Fatalf("coverage = legacy:%t has_more:%t, want run-keyed page with more rows", legacySource, hasMore)
+	turns := load.Turns
+	if load.LegacySource || !load.HasMore {
+		t.Fatalf("coverage = legacy:%t has_more:%t, want run-keyed page with more rows", load.LegacySource, load.HasMore)
 	}
 	if len(turns) != 2 || turns[0].Snapshot.Counts.Fragments != 1 || turns[1].Snapshot.Counts.Fragments != 2 {
 		t.Fatalf("turns = %#v, want query order bounded to two rows", turns)
 	}
-	if len(queries.legacyParams) != 0 {
-		t.Fatalf("legacy query calls = %d, want 0 when run rows exist", len(queries.legacyParams))
+	if len(queries.legacyParams) != 1 || queries.legacyParams[0].MaxCount != 1 {
+		t.Fatalf("legacy query calls = %#v, want one era probe with limit 1", queries.legacyParams)
 	}
 }
 
@@ -290,7 +292,7 @@ func TestLoadContextLifecycleTurnsFallsBackOnlyWhenRunRowsDoNotExist(t *testing.
 		},
 	}
 
-	turns, _, _, err := loadContextLifecycleTurns(
+	load, err := loadContextLifecycleTurns(
 		context.Background(),
 		queries,
 		pgtype.UUID{Bytes: [16]byte{5}, Valid: true},
@@ -299,6 +301,7 @@ func TestLoadContextLifecycleTurnsFallsBackOnlyWhenRunRowsDoNotExist(t *testing.
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
 	}
+	turns := load.Turns
 	if len(turns) != 1 || turns[0].RunID != runID.String() || turns[0].Status != "" ||
 		turns[0].ErrorCode != "" || turns[0].AssistantMessageID == "" ||
 		turns[0].Snapshot.Counts.Messages != 3 {
@@ -325,7 +328,7 @@ func TestLoadContextLifecycleTurnsDoesNotMaskRunQueryFailure(t *testing.T) {
 		queries := queries
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, _, _, err := loadContextLifecycleTurns(
+			_, err := loadContextLifecycleTurns(
 				context.Background(),
 				queries,
 				pgtype.UUID{Bytes: [16]byte{7}, Valid: true},

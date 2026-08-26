@@ -176,10 +176,10 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 	var breakdown []contextfrag.KindBreakdown
 	var toolDefs []ToolDefBucket
-	if turns, _, _, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, 1); err != nil {
+	if load, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, 1); err != nil {
 		h.logger.Warn("load latest context snapshot failed", slog.Any("error", err))
 	} else {
-		breakdown, toolDefs = latestContextComposition(turns)
+		breakdown, toolDefs = latestContextComposition(load.Turns)
 	}
 
 	resp := SessionInfoResponse{

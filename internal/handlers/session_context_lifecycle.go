@@ -36,6 +36,10 @@ type ContextLifecycleResponse struct {
 	// LegacySource reports that turns were recovered from pre-run-table
 	// assistant metadata instead of the run-keyed lifecycle table.
 	LegacySource bool `json:"legacy_source,omitempty"`
+	// LegacyHistoryMayExist reports that pre-run-table assistant metadata also
+	// exists for this session while the run-keyed table served the page, so
+	// this response does not cover the session's full history era.
+	LegacyHistoryMayExist bool `json:"legacy_history_may_exist,omitempty"`
 	// AggregateScope is always "returned_page": aggregates cover the returned
 	// turns, never the whole session.
 	AggregateScope string `json:"aggregate_scope"`
@@ -144,17 +148,18 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 	}
 
 	limit := contextLifecycleLimit(c)
-	turns, legacySource, hasMore, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, limit)
+	load, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, limit)
 	if err != nil {
 		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
 	return c.JSON(http.StatusOK, ContextLifecycleResponse{
-		Turns:          turns,
-		Aggregates:     aggregateContextLifecycle(turns),
-		Limit:          limit,
-		HasMore:        hasMore,
-		LegacySource:   legacySource,
-		AggregateScope: contextLifecycleAggregateScope,
+		Turns:                 load.Turns,
+		Aggregates:            aggregateContextLifecycle(load.Turns),
+		Limit:                 limit,
+		HasMore:               load.HasMore,
+		LegacySource:          load.LegacySource,
+		LegacyHistoryMayExist: load.LegacyHistoryMayExist,
+		AggregateScope:        contextLifecycleAggregateScope,
 	})
 }
 
@@ -204,26 +209,50 @@ type contextLifecycleQueries interface {
 	) ([]sqlc.ListRecentAssistantMessagesBySessionRow, error)
 }
 
+type contextLifecycleLoad struct {
+	Turns []ContextLifecycleTurn
+	// LegacySource reports that every returned turn came from pre-run-table
+	// assistant metadata.
+	LegacySource bool
+	// HasMore reports that the chosen source holds older rows beyond the page.
+	HasMore bool
+	// LegacyHistoryMayExist reports that run-keyed rows were returned while
+	// older pre-run-table metadata also exists for the session, so the page
+	// does not cover the session's full history era.
+	LegacyHistoryMayExist bool
+}
+
 func loadContextLifecycleTurns(
 	ctx context.Context,
 	queries contextLifecycleQueries,
 	sessionID pgtype.UUID,
 	limit int,
-) ([]ContextLifecycleTurn, bool, bool, error) {
+) (contextLifecycleLoad, error) {
 	probe := limit + 1
 	rows, err := queries.ListRecentContextLifecyclesBySession(ctx, sqlc.ListRecentContextLifecyclesBySessionParams{
 		SessionID: sessionID,
 		MaxCount:  int32(probe), //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
 	})
 	if err != nil {
-		return nil, false, false, fmt.Errorf("list run lifecycles: %w", err)
+		return contextLifecycleLoad{}, fmt.Errorf("list run lifecycles: %w", err)
 	}
 	if len(rows) > 0 {
 		turns, err := lifecycleTurnsFromRunRows(rows, limit)
 		if err != nil {
-			return nil, false, false, err
+			return contextLifecycleLoad{}, err
 		}
-		return turns, false, len(rows) > limit, nil
+		legacyProbe, err := queries.ListRecentAssistantMessagesBySession(ctx, sqlc.ListRecentAssistantMessagesBySessionParams{
+			SessionID: sessionID,
+			MaxCount:  1,
+		})
+		if err != nil {
+			return contextLifecycleLoad{}, fmt.Errorf("probe legacy assistant lifecycles: %w", err)
+		}
+		return contextLifecycleLoad{
+			Turns:                 turns,
+			HasMore:               len(rows) > limit,
+			LegacyHistoryMayExist: len(legacyLifecycleTurnsFromRows(legacyProbe, 1)) > 0,
+		}, nil
 	}
 
 	legacyRows, err := queries.ListRecentAssistantMessagesBySession(ctx, sqlc.ListRecentAssistantMessagesBySessionParams{
@@ -231,10 +260,14 @@ func loadContextLifecycleTurns(
 		MaxCount:  int32(probe), //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
 	})
 	if err != nil {
-		return nil, false, false, fmt.Errorf("list legacy assistant lifecycles: %w", err)
+		return contextLifecycleLoad{}, fmt.Errorf("list legacy assistant lifecycles: %w", err)
 	}
 	turns := legacyLifecycleTurnsFromRows(legacyRows, limit)
-	return turns, len(turns) > 0, len(legacyRows) > limit, nil
+	return contextLifecycleLoad{
+		Turns:        turns,
+		LegacySource: len(turns) > 0,
+		HasMore:      len(legacyRows) > limit,
+	}, nil
 }
 
 func lifecycleTurnsFromRunRows(

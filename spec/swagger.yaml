@@ -2191,6 +2191,7 @@ definitions:
     - context_budget_disabled
     - capability_gate
     - read_media
+    - renderer_prune
     - mid_stream_retry
     type: string
     x-enum-varnames:
@@ -2204,6 +2205,7 @@ definitions:
     - MutationContextBudgetDisabled
     - MutationCapabilityGate
     - MutationReadMedia
+    - MutationRendererPrune
     - MutationMidStreamRetry
   contextfrag.MutationRecord:
     properties:
@@ -3241,6 +3243,12 @@ definitions:
       has_more:
         description: HasMore reports whether older lifecycle turns exist beyond this
           page.
+        type: boolean
+      legacy_history_may_exist:
+        description: |-
+          LegacyHistoryMayExist reports that pre-run-table assistant metadata also
+          exists for this session while the run-keyed table served the page, so
+          this response does not cover the session's full history era.
         type: boolean
       legacy_source:
         description: |-

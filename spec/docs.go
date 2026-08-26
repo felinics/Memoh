@@ -18323,6 +18323,7 @@ const docTemplate = `{
                 "context_budget_disabled",
                 "capability_gate",
                 "read_media",
+                "renderer_prune",
                 "mid_stream_retry"
             ],
             "x-enum-varnames": [
@@ -18336,6 +18337,7 @@ const docTemplate = `{
                 "MutationContextBudgetDisabled",
                 "MutationCapabilityGate",
                 "MutationReadMedia",
+                "MutationRendererPrune",
                 "MutationMidStreamRetry"
             ]
         },
@@ -19878,6 +19880,10 @@ const docTemplate = `{
                 },
                 "has_more": {
                     "description": "HasMore reports whether older lifecycle turns exist beyond this page.",
+                    "type": "boolean"
+                },
+                "legacy_history_may_exist": {
+                    "description": "LegacyHistoryMayExist reports that pre-run-table assistant metadata also\nexists for this session while the run-keyed table served the page, so\nthis response does not cover the session's full history era.",
                     "type": "boolean"
                 },
                 "legacy_source": {

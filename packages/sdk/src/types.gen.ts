@@ -1237,7 +1237,7 @@ export type ContextfragMemoryRecallTrace = {
     retrieval_mode?: string;
 };
 
-export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'loop_step_reselection' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'mid_stream_retry';
+export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'loop_step_reselection' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'renderer_prune' | 'mid_stream_retry';
 
 export type ContextfragMutationRecord = {
     detail?: string;
@@ -1845,6 +1845,12 @@ export type HandlersContextLifecycleResponse = {
      * HasMore reports whether older lifecycle turns exist beyond this page.
      */
     has_more?: boolean;
+    /**
+     * LegacyHistoryMayExist reports that pre-run-table assistant metadata also
+     * exists for this session while the run-keyed table served the page, so
+     * this response does not cover the session's full history era.
+     */
+    legacy_history_may_exist?: boolean;
     /**
      * LegacySource reports that turns were recovered from pre-run-table
      * assistant metadata instead of the run-keyed lifecycle table.
