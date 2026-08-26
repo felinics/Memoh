@@ -284,6 +284,14 @@ const (
 // model before auth and answer 401 for an unknown model, which the probe
 // misclassified as "Invalid API key" even after the key had authenticated.
 // Per-model availability is covered by models.Service.Test instead.
+//
+// Outcome semantics (#1087) — the models list is only a partial falsifier:
+//   - reachable + 200: verified (ok);
+//   - reachable + 401/403: auth failed (auth_error) — the request carries no
+//     model parameter, so this cannot be confused with "model not found";
+//   - reachable + anything else (404/5xx): unverified, NOT a failure — the
+//     base URL may be wrong, or the provider may not implement model listing;
+//   - unreachable (DNS/TCP): error, the only hard failure kept at this layer.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -319,12 +327,16 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Message:   message,
 		}, nil
 	case sdk.ProviderStatusUnhealthy:
-		status := TestStatusError
 		if strings.Contains(result.Message, "authentication failed") {
-			status = TestStatusAuthError
+			return TestResponse{
+				Status:    TestStatusAuthError,
+				Reachable: true,
+				LatencyMs: time.Since(start).Milliseconds(),
+				Message:   message,
+			}, nil
 		}
 		return TestResponse{
-			Status:    status,
+			Status:    TestStatusUnverified,
 			Reachable: true,
 			LatencyMs: time.Since(start).Milliseconds(),
 			Message:   message,

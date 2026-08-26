@@ -1004,3 +1004,74 @@ func TestTestSkipsModelProbeAfterSuccessfulModelsList(t *testing.T) {
 		t.Fatal("reachable = false, want true")
 	}
 }
+
+// Locks the #1087 outcome mapping: only an auth failure on the models list
+// is an auth_error; any other HTTP response is unverified (not a failure);
+// a transport-level failure stays a hard error.
+func TestTestModelsListOutcomeMapping(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		modelsStatus int
+		wantStatus   TestStatus
+	}{
+		{"auth failure stays auth_error", http.StatusUnauthorized, TestStatusAuthError},
+		{"missing models endpoint is unverified", http.StatusNotFound, TestStatusUnverified},
+		{"upstream 5xx is unverified", http.StatusInternalServerError, TestStatusUnverified},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/models" {
+					t.Errorf("unexpected probe request: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(tc.modelsStatus)
+			}))
+			defer server.Close()
+
+			providerID := pgtype.UUID{Bytes: [16]byte{0x10, 0x87}, Valid: true}
+			service := &Service{queries: providerTestQueries{provider: sqlc.Provider{
+				ID:         providerID,
+				ClientType: string(models.ClientTypeOpenAICompletions),
+				Config:     []byte(`{"api_key":"sk-test","base_url":"` + server.URL + `"}`),
+			}}}
+
+			resp, err := service.Test(context.Background(), providerID.String())
+			if err != nil {
+				t.Fatalf("Test() error = %v", err)
+			}
+			if resp.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q (message: %s)", resp.Status, tc.wantStatus, resp.Message)
+			}
+			if !resp.Reachable {
+				t.Fatal("reachable = false, want true")
+			}
+		})
+	}
+}
+
+func TestTestUnreachableStaysHardError(t *testing.T) {
+	t.Parallel()
+
+	// Port 1 is reserved and refuses connections deterministically.
+	providerID := pgtype.UUID{Bytes: [16]byte{0x10, 0x87, 0x01}, Valid: true}
+	service := &Service{queries: providerTestQueries{provider: sqlc.Provider{
+		ID:         providerID,
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"api_key":"sk-test","base_url":"http://127.0.0.1:1"}`),
+	}}}
+
+	resp, err := service.Test(context.Background(), providerID.String())
+	if err != nil {
+		t.Fatalf("Test() error = %v", err)
+	}
+	if resp.Status != TestStatusError {
+		t.Fatalf("status = %q, want %q", resp.Status, TestStatusError)
+	}
+	if resp.Reachable {
+		t.Fatal("reachable = true, want false")
+	}
+}

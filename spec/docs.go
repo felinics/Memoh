@@ -18020,6 +18020,9 @@ const docTemplate = `{
                 "output_reserve": {
                     "type": "integer"
                 },
+                "output_reserve_resolution": {
+                    "type": "string"
+                },
                 "system_budget": {
                     "type": "integer"
                 },
@@ -22636,12 +22639,14 @@ const docTemplate = `{
             "enum": [
                 "ok",
                 "auth_error",
-                "error"
+                "error",
+                "unverified"
             ],
             "x-enum-varnames": [
                 "TestStatusOK",
                 "TestStatusAuthError",
-                "TestStatusError"
+                "TestStatusError",
+                "TestStatusUnverified"
             ]
         },
         "providers.UpdateRequest": {

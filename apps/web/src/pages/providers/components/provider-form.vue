@@ -165,6 +165,10 @@
                 class="size-4 text-success"
               />
               <AlertCircle
+                v-else-if="testStatus === 'unverified'"
+                class="size-4 text-warning"
+              />
+              <AlertCircle
                 v-else-if="testStatus === 'error'"
                 class="size-4 text-destructive"
               />
@@ -177,8 +181,14 @@
           </HoverCardTrigger>
           <HoverCardContent
             v-if="testError"
-            class="w-80 text-xs text-destructive whitespace-pre-wrap break-words"
+            class="w-80 text-xs whitespace-pre-wrap break-words"
+            :class="testStatus === 'unverified' ? 'text-muted-foreground' : 'text-destructive'"
           >
+            <!-- unverified 不是失败:端点已连通,只是 models 列表无法证实可用,
+                 先给指引文案再附上游细节,不涂成 destructive。 -->
+            <template v-if="testStatus === 'unverified'">
+              {{ $t('provider.testUnverifiedHint') }} ·
+            </template>
             {{ testError }}
           </HoverCardContent>
         </HoverCard>
@@ -404,6 +414,8 @@ let oauthStatusLoadGeneration = 0
 
 const testStatus = computed(() => {
   if (testResult.value?.status === 'ok') return 'ok'
+  // unverified(#1087)必须先于 error 判断:它不是失败,是"无法确认"。
+  if (testResult.value?.status === 'unverified') return 'unverified'
   if (testError.value) return 'error'
   // Any non-ok probe result is an error state (the ok case returned above).
   if (testResult.value) return 'error'

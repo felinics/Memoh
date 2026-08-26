@@ -1977,6 +1977,8 @@ definitions:
         type: integer
       output_reserve:
         type: integer
+      output_reserve_resolution:
+        type: string
       system_budget:
         type: integer
       tool_defs_cost:
@@ -5102,11 +5104,13 @@ definitions:
     - ok
     - auth_error
     - error
+    - unverified
     type: string
     x-enum-varnames:
     - TestStatusOK
     - TestStatusAuthError
     - TestStatusError
+    - TestStatusUnverified
   providers.UpdateRequest:
     properties:
       client_type:

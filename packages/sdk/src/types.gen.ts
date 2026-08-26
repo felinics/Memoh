@@ -1151,6 +1151,7 @@ export type ContextfragContextBudgetPlan = {
     estimator_safety_factor_percent?: number;
     history_budget?: number;
     output_reserve?: number;
+    output_reserve_resolution?: string;
     system_budget?: number;
     tool_defs_cost?: number;
     window?: number;
@@ -2932,7 +2933,7 @@ export type ProvidersTestResponse = {
     status?: ProvidersTestStatus;
 };
 
-export type ProvidersTestStatus = 'ok' | 'auth_error' | 'error';
+export type ProvidersTestStatus = 'ok' | 'auth_error' | 'error' | 'unverified';
 
 export type ProvidersUpdateRequest = {
     client_type?: string;
