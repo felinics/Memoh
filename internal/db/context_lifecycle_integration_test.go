@@ -83,7 +83,7 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 
 	contentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(secret)))
 	snapshot := contextfrag.LifecycleSnapshot{
-		Version: 1,
+		Version: contextfrag.LifecycleSnapshotVersion,
 		View:    contextfrag.ViewRunConfigPreProvider,
 		Counts: contextfrag.ManifestCounts{
 			Fragments:     1,
