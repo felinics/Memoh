@@ -7654,7 +7654,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/{session_id}/context-lifecycle": {
             "get": {
-                "description": "List run-keyed context lifecycle snapshots and aggregate cache, drop, mutation, and tool-roster diagnostics for a chat session; sessions predating run lifecycle persistence fall back to legacy assistant metadata",
+                "description": "List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source)",
                 "tags": [
                     "sessions"
                 ],
@@ -19843,18 +19843,6 @@ const docTemplate = `{
         "handlers.ContextLifecycleAggregates": {
             "type": "object",
             "properties": {
-                "cache_hit_rate": {
-                    "type": "number"
-                },
-                "cache_outcomes": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "integer"
-                    }
-                },
-                "cache_read_efficiency": {
-                    "type": "number"
-                },
                 "drop_reasons": {
                     "type": "object",
                     "additionalProperties": {
@@ -19867,22 +19855,10 @@ const docTemplate = `{
                         "type": "integer"
                     }
                 },
-                "tool_roster_change_details": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.ToolRosterChange"
-                    }
-                },
-                "tool_roster_changes": {
-                    "type": "integer"
-                },
                 "total_cache_read_tokens": {
                     "type": "integer"
                 },
                 "total_cache_write_tokens": {
-                    "type": "integer"
-                },
-                "total_expected_stable_tokens": {
                     "type": "integer"
                 },
                 "turns": {
@@ -19893,8 +19869,24 @@ const docTemplate = `{
         "handlers.ContextLifecycleResponse": {
             "type": "object",
             "properties": {
+                "aggregate_scope": {
+                    "description": "AggregateScope is always \"returned_page\": aggregates cover the returned\nturns, never the whole session.",
+                    "type": "string"
+                },
                 "aggregates": {
                     "$ref": "#/definitions/handlers.ContextLifecycleAggregates"
+                },
+                "has_more": {
+                    "description": "HasMore reports whether older lifecycle turns exist beyond this page.",
+                    "type": "boolean"
+                },
+                "legacy_source": {
+                    "description": "LegacySource reports that turns were recovered from pre-run-table\nassistant metadata instead of the run-keyed lifecycle table.",
+                    "type": "boolean"
+                },
+                "limit": {
+                    "description": "Limit is the page bound the turns and aggregates were computed over.",
+                    "type": "integer"
                 },
                 "turns": {
                     "type": "array",
@@ -21526,32 +21518,6 @@ const docTemplate = `{
                 },
                 "tools": {
                     "type": "integer"
-                }
-            }
-        },
-        "handlers.ToolRosterChange": {
-            "type": "object",
-            "properties": {
-                "added": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "removed": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "resized": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "run_id": {
-                    "type": "string"
                 }
             }
         },

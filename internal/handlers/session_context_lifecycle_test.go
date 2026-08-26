@@ -159,8 +159,9 @@ func TestGetSessionContextLifecycleReturnsFailedRunWithoutAssistantMessage(t *te
 	if err := json.Unmarshal(ctx.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &topLevel); err != nil {
 		t.Fatalf("decode top-level response: %v", err)
 	}
-	if len(topLevel) != 2 || topLevel["turns"] == nil || topLevel["aggregates"] == nil {
-		t.Fatalf("top-level response = %#v, want turns and aggregates", topLevel)
+	if topLevel["turns"] == nil || topLevel["aggregates"] == nil ||
+		topLevel["limit"] == nil || topLevel["has_more"] == nil || topLevel["aggregate_scope"] == nil {
+		t.Fatalf("top-level response = %#v, want turns, aggregates, and page coverage", topLevel)
 	}
 	var response ContextLifecycleResponse
 	if err := json.Unmarshal(ctx.Response().Writer.(*httptest.ResponseRecorder).Body.Bytes(), &response); err != nil {
@@ -185,7 +186,7 @@ func TestGetSessionContextLifecycleReturnsFailedRunWithoutAssistantMessage(t *te
 	if len(queries.legacyParams) != 0 {
 		t.Fatalf("legacy query calls = %d, want 0", len(queries.legacyParams))
 	}
-	if len(queries.lifecycleParams) != 1 || queries.lifecycleParams[0].MaxCount != 2 {
+	if len(queries.lifecycleParams) != 1 || queries.lifecycleParams[0].MaxCount != 3 {
 		t.Fatalf("run query params = %#v, want limit 2", queries.lifecycleParams)
 	}
 }
@@ -209,7 +210,7 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 		}},
 	}
 
-	turns, err := loadContextLifecycleTurns(
+	turns, _, _, err := loadContextLifecycleTurns(
 		context.Background(),
 		queries,
 		pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
@@ -233,8 +234,8 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 	if len(queries.legacyParams) != 0 {
 		t.Fatalf("legacy query calls = %d, want 0 when run rows exist", len(queries.legacyParams))
 	}
-	if len(queries.lifecycleParams) != 1 || queries.lifecycleParams[0].MaxCount != 7 {
-		t.Fatalf("run query params = %#v, want one call with limit 7", queries.lifecycleParams)
+	if len(queries.lifecycleParams) != 1 || queries.lifecycleParams[0].MaxCount != 8 {
+		t.Fatalf("run query params = %#v, want one probe call with limit+1", queries.lifecycleParams)
 	}
 }
 
@@ -255,7 +256,7 @@ func TestLoadContextLifecycleTurnsPreservesRunOrderingAndLimit(t *testing.T) {
 	}
 	queries := &contextLifecycleQueryStub{lifecycleRows: rows}
 
-	turns, err := loadContextLifecycleTurns(
+	turns, legacySource, hasMore, err := loadContextLifecycleTurns(
 		context.Background(),
 		queries,
 		pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
@@ -263,6 +264,9 @@ func TestLoadContextLifecycleTurnsPreservesRunOrderingAndLimit(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
+	}
+	if legacySource || !hasMore {
+		t.Fatalf("coverage = legacy:%t has_more:%t, want run-keyed page with more rows", legacySource, hasMore)
 	}
 	if len(turns) != 2 || turns[0].Snapshot.Counts.Fragments != 1 || turns[1].Snapshot.Counts.Fragments != 2 {
 		t.Fatalf("turns = %#v, want query order bounded to two rows", turns)
@@ -286,7 +290,7 @@ func TestLoadContextLifecycleTurnsFallsBackOnlyWhenRunRowsDoNotExist(t *testing.
 		},
 	}
 
-	turns, err := loadContextLifecycleTurns(
+	turns, _, _, err := loadContextLifecycleTurns(
 		context.Background(),
 		queries,
 		pgtype.UUID{Bytes: [16]byte{5}, Valid: true},
@@ -321,7 +325,7 @@ func TestLoadContextLifecycleTurnsDoesNotMaskRunQueryFailure(t *testing.T) {
 		queries := queries
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, err := loadContextLifecycleTurns(
+			_, _, _, err := loadContextLifecycleTurns(
 				context.Background(),
 				queries,
 				pgtype.UUID{Bytes: [16]byte{7}, Valid: true},
@@ -428,12 +432,6 @@ func TestAggregateContextLifecycle(t *testing.T) {
 	agg := aggregateContextLifecycle(turns)
 	if agg.Turns != 3 {
 		t.Fatalf("turns = %d, want 3", agg.Turns)
-	}
-	if agg.CacheOutcomes[contextfrag.CacheOutcomeHit] != 1 || agg.CacheOutcomes[contextfrag.CacheOutcomeMissSamePrefix] != 1 {
-		t.Fatalf("cache outcomes = %#v", agg.CacheOutcomes)
-	}
-	if agg.CacheHitRate != 50 {
-		t.Fatalf("hit rate = %v, want 50", agg.CacheHitRate)
 	}
 	if agg.TotalCacheReadTokens != 100 || agg.TotalCacheWriteTokens != 10 {
 		t.Fatalf("cache totals = %d/%d", agg.TotalCacheReadTokens, agg.TotalCacheWriteTokens)

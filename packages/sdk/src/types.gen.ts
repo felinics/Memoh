@@ -1823,27 +1823,37 @@ export type HandlersContainerStorageMetricsResponse = {
 };
 
 export type HandlersContextLifecycleAggregates = {
-    cache_hit_rate?: number;
-    cache_outcomes?: {
-        [key: string]: number;
-    };
-    cache_read_efficiency?: number;
     drop_reasons?: {
         [key: string]: number;
     };
     mutation_kinds?: {
         [key: string]: number;
     };
-    tool_roster_change_details?: Array<HandlersToolRosterChange>;
-    tool_roster_changes?: number;
     total_cache_read_tokens?: number;
     total_cache_write_tokens?: number;
-    total_expected_stable_tokens?: number;
     turns?: number;
 };
 
 export type HandlersContextLifecycleResponse = {
+    /**
+     * AggregateScope is always "returned_page": aggregates cover the returned
+     * turns, never the whole session.
+     */
+    aggregate_scope?: string;
     aggregates?: HandlersContextLifecycleAggregates;
+    /**
+     * HasMore reports whether older lifecycle turns exist beyond this page.
+     */
+    has_more?: boolean;
+    /**
+     * LegacySource reports that turns were recovered from pre-run-table
+     * assistant metadata instead of the run-keyed lifecycle table.
+     */
+    legacy_source?: boolean;
+    /**
+     * Limit is the page bound the turns and aggregates were computed over.
+     */
+    limit?: number;
     turns?: Array<HandlersContextLifecycleTurn>;
 };
 
@@ -2429,13 +2439,6 @@ export type HandlersToolDefBucket = {
     provider?: string;
     token_estimate?: number;
     tools?: number;
-};
-
-export type HandlersToolRosterChange = {
-    added?: Array<string>;
-    removed?: Array<string>;
-    resized?: Array<string>;
-    run_id?: string;
 };
 
 export type HandlersTriggerCompactResponse = {

@@ -3214,14 +3214,6 @@ definitions:
     type: object
   handlers.ContextLifecycleAggregates:
     properties:
-      cache_hit_rate:
-        type: number
-      cache_outcomes:
-        additionalProperties:
-          type: integer
-        type: object
-      cache_read_efficiency:
-        type: number
       drop_reasons:
         additionalProperties:
           type: integer
@@ -3230,25 +3222,35 @@ definitions:
         additionalProperties:
           type: integer
         type: object
-      tool_roster_change_details:
-        items:
-          $ref: '#/definitions/handlers.ToolRosterChange'
-        type: array
-      tool_roster_changes:
-        type: integer
       total_cache_read_tokens:
         type: integer
       total_cache_write_tokens:
-        type: integer
-      total_expected_stable_tokens:
         type: integer
       turns:
         type: integer
     type: object
   handlers.ContextLifecycleResponse:
     properties:
+      aggregate_scope:
+        description: |-
+          AggregateScope is always "returned_page": aggregates cover the returned
+          turns, never the whole session.
+        type: string
       aggregates:
         $ref: '#/definitions/handlers.ContextLifecycleAggregates'
+      has_more:
+        description: HasMore reports whether older lifecycle turns exist beyond this
+          page.
+        type: boolean
+      legacy_source:
+        description: |-
+          LegacySource reports that turns were recovered from pre-run-table
+          assistant metadata instead of the run-keyed lifecycle table.
+        type: boolean
+      limit:
+        description: Limit is the page bound the turns and aggregates were computed
+          over.
+        type: integer
       turns:
         items:
           $ref: '#/definitions/handlers.ContextLifecycleTurn'
@@ -4351,23 +4353,6 @@ definitions:
         type: integer
       tools:
         type: integer
-    type: object
-  handlers.ToolRosterChange:
-    properties:
-      added:
-        items:
-          type: string
-        type: array
-      removed:
-        items:
-          type: string
-        type: array
-      resized:
-        items:
-          type: string
-        type: array
-      run_id:
-        type: string
     type: object
   handlers.TriggerCompactResponse:
     properties:
@@ -11344,9 +11329,11 @@ paths:
       - compaction
   /bots/{bot_id}/sessions/{session_id}/context-lifecycle:
     get:
-      description: List run-keyed context lifecycle snapshots and aggregate cache,
-        drop, mutation, and tool-roster diagnostics for a chat session; sessions predating
-        run lifecycle persistence fall back to legacy assistant metadata
+      description: List run-keyed context lifecycle snapshots for a chat session,
+        newest first, with page-scoped aggregate totals (cache read/write tokens,
+        drop reasons, mutation kinds). Aggregates cover only the returned page; has_more
+        reports older turns. Sessions predating run lifecycle persistence fall back
+        to legacy assistant metadata (legacy_source)
       parameters:
       - description: Bot ID
         in: path

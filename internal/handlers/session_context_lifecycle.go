@@ -29,7 +29,19 @@ const (
 type ContextLifecycleResponse struct {
 	Turns      []ContextLifecycleTurn     `json:"turns"`
 	Aggregates ContextLifecycleAggregates `json:"aggregates"`
+	// Limit is the page bound the turns and aggregates were computed over.
+	Limit int `json:"limit"`
+	// HasMore reports whether older lifecycle turns exist beyond this page.
+	HasMore bool `json:"has_more"`
+	// LegacySource reports that turns were recovered from pre-run-table
+	// assistant metadata instead of the run-keyed lifecycle table.
+	LegacySource bool `json:"legacy_source,omitempty"`
+	// AggregateScope is always "returned_page": aggregates cover the returned
+	// turns, never the whole session.
+	AggregateScope string `json:"aggregate_scope"`
 }
+
+const contextLifecycleAggregateScope = "returned_page"
 
 // ContextLifecycleTurn is one persisted lifecycle snapshot, newest first.
 type ContextLifecycleTurn struct {
@@ -41,30 +53,21 @@ type ContextLifecycleTurn struct {
 	Snapshot           contextfrag.LifecycleSnapshot `json:"snapshot"`
 }
 
+// ContextLifecycleAggregates sums facts observed on the returned page. Cache
+// totals come from provider usage; derived cache-comparison ratios and
+// tool-roster churn are intentionally absent until a durable comparator
+// exists — a zero here must always mean "measured zero", never "unknown".
 type ContextLifecycleAggregates struct {
-	Turns                     int                `json:"turns"`
-	CacheOutcomes             map[string]int     `json:"cache_outcomes,omitempty"`
-	CacheHitRate              float64            `json:"cache_hit_rate"`
-	TotalCacheReadTokens      int                `json:"total_cache_read_tokens"`
-	TotalCacheWriteTokens     int                `json:"total_cache_write_tokens"`
-	TotalExpectedStableTokens int                `json:"total_expected_stable_tokens"`
-	CacheReadEfficiency       float64            `json:"cache_read_efficiency"`
-	DropReasons               map[string]int     `json:"drop_reasons,omitempty"`
-	MutationKinds             map[string]int     `json:"mutation_kinds,omitempty"`
-	ToolRosterChanges         int                `json:"tool_roster_changes"`
-	ToolRosterChangeDetails   []ToolRosterChange `json:"tool_roster_change_details,omitempty"`
-}
-
-type ToolRosterChange struct {
-	RunID   string   `json:"run_id"`
-	Added   []string `json:"added,omitempty"`
-	Removed []string `json:"removed,omitempty"`
-	Resized []string `json:"resized,omitempty"`
+	Turns                 int            `json:"turns"`
+	TotalCacheReadTokens  int            `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int            `json:"total_cache_write_tokens"`
+	DropReasons           map[string]int `json:"drop_reasons,omitempty"`
+	MutationKinds         map[string]int `json:"mutation_kinds,omitempty"`
 }
 
 // GetSessionContextLifecycle godoc
 // @Summary Get session context lifecycle
-// @Description List run-keyed context lifecycle snapshots and aggregate cache, drop, mutation, and tool-roster diagnostics for a chat session; sessions predating run lifecycle persistence fall back to legacy assistant metadata
+// @Description List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source)
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
@@ -139,13 +142,18 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
 	}
 
-	turns, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, contextLifecycleLimit(c))
+	limit := contextLifecycleLimit(c)
+	turns, legacySource, hasMore, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, limit)
 	if err != nil {
 		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
 	return c.JSON(http.StatusOK, ContextLifecycleResponse{
-		Turns:      turns,
-		Aggregates: aggregateContextLifecycle(turns),
+		Turns:          turns,
+		Aggregates:     aggregateContextLifecycle(turns),
+		Limit:          limit,
+		HasMore:        hasMore,
+		LegacySource:   legacySource,
+		AggregateScope: contextLifecycleAggregateScope,
 	})
 }
 
@@ -200,26 +208,32 @@ func loadContextLifecycleTurns(
 	queries contextLifecycleQueries,
 	sessionID pgtype.UUID,
 	limit int,
-) ([]ContextLifecycleTurn, error) {
+) ([]ContextLifecycleTurn, bool, bool, error) {
+	probe := limit + 1
 	rows, err := queries.ListRecentContextLifecyclesBySession(ctx, sqlc.ListRecentContextLifecyclesBySessionParams{
 		SessionID: sessionID,
-		MaxCount:  int32(limit), //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
+		MaxCount:  int32(probe), //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list run lifecycles: %w", err)
+		return nil, false, false, fmt.Errorf("list run lifecycles: %w", err)
 	}
 	if len(rows) > 0 {
-		return lifecycleTurnsFromRunRows(rows, limit)
+		turns, err := lifecycleTurnsFromRunRows(rows, limit)
+		if err != nil {
+			return nil, false, false, err
+		}
+		return turns, false, len(rows) > limit, nil
 	}
 
 	legacyRows, err := queries.ListRecentAssistantMessagesBySession(ctx, sqlc.ListRecentAssistantMessagesBySessionParams{
 		SessionID: sessionID,
-		MaxCount:  int32(limit), //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
+		MaxCount:  int32(probe), //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list legacy assistant lifecycles: %w", err)
+		return nil, false, false, fmt.Errorf("list legacy assistant lifecycles: %w", err)
 	}
-	return legacyLifecycleTurnsFromRows(legacyRows, limit), nil
+	turns := legacyLifecycleTurnsFromRows(legacyRows, limit)
+	return turns, len(turns) > 0, len(legacyRows) > limit, nil
 }
 
 func lifecycleTurnsFromRunRows(
@@ -306,26 +320,9 @@ func latestContextComposition(turns []ContextLifecycleTurn) ([]contextfrag.KindB
 
 func aggregateContextLifecycle(turns []ContextLifecycleTurn) ContextLifecycleAggregates {
 	agg := ContextLifecycleAggregates{Turns: len(turns)}
-	comparableTurns := 0
-	hits := 0
-	comparableReadTokens := 0
 	for _, turn := range turns {
 		agg.TotalCacheReadTokens += turn.Snapshot.CacheReadTokens
 		agg.TotalCacheWriteTokens += turn.Snapshot.CacheWriteTokens
-		if comparison := turn.Snapshot.CacheComparison; comparison != nil {
-			if agg.CacheOutcomes == nil {
-				agg.CacheOutcomes = make(map[string]int, 4)
-			}
-			agg.CacheOutcomes[comparison.Outcome]++
-			if comparison.Outcome != contextfrag.CacheOutcomeFirstObservation {
-				comparableTurns++
-				comparableReadTokens += turn.Snapshot.CacheReadTokens
-				agg.TotalExpectedStableTokens += turn.Snapshot.StablePrefixTokenEstimate
-				if comparison.Outcome == contextfrag.CacheOutcomeHit {
-					hits++
-				}
-			}
-		}
 		for reason, count := range turn.Snapshot.Selection.DropReasons {
 			if agg.DropReasons == nil {
 				agg.DropReasons = make(map[string]int, 4)
@@ -339,65 +336,5 @@ func aggregateContextLifecycle(turns []ContextLifecycleTurn) ContextLifecycleAgg
 			agg.MutationKinds[string(record.Kind)]++
 		}
 	}
-	if comparableTurns > 0 {
-		agg.CacheHitRate = float64(hits) / float64(comparableTurns) * 100
-	}
-	if agg.TotalExpectedStableTokens > 0 {
-		agg.CacheReadEfficiency = float64(comparableReadTokens) / float64(agg.TotalExpectedStableTokens) * 100
-	}
-	agg.ToolRosterChanges, agg.ToolRosterChangeDetails = toolRosterChurn(turns)
 	return agg
-}
-
-const toolRosterChangeDetailCap = 10
-
-func toolRosterChurn(turns []ContextLifecycleTurn) (int, []ToolRosterChange) {
-	changes := 0
-	var details []ToolRosterChange
-	for i := 0; i+1 < len(turns); i++ {
-		current, previous := turns[i], turns[i+1]
-		if len(current.Snapshot.ToolDefs) == 0 || len(previous.Snapshot.ToolDefs) == 0 {
-			continue
-		}
-		change := diffToolRosters(previous.Snapshot.ToolDefs, current.Snapshot.ToolDefs)
-		if len(change.Added) == 0 && len(change.Removed) == 0 && len(change.Resized) == 0 {
-			continue
-		}
-		change.RunID = current.RunID
-		changes++
-		if len(details) < toolRosterChangeDetailCap {
-			details = append(details, change)
-		}
-	}
-	return changes, details
-}
-
-func diffToolRosters(previous, current []contextfrag.ToolDefAccounting) ToolRosterChange {
-	key := func(def contextfrag.ToolDefAccounting) string { return def.Provider + "/" + def.Name }
-	prevBytes := make(map[string]int, len(previous))
-	for _, def := range previous {
-		prevBytes[key(def)] = def.Bytes
-	}
-	var change ToolRosterChange
-	seen := make(map[string]bool, len(current))
-	for _, def := range current {
-		k := key(def)
-		seen[k] = true
-		before, existed := prevBytes[k]
-		switch {
-		case !existed:
-			change.Added = append(change.Added, k)
-		case before != def.Bytes:
-			change.Resized = append(change.Resized, k)
-		}
-	}
-	for _, def := range previous {
-		if k := key(def); !seen[k] {
-			change.Removed = append(change.Removed, k)
-		}
-	}
-	sort.Strings(change.Added)
-	sort.Strings(change.Removed)
-	sort.Strings(change.Resized)
-	return change
 }

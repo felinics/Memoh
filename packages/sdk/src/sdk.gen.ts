@@ -1387,7 +1387,7 @@ export const postBotsByBotIdSessionsBySessionIdCompact = <ThrowOnError extends b
 /**
  * Get session context lifecycle
  *
- * List run-keyed context lifecycle snapshots and aggregate cache, drop, mutation, and tool-roster diagnostics for a chat session; sessions predating run lifecycle persistence fall back to legacy assistant metadata
+ * List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source)
  */
 export const getBotsByBotIdSessionsBySessionIdContextLifecycle = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdSessionsBySessionIdContextLifecycleData, ThrowOnError>): RequestResult<GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses, GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses, GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors, ThrowOnError>({ url: '/bots/{bot_id}/sessions/{session_id}/context-lifecycle', ...options });
 
