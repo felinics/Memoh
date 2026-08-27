@@ -252,23 +252,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			return
 		}
 	}
-	if idleCancel.DidFire() {
+	timedOut := idleCancel.DidFire()
+	if timedOut {
 		lifecycleCause = context.Cause(idleCtx)
 		lifecycleDeferred = false
-		failureEvent := agentFailureStreamEvent(lifecycleCause)
-		if h.publishAgentEvent != nil {
-			if publishErr := h.publishAgentEvent(context.WithoutCancel(ctx), failureEvent); publishErr != nil {
-				h.emitErr(publishErr)
-				return
-			}
-		}
-		if payload, marshalErr := json.Marshal(failureEvent); marshalErr == nil {
-			h.emit(string(failureEvent.Type), payload)
-		}
-		h.emitErr(lifecycleCause)
-		return
 	}
-	if !hasTerminalEvent {
+	if !hasTerminalEvent && !timedOut {
 		if lifecycleCause == nil {
 			if ctx.Err() != nil {
 				lifecycleCause = context.Cause(ctx)
@@ -287,22 +276,29 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// detaching cancellation so that terminal history and runtime publication
 	// can cross the same durable boundary as the main chat stream.
 	terminalCtx := context.WithoutCancel(ctx)
-	if len(finalMessages) > 0 {
-		var sdkMsgs []sdk.Message
-		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
-			if storeErr := s.storeDiscussRound(terminalCtx,
-				runConfig.RunID,
-				cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
-				sdkMsgs, resolved.ModelID,
-				runConfig.ContextLifecycle,
-			); storeErr != nil {
-				historyErr := runtimeHistoryError(storeErr)
-				lifecycleCause = historyErr
-				lifecycleDeferred = false
-				h.emitErr(historyErr)
+	if hasTerminalEvent {
+		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages); storeErr != nil {
+			historyErr := runtimeHistoryError(storeErr)
+			lifecycleCause = historyErr
+			lifecycleDeferred = false
+			h.emitErr(historyErr)
+			return
+		}
+	}
+
+	if timedOut {
+		failureEvent := agentFailureStreamEvent(lifecycleCause)
+		if h.publishAgentEvent != nil {
+			if publishErr := h.publishAgentEvent(terminalCtx, failureEvent); publishErr != nil {
+				h.emitErr(publishErr)
 				return
 			}
 		}
+		if payload, marshalErr := json.Marshal(failureEvent); marshalErr == nil {
+			h.emit(string(failureEvent.Type), payload)
+		}
+		h.emitErr(lifecycleCause)
+		return
 	}
 	if hasTerminalEvent && h.publishAgentEvent != nil {
 		if publishErr := h.publishAgentEvent(terminalCtx, terminalEvent); publishErr != nil {
@@ -322,6 +318,33 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if compactable := discussCompactableTokens(cmd.DiscussMessages); compactable > 0 && s.compactionService != nil && s.settingsService != nil {
 		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
 	}
+}
+
+func (s *Service) persistDiscussTerminalSnapshot(
+	ctx context.Context,
+	runConfig native.RunConfig,
+	cmd turn.StartTurnCommand,
+	modelID string,
+	finalMessages json.RawMessage,
+) error {
+	if len(finalMessages) == 0 {
+		return nil
+	}
+	var sdkMsgs []sdk.Message
+	if json.Unmarshal(finalMessages, &sdkMsgs) != nil || len(sdkMsgs) == 0 {
+		return nil
+	}
+	return s.storeDiscussRound(
+		ctx,
+		runConfig.RunID,
+		cmd.BotID,
+		cmd.ThreadID,
+		cmd.SourceChannelIdentityID,
+		cmd.CurrentChannel,
+		sdkMsgs,
+		modelID,
+		runConfig.ContextLifecycle,
+	)
 }
 
 func (s *Service) collectDiscussSourceFrags(

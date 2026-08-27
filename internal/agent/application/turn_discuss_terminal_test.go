@@ -149,6 +149,71 @@ func TestDiscussCancellationPersistsAndPublishesTerminalOnDetachedContext(t *tes
 	}
 }
 
+func TestDiscussTimeoutPersistsNonemptyAbortSnapshotBeforeFailure(t *testing.T) {
+	agent := &canceledDiscussMessagesReporter{started: make(chan struct{})}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{ModelID: "model-1"},
+	}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	a.streamIdleTimeout = 10 * time.Millisecond
+	admitter := a.sessionRuntime.(*scriptedAdmitter)
+
+	var storedMessages []sdk.Message
+	var order []string
+	a.turnHooks.storeRound = func(
+		_ context.Context,
+		_, _, _, _, _ string,
+		messages []sdk.Message,
+		_ string,
+		_ *contextfrag.LifecycleHolder,
+	) error {
+		order = append(order, "store")
+		storedMessages = append([]sdk.Message(nil), messages...)
+		return nil
+	}
+	a.publishTurnEvent = func(
+		ctx context.Context,
+		handle sessionruntime.RunHandle,
+		event native.StreamEvent,
+	) error {
+		switch event.Type {
+		case native.EventError:
+			order = append(order, "failure")
+		case native.EventAgentEnd, native.EventAgentAbort:
+			order = append(order, "terminal")
+		}
+		return admitter.PublishAgentEvent(ctx, handle, event)
+	}
+
+	h, err := a.StartTurn(context.Background(), discussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-agent.started:
+	case <-time.After(time.Second):
+		t.Fatal("discuss turn did not reach native streaming")
+	}
+	for range h.Events() {
+	}
+	var streamErr error
+	for err := range h.Errs() {
+		streamErr = err
+	}
+
+	assertSDKMessagesEqual(t, storedMessages, []sdk.Message{sdk.AssistantMessage("partial answer")})
+	if len(order) != 2 || order[0] != "store" || order[1] != "failure" {
+		t.Fatalf("terminal order = %v, want persistence before timeout failure", order)
+	}
+	if got := apperror.CodeOf(streamErr); got != apperror.CodeAgentResponseTimeout {
+		t.Fatalf("stream error code = %q, want %q: %v", got, apperror.CodeAgentResponseTimeout, streamErr)
+	}
+	finish := admitter.awaitFinish(t)
+	if finish.status != sessionruntime.RunStatusErrored || finish.message != string(apperror.CodeAgentResponseTimeout) {
+		t.Fatalf("runtime finish = %#v, want errored response timeout", finish)
+	}
+}
+
 func TestDiscussPublishesDecisionTerminalAfterStoreSucceeds(t *testing.T) {
 	agent := &decisionDiscussAgentStreamer{}
 	resolver := &fakeDiscussService{

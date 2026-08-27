@@ -307,6 +307,9 @@ func TestAdmittedDiscussCancellationPersistsAbortedLifecycle(t *testing.T) {
 	handle.Cancel()
 	drainDiscuss(t, handle)
 
+	if resolver.storeCalls != 0 {
+		t.Fatalf("store calls = %d, want none for empty explicit cancellation", resolver.storeCalls)
+	}
 	if len(lifecycles.creates) != 1 || lifecycles.creates[0].Status != contextLifecycleStatusAborted {
 		t.Fatalf("lifecycle creates = %#v, want one aborted row", lifecycles.creates)
 	}
@@ -327,6 +330,9 @@ func TestAdmittedDiscussSilencePublishesStableTimeoutFailure(t *testing.T) {
 	}
 	events := drainDiscuss(t, handle)
 
+	if resolver.storeCalls != 0 {
+		t.Fatalf("store calls = %d, want none for empty timeout snapshot", resolver.storeCalls)
+	}
 	var failurePayload json.RawMessage
 	for _, event := range events {
 		if event.Kind == string(native.EventError) {
