@@ -143,6 +143,17 @@
       "reasoning_effort_unavailable": "選択した推論強度はこの外部Agentで利用できなくなりました。",
       "config_update_failed": "外部Agentに選択した設定を適用できませんでした。もう一度お試しください。"
     },
+    "agent_credential": {
+      "not_found": "この Agent アカウントは利用できません。別のアカウントを選択してください。",
+      "request_invalid": "Agent アカウントの情報を確認して、もう一度お試しください。",
+      "forbidden": "この Agent アカウントを使用する権限がありません。",
+      "incompatible": "このアカウントは選択した Agent では使用できません。",
+      "revoked": "この Agent アカウントは切断されています。再接続するか、別のアカウントを選択してください。",
+      "reauthorization_required": "この Agent アカウントを再接続してから使用してください。",
+      "encryption_unavailable": "この Server では Agent アカウントの保存が設定されていません。",
+      "runtime_busy": "現在の応答が完了してから Agent アカウントを切り替えてください。",
+      "materialization_failed": "Agent アカウントを準備できませんでした。もう一度お試しください。"
+    },
     "session_runtime": {
       "session_busy": "このセッションはまだ前のメッセージを処理しています。しばらくしてからもう一度お試しください。",
       "invocation_conflict": "このメッセージは別の内容で既に送信されています。セッションを再読み込みして保存済みの内容を確認してください。",
@@ -2442,6 +2453,14 @@
       "acpSetupChatGPT": "チャットGPT",
       "acpSetupClaude": "クロード",
       "acpSetupSelf": "自己管理",
+      "agentCredential": "アカウント",
+      "agentCredentialPlaceholder": "Agent アカウントを選択",
+      "agentCredentialLabel": "アカウント名",
+      "agentCredentialLabelPlaceholder": "識別しやすい名前を入力してください",
+      "agentCredentialSecret": "API Key",
+      "agentCredentialSecretPlaceholder": "API Keyを入力してください",
+      "agentCredentialSave": "アカウントを保存",
+      "agentCredentialSaved": "Agent アカウントを保存しました",
       "acpAuthType": "認証",
       "acpAuthApiKey": "APIキー",
       "acpAuthChatGPT": "ChatGPTアカウント",

@@ -231,6 +231,8 @@ definitions:
     properties:
       acp_session_id:
         type: string
+      agent_credential_id:
+        type: string
       agent_id:
         type: string
       default_model_id:
@@ -325,6 +327,10 @@ definitions:
           $ref: '#/definitions/acpprofile.ManagedField'
         type: array
       setup_modes:
+        items:
+          type: string
+        type: array
+      supported_auth_kinds:
         items:
           type: string
         type: array
@@ -584,6 +590,76 @@ definitions:
         type: integer
       total_text_bytes:
         type: integer
+    type: object
+  agentcredential.BindRequest:
+    properties:
+      credential_id:
+        type: string
+      make_default:
+        type: boolean
+    type: object
+  agentcredential.CreateRequest:
+    properties:
+      account_metadata:
+        additionalProperties: {}
+        type: object
+      auth_kind:
+        type: string
+      expires_at:
+        type: string
+      label:
+        type: string
+      provider:
+        type: string
+      secret:
+        additionalProperties:
+          type: string
+        type: object
+    type: object
+  agentcredential.CredentialList:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/agentcredential.PublicCredential'
+        type: array
+    type: object
+  agentcredential.PublicCredential:
+    properties:
+      account_metadata:
+        additionalProperties: {}
+        type: object
+      auth_kind:
+        type: string
+      created_at:
+        type: string
+      credential_version:
+        type: integer
+      expires_at:
+        type: string
+      id:
+        type: string
+      is_default:
+        type: boolean
+      label:
+        type: string
+      owner_user_id:
+        type: string
+      provider:
+        type: string
+      revoked:
+        type: boolean
+      updated_at:
+        type: string
+    type: object
+  agentcredential.SetDefaultRequest:
+    properties:
+      credential_id:
+        type: string
+    type: object
+  agentcredential.UpdateRequest:
+    properties:
+      label:
+        type: string
     type: object
   apperror.Problem:
     properties:
@@ -3436,6 +3512,8 @@ definitions:
     properties:
       acp_agent_id:
         type: string
+      agent_credential_id:
+        type: string
       project_path:
         type: string
     type: object
@@ -4572,6 +4650,9 @@ definitions:
           ACPModelID is an agent-reported model identifier override for ACP
           runs (e.g. a Codex model id). Mutually exclusive with ModelID.
         type: string
+      agent_credential_id:
+        description: AgentCredentialID pins the credential used by a new Agent session.
+        type: string
       command:
         type: string
       description:
@@ -4618,6 +4699,9 @@ definitions:
         description: |-
           ACPModelID is an agent-reported model identifier override for ACP
           runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+        type: string
+      agent_credential_id:
+        description: AgentCredentialID pins the credential used by a new Agent session.
         type: string
       model_id:
         description: ModelID is a native model UUID override (models.id).
@@ -4698,6 +4782,9 @@ definitions:
         description: |-
           ACPModelID is an agent-reported model identifier override for ACP
           runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+        type: string
+      agent_credential_id:
+        description: AgentCredentialID pins the credential used by a new Agent session.
         type: string
       bot_id:
         type: string
@@ -5428,6 +5515,93 @@ paths:
       summary: List ACP profiles
       tags:
       - acp
+  /agent-credentials:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.CredentialList'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List owned Agent credentials
+      tags:
+      - agent-credentials
+    post:
+      parameters:
+      - description: Credential
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/agentcredential.CreateRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/agentcredential.PublicCredential'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Create an encrypted Agent credential
+      tags:
+      - agent-credentials
+  /agent-credentials/{credential_id}:
+    delete:
+      parameters:
+      - description: Credential ID
+        in: path
+        name: credential_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.PublicCredential'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Revoke an Agent credential
+      tags:
+      - agent-credentials
+    patch:
+      parameters:
+      - description: Credential ID
+        in: path
+        name: credential_id
+        required: true
+        type: string
+      - description: Update
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/agentcredential.UpdateRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.PublicCredential'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Rename an Agent credential
+      tags:
+      - agent-credentials
   /auth/login:
     post:
       description: Validate user credentials and issue a JWT
@@ -6270,6 +6444,122 @@ paths:
       summary: Get Codex ACP OAuth status
       tags:
       - acp
+  /bots/{bot_id}/agents/{agent_id}/credentials:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: agent_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.CredentialList'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List credentials bound to a Bot Agent
+      tags:
+      - agent-credentials
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: agent_id
+        required: true
+        type: string
+      - description: Binding
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/agentcredential.BindRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/agentcredential.PublicCredential'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Bind a credential to a Bot Agent
+      tags:
+      - agent-credentials
+  /bots/{bot_id}/agents/{agent_id}/credentials/{credential_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: agent_id
+        required: true
+        type: string
+      - description: Credential ID
+        in: path
+        name: credential_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Unbind a credential from a Bot Agent
+      tags:
+      - agent-credentials
+  /bots/{bot_id}/agents/{agent_id}/credentials/default:
+    put:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: agent_id
+        required: true
+        type: string
+      - description: Default credential
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/agentcredential.SetDefaultRequest'
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Set the default credential for a Bot Agent
+      tags:
+      - agent-credentials
   /bots/{bot_id}/backup/export:
     post:
       consumes:
@@ -9747,6 +10037,11 @@ paths:
     post:
       description: Create a schedule for current user
       parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       - description: Schedule payload
         in: body
         name: payload
@@ -9823,6 +10118,11 @@ paths:
     put:
       description: Update a schedule by ID
       parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       - description: Schedule ID
         in: path
         name: id

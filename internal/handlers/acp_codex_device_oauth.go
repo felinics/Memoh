@@ -210,7 +210,7 @@ func (h *ACPCodexOAuthHandler) PollDevice(c echo.Context) error {
 		}
 		return c.JSON(http.StatusOK, deviceStatusResponse(updated))
 	}
-	writeErr := h.writeCodexOAuthAuth(writeCtx, botID, creds)
+	writeErr := h.writeCodexOAuthAuth(writeCtx, botID, channelIdentityID, creds)
 	updated := h.finishDeviceAuthWrite(sessionID, generation, creds.AccountID, writeErr, time.Now().UTC())
 	return c.JSON(http.StatusOK, deviceStatusResponse(updated))
 }

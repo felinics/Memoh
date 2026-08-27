@@ -15,6 +15,8 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/memohai/memoh/internal/agentcredential"
 	"github.com/memohai/memoh/internal/bots"
 	session "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/workdir"
@@ -26,6 +28,7 @@ type SessionHandler struct {
 	threadEnricher threadEnricher
 	acpPool        acpSessionCloser
 	workdirs       sessionWorkdirService
+	credentials    *agentcredential.Service
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
@@ -66,6 +69,10 @@ func (h *SessionHandler) SetThreadEnricher(enricher threadEnricher) {
 // bindings at session creation.
 func (h *SessionHandler) SetWorkdirService(workdirs sessionWorkdirService) {
 	h.workdirs = workdirs
+}
+
+func (h *SessionHandler) SetCredentialService(service *agentcredential.Service) {
+	h.credentials = service
 }
 
 // Register registers session routes.
@@ -158,9 +165,10 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if targetRuntimeType == session.RuntimeACPAgent {
 		req.Metadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(req.Metadata, req.RuntimeMetadata))
 		req.RuntimeMetadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(req.RuntimeMetadata, req.Metadata))
-		if err := validateACPCreate(bot, req.Metadata); err != nil {
+		if err := h.ensureAgentCredential(c.Request().Context(), bot, req.Metadata); err != nil {
 			return err
 		}
+		req.RuntimeMetadata["agent_credential_id"] = req.Metadata["agent_credential_id"]
 	}
 	createInput := session.CreateInput{
 		BotID:           bot.ID,
@@ -640,6 +648,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			targetRuntimeMetadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(targetRuntimeMetadata, targetMetadata))
 		}
 		agentChanged := sessionAgentConfigChanged(existing, targetMode, targetRuntime, targetMetadata, targetRuntimeMetadata)
+		credentialChanged := sessionMetadataString(mergeSessionMetadata(existing.Metadata, existing.RuntimeMetadata), "agent_credential_id") != sessionMetadataString(mergeSessionMetadata(targetMetadata, targetRuntimeMetadata), "agent_credential_id")
 		if agentChanged {
 			count, err := h.sessionService.MessageCount(c.Request().Context(), sessionID)
 			if err != nil {
@@ -650,9 +659,10 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			}
 		}
 		if targetRuntime == session.RuntimeACPAgent {
-			if err := validateACPCreate(bot, targetMetadata); err != nil {
+			if err := h.ensureAgentCredential(c.Request().Context(), bot, targetMetadata); err != nil {
 				return err
 			}
+			targetRuntimeMetadata["agent_credential_id"] = targetMetadata["agent_credential_id"]
 		} else if session.IsACPRuntime(existing) || req.Type != nil || req.RuntimeType != nil || req.RuntimeMetadata != nil {
 			targetMetadata = stripACPMetadata(targetMetadata)
 			targetRuntimeMetadata = map[string]any{}
@@ -662,7 +672,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			if err != nil {
 				return sessionServiceError(err)
 			}
-			if agentChanged && session.IsACPRuntime(existing) && h.acpPool != nil {
+			if (agentChanged || credentialChanged) && session.IsACPRuntime(existing) && h.acpPool != nil {
 				if closeErr := h.acpPool.CloseSession(sessionID); closeErr != nil {
 					h.logger.Warn("failed to close ACP runtime after session update", slog.String("session_id", sessionID), slog.Any("error", closeErr))
 				}
@@ -901,6 +911,40 @@ func validateACPCreate(bot bots.Bot, metadata map[string]any) error {
 	return nil
 }
 
+func (h *SessionHandler) ensureAgentCredential(ctx context.Context, bot bots.Bot, metadata map[string]any) error {
+	agentID := sessionMetadataString(metadata, "acp_agent_id")
+	if agentID == "" || sessionMetadataString(metadata, "project_path") == "" {
+		return validateACPCreate(bot, metadata)
+	}
+	setup := acpprofile.ParseAgentSetup(bot.Metadata, agentID)
+	if setup.Mode == "self" {
+		if err := validateACPCreate(bot, metadata); err != nil {
+			return err
+		}
+		delete(metadata, "agent_credential_id")
+		return nil
+	}
+	if h.credentials == nil {
+		return mapAgentCredentialError(agentcredential.ErrEncryptionUnavailable)
+	}
+	if !setup.Enabled {
+		return echo.NewHTTPError(http.StatusBadRequest, "ACP agent is not enabled")
+	}
+	credentialID := sessionMetadataString(metadata, "agent_credential_id")
+	var resolved agentcredential.ResolvedCredential
+	var err error
+	if credentialID == "" {
+		resolved, err = h.credentials.ResolveDefault(ctx, bot.ID, agentID)
+	} else {
+		resolved, err = h.credentials.Resolve(ctx, bot.ID, agentID, credentialID)
+	}
+	if err != nil {
+		return mapAgentCredentialError(err)
+	}
+	metadata["agent_credential_id"] = resolved.ID
+	return nil
+}
+
 func sessionServiceError(err error) error {
 	switch {
 	case errors.Is(err, session.ErrACPAgentIDRequired),
@@ -976,7 +1020,7 @@ func sessionAgentConfigChanged(existing session.Thread, targetMode, targetRuntim
 func stripACPMetadata(metadata map[string]any) map[string]any {
 	out := cloneSessionMetadata(metadata)
 	for key := range out {
-		if strings.HasPrefix(key, "acp_") || key == "project_path" {
+		if strings.HasPrefix(key, "acp_") || key == "project_path" || key == "agent_credential_id" {
 			delete(out, key)
 		}
 	}

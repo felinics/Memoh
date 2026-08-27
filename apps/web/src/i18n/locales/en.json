@@ -146,6 +146,17 @@
       "reasoning_effort_unavailable": "The selected reasoning effort is no longer available for this external agent.",
       "config_update_failed": "The external agent could not apply the selected settings. Please retry."
     },
+    "agent_credential": {
+      "not_found": "This Agent account is no longer available. Choose another account.",
+      "request_invalid": "Check the Agent account details and try again.",
+      "forbidden": "You do not have permission to use this Agent account.",
+      "incompatible": "This account cannot be used with the selected Agent.",
+      "revoked": "This Agent account has been disconnected. Connect it again or choose another account.",
+      "reauthorization_required": "Connect this Agent account again before using it.",
+      "encryption_unavailable": "Agent account storage is not configured on this server.",
+      "runtime_busy": "Wait for the current response to finish before switching Agent accounts.",
+      "materialization_failed": "The Agent account could not be prepared. Please retry."
+    },
     "session_runtime": {
       "session_busy": "This conversation is still working on your previous message. Please try again in a moment.",
       "invocation_conflict": "This message was already sent with different content. Reload the conversation to see what was saved.",
@@ -2449,6 +2460,14 @@
       "acpSetupChatGPT": "ChatGPT",
       "acpSetupClaude": "Claude",
       "acpSetupSelf": "Self-managed",
+      "agentCredential": "Account",
+      "agentCredentialPlaceholder": "Select an Agent account",
+      "agentCredentialLabel": "Account name",
+      "agentCredentialLabelPlaceholder": "Enter a name you will recognize",
+      "agentCredentialSecret": "API Key",
+      "agentCredentialSecretPlaceholder": "Enter the API Key",
+      "agentCredentialSave": "Save account",
+      "agentCredentialSaved": "Agent account saved",
       "acpAuthType": "Authentication",
       "acpAuthApiKey": "API Key",
       "acpAuthChatGPT": "ChatGPT Account",

@@ -11,42 +11,51 @@ import (
 type Code string
 
 const (
-	CodeBotNameTaken                     Code = "bot.name_taken"
-	CodeChannelRuntimeUnavailable        Code = "channel.runtime_unavailable"
-	CodeCompactionModelUnavailable       Code = "compaction.model_unavailable"
-	CodeWorkspaceUnreachable             Code = "workspace.unreachable"
-	CodeWorkspaceImageIncompatible       Code = "workspace.image_incompatible"
-	CodeWorkspaceTemplateBootstrapFailed Code = "workspace.template_bootstrap_failed"
-	CodeWorkspaceDisplayPrepareFailed    Code = "workspace.display_prepare_failed"
-	CodeProviderTemplateNotFound         Code = "provider_template.not_found"
-	CodeProviderTemplateDomainInvalid    Code = "provider_template.domain_invalid"
-	CodeProviderTemplateDomainMismatch   Code = "provider_template.domain_mismatch"
-	CodeProviderTemplateOperationFailed  Code = "provider_template.operation_failed"
-	CodeProviderNameTaken                Code = "provider.name_taken"
-	CodeProviderTemplateRequestInvalid   Code = "provider_template.request_invalid"
-	CodeSearchProviderTypeConflict       Code = "search_provider.type_conflict"
-	CodeConnectorRequestInvalid          Code = "connector.request_invalid"
-	CodeConnectorNotConfigured           Code = "connector.not_configured"
-	CodeConnectorNotFound                Code = "connector.not_found"
-	CodeConnectorConflict                Code = "connector.conflict"
-	CodeConnectorRequestRejected         Code = "connector.request_rejected"
-	CodeConnectorUpstreamUnavailable     Code = "connector.upstream_unavailable"
-	CodeConnectorOperationFailed         Code = "connector.operation_failed"
-	CodeProfileRequestInvalid            Code = "profile.request_invalid"
-	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
-	CodeProfileUpdateFailed              Code = "profile.update_failed"
-	CodeACPRuntimeNotFound               Code = "acp.runtime_not_found"
-	CodeACPTurnReplacementUnsupported    Code = "acp.turn_replacement_unsupported"
-	CodeACPModelSelectionUnsupported     Code = "acp.model_selection_unsupported"
-	CodeACPModelIDRequired               Code = "acp.model_id_required"
-	CodeACPModelUnavailable              Code = "acp.model_unavailable"
-	CodeACPReasoningUnsupported          Code = "acp.reasoning_selection_unsupported"
-	CodeACPReasoningEffortRequired       Code = "acp.reasoning_effort_required"
-	CodeACPReasoningUnavailable          Code = "acp.reasoning_effort_unavailable"
-	CodeACPConfigUpdateFailed            Code = "acp.config_update_failed"
-	CodeSessionBusy                      Code = "session_runtime.session_busy"
-	CodeSessionInvocationConflict        Code = "session_runtime.invocation_conflict"
-	CodeSessionHistoryInconsistent       Code = "session_runtime.history_inconsistent"
+	CodeBotNameTaken                         Code = "bot.name_taken"
+	CodeChannelRuntimeUnavailable            Code = "channel.runtime_unavailable"
+	CodeCompactionModelUnavailable           Code = "compaction.model_unavailable"
+	CodeWorkspaceUnreachable                 Code = "workspace.unreachable"
+	CodeWorkspaceImageIncompatible           Code = "workspace.image_incompatible"
+	CodeWorkspaceTemplateBootstrapFailed     Code = "workspace.template_bootstrap_failed"
+	CodeWorkspaceDisplayPrepareFailed        Code = "workspace.display_prepare_failed"
+	CodeProviderTemplateNotFound             Code = "provider_template.not_found"
+	CodeProviderTemplateDomainInvalid        Code = "provider_template.domain_invalid"
+	CodeProviderTemplateDomainMismatch       Code = "provider_template.domain_mismatch"
+	CodeProviderTemplateOperationFailed      Code = "provider_template.operation_failed"
+	CodeProviderNameTaken                    Code = "provider.name_taken"
+	CodeProviderTemplateRequestInvalid       Code = "provider_template.request_invalid"
+	CodeSearchProviderTypeConflict           Code = "search_provider.type_conflict"
+	CodeConnectorRequestInvalid              Code = "connector.request_invalid"
+	CodeConnectorNotConfigured               Code = "connector.not_configured"
+	CodeConnectorNotFound                    Code = "connector.not_found"
+	CodeConnectorConflict                    Code = "connector.conflict"
+	CodeConnectorRequestRejected             Code = "connector.request_rejected"
+	CodeConnectorUpstreamUnavailable         Code = "connector.upstream_unavailable"
+	CodeConnectorOperationFailed             Code = "connector.operation_failed"
+	CodeProfileRequestInvalid                Code = "profile.request_invalid"
+	CodeProfileTitleModelInvalid             Code = "profile.title_model_invalid"
+	CodeProfileUpdateFailed                  Code = "profile.update_failed"
+	CodeACPRuntimeNotFound                   Code = "acp.runtime_not_found"
+	CodeACPTurnReplacementUnsupported        Code = "acp.turn_replacement_unsupported"
+	CodeACPModelSelectionUnsupported         Code = "acp.model_selection_unsupported"
+	CodeACPModelIDRequired                   Code = "acp.model_id_required"
+	CodeACPModelUnavailable                  Code = "acp.model_unavailable"
+	CodeACPReasoningUnsupported              Code = "acp.reasoning_selection_unsupported"
+	CodeACPReasoningEffortRequired           Code = "acp.reasoning_effort_required"
+	CodeACPReasoningUnavailable              Code = "acp.reasoning_effort_unavailable"
+	CodeACPConfigUpdateFailed                Code = "acp.config_update_failed"
+	CodeSessionBusy                          Code = "session_runtime.session_busy"
+	CodeSessionInvocationConflict            Code = "session_runtime.invocation_conflict"
+	CodeSessionHistoryInconsistent           Code = "session_runtime.history_inconsistent"
+	CodeAgentCredentialNotFound              Code = "agent_credential.not_found"                //nolint:gosec // Stable public error code.
+	CodeAgentCredentialRequestInvalid        Code = "agent_credential.request_invalid"          //nolint:gosec // Stable public error code.
+	CodeAgentCredentialForbidden             Code = "agent_credential.forbidden"                //nolint:gosec // Stable public error code.
+	CodeAgentCredentialIncompatible          Code = "agent_credential.incompatible"             //nolint:gosec // Stable public error code.
+	CodeAgentCredentialRevoked               Code = "agent_credential.revoked"                  //nolint:gosec // Stable public error code.
+	CodeAgentCredentialReauthRequired        Code = "agent_credential.reauthorization_required" //nolint:gosec // Stable public error code.
+	CodeAgentCredentialEncryptionUnavailable Code = "agent_credential.encryption_unavailable"   //nolint:gosec // Stable public error code.
+	CodeAgentCredentialRuntimeBusy           Code = "agent_credential.runtime_busy"             //nolint:gosec // Stable public error code.
+	CodeAgentCredentialMaterializationFailed Code = "agent_credential.materialization_failed"   //nolint:gosec // Stable public error code.
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -61,6 +70,42 @@ type Definition struct {
 // clients; the localized copies live under errors.* in
 // apps/web/src/i18n/locales/{en,zh,ja}.json. Keep both sides in sync.
 var catalog = map[Code]Definition{
+	CodeAgentCredentialNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The Agent credential was not found.",
+	},
+	CodeAgentCredentialRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The Agent credential request is invalid.",
+	},
+	CodeAgentCredentialForbidden: {
+		HTTPStatus: http.StatusForbidden,
+		Detail:     "You cannot use this Agent credential.",
+	},
+	CodeAgentCredentialIncompatible: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "This credential is not compatible with the selected Agent.",
+	},
+	CodeAgentCredentialRevoked: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This Agent credential has been revoked.",
+	},
+	CodeAgentCredentialReauthRequired: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This Agent credential needs to be connected again.",
+	},
+	CodeAgentCredentialEncryptionUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "Agent credential storage is not configured on this server.",
+	},
+	CodeAgentCredentialRuntimeBusy: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The Agent credential cannot be changed while the Agent is running.",
+	},
+	CodeAgentCredentialMaterializationFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The Agent credential could not be prepared for this runtime.",
+	},
 	CodeBotNameTaken: {
 		HTTPStatus:  http.StatusConflict,
 		Detail:      "This name is already taken.",

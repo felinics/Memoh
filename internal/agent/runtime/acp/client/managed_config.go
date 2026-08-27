@@ -11,10 +11,11 @@ import (
 )
 
 type ManagedACPConfigRequest struct {
-	Profile  acpprofile.Profile
-	Setup    acpprofile.AgentSetup
-	Mode     SetupMode
-	Resolved ResolvedSessionContext
+	Profile    acpprofile.Profile
+	Setup      acpprofile.AgentSetup
+	Mode       SetupMode
+	Resolved   ResolvedSessionContext
+	CodexOAuth *CodexOAuthCredentials
 }
 
 type ManagedACPConfigClientGetter func() (*bridge.Client, error)
@@ -71,11 +72,24 @@ func WriteManagedACPConfig(ctx context.Context, req ManagedACPConfigRequest, get
 		if err != nil {
 			return err
 		}
+		if strings.TrimSpace(req.Resolved.AuthRoot) != "" {
+			if err := preparePrivateDir(ctx, client, req.Resolved.AuthRoot); err != nil {
+				return err
+			}
+			if err := preparePrivateDir(ctx, client, req.Resolved.CodexHome); err != nil {
+				return err
+			}
+		}
 		cfg := CodexManagedConfig{
-			Mode:    mode,
-			Managed: req.Setup.Managed,
+			Mode:      mode,
+			Managed:   req.Setup.Managed,
+			OAuth:     req.CodexOAuth,
+			ConfigDir: req.Resolved.CodexHome,
 		}
 		if mode == SetupModeOAuth {
+			if req.CodexOAuth != nil {
+				return WriteCodexManagedConfigWithAuth(ctx, client, cfg)
+			}
 			return WriteCodexManagedConfigFile(ctx, client, cfg)
 		}
 		return WriteCodexManagedConfigWithAuth(ctx, client, cfg)
@@ -83,6 +97,14 @@ func WriteManagedACPConfig(ctx context.Context, req ManagedACPConfigRequest, get
 		client, err := requireManagedACPClient(getClient)
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(req.Resolved.AuthRoot) != "" {
+			if err := preparePrivateDir(ctx, client, req.Resolved.AuthRoot); err != nil {
+				return err
+			}
+			if err := preparePrivateDir(ctx, client, req.Resolved.HermesHome); err != nil {
+				return err
+			}
 		}
 		return WriteHermesManagedConfig(ctx, client, HermesManagedConfig{
 			Managed: req.Setup.Managed,

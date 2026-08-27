@@ -16,6 +16,8 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
+	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/memohai/memoh/internal/agentcredential"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/providers"
 )
@@ -55,10 +57,15 @@ type ACPCodexOAuthHandler struct {
 	acpWorkspace   acpWorkspaceConfigProvider
 	callbackURL    string
 	logger         *slog.Logger
+	credentials    *agentcredential.Service
 
 	mu             sync.Mutex
 	states         map[string]acpCodexOAuthState
 	deviceSessions map[string]*acpCodexDeviceAuthSession
+}
+
+func (h *ACPCodexOAuthHandler) SetCredentialService(service *agentcredential.Service) {
+	h.credentials = service
 }
 
 type acpCodexOAuthState struct {
@@ -155,10 +162,26 @@ func (h *ACPCodexOAuthHandler) Status(c echo.Context) error {
 		return err
 	}
 	status := ACPCodexOAuthStatus{
-		Configured:  h.provider != nil && h.acpWorkspace != nil,
+		Configured:  h.provider != nil && ((h.credentials != nil && h.credentials.Configured()) || h.acpWorkspace != nil),
 		CallbackURL: h.callbackURL,
 	}
 	if !status.Configured {
+		return c.JSON(http.StatusOK, status)
+	}
+	if h.credentials != nil {
+		items, listErr := h.credentials.ListBindings(c.Request().Context(), botID, acpprofile.AgentCodexID)
+		if listErr != nil {
+			return mapAgentCredentialError(listErr)
+		}
+		for _, item := range items {
+			if item.IsDefault && !item.Revoked && item.AuthKind == agentcredential.AuthKindOpenAICodexOAuth {
+				status.HasToken = true
+				if value, ok := item.AccountMetadata["account_id"].(string); ok {
+					status.AccountID = value
+				}
+				break
+			}
+		}
 		return c.JSON(http.StatusOK, status)
 	}
 	if err := h.ensureManagedWorkspace(c.Request().Context(), botID); err != nil {
@@ -210,7 +233,7 @@ func (h *ACPCodexOAuthHandler) Callback(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if err := h.writeCodexOAuthAuth(c.Request().Context(), oauthState.BotID, creds); err != nil {
+	if err := h.writeCodexOAuthAuth(c.Request().Context(), oauthState.BotID, oauthState.ChannelIdentityID, creds); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -257,7 +280,21 @@ func (h *ACPCodexOAuthHandler) ensureManagedWorkspace(ctx context.Context, botID
 	return nil
 }
 
-func (h *ACPCodexOAuthHandler) writeCodexOAuthAuth(ctx context.Context, botID string, creds providers.OpenAICodexOAuthCredentials) error {
+func (h *ACPCodexOAuthHandler) writeCodexOAuthAuth(ctx context.Context, botID, ownerUserID string, creds providers.OpenAICodexOAuthCredentials) error {
+	if h.credentials != nil {
+		metadata := map[string]any{"account_id": creds.AccountID}
+		item, err := h.credentials.Create(ctx, ownerUserID, agentcredential.CreateRequest{
+			Provider: agentcredential.ProviderOpenAI, AuthKind: agentcredential.AuthKindOpenAICodexOAuth,
+			Label:           "ChatGPT " + creds.AccountID,
+			Secret:          map[string]string{"access_token": creds.AccessToken, "id_token": creds.IDToken, "refresh_token": creds.RefreshToken, "account_id": creds.AccountID},
+			AccountMetadata: metadata, ExpiresAt: &creds.ExpiresAt,
+		})
+		if err != nil {
+			return err
+		}
+		_, err = h.credentials.Bind(ctx, ownerUserID, botID, acpprofile.AgentCodexID, item.ID, true)
+		return err
+	}
 	if h.acpWorkspace == nil {
 		return errors.New("workspace manager is not configured")
 	}

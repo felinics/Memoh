@@ -26,6 +26,7 @@ import (
 type ToolSessionContext = mcp.ToolSessionContext
 
 type StartRequest struct {
+	RuntimeID   string
 	AgentID     string
 	BotID       string
 	ProjectPath string
@@ -56,6 +57,7 @@ type StartRequest struct {
 	ToolPreflightGateway   *mcp.ToolGatewayService
 	ToolHTTPURL            string
 	ToolHTTPHandler        http.Handler
+	BeforeAuthCleanup      func(context.Context)
 }
 
 type PromptResult struct {
@@ -210,14 +212,19 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}
 
 	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
-		Backend:    backend,
-		AgentID:    req.AgentID,
-		SetupMode:  req.SetupMode,
-		Env:        req.Env,
-		CleanEnv:   req.CleanEnv,
-		UnsetEnv:   req.UnsetEnv,
-		HermesHome: resolvedHermesHome(req.Resolved),
-		NoTimeout:  true,
+		Backend:           backend,
+		RuntimeID:         req.RuntimeID,
+		AgentID:           req.AgentID,
+		SetupMode:         req.SetupMode,
+		Env:               req.Env,
+		CleanEnv:          req.CleanEnv,
+		UnsetEnv:          req.UnsetEnv,
+		HermesHome:        resolvedHermesHome(req.Resolved),
+		AuthRoot:          resolvedAuthRoot(req.Resolved),
+		CodexHome:         resolvedCodexHome(req.Resolved),
+		ClaudeHome:        resolvedClaudeHome(req.Resolved),
+		BeforeAuthCleanup: req.BeforeAuthCleanup,
+		NoTimeout:         true,
 	})
 	if err != nil {
 		if toolHTTPStop != nil {

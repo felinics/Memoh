@@ -146,6 +146,17 @@
       "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent。",
       "config_update_failed": "外部 Agent 无法应用所选设置，请重试。"
     },
+    "agent_credential": {
+      "not_found": "这个 Agent 账号已不可用，请选择其他账号。",
+      "request_invalid": "请检查 Agent 账号信息后重试。",
+      "forbidden": "你没有权限使用这个 Agent 账号。",
+      "incompatible": "这个账号不能用于所选 Agent。",
+      "revoked": "这个 Agent 账号已断开，请重新连接或选择其他账号。",
+      "reauthorization_required": "请先重新连接这个 Agent 账号。",
+      "encryption_unavailable": "此服务器尚未配置 Agent 账号存储。",
+      "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
+      "materialization_failed": "Agent 账号准备失败，请重试。"
+    },
     "session_runtime": {
       "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
       "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。",
@@ -2449,6 +2460,14 @@
       "acpSetupChatGPT": "ChatGPT",
       "acpSetupClaude": "Claude",
       "acpSetupSelf": "自行配置",
+      "agentCredential": "账号",
+      "agentCredentialPlaceholder": "选择 Agent 账号",
+      "agentCredentialLabel": "账号名称",
+      "agentCredentialLabelPlaceholder": "输入一个便于识别的名称",
+      "agentCredentialSecret": "API Key",
+      "agentCredentialSecretPlaceholder": "输入 API Key",
+      "agentCredentialSave": "保存账号",
+      "agentCredentialSaved": "Agent 账号已保存",
       "acpAuthType": "授权方式",
       "acpAuthApiKey": "API Key",
       "acpAuthChatGPT": "ChatGPT 账号",

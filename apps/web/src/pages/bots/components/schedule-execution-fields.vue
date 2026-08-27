@@ -17,6 +17,26 @@
     </FieldStack>
 
     <FieldStack
+      v-if="form.runTarget === 'new_session' && form.runtimeType === 'acp_agent'"
+      :label="t('bots.settings.agentCredential')"
+    >
+      <Select v-model="credentialModel">
+        <SelectTrigger class="w-full">
+          <SelectValue :placeholder="t('bots.settings.agentCredentialPlaceholder')" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem
+            v-for="credential in agentCredentials"
+            :key="credential.id"
+            :value="credential.id || ''"
+          >
+            {{ credential.label }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    </FieldStack>
+
+    <FieldStack
       v-if="form.runTarget === 'existing_session'"
       :label="t('bots.schedule.execution.session')"
     >
@@ -131,6 +151,7 @@ import {
 import {
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getAcpProfiles,
+  getBotsByBotIdAgentsByAgentIdCredentials,
   getBotsById,
   getModels,
   getProviders,
@@ -140,6 +161,7 @@ import type {
   AcpclientModelInfo,
   AcpclientReasoningEffortInfo,
   AcpprofilePublicProfile,
+  AgentcredentialPublicCredential,
   ModelsGetResponse,
   ProvidersGetResponse,
   SessionSession,
@@ -166,6 +188,7 @@ export interface ScheduleExecutionForm {
   targetSessionId: string
   runtimeType: '' | 'acp_agent'
   acpAgentId: string
+  agentCredentialId: string
   modelId: string
   acpModelId: string
   reasoningEffort: string
@@ -179,6 +202,10 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const workdirsStore = useWorkdirsStore()
+const credentialModel = computed({
+  get: () => props.form.agentCredentialId,
+  set: (value: string) => { props.form.agentCredentialId = value },
+})
 
 // The backend only lets a schedule append to chat and schedule threads.
 const TARGET_SESSION_MODES = ['chat', 'schedule']
@@ -207,6 +234,29 @@ interface ACPCatalog {
 const acpCatalog = ref<ACPCatalog | null>(null)
 const acpCatalogLoading = ref(false)
 const acpCatalogError = ref<string | null>(null)
+const agentCredentials = ref<AgentcredentialPublicCredential[]>([])
+
+async function loadAgentCredentials(agentID: string) {
+  agentID = normalizeACPAgentID(agentID)
+  if (!agentID) {
+    agentCredentials.value = []
+    props.form.agentCredentialId = ''
+    return
+  }
+  try {
+    const { data } = await getBotsByBotIdAgentsByAgentIdCredentials({
+      path: { bot_id: props.botId, agent_id: agentID },
+      throwOnError: true,
+    })
+    agentCredentials.value = data?.items ?? []
+    if (!props.form.agentCredentialId) {
+      props.form.agentCredentialId = agentCredentials.value.find(item => item.is_default)?.id ?? ''
+    }
+  } catch {
+    agentCredentials.value = []
+    props.form.agentCredentialId = ''
+  }
+}
 
 const chatModels = computed(() =>
   models.value.filter((m) => m.type === 'chat' && m.enable !== false),
@@ -321,6 +371,7 @@ const runtimeModel = computed({
     props.form.modelId = ''
     props.form.acpModelId = ''
     props.form.reasoningEffort = ''
+    props.form.agentCredentialId = ''
     if (value.startsWith(ACP_VALUE_PREFIX)) {
       props.form.runtimeType = 'acp_agent'
       props.form.acpAgentId = value.slice(ACP_VALUE_PREFIX.length)
@@ -437,7 +488,7 @@ watch([acpReasoningOptions, acpAgentInPlay] as const, ([options, inPlay]) => {
   const agentCurrent = (acpCatalog.value?.currentEffort ?? '').trim()
   props.form.reasoningEffort = options.some((option) => option.value === agentCurrent)
     ? agentCurrent
-    : options[0].value
+    : options[0]?.value ?? ''
 }, { immediate: true })
 
 // loadACPCatalog boots a temporary pre-session runtime — the only place an
@@ -451,7 +502,7 @@ async function loadACPCatalog(agentID: string) {
   try {
     const { data } = await postBotsByBotIdAcpRuntimes({
       path: { bot_id: props.botId },
-      body: { acp_agent_id: agentID },
+      body: { acp_agent_id: agentID, agent_credential_id: props.form.agentCredentialId || undefined },
       throwOnError: true,
     })
     acpCatalog.value = {
@@ -473,7 +524,9 @@ async function loadACPCatalog(agentID: string) {
 }
 
 watch(activeAgentID, (agentID) => {
-  if (agentID && acpAgentInPlay.value) void loadACPCatalog(agentID)
+  if (agentID && acpAgentInPlay.value) {
+    void loadAgentCredentials(agentID).then(() => loadACPCatalog(agentID))
+  }
 }, { immediate: true })
 
 onMounted(async () => {

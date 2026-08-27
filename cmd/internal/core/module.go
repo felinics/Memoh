@@ -6,6 +6,7 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/agent/context/compaction"
 	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	"github.com/memohai/memoh/internal/agentcredential"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
@@ -85,6 +86,7 @@ func ServerModule() fx.Option {
 			memprovider.NewService,
 			provideMemoryProviderRegistry,
 			models.NewService,
+			agentcredential.NewService,
 			provideACPRunner,
 			provideACPSessionPool,
 			provideACPCodexOAuthHandler,

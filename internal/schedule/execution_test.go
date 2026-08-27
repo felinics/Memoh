@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	execTestBotID     = "11111111-1111-1111-1111-111111111111"
-	execTestSessionID = "22222222-2222-2222-2222-222222222222"
-	execTestModelID   = "33333333-3333-3333-3333-333333333333"
-	execTestWorkdirID = "44444444-4444-4444-4444-444444444444"
+	execTestBotID        = "11111111-1111-1111-1111-111111111111"
+	execTestSessionID    = "22222222-2222-2222-2222-222222222222"
+	execTestModelID      = "33333333-3333-3333-3333-333333333333"
+	execTestWorkdirID    = "44444444-4444-4444-4444-444444444444"
+	execTestCredentialID = "55555555-5555-5555-5555-555555555555"
 )
 
 // executionQueries fakes the two lookups normalizeExecution performs.
@@ -234,7 +235,7 @@ func TestNormalizeExecutionNewSessionRules(t *testing.T) {
 		t.Fatalf("unexpected normalized exec: %+v", disabled)
 	}
 
-	exec, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{RuntimeType: RuntimeACPAgent, ACPAgentID: "codex", ACPModelID: "gpt-5-codex", ReasoningEffort: "anything-agent-defined"})
+	exec, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{RuntimeType: RuntimeACPAgent, ACPAgentID: "codex", AgentCredentialID: execTestCredentialID, ACPModelID: "gpt-5-codex", ReasoningEffort: "anything-agent-defined"})
 	if err != nil {
 		t.Fatalf("normalizeExecution() error = %v", err)
 	}
@@ -308,7 +309,7 @@ func TestNormalizeExecutionWorkdirRules(t *testing.T) {
 	t.Run("acp runtime rejects remote workdir", func(t *testing.T) {
 		svc := newExecutionService(t, &executionQueries{}, remote)
 		_, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{
-			RuntimeType: RuntimeACPAgent, ACPAgentID: "codex", WorkdirID: execTestWorkdirID,
+			RuntimeType: RuntimeACPAgent, ACPAgentID: "codex", AgentCredentialID: execTestCredentialID, WorkdirID: execTestWorkdirID,
 		})
 		if err == nil || !strings.Contains(err.Error(), "remote") {
 			t.Fatalf("error = %v, want remote workdir rejection", err)

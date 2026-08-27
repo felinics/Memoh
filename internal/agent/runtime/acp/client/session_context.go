@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/memohai/memoh/internal/runtimeauth"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const HermesContainerHome = dataMountPath + "/.memoh-hermes"
 
 type SessionContextInput struct {
+	RuntimeID   string
 	AgentID     string
 	SetupMode   SetupMode
 	Backend     string
@@ -17,12 +19,16 @@ type SessionContextInput struct {
 }
 
 type ResolvedSessionContext struct {
+	RuntimeID     string
 	AgentID       string
 	SetupMode     SetupMode
 	Backend       WorkspaceBackend
 	WorkspaceRoot string
 	ProjectPath   string
 	CWD           string
+	AuthRoot      string
+	CodexHome     string
+	ClaudeHome    string
 	HermesHome    string
 }
 
@@ -41,6 +47,7 @@ func ResolveSessionContext(input SessionContextInput) (ResolvedSessionContext, e
 	}
 
 	ctx := ResolvedSessionContext{
+		RuntimeID:     strings.TrimSpace(input.RuntimeID),
 		AgentID:       strings.TrimSpace(input.AgentID),
 		SetupMode:     normalizeSetupMode(input.SetupMode),
 		Backend:       backend,
@@ -48,7 +55,19 @@ func ResolveSessionContext(input SessionContextInput) (ResolvedSessionContext, e
 		ProjectPath:   projectPath,
 		CWD:           projectPath,
 	}
-	if isHermesAgent(input.AgentID) && ctx.SetupMode != SetupModeSelf {
+	if ctx.SetupMode != SetupModeSelf && ctx.RuntimeID != "" {
+		authRoot, err := runtimeauth.RootFor(ctx.RuntimeID)
+		if err != nil {
+			return ResolvedSessionContext{}, err
+		}
+		ctx.AuthRoot = authRoot
+		ctx.CodexHome, _ = runtimeauth.Child(authRoot, "codex")
+		ctx.ClaudeHome, _ = runtimeauth.Child(authRoot, "claude-home")
+		ctx.HermesHome, _ = runtimeauth.Child(authRoot, "hermes")
+	} else if isHermesAgent(input.AgentID) && ctx.SetupMode != SetupModeSelf {
+		// Compatibility callers that prepare a Bot workspace outside a live
+		// runtime retain the historical location. Live runtimes always pass an
+		// ID and use the isolated /tmp/memoh-auth root above.
 		ctx.HermesHome = HermesContainerHome
 	}
 	return ctx, nil
@@ -70,4 +89,25 @@ func resolvedHermesHome(ctx *ResolvedSessionContext) string {
 		return ""
 	}
 	return strings.TrimSpace(ctx.HermesHome)
+}
+
+func resolvedAuthRoot(ctx *ResolvedSessionContext) string {
+	if ctx == nil {
+		return ""
+	}
+	return strings.TrimSpace(ctx.AuthRoot)
+}
+
+func resolvedCodexHome(ctx *ResolvedSessionContext) string {
+	if ctx == nil {
+		return ""
+	}
+	return strings.TrimSpace(ctx.CodexHome)
+}
+
+func resolvedClaudeHome(ctx *ResolvedSessionContext) string {
+	if ctx == nil {
+		return ""
+	}
+	return strings.TrimSpace(ctx.ClaudeHome)
 }

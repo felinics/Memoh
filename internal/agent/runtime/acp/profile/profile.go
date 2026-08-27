@@ -62,6 +62,7 @@ type Profile struct {
 	ManagedFields      []ManagedField
 	SupportedBackends  []string
 	SetupModes         []string
+	SupportedAuthKinds []string
 }
 
 type ManagedField struct {
@@ -75,12 +76,13 @@ type ManagedField struct {
 } // @name acpprofile.ManagedField
 
 type PublicProfile struct {
-	ID                string         `json:"id"`
-	DisplayName       string         `json:"display_name"`
-	Description       string         `json:"description,omitempty"`
-	ManagedFields     []ManagedField `json:"managed_fields,omitempty"`
-	SupportedBackends []string       `json:"supported_backends,omitempty"`
-	SetupModes        []string       `json:"setup_modes,omitempty"`
+	ID                 string         `json:"id"`
+	DisplayName        string         `json:"display_name"`
+	Description        string         `json:"description,omitempty"`
+	ManagedFields      []ManagedField `json:"managed_fields,omitempty"`
+	SupportedBackends  []string       `json:"supported_backends,omitempty"`
+	SetupModes         []string       `json:"setup_modes,omitempty"`
+	SupportedAuthKinds []string       `json:"supported_auth_kinds,omitempty"`
 } // @name acpprofile.PublicProfile
 
 type ProfilesResponse struct {
@@ -227,8 +229,9 @@ func codexProfile() Profile {
 				Help:        "Optional Codex provider base URL.",
 			},
 		},
-		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		SupportedBackends:  []string{"container"},
+		SetupModes:         []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		SupportedAuthKinds: []string{"openai_api_key", "openai_codex_oauth"},
 	}
 }
 
@@ -279,8 +282,9 @@ func claudeCodeProfile() Profile {
 				Help:        "Used by OAuth setup to authenticate Claude Code.",
 			},
 		},
-		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		SupportedBackends:  []string{"container"},
+		SetupModes:         []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		SupportedAuthKinds: []string{"anthropic_api_key", "claude_code_oauth"},
 	}
 }
 
@@ -333,8 +337,9 @@ func hermesProfile() Profile {
 				Help:        "Written to the bot-scoped Hermes .env file.",
 			},
 		},
-		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeSelf, setupModeAPIKey},
+		SupportedBackends:  []string{"container"},
+		SetupModes:         []string{setupModeSelf, setupModeAPIKey},
+		SupportedAuthKinds: []string{"openai_api_key", "google_api_key", "openrouter_api_key"},
 	}
 }
 
@@ -363,12 +368,13 @@ func ShouldForceHTTPMCPServer(agentID string) bool {
 
 func (p Profile) Public() PublicProfile {
 	return PublicProfile{
-		ID:                p.ID,
-		DisplayName:       p.DisplayName,
-		Description:       p.Description,
-		ManagedFields:     append([]ManagedField(nil), p.ManagedFields...),
-		SupportedBackends: append([]string(nil), p.SupportedBackends...),
-		SetupModes:        append([]string(nil), p.SetupModes...),
+		ID:                 p.ID,
+		DisplayName:        p.DisplayName,
+		Description:        p.Description,
+		ManagedFields:      append([]ManagedField(nil), p.ManagedFields...),
+		SupportedBackends:  append([]string(nil), p.SupportedBackends...),
+		SetupModes:         append([]string(nil), p.SetupModes...),
+		SupportedAuthKinds: append([]string(nil), p.SupportedAuthKinds...),
 	}
 }
 

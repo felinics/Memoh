@@ -1,7 +1,7 @@
 -- name: CreateSchedule :one
 INSERT INTO schedule (
   name, description, pattern, max_calls, enabled, command, bot_id,
-  run_target, target_session_id, runtime_type, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id
+  run_target, target_session_id, runtime_type, acp_agent_id, agent_credential_id, model_id, acp_model_id, reasoning_effort, workdir_id
 )
 VALUES (
   $1, $2, $3, $4, $5, $6, $7,
@@ -9,6 +9,7 @@ VALUES (
   sqlc.narg(target_session_id)::uuid,
   sqlc.narg(runtime_type)::text,
   sqlc.narg(acp_agent_id)::text,
+  sqlc.narg(agent_credential_id)::uuid,
   sqlc.narg(model_id)::uuid,
   sqlc.narg(acp_model_id)::text,
   sqlc.narg(reasoning_effort)::text,
@@ -45,6 +46,7 @@ SET name = $2,
     target_session_id = sqlc.narg(target_session_id)::uuid,
     runtime_type = sqlc.narg(runtime_type)::text,
     acp_agent_id = sqlc.narg(acp_agent_id)::text,
+    agent_credential_id = sqlc.narg(agent_credential_id)::uuid,
     model_id = sqlc.narg(model_id)::uuid,
     acp_model_id = sqlc.narg(acp_model_id)::text,
     reasoning_effort = sqlc.narg(reasoning_effort)::text,

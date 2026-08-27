@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/memohai/memoh/internal/runtimeauth"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -44,6 +45,7 @@ const (
 
 type processOptions struct {
 	Backend   WorkspaceBackend
+	RuntimeID string
 	AgentID   string
 	SetupMode SetupMode
 	Env       []string
@@ -51,19 +53,24 @@ type processOptions struct {
 	UnsetEnv  []string
 	// HermesHome is the bot-scoped HERMES_HOME resolved by SessionPool and
 	// reused by Runner so config writes and process startup share one path.
-	HermesHome string
-	NoTimeout  bool
+	HermesHome        string
+	AuthRoot          string
+	CodexHome         string
+	ClaudeHome        string
+	BeforeAuthCleanup func(context.Context)
+	NoTimeout         bool
 }
 
 type bridgeProcess struct {
-	stream  *bridge.ExecStream
-	stdin   *io.PipeWriter
-	stdout  *io.PipeReader
-	tail    *stderrTail
-	done    chan struct{}
-	env     []string
-	cleanup func()
-	once    sync.Once
+	stream      *bridge.ExecStream
+	stdin       *io.PipeWriter
+	stdout      *io.PipeReader
+	tail        *stderrTail
+	done        chan struct{}
+	env         []string
+	cleanup     func()
+	once        sync.Once
+	cleanupOnce sync.Once
 }
 
 func startBridgeProcess(ctx context.Context, client *bridge.Client, command string, args []string, workDir string, timeout time.Duration, opts processOptions) (*bridgeProcess, error) {
@@ -177,6 +184,16 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 	env := withoutEnvKeys(opts.Env, "HOME", "PATH", "CODEX_HOME")
 	switch mode {
 	case SetupModeAPIKey, SetupModeOAuth:
+		authRoot := strings.TrimSpace(opts.AuthRoot)
+		isolatedAuth := runtimeauth.IsRuntimeRoot(authRoot)
+		if strings.TrimSpace(opts.RuntimeID) != "" && !isolatedAuth {
+			return nil, nil, errors.New("managed Agent runtime requires an isolated auth root")
+		}
+		if isolatedAuth {
+			if err := preparePrivateDir(ctx, client, authRoot); err != nil {
+				return nil, nil, fmt.Errorf("prepare runtime auth root: %w", err)
+			}
+		}
 		if isHermesAgent(opts.AgentID) {
 			hermesHome := strings.TrimSpace(opts.HermesHome)
 			if hermesHome == "" {
@@ -184,19 +201,40 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 			}
 			env = withoutEnvKeys(withoutBlockedEnvNames(opts.Env, HermesManagedUnsetEnvKeys()), "HOME", "PATH", "CODEX_HOME")
 			env = append(env, "HOME="+dataMountPath, "PATH="+defaultContainerPath, "HERMES_HOME="+hermesHome)
-			if err := client.Mkdir(ctx, hermesHome); err != nil {
+			if isolatedAuth {
+				if err := preparePrivateDir(ctx, client, hermesHome); err != nil {
+					return nil, nil, fmt.Errorf("prepare Hermes HOME: %w", err)
+				}
+			} else if err := client.Mkdir(ctx, hermesHome); err != nil {
 				return nil, nil, fmt.Errorf("prepare Hermes HOME: %w", err)
+			}
+			if isolatedAuth {
+				return env, runtimeAuthCleanup(client, authRoot, opts.BeforeAuthCleanup), nil
 			}
 			return env, nil, nil
 		}
-		homeDir := dataMountPath
-		tempHomeDir := "/tmp/memoh-acp/" + uuid.NewString()
-		if !isCodexAgent(opts.AgentID) {
-			homeDir = tempHomeDir
+		homeDir := strings.TrimSpace(opts.ClaudeHome)
+		legacyTempHome := ""
+		if isCodexAgent(opts.AgentID) {
+			homeDir = dataMountPath
+			codexHome := strings.TrimSpace(opts.CodexHome)
+			if codexHome != "" {
+				env = append(env, "CODEX_HOME="+codexHome)
+			}
+		} else if homeDir == "" {
+			legacyTempHome = "/tmp/memoh-auth/rt_" + uuid.NewString()
+			homeDir = legacyTempHome
+		}
+		if homeDir == "" {
+			return nil, nil, errors.New("managed Agent runtime requires HOME isolation")
 		}
 		env = append(env, "HOME="+homeDir, "PATH="+defaultContainerPath)
 
-		if err := client.Mkdir(ctx, homeDir); err != nil {
+		if isolatedAuth && !isCodexAgent(opts.AgentID) {
+			if err := preparePrivateDir(ctx, client, homeDir); err != nil {
+				return nil, nil, fmt.Errorf("prepare Agent HOME: %w", err)
+			}
+		} else if err := client.Mkdir(ctx, homeDir); err != nil {
 			return nil, nil, fmt.Errorf("prepare ACP HOME: %w", err)
 		}
 		// Managed sessions isolate via a fresh HOME and start with the managed
@@ -210,16 +248,16 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 		// Cleanup intentionally derives a fresh background ctx with its own
 		// short deadline: the parent ctx is usually already cancelled by the
 		// time we tear down the ACP HOME, but we still want to issue rm -rf.
-		cleanup := func() { //nolint:contextcheck // cleanup uses independent background ctx by design.
+		if isolatedAuth {
+			return env, runtimeAuthCleanup(client, authRoot, opts.BeforeAuthCleanup), nil
+		}
+		cleanup := func() { //nolint:contextcheck // compatibility cleanup outlives its request.
+			if legacyTempHome == "" {
+				return
+			}
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if homeDir == tempHomeDir {
-				_, _ = client.ExecWithOptions(cleanupCtx, "rm -rf "+escapeShellArg(homeDir), workDir, 5, nil, bridge.ExecOptions{
-					Env:      env,
-					CleanEnv: opts.CleanEnv,
-					UnsetEnv: opts.UnsetEnv,
-				})
-			}
+			_, _ = client.ExecWithOptions(cleanupCtx, "rm -rf "+escapeShellArg(legacyTempHome), workDir, 5, nil, bridge.ExecOptions{Env: env, CleanEnv: opts.CleanEnv, UnsetEnv: opts.UnsetEnv})
 		}
 		return env, cleanup, nil
 	case SetupModeSelf:
@@ -239,6 +277,38 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 	default:
 		return nil, nil, fmt.Errorf("unsupported ACP setup mode %q", mode)
 	}
+}
+
+//nolint:contextcheck // cleanup intentionally creates a detached bounded context after runtime shutdown.
+func runtimeAuthCleanup(client *bridge.Client, root string, before func(context.Context)) func() {
+	return func() { //nolint:contextcheck // cleanup must outlive the request that owned the runtime.
+		if client == nil || !runtimeauth.IsRuntimeRoot(root) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if before != nil {
+			before(ctx)
+		}
+		_ = client.DeleteFile(ctx, root, true)
+	}
+}
+
+func preparePrivateDir(ctx context.Context, client *bridge.Client, dir string) error {
+	if client == nil || strings.TrimSpace(dir) == "" {
+		return errors.New("private runtime directory is required")
+	}
+	if err := client.Mkdir(ctx, dir); err != nil {
+		return err
+	}
+	result, err := client.ExecWithOptions(ctx, "chmod 700 "+escapeShellArg(dir), dataMountPath, 5, nil, bridge.ExecOptions{})
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("chmod private runtime directory: exit %d", result.ExitCode)
+	}
+	return nil
 }
 
 func normalizeSetupMode(mode SetupMode) SetupMode {
@@ -393,14 +463,16 @@ func (p *bridgeProcess) Close() error {
 		if p.stream != nil {
 			_ = p.stream.Close()
 		}
-		if p.cleanup != nil {
-			p.cleanup()
-		}
 	})
 	select {
 	case <-p.done:
 	case <-time.After(2 * time.Second):
 	}
+	p.cleanupOnce.Do(func() {
+		if p.cleanup != nil {
+			p.cleanup()
+		}
+	})
 	return nil
 }
 

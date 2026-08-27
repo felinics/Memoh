@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/memohai/memoh/internal/logger"
+	"github.com/memohai/memoh/internal/runtimeauth"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 	"github.com/memohai/memoh/internal/workspace/bridgesvc"
 )
@@ -31,6 +32,9 @@ func main() {
 	// Append toolkit to PATH so child processes (via /bin/sh -c) can find npx/uvx.
 	// Container-native tools take priority since toolkit is appended at the end.
 	_ = os.Setenv("PATH", os.Getenv("PATH")+":/opt/memoh/toolkit/bin")
+	if err := runtimeauth.CleanupStale(time.Now()); err != nil {
+		logger.Warn("failed to clean stale runtime auth directories", slog.Any("error", err))
+	}
 
 	reverseHTTP := bridgesvc.NewReverseHTTPBroker()
 	startDisplaySupervisor(ctx)

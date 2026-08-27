@@ -461,6 +461,7 @@ function defaultExecutionForm(): ScheduleExecutionForm {
     targetSessionId: '',
     runtimeType: '',
     acpAgentId: '',
+    agentCredentialId: '',
     modelId: '',
     acpModelId: '',
     reasoningEffort: '',
@@ -473,6 +474,7 @@ function hydrateExecution(schedule: ScheduleSchedule) {
   execution.targetSessionId = schedule.target_session_id ?? ''
   execution.runtimeType = schedule.runtime_type === 'acp_agent' ? 'acp_agent' : ''
   execution.acpAgentId = schedule.acp_agent_id ?? ''
+  execution.agentCredentialId = schedule.agent_credential_id ?? ''
   execution.modelId = schedule.model_id ?? ''
   execution.acpModelId = schedule.acp_model_id ?? ''
   execution.reasoningEffort = schedule.reasoning_effort ?? ''
@@ -484,7 +486,7 @@ function hydrateExecution(schedule: ScheduleSchedule) {
 function hasExecutionConfig(schedule: ScheduleSchedule): boolean {
   return schedule.run_target === 'existing_session'
     || !!schedule.runtime_type || !!schedule.acp_agent_id || !!schedule.model_id
-    || !!schedule.acp_model_id || !!schedule.reasoning_effort || !!schedule.workdir_id
+    || !!schedule.agent_credential_id || !!schedule.acp_model_id || !!schedule.reasoning_effort || !!schedule.workdir_id
 }
 
 function executionRequestBlock() {
@@ -493,6 +495,7 @@ function executionRequestBlock() {
     target_session_id: execution.targetSessionId || undefined,
     runtime_type: execution.runTarget === 'new_session' && execution.runtimeType ? execution.runtimeType : undefined,
     acp_agent_id: execution.runTarget === 'new_session' && execution.acpAgentId ? execution.acpAgentId : undefined,
+    agent_credential_id: execution.runTarget === 'new_session' && execution.agentCredentialId ? execution.agentCredentialId : undefined,
     model_id: execution.modelId || undefined,
     acp_model_id: execution.acpModelId || undefined,
     reasoning_effort: execution.reasoningEffort || undefined,

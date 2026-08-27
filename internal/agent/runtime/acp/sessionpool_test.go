@@ -325,7 +325,7 @@ func TestSessionPoolEnsureStartsRuntimeAndReportsModels(t *testing.T) {
 }
 
 func TestSessionPoolStartRuntimeReconcilesManagedCodexAPIKeyConfig(t *testing.T) {
-	pool, root := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "api_key", map[string]any{
+	pool, _ := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "api_key", map[string]any{
 		"api_key":  "sk-container-byok",
 		"base_url": "https://proxy.example.com/v1",
 	}))
@@ -340,7 +340,12 @@ func TestSessionPoolStartRuntimeReconcilesManagedCodexAPIKeyConfig(t *testing.T)
 		t.Fatalf("Ensure() error = %v", err)
 	}
 
-	config := readSessionPoolFile(t, root, ".codex", "config.toml")
+	handle := pool.sessionHandle("session-1")
+	if handle == nil {
+		t.Fatal("runtime handle missing")
+		return
+	}
+	config := readSessionPoolFile(t, string(filepath.Separator), "tmp", "memoh-auth", handle.id, "codex", "config.toml")
 	for _, want := range []string{
 		`model_provider = "OpenAI"`,
 		`model_reasoning_summary = "detailed"`,
@@ -352,9 +357,17 @@ func TestSessionPoolStartRuntimeReconcilesManagedCodexAPIKeyConfig(t *testing.T)
 			t.Fatalf("Codex config missing %q:\n%s", want, config)
 		}
 	}
-	auth := readSessionPoolFile(t, root, ".codex", "auth.json")
+	auth := readSessionPoolFile(t, string(filepath.Separator), "tmp", "memoh-auth", handle.id, "codex", "auth.json")
 	if !strings.Contains(auth, `"OPENAI_API_KEY": "sk-container-byok"`) {
 		t.Fatalf("Codex auth missing managed key:\n%s", auth)
+	}
+	authPath := filepath.Join(string(filepath.Separator), "tmp", "memoh-auth", handle.id, "codex", "auth.json")
+	if info, err := os.Stat(authPath); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("Codex auth mode = %v, err = %v", info, err)
+	}
+	dirPath := filepath.Dir(authPath)
+	if info, err := os.Stat(dirPath); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("Codex auth dir mode = %v, err = %v", info, err)
 	}
 }
 
@@ -379,7 +392,12 @@ func TestSessionPoolStartRuntimeReconcilesCodexOAuthConfigWithoutOverwritingAuth
 		t.Fatalf("Ensure() error = %v", err)
 	}
 
-	config := readSessionPoolFile(t, root, ".codex", "config.toml")
+	handle := pool.sessionHandle("session-1")
+	if handle == nil {
+		t.Fatal("runtime handle missing")
+		return
+	}
+	config := readSessionPoolFile(t, string(filepath.Separator), "tmp", "memoh-auth", handle.id, "codex", "config.toml")
 	for _, want := range []string{
 		`model_provider = "chatgpt-http"`,
 		`model_reasoning_summary = "detailed"`,
@@ -2176,10 +2194,10 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 	if !hasString(hermesRunner.req.UnsetEnv, "HERMES_*") || !hasString(hermesRunner.req.UnsetEnv, "OPENROUTER_API_KEY") || !hasString(hermesRunner.req.UnsetEnv, "OPENROUTER_BASE_URL") {
 		t.Fatalf("Hermes managed UnsetEnv = %#v", hermesRunner.req.UnsetEnv)
 	}
-	if hermesRunner.req.Resolved == nil || hermesRunner.req.Resolved.HermesHome != client.HermesContainerHome {
+	if hermesRunner.req.Resolved == nil || !strings.HasPrefix(hermesRunner.req.Resolved.HermesHome, "/tmp/memoh-auth/rt_") || !strings.HasSuffix(hermesRunner.req.Resolved.HermesHome, "/hermes") {
 		t.Fatalf("Hermes resolved context = %#v", hermesRunner.req.Resolved)
 	}
-	configPath := filepath.Join(hermesRoot, ".memoh-hermes", "config.yaml")
+	configPath := filepath.Join(hermesRunner.req.Resolved.HermesHome, "config.yaml")
 	configBytes, readErr := os.ReadFile(configPath) //nolint:gosec // test path is under t.TempDir.
 	if readErr != nil {
 		t.Fatalf("read Hermes config: %v", readErr)

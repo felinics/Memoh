@@ -47,6 +47,7 @@ func (h *ScheduleHandler) Register(e *echo.Echo) {
 // @Summary Create schedule
 // @Description Create a schedule for current user
 // @Tags schedule
+// @Param bot_id path string true "Bot ID"
 // @Param payload body schedule.CreateRequest true "Schedule payload"
 // @Success 201 {object} schedule.Schedule
 // @Failure 400 {object} ErrorResponse
@@ -142,6 +143,7 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 // @Summary Update schedule
 // @Description Update a schedule by ID
 // @Tags schedule
+// @Param bot_id path string true "Bot ID"
 // @Param id path string true "Schedule ID"
 // @Param payload body schedule.UpdateRequest true "Schedule payload"
 // @Success 200 {object} schedule.Schedule

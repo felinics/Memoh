@@ -33,7 +33,8 @@ type SessionSpec struct {
 	// RuntimeType is RuntimeModel ("" means model) or RuntimeACPAgent.
 	RuntimeType string
 	// ACPAgentID names the agent when RuntimeType is RuntimeACPAgent.
-	ACPAgentID string
+	ACPAgentID        string
+	AgentCredentialID string
 	// WorkdirID optionally binds the session to a bot workdir.
 	WorkdirID string
 	// OwnerUserID becomes the session creator and, for ACP sessions, the
@@ -142,21 +143,22 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 		return Schedule{}, err
 	}
 	row, err := s.queries.CreateSchedule(ctx, sqlc.CreateScheduleParams{
-		Name:            req.Name,
-		Description:     req.Description,
-		Pattern:         req.Pattern,
-		MaxCalls:        maxCalls,
-		Enabled:         enabled,
-		Command:         req.Command,
-		BotID:           pgBotID,
-		RunTarget:       exec.RunTarget,
-		TargetSessionID: db.ParseUUIDOrEmpty(exec.TargetSessionID),
-		RuntimeType:     optionalText(exec.RuntimeType),
-		AcpAgentID:      optionalText(exec.ACPAgentID),
-		ModelID:         db.ParseUUIDOrEmpty(exec.ModelID),
-		AcpModelID:      optionalText(exec.ACPModelID),
-		ReasoningEffort: optionalText(exec.ReasoningEffort),
-		WorkdirID:       db.ParseUUIDOrEmpty(exec.WorkdirID),
+		Name:              req.Name,
+		Description:       req.Description,
+		Pattern:           req.Pattern,
+		MaxCalls:          maxCalls,
+		Enabled:           enabled,
+		Command:           req.Command,
+		BotID:             pgBotID,
+		RunTarget:         exec.RunTarget,
+		TargetSessionID:   db.ParseUUIDOrEmpty(exec.TargetSessionID),
+		RuntimeType:       optionalText(exec.RuntimeType),
+		AcpAgentID:        optionalText(exec.ACPAgentID),
+		AgentCredentialID: db.ParseUUIDOrEmpty(exec.AgentCredentialID),
+		ModelID:           db.ParseUUIDOrEmpty(exec.ModelID),
+		AcpModelID:        optionalText(exec.ACPModelID),
+		ReasoningEffort:   optionalText(exec.ReasoningEffort),
+		WorkdirID:         db.ParseUUIDOrEmpty(exec.WorkdirID),
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -258,21 +260,22 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 		exec = normalized
 	}
 	updated, err := s.queries.UpdateSchedule(ctx, sqlc.UpdateScheduleParams{
-		ID:              pgID,
-		Name:            name,
-		Description:     description,
-		Pattern:         pattern,
-		MaxCalls:        maxCalls,
-		Enabled:         enabled,
-		Command:         command,
-		RunTarget:       exec.RunTarget,
-		TargetSessionID: db.ParseUUIDOrEmpty(exec.TargetSessionID),
-		RuntimeType:     optionalText(exec.RuntimeType),
-		AcpAgentID:      optionalText(exec.ACPAgentID),
-		ModelID:         db.ParseUUIDOrEmpty(exec.ModelID),
-		AcpModelID:      optionalText(exec.ACPModelID),
-		ReasoningEffort: optionalText(exec.ReasoningEffort),
-		WorkdirID:       db.ParseUUIDOrEmpty(exec.WorkdirID),
+		ID:                pgID,
+		Name:              name,
+		Description:       description,
+		Pattern:           pattern,
+		MaxCalls:          maxCalls,
+		Enabled:           enabled,
+		Command:           command,
+		RunTarget:         exec.RunTarget,
+		TargetSessionID:   db.ParseUUIDOrEmpty(exec.TargetSessionID),
+		RuntimeType:       optionalText(exec.RuntimeType),
+		AcpAgentID:        optionalText(exec.ACPAgentID),
+		AgentCredentialID: db.ParseUUIDOrEmpty(exec.AgentCredentialID),
+		ModelID:           db.ParseUUIDOrEmpty(exec.ModelID),
+		AcpModelID:        optionalText(exec.ACPModelID),
+		ReasoningEffort:   optionalText(exec.ReasoningEffort),
+		WorkdirID:         db.ParseUUIDOrEmpty(exec.WorkdirID),
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -441,12 +444,13 @@ func (s *Service) resolveRunSession(ctx context.Context, sched Schedule, ownerUs
 		return "", errors.New("schedule session creator not configured")
 	}
 	sessionID, err := s.sessionCreator.CreateScheduleSession(ctx, SessionSpec{
-		BotID:       sched.BotID,
-		Title:       sched.Name,
-		RuntimeType: sched.RuntimeType,
-		ACPAgentID:  sched.ACPAgentID,
-		WorkdirID:   sched.WorkdirID,
-		OwnerUserID: ownerUserID,
+		BotID:             sched.BotID,
+		Title:             sched.Name,
+		RuntimeType:       sched.RuntimeType,
+		ACPAgentID:        sched.ACPAgentID,
+		AgentCredentialID: sched.AgentCredentialID,
+		WorkdirID:         sched.WorkdirID,
+		OwnerUserID:       ownerUserID,
 	})
 	if err != nil {
 		return "", fmt.Errorf("create schedule session: %w", err)
@@ -713,11 +717,12 @@ func toSchedule(row sqlc.Schedule) Schedule {
 
 func executionFromRow(row sqlc.Schedule) ExecutionConfig {
 	exec := ExecutionConfig{
-		RunTarget:       row.RunTarget,
-		RuntimeType:     row.RuntimeType.String,
-		ACPAgentID:      row.AcpAgentID.String,
-		ACPModelID:      row.AcpModelID.String,
-		ReasoningEffort: row.ReasoningEffort.String,
+		RunTarget:         row.RunTarget,
+		RuntimeType:       row.RuntimeType.String,
+		ACPAgentID:        row.AcpAgentID.String,
+		AgentCredentialID: row.AgentCredentialID.String(),
+		ACPModelID:        row.AcpModelID.String,
+		ReasoningEffort:   row.ReasoningEffort.String,
 	}
 	if row.TargetSessionID.Valid {
 		exec.TargetSessionID = row.TargetSessionID.String()

@@ -73,6 +73,7 @@ services:
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
       no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,connect-it,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel,memoh-connect-it"
       MEMOH_INTERNAL_RPC_SHARED_SECRET: "${MEMOH_INTERNAL_RPC_SHARED_SECRET:?MEMOH_INTERNAL_RPC_SHARED_SECRET is required}"
+      MEMOH_AGENT_CREDENTIALS_ENCRYPTION_KEY: "${MEMOH_AGENT_CREDENTIALS_ENCRYPTION_KEY:-}"
       MEMOH_INTERNAL_RPC_SERVER_TARGET: "server:9090"
       MEMOH_INTERNAL_RPC_CHANNEL_TARGET: "channel:9091"
       MEMOH_CONNECT_IT_BASE_URL: "${MEMOH_CONNECT_IT_BASE_URL:-}"

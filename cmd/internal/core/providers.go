@@ -39,6 +39,7 @@ import (
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	agenttools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/agentcredential"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/botbackup"
@@ -442,7 +443,8 @@ func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec 
 		// The thread service derives the ACP runtime owner from
 		// CreatedByUserID and applies project-path defaults; the workdir
 		// override below wins when a workdir is bound.
-		input.Metadata = map[string]any{"acp_agent_id": spec.ACPAgentID}
+		input.Metadata = map[string]any{"acp_agent_id": spec.ACPAgentID, "agent_credential_id": spec.AgentCredentialID}
+		input.RuntimeMetadata = map[string]any{"acp_agent_id": spec.ACPAgentID, "agent_credential_id": spec.AgentCredentialID}
 	}
 	if strings.TrimSpace(spec.WorkdirID) != "" {
 		if a.workdirs == nil {
@@ -513,12 +515,13 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, credentialService *agentcredential.Service) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, acpsessionadapter.NewSource(sessionService))
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
 	pool.SetToolApprovalService(toolApproval)
 	pool.SetUserInputService(userInput)
+	pool.SetCredentialService(credentialService)
 	containerdHandler.SetACPRuntimeResolver(pool)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -765,12 +768,16 @@ func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.
 	return media.NewService(log, storageProvider)
 }
 
-func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPCodexOAuthHandler {
-	return handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
+func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager, credentialService *agentcredential.Service) *handlers.ACPCodexOAuthHandler {
+	h := handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
+	h.SetCredentialService(credentialService)
+	return h
 }
 
-func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPClaudeCodeOAuthHandler {
-	return handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
+func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager, credentialService *agentcredential.Service) *handlers.ACPClaudeCodeOAuthHandler {
+	h := handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
+	h.SetCredentialService(credentialService)
+	return h
 }
 
 func provideAudioRegistry() *audiopkg.Registry {

@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/memohai/memoh/internal/agentcredential"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
@@ -60,6 +61,7 @@ type UsersHandler struct {
 	registry       *channel.Registry
 	acpWorkspace   botCreateWorkspace
 	acpRuntimes    acpRuntimeCloser
+	credentials    *agentcredential.Service
 	logger         *slog.Logger
 }
 
@@ -82,6 +84,10 @@ func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bo
 
 func (h *UsersHandler) SetACPRuntimeCloser(closer acpRuntimeCloser) {
 	h.acpRuntimes = closer
+}
+
+func (h *UsersHandler) SetCredentialService(service *agentcredential.Service) {
+	h.credentials = service
 }
 
 func (h *UsersHandler) Register(e *echo.Echo) {
@@ -823,18 +829,33 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	needsACPWorkspaceConfigWrite := false
 	shouldCloseACPRuntimes := false
 	if req.Metadata != nil {
+		managedCredentialStore := h.credentials != nil && h.credentials.Configured()
+		if managedCredentialStore {
+			req.Metadata, _ = acpprofile.ScrubMetadataForExport(req.Metadata)
+		}
 		if err := h.botService.ValidateUpdate(c.Request().Context(), bot.ID, req); err != nil {
 			return updateBotHTTPError(err)
 		}
 		pending := bot
-		pending.Metadata = acpprofile.MergeSensitiveFieldsForUpdate(bot.Metadata, req.Metadata)
-		if err := validateACPManagedConfig(pending.Metadata); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid ACP metadata: "+err.Error())
+		if managedCredentialStore {
+			pending.Metadata = req.Metadata
+		} else {
+			pending.Metadata = acpprofile.MergeSensitiveFieldsForUpdate(bot.Metadata, req.Metadata)
 		}
-		needsACPWorkspaceConfigWrite = acpManagedConfigNeedsWrite(bot.Metadata, pending.Metadata)
+		if !managedCredentialStore {
+			if err := validateACPManagedConfig(pending.Metadata); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid ACP metadata: "+err.Error())
+			}
+		}
+		needsACPWorkspaceConfigWrite = !managedCredentialStore && acpManagedConfigNeedsWrite(bot.Metadata, pending.Metadata)
 		shouldCloseACPRuntimes = acpRuntimeMetadataChanged(bot.Metadata, pending.Metadata)
 	}
-	resp, err := h.botService.Update(c.Request().Context(), bot.ID, req)
+	var resp bots.Bot
+	if h.credentials != nil && h.credentials.Configured() && req.Metadata != nil {
+		resp, err = h.botService.UpdateReplacingMetadata(c.Request().Context(), bot.ID, req)
+	} else {
+		resp, err = h.botService.Update(c.Request().Context(), bot.ID, req)
+	}
 	if err != nil {
 		return updateBotHTTPError(err)
 	}
@@ -972,6 +993,11 @@ func (h *UsersHandler) closeUpdatedACPRuntimes(botID string) {
 }
 
 func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.Bot) error {
+	if h.credentials != nil && h.credentials.Configured() {
+		// Managed credentials are materialized into a runtime-private
+		// /tmp/memoh-auth directory when the Agent process starts.
+		return nil
+	}
 	if h.acpWorkspace == nil {
 		return nil
 	}

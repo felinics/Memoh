@@ -40,14 +40,15 @@ func invalidRequestf(format string, args ...any) error {
 // workdir liveness) can only live here where the referenced rows are visible.
 func (s *Service) normalizeExecution(ctx context.Context, botID string, exec ExecutionConfig) (ExecutionConfig, error) {
 	out := ExecutionConfig{
-		RunTarget:       strings.TrimSpace(exec.RunTarget),
-		TargetSessionID: strings.TrimSpace(exec.TargetSessionID),
-		RuntimeType:     strings.TrimSpace(exec.RuntimeType),
-		ACPAgentID:      strings.TrimSpace(exec.ACPAgentID),
-		ModelID:         strings.TrimSpace(exec.ModelID),
-		ACPModelID:      strings.TrimSpace(exec.ACPModelID),
-		ReasoningEffort: strings.TrimSpace(exec.ReasoningEffort),
-		WorkdirID:       strings.TrimSpace(exec.WorkdirID),
+		RunTarget:         strings.TrimSpace(exec.RunTarget),
+		TargetSessionID:   strings.TrimSpace(exec.TargetSessionID),
+		RuntimeType:       strings.TrimSpace(exec.RuntimeType),
+		ACPAgentID:        strings.TrimSpace(exec.ACPAgentID),
+		AgentCredentialID: strings.TrimSpace(exec.AgentCredentialID),
+		ModelID:           strings.TrimSpace(exec.ModelID),
+		ACPModelID:        strings.TrimSpace(exec.ACPModelID),
+		ReasoningEffort:   strings.TrimSpace(exec.ReasoningEffort),
+		WorkdirID:         strings.TrimSpace(exec.WorkdirID),
 	}
 	if out.RunTarget == "" {
 		out.RunTarget = RunTargetNewSession
@@ -59,7 +60,7 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 	targetIsACP := false
 	switch out.RunTarget {
 	case RunTargetExistingSession:
-		if out.RuntimeType != "" || out.ACPAgentID != "" || out.WorkdirID != "" {
+		if out.RuntimeType != "" || out.ACPAgentID != "" || out.AgentCredentialID != "" || out.WorkdirID != "" {
 			return ExecutionConfig{}, invalidRequest("existing_session inherits runtime and workdir from the target session; runtime_type, acp_agent_id, and workdir_id must be empty")
 		}
 		acp, err := s.validateTargetSession(ctx, botID, out.TargetSessionID)
@@ -79,7 +80,7 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 		}
 		switch out.RuntimeType {
 		case "", RuntimeModel:
-			if out.ACPAgentID != "" || out.ACPModelID != "" {
+			if out.ACPAgentID != "" || out.AgentCredentialID != "" || out.ACPModelID != "" {
 				return ExecutionConfig{}, invalidRequest("acp_agent_id and acp_model_id require runtime_type acp_agent")
 			}
 		case RuntimeACPAgent:
@@ -88,6 +89,9 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 			}
 			if out.ModelID != "" {
 				return ExecutionConfig{}, invalidRequest("ACP schedules use acp_model_id; model_id is only valid for the native model runtime")
+			}
+			if out.AgentCredentialID == "" {
+				return ExecutionConfig{}, invalidRequest("agent_credential_id is required for managed Agent schedules")
 			}
 		default:
 			return ExecutionConfig{}, invalidRequestf("unknown runtime_type %q", out.RuntimeType)
