@@ -206,12 +206,60 @@ func shouldGenerateSessionTitle(sess session.Thread) bool {
 	return false
 }
 
+const (
+	// titlePromptOverheadTokens reserves budget for the fixed prompt text plus
+	// protocol framing when sizing the user message against the title model's
+	// context window. The prompt is ~400 tokens; the slack covers tokenizer
+	// variance.
+	titlePromptOverheadTokens = 512
+	// titleInputFallbackWindow bounds the user message when the model's
+	// context window is unknown (config absent). 8k is below virtually every
+	// chat model's real window, so the request stays accepted; without any
+	// bound a huge pasted message could overflow an unknown-but-small window
+	// and the provider would reject the whole title call, silently leaving
+	// the first-line fallback title in place.
+	titleInputFallbackWindow = 8192
+	// titleInputFloorRunes is the minimum sample kept even when the window
+	// cannot cover it (a window smaller than the output reservation). Sending
+	// something risks a rejection there, but sending nothing guarantees the
+	// fallback title wins.
+	titleInputFloorRunes = 1000
+)
+
+// boundTitleInput sizes the first user message against the title model's
+// context window so prompt + input + the titleGenerateMaxTokens reservation
+// always fits. Small-context title models exist (provider templates catalog
+// 4096/4097-token ones), and an oversized request is rejected outright —
+// which would leave the fallback title in place, defeating long-message
+// support exactly on the long messages it exists for.
+//
+// Messages within budget pass through whole (the common case). Over-budget
+// messages keep a head/tail sample — 2/3 head, 1/3 tail — because a pasted
+// log or document may state its subject at either end; a pure head cut was
+// the old 500-char bug. The rune budget assumes the worst case of ~1 token
+// per rune (CJK-heavy text); English over-reserves, which errs safe.
+func boundTitleInput(msg string, contextWindowTokens int) string {
+	if msg == "" {
+		return ""
+	}
+	if contextWindowTokens <= 0 {
+		contextWindowTokens = titleInputFallbackWindow
+	}
+	budget := contextWindowTokens - titleGenerateMaxTokens - titlePromptOverheadTokens
+	if budget < titleInputFloorRunes {
+		budget = titleInputFloorRunes
+	}
+	runes := []rune(msg)
+	if len(runes) <= budget {
+		return msg
+	}
+	head := budget * 2 / 3
+	tail := budget - head
+	return string(runes[:head]) + "\n…\n" + string(runes[len(runes)-tail:])
+}
+
 func (s *Service) generateTitle(ctx context.Context, userID string, model models.GetResponse, provider sqlc.Provider, userQuery string) string {
-	// The full first user message goes in untruncated: truncating it (the old
-	// 500-char cap) cut the actual topic off long first messages — a pasted
-	// log or document often states its subject well past the opening — and
-	// left the model with only the greeting half to summarize.
-	userSnippet := strings.TrimSpace(userQuery)
+	userSnippet := boundTitleInput(strings.TrimSpace(userQuery), model.Config.ContextBudgetMaxTokens())
 	if userSnippet == "" {
 		return ""
 	}
