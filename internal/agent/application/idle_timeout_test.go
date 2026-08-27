@@ -30,20 +30,31 @@ func TestIdleTimeoutPublishesStableResponseTimeoutCause(t *testing.T) {
 	}
 }
 
-func TestStreamingHTTPClientDelegatesSilenceToApplicationWatchdog(t *testing.T) {
+func TestServiceHTTPClientsHaveSeparateTimeoutOwnership(t *testing.T) {
 	service := NewService(slog.New(slog.DiscardHandler), nil, nil, nil, nil, nil, nil, time.UTC, time.Minute)
 	if service.streamHTTPClient.Timeout != 0 {
 		t.Fatalf("stream client timeout = %v, want no whole-request deadline", service.streamHTTPClient.Timeout)
 	}
-	transport, ok := service.streamHTTPClient.Transport.(*http.Transport)
+	streamTransport, ok := service.streamHTTPClient.Transport.(*http.Transport)
 	if !ok {
 		t.Fatalf("stream transport = %T, want *http.Transport", service.streamHTTPClient.Transport)
 	}
-	if transport.ResponseHeaderTimeout != 0 {
-		t.Fatalf("response header timeout = %v, want application watchdog ownership", transport.ResponseHeaderTimeout)
+	if streamTransport.ResponseHeaderTimeout != 0 {
+		t.Fatalf("stream response header timeout = %v, want application watchdog ownership", streamTransport.ResponseHeaderTimeout)
 	}
-	if service.compactionHTTPClient.Timeout != 10*time.Minute {
-		t.Fatalf("compaction client timeout = %v, want bounded non-streaming request", service.compactionHTTPClient.Timeout)
+
+	if service.nonStreamingHTTPClient.Timeout != 10*time.Minute {
+		t.Fatalf("non-streaming client timeout = %v, want 10m", service.nonStreamingHTTPClient.Timeout)
+	}
+	nonStreamingTransport, ok := service.nonStreamingHTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("non-streaming transport = %T, want *http.Transport", service.nonStreamingHTTPClient.Transport)
+	}
+	if nonStreamingTransport == streamTransport {
+		t.Fatal("streaming and non-streaming clients share a mutable transport")
+	}
+	if nonStreamingTransport.ResponseHeaderTimeout != 30*time.Second {
+		t.Fatalf("non-streaming response header timeout = %v, want 30s", nonStreamingTransport.ResponseHeaderTimeout)
 	}
 }
 

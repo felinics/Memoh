@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -166,9 +168,10 @@ func (s *synchronizedLifecycleStore) creates() []sqlc.CreateContextLifecyclePara
 type directLifecycleModelMode string
 
 const (
-	directLifecycleModelSuccess directLifecycleModelMode = "success"
-	directLifecycleModelFailure directLifecycleModelMode = "failure"
-	directLifecycleModelBlock   directLifecycleModelMode = "block"
+	directLifecycleModelSuccess      directLifecycleModelMode = "success"
+	directLifecycleModelFailure      directLifecycleModelMode = "failure"
+	directLifecycleModelBlock        directLifecycleModelMode = "block"
+	directLifecycleModelStallHeaders directLifecycleModelMode = "stall_headers"
 )
 
 func newDirectLifecycleFixture(t *testing.T, mode directLifecycleModelMode) directLifecycleFixture {
@@ -183,6 +186,11 @@ func newDirectLifecycleFixture(t *testing.T, mode directLifecycleModelMode) dire
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode model request: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if mode == directLifecycleModelStallHeaders && !request.Stream {
+			startedOnce.Do(func() { close(started) })
+			<-r.Context().Done()
 			return
 		}
 		if mode == directLifecycleModelBlock && request.Stream {
@@ -254,18 +262,26 @@ func newDirectLifecycleFixture(t *testing.T, mode directLifecycleModelMode) dire
 		modelID: model.ID,
 	}
 	logger := slog.New(slog.DiscardHandler)
+	streamTransport, ok := server.Client().Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("httptest transport = %T, want *http.Transport", server.Client().Transport)
+	}
+	nonStreamingTransport := streamTransport.Clone()
+	nonStreamingTransport.ResponseHeaderTimeout = 50 * time.Millisecond
 	lifecycles := &synchronizedLifecycleStore{}
 	messages := &recordingMessageService{}
 	runtime := &lifecycleTurnAdmitter{admission: lifecycleTestAdmission()}
 	service := &Service{
-		agent:             native.New(native.Deps{Logger: logger}),
-		modelsService:     models.NewService(logger, queries),
-		queries:           queries,
-		contextLifecycles: lifecycles,
-		messageService:    messages,
-		settingsService:   settings.NewService(logger, queries, nil, nil),
-		sessionRuntime:    runtime,
-		logger:            logger,
+		agent:                  native.New(native.Deps{Logger: logger}),
+		modelsService:          models.NewService(logger, queries),
+		queries:                queries,
+		contextLifecycles:      lifecycles,
+		messageService:         messages,
+		settingsService:        settings.NewService(logger, queries, nil, nil),
+		sessionRuntime:         runtime,
+		streamHTTPClient:       &http.Client{Transport: streamTransport},
+		nonStreamingHTTPClient: &http.Client{Transport: nonStreamingTransport, Timeout: time.Second},
+		logger:                 logger,
 	}
 	return directLifecycleFixture{
 		service:    service,
@@ -273,6 +289,66 @@ func newDirectLifecycleFixture(t *testing.T, mode directLifecycleModelMode) dire
 		messages:   messages,
 		runtime:    runtime,
 		started:    started,
+	}
+}
+
+func TestDirectChatWithoutCallerDeadlineUsesBoundedNonStreamingClient(t *testing.T) {
+	fixture := newDirectLifecycleFixture(t, directLifecycleModelStallHeaders)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		t.Fatal("test caller context unexpectedly has a deadline")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := fixture.service.Chat(ctx, ChatRequest{
+			BotID:                lifecycleTestBotID,
+			ChatID:               lifecycleTestBotID,
+			ThreadID:             lifecycleTestSessionID,
+			Query:                directLifecyclePrompt,
+			UserMessagePersisted: true,
+		})
+		done <- err
+	}()
+
+	select {
+	case <-fixture.started:
+	case <-time.After(time.Second):
+		cancel()
+		<-done
+		t.Fatal("provider did not receive synchronous Chat request")
+	}
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Chat() error = nil, want response-header timeout")
+		}
+		if !strings.Contains(err.Error(), "timeout awaiting response headers") {
+			t.Fatalf("Chat() error = %v, want response-header timeout", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		cancel()
+		<-done
+		t.Fatal("Chat() remained blocked after the bounded response-header window")
+	}
+}
+
+func TestDirectChatCallerDeadlineWinsOverNonStreamingClientTimeout(t *testing.T) {
+	fixture := newDirectLifecycleFixture(t, directLifecycleModelStallHeaders)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	_, err := fixture.service.Chat(ctx, ChatRequest{
+		BotID:                lifecycleTestBotID,
+		ChatID:               lifecycleTestBotID,
+		ThreadID:             lifecycleTestSessionID,
+		Query:                directLifecyclePrompt,
+		UserMessagePersisted: true,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Chat() error = %v, want caller context deadline exceeded", err)
 	}
 }
 

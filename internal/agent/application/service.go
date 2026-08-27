@@ -103,35 +103,35 @@ type compactionRunner interface {
 
 // Service orchestrates chat with the internal agent.
 type Service struct {
-	agent                *native.Agent
-	modelsService        *models.Service
-	queries              dbstore.Queries
-	memoryRegistry       *memprovider.Registry
-	messageService       messagepkg.Service
-	settingsService      *settings.Service
-	accountService       *accounts.Service
-	sessionService       SessionService
-	acpPool              acpPrompter
-	compactionService    compactionRunner
-	eventPublisher       messageevent.Publisher
-	skillLoader          SkillLoader
-	assetLoader          gatewayAssetLoader
-	platformIdentities   PlatformIdentitySource
-	botPermissions       botPermissionChecker
-	workspaceTargets     workspaceTargetResolver
-	workdirs             sessionWorkdirResolver
-	pipeline             *timeline.Pipeline
-	streamHTTPClient     *http.Client
-	compactionHTTPClient *http.Client
-	streamIdleTimeout    time.Duration
-	bgManager            *background.Manager
-	toolApproval         *toolapproval.Service
-	userInput            userInputService
-	hookService          *hooks.Service
-	memoryContextMu      sync.Mutex
-	memoryContextCache   *memprovider.MemoryContextCache
-	acpPromptMu          sync.Mutex
-	acpPromptHubs        map[string]*acpActivePromptHub
+	agent                  *native.Agent
+	modelsService          *models.Service
+	queries                dbstore.Queries
+	memoryRegistry         *memprovider.Registry
+	messageService         messagepkg.Service
+	settingsService        *settings.Service
+	accountService         *accounts.Service
+	sessionService         SessionService
+	acpPool                acpPrompter
+	compactionService      compactionRunner
+	eventPublisher         messageevent.Publisher
+	skillLoader            SkillLoader
+	assetLoader            gatewayAssetLoader
+	platformIdentities     PlatformIdentitySource
+	botPermissions         botPermissionChecker
+	workspaceTargets       workspaceTargetResolver
+	workdirs               sessionWorkdirResolver
+	pipeline               *timeline.Pipeline
+	streamHTTPClient       *http.Client
+	nonStreamingHTTPClient *http.Client
+	streamIdleTimeout      time.Duration
+	bgManager              *background.Manager
+	toolApproval           *toolapproval.Service
+	userInput              userInputService
+	hookService            *hooks.Service
+	memoryContextMu        sync.Mutex
+	memoryContextCache     *memprovider.MemoryContextCache
+	acpPromptMu            sync.Mutex
+	acpPromptHubs          map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn               func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
@@ -188,25 +188,27 @@ func NewService(
 	streamHTTPClient := &http.Client{
 		Transport: streamTransport,
 	}
-	compactionHTTPClient := &http.Client{
-		Transport: streamTransport,
+	nonStreamingTransport := streamTransport.Clone()
+	nonStreamingTransport.ResponseHeaderTimeout = 30 * time.Second
+	nonStreamingHTTPClient := &http.Client{
+		Transport: nonStreamingTransport,
 		Timeout:   10 * time.Minute,
 	}
 
 	return &Service{
-		agent:                a,
-		modelsService:        modelsService,
-		queries:              queries,
-		contextLifecycles:    queries,
-		messageService:       messageService,
-		settingsService:      settingsService,
-		accountService:       accountService,
-		streamHTTPClient:     streamHTTPClient,
-		compactionHTTPClient: compactionHTTPClient,
-		timeout:              timeout,
-		memorySearchTimeout:  defaultMemorySearchTimeout,
-		clockLocation:        clockLocation,
-		logger:               log.With(slog.String("service", "agent/application")),
+		agent:                  a,
+		modelsService:          modelsService,
+		queries:                queries,
+		contextLifecycles:      queries,
+		messageService:         messageService,
+		settingsService:        settingsService,
+		accountService:         accountService,
+		streamHTTPClient:       streamHTTPClient,
+		nonStreamingHTTPClient: nonStreamingHTTPClient,
+		timeout:                timeout,
+		memorySearchTimeout:    defaultMemorySearchTimeout,
+		clockLocation:          clockLocation,
+		logger:                 log.With(slog.String("service", "agent/application")),
 	}
 }
 
@@ -374,6 +376,10 @@ func defaultToolExchangePolicy() *contextfrag.ToolExchangePolicy {
 // request, not the one that went in. Query is deliberately untouched: callers
 // that persist a headerified user message still take it from resolvedContext.
 func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext, ChatRequest, error) {
+	return s.resolveWithHTTPClient(ctx, req, nil)
+}
+
+func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, modelHTTPClient *http.Client) (resolvedContext, ChatRequest, error) {
 	modelQuery := modelQueryText(req)
 	if strings.TrimSpace(modelQuery) == "" && len(req.Attachments) == 0 {
 		return resolvedContext{}, req, errors.New("query or attachments is required")
@@ -404,6 +410,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		Model:             req.Model,
 		Provider:          req.Provider,
 		ReasoningEffort:   req.ReasoningEffort,
+		HTTPClient:        modelHTTPClient,
 	})
 	if err != nil {
 		s.logger.Error("resolve: buildBaseRunConfig failed",
@@ -667,7 +674,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			return ChatResponse{}, err
 		}
 	}
-	rc, req, err := s.resolve(ctx, req)
+	rc, req, err := s.resolveWithHTTPClient(ctx, req, s.nonStreamingHTTPClient)
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -748,6 +755,7 @@ type baseRunConfigParams struct {
 	Model             string
 	Provider          string
 	ReasoningEffort   string // caller-provided override (empty = use bot default)
+	HTTPClient        *http.Client
 }
 
 // buildBaseRunConfig creates a RunConfig with model, credentials, skills,
@@ -788,6 +796,10 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 
 	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, provider.ClientType)
 
+	modelHTTPClient := p.HTTPClient
+	if modelHTTPClient == nil {
+		modelHTTPClient = s.streamHTTPClient
+	}
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               chatModel.ModelID,
 		ClientType:            provider.ClientType,
@@ -795,7 +807,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		CodexAccountID:        creds.CodexAccountID,
 		BaseURL:               baseURL,
 		ChatCompletionsCompat: chatCompletionsCompat,
-		HTTPClient:            s.streamHTTPClient,
+		HTTPClient:            modelHTTPClient,
 		ReasoningConfig:       reasoningConfig,
 		ReasoningDialect:      chatModel.Config.ReasoningDialect,
 		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport,

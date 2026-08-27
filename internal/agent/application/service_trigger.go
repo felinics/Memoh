@@ -131,14 +131,39 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		cfg.OnStepInterrupted = stepCommitter.interrupt
 	}
 
-	// cancelStream is the consumption brake: if the consumer stops early
-	// (projection refused, terminal handled), cancelling unwinds the Stream
-	// goroutine instead of leaving it blocked on an unread channel.
-	streamCtx, cancelStream := context.WithCancel(ctx)
-	defer cancelStream()
-	result, streamErr := s.consumeTriggeredStream(streamCtx, s.agent.Stream(streamCtx, cfg), req, rc, admission.Handle, stepCommitter)
+	result, streamErr := s.runTriggeredNativeStream(ctx, cfg, req, rc, admission.Handle, stepCommitter)
 	lifecycleCause = streamErr
 	return result, streamErr
+}
+
+func (s *Service) runTriggeredNativeStream(
+	ctx context.Context,
+	cfg native.RunConfig,
+	req ChatRequest,
+	rc resolvedContext,
+	handle sessionruntime.RunHandle,
+	stepCommitter *agentStepCommitter,
+) (schedule.TriggerResult, error) {
+	// cancelStream remains the consumption brake: if the consumer stops early
+	// (projection refused, terminal handled), cancelling unwinds the Stream
+	// goroutine instead of leaving it blocked on an unread channel. The child
+	// idle context independently owns first-event and between-event silence.
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	idleCtx, idleCancel := s.withStreamIdleTimeout(streamCtx)
+	defer func() {
+		cancelStream()
+		idleCancel.Stop()
+	}()
+
+	return s.consumeTriggeredStreamWithIdle(
+		idleCtx,
+		s.agent.Stream(idleCtx, cfg),
+		req,
+		rc,
+		handle,
+		stepCommitter,
+		idleCancel,
+	)
 }
 
 // triggerScheduleACP runs one schedule fire through the ACP session pool.
@@ -262,15 +287,20 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 // committer, with one terminal-snapshot write as the fallback when step
 // persistence is unavailable, and an abort terminal is reported as an error
 // outcome while its partial transcript still persists. What a trigger
-// deliberately does NOT have is the WS client plumbing — no push channel, no
-// abort channel, no idle timeout — because there is no client; the runtime
-// lease and routed abort already bound execution.
+// deliberately does NOT have is the WS client plumbing — no push channel or
+// abort channel because there is no client. An application idle watchdog still
+// bounds first-event and between-event silence, including manual schedule fires
+// whose caller context has no deadline.
 //
 // The events channel is a parameter (rather than this function calling
 // agent.Stream itself) so tests can drive the loop directly; the caller owns
 // the stream context and must cancel it to unwind a still-running Stream
 // goroutine when this returns early.
 func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan native.StreamEvent, req ChatRequest, rc resolvedContext, handle sessionruntime.RunHandle, stepCommitter *agentStepCommitter) (schedule.TriggerResult, error) {
+	return s.consumeTriggeredStreamWithIdle(ctx, events, req, rc, handle, stepCommitter, nil)
+}
+
+func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-chan native.StreamEvent, req ChatRequest, rc resolvedContext, handle sessionruntime.RunHandle, stepCommitter *agentStepCommitter, idle *idleCancel) (schedule.TriggerResult, error) {
 	publishEvent := s.turnAgentEventPublisher(handle)
 
 	var (
@@ -282,6 +312,12 @@ func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan nati
 		streamErr        error
 	)
 	for event := range events {
+		if idle != nil {
+			idle.Reset()
+			if event.Type == native.EventToolCallStart {
+				idle.RecordToolCall()
+			}
+		}
 		if eventErr := agentStreamEventError(event); eventErr != nil {
 			s.logger.Error("triggered run stream error",
 				slog.String("bot_id", req.BotID),
@@ -300,7 +336,7 @@ func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan nati
 			// changes — without this the schedule log would mark a stopped
 			// run "ok", a regression from the Generate era, which errored.
 			terminalAborted = true
-			if streamErr == nil {
+			if context.Cause(ctx) != nil || streamErr == nil {
 				streamErr = agentAbortCause(ctx)
 			}
 		}
@@ -355,6 +391,9 @@ func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan nati
 				}
 			}
 		}
+	}
+	if streamErr == nil {
+		streamErr = context.Cause(ctx)
 	}
 
 	// Mid-run abort/error: finalize whatever the step committer already landed
