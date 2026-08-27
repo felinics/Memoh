@@ -16,21 +16,21 @@ import (
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 )
 
-func TestPostgresForkFromAssistantMessageCopiesVisibleTurns(t *testing.T) {
+func TestPostgresForkFromAssistantTurnCopiesVisibleTurns(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresSessionTestTx(t, ctx)
 	setupPostgresSessionForkFixtures(t, ctx, tx)
 
 	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)), nil)
-	fork, err := svc.ForkFromAssistantMessage(ctx, ForkFromAssistantInput{
+	fork, err := svc.ForkFromAssistantTurn(ctx, ForkFromAssistantInput{
 		BotID:           postgresSessionTestBotID,
 		ThreadID:        postgresSessionTestSessionID,
-		MessageID:       postgresSessionTestAssistant2ID,
+		TurnID:          postgresSessionTestTurn2ID,
 		Title:           "Forked",
 		CreatedByUserID: postgresSessionTestUserID,
 	})
 	if err != nil {
-		t.Fatalf("fork assistant message: %v", err)
+		t.Fatalf("fork assistant turn: %v", err)
 	}
 
 	forkedFrom, ok := fork.Metadata["forked_from"].(map[string]any)
@@ -313,7 +313,7 @@ func TestPostgresCreateSubagentStoresForkContextAsHiddenHistory(t *testing.T) {
 	}
 }
 
-func TestPostgresForkFromAssistantMessageRejectsInvalidTargetWithoutSideEffects(t *testing.T) {
+func TestPostgresForkFromAssistantTurnRejectsInvalidTargetWithoutSideEffects(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresSessionTestTx(t, ctx)
 	setupPostgresSessionForkFixtures(t, ctx, tx)
@@ -322,15 +322,15 @@ func TestPostgresForkFromAssistantMessageRejectsInvalidTargetWithoutSideEffects(
 	beforeSessions := countPostgresSessionTestRows(t, ctx, tx, "bot_sessions")
 	beforeMessages := countPostgresSessionTestRows(t, ctx, tx, "bot_history_messages")
 
-	for _, messageID := range []string{postgresSessionTestUser1ID, postgresSessionTestHiddenAssistantID} {
-		_, err := svc.ForkFromAssistantMessage(ctx, ForkFromAssistantInput{
-			BotID:     postgresSessionTestBotID,
-			ThreadID:  postgresSessionTestSessionID,
-			MessageID: messageID,
-			Title:     "Should Not Exist",
+	for _, turnID := range []string{postgresSessionTestHiddenTurnID, postgresSessionTestUnknownTurnID} {
+		_, err := svc.ForkFromAssistantTurn(ctx, ForkFromAssistantInput{
+			BotID:    postgresSessionTestBotID,
+			ThreadID: postgresSessionTestSessionID,
+			TurnID:   turnID,
+			Title:    "Should Not Exist",
 		})
 		if !errors.Is(err, ErrForkSourceNotReply) {
-			t.Fatalf("fork invalid message %s error = %v, want ErrForkSourceNotReply", messageID, err)
+			t.Fatalf("fork invalid turn %s error = %v, want ErrForkSourceNotReply", turnID, err)
 		}
 
 		if got := countPostgresSessionTestRows(t, ctx, tx, "bot_sessions"); got != beforeSessions {
@@ -785,6 +785,9 @@ const (
 	postgresSessionTestUser2ID           = "00000000-0000-0000-0000-000000075113"
 	postgresSessionTestAssistant2ID      = "00000000-0000-0000-0000-000000075114"
 	postgresSessionTestHiddenAssistantID = "00000000-0000-0000-0000-000000075115"
+	postgresSessionTestTurn2ID           = "00000000-0000-0000-0000-000000075202"
+	postgresSessionTestHiddenTurnID      = "00000000-0000-0000-0000-000000075203"
+	postgresSessionTestUnknownTurnID     = "00000000-0000-0000-0000-000000075299"
 )
 
 func beginPostgresSessionTestTx(t *testing.T, ctx context.Context) pgx.Tx {

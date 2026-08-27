@@ -20,7 +20,7 @@ VALUES (
 )
 RETURNING *;
 
--- name: ForkSessionFromAssistantMessage :one
+-- name: ForkSessionFromAssistantTurn :one
 WITH source_session AS (
   SELECT s.*
   FROM bot_sessions s
@@ -38,10 +38,9 @@ target_turn AS (
   FROM source_session s
   JOIN bot_visible_history_messages vm ON vm.team_id = public.memoh_current_team_id()
     AND vm.session_id = s.id
-    AND vm.id = sqlc.arg(message_id)
+    AND vm.turn_id = sqlc.arg(turn_id)
     AND vm.role = 'assistant'
-    AND vm.turn_id IS NOT NULL
-    AND vm.turn_position IS NOT NULL
+  ORDER BY vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
   LIMIT 1
 ),
 copy_messages AS (
@@ -102,9 +101,11 @@ fork_plan AS (
   SELECT
     s.*,
     fam.new_message_id AS fork_message_id,
+    tt.message_id AS source_message_id,
     ntp.value AS next_turn_position_value
   FROM source_session s
   JOIN fork_anchor_message fam ON true
+  JOIN target_turn tt ON true
   CROSS JOIN next_turn_position ntp
   WHERE EXISTS (SELECT 1 FROM copy_turns)
 ),
@@ -138,7 +139,10 @@ created_session AS (
     jsonb_set(
       pm.value,
       '{forked_from}',
-      COALESCE(pm.value->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fp.fork_message_id::text),
+      COALESCE(pm.value->'forked_from', '{}'::jsonb) || jsonb_build_object(
+        'message_id', fp.source_message_id::text,
+        'fork_message_id', fp.fork_message_id::text
+      ),
       true
     ),
     fp.next_turn_position_value,

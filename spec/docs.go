@@ -7743,7 +7743,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Fork source message",
+                        "description": "Fork source turn",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -21549,14 +21549,15 @@ const docTemplate = `{
         "handlers.forkSessionRequest": {
             "type": "object",
             "required": [
-                "message_id"
+                "turn_id"
             ],
             "properties": {
-                "message_id": {
-                    "type": "string"
-                },
                 "title": {
                     "type": "string"
+                },
+                "turn_id": {
+                    "type": "string",
+                    "format": "uuid"
                 }
             }
         },

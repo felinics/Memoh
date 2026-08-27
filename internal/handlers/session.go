@@ -137,8 +137,8 @@ type updateSessionRequest struct {
 }
 
 type forkSessionRequest struct {
-	MessageID string `json:"message_id" validate:"required"`
-	Title     string `json:"title,omitempty"`
+	TurnID string `json:"turn_id" validate:"required" format:"uuid"`
+	Title  string `json:"title,omitempty"`
 }
 
 // CreateSession godoc
@@ -282,7 +282,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Source session ID"
-// @Param body body forkSessionRequest true "Fork source message"
+// @Param body body forkSessionRequest true "Fork source turn"
 // @Success 201 {object} session.Thread
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -314,18 +314,18 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	messageID := strings.TrimSpace(req.MessageID)
-	if messageID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "message_id is required")
+	turnID := strings.TrimSpace(req.TurnID)
+	if turnID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "turn_id is required")
 	}
-	if _, err := uuid.Parse(messageID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid message_id")
+	if _, err := uuid.Parse(turnID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid turn_id")
 	}
 
-	forked, err := h.sessionService.ForkFromAssistantMessage(c.Request().Context(), session.ForkFromAssistantInput{
+	forked, err := h.sessionService.ForkFromAssistantTurn(c.Request().Context(), session.ForkFromAssistantInput{
 		BotID:           bot.ID,
 		ThreadID:        source.ID,
-		MessageID:       messageID,
+		TurnID:          turnID,
 		Title:           strings.TrimSpace(req.Title),
 		CreatedByUserID: channelIdentityID,
 	})

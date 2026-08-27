@@ -81,7 +81,7 @@ describe('chat transcript controller', () => {
     expect(toRaw(transcript.messages[0])).toBe(turn)
   })
 
-  it('owns server-id lookup and latest visible turn queries', () => {
+  it('owns turn lookup and latest visible turn queries', () => {
     const { transcript } = makeTranscript()
     transcript.replaceMessages([
       rawUser('user-1'),
@@ -89,8 +89,8 @@ describe('chat transcript controller', () => {
       rawUser('user-2'),
       rawAssistant('assistant-2'),
     ], 'session-1')
-    const latestUser = transcript.findTurnByServerId('user-2')!
-    const latestAssistant = transcript.findTurnByServerId('assistant-2')!
+    const latestUser = transcript.findTurnByTurnId('turn-user-2', 'user')!
+    const latestAssistant = transcript.findTurnByTurnId('turn-assistant-2', 'assistant')!
     const optimisticUser: ChatUserTurn = {
       id: 'optimistic-user',
       role: 'user',
@@ -104,11 +104,60 @@ describe('chat transcript controller', () => {
     transcript.appendToView(optimisticUser)
 
     expect(transcript.hasTurn(optimisticUser)).toBe(true)
-    expect(transcript.findTurnByServerId('missing')).toBeNull()
+    expect(transcript.findTurnByTurnId('missing', 'user')).toBeNull()
     expect(transcript.isLatestVisibleUserTurn(latestUser)).toBe(true)
     expect(transcript.isLatestVisibleAssistantTurn(latestAssistant)).toBe(true)
     expect(transcript.isLatestVisibleUserTurn(optimisticUser)).toBe(false)
-    expect(transcript.isLatestVisibleUserTurn(transcript.findTurnByServerId('user-1')!)).toBe(false)
+    expect(transcript.isLatestVisibleUserTurn(transcript.findTurnByTurnId('turn-user-1', 'user')!)).toBe(false)
+  })
+
+  // Both halves of a round share one turn id, so the role is what separates
+  // what a retry addresses from what an edit addresses.
+  it('resolves the two halves of one turn by role', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([
+      { id: 'user-1', turn_id: 'turn-1', role: 'user', text: 'hello', timestamp: '2026-01-01T00:00:00.000Z' },
+      { id: 'assistant-1', turn_id: 'turn-1', role: 'assistant', messages: [], timestamp: '2026-01-01T00:00:01.000Z' },
+    ], 'session-1')
+
+    expect(transcript.findTurnByTurnId('turn-1', 'user')?.id).toBe('user-1')
+    expect(transcript.findTurnByTurnId('turn-1', 'assistant')?.id).toBe('assistant-1')
+  })
+
+  // A live turn is on screen before the database has numbered it. Paging from
+  // it would hand the server a render identity it cannot resolve.
+  it('never pages from a turn the database has not numbered', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.replaceHistoryView([], 'session-1')
+    transcript.appendToView({
+      id: 'runtime:turn-1:user',
+      role: 'user',
+      text: 'hi',
+      attachments: [],
+      timestamp: '2026-01-01T00:00:00.000Z',
+      streaming: false,
+      isSelf: true,
+      turnId: 'turn-1',
+    })
+
+    expect(await transcript.loadOlderMessages()).toBe(0)
+    expect(fetchMessages).not.toHaveBeenCalled()
+
+    transcript.replaceHistoryView([{
+      id: '018f47f2-8bc1-7a3d-91b2-b73a7b925b1e',
+      turn_id: 'turn-1',
+      turn_position: 7,
+      role: 'user',
+      text: 'hi',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    }], 'session-1')
+    fetchMessages.mockResolvedValueOnce([])
+
+    expect(await transcript.loadOlderMessages()).toBe(0)
+    expect(fetchMessages).toHaveBeenCalledWith('bot-1', 'session-1', {
+      limit: 30,
+      beforeMessageId: '018f47f2-8bc1-7a3d-91b2-b73a7b925b1e',
+    })
   })
 
   it('does not guess optimistic identity from matching text and timestamps', () => {

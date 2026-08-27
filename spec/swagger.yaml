@@ -4357,12 +4357,13 @@ definitions:
     type: object
   handlers.forkSessionRequest:
     properties:
-      message_id:
-        type: string
       title:
         type: string
+      turn_id:
+        format: uuid
+        type: string
     required:
-    - message_id
+    - turn_id
     type: object
   handlers.fsOpResponse:
     properties:
@@ -11183,7 +11184,7 @@ paths:
         name: session_id
         required: true
         type: string
-      - description: Fork source message
+      - description: Fork source turn
         in: body
         name: body
         required: true

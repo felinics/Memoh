@@ -406,7 +406,7 @@ const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
   active: [isActive: boolean, { id: string, top: number,  }]
   editMessage: [messageId: string, text: string, done: (started: boolean) => void]
-  forkMessage: [messageId: string]
+  forkMessage: [turnId: string]
 }>()
 
 const props = defineProps<{
@@ -452,14 +452,17 @@ const isEditingUserMessage = ref(false)
 const editDraft = ref('')
 const editSubmitting = ref(false)
 
+// Retry, edit and fork all address a round, and a round is named by its turn
+// id — an identity the turn carries from admission onward. The message id is a
+// render identity here and would not survive the trip to the server.
+const turnId = computed(() => props.message.turnId?.trim() ?? '')
+
 function handleRetry() {
-  const messageId = (props.message.serverId ?? props.message.id).trim()
-  if (messageId) props.onRetryMessage?.(messageId)
+  if (turnId.value) props.onRetryMessage?.(turnId.value)
 }
 
 function handleFork() {
-  const messageId = (props.message.serverId ?? props.message.id).trim()
-  if (messageId) emit('forkMessage', messageId)
+  if (turnId.value) emit('forkMessage', turnId.value)
 }
 
 // The pre-stream "running" line picks one phrase and holds it for the turn:
@@ -587,13 +590,15 @@ const canEditUserMessage = computed(() =>
   && props.canEditLatestUser === true
   && props.message.attachments.length === 0
   && cleanCurrentUserText.value.length > 0
-  && bubbleSelf.value,
+  && bubbleSelf.value
+  && turnId.value !== '',
 )
 
 const canForkAssistantMessage = computed(() =>
   props.message.role === 'assistant'
   && !props.message.streaming
-  && props.message.__optimistic !== true,
+  && props.message.__optimistic !== true
+  && turnId.value !== '',
 )
 
 const canSubmitEdit = computed(() =>
@@ -626,10 +631,9 @@ function cancelEdit() {
 }
 
 async function submitEdit() {
-  if (!canSubmitEdit.value || props.message.role !== 'user') return
+  if (!canSubmitEdit.value || props.message.role !== 'user' || !turnId.value) return
   editSubmitting.value = true
-  const messageId = (props.message.serverId ?? props.message.id).trim()
-  emit('editMessage', messageId, editDraft.value.trim(), (started) => {
+  emit('editMessage', turnId.value, editDraft.value.trim(), (started) => {
     editSubmitting.value = false
     if (started) {
       isEditingUserMessage.value = false

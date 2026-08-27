@@ -7734,7 +7734,7 @@
                         "required": true
                     },
                     {
-                        "description": "Fork source message",
+                        "description": "Fork source turn",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -21540,14 +21540,15 @@
         "handlers.forkSessionRequest": {
             "type": "object",
             "required": [
-                "message_id"
+                "turn_id"
             ],
             "properties": {
-                "message_id": {
-                    "type": "string"
-                },
                 "title": {
                     "type": "string"
+                },
+                "turn_id": {
+                    "type": "string",
+                    "format": "uuid"
                 }
             }
         },

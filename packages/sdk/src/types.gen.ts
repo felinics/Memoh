@@ -2476,8 +2476,8 @@ export type HandlersEmailOAuthStatusResponse = {
 };
 
 export type HandlersForkSessionRequest = {
-    message_id: string;
     title?: string;
+    turn_id: string;
 };
 
 export type HandlersFsOpResponse = {
@@ -9815,7 +9815,7 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponse = GetBotsB
 
 export type PostBotsByBotIdSessionsBySessionIdForkData = {
     /**
-     * Fork source message
+     * Fork source turn
      */
     body: HandlersForkSessionRequest;
     path: {

@@ -104,7 +104,7 @@ type Queries interface {
 	CreateScheduleLog(ctx context.Context, arg dbsqlc.CreateScheduleLogParams) (dbsqlc.CreateScheduleLogRow, error)
 	CreateSearchProvider(ctx context.Context, arg dbsqlc.CreateSearchProviderParams) (dbsqlc.SearchProvider, error)
 	CreateSession(ctx context.Context, arg dbsqlc.CreateSessionParams) (dbsqlc.BotSession, error)
-	ForkSessionFromAssistantMessage(ctx context.Context, arg dbsqlc.ForkSessionFromAssistantMessageParams) (dbsqlc.ForkSessionFromAssistantMessageRow, error)
+	ForkSessionFromAssistantTurn(ctx context.Context, arg dbsqlc.ForkSessionFromAssistantTurnParams) (dbsqlc.ForkSessionFromAssistantTurnRow, error)
 	CreateSessionEvent(ctx context.Context, arg dbsqlc.CreateSessionEventParams) (pgtype.UUID, error)
 	CreateStorageProvider(ctx context.Context, arg dbsqlc.CreateStorageProviderParams) (dbsqlc.StorageProvider, error)
 	CreateSubagentConfig(ctx context.Context, arg dbsqlc.CreateSubagentConfigParams) (dbsqlc.SubagentConfig, error)

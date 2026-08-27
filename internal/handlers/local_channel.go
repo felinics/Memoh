@@ -882,13 +882,17 @@ var wsUpgrader = websocket.Upgrader{
 // that already exists, which is why abort and decision responses carry it. A
 // client can never name a run it has not been told about.
 type wsClientMessage struct {
-	Type              string                     `json:"type"`
-	RunID             string                     `json:"run_id,omitempty"`
-	Text              string                     `json:"text,omitempty"`
-	SessionID         string                     `json:"session_id,omitempty"`
-	InvocationID      string                     `json:"invocation_id,omitempty"`
-	ComposerScope     string                     `json:"composer_scope,omitempty"`
-	MessageID         string                     `json:"message_id,omitempty"`
+	Type          string `json:"type"`
+	RunID         string `json:"run_id,omitempty"`
+	Text          string `json:"text,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	InvocationID  string `json:"invocation_id,omitempty"`
+	ComposerScope string `json:"composer_scope,omitempty"`
+	// TurnID names an existing turn the client wants replaced (retry, edit).
+	// It is a turn rather than a message because the client holds a turn id
+	// from admission onward, while a stored message id only exists once the
+	// round has been persisted.
+	TurnID            string                     `json:"turn_id,omitempty"`
 	Attachments       []json.RawMessage          `json:"attachments,omitempty"`
 	RequestedSkills   []webRequestedSkill        `json:"requested_skills,omitempty"`
 	ModelID           string                     `json:"model_id,omitempty"`
@@ -1395,7 +1399,7 @@ type wsSubmission struct {
 	Kind      string `json:"kind"`
 	SessionID string `json:"session_id"`
 	Text      string `json:"text,omitempty"`
-	MessageID string `json:"message_id,omitempty"`
+	TurnID    string `json:"turn_id,omitempty"`
 	// Attachments is a digest rather than the files themselves. Two submissions
 	// differ if their attachments differ, which is all the fingerprint needs,
 	// and the durable row does not carry inlined uploads to learn it.
@@ -1423,7 +1427,7 @@ func digestWSAttachments(attachments []json.RawMessage) string {
 func (s wsSubmission) encode() []byte {
 	payload, err := json.Marshal(s)
 	if err != nil {
-		return []byte(s.Kind + "\x00" + s.SessionID + "\x00" + s.Text + "\x00" + s.MessageID)
+		return []byte(s.Kind + "\x00" + s.SessionID + "\x00" + s.Text + "\x00" + s.TurnID)
 	}
 	return payload
 }
@@ -2288,7 +2292,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		case "retry_message":
 			sessionID := strings.TrimSpace(msg.SessionID)
 			ref := wsTurn(msg.InvocationID, sessionID)
-			messageID := strings.TrimSpace(msg.MessageID)
+			targetTurnID := strings.TrimSpace(msg.TurnID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if ref.InvocationID == "" {
 				sendWSError(writer, ref, "invocation_id is required")
@@ -2298,8 +2302,8 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
-			if messageID == "" {
-				sendWSError(writer, ref, "message_id is required")
+			if targetTurnID == "" {
+				sendWSError(writer, ref, "turn_id is required")
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
@@ -2320,12 +2324,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			retrySubmission := wsSubmission{
 				Kind:      "retry_message",
 				SessionID: sessionID,
-				MessageID: messageID,
+				TurnID:    targetTurnID,
 			}.encode()
 			retryInput := application.RetryLatestMessageInput{
 				BotID:                  botID,
 				SessionID:              sessionID,
-				MessageID:              messageID,
+				TargetTurnID:           targetTurnID,
 				ActorChannelIdentityID: channelIdentityID,
 				ActorUserID:            channelIdentityID,
 				ChatToken:              bearerToken,
@@ -2337,7 +2341,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			retryAdmission := &wsReplacementAdmission{
 				kind: sessionruntime.RunOperationRetry,
 				prepareAnchor: func(ctx context.Context) (string, error) {
-					return h.agentService.PrepareRetryLatestMessageOperation(ctx, sessionID, messageID)
+					return h.agentService.PrepareRetryLatestTurnOperation(ctx, sessionID, targetTurnID)
 				},
 			}
 			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws retry stream error", retrySubmission, retryAdmission.build, nil,
@@ -2354,7 +2358,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			text := strings.TrimSpace(msg.Text)
 			sessionID := strings.TrimSpace(msg.SessionID)
 			ref := wsTurn(msg.InvocationID, sessionID)
-			messageID := strings.TrimSpace(msg.MessageID)
+			targetTurnID := strings.TrimSpace(msg.TurnID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if ref.InvocationID == "" {
 				sendWSError(writer, ref, "invocation_id is required")
@@ -2364,8 +2368,8 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, ref, "session_id is required")
 				continue
 			}
-			if messageID == "" {
-				sendWSError(writer, ref, "message_id is required")
+			if targetTurnID == "" {
+				sendWSError(writer, ref, "turn_id is required")
 				continue
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
@@ -2400,13 +2404,13 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				Kind:        "edit_message",
 				SessionID:   sessionID,
 				Text:        text,
-				MessageID:   messageID,
+				TurnID:      targetTurnID,
 				Attachments: digestWSAttachments(msg.Attachments),
 			}.encode()
 			editInput := application.EditLatestMessageInput{
 				BotID:                  botID,
 				SessionID:              sessionID,
-				MessageID:              messageID,
+				TargetTurnID:           targetTurnID,
 				Text:                   text,
 				ActorChannelIdentityID: channelIdentityID,
 				ActorUserID:            channelIdentityID,
@@ -2421,7 +2425,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				botID:   botID,
 				kind:    sessionruntime.RunOperationEdit,
 				prepareAnchor: func(ctx context.Context) (string, error) {
-					return h.agentService.PrepareEditLatestMessageOperation(ctx, sessionID, messageID)
+					return h.agentService.PrepareEditLatestTurnOperation(ctx, sessionID, targetTurnID)
 				},
 				replacementUserTurn: &chatview.UITurn{
 					Role:         "user",
