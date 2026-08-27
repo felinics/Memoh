@@ -22,8 +22,7 @@ import (
 )
 
 const (
-	titlePromptMaxInputChars = 500
-	titleGenerateTimeout     = 60 * time.Second
+	titleGenerateTimeout = 60 * time.Second
 	// titleGenerateMaxTokens caps the title completion. Reasoning models burn
 	// budget on hidden thinking before answering, so the cap must clear their
 	// thinking plus a short title (provider defaults can be far smaller, which
@@ -41,6 +40,13 @@ const (
 // trailing question mark, while worked examples carry the target style.
 // Keep the "rules + examples" shape when editing, and keep example inputs
 // disjoint from real traffic so the model generalizes instead of copying.
+//
+// Deliberately no special case for meaningless input (a number, a sticker):
+// the model still returns *something* topic-ish for it, and an empty result
+// already falls back to the prompt-derived title — whereas a fixed
+// placeholder string (the previous rule returned "新对话") collides with the
+// UI's own untitled-session label and makes every such session
+// indistinguishable in the sidebar.
 const titleGenerationPrompt = `Generate a short title for this conversation, in the same language as the user's message.
 
 Rules:
@@ -52,7 +58,6 @@ Rules:
 - For two-entity topics in Chinese, use the "X与Y" form; in English, use "X and Y".
 - For Chinese titles, allowed suffixes when one is needed: 分析/解析/介绍/建议/疑问/困惑/误解/修复/控制/设计/差异 — pick by topic nature, or use no suffix. English titles use plain noun phrases.
 - No ending punctuation, no quotes.
-- If the message is meaningless (a number, a sticker, a single character), return exactly: 新对话
 - Return ONLY the title text.
 
 Examples of the rules (do not copy their content):
@@ -202,7 +207,11 @@ func shouldGenerateSessionTitle(sess session.Thread) bool {
 }
 
 func (s *Service) generateTitle(ctx context.Context, userID string, model models.GetResponse, provider sqlc.Provider, userQuery string) string {
-	userSnippet := truncate(strings.TrimSpace(userQuery), titlePromptMaxInputChars)
+	// The full first user message goes in untruncated: truncating it (the old
+	// 500-char cap) cut the actual topic off long first messages — a pasted
+	// log or document often states its subject well past the opening — and
+	// left the model with only the greeting half to summarize.
+	userSnippet := strings.TrimSpace(userQuery)
 	if userSnippet == "" {
 		return ""
 	}
