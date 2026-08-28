@@ -3,7 +3,7 @@ package tools
 import (
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
 )

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	"github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/channel/inbound"

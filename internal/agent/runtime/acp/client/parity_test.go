@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
 	"github.com/memohai/memoh/internal/agent/event"

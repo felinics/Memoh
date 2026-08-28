@@ -6,9 +6,9 @@ import (
 	"strings"
 	"sync"
 
-	arkvideos "github.com/memohai/twilight-ai/provider/ark/videos"
-	openroutervideos "github.com/memohai/twilight-ai/provider/openrouter/videos"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	arkvideos "github.com/memohai/twilight/provider/ark/videos"
+	openroutervideos "github.com/memohai/twilight/provider/openrouter/videos"
+	sdk "github.com/memohai/twilight/sdk"
 
 	"github.com/memohai/memoh/internal/models"
 )

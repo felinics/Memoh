@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
 	"github.com/memohai/memoh/internal/agent/runtime/native"

@@ -28,7 +28,7 @@ Infrastructure dependencies:
 ### Backend (Go)
 - **Framework**: Echo (HTTP)
 - **Dependency Injection**: Uber FX
-- **AI SDK**: [Twilight AI](https://github.com/memohai/twilight-ai) (Go LLM SDK — OpenAI, Anthropic, Google)
+- **AI SDK**: [Twilight AI](https://github.com/memohai/twilight) (Go LLM SDK — OpenAI, Anthropic, Google)
 - **Database Driver**: pgx/v5 (PostgreSQL)
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)

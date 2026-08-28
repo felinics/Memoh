@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/memohai/memoh/internal/agent/context/history"

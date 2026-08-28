@@ -103,7 +103,7 @@ submodule，setup 也会为后续 pull 启用递归更新。如果从未安装�
 
 ## 为本项目拆出的子项目
 
-- [**Twilight AI**](https://github.com/memohai/twilight-ai) — 给 Go 用的轻量 AI SDK，风格参考 [Vercel AI SDK](https://sdk.vercel.ai/)
+- [**Twilight AI**](https://github.com/memohai/twilight) — 给 Go 用的轻量 AI SDK，风格参考 [Vercel AI SDK](https://sdk.vercel.ai/)
 - [**Connect It**](https://github.com/memohai/connect-it) — 自托管的连接器网关，安全保存 SaaS 凭据，并通过单个 MCP 端点让 Agent 使用各种集成
 - [**UI**](https://github.com/memohai/ui) — 面向 AI Agent 管理界面的 Vue 3 设计系统，包含组件库、设计令牌，以及指导 Agent 正确使用它们的技能
 

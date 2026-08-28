@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 )
 
 const (
-	sdkImportPath            = "github.com/memohai/twilight-ai/sdk"
+	sdkImportPath            = "github.com/memohai/twilight/sdk"
 	mcpImportPath            = "github.com/memohai/memoh/internal/mcp"
 	memoryAdaptersImportPath = "github.com/memohai/memoh/internal/memory/adapters"
 
@@ -247,7 +247,7 @@ func f() {
 	typedAssignSrc := []byte(`package tools
 
 import (
-	"github.com/memohai/twilight-ai/sdk"
+	"github.com/memohai/twilight/sdk"
 	"github.com/memohai/memoh/internal/mcp"
 )
 
@@ -415,7 +415,7 @@ func TestProtocolNameGuardsRecognizeImportAliases(t *testing.T) {
 	src := []byte(`package tools
 
 import (
-	twilight "github.com/memohai/twilight-ai/sdk"
+	twilight "github.com/memohai/twilight/sdk"
 	mcpgw "github.com/memohai/memoh/internal/mcp"
 	memoryadapters "github.com/memohai/memoh/internal/memory/adapters"
 )

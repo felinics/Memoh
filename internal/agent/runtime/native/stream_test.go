@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	agenttools "github.com/memohai/memoh/internal/agent/tool"
 )

@@ -3,7 +3,7 @@ package contextfrag
 import (
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 )
 
 func TestNewSummaryCoverageCarriesRefsAndSchema(t *testing.T) {

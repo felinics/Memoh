@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"

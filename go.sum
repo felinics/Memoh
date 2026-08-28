@@ -521,8 +521,8 @@ github.com/memohai/connect-it/sdk/go v0.1.1-0.20260823104951-478f43caffb2 h1:0Vx
 github.com/memohai/connect-it/sdk/go v0.1.1-0.20260823104951-478f43caffb2/go.mod h1:0XfT9WNZF/cKDaJYoQrXzRRkvMn2f77gBRscF9U3YvY=
 github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978 h1:6gD8DvZkimGmU0e3PjlusJPyw55SyeoE12CZQoYUa8g=
 github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978/go.mod h1:2LMgK5QYFlTSvrGY+sI/j+jK2WK+YGHv4IMuiW+iPSc=
-github.com/memohai/twilight-ai v0.5.0 h1:zkQkmUhasQooHP8/6aZM/+Ogv5a12zlCFfxQ4XJ+uRU=
-github.com/memohai/twilight-ai v0.5.0/go.mod h1:s5s03jeYgK56SaHH9oVHua73xCmiSG4uyfCZKi9fCHk=
+github.com/memohai/twilight v0.6.0 h1:dISNBc/Knb/YpWNh6D3YEyN6TcSW7RqHTVhjf2+yNjo=
+github.com/memohai/twilight v0.6.0/go.mod h1:8VVR78q7UbUwmwwip8bzIXwLtGT2M331BiURvekscOo=
 github.com/miekg/dns v1.1.26/go.mod h1:bPDLeHnStXmXAq1m/Ch/hvfNHr14JKNPMBo3VZKjuso=
 github.com/miekg/dns v1.1.41/go.mod h1:p6aan82bvRIyn+zDIv9xYNUpwa73JcSh9BKwknJysuI=
 github.com/mitchellh/cli v1.1.0/go.mod h1:xcISNoH86gajksDmfB23e/pu+B+GeFRMYmoHXxx3xhI=

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	sched "github.com/memohai/memoh/internal/schedule"
 )

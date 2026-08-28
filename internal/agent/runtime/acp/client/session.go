@@ -15,7 +15,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	"github.com/memohai/memoh/internal/agent/event"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"

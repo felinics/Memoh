@@ -3,7 +3,7 @@ package native
 import (
 	"sync"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 )
 
 type providerAttemptState struct {

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	anthropicmessages "github.com/memohai/twilight/provider/anthropic/messages"
+	sdk "github.com/memohai/twilight/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/models"

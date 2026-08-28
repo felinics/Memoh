@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	messagepkg "github.com/memohai/memoh/internal/chat/message"

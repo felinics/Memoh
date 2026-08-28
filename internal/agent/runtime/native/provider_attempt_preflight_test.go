@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 

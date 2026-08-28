@@ -3,7 +3,7 @@ package tools
 import (
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 )
 
 func TestMessageSnapshotIsImmutableAndProviderNeutral(t *testing.T) {

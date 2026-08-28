@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"sync"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 )
 
 // stepMessageCapture retains context messages appended by PrepareStep. They

@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	displaypkg "github.com/memohai/memoh/internal/display"
 	"github.com/memohai/memoh/internal/settings"

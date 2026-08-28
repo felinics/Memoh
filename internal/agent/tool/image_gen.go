@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	alibabaimages "github.com/memohai/twilight-ai/provider/alibabacloud/images"
-	openaiimages "github.com/memohai/twilight-ai/provider/openai/images"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	alibabaimages "github.com/memohai/twilight/provider/alibabacloud/images"
+	openaiimages "github.com/memohai/twilight/provider/openai/images"
+	sdk "github.com/memohai/twilight/sdk"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"

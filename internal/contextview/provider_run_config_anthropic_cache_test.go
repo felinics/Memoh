@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
-	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	anthropicmessages "github.com/memohai/twilight/provider/anthropic/messages"
+	openaicompletions "github.com/memohai/twilight/provider/openai/completions"
+	sdk "github.com/memohai/twilight/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"

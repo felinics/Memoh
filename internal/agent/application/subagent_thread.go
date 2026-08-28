@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 )

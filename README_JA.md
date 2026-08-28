@@ -106,7 +106,7 @@ GitHub が自動生成する「Source code」
 
 ## Sub-projects
 
-- [**Twilight AI**](https://github.com/memohai/twilight-ai) — Go 向けの軽量で idiomatic な AI SDK。[Vercel AI SDK](https://sdk.vercel.ai/) に着想を得ており、Provider 非依存で、streaming、tool calling、MCP、embeddings を first-class に扱えます。
+- [**Twilight AI**](https://github.com/memohai/twilight) — Go 向けの軽量で idiomatic な AI SDK。[Vercel AI SDK](https://sdk.vercel.ai/) に着想を得ており、Provider 非依存で、streaming、tool calling、MCP、embeddings を first-class に扱えます。
 - [**Connect It**](https://github.com/memohai/connect-it) — SaaS の認証情報を安全に保管し、単一の MCP endpoint を通じて Agent に各種連携を提供するセルフホスト型 connector gateway です。
 - [**UI**](https://github.com/memohai/ui) — AI Agent の管理画面向け Vue 3 design system。component library、design token、および Agent に正しい使い方を教える Skill を含みます。
 

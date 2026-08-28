@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/agent/background"

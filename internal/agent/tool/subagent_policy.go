@@ -1,6 +1,6 @@
 package tools
 
-import sdk "github.com/memohai/twilight-ai/sdk"
+import sdk "github.com/memohai/twilight/sdk"
 
 // FilterSubagentTools applies the small denylist for capabilities that require
 // direct parent/user coordination. All other native and federated tools remain

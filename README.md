@@ -106,7 +106,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup
 
 ## Sub-projects
 
-- [**Twilight AI**](https://github.com/memohai/twilight-ai) — A lightweight, idiomatic AI SDK for Go, inspired by [Vercel AI SDK](https://sdk.vercel.ai/). Provider-agnostic (OpenAI, Anthropic, Google), with first-class streaming, tool calling, MCP, and embeddings.
+- [**Twilight AI**](https://github.com/memohai/twilight) — A lightweight, idiomatic AI SDK for Go, inspired by [Vercel AI SDK](https://sdk.vercel.ai/). Provider-agnostic (OpenAI, Anthropic, Google), with first-class streaming, tool calling, MCP, and embeddings.
 - [**Connect It**](https://github.com/memohai/connect-it) — A self-hosted connector gateway that securely stores SaaS credentials and gives agents access to integrations through a single MCP endpoint.
 - [**UI**](https://github.com/memohai/ui) — A Vue 3 design system for AI agent management interfaces, including a component library, design tokens, and skills that teach agents how to use them.
 

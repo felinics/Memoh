@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	tools "github.com/memohai/memoh/internal/agent/tool"
 	"github.com/memohai/memoh/internal/models"

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"

@@ -3,7 +3,7 @@ package native
 import (
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 )
 
 func TestMarkApprovalToolsCoversWorkspaceTools(t *testing.T) {

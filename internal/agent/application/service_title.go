@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	messageevent "github.com/memohai/memoh/internal/chat/event"

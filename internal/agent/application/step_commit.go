@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	"github.com/memohai/memoh/internal/runtimefence"

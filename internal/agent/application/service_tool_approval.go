@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
 	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"

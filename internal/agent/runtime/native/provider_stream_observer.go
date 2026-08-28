@@ -3,7 +3,7 @@ package native
 import (
 	"context"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 )
 
 type providerStreamEventObserver struct {

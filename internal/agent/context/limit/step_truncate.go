@@ -3,7 +3,7 @@ package contextlimit
 import (
 	"fmt"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 )
 
 // StepToolResultTruncateBytes is the content-size threshold above which an

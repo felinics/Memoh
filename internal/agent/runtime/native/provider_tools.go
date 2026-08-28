@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 )
 
 // canonicalizeProviderToolSchemas mirrors Twilight's buildConfig schema

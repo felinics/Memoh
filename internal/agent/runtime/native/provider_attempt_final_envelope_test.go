@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/memohai/twilight/sdk"
 
 	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
 	agenttools "github.com/memohai/memoh/internal/agent/tool"

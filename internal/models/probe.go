@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
-	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
-	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
-	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
-	openairesponses "github.com/memohai/twilight-ai/provider/openai/responses"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	anthropicmessages "github.com/memohai/twilight/provider/anthropic/messages"
+	googlegenerative "github.com/memohai/twilight/provider/google/generativeai"
+	openaicodex "github.com/memohai/twilight/provider/openai/codex"
+	openaicompletions "github.com/memohai/twilight/provider/openai/completions"
+	openairesponses "github.com/memohai/twilight/provider/openai/responses"
+	sdk "github.com/memohai/twilight/sdk"
 
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db"

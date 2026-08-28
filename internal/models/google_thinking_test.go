@@ -3,7 +3,7 @@ package models
 import (
 	"testing"
 
-	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
+	googlegenerative "github.com/memohai/twilight/provider/google/generativeai"
 
 	"github.com/memohai/memoh/internal/reasoning"
 )
