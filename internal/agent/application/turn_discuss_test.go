@@ -95,6 +95,9 @@ type testDiscussService interface {
 
 func newDiscussTestService(streamer testChatStreamer, agent testAgentStreamer, resolver testDiscussService) *Service {
 	service := newTurnTestService(streamer)
+	if service.logger == nil {
+		service.logger = slog.New(slog.DiscardHandler)
+	}
 	service.turnHooks.streamAgent = agent.Stream
 	service.turnHooks.resolveRunConfig = resolver.ResolveRunConfig
 	service.turnHooks.inlineImages = resolver.InlineImageAttachments
@@ -367,19 +370,17 @@ func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T)
 	if err != nil {
 		t.Fatalf("StartTurn() error = %v", err)
 	}
-	events := drainDiscuss(t, handle)
-
-	var publicError native.StreamEvent
-	for _, event := range events {
-		if event.Kind != string(native.EventError) {
-			continue
-		}
-		if err := json.Unmarshal(event.Payload, &publicError); err != nil {
-			t.Fatalf("decode discuss error event: %v", err)
-		}
+	for range handle.Events() {
 	}
-	if publicError.Code != string(apperror.CodeContextBudgetUnsatisfied) {
-		t.Fatalf("public error code = %q, want %q", publicError.Code, apperror.CodeContextBudgetUnsatisfied)
+	var handleErrs []error
+	for err := range handle.Errs() {
+		handleErrs = append(handleErrs, err)
+	}
+	// Since the pre-materialization admission boundary (#1077), an over-budget
+	// discuss turn is rejected before context assembly and surfaces the stable
+	// protected-overflow code on the handle's error channel.
+	if len(handleErrs) != 1 || apperror.CodeOf(handleErrs[0]) != apperror.CodeContextProtectedOverflow {
+		t.Fatalf("handle errors = %v, want one %q rejection", handleErrs, apperror.CodeContextProtectedOverflow)
 	}
 	if provider.callCount() != 0 {
 		t.Fatalf("provider calls = %d, want 0 after provider-budget rejection", provider.callCount())
@@ -392,13 +393,13 @@ func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T)
 		lifecycles.creates,
 		admittedRunID,
 		contextLifecycleStatusFailedBudget,
-		string(apperror.CodeContextBudgetUnsatisfied),
+		string(apperror.CodeContextProtectedOverflow),
 	)
-	if snapshot.BudgetPlan == nil || snapshot.BudgetPlan.Window != 1 {
-		t.Fatalf("budget plan = %#v, want active provider plan with window 1", snapshot.BudgetPlan)
-	}
-	if !hasLifecycleMutation(snapshot, contextfrag.MutationContextBudgetFailure) {
-		t.Fatalf("lifecycle mutations = %#v, want provider-budget failure", snapshot.Mutations)
+	// Admission rejects before context assembly, so the persisted snapshot is
+	// the content-light minimal form: the classification authority is the
+	// stable protected-overflow error code, not a budget plan or mutation.
+	if snapshot.BudgetPlan != nil {
+		t.Fatalf("budget plan = %#v, want none before context assembly", snapshot.BudgetPlan)
 	}
 	if len(runtime.finishes) != 1 || runtime.finishes[0].status != sessionruntime.RunStatusErrored {
 		t.Fatalf("runtime finishes = %#v, want one errored finish", runtime.finishes)

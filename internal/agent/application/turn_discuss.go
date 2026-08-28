@@ -175,7 +175,13 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			slog.String("session_id", cmd.ThreadID),
 			slog.Int("estimated_tokens", admission.EstimatedTokens),
 			slog.Int("budget_tokens", admission.BudgetTokens))
-		h.emitErr(apperror.New(apperror.CodeContextProtectedOverflow, nil))
+		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
+		if runConfig.ContextLifecycle == nil {
+			runConfig.ContextLifecycle = contextfrag.NewLifecycleHolder()
+		}
+		runConfig.ContextLifecycle.SetManifest(contextfrag.BuildManifest(nil))
+		s.contextLifecycleTerminal(ctx, runConfig)(cause)
+		h.emitErr(cause)
 		return
 	}
 	if admission.DroppedMessages > 0 {
@@ -435,7 +441,18 @@ func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 			slog.String("session_id", cmd.ThreadID),
 			slog.Int("estimated_tokens", admission.EstimatedTokens),
 			slog.Int("budget_tokens", admission.BudgetTokens))
-		h.emitErr(apperror.New(apperror.CodeContextProtectedOverflow, nil))
+		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
+		lifecycle := contextfrag.NewLifecycleHolder()
+		lifecycle.SetManifest(contextfrag.BuildManifest(nil))
+		s.contextLifecycleTerminal(ctx, native.RunConfig{
+			RunID: h.id,
+			Identity: native.SessionContext{
+				BotID:     cmd.BotID,
+				SessionID: cmd.ThreadID,
+			},
+			ContextLifecycle: lifecycle,
+		})(cause)
+		h.emitErr(cause)
 		return
 	}
 	if admission.DroppedMessages > 0 {
