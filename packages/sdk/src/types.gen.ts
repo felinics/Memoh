@@ -1151,6 +1151,7 @@ export type ContextfragContextBudgetPlan = {
     estimator_safety_factor_percent?: number;
     history_budget?: number;
     output_reserve?: number;
+    output_reserve_resolution?: string;
     system_budget?: number;
     tool_defs_cost?: number;
     window?: number;
@@ -1318,6 +1319,7 @@ export type ConversationUiMessage = {
     name?: string;
     output?: unknown;
     progress?: Array<unknown>;
+    reasoning_timing?: ConversationUiReasoningTiming;
     running?: boolean;
     tool_call_id?: string;
     type?: ConversationUiMessageType;
@@ -1325,6 +1327,10 @@ export type ConversationUiMessage = {
 };
 
 export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments';
+
+export type ConversationUiReasoningTiming = {
+    duration_ms?: number;
+};
 
 export type ConversationUiReplyRef = {
     attachments?: Array<ConversationUiAttachment>;
@@ -2470,8 +2476,15 @@ export type HandlersEmailOAuthStatusResponse = {
 };
 
 export type HandlersForkSessionRequest = {
-    message_id: string;
+    /**
+     * MessageID is the pre-turn spelling of TurnID, resolved server-side to the
+     * round that contains it. Deprecated: send turn_id. A client holds a turn id
+     * from admission onward, while a stored message id exists only once the
+     * round has been persisted.
+     */
+    message_id?: string;
     title?: string;
+    turn_id?: string;
 };
 
 export type HandlersFsOpResponse = {
@@ -2932,7 +2945,7 @@ export type ProvidersTestResponse = {
     status?: ProvidersTestStatus;
 };
 
-export type ProvidersTestStatus = 'ok' | 'auth_error' | 'error';
+export type ProvidersTestStatus = 'ok' | 'auth_error' | 'error' | 'unverified';
 
 export type ProvidersUpdateRequest = {
     client_type?: string;
@@ -9809,7 +9822,7 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponse = GetBotsB
 
 export type PostBotsByBotIdSessionsBySessionIdForkData = {
     /**
-     * Fork source message
+     * Fork source turn
      */
     body: HandlersForkSessionRequest;
     path: {

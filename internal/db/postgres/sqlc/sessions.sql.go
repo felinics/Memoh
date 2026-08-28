@@ -139,7 +139,7 @@ func (q *Queries) DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pg
 	return err
 }
 
-const forkSessionFromAssistantMessage = `-- name: ForkSessionFromAssistantMessage :one
+const forkSessionFromAssistantTurn = `-- name: ForkSessionFromAssistantTurn :one
 WITH source_session AS (
   SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.visibility, s.title, s.metadata, s.next_turn_position, s.compaction_epoch, s.runtime_fencing_token, s.runtime_reset_token, s.runtime_reset_expires_at, s.runtime_config_epoch, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at, s.team_id, s.workdir_id, s.bot_agent_id
   FROM bot_sessions s
@@ -157,10 +157,9 @@ target_turn AS (
   FROM source_session s
   JOIN bot_visible_history_messages vm ON vm.team_id = public.memoh_current_team_id()
     AND vm.session_id = s.id
-    AND vm.id = $3
+    AND vm.turn_id = $3
     AND vm.role = 'assistant'
-    AND vm.turn_id IS NOT NULL
-    AND vm.turn_position IS NOT NULL
+  ORDER BY vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
   LIMIT 1
 ),
 copy_messages AS (
@@ -221,9 +220,11 @@ fork_plan AS (
   SELECT
     s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.visibility, s.title, s.metadata, s.next_turn_position, s.compaction_epoch, s.runtime_fencing_token, s.runtime_reset_token, s.runtime_reset_expires_at, s.runtime_config_epoch, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at, s.team_id, s.workdir_id, s.bot_agent_id,
     fam.new_message_id AS fork_message_id,
+    tt.message_id AS source_message_id,
     ntp.value AS next_turn_position_value
   FROM source_session s
   JOIN fork_anchor_message fam ON true
+  JOIN target_turn tt ON true
   CROSS JOIN next_turn_position ntp
   WHERE EXISTS (SELECT 1 FROM copy_turns)
 ),
@@ -257,7 +258,10 @@ created_session AS (
     jsonb_set(
       pm.value,
       '{forked_from}',
-      COALESCE(pm.value->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fp.fork_message_id::text),
+      COALESCE(pm.value->'forked_from', '{}'::jsonb) || jsonb_build_object(
+        'message_id', fp.source_message_id::text,
+        'fork_message_id', fp.fork_message_id::text
+      ),
       true
     ),
     fp.next_turn_position_value,
@@ -351,16 +355,16 @@ FROM created_session cs
 CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
 `
 
-type ForkSessionFromAssistantMessageParams struct {
+type ForkSessionFromAssistantTurnParams struct {
 	SessionID       pgtype.UUID `json:"session_id"`
 	BotID           pgtype.UUID `json:"bot_id"`
-	MessageID       pgtype.UUID `json:"message_id"`
+	TurnID          pgtype.UUID `json:"turn_id"`
 	Metadata        []byte      `json:"metadata"`
 	Title           string      `json:"title"`
 	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
 }
 
-type ForkSessionFromAssistantMessageRow struct {
+type ForkSessionFromAssistantTurnRow struct {
 	ID                    pgtype.UUID        `json:"id"`
 	BotID                 pgtype.UUID        `json:"bot_id"`
 	RouteID               pgtype.UUID        `json:"route_id"`
@@ -388,16 +392,16 @@ type ForkSessionFromAssistantMessageRow struct {
 	BotAgentID            pgtype.UUID        `json:"bot_agent_id"`
 }
 
-func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg ForkSessionFromAssistantMessageParams) (ForkSessionFromAssistantMessageRow, error) {
-	row := q.db.QueryRow(ctx, forkSessionFromAssistantMessage,
+func (q *Queries) ForkSessionFromAssistantTurn(ctx context.Context, arg ForkSessionFromAssistantTurnParams) (ForkSessionFromAssistantTurnRow, error) {
+	row := q.db.QueryRow(ctx, forkSessionFromAssistantTurn,
 		arg.SessionID,
 		arg.BotID,
-		arg.MessageID,
+		arg.TurnID,
 		arg.Metadata,
 		arg.Title,
 		arg.CreatedByUserID,
 	)
-	var i ForkSessionFromAssistantMessageRow
+	var i ForkSessionFromAssistantTurnRow
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,

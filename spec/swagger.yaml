@@ -1977,6 +1977,8 @@ definitions:
         type: integer
       output_reserve:
         type: integer
+      output_reserve_resolution:
+        type: string
       system_budget:
         type: integer
       tool_defs_cost:
@@ -2329,6 +2331,8 @@ definitions:
       progress:
         items: {}
         type: array
+      reasoning_timing:
+        $ref: '#/definitions/conversation.UIReasoningTiming'
       running:
         type: boolean
       tool_call_id:
@@ -2350,6 +2354,11 @@ definitions:
     - UIMessageReasoning
     - UIMessageTool
     - UIMessageAttachments
+  conversation.UIReasoningTiming:
+    properties:
+      duration_ms:
+        type: integer
+    type: object
   conversation.UIReplyRef:
     properties:
       attachments:
@@ -4349,11 +4358,18 @@ definitions:
   handlers.forkSessionRequest:
     properties:
       message_id:
+        description: |-
+          MessageID is the pre-turn spelling of TurnID, resolved server-side to the
+          round that contains it. Deprecated: send turn_id. A client holds a turn id
+          from admission onward, while a stored message id exists only once the
+          round has been persisted.
+        format: uuid
         type: string
       title:
         type: string
-    required:
-    - message_id
+      turn_id:
+        format: uuid
+        type: string
     type: object
   handlers.fsOpResponse:
     properties:
@@ -5102,11 +5118,13 @@ definitions:
     - ok
     - auth_error
     - error
+    - unverified
     type: string
     x-enum-varnames:
     - TestStatusOK
     - TestStatusAuthError
     - TestStatusError
+    - TestStatusUnverified
   providers.UpdateRequest:
     properties:
       client_type:
@@ -11172,7 +11190,7 @@ paths:
         name: session_id
         required: true
         type: string
-      - description: Fork source message
+      - description: Fork source turn
         in: body
         name: body
         required: true

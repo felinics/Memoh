@@ -25,6 +25,13 @@ WHERE team_id = public.memoh_current_team_id()
   AND enabled
   AND deleted_at IS NULL;
 
+-- name: LockBotForAgentMutation :one
+SELECT id
+FROM bots
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(bot_id)
+FOR NO KEY UPDATE;
+
 -- name: ListBotAgents :many
 SELECT *
 FROM bot_agents

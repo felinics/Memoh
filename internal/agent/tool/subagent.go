@@ -143,8 +143,8 @@ type SpawnResult struct {
 const (
 	// subagentTimeout caps total execution time as a safety net per attempt.
 	subagentTimeout = 10 * time.Minute
-	// spawnHeartbeatInterval keeps the parent stream active during foreground waits.
-	spawnHeartbeatInterval  = 30 * time.Second
+	// spawnProgressInterval keeps the parent stream active during foreground waits.
+	spawnProgressInterval   = 30 * time.Second
 	subagentMaxRetries      = 3
 	subagentRetryBaseDelay  = 2 * time.Second
 	subagentWatchdogTimeout = 3 * time.Minute
@@ -803,9 +803,9 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 		}, nil
 	}
 
-	heartbeatCtx, heartbeatCancel := context.WithCancel(context.WithoutCancel(ctx))
-	defer heartbeatCancel()
-	p.startSpawnHeartbeat(heartbeatCtx, session, 1)
+	progressCtx, progressCancel := context.WithCancel(ctx)
+	defer progressCancel()
+	p.startSpawnProgress(progressCtx, session)
 	result := p.runAgentRequest(taskCtx, key, req)
 	return agentResultMap(result), nil
 }
@@ -1547,23 +1547,33 @@ func agentResultMap(res agentRunResult) map[string]any {
 	return out
 }
 
-func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionContext, _ int) {
+func (*SpawnProvider) startSpawnProgress(ctx context.Context, session SessionContext) {
 	emitter := session.Emitter
 	if emitter == nil {
 		return
 	}
 	go func() {
-		ticker := time.NewTicker(spawnHeartbeatInterval)
+		ticker := time.NewTicker(spawnProgressInterval)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				emitter(ToolStreamEvent{Type: StreamEventSpawnHeartbeat})
-			}
-		}
+		runSpawnProgress(ctx, emitter, ticker.C)
 	}()
+}
+
+func runSpawnProgress(ctx context.Context, emitter StreamEmitter, ticks <-chan time.Time) {
+	if emitter == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			if ctx.Err() != nil {
+				return
+			}
+			emitter(ToolStreamEvent{Type: StreamEventSpawnProgress})
+		}
+	}
 }
 
 func isRetryableSubagentError(err error) bool {

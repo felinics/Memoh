@@ -5,7 +5,7 @@ import {
   sortByRecency,
   type SidebarSessionMode,
 } from '../chat-list.utils'
-import { serverMessageId } from '../chat-list.normalize'
+import { messageIdentityId } from '../chat-list.normalize'
 import type { ChatMessage } from './types'
 
 // The factory owns the list state (reactive array + non-reactive O(1) map +
@@ -109,7 +109,7 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     for (let i = index - 1; i >= 0; i--) {
       const message = transcript[i]
       if (message?.role !== 'assistant') continue
-      return serverMessageId(message) || message.id
+      return messageIdentityId(message) || message.id
     }
     return ''
   }

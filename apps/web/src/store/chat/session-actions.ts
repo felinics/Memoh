@@ -3,7 +3,7 @@ import { toast } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   deleteSession,
-  forkSessionFromMessage,
+  forkSessionFromTurn,
   updateSessionTitle,
   type SessionSummary,
   type UITurn,
@@ -60,7 +60,7 @@ export function createSessionActions(deps: {
     activate: boolean
     seq: number
   } | null>(null)
-  const forkingMessages = new Set<string>()
+  const forkingTurns = new Set<string>()
   let deletedSessionSeq = 0
   let forkedSessionRequestSeq = 0
 
@@ -152,14 +152,14 @@ export function createSessionActions(deps: {
     return updated
   }
 
-  async function forkMessage(
-    messageId: string,
+  async function forkTurn(
+    turnId: string,
     options: { title?: string; target?: ChatViewTarget } = {},
   ) {
     const target = deps.normalizeTarget(options.target)
     const botId = target.botId
     const sessionId = target.sessionId ?? ''
-    const id = messageId.trim()
+    const id = turnId.trim()
     const view = deps.chatView(target)
     const generation = deps.userScopeGeneration()
     const activate = deps.isFocusedTarget(target)
@@ -172,10 +172,10 @@ export function createSessionActions(deps: {
     ) return false
 
     const key = `${botId}:${sessionId}:${id}`
-    if (forkingMessages.has(key)) return false
-    forkingMessages.add(key)
+    if (forkingTurns.has(key)) return false
+    forkingTurns.add(key)
     try {
-      const forked = await forkSessionFromMessage(
+      const forked = await forkSessionFromTurn(
         botId,
         sessionId,
         id,
@@ -211,7 +211,7 @@ export function createSessionActions(deps: {
       toast.error(resolveApiErrorMessage(error, deps.forkFailedMessage()))
       return false
     } finally {
-      forkingMessages.delete(key)
+      forkingTurns.delete(key)
     }
   }
 
@@ -221,11 +221,11 @@ export function createSessionActions(deps: {
     cleanupFailedDeferredSession,
     removeSession,
     renameSession,
-    forkMessage,
+    forkTurn,
     reset: () => {
       deletedSession.value = null
       forkedSessionRequested.value = null
-      forkingMessages.clear()
+      forkingTurns.clear()
     },
   }
 }

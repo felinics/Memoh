@@ -58,6 +58,8 @@ models:
     config:
       compatibilities: [tool-call]
       context_window: 131072
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: mistral-large-latest
     name: Mistral Large 2.1

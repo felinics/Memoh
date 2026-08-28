@@ -1304,6 +1304,7 @@
     "reachable": "可连接",
     "unreachable": "不可连接",
     "testFailed": "测试失败",
+    "testUnverifiedHint": "已连通，但无法通过模型列表确认可用——该服务商可能不支持此接口。可改为测试具体模型。",
     "autoImport": "自动导入模型",
     "autoImportHint": "创建后自动从服务商获取并导入模型",
     "configurationTitle": "配置",

@@ -130,18 +130,18 @@ export interface ForkSessionOptions {
   title?: string
 }
 
-export async function forkSessionFromMessage(botId: string, sessionId: string, messageId: string, options?: ForkSessionOptions): Promise<SessionSummary> {
+export async function forkSessionFromTurn(botId: string, sessionId: string, turnId: string, options?: ForkSessionOptions): Promise<SessionSummary> {
   const bid = botId.trim()
   const sid = sessionId.trim()
-  const mid = messageId.trim()
+  const tid = turnId.trim()
   const title = options?.title?.trim() ?? ''
   if (!bid) throw new Error('bot id is required')
   if (!sid) throw new Error('session id is required')
-  if (!mid) throw new Error('message id is required')
+  if (!tid) throw new Error('turn id is required')
   const { data } = await postBotsByBotIdSessionsBySessionIdFork({
     path: { bot_id: bid, session_id: sid },
     body: {
-      message_id: mid,
+      turn_id: tid,
       ...(title ? { title } : {}),
     },
     throwOnError: true,

@@ -218,6 +218,21 @@ func (q *Queries) ListBotAgents(ctx context.Context, botID pgtype.UUID) ([]BotAg
 	return items, nil
 }
 
+const lockBotForAgentMutation = `-- name: LockBotForAgentMutation :one
+SELECT id
+FROM bots
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1
+FOR NO KEY UPDATE
+`
+
+func (q *Queries) LockBotForAgentMutation(ctx context.Context, botID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockBotForAgentMutation, botID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const softDeleteBotAgent = `-- name: SoftDeleteBotAgent :one
 UPDATE bot_agents
 SET enabled = false,

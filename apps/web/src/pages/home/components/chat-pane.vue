@@ -109,8 +109,8 @@
                       :on-open-media="galleryOpenBySrc"
                       :on-reply-click="handleReplyJump"
                       :on-retry-message="handleRetryMessage"
-                      :can-retry-latest-assistant="latestRetryableAssistantId === ((msg.serverId ?? msg.id).trim())"
-                      :can-edit-latest-user="latestEditableUserId === ((msg.serverId ?? msg.id).trim())"
+                      :can-retry-latest-assistant="isRetryableTurn(msg)"
+                      :can-edit-latest-user="isEditableTurn(msg)"
                       :can-fork-assistant="canForkAssistant"
                       :is-scrolling="isScrolling"
                       :is-last-message="msg.id === lastMessageId"
@@ -164,7 +164,7 @@
 
       <ChatForkDialog
         v-model:open="forkDialogOpen"
-        :message-id="pendingForkMessageId"
+        :turn-id="pendingForkTurnId"
       />
 
       <!-- The composer is a single instance reused in both layouts: pinned to
@@ -978,7 +978,7 @@ const {
 
 const composerError = ref('')
 const forkDialogOpen = ref(false)
-const pendingForkMessageId = ref('')
+const pendingForkTurnId = ref('')
 const modelPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
 const agentChanging = ref(false)
@@ -1102,29 +1102,44 @@ const activeSupportsTurnReplacement = computed(() =>
   !activeChatTarget.value.isACP && !activeChatTarget.value.isPendingACP,
 )
 
-const latestRetryableAssistantId = computed(() => {
+// The turn id, not a message id: a turn carries it from admission, so the
+// affordance is live the moment the round exists rather than after the
+// database twin of that round has been fetched back.
+const latestRetryableAssistantTurnId = computed(() => {
   if (streaming.value || loadingMessages.value || activeChatReadOnly.value) return ''
   if (!activeSupportsTurnReplacement.value) return ''
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const message = messages.value[i]
     if (message?.role === 'assistant' && !message.streaming && !message.__optimistic) {
-      return (message.serverId ?? message.id).trim()
+      return message.turnId?.trim() ?? ''
     }
   }
   return ''
 })
 
-const latestEditableUserId = computed(() => {
+const latestEditableUserTurnId = computed(() => {
   if (streaming.value || loadingMessages.value || activeChatReadOnly.value) return ''
   if (!activeSupportsTurnReplacement.value) return ''
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const message = messages.value[i]
     if (message?.role === 'user' && !message.streaming && !message.__optimistic) {
-      return (message.serverId ?? message.id).trim()
+      return message.turnId?.trim() ?? ''
     }
   }
   return ''
 })
+
+// Both halves of a round share one turn id, so the role decides which
+// affordance a message gets: retry belongs to the reply, edit to the request.
+function isRetryableTurn(message: ChatMessage): boolean {
+  const turnId = latestRetryableAssistantTurnId.value
+  return message.role === 'assistant' && turnId !== '' && turnId === (message.turnId?.trim() ?? '')
+}
+
+function isEditableTurn(message: ChatMessage): boolean {
+  const turnId = latestEditableUserTurnId.value
+  return message.role === 'user' && turnId !== '' && turnId === (message.turnId?.trim() ?? '')
+}
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -2999,11 +3014,11 @@ async function handleForkSourceClick() {
   }
 }
 
-function handleForkMessage(messageId: string) {
+function handleForkMessage(turnId: string) {
   composerError.value = ''
-  const id = messageId.trim()
+  const id = turnId.trim()
   if (!id) return
-  pendingForkMessageId.value = id
+  pendingForkTurnId.value = id
   forkDialogOpen.value = true
 }
 
@@ -3060,10 +3075,10 @@ function handleComposerKeydown(e: KeyboardEvent) {
   handleSend()
 }
 
-async function handleRetryMessage(messageId: string) {
+async function handleRetryMessage(turnId: string) {
   if (composerConfigPending.value) return
   composerError.value = ''
-  const result = await chatStore.retryLatestAssistant(messageId, {
+  const result = await chatStore.retryLatestAssistant(turnId, {
     target: paneTarget.value,
     modelId: overrideModelId.value,
     reasoningEffort: overrideReasoningEffort.value,
@@ -3075,14 +3090,14 @@ async function handleRetryMessage(messageId: string) {
   }
 }
 
-async function handleEditMessage(messageId: string, text: string, done?: (started: boolean) => void) {
+async function handleEditMessage(turnId: string, text: string, done?: (started: boolean) => void) {
   if (composerConfigPending.value) {
     done?.(false)
     return
   }
   composerError.value = ''
   try {
-    const result = await chatStore.editLatestUser(messageId, text, {
+    const result = await chatStore.editLatestUser(turnId, text, {
       target: paneTarget.value,
       modelId: overrideModelId.value,
       reasoningEffort: overrideReasoningEffort.value,

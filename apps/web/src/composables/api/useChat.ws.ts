@@ -35,13 +35,17 @@ export type WSClientMessage =
       type: 'retry_message'
       invocation_id: string
       session_id: string
-      message_id: string
+      /** The turn being replaced. A client holds it from admission onward,
+       *  unlike a stored message id, which only exists once the round has
+       *  been persisted and fetched back. */
+      turn_id: string
     } & WSTurnOptions)
   | ({
       type: 'edit_message'
       invocation_id: string
       session_id: string
-      message_id: string
+      /** See retry_message. */
+      turn_id: string
       text?: string
       attachments?: ChatAttachment[]
     } & WSTurnOptions)

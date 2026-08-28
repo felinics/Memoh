@@ -2837,6 +2837,273 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 	return items, nil
 }
 
+const listActiveMessagesSinceBySessionWithinBytes = `-- name: ListActiveMessagesSinceBySessionWithinBytes :many
+SELECT
+  ranked.id,
+  ranked.bot_id,
+  ranked.session_id,
+  ranked.sender_channel_identity_id,
+  ranked.sender_user_id,
+  ranked.external_message_id,
+  ranked.source_reply_to_message_id,
+  ranked.role,
+  ranked.content,
+  ranked.metadata,
+  ranked.usage,
+  ranked.session_mode,
+  ranked.runtime_type,
+  ranked.event_id,
+  ranked.display_text,
+  ranked.compact_id,
+  ranked.created_at,
+  ranked.sender_display_name,
+  ranked.sender_avatar_url,
+  ranked.platform
+FROM (
+  SELECT
+    m.id,
+    m.bot_id,
+    m.session_id,
+    m.sender_channel_identity_id,
+    m.sender_account_user_id AS sender_user_id,
+    m.source_message_id AS external_message_id,
+    m.source_reply_to_message_id,
+    m.role,
+    m.content,
+    m.metadata,
+    m.usage,
+    m.session_mode,
+    m.runtime_type,
+    m.event_id,
+    m.display_text,
+    m.compact_id,
+    m.created_at,
+    m.turn_position,
+    m.turn_message_seq,
+    ci.display_name AS sender_display_name,
+    ci.avatar_url AS sender_avatar_url,
+    s.channel_type AS platform,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_visible_history_messages m
+  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+  LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = $1
+    AND m.created_at >= $2
+    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+) ranked
+WHERE ranked.preceding_bytes < $3::BIGINT
+ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC
+`
+
+type ListActiveMessagesSinceBySessionWithinBytesParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	MaxBytes  int64              `json:"max_bytes"`
+}
+
+type ListActiveMessagesSinceBySessionWithinBytesRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+// Byte-budgeted variant of ListActiveMessagesSinceBySession (CM-ADM-001):
+// rows are admitted newest-first until their running content byte total
+// crosses max_bytes (the crossing row is kept, so the newest row always
+// loads), then returned in ascending order. Process memory is bounded by
+// max_bytes regardless of total history size.
+func (q *Queries) ListActiveMessagesSinceBySessionWithinBytes(ctx context.Context, arg ListActiveMessagesSinceBySessionWithinBytesParams) ([]ListActiveMessagesSinceBySessionWithinBytesRow, error) {
+	rows, err := q.db.Query(ctx, listActiveMessagesSinceBySessionWithinBytes, arg.SessionID, arg.CreatedAt, arg.MaxBytes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveMessagesSinceBySessionWithinBytesRow
+	for rows.Next() {
+		var i ListActiveMessagesSinceBySessionWithinBytesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CompactID,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveMessagesSinceWithinBytes = `-- name: ListActiveMessagesSinceWithinBytes :many
+SELECT
+  ranked.id,
+  ranked.bot_id,
+  ranked.session_id,
+  ranked.sender_channel_identity_id,
+  ranked.sender_user_id,
+  ranked.external_message_id,
+  ranked.source_reply_to_message_id,
+  ranked.role,
+  ranked.content,
+  ranked.metadata,
+  ranked.usage,
+  ranked.session_mode,
+  ranked.runtime_type,
+  ranked.event_id,
+  ranked.display_text,
+  ranked.compact_id,
+  ranked.created_at,
+  ranked.sender_display_name,
+  ranked.sender_avatar_url,
+  ranked.platform
+FROM (
+  SELECT
+    m.id,
+    m.bot_id,
+    m.session_id,
+    m.sender_channel_identity_id,
+    m.sender_account_user_id AS sender_user_id,
+    m.source_message_id AS external_message_id,
+    m.source_reply_to_message_id,
+    m.role,
+    m.content,
+    m.metadata,
+    m.usage,
+    m.session_mode,
+    m.runtime_type,
+    m.event_id,
+    m.display_text,
+    m.compact_id,
+    m.created_at,
+    ci.display_name AS sender_display_name,
+    ci.avatar_url AS sender_avatar_url,
+    s.channel_type AS platform,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.created_at DESC, m.id DESC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_visible_history_messages m
+  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+  LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.bot_id = $1
+    AND m.created_at >= $2
+    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+) ranked
+WHERE ranked.preceding_bytes < $3::BIGINT
+ORDER BY ranked.created_at ASC, ranked.id ASC
+`
+
+type ListActiveMessagesSinceWithinBytesParams struct {
+	BotID     pgtype.UUID        `json:"bot_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	MaxBytes  int64              `json:"max_bytes"`
+}
+
+type ListActiveMessagesSinceWithinBytesRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+// Byte-budgeted variant of ListActiveMessagesSince (CM-ADM-001), same
+// newest-first admission semantics scoped to a bot instead of a session.
+func (q *Queries) ListActiveMessagesSinceWithinBytes(ctx context.Context, arg ListActiveMessagesSinceWithinBytesParams) ([]ListActiveMessagesSinceWithinBytesRow, error) {
+	rows, err := q.db.Query(ctx, listActiveMessagesSinceWithinBytes, arg.BotID, arg.CreatedAt, arg.MaxBytes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveMessagesSinceWithinBytesRow
+	for rows.Next() {
+		var i ListActiveMessagesSinceWithinBytesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CompactID,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllMessagesForBackup = `-- name: ListAllMessagesForBackup :many
 SELECT
   m.id,
@@ -5413,6 +5680,37 @@ func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCom
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const measureActiveMessagesBySession = `-- name: MeasureActiveMessagesBySession :one
+SELECT
+  COUNT(*)::BIGINT AS message_count,
+  COALESCE(SUM(octet_length(m.content::text)), 0)::BIGINT AS content_bytes
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND m.created_at >= $2
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+`
+
+type MeasureActiveMessagesBySessionParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type MeasureActiveMessagesBySessionRow struct {
+	MessageCount int64 `json:"message_count"`
+	ContentBytes int64 `json:"content_bytes"`
+}
+
+// Metadata-only context admission measure (CM-ADM-001): counts and content
+// bytes aggregate on the database side, so admission can size a session's
+// history without shipping any payload into the process.
+func (q *Queries) MeasureActiveMessagesBySession(ctx context.Context, arg MeasureActiveMessagesBySessionParams) (MeasureActiveMessagesBySessionRow, error) {
+	row := q.db.QueryRow(ctx, measureActiveMessagesBySession, arg.SessionID, arg.CreatedAt)
+	var i MeasureActiveMessagesBySessionRow
+	err := row.Scan(&i.MessageCount, &i.ContentBytes)
+	return i, err
 }
 
 const replaceHistoryTurn = `-- name: ReplaceHistoryTurn :one

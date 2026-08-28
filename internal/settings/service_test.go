@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
+	"github.com/memohai/memoh/internal/botagents"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/reasoning"
@@ -172,6 +173,26 @@ type reasoningPolicyQueries struct {
 	storedEffort   string
 	upsertCalls    int
 	lastUpsert     sqlc.UpsertBotSettingsParams
+	transactions   bool
+	botAgent       sqlc.BotAgent
+	events         []string
+}
+
+func (q *reasoningPolicyQueries) SupportsTransactions() bool { return q.transactions }
+
+func (q *reasoningPolicyQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
+	q.events = append(q.events, "transaction")
+	return fn(q)
+}
+
+func (q *reasoningPolicyQueries) LockBotForAgentMutation(context.Context, pgtype.UUID) (pgtype.UUID, error) {
+	q.events = append(q.events, "lock-bot")
+	return q.botID, nil
+}
+
+func (q *reasoningPolicyQueries) GetBotAgentByID(context.Context, sqlc.GetBotAgentByIDParams) (sqlc.BotAgent, error) {
+	q.events = append(q.events, "get-agent")
+	return q.botAgent, nil
 }
 
 func (q *reasoningPolicyQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -210,6 +231,7 @@ func (*reasoningPolicyQueries) GetModelByID(_ context.Context, id pgtype.UUID) (
 }
 
 func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.UpsertBotSettingsParams) (sqlc.UpsertBotSettingsRow, error) {
+	q.events = append(q.events, "upsert-settings")
 	q.upsertCalls++
 	q.lastUpsert = arg
 	modelID := q.currentModelID
@@ -236,6 +258,54 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 		ToolApprovalConfig:  arg.ToolApprovalConfig,
 		OverlayConfig:       arg.OverlayConfig,
 	}, nil
+}
+
+func TestUpsertBotSettingsRechecksDefaultAgentAfterBotLock(t *testing.T) {
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000740"), Valid: true}
+	agentID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000741"), Valid: true}
+	params := sqlc.UpsertBotSettingsParams{
+		ID:                   botID,
+		DefaultBotAgentID:    agentID,
+		DefaultBotAgentIDSet: true,
+	}
+
+	t.Run("active agent is assigned", func(t *testing.T) {
+		queries := &reasoningPolicyQueries{
+			botID:        botID,
+			transactions: true,
+			botAgent:     sqlc.BotAgent{ID: agentID, BotID: botID, Enabled: true},
+		}
+		service := &Service{queries: queries}
+		if _, err := service.upsertBotSettings(context.Background(), params); err != nil {
+			t.Fatalf("upsertBotSettings() error = %v", err)
+		}
+		assertSettingsEvents(t, queries.events, []string{"transaction", "lock-bot", "get-agent", "upsert-settings"})
+	})
+
+	t.Run("agent disabled before lock release is rejected", func(t *testing.T) {
+		queries := &reasoningPolicyQueries{
+			botID:        botID,
+			transactions: true,
+			botAgent:     sqlc.BotAgent{ID: agentID, BotID: botID, Enabled: false},
+		}
+		service := &Service{queries: queries}
+		if _, err := service.upsertBotSettings(context.Background(), params); !errors.Is(err, botagents.ErrUnavailable) {
+			t.Fatalf("upsertBotSettings() error = %v, want %v", err, botagents.ErrUnavailable)
+		}
+		assertSettingsEvents(t, queries.events, []string{"transaction", "lock-bot", "get-agent"})
+	})
+}
+
+func assertSettingsEvents(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("events = %v, want %v", got, want)
+		}
+	}
 }
 
 func TestUpsertBotLegacyNativeRuntimeClearsDefaultAgent(t *testing.T) {

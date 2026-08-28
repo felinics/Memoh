@@ -450,7 +450,7 @@ export const useChatStore = defineStore('chat', () => {
     cleanupFailedDeferredSession,
     removeSession,
     renameSession,
-    forkMessage,
+    forkTurn,
     reset: resetSessionActions,
   } = createSessionActions({
     currentBotId,
@@ -612,7 +612,7 @@ export const useChatStore = defineStore('chat', () => {
     setPendingACPModel, setPendingACPMode, setPendingACPReasoning, clearPendingACPSession,
     createACPSession, updateCurrentSessionAgent, updateCurrentSessionToMemoh,
     acpRuntimeKey, ensureACPRuntime, setACPRuntimeMode, setACPRuntimeModel, setACPRuntimeReasoning,
-    removeSession, renameSession, forkMessage,
+    removeSession, renameSession, forkTurn,
     sendMessage, retryLatestAssistant, editLatestUser,
     respondToolApproval, respondUserInput,
     loadOlderMessages, findMessageIdByExternalId, locateMessageByExternalId,

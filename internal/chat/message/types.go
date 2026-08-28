@@ -140,6 +140,14 @@ type LocateResult struct {
 	TargetID string
 }
 
+// ActiveMessagesMeasure is a database-side aggregate over a session's active
+// messages (CM-ADM-001): counts and raw content bytes, computed without
+// loading any payload into the process.
+type ActiveMessagesMeasure struct {
+	MessageCount int64
+	ContentBytes int64
+}
+
 // Writer defines write behavior needed by the inbound router.
 type Writer interface {
 	Persist(ctx context.Context, input PersistInput) (Message, error)
@@ -200,11 +208,24 @@ type Service interface {
 	List(ctx context.Context, botID string) ([]Message, error)
 	ListSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
 	ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
+	// ListActiveSinceWithinBytes is the byte-budgeted variant of
+	// ListActiveSince (CM-ADM-001): rows are admitted newest-first until
+	// their content byte total crosses maxBytes, so process memory is
+	// bounded by the budget regardless of total history size.
+	ListActiveSinceWithinBytes(ctx context.Context, botID string, since time.Time, maxBytes int64) ([]Message, error)
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
 	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
 	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
+	// ListActiveSinceBySessionWithinBytes is the byte-budgeted variant of
+	// ListActiveSinceBySession (CM-ADM-001), same admission semantics as
+	// ListActiveSinceWithinBytes scoped to one session.
+	ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error)
+	// MeasureActiveBySession aggregates message count and content bytes on
+	// the database side (CM-ADM-001): admission sizes a session's history
+	// without shipping any payload into the process.
+	MeasureActiveBySession(ctx context.Context, sessionID string, since time.Time) (ActiveMessagesMeasure, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
 	ListBeforeMessageBySession(ctx context.Context, sessionID string, beforeMessageID string, limit int32) ([]Message, error)

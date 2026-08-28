@@ -144,6 +144,7 @@ func TestTriggeredNativeStreamTimesOutSilentProviderWithoutRetry(t *testing.T) {
 			rc,
 			sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"},
 			nil,
+			nil,
 		)
 		done <- err
 	}()
@@ -194,6 +195,7 @@ func TestTriggeredNativeStreamCallerCancellationWinsOverIdleTimeout(t *testing.T
 			rc,
 			sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"},
 			nil,
+			nil,
 		)
 		done <- err
 	}()
@@ -235,7 +237,7 @@ func TestConsumeTriggeredStreamProjectsEventsAndBuildsResult(t *testing.T) {
 	events <- scheduleTerminalEvent(t, "对账完成。")
 	close(events)
 
-	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
 	if err != nil {
 		t.Fatalf("consumeTriggeredStream() error = %v", err)
 	}
@@ -280,7 +282,7 @@ func TestConsumeTriggeredStreamStopsWhenProjectionRefused(t *testing.T) {
 	events <- scheduleTerminalEvent(t, "done")
 	close(events)
 
-	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
 	if err == nil {
 		t.Fatal("consumeTriggeredStream() error = nil, want the projection failure")
 	}
@@ -302,7 +304,7 @@ func TestConsumeTriggeredStreamFailsWithoutTerminalEvent(t *testing.T) {
 	events <- native.StreamEvent{Type: native.EventTextDelta, Delta: "working"}
 	close(events)
 
-	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "terminal event") {
 		t.Fatalf("consumeTriggeredStream() error = %v, want the missing-terminal failure", err)
 	}
@@ -317,7 +319,7 @@ func TestConsumeTriggeredStreamSurfacesStreamErrorWithoutTerminal(t *testing.T) 
 	events <- native.StreamEvent{Type: native.EventError, Error: "provider boom"}
 	close(events)
 
-	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "provider boom") {
 		t.Fatalf("consumeTriggeredStream() error = %v, want the provider error", err)
 	}
@@ -333,7 +335,7 @@ func TestConsumeTriggeredStreamKeepsDiagnosticsInternalAndPublishesStableFailure
 	events <- native.StreamEvent{Type: native.EventError, Error: "SECRET provider boom"}
 	close(events)
 
-	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "SECRET provider boom") {
 		t.Fatalf("internal trigger error = %v, want private provider diagnostic", err)
 	}
@@ -363,7 +365,7 @@ func TestConsumeTriggeredStreamSkipsPersistenceOnOwnershipLoss(t *testing.T) {
 	events <- scheduleTerminalEvent(t, "done")
 	close(events)
 
-	_, err := svc.consumeTriggeredStream(ctx, events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	_, err := svc.consumeTriggeredStream(ctx, events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
 	if !errors.Is(err, sessionruntime.ErrRunOwnershipLost) {
 		t.Fatalf("consumeTriggeredStream() error = %v, want ErrRunOwnershipLost", err)
 	}
@@ -392,7 +394,7 @@ func TestConsumeTriggeredStreamReportsAbortWithPartialTranscript(t *testing.T) {
 	events <- native.StreamEvent{Type: native.EventAgentAbort, Messages: messagesJSON}
 	close(events)
 
-	_, err = svc.consumeTriggeredStream(ctx, events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	_, err = svc.consumeTriggeredStream(ctx, events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("consumeTriggeredStream() error = %v, want the abort cause, not a success", err)
 	}
@@ -418,7 +420,7 @@ func TestConsumeTriggeredStreamDeferredApprovalIsNotAnAbort(t *testing.T) {
 	events <- native.StreamEvent{Type: native.EventAgentAbort, ApprovalID: "appr-1", Messages: messagesJSON}
 	close(events)
 
-	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil)
+	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
 	if err != nil {
 		t.Fatalf("consumeTriggeredStream() error = %v, want nil for a deferred approval", err)
 	}
@@ -442,7 +444,7 @@ func TestConsumeTriggeredStreamWithStepCommitterDoesNotDoublePersist(t *testing.
 	events <- scheduleTerminalEvent(t, "done")
 	close(events)
 
-	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, committer)
+	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, committer, nil)
 	if err != nil {
 		t.Fatalf("consumeTriggeredStream() error = %v", err)
 	}

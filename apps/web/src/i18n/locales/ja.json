@@ -1263,6 +1263,7 @@
     "reachable": "到達可能",
     "unreachable": "到達不能",
     "testFailed": "テストが失敗しました",
+    "testUnverifiedHint": "接続できましたが、モデル一覧では動作を確認できませんでした。このプロバイダーが一覧に対応していない可能性があります。個別のモデルでテストしてください。",
     "autoImport": "モデルを自動インポート",
     "autoImportHint": "作成後にプロバイダーからモデルを自動的に取得してインポートします。",
     "configurationTitle": "構成",

@@ -725,7 +725,15 @@ func (m *Manager) Cleanup(maxAge time.Duration) {
 	defer m.mu.Unlock()
 	cutoff := time.Now().Add(-maxAge)
 	for id, t := range m.tasks {
-		if t.Status != TaskRunning && t.CompletedAt.Before(cutoff) {
+		// Task lifecycle fields are protected by task.mu, not Manager.mu. Keep
+		// queued and running tasks until their runtime records a terminal state;
+		// queued subagent requests may legitimately wait longer than one cleanup
+		// interval before promotion.
+		t.mu.Lock()
+		terminal := t.Status == TaskCompleted || t.Status == TaskFailed || t.Status == TaskKilled
+		old := !t.CompletedAt.IsZero() && t.CompletedAt.Before(cutoff)
+		t.mu.Unlock()
+		if terminal && old {
 			delete(m.tasks, id)
 		}
 	}

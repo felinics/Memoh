@@ -1142,6 +1142,7 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 		nil,
 		true,
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("persistACPRound returned error: %v", err)
@@ -1207,6 +1208,7 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 		}),
 		nil,
 		true,
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -1281,6 +1283,7 @@ func TestPersistACPRoundAttachesLifecycleOnlyToFinalAssistant(t *testing.T) {
 		nil,
 		true,
 		holder,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)
@@ -1320,6 +1323,10 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 		nil,
 		true,
 		nil,
+		[]messagepkg.ReasoningTimingSegment{{
+			DurationMS: 2000,
+			State:      "completed",
+		}},
 	)
 	if err != nil {
 		t.Fatalf("persistACPRound returned error: %v", err)
@@ -1334,6 +1341,10 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 	parts := assistant.ContentParts()
 	if len(parts) < 2 || parts[0].Type != "reasoning" || parts[0].Text != "I should inspect first." {
 		t.Fatalf("assistant parts = %#v, want leading reasoning part", parts)
+	}
+	segments := messagepkg.ReasoningTimingFromMetadata(messages.persisted[1].Metadata)
+	if len(segments) != 1 || segments[0].DurationMS != 2000 {
+		t.Fatalf("assistant reasoning timing = %#v", segments)
 	}
 }
 
@@ -1353,6 +1364,7 @@ func TestPersistACPRoundEmptyTextLeavesAssistantBlank(t *testing.T) {
 		acpclient.PromptResult{},
 		nil,
 		true,
+		nil,
 		nil,
 	); err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)
@@ -1386,6 +1398,7 @@ func TestPersistACPRoundEmptyOutputKeepsUsage(t *testing.T) {
 		},
 		nil,
 		true,
+		nil,
 		nil,
 	); err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)

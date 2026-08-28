@@ -13,6 +13,8 @@ import (
 	"github.com/memohai/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/memohai/memoh/internal/apperror"
+	messagepkg "github.com/memohai/memoh/internal/chat/message"
 	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
 	"github.com/memohai/memoh/internal/chat/timeline"
 	"github.com/memohai/memoh/internal/contextview"
@@ -161,7 +163,32 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved ResolveRunConfigResult) {
 	runConfig := resolved.RunConfig
 	runConfig.RunID = h.id
-	runConfig.Messages = discussMessagesToSDK(cmd.DiscussMessages)
+	budgetTokens := resolved.ContextBudgetMaxTokens
+	if budgetTokens <= 0 {
+		budgetTokens = s.contextAbsoluteMaxTokens()
+	}
+	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, budgetTokens)
+	if admission.ProtectedOverflow {
+		s.logger.Error("context_admission_rejected",
+			slog.String("path", "discuss_turn"),
+			slog.String("bot_id", cmd.BotID),
+			slog.String("session_id", cmd.ThreadID),
+			slog.Int("estimated_tokens", admission.EstimatedTokens),
+			slog.Int("budget_tokens", admission.BudgetTokens))
+		h.emitErr(apperror.New(apperror.CodeContextProtectedOverflow, nil))
+		return
+	}
+	if admission.DroppedMessages > 0 {
+		s.logger.Info("context_admission",
+			slog.String("path", "discuss_turn"),
+			slog.String("bot_id", cmd.BotID),
+			slog.String("session_id", cmd.ThreadID),
+			slog.Int("estimated_tokens", admission.EstimatedTokens),
+			slog.Int("selected_tokens", admission.SelectedTokens),
+			slog.Int("budget_tokens", admission.BudgetTokens),
+			slog.Int("dropped_messages", admission.DroppedMessages))
+	}
+	runConfig.Messages = discussMessagesToSDK(admitted)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
 	runConfig.ContextCurrentUserMessageIndex = nil
@@ -185,7 +212,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		imageParts = s.inlineDiscussImages(ctx, cmd.BotID, refs)
 		injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
 	}
-	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, cmd.DiscussMessages, imageParts)
+	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, admitted, imageParts)
 	runConfig = runConfig.RefreshContextFrag()
 	terminal := s.contextLifecycleTerminal(ctx, runConfig)
 	var lifecycleCause error
@@ -196,11 +223,14 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 	}()
 
+	reasoningTiming := newReasoningTimingTracker(nil)
+	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx)
 	defer idleCancel.Stop()
 	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
 
 	var finalMessages json.RawMessage
+	var finalReasoningTiming []messagepkg.ReasoningTimingSegment
 	var terminalEvent native.StreamEvent
 	var terminalPayload []byte
 	var hasTerminalEvent bool
@@ -215,6 +245,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		terminal := event.Type == native.EventAgentEnd || event.Type == native.EventAgentAbort
 		if terminal {
 			finalMessages = event.Messages
+			finalReasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
 			terminalEvent = event
 			terminalPayload, _ = json.Marshal(event)
 			hasTerminalEvent = true
@@ -277,7 +308,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// can cross the same durable boundary as the main chat stream.
 	terminalCtx := context.WithoutCancel(ctx)
 	if hasTerminalEvent {
-		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages); storeErr != nil {
+		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming); storeErr != nil {
 			historyErr := runtimeHistoryError(storeErr)
 			lifecycleCause = historyErr
 			lifecycleDeferred = false
@@ -316,6 +347,8 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// Compute pressure on this goroutine so the detached trigger holds a few
 	// scalars instead of pinning the whole composed context until it runs.
 	if compactable := discussCompactableTokens(cmd.DiscussMessages); compactable > 0 && s.compactionService != nil && s.settingsService != nil {
+		// Pressure is measured on the full composed context, not the admitted
+		// window: what admission dropped is exactly what compaction must cover.
 		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
 	}
 }
@@ -326,6 +359,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 	cmd turn.StartTurnCommand,
 	modelID string,
 	finalMessages json.RawMessage,
+	reasoningTiming []messagepkg.ReasoningTimingSegment,
 ) error {
 	if len(finalMessages) == 0 {
 		return nil
@@ -344,6 +378,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 		sdkMsgs,
 		modelID,
 		runConfig.ContextLifecycle,
+		reasoningTiming,
 	)
 }
 
@@ -406,14 +441,14 @@ func (s *Service) collectDiscussSourceFrags(
 // turn with the same trigger policy as the chat path. ACP discuss turns run
 // through streamTurnChat and inherit its trigger directly.
 func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, modelID string, compactable int) {
-	budget := 0
+	// The absolute cap keeps compaction triggers alive even when the model
+	// has no configured context window; a zero budget would disable them.
+	budget := s.contextAbsoluteMaxTokens()
 	var turnModel models.GetResponse
 	if s.modelsService != nil && strings.TrimSpace(modelID) != "" {
 		if model, err := s.modelsService.GetByID(ctx, modelID); err == nil {
 			turnModel = model
-			if model.Config.ContextWindow != nil {
-				budget = *model.Config.ContextWindow
-			}
+			budget = s.effectiveContextTokenBudget(model)
 		}
 	}
 	s.maybeCompact(ctx, ChatRequest{BotID: botID, ThreadID: threadID}, resolvedContext{
@@ -425,24 +460,43 @@ func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, mode
 }
 
 // discussCompactableTokens estimates the raw history share of a discuss
-// context, excluding artifact summaries, in the chat trigger's token unit.
+// context, excluding artifact summaries, in the shared estimator's unit.
 func discussCompactableTokens(messages []turn.DiscussMessage) int {
 	total := 0
 	for _, message := range messages {
 		if message.CompactionArtifactID != "" {
 			continue
 		}
-		size := len(message.RawContent)
-		if size == 0 {
-			size = len(message.Content)
-		}
-		total += size / 4
+		total += discussMessageTokens(message)
 	}
 	return total
 }
 
 func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
-	prompt := discussACPFullContextPrompt(cmd.DiscussMessages)
+	// ACP resolution carries no model window, so the prompt is budgeted by
+	// the absolute cap before any concatenation (CM-ADM-001).
+	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, s.contextAbsoluteMaxTokens())
+	if admission.ProtectedOverflow {
+		s.logger.Error("context_admission_rejected",
+			slog.String("path", "discuss_acp"),
+			slog.String("bot_id", cmd.BotID),
+			slog.String("session_id", cmd.ThreadID),
+			slog.Int("estimated_tokens", admission.EstimatedTokens),
+			slog.Int("budget_tokens", admission.BudgetTokens))
+		h.emitErr(apperror.New(apperror.CodeContextProtectedOverflow, nil))
+		return
+	}
+	if admission.DroppedMessages > 0 {
+		s.logger.Info("context_admission",
+			slog.String("path", "discuss_acp"),
+			slog.String("bot_id", cmd.BotID),
+			slog.String("session_id", cmd.ThreadID),
+			slog.Int("estimated_tokens", admission.EstimatedTokens),
+			slog.Int("selected_tokens", admission.SelectedTokens),
+			slog.Int("budget_tokens", admission.BudgetTokens),
+			slog.Int("dropped_messages", admission.DroppedMessages))
+	}
+	prompt := discussACPFullContextPrompt(admitted)
 	if strings.TrimSpace(prompt) == "" {
 		// No composable context: end without a skip marker so the caller
 		// does not advance its consumed cursor (pre-port semantics).
@@ -558,6 +612,7 @@ func (s *Service) storeDiscussRound(
 	messages []sdk.Message,
 	modelID string,
 	lifecycle *contextfrag.LifecycleHolder,
+	reasoningTiming []messagepkg.ReasoningTimingSegment,
 ) error {
 	if s.turnHooks != nil && s.turnHooks.storeRound != nil {
 		return s.turnHooks.storeRound(
@@ -580,7 +635,10 @@ func (s *Service) storeDiscussRound(
 		SourceChannelIdentityID: channelIdentityID,
 		CurrentChannel:          currentPlatform,
 		UserMessagePersisted:    true,
-	}, sdkMessagesToModelMessages(messages), modelID, storeRoundOptions{ContextLifecycle: lifecycle})
+	}, sdkMessagesToModelMessages(messages), modelID, storeRoundOptions{
+		ContextLifecycle: lifecycle,
+		ReasoningTiming:  reasoningTiming,
+	})
 }
 
 // discussMessagesToSDK converts composed context messages into SDK

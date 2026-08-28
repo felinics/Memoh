@@ -12,6 +12,7 @@ import {
   treeRowIdleClass,
   treeRowSelectedClass,
 } from './tree-row'
+import { useTreeDisclosure } from './tree-disclosure'
 
 // One directory row in the folder picker. Mirrors file-tree-node's shape and
 // disclosure behaviour, minus everything the Explorer needs and a picker does
@@ -38,42 +39,28 @@ const emit = defineEmits<{ select: [path: string] }>()
 
 const { t } = useI18n()
 
-const expanded = ref(false)
-const loaded = ref(false)
-const loading = ref(false)
 const failed = ref(false)
 const children = ref<string[]>([])
 
 const selected = computed(() => props.selectedPath === props.path)
 
-async function loadChildren() {
-  loading.value = true
-  failed.value = false
+const { expanded, loaded, spinnerVisible, expand, toggle, reload } = useTreeDisclosure(async () => {
   try {
     children.value = await props.listDirectory(props.path)
-    loaded.value = true
+    failed.value = false
+    return true
   } catch {
     // The message is on the retry line below the row; a toast per node would
-    // stack one per expanded folder.
+    // stack one per expanded folder. `failed` clears only on success so the
+    // line holds its place during a retry instead of flickering out and back.
     failed.value = true
-  } finally {
-    loading.value = false
+    return false
   }
-}
-
-async function expand() {
-  expanded.value = true
-  if (!loaded.value) await loadChildren()
-}
+})
 
 function onRowClick() {
   emit('select', props.path)
   if (!expanded.value) void expand()
-}
-
-function onChevronClick() {
-  if (expanded.value) expanded.value = false
-  else void expand()
 }
 
 onMounted(() => {
@@ -97,12 +84,17 @@ onMounted(() => {
     />
     <span
       :class="treeGlyphSlotClass"
-      @click.stop="onChevronClick"
+      @click.stop="toggle"
     >
+      <Spinner
+        v-if="spinnerVisible"
+        class="text-muted-foreground"
+      />
       <ChevronRight
+        v-else
         :stroke-width="1.53"
-        class="size-4 text-muted-foreground transition-transform"
-        :class="{ 'rotate-90': expanded }"
+        class="size-4 text-muted-foreground transition-[rotate]"
+        :class="{ 'rotate-90': expanded && (loaded || failed) }"
       />
     </span>
     <span class="ml-1 min-w-0 flex-1 truncate">{{ name }}</span>
@@ -110,21 +102,7 @@ onMounted(() => {
 
   <template v-if="expanded">
     <div
-      v-if="loading"
-      :class="treeAsideClass"
-    >
-      <span
-        v-for="g in depth + 1"
-        :key="g"
-        :class="treeIndentClass"
-      />
-      <span :class="treeGlyphSlotClass">
-        <Spinner class="size-3.5" />
-      </span>
-    </div>
-
-    <div
-      v-else-if="failed"
+      v-if="failed"
       :class="treeAsideClass"
     >
       <span
@@ -135,7 +113,7 @@ onMounted(() => {
       <span class="ml-1 min-w-0 flex-1 truncate">{{ t('bots.folders.form.browseFailed') }}</span>
       <TextButton
         class="ml-2 shrink-0"
-        @click.stop="loadChildren"
+        @click.stop="reload"
       >
         {{ t('bots.folders.form.browseRetry') }}
       </TextButton>

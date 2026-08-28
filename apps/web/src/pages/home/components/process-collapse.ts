@@ -1,3 +1,5 @@
+import { processBlockKey } from './process-block-key'
+
 // Open/closed state for chain-of-process collapsibles (process groups, single
 // tool detail rows, thinking blocks).
 //
@@ -5,61 +7,54 @@
 // streaming, which would otherwise discard any expand/collapse the user did
 // mid-stream (the classic "I opened it, then the turn ended and it snapped
 // shut"). We keep the toggle here, keyed by a *stable* signature of the block
-// (backend tool_call_id, or a content hash for reasoning) so the re-mounted
-// "done" component recovers exactly what the user left open.
+// (assistant render id + backend block id) so the re-mounted "done" component
+// recovers exactly what the user left open without confusing mutable content
+// for identity.
 //
 // Semantics: purely user-driven. Nothing auto-opens on stream start or
 // auto-closes on completion — a CoP is collapsed until the user opens it, and
 // then stays however they left it for the life of the session. Cross-reload it
 // resets to collapsed (acceptable; matches "reduce info, focus on output").
+const MAX_OPEN_STATES = 2048
+// This is session-only UI state, so keep recent toggles without growing for
+// the full lifetime of a long-running desktop renderer.
 const openState = new Map<string, boolean>()
 
-export function getCollapseOpen(key: string): boolean {
-  return key ? openState.get(key) ?? false : false
+export function getCollapseOpen(key: string): boolean | undefined {
+  return key ? openState.get(key) : undefined
 }
 
 export function setCollapseOpen(key: string, open: boolean): void {
-  if (key) openState.set(key, open)
-}
-
-export function migrateCollapseOpen(previousKey: string, key: string, open: boolean): void {
-  if (previousKey && previousKey !== key) openState.delete(previousKey)
-  setCollapseOpen(key, open)
-}
-
-function hash(value: string): string {
-  let h = 0
-  for (let i = 0; i < value.length; i += 1) {
-    h = (h * 31 + value.charCodeAt(i)) | 0
+  if (!key) return
+  openState.delete(key)
+  openState.set(key, open)
+  while (openState.size > MAX_OPEN_STATES) {
+    const oldest = openState.keys().next().value
+    if (oldest === undefined) break
+    openState.delete(oldest)
   }
-  return `${value.length}:${h}`
 }
 
 interface KeyableBlock {
   type: string
   id: number
-  toolCallId?: string
-  content?: string
 }
 
-// A block's stable identity across the stream→refetch boundary.
-function blockSignature(block: KeyableBlock): string {
-  if (block.type === 'tool') return `t:${block.toolCallId || block.id}`
-  if (block.type === 'reasoning') return `r:${hash((block.content ?? '').trim())}`
-  return `b:${block.id}`
+export function toolCollapseKey(messageId: string, block: KeyableBlock): string {
+  const key = processBlockKey(messageId, block)
+  return key ? `tool/${key}` : ''
 }
 
-export function toolCollapseKey(block: KeyableBlock): string {
-  return blockSignature(block)
+export function reasoningCollapseKey(messageId: string, block: KeyableBlock): string {
+  const key = processBlockKey(messageId, block)
+  return key ? `reasoning/${key}` : ''
 }
 
-export function reasoningCollapseKey(content: string): string {
-  return `r:${hash((content ?? '').trim())}`
-}
-
-// A group is identified by its first item — once a group has >= 2 items the
-// first item is complete (a later one exists), so its signature is stable.
-export function groupCollapseKey(items: KeyableBlock[]): string {
+// A group is identified by its first item. Its backend id is stable even while
+// reasoning content and tool payloads continue to grow.
+export function groupCollapseKey(messageId: string, items: KeyableBlock[]): string {
   const first = items[0]
-  return first ? `g/${blockSignature(first)}` : ''
+  if (!first) return ''
+  const key = processBlockKey(messageId, first)
+  return key ? `group/${key}` : ''
 }

@@ -35,5 +35,5 @@ export const treeIndentClass = 'h-full w-2 shrink-0 self-stretch'
 /** The fixed 24px column that holds a row's chevron or type glyph. */
 export const treeGlyphSlotClass = 'flex size-6 shrink-0 items-center justify-center'
 
-/** A non-row line rendered inside the tree (a child-loading or error line). */
+/** A non-row line rendered inside the tree (the picker's load-failed retry line). */
 export const treeAsideClass = 'flex min-h-[1.6875rem] items-center mx-1 mb-px pl-1 pr-1 text-[0.84375rem] tracking-normal font-[350] text-muted-foreground [-webkit-font-smoothing:auto]' /* ui-allow-px: same Explorer row density as treeRowClass */

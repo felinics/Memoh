@@ -1304,6 +1304,7 @@
     "reachable": "Reachable",
     "unreachable": "Unreachable",
     "testFailed": "Test failed",
+    "testUnverifiedHint": "Connected, but the model list could not confirm availability — this provider may not support it. Test a specific model instead.",
     "autoImport": "Auto Import Models",
     "autoImportHint": "Automatically fetch and import models from the provider after creation",
     "configurationTitle": "Configuration",

@@ -23,11 +23,12 @@ type WSStreamEvent = json.RawMessage
 // interrupted-path fallback so that real partial messages get saved instead
 // of a synthetic placeholder.
 type terminalSnapshot struct {
-	sdkMessages    []sdk.Message
-	usage          json.RawMessage
-	deferredToolID string
-	aborted        bool
-	visibleOutput  bool
+	sdkMessages     []sdk.Message
+	usage           json.RawMessage
+	reasoningTiming []messagepkg.ReasoningTimingSegment
+	deferredToolID  string
+	aborted         bool
+	visibleOutput   bool
 }
 
 func hasVisibleAgentStreamOutput(event native.StreamEvent) bool {
@@ -210,11 +211,9 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		cfg := rc.runConfig
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = s.canDeliverUserInputStream()
+		reasoningTiming := newReasoningTimingTracker(nil)
 		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
-		if stepCommitter != nil {
-			cfg.OnStepCommitted = stepCommitter.commit
-			cfg.OnStepInterrupted = stepCommitter.interrupt
-		}
+		configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
 		cfg = s.prepareRunConfig(streamCtx, cfg)
 		terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 		var lifecycleCause error
@@ -301,6 +300,9 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			}
 			if event.IsTerminal() && len(event.Messages) > 0 {
 				if snap, ok := extractTerminalSnapshot(data); ok {
+					if stepCommitter == nil {
+						snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+					}
 					snap.visibleOutput = hasVisibleOutput
 					lastSnapshot = snap
 					hasSnapshot = true
@@ -375,7 +377,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					slog.String("chat_id", streamReq.ChatID),
 				)
 			case hasSnapshot:
-				_ = s.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+				_ = s.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, lastSnapshot.reasoningTiming, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 			default:
 				s.logger.Info("skip persisting failed startup stream",
 					slog.String("bot_id", streamReq.BotID),
@@ -522,11 +524,9 @@ func (s *Service) streamChatWSResultWithHooks(
 	cfg := rc.runConfig
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
+	reasoningTiming := newReasoningTimingTracker(nil)
 	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
-	if stepCommitter != nil {
-		cfg.OnStepCommitted = stepCommitter.commit
-		cfg.OnStepInterrupted = stepCommitter.interrupt
-	}
+	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 	terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 	var lifecycleCause error
@@ -611,6 +611,9 @@ func (s *Service) streamChatWSResultWithHooks(
 
 		if event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
+				if stepCommitter == nil {
+					snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				}
 				snap.visibleOutput = hasVisibleOutput
 				lastSnapshot = snap
 				hasSnapshot = true
@@ -689,7 +692,7 @@ func (s *Service) streamChatWSResultWithHooks(
 				slog.String("chat_id", req.ChatID),
 			)
 		case hasSnapshot:
-			persistedMessages = s.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+			persistedMessages = s.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, lastSnapshot.reasoningTiming, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 		default:
 			s.logger.Info("skip persisting failed startup ws stream",
 				slog.String("bot_id", req.BotID),
@@ -776,6 +779,7 @@ func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatReq
 	persisted, err := s.storeRoundWithOptionsResult(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
 		AllowPendingToolCalls: snap.deferredToolID != "",
 		ContextLifecycle:      rc.runConfig.ContextLifecycle,
+		ReasoningTiming:       snap.reasoningTiming,
 	})
 	if err != nil {
 		return nil, err
@@ -816,6 +820,7 @@ func (s *Service) persistPartialResult(
 	req ChatRequest,
 	rc resolvedContext,
 	partialMessages []sdk.Message,
+	reasoningTiming []messagepkg.ReasoningTimingSegment,
 	toolCallCount int,
 	wasIdleTimeout bool,
 	hasVisibleOutput bool,
@@ -828,9 +833,10 @@ func (s *Service) persistPartialResult(
 		// a real result, preserving the assistant ↔ tool pairing required by
 		// downstream provider serializers (especially Anthropic).
 		persisted, err := s.persistTerminalSnapshotResult(persistCtx, req, rc, terminalSnapshot{
-			sdkMessages:   partialMessages,
-			aborted:       !hasVisibleOutput,
-			visibleOutput: hasVisibleOutput,
+			sdkMessages:     partialMessages,
+			reasoningTiming: reasoningTiming,
+			aborted:         !hasVisibleOutput,
+			visibleOutput:   hasVisibleOutput,
 		})
 		if err == nil {
 			s.logger.Info("persisted partial agent result",

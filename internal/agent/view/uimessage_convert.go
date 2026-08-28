@@ -25,6 +25,7 @@ var (
 		[]byte(`"model_requested_skills"`),
 		[]byte(`"platform"`),
 		[]byte(`"reply"`),
+		[]byte(`"reasoning_timing"`),
 		[]byte(`"skill_activation"`),
 		[]byte(`"user_message_kind"`),
 	}
@@ -301,9 +302,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			result = append(result, turn)
 
 		case "assistant":
-			if strings.TrimSpace(raw.Platform) == "" {
-				ensurePersistedMetadata(&raw)
-			}
+			ensurePersistedMetadata(&raw)
 			modelMessage := decodePersistedModelMessage(raw)
 			toolCalls := extractPersistedToolCalls(&modelMessage)
 			text := extractPersistedMessageText(raw, &modelMessage)
@@ -320,11 +319,13 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				pending = newPendingAssistantTurn(raw)
 			}
 
-			for _, reasoning := range reasonings {
+			reasoningTimings := uiReasoningTimingsByOrdinal(raw.Metadata)
+			for ordinal, reasoning := range reasonings {
 				appendPendingAssistantMessage(pending, UIMessage{
-					ID:      pending.NextID,
-					Type:    UIMessageReasoning,
-					Content: reasoning,
+					ID:              pending.NextID,
+					Type:            UIMessageReasoning,
+					Content:         reasoning,
+					ReasoningTiming: reasoningTimings[ordinal],
 				})
 			}
 			if text != "" {
@@ -715,6 +716,23 @@ func extractPersistedReasoning(message *uiDecodedModelMessage) []string {
 		}
 	}
 	return reasonings
+}
+
+func uiReasoningTimingsByOrdinal(metadata map[string]any) map[int]*UIReasoningTiming {
+	segments := messagepkg.ReasoningTimingFromMetadata(metadata)
+	if len(segments) == 0 {
+		return nil
+	}
+	timings := make(map[int]*UIReasoningTiming, len(segments))
+	for _, segment := range segments {
+		if _, exists := timings[segment.Ordinal]; exists {
+			continue
+		}
+		timings[segment.Ordinal] = &UIReasoningTiming{
+			DurationMS: segment.DurationMS,
+		}
+	}
+	return timings
 }
 
 func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedToolCall {

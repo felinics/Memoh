@@ -67,12 +67,19 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Message:   providerResult.Message,
 		}, nil
 	case sdk.ProviderStatusUnhealthy:
-		return TestResponse{
-			Status:    TestStatusAuthError,
-			Reachable: true,
-			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   providerResult.Message,
-		}, nil
+		// Only an auth failure justifies an early verdict. Any other
+		// unhealthy result (e.g. 404 because the provider does not implement
+		// the models list at all) must not be reported as "Invalid API key" —
+		// fall through to the real-model generation probe, which is the only
+		// check that can give a definitive answer for such providers (#1087).
+		if strings.Contains(providerResult.Message, "authentication failed") {
+			return TestResponse{
+				Status:    TestStatusAuthError,
+				Reachable: true,
+				LatencyMs: time.Since(start).Milliseconds(),
+				Message:   providerResult.Message,
+			}, nil
+		}
 	}
 
 	modelResult, err := sdkProvider.TestModel(ctx, model.ModelID)

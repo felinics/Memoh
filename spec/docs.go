@@ -7743,7 +7743,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Fork source message",
+                        "description": "Fork source turn",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -18020,6 +18020,9 @@ const docTemplate = `{
                 "output_reserve": {
                     "type": "integer"
                 },
+                "output_reserve_resolution": {
+                    "type": "string"
+                },
                 "system_budget": {
                     "type": "integer"
                 },
@@ -18531,6 +18534,9 @@ const docTemplate = `{
                     "type": "array",
                     "items": {}
                 },
+                "reasoning_timing": {
+                    "$ref": "#/definitions/conversation.UIReasoningTiming"
+                },
                 "running": {
                     "type": "boolean"
                 },
@@ -18559,6 +18565,14 @@ const docTemplate = `{
                 "UIMessageTool",
                 "UIMessageAttachments"
             ]
+        },
+        "conversation.UIReasoningTiming": {
+            "type": "object",
+            "properties": {
+                "duration_ms": {
+                    "type": "integer"
+                }
+            }
         },
         "conversation.UIReplyRef": {
             "type": "object",
@@ -21534,15 +21548,18 @@ const docTemplate = `{
         },
         "handlers.forkSessionRequest": {
             "type": "object",
-            "required": [
-                "message_id"
-            ],
             "properties": {
                 "message_id": {
-                    "type": "string"
+                    "description": "MessageID is the pre-turn spelling of TurnID, resolved server-side to the\nround that contains it. Deprecated: send turn_id. A client holds a turn id\nfrom admission onward, while a stored message id exists only once the\nround has been persisted.",
+                    "type": "string",
+                    "format": "uuid"
                 },
                 "title": {
                     "type": "string"
+                },
+                "turn_id": {
+                    "type": "string",
+                    "format": "uuid"
                 }
             }
         },
@@ -22636,12 +22653,14 @@ const docTemplate = `{
             "enum": [
                 "ok",
                 "auth_error",
-                "error"
+                "error",
+                "unverified"
             ],
             "x-enum-varnames": [
                 "TestStatusOK",
                 "TestStatusAuthError",
-                "TestStatusError"
+                "TestStatusError",
+                "TestStatusUnverified"
             ]
         },
         "providers.UpdateRequest": {

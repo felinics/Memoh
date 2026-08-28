@@ -15,6 +15,7 @@ import (
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 var (
@@ -45,6 +46,11 @@ type queries interface {
 	ListBotAgents(context.Context, pgtype.UUID) ([]sqlc.BotAgent, error)
 	SoftDeleteBotAgent(context.Context, sqlc.SoftDeleteBotAgentParams) (sqlc.BotAgent, error)
 	UpdateBotAgent(context.Context, sqlc.UpdateBotAgentParams) (sqlc.BotAgent, error)
+}
+
+type transactionalQueries interface {
+	SupportsTransactions() bool
+	InTx(context.Context, func(dbstore.Queries) error) error
 }
 
 type Service struct {
@@ -186,24 +192,29 @@ func (s *Service) Update(ctx context.Context, botID, id string, req UpdateReques
 		enabled = *req.Enabled
 	}
 	pgBotID, pgID, _ := parseIDs(botID, id)
-	row, err := s.queries.UpdateBotAgent(ctx, sqlc.UpdateBotAgentParams{
-		Name:    name,
-		Enabled: enabled,
-		BotID:   pgBotID,
-		ID:      pgID,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
+	var row sqlc.BotAgent
+	err = s.withBotMutationLock(ctx, pgBotID, func(q queries) error {
+		var updateErr error
+		row, updateErr = q.UpdateBotAgent(ctx, sqlc.UpdateBotAgentParams{
+			Name:    name,
+			Enabled: enabled,
+			BotID:   pgBotID,
+			ID:      pgID,
+		})
+		if !errors.Is(updateErr, pgx.ErrNoRows) {
+			return updateErr
+		}
 		if !enabled {
-			isDefault, checkErr := s.queries.BotAgentIsDefault(ctx, sqlc.BotAgentIsDefaultParams{BotID: pgBotID, ID: pgID})
+			isDefault, checkErr := q.BotAgentIsDefault(ctx, sqlc.BotAgentIsDefaultParams{BotID: pgBotID, ID: pgID})
 			if checkErr != nil {
-				return BotAgent{}, checkErr
+				return checkErr
 			}
 			if isDefault {
-				return BotAgent{}, ErrDefaultInUse
+				return ErrDefaultInUse
 			}
 		}
-		return BotAgent{}, ErrNotFound
-	}
+		return ErrNotFound
+	})
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			return BotAgent{}, ErrNameTaken
@@ -218,9 +229,12 @@ func (s *Service) Delete(ctx context.Context, botID, id string) error {
 	if err != nil {
 		return ErrNotFound
 	}
-	_, err = s.queries.SoftDeleteBotAgent(ctx, sqlc.SoftDeleteBotAgentParams{BotID: pgBotID, ID: pgID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		isDefault, checkErr := s.queries.BotAgentIsDefault(ctx, sqlc.BotAgentIsDefaultParams{BotID: pgBotID, ID: pgID})
+	return s.withBotMutationLock(ctx, pgBotID, func(q queries) error {
+		_, deleteErr := q.SoftDeleteBotAgent(ctx, sqlc.SoftDeleteBotAgentParams{BotID: pgBotID, ID: pgID})
+		if !errors.Is(deleteErr, pgx.ErrNoRows) {
+			return deleteErr
+		}
+		isDefault, checkErr := q.BotAgentIsDefault(ctx, sqlc.BotAgentIsDefaultParams{BotID: pgBotID, ID: pgID})
 		if checkErr != nil {
 			return checkErr
 		}
@@ -228,8 +242,24 @@ func (s *Service) Delete(ctx context.Context, botID, id string) error {
 			return ErrDefaultInUse
 		}
 		return ErrNotFound
+	})
+}
+
+// withBotMutationLock serializes Agent availability changes with default-Agent
+// assignment. Both paths lock the parent bot before reading or writing the
+// child Agent, so they share one lock order and cannot publish a disabled
+// default. Query-only test doubles retain the historical direct path.
+func (s *Service) withBotMutationLock(ctx context.Context, botID pgtype.UUID, fn func(queries) error) error {
+	txer, ok := s.queries.(transactionalQueries)
+	if !ok || !txer.SupportsTransactions() {
+		return fn(s.queries)
 	}
-	return err
+	return txer.InTx(ctx, func(q dbstore.Queries) error {
+		if _, err := q.LockBotForAgentMutation(ctx, botID); err != nil {
+			return err
+		}
+		return fn(q)
+	})
 }
 
 func DescriptorFor(agent BotAgent) (Descriptor, error) {

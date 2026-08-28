@@ -6,9 +6,9 @@ import type {
   UITurn,
 } from '@/composables/api/useChat.types'
 import {
+  messageIdentityId,
   mergeApprovalState,
   nextId,
-  serverMessageId,
 } from '../chat-list.normalize'
 import { upsertById } from '../chat-list.utils'
 import type {
@@ -230,13 +230,22 @@ export function createTranscriptController({
     return fetchMessages(botId, targetSessionId, { limit: PAGE_SIZE })
   }
 
+  // The oldest turn the database has actually numbered. turnPosition is that
+  // signal exactly: the visible-history view cannot return a row without one,
+  // and a live turn carries none until its settled twin arrives. Paging from
+  // messages[0] instead would hand the server a render identity whenever a
+  // live turn sits at the head of an otherwise unsettled transcript.
+  function oldestSettledTurn(): ChatMessage | undefined {
+    return messages.find(turn => turn.turnPosition !== undefined)
+  }
+
   async function loadOlderMessages(): Promise<number> {
     const bid = (currentBotId.value ?? '').trim()
     const sid = (sessionId.value ?? '').trim()
     if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
-    const first = messages[0]
+    const first = oldestSettledTurn()
     if (!first) return 0
-    const firstId = serverMessageId(first)
+    const firstId = messageIdentityId(first)
     if (!firstId) return 0
 
     const generation = historyGeneration
@@ -262,7 +271,7 @@ export function createTranscriptController({
           return older.length
         }
 
-        const earliest = normalized[0] ? serverMessageId(normalized[0]) : ''
+        const earliest = normalized[0] ? messageIdentityId(normalized[0]) : ''
         if (!earliest || earliest === cursor) {
           hasMoreOlder.value = false
           return 0
@@ -368,9 +377,9 @@ export function createTranscriptController({
   function findMessageIndexForReplacement(turn: ChatMessage): number {
     const referenceIndex = messages.indexOf(turn)
     if (referenceIndex >= 0) return referenceIndex
-    const id = serverMessageId(turn)
+    const id = messageIdentityId(turn)
     if (!id) return -1
-    return messages.findIndex(message => serverMessageId(message) === id)
+    return messages.findIndex(message => messageIdentityId(message) === id)
   }
 
   function replaceTailFromTurn(turn: ChatMessage, replacements: ChatMessage[]): ChatMessage[] {
@@ -496,13 +505,14 @@ export function createTranscriptController({
       if (!next) return current ? [current] : []
       if (!current) return [next]
       const renderId = current.id
-      Object.assign(current, next, { id: renderId })
+      const settledPosition = current.turnPosition ?? next.turnPosition
+      Object.assign(current, next, { id: renderId, turnPosition: settledPosition })
       return [current]
     })
 
     const operationAnchor = slice.operation?.replace_from_message_id?.trim() ?? ''
     const anchor = operationAnchor
-      ? messages.find(turn => serverMessageId(turn) === operationAnchor)
+      ? messages.find(turn => messageIdentityId(turn) === operationAnchor)
       : undefined
     if (anchor) {
       replaceTailFromTurn(anchor, resolved)

@@ -517,8 +517,8 @@ github.com/mattn/go-runewidth v0.0.10/go.mod h1:RAqKPSqVFrSLVXbA8x7dzmKdmGzieGRC
 github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5Ld7szi9bcBfOoFv/3dc6xSMkL2PC0=
 github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7 h1:beehwOQperqGWj4m4EhcPhnSZKtDiuHK/7ZMoTPaQjw=
 github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7/go.mod h1:OvmxM7JmnXBmwJWWVqtreL3HSHSKuzPbtbhlg5MvBg0=
-github.com/memohai/connect-it/sdk/go v0.1.1-0.20260801041115-19a755fb92f6 h1:izUUiax2VaFHdOynSuDGpqVcTuzbO9azDiuR+OW90co=
-github.com/memohai/connect-it/sdk/go v0.1.1-0.20260801041115-19a755fb92f6/go.mod h1:8n7yDCRRNju4+wB8JrKOd29xwbKq9luyihK4eBONBVY=
+github.com/memohai/connect-it/sdk/go v0.1.1-0.20260823104951-478f43caffb2 h1:0VxBDk0lJbkwKpg4+TH40cC8gytKntuHN8BGtHZoje4=
+github.com/memohai/connect-it/sdk/go v0.1.1-0.20260823104951-478f43caffb2/go.mod h1:0XfT9WNZF/cKDaJYoQrXzRRkvMn2f77gBRscF9U3YvY=
 github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978 h1:6gD8DvZkimGmU0e3PjlusJPyw55SyeoE12CZQoYUa8g=
 github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978/go.mod h1:2LMgK5QYFlTSvrGY+sI/j+jK2WK+YGHv4IMuiW+iPSc=
 github.com/memohai/twilight-ai v0.5.0 h1:zkQkmUhasQooHP8/6aZM/+Ogv5a12zlCFfxQ4XJ+uRU=

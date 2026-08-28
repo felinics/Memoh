@@ -26,6 +26,7 @@ type storeRoundOptions struct {
 	SkipMemory                    bool
 	AllowEmptyAssistantText       bool
 	MessageMetadataByIndex        map[int]map[string]any
+	ReasoningTiming               []messagepkg.ReasoningTimingSegment
 	RequireCompletePersist        bool
 	CleanupACPDecisionProjections bool
 	ACPPublication                *messagepkg.ACPPublication
@@ -247,6 +248,9 @@ func (s *Service) storeMessagesResult(ctx context.Context, req ChatRequest, mess
 }
 
 func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.PersistInput, error) {
+	// Project timing only at the final persistence boundary, after callers have
+	// finished filtering, repairing, or augmenting the rows being stored.
+	opts = opts.withReasoningTimingMetadata(messages)
 	// Check bot setting for full tool result persistence.
 	pruneToolResults := true
 	if botSettings, err := s.loadBotSettings(ctx, req.BotID); err == nil {

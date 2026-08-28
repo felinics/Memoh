@@ -37,10 +37,11 @@ import { useI18n } from 'vue-i18n'
 import type { ThinkingBlock } from '@/store/chat-list'
 import CollapseSection from './collapse-section.vue'
 import { getReasoningDuration } from './reasoning-timing'
-import { getCollapseOpen, migrateCollapseOpen, reasoningCollapseKey, setCollapseOpen } from './process-collapse'
+import { getCollapseOpen, reasoningCollapseKey, setCollapseOpen } from './process-collapse'
 
 const props = defineProps<{
   block: ThinkingBlock
+  messageId: string
   streaming: boolean
   // True when nested inside a multi-step process card: inherit the card's smaller
   // type scale + tighter leading instead of the root-level cop size.
@@ -50,20 +51,25 @@ const props = defineProps<{
 const { t } = useI18n()
 
 // Persisted, user-driven toggle (survives the post-turn refetch/remount).
-const collapseKey = computed(() => reasoningCollapseKey(props.block.content ?? ''))
-const open = ref(getCollapseOpen(collapseKey.value))
-watch(collapseKey, (key, previousKey) => {
-  migrateCollapseOpen(previousKey, key, open.value)
+const collapseKey = computed(() => reasoningCollapseKey(props.messageId, props.block))
+const open = ref(getCollapseOpen(collapseKey.value) ?? false)
+watch(collapseKey, (key) => {
+  open.value = getCollapseOpen(key) ?? false
 })
 
 // Trimmed so the expanded body doesn't open with leading blank lines/space.
 const bodyText = computed(() => (props.block.content ?? '').trim())
 
-// Duration is measured centrally in message-item (every reasoning block, not
-// just the streaming tail) and cached by content, so the re-mounted "done"
-// block recovers it here. Historical blocks (never streamed this session) have
-// no timing and fall back to a plain "Thought".
-const durationMs = computed(() => getReasoningDuration(props.block.content ?? ''))
+// Settled/history blocks prefer the server-observed duration persisted on the
+// assistant row. The client timer remains a compatibility fallback for legacy
+// rows, older servers, and the live interval before the settled row arrives.
+const durationMs = computed(() => {
+  const persisted = props.block.reasoning_timing?.duration_ms
+  if (typeof persisted === 'number' && Number.isFinite(persisted) && persisted >= 0) {
+    return persisted
+  }
+  return getReasoningDuration(props.messageId, props.block)
+})
 
 const label = computed(() => {
   if (props.streaming) return t('chat.thinkingInProgress')

@@ -197,7 +197,7 @@ import HeaderRow from './tool-detail/header-row.vue'
 import ExpandChevron from './tool-detail/expand-chevron.vue'
 import Capsule from './tool-detail/capsule.vue'
 
-const props = defineProps<{ block: ToolCallBlock, inGroup?: boolean }>()
+const props = defineProps<{ block: ToolCallBlock, messageId: string, inGroup?: boolean }>()
 const { t } = useI18n()
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
@@ -216,10 +216,10 @@ const executionLocationLabel = computed(() => {
 })
 
 // Persisted, user-driven toggle (survives the post-turn refetch/remount).
-const collapseKey = computed(() => toolCollapseKey(props.block))
-const open = ref(getCollapseOpen(collapseKey.value) || display.value.defaultOpen === true)
+const collapseKey = computed(() => toolCollapseKey(props.messageId, props.block))
+const open = ref(getCollapseOpen(collapseKey.value) ?? (display.value.defaultOpen === true))
 watch(collapseKey, (key) => {
-  open.value = getCollapseOpen(key) || display.value.defaultOpen === true
+  open.value = getCollapseOpen(key) ?? (display.value.defaultOpen === true)
 })
 
 const expandable = computed(

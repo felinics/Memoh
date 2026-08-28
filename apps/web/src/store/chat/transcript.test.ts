@@ -4,17 +4,18 @@ import type { UIMessage, UITurn } from '@/composables/api/useChat.types'
 import { createBackgroundTaskTracker } from './background-tasks'
 import { createTranscriptController } from './transcript'
 import type { ChatAssistantTurn, ChatUserTurn, ToolCallBlock } from './types'
+import { messageIdentityId } from '../chat-list.normalize'
 
 vi.mock('@/store/user', () => ({
   useUserStore: () => ({ userInfo: { id: 'user-1' } }),
 }))
 
 function rawUser(id: string, text = 'hello', timestamp = '2026-01-01T00:00:00.000Z'): UITurn {
-  return { id, turn_id: `turn-${id}`, role: 'user', text, timestamp, platform: 'local' }
+  return { id, turn_id: `turn-${id}`, turn_position: 1, role: 'user', text, timestamp, platform: 'local' }
 }
 
 function rawAssistant(id: string, messages: UIMessage[] = [], timestamp = '2026-01-01T00:00:01.000Z'): UITurn {
-  return { id, turn_id: `turn-${id}`, role: 'assistant', messages, timestamp }
+  return { id, turn_id: `turn-${id}`, turn_position: 1, role: 'assistant', messages, timestamp }
 }
 
 function assistant(id: string, messages: ChatAssistantTurn['messages'] = []): ChatAssistantTurn {
@@ -57,6 +58,8 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
+const persistedUserId = '018f47f2-8bc1-7a3d-91b2-b73a7b925b1e'
+
 function approvalMessage(status = 'pending'): UIMessage {
   return {
     id: 1,
@@ -81,7 +84,7 @@ describe('chat transcript controller', () => {
     expect(toRaw(transcript.messages[0])).toBe(turn)
   })
 
-  it('owns server-id lookup and latest visible turn queries', () => {
+  it('owns turn lookup and latest visible turn queries', () => {
     const { transcript } = makeTranscript()
     transcript.replaceMessages([
       rawUser('user-1'),
@@ -89,8 +92,8 @@ describe('chat transcript controller', () => {
       rawUser('user-2'),
       rawAssistant('assistant-2'),
     ], 'session-1')
-    const latestUser = transcript.findTurnByServerId('user-2')!
-    const latestAssistant = transcript.findTurnByServerId('assistant-2')!
+    const latestUser = transcript.findTurnByTurnId('turn-user-2', 'user')!
+    const latestAssistant = transcript.findTurnByTurnId('turn-assistant-2', 'assistant')!
     const optimisticUser: ChatUserTurn = {
       id: 'optimistic-user',
       role: 'user',
@@ -104,11 +107,111 @@ describe('chat transcript controller', () => {
     transcript.appendToView(optimisticUser)
 
     expect(transcript.hasTurn(optimisticUser)).toBe(true)
-    expect(transcript.findTurnByServerId('missing')).toBeNull()
+    expect(transcript.findTurnByTurnId('missing', 'user')).toBeNull()
     expect(transcript.isLatestVisibleUserTurn(latestUser)).toBe(true)
     expect(transcript.isLatestVisibleAssistantTurn(latestAssistant)).toBe(true)
     expect(transcript.isLatestVisibleUserTurn(optimisticUser)).toBe(false)
-    expect(transcript.isLatestVisibleUserTurn(transcript.findTurnByServerId('user-1')!)).toBe(false)
+    expect(transcript.isLatestVisibleUserTurn(transcript.findTurnByTurnId('turn-user-1', 'user')!)).toBe(false)
+  })
+
+  // Both halves of a round share one turn id, so the role is what separates
+  // what a retry addresses from what an edit addresses.
+  it('resolves the two halves of one turn by role', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([
+      { id: 'user-1', turn_id: 'turn-1', role: 'user', text: 'hello', timestamp: '2026-01-01T00:00:00.000Z' },
+      { id: 'assistant-1', turn_id: 'turn-1', role: 'assistant', messages: [], timestamp: '2026-01-01T00:00:01.000Z' },
+    ], 'session-1')
+
+    expect(transcript.findTurnByTurnId('turn-1', 'user')?.id).toBe('user-1')
+    expect(transcript.findTurnByTurnId('turn-1', 'assistant')?.id).toBe('assistant-1')
+  })
+
+  // The originally reported failure, as state: the moment a turn ends, the
+  // round on screen is a runtime projection carrying a render id and nothing
+  // else. Retry, edit and fork have to be able to name that round, and the
+  // turn id is the only identity it has — asking it for a stored message id
+  // is what produced `load message: invalid UUID`.
+  it('addresses a round that has no stored message id yet', () => {
+    const { transcript } = makeTranscript()
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1',
+      turnId: 'turn-live',
+      invocationId: '',
+      status: 'completed',
+      operation: null,
+      streaming: false,
+      turns: [
+        {
+          id: 'runtime:turn-live:user',
+          turn_id: 'turn-live',
+          role: 'user',
+          text: 'hi',
+          timestamp: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'runtime:turn-live:assistant',
+          turn_id: 'turn-live',
+          role: 'assistant',
+          messages: [{ id: 1, type: 'text', content: 'answer' }],
+          timestamp: '2026-01-01T00:00:01.000Z',
+        },
+      ],
+    })
+
+    const userTurn = transcript.findTurnByTurnId('turn-live', 'user')!
+    const assistantTurn = transcript.findTurnByTurnId('turn-live', 'assistant')!
+
+    // What the old contract asked this round for, and could not get. The
+    // reconciliation key is the value `(serverId ?? id)` used to send: a render
+    // id, which is what reached the server as `load message: invalid UUID`.
+    expect(assistantTurn.serverId).toBeUndefined()
+    expect(assistantTurn.turnPosition).toBeUndefined()
+    expect(assistantTurn.__optimistic).toBe(false)
+    expect(messageIdentityId(assistantTurn)).toBe('runtime:turn-live:assistant')
+    expect(messageIdentityId(userTurn)).toBe('runtime:turn-live:user')
+
+    // What it can be named by instead, in both halves of the round.
+    expect(userTurn.turnId).toBe('turn-live')
+    expect(assistantTurn.turnId).toBe('turn-live')
+    expect(transcript.isLatestVisibleUserTurn(userTurn)).toBe(true)
+    expect(transcript.isLatestVisibleAssistantTurn(assistantTurn)).toBe(true)
+  })
+
+  // A live turn is on screen before the database has numbered it. Paging from
+  // it would hand the server a render identity it cannot resolve.
+  it('never pages from a turn the database has not numbered', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.replaceHistoryView([], 'session-1')
+    transcript.appendToView({
+      id: 'runtime:turn-1:user',
+      role: 'user',
+      text: 'hi',
+      attachments: [],
+      timestamp: '2026-01-01T00:00:00.000Z',
+      streaming: false,
+      isSelf: true,
+      turnId: 'turn-1',
+    })
+
+    expect(await transcript.loadOlderMessages()).toBe(0)
+    expect(fetchMessages).not.toHaveBeenCalled()
+
+    transcript.replaceHistoryView([{
+      id: '018f47f2-8bc1-7a3d-91b2-b73a7b925b1e',
+      turn_id: 'turn-1',
+      turn_position: 7,
+      role: 'user',
+      text: 'hi',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    }], 'session-1')
+    fetchMessages.mockResolvedValueOnce([])
+
+    expect(await transcript.loadOlderMessages()).toBe(0)
+    expect(fetchMessages).toHaveBeenCalledWith('bot-1', 'session-1', {
+      limit: 30,
+      beforeMessageId: '018f47f2-8bc1-7a3d-91b2-b73a7b925b1e',
+    })
   })
 
   it('does not guess optimistic identity from matching text and timestamps', () => {
@@ -533,7 +636,7 @@ describe('chat transcript controller', () => {
 
   it('drops an older-page response that resolves after the active session changes', async () => {
     const { transcript, sessionId, fetchMessages } = makeTranscript()
-    transcript.replaceHistoryView([rawUser('session-1-user')], 'session-1')
+    transcript.replaceHistoryView([rawUser(persistedUserId)], 'session-1')
     const pending = deferred<UITurn[]>()
     fetchMessages.mockReturnValueOnce(pending.promise)
 

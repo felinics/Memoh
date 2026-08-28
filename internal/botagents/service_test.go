@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 const (
@@ -21,6 +22,7 @@ const (
 )
 
 type fakeQueries struct {
+	dbstore.Queries
 	createParams sqlc.CreateBotAgentParams
 	createRow    sqlc.BotAgent
 	createErr    error
@@ -31,6 +33,21 @@ type fakeQueries struct {
 	updateErr    error
 	deleteErr    error
 	isDefault    bool
+	transactions bool
+	lockErr      error
+	events       []string
+}
+
+func (f *fakeQueries) SupportsTransactions() bool { return f.transactions }
+
+func (f *fakeQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
+	f.events = append(f.events, "transaction")
+	return fn(f)
+}
+
+func (f *fakeQueries) LockBotForAgentMutation(context.Context, pgtype.UUID) (pgtype.UUID, error) {
+	f.events = append(f.events, "lock-bot")
+	return testUUID(testBotID), f.lockErr
 }
 
 func (f *fakeQueries) BotAgentIsDefault(context.Context, sqlc.BotAgentIsDefaultParams) (bool, error) {
@@ -55,10 +72,12 @@ func (*fakeQueries) ListBotAgents(context.Context, pgtype.UUID) ([]sqlc.BotAgent
 }
 
 func (f *fakeQueries) SoftDeleteBotAgent(context.Context, sqlc.SoftDeleteBotAgentParams) (sqlc.BotAgent, error) {
+	f.events = append(f.events, "delete-agent")
 	return sqlc.BotAgent{}, f.deleteErr
 }
 
 func (f *fakeQueries) UpdateBotAgent(_ context.Context, params sqlc.UpdateBotAgentParams) (sqlc.BotAgent, error) {
+	f.events = append(f.events, "update-agent")
 	f.updateParams = params
 	return f.updateRow, f.updateErr
 }
@@ -140,6 +159,39 @@ func TestUpdateAndDeleteProtectDefaultAgent(t *testing.T) {
 	}
 	if err := service.Delete(context.Background(), testBotID, testAgentID); !errors.Is(err, ErrDefaultInUse) {
 		t.Fatalf("Delete() error = %v, want %v", err, ErrDefaultInUse)
+	}
+}
+
+func TestUpdateAndDeleteLockBotBeforeAgentMutation(t *testing.T) {
+	falseValue := false
+	updateFake := &fakeQueries{
+		getRow:       testRow(true),
+		updateRow:    testRow(false),
+		transactions: true,
+	}
+	if _, err := NewService(slog.Default(), updateFake).Update(
+		context.Background(), testBotID, testAgentID, UpdateRequest{Enabled: &falseValue},
+	); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	assertEvents(t, updateFake.events, []string{"transaction", "lock-bot", "update-agent"})
+
+	deleteFake := &fakeQueries{transactions: true}
+	if err := NewService(slog.Default(), deleteFake).Delete(context.Background(), testBotID, testAgentID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	assertEvents(t, deleteFake.events, []string{"transaction", "lock-bot", "delete-agent"})
+}
+
+func assertEvents(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("events = %v, want %v", got, want)
+		}
 	}
 }
 
