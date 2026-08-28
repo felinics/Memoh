@@ -26,6 +26,7 @@ email = "dev@memoh.local"
 [auth]
 jwt_secret = "memoh-dev-secret-do-not-use-in-production"
 jwt_expires_in = "168h"
+agent_credentials_encryption_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 timezone = "UTC"
 

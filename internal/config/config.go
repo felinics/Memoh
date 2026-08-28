@@ -216,8 +216,9 @@ type AdminConfig struct {
 }
 
 type AuthConfig struct {
-	JWTSecret    string `toml:"jwt_secret"    json:"-"`
-	JWTExpiresIn string `toml:"jwt_expires_in"`
+	JWTSecret                     string `toml:"jwt_secret"                       json:"-"`
+	JWTExpiresIn                  string `toml:"jwt_expires_in"`
+	AgentCredentialsEncryptionKey string `toml:"agent_credentials_encryption_key" json:"-"`
 }
 
 type AgentConfig struct {
@@ -882,6 +883,9 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_INTERNAL_RPC_SHARED_SECRET")); value != "" {
 		cfg.InternalRPC.SharedSecret = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_AGENT_CREDENTIALS_ENCRYPTION_KEY")); value != "" {
+		cfg.Auth.AgentCredentialsEncryptionKey = value
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_INTERNAL_RPC_SERVER_TARGET")); value != "" {
 		cfg.InternalRPC.ServerTarget = value

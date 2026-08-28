@@ -63,6 +63,8 @@ email = "admin@memoh.local"
 [auth]
 jwt_secret = "CHANGE-ME-TO-A-RANDOM-SECRET"
 jwt_expires_in = "168h"
+# Base64-encoded 32-byte key used to encrypt Agent credentials at rest.
+agent_credentials_encryption_key = ""
 
 [agent]
 tool_output_max_bytes = 65536

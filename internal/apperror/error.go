@@ -87,6 +87,15 @@ const (
 	CodeContextLifecycleAccessDenied           Code = "context_lifecycle.access_denied"
 	CodeContextLifecycleNotFound               Code = "context_lifecycle.not_found"
 	CodeContextLifecycleLoadFailed             Code = "context_lifecycle.load_failed"
+	CodeAgentCredentialNotFound                Code = "agent_credential.not_found"                //nolint:gosec // Stable public error code.
+	CodeAgentCredentialRequestInvalid          Code = "agent_credential.request_invalid"          //nolint:gosec // Stable public error code.
+	CodeAgentCredentialForbidden               Code = "agent_credential.forbidden"                //nolint:gosec // Stable public error code.
+	CodeAgentCredentialIncompatible            Code = "agent_credential.incompatible"             //nolint:gosec // Stable public error code.
+	CodeAgentCredentialRevoked                 Code = "agent_credential.revoked"                  //nolint:gosec // Stable public error code.
+	CodeAgentCredentialReauthRequired          Code = "agent_credential.reauthorization_required" //nolint:gosec // Stable public error code.
+	CodeAgentCredentialEncryptionUnavailable   Code = "agent_credential.encryption_unavailable"   //nolint:gosec // Stable public error code.
+	CodeAgentCredentialRuntimeBusy             Code = "agent_credential.runtime_busy"             //nolint:gosec // Stable public error code.
+	CodeAgentCredentialMaterializationFailed   Code = "agent_credential.materialization_failed"   //nolint:gosec // Stable public error code.
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -101,6 +110,42 @@ type Definition struct {
 // clients; the localized copies live under errors.* in
 // apps/web/src/i18n/locales/{en,zh,ja}.json. Keep both sides in sync.
 var catalog = map[Code]Definition{
+	CodeAgentCredentialNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The Agent credential was not found.",
+	},
+	CodeAgentCredentialRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The Agent credential request is invalid.",
+	},
+	CodeAgentCredentialForbidden: {
+		HTTPStatus: http.StatusForbidden,
+		Detail:     "You cannot use this Agent credential.",
+	},
+	CodeAgentCredentialIncompatible: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "This credential is not compatible with the selected Agent.",
+	},
+	CodeAgentCredentialRevoked: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This Agent credential has been revoked.",
+	},
+	CodeAgentCredentialReauthRequired: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This Agent credential needs to be connected again.",
+	},
+	CodeAgentCredentialEncryptionUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "Agent credential storage is not configured on this server.",
+	},
+	CodeAgentCredentialRuntimeBusy: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The Agent credential cannot be changed while the Agent is running.",
+	},
+	CodeAgentCredentialMaterializationFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The Agent credential could not be prepared for this runtime.",
+	},
 	CodeBotNameTaken: {
 		HTTPStatus:  http.StatusConflict,
 		Detail:      "This name is already taken.",

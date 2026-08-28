@@ -35,6 +35,55 @@
           @field-commit="commitForm"
         />
 
+        <template v-if="agent.setup_mode !== 'self'">
+          <FormStack>
+            <FieldStack :label="$t('bots.settings.agentCredential')">
+              <Select
+                :model-value="defaultCredentialId"
+                @update:model-value="(value) => setDefaultCredential(String(value))"
+              >
+                <SelectTrigger class="w-full">
+                  <SelectValue :placeholder="$t('bots.settings.agentCredentialPlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="credential in credentials"
+                    :key="credential.id"
+                    :value="credential.id || ''"
+                  >
+                    {{ credential.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FieldStack>
+
+            <template v-if="agent.setup_mode === 'api_key'">
+              <FieldStack :label="$t('bots.settings.agentCredentialLabel')">
+                <Input
+                  v-model="credentialLabel"
+                  :placeholder="$t('bots.settings.agentCredentialLabelPlaceholder')"
+                />
+              </FieldStack>
+              <FieldStack :label="$t('bots.settings.agentCredentialSecret')">
+                <Input
+                  v-model="credentialSecret"
+                  type="password"
+                  autocomplete="new-password"
+                  :placeholder="$t('bots.settings.agentCredentialSecretPlaceholder')"
+                />
+              </FieldStack>
+              <Button
+                type="button"
+                :loading="savingCredential"
+                :disabled="!credentialLabel.trim() || !credentialSecret.trim()"
+                @click="saveAPIKeyCredential"
+              >
+                {{ $t('bots.settings.agentCredentialSave') }}
+              </Button>
+            </template>
+          </FormStack>
+        </template>
+
         <p
           v-else-if="agent.setup_mode === 'self'"
           class="break-words text-sm text-muted-foreground"
@@ -219,14 +268,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQueryCache } from '@pinia/colada'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   AutoHeight,
   Button,
   DeviceCodePanel,
+  FieldStack,
+  FormStack,
   Input,
   LabelSwap,
   SegmentedControl,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   SettingsRow,
   SettingsSection,
   Spinner,
@@ -235,6 +291,11 @@ import {
 import { KeyRound } from 'lucide-vue-next'
 import {
   type AcpprofilePublicProfile,
+  type AgentcredentialPublicCredential,
+  getBotsByBotIdAgentsByAgentIdCredentials,
+  postAgentCredentials,
+  postBotsByBotIdAgentsByAgentIdCredentials,
+  putBotsByBotIdAgentsByAgentIdCredentialsDefault,
 } from '@memohai/sdk'
 import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useAcpSetupModeItems } from '@/composables/useAcpSetupModeItems'
@@ -251,7 +312,9 @@ import {
   type ACPAgentForm,
   type ACPForm,
 } from '@/utils/acp'
+import { hermesProviderValue } from '@/utils/acp/hermes'
 import { filterSettingsVisibleManagedFields } from '@/utils/acp/setup-fields'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import AcpManagedFields from './acp-managed-fields.vue'
 
 const props = defineProps<{
@@ -273,6 +336,9 @@ const { t } = useI18n()
 const queryCache = useQueryCache()
 const claudeOAuthCode = ref('')
 const { setupModeItems } = useAcpSetupModeItems(() => props.profile)
+const credentialLabel = ref('')
+const credentialSecret = ref('')
+const savingCredential = ref(false)
 const {
   codexStatus: codexOAuthStatus,
   codexStatusLoading: codexOAuthStatusLoading,
@@ -298,6 +364,73 @@ const isGenericACP = computed(() => isACPAgent(props.profile.id))
 const isCodex = computed(() => isCodexAgent(props.profile.id))
 const isClaude = computed(() => isClaudeCodeAgent(props.profile.id))
 const isHermes = computed(() => normalizeACPAgentID(props.profile.id) === 'hermes')
+const credentialQueryKey = computed(() => ['agent-credentials', props.botId, normalizeACPAgentID(props.profile.id)] as const)
+const { data: credentialList } = useQuery({
+  key: () => credentialQueryKey.value,
+  query: async () => {
+    const { data } = await getBotsByBotIdAgentsByAgentIdCredentials({
+      path: { bot_id: props.botId, agent_id: normalizeACPAgentID(props.profile.id) },
+      throwOnError: true,
+    })
+    return data
+  },
+})
+const credentials = computed<AgentcredentialPublicCredential[]>(() => credentialList.value?.items ?? [])
+const defaultCredentialId = computed(() => credentials.value.find(item => item.is_default)?.id ?? '')
+
+function credentialKind(): { provider: string; authKind: string } {
+  if (isCodex.value) return { provider: 'openai', authKind: 'openai_api_key' }
+  if (isClaude.value) return { provider: 'anthropic', authKind: 'anthropic_api_key' }
+  switch (hermesProviderValue(agent.value.managed.provider)) {
+    case 'gemini': return { provider: 'google', authKind: 'google_api_key' }
+    case 'openrouter': return { provider: 'openrouter', authKind: 'openrouter_api_key' }
+    default: return { provider: 'openai', authKind: 'openai_api_key' }
+  }
+}
+
+async function setDefaultCredential(credentialId: string) {
+  if (!credentialId || credentialId === defaultCredentialId.value) return
+  try {
+    await putBotsByBotIdAgentsByAgentIdCredentialsDefault({
+      path: { bot_id: props.botId, agent_id: normalizeACPAgentID(props.profile.id) },
+      body: { credential_id: credentialId },
+      throwOnError: true,
+    })
+    await queryCache.invalidateQueries({ key: credentialQueryKey.value })
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  }
+}
+
+async function saveAPIKeyCredential() {
+  const label = credentialLabel.value.trim()
+  const apiKey = credentialSecret.value.trim()
+  if (!label || !apiKey) return
+  savingCredential.value = true
+  try {
+    const kind = credentialKind()
+    const { data: created } = await postAgentCredentials({
+      body: { provider: kind.provider, auth_kind: kind.authKind, label, secret: { api_key: apiKey } },
+      throwOnError: true,
+    })
+    if (!created?.id) throw new Error('credential id missing')
+    await postBotsByBotIdAgentsByAgentIdCredentials({
+      path: { bot_id: props.botId, agent_id: normalizeACPAgentID(props.profile.id) },
+      body: { credential_id: created.id, make_default: true },
+      throwOnError: true,
+    })
+    agent.value.managed.api_key = '***'
+    credentialSecret.value = ''
+    credentialLabel.value = ''
+    commitForm()
+    await queryCache.invalidateQueries({ key: credentialQueryKey.value })
+    toast.success(t('bots.settings.agentCredentialSaved'))
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  } finally {
+    savingCredential.value = false
+  }
+}
 const isHermesSelfConfirmVisible = computed(() =>
   isHermes.value && props.pendingSelfConfirm === true && agent.value.enabled && agent.value.setup_mode === 'self',
 )

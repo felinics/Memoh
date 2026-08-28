@@ -143,6 +143,7 @@ export type AclUpdateRuleRequest = {
 
 export type AcpagentRuntimeStatus = {
     acp_session_id?: string;
+    agent_credential_id?: string;
     agent_id?: string;
     available_commands?: Array<AcpclientAvailableCommandInfo>;
     default_model_id?: string;
@@ -217,6 +218,7 @@ export type AcpprofilePublicProfile = {
     id?: string;
     managed_fields?: Array<AcpprofileManagedField>;
     setup_modes?: Array<string>;
+    supported_auth_kinds?: Array<string>;
     supported_backends?: Array<string>;
 };
 
@@ -381,6 +383,53 @@ export type AdaptersUsageResponse = {
     count?: number;
     estimated_storage_bytes?: number;
     total_text_bytes?: number;
+};
+
+export type AgentcredentialBindRequest = {
+    credential_id?: string;
+    make_default?: boolean;
+};
+
+export type AgentcredentialCreateRequest = {
+    account_metadata?: {
+        [key: string]: unknown;
+    };
+    auth_kind?: string;
+    expires_at?: string;
+    label?: string;
+    provider?: string;
+    secret?: {
+        [key: string]: string;
+    };
+};
+
+export type AgentcredentialCredentialList = {
+    items?: Array<AgentcredentialPublicCredential>;
+};
+
+export type AgentcredentialPublicCredential = {
+    account_metadata?: {
+        [key: string]: unknown;
+    };
+    auth_kind?: string;
+    created_at?: string;
+    credential_version?: number;
+    expires_at?: string;
+    id?: string;
+    is_default?: boolean;
+    label?: string;
+    owner_user_id?: string;
+    provider?: string;
+    revoked?: boolean;
+    updated_at?: string;
+};
+
+export type AgentcredentialSetDefaultRequest = {
+    credential_id?: string;
+};
+
+export type AgentcredentialUpdateRequest = {
+    label?: string;
 };
 
 export type ApperrorProblem = {
@@ -2375,6 +2424,7 @@ export type HandlersUpdateContainerResourceLimitsRequest = {
 
 export type HandlersAcpRuntimeCreateRequest = {
     acp_agent_id?: string;
+    agent_credential_id?: string;
     project_path?: string;
 };
 
@@ -3037,6 +3087,10 @@ export type ScheduleCreateRequest = {
      */
     acp_model_id?: string;
     /**
+     * AgentCredentialID pins the credential used by a new Agent session.
+     */
+    agent_credential_id?: string;
+    /**
      * BotAgentID selects one persisted BotAgent for a new session. Empty means
      * the built-in Native runtime (or the legacy ACP fields below).
      */
@@ -3086,6 +3140,10 @@ export type ScheduleExecutionConfig = {
      * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
      */
     acp_model_id?: string;
+    /**
+     * AgentCredentialID pins the credential used by a new Agent session.
+     */
+    agent_credential_id?: string;
     /**
      * BotAgentID selects one persisted BotAgent for a new session. Empty means
      * the built-in Native runtime (or the legacy ACP fields below).
@@ -3157,6 +3215,10 @@ export type ScheduleSchedule = {
      * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
      */
     acp_model_id?: string;
+    /**
+     * AgentCredentialID pins the credential used by a new Agent session.
+     */
+    agent_credential_id?: string;
     /**
      * BotAgentID selects one persisted BotAgent for a new session. Empty means
      * the built-in Native runtime (or the legacy ACP fields below).
@@ -3647,6 +3709,130 @@ export type GetAcpProfilesResponses = {
 };
 
 export type GetAcpProfilesResponse = GetAcpProfilesResponses[keyof GetAcpProfilesResponses];
+
+export type GetAgentCredentialsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/agent-credentials';
+};
+
+export type GetAgentCredentialsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+};
+
+export type GetAgentCredentialsError = GetAgentCredentialsErrors[keyof GetAgentCredentialsErrors];
+
+export type GetAgentCredentialsResponses = {
+    /**
+     * OK
+     */
+    200: AgentcredentialCredentialList;
+};
+
+export type GetAgentCredentialsResponse = GetAgentCredentialsResponses[keyof GetAgentCredentialsResponses];
+
+export type PostAgentCredentialsData = {
+    /**
+     * Credential
+     */
+    body: AgentcredentialCreateRequest;
+    path?: never;
+    query?: never;
+    url: '/agent-credentials';
+};
+
+export type PostAgentCredentialsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostAgentCredentialsError = PostAgentCredentialsErrors[keyof PostAgentCredentialsErrors];
+
+export type PostAgentCredentialsResponses = {
+    /**
+     * Created
+     */
+    201: AgentcredentialPublicCredential;
+};
+
+export type PostAgentCredentialsResponse = PostAgentCredentialsResponses[keyof PostAgentCredentialsResponses];
+
+export type DeleteAgentCredentialsByCredentialIdData = {
+    body?: never;
+    path: {
+        /**
+         * Credential ID
+         */
+        credential_id: string;
+    };
+    query?: never;
+    url: '/agent-credentials/{credential_id}';
+};
+
+export type DeleteAgentCredentialsByCredentialIdErrors = {
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type DeleteAgentCredentialsByCredentialIdError = DeleteAgentCredentialsByCredentialIdErrors[keyof DeleteAgentCredentialsByCredentialIdErrors];
+
+export type DeleteAgentCredentialsByCredentialIdResponses = {
+    /**
+     * OK
+     */
+    200: AgentcredentialPublicCredential;
+};
+
+export type DeleteAgentCredentialsByCredentialIdResponse = DeleteAgentCredentialsByCredentialIdResponses[keyof DeleteAgentCredentialsByCredentialIdResponses];
+
+export type PatchAgentCredentialsByCredentialIdData = {
+    /**
+     * Update
+     */
+    body: AgentcredentialUpdateRequest;
+    path: {
+        /**
+         * Credential ID
+         */
+        credential_id: string;
+    };
+    query?: never;
+    url: '/agent-credentials/{credential_id}';
+};
+
+export type PatchAgentCredentialsByCredentialIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type PatchAgentCredentialsByCredentialIdError = PatchAgentCredentialsByCredentialIdErrors[keyof PatchAgentCredentialsByCredentialIdErrors];
+
+export type PatchAgentCredentialsByCredentialIdResponses = {
+    /**
+     * OK
+     */
+    200: AgentcredentialPublicCredential;
+};
+
+export type PatchAgentCredentialsByCredentialIdResponse = PatchAgentCredentialsByCredentialIdResponses[keyof PatchAgentCredentialsByCredentialIdResponses];
 
 export type PostAuthLoginData = {
     /**
@@ -4998,6 +5184,152 @@ export type PostBotsByBotIdAgentsResponses = {
 };
 
 export type PostBotsByBotIdAgentsResponse = PostBotsByBotIdAgentsResponses[keyof PostBotsByBotIdAgentsResponses];
+
+export type GetBotsByBotIdAgentsByAgentIdCredentialsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{agent_id}/credentials';
+};
+
+export type GetBotsByBotIdAgentsByAgentIdCredentialsErrors = {
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAgentsByAgentIdCredentialsError = GetBotsByBotIdAgentsByAgentIdCredentialsErrors[keyof GetBotsByBotIdAgentsByAgentIdCredentialsErrors];
+
+export type GetBotsByBotIdAgentsByAgentIdCredentialsResponses = {
+    /**
+     * OK
+     */
+    200: AgentcredentialCredentialList;
+};
+
+export type GetBotsByBotIdAgentsByAgentIdCredentialsResponse = GetBotsByBotIdAgentsByAgentIdCredentialsResponses[keyof GetBotsByBotIdAgentsByAgentIdCredentialsResponses];
+
+export type PostBotsByBotIdAgentsByAgentIdCredentialsData = {
+    /**
+     * Binding
+     */
+    body: AgentcredentialBindRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{agent_id}/credentials';
+};
+
+export type PostBotsByBotIdAgentsByAgentIdCredentialsErrors = {
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAgentsByAgentIdCredentialsError = PostBotsByBotIdAgentsByAgentIdCredentialsErrors[keyof PostBotsByBotIdAgentsByAgentIdCredentialsErrors];
+
+export type PostBotsByBotIdAgentsByAgentIdCredentialsResponses = {
+    /**
+     * Created
+     */
+    201: AgentcredentialPublicCredential;
+};
+
+export type PostBotsByBotIdAgentsByAgentIdCredentialsResponse = PostBotsByBotIdAgentsByAgentIdCredentialsResponses[keyof PostBotsByBotIdAgentsByAgentIdCredentialsResponses];
+
+export type PutBotsByBotIdAgentsByAgentIdCredentialsDefaultData = {
+    /**
+     * Default credential
+     */
+    body: AgentcredentialSetDefaultRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{agent_id}/credentials/default';
+};
+
+export type PutBotsByBotIdAgentsByAgentIdCredentialsDefaultErrors = {
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type PutBotsByBotIdAgentsByAgentIdCredentialsDefaultError = PutBotsByBotIdAgentsByAgentIdCredentialsDefaultErrors[keyof PutBotsByBotIdAgentsByAgentIdCredentialsDefaultErrors];
+
+export type PutBotsByBotIdAgentsByAgentIdCredentialsDefaultResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type DeleteBotsByBotIdAgentsByAgentIdCredentialsByCredentialIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        agent_id: string;
+        /**
+         * Credential ID
+         */
+        credential_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{agent_id}/credentials/{credential_id}';
+};
+
+export type DeleteBotsByBotIdAgentsByAgentIdCredentialsByCredentialIdErrors = {
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type DeleteBotsByBotIdAgentsByAgentIdCredentialsByCredentialIdError = DeleteBotsByBotIdAgentsByAgentIdCredentialsByCredentialIdErrors[keyof DeleteBotsByBotIdAgentsByAgentIdCredentialsByCredentialIdErrors];
+
+export type DeleteBotsByBotIdAgentsByAgentIdCredentialsByCredentialIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type DeleteBotsByBotIdAgentsByIdData = {
     body?: never;

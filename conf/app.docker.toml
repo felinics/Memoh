@@ -38,6 +38,7 @@ email = "admin@memoh.local"
 [auth]
 jwt_secret = "YZq8kXrW5dFpNt9mLxQvHbRjKsMnOePw"
 jwt_expires_in = "168h"
+agent_credentials_encryption_key = ""
 
 timezone = "UTC"
 

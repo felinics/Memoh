@@ -112,6 +112,46 @@ func WriteCodexManagedConfigWithAuth(ctx context.Context, client *bridge.Client,
 	return nil
 }
 
+// ReadCodexOAuthCredentials parses the durable Codex auth.json so a rotated
+// OAuth token can be persisted back into the encrypted credential store.
+func ReadCodexOAuthCredentials(ctx context.Context, client *bridge.Client, configDir string) (CodexOAuthCredentials, error) {
+	if client == nil {
+		return CodexOAuthCredentials{}, errors.New("workspace bridge client is required")
+	}
+	configDir = strings.TrimSpace(configDir)
+	if configDir == "" {
+		return CodexOAuthCredentials{}, ErrCodexOAuthIncomplete
+	}
+	resp, err := client.ReadFile(ctx, path.Join(configDir, "auth.json"), 0, 0)
+	if err != nil {
+		return CodexOAuthCredentials{}, ErrCodexOAuthIncomplete
+	}
+	var auth struct {
+		AuthMode string `json:"auth_mode"`
+		Tokens   struct {
+			IDToken      string `json:"id_token"`
+			AccessToken  string `json:"access_token"`  //nolint:gosec // Parses runtime-owned auth material for encrypted writeback.
+			RefreshToken string `json:"refresh_token"` //nolint:gosec // Parses runtime-owned auth material for encrypted writeback.
+			AccountID    string `json:"account_id"`
+		} `json:"tokens"`
+		LastRefresh string `json:"last_refresh"`
+	}
+	if err := json.Unmarshal([]byte(resp.GetContent()), &auth); err != nil || !strings.EqualFold(strings.TrimSpace(auth.AuthMode), "chatgpt") {
+		return CodexOAuthCredentials{}, ErrCodexOAuthIncomplete
+	}
+	out := CodexOAuthCredentials{
+		AccessToken: strings.TrimSpace(auth.Tokens.AccessToken), IDToken: strings.TrimSpace(auth.Tokens.IDToken),
+		RefreshToken: strings.TrimSpace(auth.Tokens.RefreshToken), AccountID: strings.TrimSpace(auth.Tokens.AccountID),
+	}
+	if out.AccessToken == "" || out.IDToken == "" || out.RefreshToken == "" || out.AccountID == "" {
+		return CodexOAuthCredentials{}, ErrCodexAuthTokenMissing
+	}
+	if parsed, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(auth.LastRefresh)); parseErr == nil {
+		out.LastRefresh = parsed
+	}
+	return out, nil
+}
+
 // WriteCodexManagedConfigWithAuthForBot serializes the OAuth handler with
 // RuntimeLease auth.json freshness checks for the same bot. This closes the
 // check-then-write window where a process-local stale token could otherwise

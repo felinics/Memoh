@@ -49,10 +49,11 @@ type Profile struct {
 	ForceHTTPMCPServer bool
 	// RuntimeStorage is the internal allowlist and environment contract that
 	// separates durable configuration/credentials from process-local state.
-	RuntimeStorage    RuntimeStoragePolicy
-	ManagedFields     []ManagedField
-	SupportedBackends []string
-	SetupModes        []string
+	RuntimeStorage     RuntimeStoragePolicy
+	ManagedFields      []ManagedField
+	SupportedBackends  []string
+	SetupModes         []string
+	SupportedAuthKinds []string
 }
 
 // LaunchPolicy declares how an ACP profile resolves its process command. A
@@ -76,12 +77,13 @@ type ManagedField struct {
 } // @name acpprofile.ManagedField
 
 type PublicProfile struct {
-	ID                string         `json:"id"`
-	DisplayName       string         `json:"display_name"`
-	Description       string         `json:"description,omitempty"`
-	ManagedFields     []ManagedField `json:"managed_fields,omitempty"`
-	SupportedBackends []string       `json:"supported_backends,omitempty"`
-	SetupModes        []string       `json:"setup_modes,omitempty"`
+	ID                 string         `json:"id"`
+	DisplayName        string         `json:"display_name"`
+	Description        string         `json:"description,omitempty"`
+	ManagedFields      []ManagedField `json:"managed_fields,omitempty"`
+	SupportedBackends  []string       `json:"supported_backends,omitempty"`
+	SetupModes         []string       `json:"setup_modes,omitempty"`
+	SupportedAuthKinds []string       `json:"supported_auth_kinds,omitempty"`
 } // @name acpprofile.PublicProfile
 
 type ProfilesResponse struct {
@@ -268,7 +270,8 @@ func codexProfile() Profile {
 		SupportedBackends: []string{"container"},
 		// OAuth first: signing in with a ChatGPT account is the path we want
 		// users to reach for; the API key stays available behind it.
-		SetupModes: []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},
+		SetupModes:         []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},
+		SupportedAuthKinds: []string{"openai_api_key", "openai_codex_oauth"},
 	}
 }
 
@@ -318,7 +321,8 @@ func claudeCodeProfile() Profile {
 		SupportedBackends: []string{"container"},
 		// OAuth first, same reasoning as Codex: the Claude account sign-in is
 		// the primary path, the API key is the fallback.
-		SetupModes: []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},
+		SetupModes:         []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},
+		SupportedAuthKinds: []string{"anthropic_api_key", "claude_code_oauth"},
 	}
 }
 
@@ -375,7 +379,8 @@ func hermesProfile() Profile {
 		SupportedBackends: []string{"container"},
 		// The first mode is the client's default selection, so the managed
 		// API-key path leads and self-managed stays the escape hatch.
-		SetupModes: []string{setupModeAPIKey, setupModeSelf},
+		SetupModes:         []string{setupModeAPIKey, setupModeSelf},
+		SupportedAuthKinds: []string{"openai_api_key", "google_api_key", "openrouter_api_key"},
 	}
 }
 
@@ -404,12 +409,13 @@ func ShouldForceHTTPMCPServer(agentID string) bool {
 
 func (p Profile) Public() PublicProfile {
 	return PublicProfile{
-		ID:                p.ID,
-		DisplayName:       p.DisplayName,
-		Description:       p.Description,
-		ManagedFields:     append([]ManagedField(nil), p.ManagedFields...),
-		SupportedBackends: append([]string(nil), p.SupportedBackends...),
-		SetupModes:        append([]string(nil), p.SetupModes...),
+		ID:                 p.ID,
+		DisplayName:        p.DisplayName,
+		Description:        p.Description,
+		ManagedFields:      append([]ManagedField(nil), p.ManagedFields...),
+		SupportedBackends:  append([]string(nil), p.SupportedBackends...),
+		SetupModes:         append([]string(nil), p.SetupModes...),
+		SupportedAuthKinds: append([]string(nil), p.SupportedAuthKinds...),
 	}
 }
 

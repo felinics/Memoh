@@ -22,6 +22,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	"github.com/memohai/memoh/internal/agentcredential"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 )
@@ -60,9 +61,14 @@ type ACPClaudeCodeOAuthHandler struct {
 	runtimeResets  oauthRuntimeResetService
 	tokenURL       string
 	httpClient     *http.Client
+	credentials    *agentcredential.Service
 
 	mu     sync.Mutex
 	states map[string]acpClaudeCodeOAuthState
+}
+
+func (h *ACPClaudeCodeOAuthHandler) SetCredentialService(service *agentcredential.Service) {
+	h.credentials = service
 }
 
 type oauthRuntimeResetService interface {
@@ -161,7 +167,7 @@ func (h *ACPClaudeCodeOAuthHandler) Authorize(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Router /bots/{bot_id}/acp/claude-code/oauth/exchange [post].
 func (h *ACPClaudeCodeOAuthHandler) Exchange(c echo.Context) error {
-	bot, _, err := h.requireBotAccess(c)
+	bot, channelIdentityID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
 	}
@@ -203,7 +209,7 @@ func (h *ACPClaudeCodeOAuthHandler) Exchange(c echo.Context) error {
 	if token == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "oauth token response did not include an access token")
 	}
-	if err := h.saveOAuthToken(c.Request().Context(), bot, token); err != nil {
+	if err := h.saveOAuthToken(c.Request().Context(), bot, channelIdentityID, token); err != nil {
 		if apperror.CodeOf(err) != "" {
 			return err
 		}
@@ -226,9 +232,23 @@ func (h *ACPClaudeCodeOAuthHandler) Status(c echo.Context) error {
 		return err
 	}
 	status := ACPClaudeCodeOAuthStatus{
-		Configured: h.acpWorkspace != nil,
-		HasToken:   claudeCodeOAuthTokenConfigured(bot.Metadata),
+		Configured: (h.credentials != nil && h.credentials.Configured()) || h.acpWorkspace != nil,
+		HasToken:   false,
 	}
+	if h.credentials != nil {
+		items, listErr := h.credentials.ListBindings(c.Request().Context(), bot.ID, acpprofile.AgentClaudeCodeID)
+		if listErr != nil {
+			return mapAgentCredentialError(listErr)
+		}
+		for _, item := range items {
+			if item.IsDefault && !item.Revoked && item.AuthKind == agentcredential.AuthKindClaudeCodeOAuth {
+				status.HasToken = true
+				break
+			}
+		}
+		return c.JSON(http.StatusOK, status)
+	}
+	status.HasToken = claudeCodeOAuthTokenConfigured(bot.Metadata)
 	if !status.Configured {
 		return c.JSON(http.StatusOK, status)
 	}
@@ -268,7 +288,18 @@ func (h *ACPClaudeCodeOAuthHandler) ensureManagedWorkspace(ctx context.Context, 
 	return nil
 }
 
-func (h *ACPClaudeCodeOAuthHandler) saveOAuthToken(ctx context.Context, bot bots.Bot, token string) error {
+func (h *ACPClaudeCodeOAuthHandler) saveOAuthToken(ctx context.Context, bot bots.Bot, ownerUserID, token string) error {
+	if h.credentials != nil {
+		item, err := h.credentials.Create(ctx, ownerUserID, agentcredential.CreateRequest{
+			Provider: agentcredential.ProviderAnthropic, AuthKind: agentcredential.AuthKindClaudeCodeOAuth,
+			Label: "Claude Code", Secret: map[string]string{"oauth_token": strings.TrimSpace(token)},
+		})
+		if err != nil {
+			return err
+		}
+		_, err = h.credentials.Bind(ctx, ownerUserID, bot.ID, acpprofile.AgentClaudeCodeID, item.ID, true)
+		return err
+	}
 	if h.botService == nil {
 		return errors.New("bot service is not configured")
 	}

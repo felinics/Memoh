@@ -28,6 +28,7 @@ import (
 	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	"github.com/memohai/memoh/internal/agentcredential"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/runtimefence"
@@ -100,6 +101,7 @@ type SessionPool struct {
 	contexts       *mcp.ToolSessionContextStore
 	approval       client.ToolApprovalService
 	userInput      sessionUserInputService
+	credentials    *agentcredential.Service
 	timeout        time.Duration
 
 	mu        sync.RWMutex
@@ -169,6 +171,8 @@ type runtimeHandle struct {
 	projectPath           string
 	cwd                   string
 	runtimeOwnerAccountID string
+	credentialID          string
+	credentialVersion     int64
 	disableSessionState   bool
 	sessionStateSupported bool
 	sessionStateLocator   acpprofile.RuntimeSessionLocator
@@ -224,6 +228,7 @@ type PromptInput struct {
 	SessionType              string
 	RouteID                  string
 	AgentID                  string
+	CredentialID             string
 	ProjectPath              string
 	ModelID                  string
 	ReasoningEffort          string
@@ -267,6 +272,7 @@ var ErrAgentCommandUnavailable = client.ErrAgentCommandUnavailable
 type CreateRuntimeInput struct {
 	BotID                 string
 	AgentID               string
+	CredentialID          string
 	ProjectPath           string
 	RuntimeOwnerAccountID string
 	ToolHTTPURL           string
@@ -279,6 +285,7 @@ type RuntimeStatus struct {
 	RuntimeID             string                        `json:"runtime_id,omitempty"`
 	SessionID             string                        `json:"session_id,omitempty"`
 	AgentID               string                        `json:"agent_id,omitempty"`
+	CredentialID          string                        `json:"agent_credential_id,omitempty"`
 	ProjectPath           string                        `json:"project_path,omitempty"`
 	RuntimeOwnerAccountID string                        `json:"-"`
 	State                 string                        `json:"state"`
@@ -340,6 +347,14 @@ func (p *SessionPool) SetToolApprovalService(service client.ToolApprovalService)
 func (p *SessionPool) SetUserInputService(service sessionUserInputService) {
 	if p != nil {
 		p.userInput = service
+	}
+}
+
+// SetCredentialService enables database-backed Agent credentials. It stays
+// optional so embedders without the encrypted store keep the bot-metadata path.
+func (p *SessionPool) SetCredentialService(service *agentcredential.Service) {
+	if p != nil {
+		p.credentials = service
 	}
 }
 
@@ -428,6 +443,7 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 		toolToken:             newRuntimeToolToken(),
 		botID:                 botID,
 		agentID:               agentID,
+		credentialID:          strings.TrimSpace(input.CredentialID),
 		projectPath:           projectPath,
 		runtimeOwnerAccountID: runtimeOwnerAccountID,
 		ownerCtx:              context.WithoutCancel(ctx),
@@ -1466,6 +1482,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 				toolToken:             newRuntimeToolToken(),
 				botID:                 input.BotID,
 				agentID:               agentID,
+				credentialID:          strings.TrimSpace(input.CredentialID),
 				projectPath:           projectPath,
 				runtimeOwnerAccountID: runtimeOwnerAccountID,
 				ownerCtx:              context.WithoutCancel(ctx),
@@ -1497,9 +1514,10 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 			return nil, ErrRuntimeNotFound
 		}
 		h.state.Lock()
+		credentialMatches := strings.TrimSpace(input.CredentialID) == "" || h.credentialID == strings.TrimSpace(input.CredentialID)
 		matches := h.agentID == agentID && h.projectPath == projectPath &&
 			h.runtimeOwnerAccountID == runtimeOwnerAccountID &&
-			h.disableSessionState == input.disableSessionState
+			h.disableSessionState == input.disableSessionState && credentialMatches
 		closed := h.closed
 		starting := h.session == nil
 		if matches && !closed {
@@ -1588,6 +1606,26 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if err != nil {
 		return fail(err)
 	}
+	var codexOAuth *client.CodexOAuthCredentials
+	var resolvedCredential agentcredential.ResolvedCredential
+	if mode != client.SetupModeSelf && p.credentials != nil && p.credentials.Configured() {
+		if strings.TrimSpace(h.credentialID) == "" {
+			resolvedCredential, err = p.credentials.ResolveDefault(startCtx, h.botID, h.agentID)
+		} else {
+			resolvedCredential, err = p.credentials.Resolve(startCtx, h.botID, h.agentID, h.credentialID)
+		}
+		if err != nil {
+			return fail(err)
+		}
+		setup, mode, codexOAuth, err = applyAgentCredential(profile, setup, resolvedCredential)
+		if err != nil {
+			return fail(err)
+		}
+		h.state.Lock()
+		h.credentialID = resolvedCredential.ID
+		h.credentialVersion = resolvedCredential.CredentialVersion
+		h.state.Unlock()
+	}
 	command, arguments, err := acpprofile.ResolveLaunch(profile, setup)
 	if err != nil {
 		return fail(fmt.Errorf("resolve ACP launch command: %w", err))
@@ -1602,7 +1640,10 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if err != nil {
 		return fail(fmt.Errorf("resolve ACP session context: %w", err))
 	}
-	if err := p.reconcileManagedACPConfig(startCtx, h.botID, profile, setup, mode, resolved, runtimeSyncGuard); err != nil {
+	if codexOAuth != nil {
+		codexOAuth = p.reconcileCodexOAuthRotation(startCtx, h, resolvedCredential, codexOAuth)
+	}
+	if err := p.reconcileManagedACPConfig(startCtx, h.botID, profile, setup, mode, resolved, runtimeSyncGuard, codexOAuth); err != nil {
 		return fail(fmt.Errorf("prepare %s managed config: %w", profile.DisplayName, err))
 	}
 	// Managed env (Claude Code BYOK tokens) is injected for every session.
@@ -1853,6 +1894,7 @@ func (*SessionPool) statusOf(h *runtimeHandle) RuntimeStatus {
 		RuntimeID:             h.id,
 		SessionID:             h.boundSession,
 		AgentID:               h.agentID,
+		CredentialID:          h.credentialID,
 		ProjectPath:           h.projectPath,
 		RuntimeOwnerAccountID: h.runtimeOwnerAccountID,
 		State:                 h.status,
@@ -2507,7 +2549,7 @@ func (p *SessionPool) resolveSessionMetadata(ctx context.Context, input PromptIn
 	}
 	runtimeMeta := sess.RuntimeMetadata
 	if len(runtimeMeta) > 0 {
-		for _, key := range []string{"acp_agent_id", "project_path", "acp_project_mode", "runtime_owner_account_id"} {
+		for _, key := range []string{"acp_agent_id", "project_path", "acp_project_mode", "runtime_owner_account_id", "agent_credential_id"} {
 			if value, ok := runtimeMeta[key]; ok {
 				sess.Metadata[key] = value
 			}
@@ -2782,7 +2824,7 @@ func (p *SessionPool) toolHTTPHandler(h *runtimeHandle) http.Handler {
 	})
 }
 
-func (p *SessionPool) reconcileManagedACPConfig(ctx context.Context, botID string, profile acpprofile.Profile, setup acpprofile.AgentSetup, mode client.SetupMode, resolved client.ResolvedSessionContext, guard client.RuntimeSyncGuard) error {
+func (p *SessionPool) reconcileManagedACPConfig(ctx context.Context, botID string, profile acpprofile.Profile, setup acpprofile.AgentSetup, mode client.SetupMode, resolved client.ResolvedSessionContext, guard client.RuntimeSyncGuard, codexOAuth *client.CodexOAuthCredentials) error {
 	if mode == client.SetupModeSelf {
 		return nil
 	}
@@ -2792,10 +2834,11 @@ func (p *SessionPool) reconcileManagedACPConfig(ctx context.Context, botID strin
 	}
 	write := func(writeCtx context.Context) error {
 		return client.WriteManagedACPConfig(writeCtx, client.ManagedACPConfigRequest{
-			Profile:  profile,
-			Setup:    setup,
-			Mode:     mode,
-			Resolved: resolved,
+			Profile:    profile,
+			Setup:      setup,
+			Mode:       mode,
+			Resolved:   resolved,
+			CodexOAuth: codexOAuth,
 		}, func() (*bridge.Client, error) {
 			return runner.MCPClient(writeCtx, botID)
 		})
@@ -2819,6 +2862,87 @@ func (p *SessionPool) runtimeSyncGuard(botID string, expectedBotEpoch int64) cli
 			return errors.Join(client.ErrRuntimeSyncGuardRejected, client.ErrRuntimeSyncResetInProgress, err)
 		}
 		return err
+	}
+}
+
+// reconcileCodexOAuthRotation keeps the encrypted credential and the durable
+// auth.json monotonic in both directions. The runtime lease writes a token that
+// Codex refreshed back to the durable file (RuntimeSyncCodexAuth); without this
+// the next start would overwrite that newer token with the stale database copy
+// and break the refresh chain. A different account_id means the user switched
+// credentials, so the database still wins.
+func (p *SessionPool) reconcileCodexOAuthRotation(ctx context.Context, h *runtimeHandle, credential agentcredential.ResolvedCredential, fromStore *client.CodexOAuthCredentials) *client.CodexOAuthCredentials {
+	if fromStore == nil || p.credentials == nil || credential.ID == "" {
+		return fromStore
+	}
+	runner, ok := p.runner.(workspaceClientRunner)
+	if !ok {
+		return fromStore
+	}
+	bridgeClient, err := runner.MCPClient(ctx, h.botID)
+	if err != nil {
+		return fromStore
+	}
+	onDisk, err := client.ReadCodexOAuthCredentials(ctx, bridgeClient, client.CodexManagedConfigDir)
+	if err != nil {
+		return fromStore
+	}
+	if onDisk.AccountID != fromStore.AccountID || !onDisk.LastRefresh.After(fromStore.LastRefresh) {
+		return fromStore
+	}
+	metadata := make(map[string]any, len(credential.AccountMetadata)+2)
+	for key, value := range credential.AccountMetadata {
+		metadata[key] = value
+	}
+	metadata["account_id"] = onDisk.AccountID
+	metadata["last_refresh"] = onDisk.LastRefresh.UTC().Format(time.RFC3339Nano)
+	secret := map[string]string{
+		"access_token": onDisk.AccessToken, "id_token": onDisk.IDToken,
+		"refresh_token": onDisk.RefreshToken, "account_id": onDisk.AccountID,
+	}
+	if _, err := p.credentials.UpdateSecretCAS(ctx, credential.ID, credential.CredentialVersion, secret, metadata, credential.ExpiresAt); err != nil && !errors.Is(err, agentcredential.ErrNotFound) {
+		p.logger.Warn("persist rotated Codex credential failed", slog.String("runtime_id", h.id), slog.String("credential_id", credential.ID), slog.Any("error", err))
+	}
+	onDisk.BaseURL = fromStore.BaseURL
+	return &onDisk
+}
+
+// applyAgentCredential projects a decrypted credential onto the agent setup.
+// API keys and the Claude Code OAuth token ride the existing managed-field
+// path; Codex ChatGPT credentials are returned separately because they are
+// written into the durable auth.json rather than a managed field.
+func applyAgentCredential(profile acpprofile.Profile, setup acpprofile.AgentSetup, credential agentcredential.ResolvedCredential) (acpprofile.AgentSetup, client.SetupMode, *client.CodexOAuthCredentials, error) {
+	if setup.Managed == nil {
+		setup.Managed = map[string]string{}
+	}
+	switch credential.AuthKind {
+	case agentcredential.AuthKindOpenAIAPIKey, agentcredential.AuthKindAnthropicAPIKey, agentcredential.AuthKindGoogleAPIKey, agentcredential.AuthKindOpenRouterAPIKey:
+		setup.Managed["api_key"] = credential.Secret["api_key"]
+		if profile.ID == acpprofile.AgentHermesID && strings.TrimSpace(setup.Managed["provider"]) == "" {
+			setup.Managed["provider"] = credential.Provider
+		}
+		return setup, client.SetupModeAPIKey, nil, nil
+	case agentcredential.AuthKindClaudeCodeOAuth:
+		setup.Managed["oauth_token"] = credential.Secret["oauth_token"]
+		return setup, client.SetupModeOAuth, nil, nil
+	case agentcredential.AuthKindOpenAICodexOAuth:
+		expiresAt := time.Time{}
+		if credential.ExpiresAt != nil {
+			expiresAt = *credential.ExpiresAt
+		}
+		lastRefresh := time.Time{}
+		if raw, ok := credential.AccountMetadata["last_refresh"].(string); ok {
+			if parsed, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw)); parseErr == nil {
+				lastRefresh = parsed
+			}
+		}
+		return setup, client.SetupModeOAuth, &client.CodexOAuthCredentials{
+			AccessToken: credential.Secret["access_token"], IDToken: credential.Secret["id_token"],
+			RefreshToken: credential.Secret["refresh_token"], AccountID: credential.Secret["account_id"],
+			BaseURL: setup.Managed["base_url"], ExpiresAt: expiresAt, LastRefresh: lastRefresh,
+		}, nil
+	default:
+		return setup, "", nil, agentcredential.ErrIncompatible
 	}
 }
 
