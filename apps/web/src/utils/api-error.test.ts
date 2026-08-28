@@ -64,6 +64,17 @@ describe('resolveApiErrorMessage', () => {
     expect(message).toBe('你没有执行该 Bot 工作区命令的权限。')
   })
 
+  it('reads error_code when code is absent', () => {
+    expect(parseMemohError({
+      error_code: 'agent.response_timeout',
+      error: 'The model did not respond in time. Please try again.',
+    })).toMatchObject({ code: 'agent.response_timeout' })
+    expect(resolveApiErrorMessage({
+      error_code: 'agent.response_timeout',
+      error: 'backend fallback',
+    }, 'fallback')).toBe('The model did not respond in time. Please try again.')
+  })
+
   it('falls back to existing detail extraction', () => {
     expect(resolveApiErrorMessage({ detail: 'plain detail' }, 'fallback')).toBe('plain detail')
   })

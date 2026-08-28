@@ -124,6 +124,7 @@ type Service struct {
 	streamHTTPClient       *http.Client
 	nonStreamingHTTPClient *http.Client
 	streamIdleTimeout      time.Duration
+	streamIdleTimeoutMax   time.Duration
 	bgManager              *background.Manager
 	toolApproval           *toolapproval.Service
 	userInput              userInputService

@@ -28,6 +28,7 @@ var (
 		[]byte(`"reasoning_timing"`),
 		[]byte(`"skill_activation"`),
 		[]byte(`"user_message_kind"`),
+		[]byte(`"error_code"`),
 	}
 )
 
@@ -312,6 +313,16 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			// A persisted turn_id is the only grouping key. Plain-text assistant
 			// messages and tool calls with that same id remain one reply.
 			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 {
+				if code := persistedHistoryErrorCode(raw.Metadata); code != "" {
+					if pending == nil {
+						pending = newPendingAssistantTurn(raw)
+					}
+					appendPendingAssistantMessage(pending, UIMessage{
+						Type:    UIMessageError,
+						Code:    code,
+						Content: persistedHistoryErrorDetail(raw.Metadata),
+					})
+				}
 				continue
 			}
 
@@ -456,6 +467,22 @@ func decodePersistedModelMessage(raw messagepkg.Message) uiDecodedModelMessage {
 	}
 	message.Role = raw.Role
 	return uiDecodedModelMessage{ModelMessage: message}
+}
+
+func persistedHistoryErrorCode(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	code, _ := meta[messagepkg.HistoryErrorCodeMetadataKey].(string)
+	return strings.TrimSpace(code)
+}
+
+func persistedHistoryErrorDetail(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	detail, _ := meta["error"].(string)
+	return strings.TrimSpace(detail)
 }
 
 func ensurePersistedMetadata(raw *messagepkg.Message) {

@@ -225,7 +225,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 
 	reasoningTiming := newReasoningTimingTracker(nil)
 	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
-	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx)
+	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
 	defer idleCancel.Stop()
 	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
 
@@ -307,8 +307,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// detaching cancellation so that terminal history and runtime publication
 	// can cross the same durable boundary as the main chat stream.
 	terminalCtx := context.WithoutCancel(ctx)
-	if hasTerminalEvent {
-		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming); storeErr != nil {
+	if hasTerminalEvent || timedOut {
+		var failureCode apperror.Code
+		if timedOut {
+			failureCode = snapshotFailureCode(true, lifecycleCause)
+		}
+		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, failureCode); storeErr != nil {
 			historyErr := runtimeHistoryError(storeErr)
 			lifecycleCause = historyErr
 			lifecycleDeferred = false
@@ -360,26 +364,61 @@ func (s *Service) persistDiscussTerminalSnapshot(
 	modelID string,
 	finalMessages json.RawMessage,
 	reasoningTiming []messagepkg.ReasoningTimingSegment,
+	failureCode apperror.Code,
 ) error {
-	if len(finalMessages) == 0 {
-		return nil
-	}
 	var sdkMsgs []sdk.Message
-	if json.Unmarshal(finalMessages, &sdkMsgs) != nil || len(sdkMsgs) == 0 {
+	if len(finalMessages) > 0 && json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
+		return s.storeDiscussRound(
+			ctx,
+			runConfig.RunID,
+			cmd.BotID,
+			cmd.ThreadID,
+			cmd.SourceChannelIdentityID,
+			cmd.CurrentChannel,
+			sdkMsgs,
+			modelID,
+			runConfig.ContextLifecycle,
+			reasoningTiming,
+		)
+	}
+	if failureCode == "" {
 		return nil
 	}
-	return s.storeDiscussRound(
-		ctx,
-		runConfig.RunID,
-		cmd.BotID,
-		cmd.ThreadID,
-		cmd.SourceChannelIdentityID,
-		cmd.CurrentChannel,
-		sdkMsgs,
-		modelID,
-		runConfig.ContextLifecycle,
-		reasoningTiming,
-	)
+	if s.turnHooks != nil && s.turnHooks.storeRound != nil {
+		return s.turnHooks.storeRound(
+			ctx,
+			runConfig.RunID,
+			cmd.BotID,
+			cmd.ThreadID,
+			cmd.SourceChannelIdentityID,
+			cmd.CurrentChannel,
+			[]sdk.Message{sdk.AssistantMessage("")},
+			modelID,
+			runConfig.ContextLifecycle,
+		)
+	}
+	return s.storeRoundWithOptions(ctx, ChatRequest{
+		RunID:                   runConfig.RunID,
+		BotID:                   cmd.BotID,
+		ChatID:                  cmd.BotID,
+		ThreadID:                cmd.ThreadID,
+		SourceChannelIdentityID: cmd.SourceChannelIdentityID,
+		CurrentChannel:          cmd.CurrentChannel,
+		UserMessagePersisted:    true,
+	}, []ModelMessage{{
+		Role:    "assistant",
+		Content: newTextContent(""),
+	}}, modelID, storeRoundOptions{
+		AllowEmptyAssistantText: true,
+		MessageMetadataByIndex: map[int]map[string]any{
+			0: {
+				messagepkg.AgentStepInterruptedMetadataKey: true,
+				messagepkg.HistoryErrorCodeMetadataKey:     string(failureCode),
+			},
+		},
+		ContextLifecycle: runConfig.ContextLifecycle,
+		ReasoningTiming:  reasoningTiming,
+	})
 }
 
 func (s *Service) collectDiscussSourceFrags(

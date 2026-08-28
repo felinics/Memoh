@@ -16,6 +16,7 @@ const (
 	UIMessageReasoning   UIMessageType = "reasoning"
 	UIMessageTool        UIMessageType = "tool"
 	UIMessageAttachments UIMessageType = "attachments"
+	UIMessageError       UIMessageType = "error"
 )
 
 // UIAttachment is the normalized attachment shape used by the web frontend.
@@ -66,6 +67,7 @@ type UIMessage struct {
 	Attachments       []UIAttachment       `json:"attachments,omitempty"`
 	Background        *UIBackgroundTask    `json:"background_task,omitempty"`
 	ReasoningTiming   *UIReasoningTiming   `json:"reasoning_timing,omitempty"`
+	Code              string               `json:"code,omitempty"`
 } // @name conversation.UIMessage
 
 // UIReasoningTiming is the persisted server observation for one reasoning

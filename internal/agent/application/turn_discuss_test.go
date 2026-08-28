@@ -344,8 +344,8 @@ func TestAdmittedDiscussSilencePublishesStableTimeoutFailure(t *testing.T) {
 	}
 	events := drainDiscuss(t, handle)
 
-	if resolver.storeCalls != 0 {
-		t.Fatalf("store calls = %d, want none for empty timeout snapshot", resolver.storeCalls)
+	if resolver.storeCalls != 1 {
+		t.Fatalf("store calls = %d, want one turn-level timeout failure", resolver.storeCalls)
 	}
 	var failurePayload json.RawMessage
 	for _, event := range events {

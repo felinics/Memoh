@@ -937,6 +937,37 @@ func TestConvertMessagesToUITurnsTruncatesReplyPreview(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToUITurnsProjectsTimeoutFailure(t *testing.T) {
+	now := time.Now().UTC()
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
+		ID:        "user-1",
+		TurnID:    "turn-1",
+		BotID:     "bot-1",
+		Role:      "user",
+		Content:   json.RawMessage(`{"role":"user","content":[{"type":"text","text":"hello"}]}`),
+		CreatedAt: now,
+	}, {
+		ID:      "assistant-1",
+		TurnID:  "turn-1",
+		BotID:   "bot-1",
+		Role:    "assistant",
+		Content: json.RawMessage(`{"role":"assistant","content":[]}`),
+		Metadata: map[string]any{
+			messagepkg.HistoryErrorCodeMetadataKey: "agent.response_timeout",
+		},
+		CreatedAt: now.Add(time.Second),
+	}})
+	if len(turns) != 2 {
+		t.Fatalf("expected user + timeout assistant, got %d", len(turns))
+	}
+	if turns[1].Role != "assistant" || len(turns[1].Messages) != 1 {
+		t.Fatalf("timeout assistant turn = %#v", turns[1])
+	}
+	if turns[1].Messages[0].Type != UIMessageError || turns[1].Messages[0].Code != "agent.response_timeout" {
+		t.Fatalf("timeout block = %#v", turns[1].Messages[0])
+	}
+}
+
 func TestConvertMessagesToUITurnsKeepsForwardOnlyUserMessage(t *testing.T) {
 	now := time.Now().UTC()
 	turns := convertTestMessagesToUITurns([]messagepkg.Message{{

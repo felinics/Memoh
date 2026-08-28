@@ -148,7 +148,7 @@ func (s *Service) runTriggeredNativeStream(
 	// goroutine instead of leaving it blocked on an unread channel. The child
 	// idle context independently owns first-event and between-event silence.
 	streamCtx, cancelStream := context.WithCancel(ctx)
-	idleCtx, idleCancel := s.withStreamIdleTimeout(streamCtx)
+	idleCtx, idleCancel := s.withStreamIdleTimeout(streamCtx, reasoningEffortForIdle(cfg))
 	defer func() {
 		cancelStream()
 		idleCancel.Stop()
@@ -230,7 +230,9 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 	}
 
 	reasoningTiming := newReasoningTimingTracker(nil)
-	result, promptErr := s.acpPool.Prompt(ctx, acpagent.PromptInput{
+	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, strings.TrimSpace(payload.ReasoningEffort))
+	defer idleCancel.Stop()
+	result, promptErr := s.acpPool.Prompt(idleCtx, acpagent.PromptInput{
 		BotID:             botID,
 		ChatID:            botID,
 		SessionID:         payload.SessionID,
@@ -251,6 +253,10 @@ func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload 
 		ContextMarkdown:       contextMarkdown,
 		RuntimeOwnerAccountID: runtimeOwner,
 		Sink: acpclient.EventSinkFunc(func(ev event.StreamEvent) {
+			idleCancel.Reset()
+			if ev.Type == native.EventToolCallStart {
+				idleCancel.RecordToolCall()
+			}
 			reasoningTiming.observe(ev)
 		}),
 	})
@@ -376,6 +382,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
 			}
 			snap.visibleOutput = hasVisibleOutput
+			snap.failureCode = snapshotFailureCode(idle != nil && idle.DidFire(), streamErr)
 			lastSnapshot = snap
 			hasSnapshot = true
 			if !stored && !runOwnershipLost(ctx) {
@@ -428,6 +435,11 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 		// outcome so the schedule log records the stop, not a success.
 		return schedule.TriggerResult{}, streamErr
 	case streamErr != nil && !hasSnapshot:
+		if idle != nil && idle.DidFire() {
+			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, snapshotFailureCode(true, streamErr)); storeErr != nil {
+				s.logger.Error("triggered run timeout persist failed", slog.Any("error", storeErr))
+			}
+		}
 		return schedule.TriggerResult{}, streamErr
 	case !hasSnapshot:
 		return schedule.TriggerResult{}, errors.New("schedule run ended without a terminal event")

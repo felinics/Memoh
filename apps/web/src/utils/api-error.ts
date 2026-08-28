@@ -91,8 +91,10 @@ function pickApiFeedbackMessage(error: unknown): string {
       if (rendered) return rendered
     }
 
-    if (typeof record.code === 'string' && record.code.trim()) {
-      const rendered = renderI18nMessage(`errors.${record.code.trim()}`, args)
+    const code = (typeof record.code === 'string' && record.code.trim())
+      || (typeof record.error_code === 'string' && record.error_code.trim())
+    if (code) {
+      const rendered = renderI18nMessage(`errors.${code}`, args)
       if (rendered) return rendered
     }
   }
@@ -123,7 +125,9 @@ function pickNetworkErrorMessage(error: unknown): string {
 
 export function parseMemohError(error: unknown): MemohError | null {
   for (const record of collectErrorRecords(error)) {
-    if (typeof record.code !== 'string' || !record.code.trim()) continue
+    const code = (typeof record.code === 'string' && record.code.trim())
+      || (typeof record.error_code === 'string' && record.error_code.trim())
+    if (!code) continue
 
     const status = typeof record.status === 'number'
       ? record.status
@@ -133,7 +137,7 @@ export function parseMemohError(error: unknown): MemohError | null {
     const requestId = record.request_id ?? record.requestId
 
     return {
-      code: record.code.trim(),
+      code,
       args: asRecord(record.args) ?? {},
       message: pickErrorDetail(record) || undefined,
       requestId: typeof requestId === 'string' && requestId.trim() ? requestId.trim() : undefined,

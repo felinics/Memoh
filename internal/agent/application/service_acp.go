@@ -163,6 +163,8 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	idleCtx, idleCancel := s.withStreamIdleTimeout(streamCtx, strings.TrimSpace(req.ReasoningEffort))
+	defer idleCancel.Stop()
 	terminal := s.contextLifecycleTerminal(streamCtx, native.RunConfig{
 		RunID: req.RunID,
 		Identity: native.SessionContext{
@@ -287,6 +289,10 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 		}
 	}
 	emit := func(ev native.StreamEvent) {
+		idleCancel.Reset()
+		if ev.Type == native.EventToolCallStart {
+			idleCancel.RecordToolCall()
+		}
 		emitWithContext(streamCtx, ev)
 	}
 
@@ -296,7 +302,7 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 	// block would pin the answer text above any reasoning that streams first.
 	// The first text_delta lazily creates the text block instead.
 
-	result, err := s.acpPool.Prompt(streamCtx, acpagent.PromptInput{
+	result, err := s.acpPool.Prompt(idleCtx, acpagent.PromptInput{
 		BotID:                    req.BotID,
 		ChatID:                   req.ChatID,
 		SessionID:                req.ThreadID,
@@ -364,6 +370,33 @@ func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh
 			return feedbackErr
 		}
 		result = ensureACPPromptOutput(result)
+		if idleCancel.DidFire() {
+			timeoutErr := context.Cause(idleCtx)
+			lifecycleCause = timeoutErr
+			failedResult, failureDelta := acpFailureResult(result, timeoutErr)
+			if persistErr := s.persistACPRound(context.WithoutCancel(ctx), req, agentID, projectPath, failedResult, timeoutErr, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
+				lifecycleCause = runtimeHistoryError(persistErr)
+				s.logger.Error("ACP idle timeout persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
+				switch s.resolveACPRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
+				case acpRoundCommitted:
+					lifecycleCause = timeoutErr
+					cleanupProjections()
+				case acpRoundUnresolved:
+					return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, persistErr, nil)
+				case acpRoundRolledBack:
+					cleanupProjections()
+				}
+			} else {
+				cleanupProjections()
+			}
+			if failureDelta != "" {
+				emitWithContext(ctx, native.StreamEvent{Type: native.EventTextDelta, Delta: failureDelta})
+			}
+			emitWithContext(ctx, agentFailureStreamEvent(timeoutErr))
+			emitWithContext(ctx, native.StreamEvent{Type: native.EventTextEnd})
+			emitWithContext(ctx, acpTerminalStreamEvent(native.EventAbort, failedResult))
+			return timeoutErr
+		}
 		if streamCtx.Err() != nil {
 			// A user-initiated stop is not an agent failure: keep the partial
 			// output unannotated instead of persisting a misleading
@@ -1218,6 +1251,8 @@ func (s *Service) persistACPRound(
 			meta["error_code"] = feedbackErr.Code
 			meta["error_reason"] = feedbackErr.Reason
 			meta["i18n_key"] = feedbackErr.I18nKey
+		} else if code := apperror.CodeOf(promptErr); code != "" {
+			meta["error_code"] = string(code)
 		} else {
 			meta["error_code"] = "acp_runtime_prompt_failed"
 		}

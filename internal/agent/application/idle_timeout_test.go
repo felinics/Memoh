@@ -58,6 +58,28 @@ func TestServiceHTTPClientsHaveSeparateTimeoutOwnership(t *testing.T) {
 	}
 }
 
+func TestScaleIdleTimeoutForEffort(t *testing.T) {
+	t.Parallel()
+
+	base := 90 * time.Second
+	cases := []struct {
+		effort string
+		want   time.Duration
+	}{
+		{"", base},
+		{"low", base},
+		{"medium", 3 * time.Minute},
+		{"high", 6 * time.Minute},
+		{"xhigh", 9 * time.Minute},
+		{"max", 12 * time.Minute},
+	}
+	for _, tc := range cases {
+		if got := scaleIdleTimeoutForEffort(base, tc.effort); got != tc.want {
+			t.Fatalf("effort %q = %v, want %v", tc.effort, got, tc.want)
+		}
+	}
+}
+
 func TestIdleTimeoutToolCallRearmsCurrentWindow(t *testing.T) {
 	ctx, idle := withIdleTimeout(context.Background(), 80*time.Millisecond)
 	defer idle.Stop()
