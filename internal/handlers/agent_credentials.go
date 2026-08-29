@@ -118,6 +118,11 @@ func (h *AgentCredentialHandler) Delete(c echo.Context) error {
 		return mapAgentCredentialError(err)
 	}
 	h.closeRuntimes(botID, botAgentID)
+	if h.runtimes != nil {
+		// Disconnect must also invalidate the staged Codex auth, or the next
+		// managed start would keep using the durable token on disk.
+		_ = h.runtimes.PurgeBotAgentDurableAuth(c.Request().Context(), botID, botAgentID)
+	}
 	return c.NoContent(http.StatusNoContent)
 }
 

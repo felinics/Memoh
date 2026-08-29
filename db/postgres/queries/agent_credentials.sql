@@ -91,3 +91,20 @@ WHERE bot_id = $1
   AND id = sqlc.arg(bot_agent_id)
   AND team_id = public.memoh_current_team_id()
   AND deleted_at IS NULL;
+
+-- name: RevokeAgentCredentialsForBot :exec
+UPDATE agent_credentials c
+SET revoked_at = now(),
+    credential_version = credential_version + 1,
+    updated_at = now()
+WHERE c.team_id = public.memoh_current_team_id()
+  AND c.revoked_at IS NULL
+  AND EXISTS (
+    SELECT 1 FROM bot_agents a
+    WHERE a.team_id = c.team_id AND a.agent_credential_id = c.id AND a.bot_id = $1
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM bot_agents o
+    WHERE o.team_id = c.team_id AND o.agent_credential_id = c.id
+      AND o.bot_id <> $1 AND o.deleted_at IS NULL
+  );

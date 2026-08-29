@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -19,6 +20,18 @@ type BotAgentsHandler struct {
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
+	durableAuth    durableAuthPurger
+}
+
+// durableAuthPurger removes an instance's staged Codex auth after the
+// instance (and with it the credential binding) is deleted.
+type durableAuthPurger interface {
+	PurgeBotAgentDurableAuth(ctx context.Context, botID, botAgentID string) error
+}
+
+// SetDurableAuthPurger wires the ACP pool's per-instance auth cleanup.
+func (h *BotAgentsHandler) SetDurableAuthPurger(purger durableAuthPurger) {
+	h.durableAuth = purger
 }
 
 func NewBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service) *BotAgentsHandler {
@@ -159,8 +172,12 @@ func (h *BotAgentsHandler) Delete(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.service.Delete(c.Request().Context(), botID, strings.TrimSpace(c.Param("id"))); err != nil {
+	botAgentID := strings.TrimSpace(c.Param("id"))
+	if err := h.service.Delete(c.Request().Context(), botID, botAgentID); err != nil {
 		return h.publicError("delete", err)
+	}
+	if h.durableAuth != nil {
+		_ = h.durableAuth.PurgeBotAgentDurableAuth(c.Request().Context(), botID, botAgentID)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

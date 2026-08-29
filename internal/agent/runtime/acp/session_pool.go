@@ -2472,6 +2472,33 @@ func (p *SessionPool) CloseAll() {
 	}
 }
 
+// PurgeBotAgentDurableAuth removes the per-instance durable Codex home
+// (/data/.codex/agents/<bot_agent_id>) after a credential is disconnected or
+// the instance is deleted. Without this, the staged auth.json would keep
+// authenticating to an account the user explicitly disconnected. Best-effort:
+// a missing workspace or directory is not an error.
+func (p *SessionPool) PurgeBotAgentDurableAuth(ctx context.Context, botID, botAgentID string) error {
+	if p == nil {
+		return nil
+	}
+	runner, ok := p.runner.(workspaceClientRunner)
+	if !ok {
+		return nil
+	}
+	dir, err := client.CodexInstanceDurableDir(botAgentID)
+	if err != nil {
+		return err
+	}
+	bridgeClient, err := runner.MCPClient(ctx, botID)
+	if err != nil {
+		return nil
+	}
+	if err := bridgeClient.DeleteFile(ctx, dir, true); err != nil {
+		p.logger.Warn("purge Codex instance durable auth failed", slog.String("bot_id", botID), slog.String("bot_agent_id", botAgentID), slog.Any("error", err))
+	}
+	return nil
+}
+
 // CloseBotAgentInstanceRuntimes tears down every runtime bound to one Bot
 // Agent instance, e.g. after its credential changed. Sibling instances of the
 // same provider and legacy sessions (no instance binding) stay untouched.
@@ -2958,6 +2985,33 @@ func (p *SessionPool) reconcileCodexOAuthRotation(ctx context.Context, h *runtim
 	return &onDisk
 }
 
+// hermesCredentialProviderFor maps the Hermes managed provider selection to
+// the credential provider whose key it consumes. Custom endpoints speak the
+// OpenAI wire protocol and take an OpenAI-style key.
+func hermesCredentialProviderFor(managedProvider string) string {
+	switch strings.ToLower(strings.TrimSpace(managedProvider)) {
+	case "openrouter":
+		return agentcredential.ProviderOpenRouter
+	case "gemini", "google", "google-gemini", "google-ai-studio":
+		return agentcredential.ProviderGoogle
+	default:
+		return agentcredential.ProviderOpenAI
+	}
+}
+
+// hermesManagedProviderForCredential is the inverse: the managed provider
+// value Hermes config understands for a credential provider.
+func hermesManagedProviderForCredential(credentialProvider string) string {
+	switch credentialProvider {
+	case agentcredential.ProviderGoogle:
+		return "gemini"
+	case agentcredential.ProviderOpenRouter:
+		return "openrouter"
+	default:
+		return "openai"
+	}
+}
+
 // applyAgentCredential projects a decrypted credential onto the agent setup.
 // API keys and the Claude Code OAuth token ride the existing managed-field
 // path; Codex ChatGPT credentials are returned separately because they are
@@ -2968,10 +3022,17 @@ func applyAgentCredential(profile acpprofile.Profile, setup acpprofile.AgentSetu
 	}
 	switch credential.AuthKind {
 	case agentcredential.AuthKindOpenAIAPIKey, agentcredential.AuthKindAnthropicAPIKey, agentcredential.AuthKindGoogleAPIKey, agentcredential.AuthKindOpenRouterAPIKey:
-		setup.Managed["api_key"] = credential.Secret["api_key"]
-		if profile.ID == acpprofile.AgentHermesID && strings.TrimSpace(setup.Managed["provider"]) == "" {
-			setup.Managed["provider"] = credential.Provider
+		if profile.ID == acpprofile.AgentHermesID {
+			// Hermes writes the key under the env var of the configured
+			// provider; a Google key labelled OPENROUTER_API_KEY authenticates
+			// nothing. Refuse mismatches instead of silently mislabelling.
+			if managedProvider := strings.TrimSpace(setup.Managed["provider"]); managedProvider == "" {
+				setup.Managed["provider"] = hermesManagedProviderForCredential(credential.Provider)
+			} else if hermesCredentialProviderFor(managedProvider) != credential.Provider {
+				return setup, "", nil, agentcredential.ErrIncompatible
+			}
 		}
+		setup.Managed["api_key"] = credential.Secret["api_key"]
 		return setup, client.SetupModeAPIKey, nil, nil
 	case agentcredential.AuthKindClaudeCodeOAuth:
 		setup.Managed["oauth_token"] = credential.Secret["oauth_token"]

@@ -89,6 +89,12 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 	return handler
 }
 
+func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, acpPool *acpagent.SessionPool) *handlers.BotAgentsHandler {
+	handler := handlers.NewBotAgentsHandler(log, service, botService, accountService)
+	handler.SetDurableAuthPurger(acpPool)
+	return handler
+}
+
 func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool, credentialService *agentcredential.Service) *handlers.UsersHandler {
 	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaceManager)
 	handler.SetRuntimeResetService(acpPool)
