@@ -18,8 +18,13 @@ import {
 import { loadSync } from '@grpc/proto-loader'
 
 import { ChildSupervisor } from './children'
+import {
+  prepareTrustedACPLaunchers,
+  type TrustedACPLaunchers,
+} from './core/acp-launchers.js'
 import { WorkspaceExecService } from './core/exec'
 import { rawChunkSize, WorkspaceFileService } from './core/fs'
+import { detectRuntimeCapabilities, type RuntimeCapability } from './core/guards'
 import { HostPathResolver } from './core/paths'
 import { mapNodeError, rpcError } from './rpc'
 import type {
@@ -41,9 +46,11 @@ export const grpcMessageLimit = 16 * 1024 * 1024
 export interface RuntimeGrpcServerOptions {
   workspaceBase: string
   warn?: (message: string) => void
+  trustedACPLaunchers?: TrustedACPLaunchers
 }
 
 export interface RunningRuntimeGrpcServer {
+  capabilities: readonly RuntimeCapability[]
   acceptConnection(connection: Duplex): void
   close(): Promise<void>
 }
@@ -58,22 +65,54 @@ export async function startRuntimeGrpcServer(
   options: RuntimeGrpcServerOptions,
 ): Promise<RunningRuntimeGrpcServer> {
   const paths = await HostPathResolver.create(options.workspaceBase)
+  const launchers = await prepareTrustedACPLaunchers(options.trustedACPLaunchers, {
+    warn: options.warn,
+  })
   const children = new ChildSupervisor({ warn: options.warn })
   let acceptingRPCs = true
-  const implementation = createContainerService(paths, children, () => acceptingRPCs)
-  const server = new Server({
-    'grpc.max_receive_message_length': grpcMessageLimit,
-    'grpc.max_send_message_length': grpcMessageLimit,
-  })
-  server.addService(await loadContainerServiceDefinition(), implementation)
-  // grpc-js 1.14.4 exposes a public connection injector that hands an
-  // existing Duplex directly to its HTTP/2 server. This deliberately avoids
-  // opening a second loopback TCP, Unix-socket, or named-pipe listener.
-  const injector = server.createConnectionInjector(ServerCredentials.createInsecure())
+  let capabilities: RuntimeCapability[]
+  let server: Server | undefined
+  let injector: ReturnType<Server['createConnectionInjector']> | undefined
+  try {
+    capabilities = await detectRuntimeCapabilities(
+      process.env,
+      process.platform,
+      undefined,
+      launchers,
+    )
+    server = new Server({
+      'grpc.max_receive_message_length': grpcMessageLimit,
+      'grpc.max_send_message_length': grpcMessageLimit,
+    })
+    const implementation = createContainerService(
+      paths,
+      children,
+      () => acceptingRPCs,
+      launchers.executableDirectories,
+    )
+    server.addService(await loadContainerServiceDefinition(), implementation)
+    // grpc-js 1.14.4 exposes a public connection injector that hands an
+    // existing Duplex directly to its HTTP/2 server. This deliberately avoids
+    // opening a second loopback TCP, Unix-socket, or named-pipe listener.
+    injector = server.createConnectionInjector(ServerCredentials.createInsecure())
+  } catch (error) {
+    server?.forceShutdown()
+    await children.close().catch(() => undefined)
+    await launchers.close().catch(() => undefined)
+    throw error
+  }
+  if (!server || !injector) {
+    await children.close().catch(() => undefined)
+    await launchers.close().catch(() => undefined)
+    throw new Error('runtime gRPC server initialization did not complete')
+  }
+  const activeServer = server
+  const connectionInjector = injector
   const connections = new Set<Duplex>()
   let closing = false
   let closePromise: Promise<void> | undefined
   return {
+    capabilities: Object.freeze([...capabilities]),
     acceptConnection(connection) {
       if (closing || connection.destroyed) {
         connection.destroy()
@@ -82,7 +121,7 @@ export async function startRuntimeGrpcServer(
       connections.add(connection)
       connection.once('close', () => connections.delete(connection))
       try {
-        injector.injectConnection(connection)
+        connectionInjector.injectConnection(connection)
       } catch (error) {
         connections.delete(connection)
         connection.destroy()
@@ -99,20 +138,27 @@ export async function startRuntimeGrpcServer(
           connection.destroy()
         }
         connections.clear()
-        await children.close()
-        // tryShutdown closes the injector-owned HTTP/2 server and releases
-        // the channelz reference created by createConnectionInjector().
-        await new Promise<void>(resolve => {
-          const timer = setTimeout(() => {
-            server.forceShutdown()
-            resolve()
-          }, 2_000)
-          timer.unref()
-          server.tryShutdown(() => {
-            clearTimeout(timer)
-            resolve()
-          })
-        })
+        try {
+          await children.close()
+        } finally {
+          // tryShutdown closes the injector-owned HTTP/2 server and releases
+          // the channelz reference created by createConnectionInjector().
+          try {
+            await new Promise<void>(resolve => {
+              const timer = setTimeout(() => {
+                activeServer.forceShutdown()
+                resolve()
+              }, 2_000)
+              timer.unref()
+              activeServer.tryShutdown(() => {
+                clearTimeout(timer)
+                resolve()
+              })
+            })
+          } finally {
+            await launchers.close()
+          }
+        }
       })()
       return closePromise
     },
@@ -143,9 +189,15 @@ export function createContainerService(
   paths: HostPathResolver,
   children: ChildSupervisor,
   acceptingRPCs: () => boolean = () => true,
+  trustedExecutableDirectories: readonly string[] = [],
 ): UntypedServiceImplementation {
   const files = new WorkspaceFileService(paths)
-  const commands = new WorkspaceExecService(paths, children, acceptingRPCs)
+  const commands = new WorkspaceExecService(
+    paths,
+    children,
+    acceptingRPCs,
+    trustedExecutableDirectories,
+  )
 
   const ReadFile: handleUnaryCall<ReadFileRequest, unknown> = unary(async call => files.readFile(call.request))
   const WriteFile: handleUnaryCall<WriteFileRequest, unknown> = unary(async call => files.writeFile(call.request))

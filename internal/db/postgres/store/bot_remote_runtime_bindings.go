@@ -2,8 +2,10 @@ package postgresstore
 
 import (
 	"context"
+	"errors"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/db"
@@ -167,6 +169,20 @@ func (s *Store) DeleteMount(ctx context.Context, botID, targetID string) error {
 	_, err = s.queries.DeleteBotRemoteRuntimeMount(ctx, dbsqlc.DeleteBotRemoteRuntimeMountParams{
 		BotID: botUUID, TargetID: targetUUID,
 	})
+	return mapDeleteRemoteMountErr(err)
+}
+
+func mapDeleteRemoteMountErr(err error) error {
+	var pgErr *pgconn.PgError
+	// PostgreSQL 18 reports an ON DELETE RESTRICT failure as
+	// restrict_violation (23001); older releases used
+	// foreign_key_violation (23503). Match both so self-hosted installs on an
+	// older PostgreSQL still get the mapped 409 instead of a generic 500.
+	if errors.As(err, &pgErr) &&
+		(pgErr.Code == "23001" || pgErr.Code == "23503") &&
+		pgErr.ConstraintName == "bot_workdirs_remote_binding_fkey" {
+		return db.ErrWorkspaceTargetInUse
+	}
 	return mapQueryErr(err)
 }
 

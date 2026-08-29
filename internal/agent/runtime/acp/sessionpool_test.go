@@ -34,6 +34,7 @@ import (
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 	"github.com/felinics/memoh/internal/workspace/bridgesvc"
@@ -573,6 +574,26 @@ func TestSessionPoolCreateRuntimeGeneratesIDAndReportsModels(t *testing.T) {
 	}
 }
 
+func TestRuntimeStatusKeepsWorkspaceTargetInternal(t *testing.T) {
+	pool := &SessionPool{}
+	status := pool.statusOf(&runtimeHandle{
+		id:                  "rt-remote",
+		workspaceTargetID:   "computer-1",
+		workspaceTargetKind: workspace.WorkspaceTargetRemote,
+		status:              stateIdle,
+	})
+	if status.WorkspaceTargetID != "computer-1" || status.WorkspaceTargetKind != workspace.WorkspaceTargetRemote {
+		t.Fatalf("runtime target = %q/%q", status.WorkspaceTargetID, status.WorkspaceTargetKind)
+	}
+	payload, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("Marshal(RuntimeStatus): %v", err)
+	}
+	if strings.Contains(string(payload), "computer-1") || strings.Contains(string(payload), "workspace_target") {
+		t.Fatalf("runtime target leaked into public status: %s", payload)
+	}
+}
+
 func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 	type contextKey struct{}
 
@@ -596,7 +617,7 @@ func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 		context.WithValue(context.Background(), contextKey{}, "bind-scope"),
 	)
 	defer cancelBind()
-	if err := pool.BindRuntime(bindCtx, "bot-1", created.RuntimeID, "session-1", acpprofile.AgentCodexID, "/data/project", "user-1"); err != nil {
+	if err := pool.BindRuntime(bindCtx, "bot-1", created.RuntimeID, "session-1", acpprofile.AgentCodexID, "/data/project", "", "user-1"); err != nil {
 		t.Fatalf("BindRuntime() error = %v", err)
 	}
 	cancelBind()
@@ -639,7 +660,7 @@ func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 	}
 
 	// A bound runtime cannot be bound again.
-	if err := pool.BindRuntime(context.Background(), "bot-1", created.RuntimeID, "session-2", acpprofile.AgentCodexID, "/data/project", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+	if err := pool.BindRuntime(context.Background(), "bot-1", created.RuntimeID, "session-2", acpprofile.AgentCodexID, "/data/project", "", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
 		t.Fatalf("second BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 }
@@ -721,34 +742,55 @@ func TestSessionPoolBindRuntimeRejectsMismatches(t *testing.T) {
 		{"wrong project", "bot-2", "real", acpprofile.AgentCodexID, "/other", ErrRuntimeBindRejected},
 	}
 	for _, tc := range cases {
-		if err := pool.BindRuntime(context.Background(), tc.botID, pending.id, tc.sessionID, tc.agent, tc.path, "user-1"); !errors.Is(err, tc.wantErr) {
+		if err := pool.BindRuntime(context.Background(), tc.botID, pending.id, tc.sessionID, tc.agent, tc.path, "", "user-1"); !errors.Is(err, tc.wantErr) {
 			t.Fatalf("%s: BindRuntime() error = %v, want %v", tc.name, err, tc.wantErr)
 		}
 	}
-	if err := pool.BindRuntime(context.Background(), "bot-2", "rt_missing", "real", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
+	if err := pool.BindRuntime(context.Background(), "bot-2", "rt_missing", "real", acpprofile.AgentCodexID, "/data", "", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("missing runtime: BindRuntime() error = %v, want ErrRuntimeNotFound", err)
 	}
 
 	// Session already served by another runtime.
 	other := &runtimeHandle{id: newRuntimeID(), botID: "bot-2", boundSession: "real", status: stateIdle}
 	injectRuntime(pool, other)
-	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real", acpprofile.AgentCodexID, "/data", "", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
 		t.Fatalf("occupied session: BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 
 	// A still-starting runtime (no live process yet) is not bindable.
 	starting := &runtimeHandle{id: newRuntimeID(), botID: "bot-2", agentID: acpprofile.AgentCodexID, projectPath: "/data", status: stateStarting}
 	injectRuntime(pool, starting)
-	if err := pool.BindRuntime(context.Background(), "bot-2", starting.id, "real-2", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+	if err := pool.BindRuntime(context.Background(), "bot-2", starting.id, "real-2", acpprofile.AgentCodexID, "/data", "", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
 		t.Fatalf("starting runtime: BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 
 	// Everything matching succeeds.
-	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real-2", acpprofile.AgentCodexID, "/data", "user-1"); err != nil {
+	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real-2", acpprofile.AgentCodexID, "/data", "", "user-1"); err != nil {
 		t.Fatalf("matching BindRuntime() error = %v", err)
 	}
 	if pool.sessionHandle("real-2") != pending {
 		t.Fatalf("bound session does not resolve to the runtime")
+	}
+}
+
+func TestSessionPoolBindRuntimeRejectsDifferentWorkspaceTarget(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	pending := &runtimeHandle{
+		id:                    newRuntimeID(),
+		botID:                 "bot-1",
+		agentID:               acpprofile.AgentCodexID,
+		projectPath:           "/Users/alice/project",
+		workspaceTargetID:     "computer-a",
+		runtimeOwnerAccountID: "user-1",
+		session:               &client.Session{},
+		status:                stateIdle,
+		lastActive:            time.Now(),
+	}
+	injectRuntime(pool, pending)
+
+	err := pool.BindRuntime(context.Background(), "bot-1", pending.id, "session-1", acpprofile.AgentCodexID, "/Users/alice/project", "computer-b", "user-1")
+	if !errors.Is(err, ErrRuntimeBindRejected) {
+		t.Fatalf("BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 }
 
@@ -775,7 +817,7 @@ func TestSessionPoolOwnedGateHasZeroSideEffectsAcrossBots(t *testing.T) {
 	if err := pool.CloseRuntime("bot-1", foreign.id); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("CloseRuntime(cross bot) error = %v, want ErrRuntimeNotFound", err)
 	}
-	if err := pool.BindRuntime(context.Background(), "bot-1", foreign.id, "my-session", acpprofile.AgentCodexID, "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
+	if err := pool.BindRuntime(context.Background(), "bot-1", foreign.id, "my-session", acpprofile.AgentCodexID, "/data", "", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("BindRuntime(cross bot) error = %v, want ErrRuntimeNotFound", err)
 	}
 	if _, ok := pool.ResolveRuntimeToolContext("bot-1", foreign.id, "runtime-token-1"); ok {
@@ -845,6 +887,67 @@ func TestSessionPoolCloseBotAgentRuntimesDoesNotWaitForActivePrompt(t *testing.T
 	}
 	if got := pool.sessionHandle("session-1"); got != nil {
 		t.Fatalf("session index still points at closed runtime: %#v", got)
+	}
+}
+
+func TestSessionPoolCloseBotWorkspaceTargetRuntimesIsPinnedAndNonBlocking(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	matching := &runtimeHandle{
+		id:                newRuntimeID(),
+		botID:             "bot-1",
+		agentID:           acpprofile.AgentCodexID,
+		workspaceTargetID: "computer-1",
+		session:           &client.Session{},
+		status:            stateActive,
+		lastActive:        time.Now(),
+		boundSession:      "session-1",
+	}
+	otherTarget := &runtimeHandle{
+		id:                newRuntimeID(),
+		botID:             "bot-1",
+		agentID:           acpprofile.AgentCodexID,
+		workspaceTargetID: "computer-2",
+		session:           &client.Session{},
+		status:            stateIdle,
+		lastActive:        time.Now(),
+	}
+	otherBot := &runtimeHandle{
+		id:                newRuntimeID(),
+		botID:             "bot-2",
+		agentID:           acpprofile.AgentCodexID,
+		workspaceTargetID: "computer-1",
+		session:           &client.Session{},
+		status:            stateIdle,
+		lastActive:        time.Now(),
+	}
+	injectRuntime(pool, matching)
+	injectRuntime(pool, otherTarget)
+	injectRuntime(pool, otherBot)
+	matching.op.Lock()
+	defer matching.op.Unlock()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- pool.CloseBotWorkspaceTargetRuntimes("bot-1", "computer-1")
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("CloseBotWorkspaceTargetRuntimes() error = %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("CloseBotWorkspaceTargetRuntimes waited for the active prompt op lock")
+	}
+
+	pool.mu.RLock()
+	_, matchingExists := pool.runtimes[matching.id]
+	_, otherTargetExists := pool.runtimes[otherTarget.id]
+	_, otherBotExists := pool.runtimes[otherBot.id]
+	pool.mu.RUnlock()
+	if matchingExists || !otherTargetExists || !otherBotExists {
+		t.Fatalf("target close scope = matching:%v other-target:%v other-bot:%v",
+			matchingExists, otherTargetExists, otherBotExists)
 	}
 }
 
@@ -1870,6 +1973,192 @@ func TestSessionPoolRejectsUnsupportedBackend(t *testing.T) {
 	}
 }
 
+func TestSessionPoolRemoteACPStartsLocalAdapterWithoutManagedState(t *testing.T) {
+	tests := []struct {
+		name       string
+		agentID    string
+		command    string
+		capability string
+		bot        bots.Bot
+	}{
+		{
+			name:       "Codex",
+			agentID:    acpprofile.AgentCodexID,
+			command:    "codex-acp",
+			capability: "acp_codex",
+			bot:        enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "must-not-cross"}),
+		},
+		{
+			name:       "Claude Code",
+			agentID:    acpprofile.AgentClaudeCodeID,
+			command:    "claude-agent-acp",
+			capability: "acp_claude_code",
+			bot: enabledACPAgentBot(
+				"bot-1",
+				acpprofile.AgentClaudeCodeID,
+				"api_key",
+				map[string]any{"api_key": "must-not-cross"},
+			),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &recordingRunner{
+				info: bridge.WorkspaceInfo{
+					Backend:        bridge.WorkspaceBackendRemote,
+					OS:             "darwin",
+					DefaultWorkDir: "/Users/alice",
+					Capabilities:   []string{"fs", "exec", "host_fs", tt.capability},
+					TargetID:       "computer-1",
+					TargetKind:     "remote",
+					TargetName:     "Alice's Mac",
+				},
+				startErr: errors.New("started"),
+			}
+			pool := newSessionPool(nil, runner, fakeBotGetter{bot: tt.bot})
+			_, err := pool.Prompt(context.Background(), PromptInput{
+				BotID:                 "bot-1",
+				SessionID:             "session-1",
+				AgentID:               tt.agentID,
+				ProjectPath:           "/data/project",
+				WorkspaceTargetID:     "computer-1",
+				RuntimeOwnerAccountID: "user-1",
+				Prompt:                "run",
+			})
+			if err == nil || err.Error() != "started" {
+				t.Fatalf("Prompt() error = %v, want runner start error", err)
+			}
+			if runner.req.Command != tt.command || runner.req.Resolved == nil {
+				t.Fatalf("remote request = %#v", runner.req)
+			}
+			if runner.req.Resolved.Backend != client.WorkspaceBackendRemote ||
+				runner.req.Resolved.WorkspaceRoot != "/" ||
+				runner.req.Resolved.ProjectPath != "/Users/alice/project" {
+				t.Fatalf("remote resolved context = %#v", runner.req.Resolved)
+			}
+			if len(runner.req.Env) != 0 || runner.req.CleanEnv || len(runner.req.UnsetEnv) != 0 {
+				t.Fatalf("remote request carried Server-managed environment: %#v", runner.req)
+			}
+		})
+	}
+}
+
+func TestSessionPoolRemoteACPRequiresCapabilityAndSupportedOS(t *testing.T) {
+	base := bridge.WorkspaceInfo{
+		Backend:        bridge.WorkspaceBackendRemote,
+		OS:             "darwin",
+		DefaultWorkDir: "/Users/alice",
+		Capabilities:   []string{"fs", "exec", "host_fs", "acp_codex"},
+		TargetID:       "computer-1",
+		TargetKind:     "remote",
+	}
+	tests := []struct {
+		name string
+		info bridge.WorkspaceInfo
+		code string
+		key  string
+	}{
+		{
+			name: "adapter missing",
+			info: func() bridge.WorkspaceInfo {
+				value := base
+				value.Capabilities = []string{"fs", "exec", "host_fs"}
+				return value
+			}(),
+			code: feedback.CodeRemoteAdapterMissing,
+			key:  "chat.acp.remoteAdapterMissing",
+		},
+		{
+			name: "unsupported OS",
+			info: func() bridge.WorkspaceInfo {
+				value := base
+				value.OS = "win32"
+				value.DefaultWorkDir = `C:\\Users\\alice`
+				return value
+			}(),
+			code: feedback.CodeRemoteOSUnsupported,
+			key:  "chat.acp.remoteOSUnsupported",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &recordingRunner{info: tt.info, startErr: errors.New("must not start")}
+			pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "ignored"})})
+			_, err := pool.Prompt(context.Background(), PromptInput{
+				BotID:                 "bot-1",
+				SessionID:             "session-1",
+				AgentID:               acpprofile.AgentCodexID,
+				WorkspaceTargetID:     "computer-1",
+				RuntimeOwnerAccountID: "user-1",
+				Prompt:                "run",
+			})
+			var feedbackErr *feedback.Error
+			if !errors.As(err, &feedbackErr) || feedbackErr.Code != tt.code || feedbackErr.I18nKey != tt.key {
+				t.Fatalf("Prompt() feedback = %#v, want %s/%s", feedbackErr, tt.code, tt.key)
+			}
+			if runner.req.AgentID != "" {
+				t.Fatalf("runner started unexpectedly: %#v", runner.req)
+			}
+		})
+	}
+}
+
+func TestSessionPoolUsesPersistedWorkdirTargetForEveryWorkspaceLookup(t *testing.T) {
+	runner := &targetRecordingRunner{
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendRemote,
+			OS:             "linux",
+			DefaultWorkDir: "/home/alice",
+			Capabilities:   []string{"acp_codex"},
+			TargetID:       "computer-1",
+			TargetKind:     "remote",
+		},
+		startErr: errors.New("started"),
+	}
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "self", nil)}, fakeSessionGetter{session: SessionDescriptor{
+		BotID:               "bot-1",
+		SessionType:         sessionmode.ACPAgent,
+		Metadata:            map[string]any{"acp_agent_id": "codex", "runtime_owner_account_id": "user-1"},
+		WorkspaceTargetID:   "computer-1",
+		WorkspaceTargetKind: "remote",
+		WorkdirPath:         "/home/alice/project",
+		IsACP:               true,
+	}})
+	_, err := pool.Prompt(context.Background(), PromptInput{SessionID: "session-1", Prompt: "run"})
+	if err == nil || err.Error() != "started" {
+		t.Fatalf("Prompt() error = %v, want runner start error", err)
+	}
+	if len(runner.targets) < 2 {
+		t.Fatalf("workspace lookups = %#v, want prepare and start", runner.targets)
+	}
+	for _, targetID := range runner.targets {
+		if targetID != "computer-1" {
+			t.Fatalf("workspace lookup target = %q, want computer-1; all = %#v", targetID, runner.targets)
+		}
+	}
+}
+
+func TestSessionPoolRejectsPinnedTargetWhenWorkspaceResolutionDropsIdentity(t *testing.T) {
+	runner := &recordingRunner{info: bridge.WorkspaceInfo{
+		Backend:        bridge.WorkspaceBackendRemote,
+		OS:             "linux",
+		DefaultWorkDir: "/home/alice",
+		Capabilities:   []string{"acp_codex"},
+	}}
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "self", nil)})
+
+	_, err := pool.prepareInput(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentCodexID,
+		WorkspaceTargetID:     "computer-1",
+		RuntimeOwnerAccountID: "user-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), `does not match requested target "computer-1"`) {
+		t.Fatalf("prepareInput() error = %v, want missing target identity rejection", err)
+	}
+}
+
 func TestProfileSupportsBackend(t *testing.T) {
 	if !profileSupportsBackend(acpprofile.Profile{}, "custom-backend") {
 		t.Fatal("profile with no supported_backends should allow any backend")
@@ -1998,6 +2287,31 @@ func TestSessionPoolUsesWorkspaceACPToolsEndpointForContainer(t *testing.T) {
 	}
 	if got != "http://127.0.0.1:18732/mcp" {
 		t.Fatalf("container ToolHTTPURL = %q", got)
+	}
+}
+
+func TestSessionPoolRequiresHTTPSMemohToolsEndpointForRemote(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	pool.SetToolGateway(mcp.NewToolGatewayService(nil, nil))
+	remote := bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendRemote}
+
+	got, err := pool.resolveToolHTTPURL("https://memoh.example/bots/bot-1/tools", remote)
+	if err != nil || got != "https://memoh.example/bots/bot-1/tools" {
+		t.Fatalf("remote HTTPS ToolHTTPURL = %q, %v", got, err)
+	}
+	// Loopback HTTP is the local development flow: the connected computer is
+	// the server host itself.
+	if got, err := pool.resolveToolHTTPURL("http://127.0.0.1:18080/bots/bot-1/tools", remote); err != nil || got != "http://127.0.0.1:18080/bots/bot-1/tools" {
+		t.Fatalf("loopback tools URL = %q, %v", got, err)
+	}
+	if got, err := pool.resolveToolHTTPURL("http://localhost:18080/bots/bot-1/tools", remote); err != nil || got != "http://localhost:18080/bots/bot-1/tools" {
+		t.Fatalf("localhost tools URL = %q, %v", got, err)
+	}
+	if _, err := pool.resolveToolHTTPURL("http://memoh.example/bots/bot-1/tools", remote); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("remote HTTP ToolHTTPURL error = %v, want HTTPS requirement", err)
+	}
+	if got, err := pool.resolveToolHTTPURL("", remote); err != nil || got != "" {
+		t.Fatalf("empty remote ToolHTTPURL = %q, %v", got, err)
 	}
 }
 
@@ -2728,6 +3042,12 @@ type recordingRunner struct {
 	startErr error
 }
 
+type targetRecordingRunner struct {
+	info     bridge.WorkspaceInfo
+	startErr error
+	targets  []string
+}
+
 type hermesRecordingRunner struct {
 	info     bridge.WorkspaceInfo
 	client   *bridge.Client
@@ -2792,6 +3112,15 @@ func (r *recordingRunner) WorkspaceInfo(context.Context, string) (bridge.Workspa
 
 func (r *recordingRunner) StartSession(_ context.Context, req client.StartRequest, _ client.EventSink) (*client.Session, error) {
 	r.req = req
+	return nil, r.startErr
+}
+
+func (r *targetRecordingRunner) WorkspaceInfo(ctx context.Context, _ string) (bridge.WorkspaceInfo, error) {
+	r.targets = append(r.targets, workspace.WorkspaceTargetFromContext(ctx))
+	return r.info, nil
+}
+
+func (r *targetRecordingRunner) StartSession(_ context.Context, _ client.StartRequest, _ client.EventSink) (*client.Session, error) {
 	return nil, r.startErr
 }
 

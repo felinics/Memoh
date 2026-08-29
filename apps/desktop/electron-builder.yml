@@ -1,6 +1,11 @@
 appId: ai.memoh.desktop
 productName: Memoh
 copyright: Copyright © 2026 Memoh
+afterPack: scripts/acp-packaging.mjs
+afterSign: scripts/acp-packaging.mjs
+electronFuses:
+  # Runtime-owned adapter bootstraps use packaged Electron as Node 24.
+  runAsNode: true
 directories:
   buildResources: build
   output: dist
@@ -9,6 +14,10 @@ files:
   - package.json
   - resources/icon.png
   - resources/tray-icon.png
+  # Native Codex / Claude Code executables are supplied by the user. Keep the
+  # fixed JavaScript adapters, but never redistribute their optional binaries.
+  - "!node_modules/@openai/codex-{darwin,linux,win32}-*{,/**/*}"
+  - "!node_modules/@anthropic-ai/claude-agent-sdk-{darwin,linux,win32}-*{,/**/*}"
   - "!**/.vscode/*"
   - "!src/*"
   - "!scripts/*"
@@ -72,3 +81,8 @@ nsis:
 npmRebuild: false
 asarUnpack:
   - node_modules/@memohai/runtime/dist/bridge.proto
+extraResources:
+  - from: resources/THIRD_PARTY_NOTICES.md
+    to: THIRD_PARTY_NOTICES.md
+  - from: resources/licenses
+    to: licenses

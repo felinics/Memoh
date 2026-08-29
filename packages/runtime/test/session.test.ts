@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -69,6 +69,31 @@ describe('runtime handshake', () => {
     expect(windowsMetadata.workspace_base).toBe(String.raw`C:\Users\alice\Memoh`)
   })
 
+  it('accepts detected ACP capabilities without changing legacy metadata calls', () => {
+    const machine = {
+      hostname: 'alice.local',
+      os: 'darwin' as const,
+      arch: 'arm64',
+    }
+    const legacy = createHandshakeMetadata('/Users/alice', '1.2.3', machine)
+    expect(legacy.capabilities).toEqual(['fs', 'exec', 'host_fs'])
+
+    const detected = createHandshakeMetadata('/Users/alice', '1.2.3', machine, [
+      'fs',
+      'exec',
+      'host_fs',
+      'acp_codex',
+      'acp_claude_code',
+    ])
+    expect(detected.capabilities).toEqual([
+      'fs',
+      'exec',
+      'host_fs',
+      'acp_codex',
+      'acp_claude_code',
+    ])
+  })
+
   it('allows plaintext only for an explicitly enabled loopback target', () => {
     expect(() => assertSecureRuntimeUrl(new URL('ws://127.0.0.1:8080/runtimes/connect'), true)).not.toThrow()
     expect(() => assertSecureRuntimeUrl(new URL('ws://localhost:8080/runtimes/connect'), false)).toThrow()
@@ -95,6 +120,11 @@ describe('runtime handshake', () => {
         })
       })
       const key = runtimeKey
+      const adapterEntry = join(root, 'codex-entry.cjs')
+      await writeFile(adapterEntry, '// fixed adapter fixture\n')
+      const codexExecutable = join(root, 'codex')
+      await writeFile(codexExecutable, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+      await chmod(codexExecutable, 0o700)
       const session = new RuntimeSession({
         serverUrl: `http://127.0.0.1:${port}/api`,
         key,
@@ -104,6 +134,15 @@ describe('runtime handshake', () => {
       }, {
         random: () => 0.5,
         onStatus: status => statuses.push(status),
+        trustedACPLaunchers: process.platform === 'win32'
+          ? undefined
+          : {
+              'codex-acp': {
+                nodeExecutable: process.execPath,
+                adapterEntry,
+                codexExecutable,
+              },
+            },
       })
       running = session.start(controller.signal)
       const request = await requestPromise
@@ -113,10 +152,16 @@ describe('runtime handshake', () => {
       expect(request.headers['sec-websocket-protocol']).toBe(runtimeProtocolGrpc)
       const encoded = request.headers['x-memoh-runtime-metadata']
       expect(typeof encoded).toBe('string')
-      expect(JSON.parse(Buffer.from(String(encoded), 'base64url').toString('utf8'))).toMatchObject({
+      const decoded = JSON.parse(Buffer.from(String(encoded), 'base64url').toString('utf8'))
+      expect(decoded).toMatchObject({
         version: 1,
         workspace_base: await realpath(root),
       })
+      if (process.platform !== 'win32') {
+        expect(decoded.capabilities).toContain('acp_codex')
+      }
+      expect(JSON.stringify(decoded)).not.toContain(process.execPath)
+      expect(JSON.stringify(decoded)).not.toContain(adapterEntry)
       controller.abort()
       await running
       expect(statuses).toContain('connected')

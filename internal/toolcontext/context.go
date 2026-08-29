@@ -29,6 +29,13 @@ type Session struct {
 	CurrentPlatform   string
 	ReplyTarget       string
 	ConversationType  string
+	// Workspace routing pins tool execution to the session's resolved target.
+	// The remote kind marks a connected computer rather than a managed
+	// container workspace.
+	WorkspaceTargetID   string
+	WorkspaceTargetKind string
+	WorkspaceTargetName string
+	WorkdirPath         string
 	// ReasoningStoredEffort and ReasoningRequestedEffort are unresolved turn
 	// inputs. A tool that selects another model must resolve them against that
 	// model instead of inheriting the parent runtime's provider-specific result.
@@ -145,6 +152,18 @@ func Merge(base, latest Session) Session {
 	}
 	if value := strings.TrimSpace(latest.ConversationType); value != "" {
 		merged.ConversationType = value
+	}
+	if value := strings.TrimSpace(latest.WorkspaceTargetID); value != "" {
+		merged.WorkspaceTargetID = value
+	}
+	if value := strings.TrimSpace(latest.WorkspaceTargetKind); value != "" {
+		merged.WorkspaceTargetKind = value
+	}
+	if value := strings.TrimSpace(latest.WorkspaceTargetName); value != "" {
+		merged.WorkspaceTargetName = value
+	}
+	if value := strings.TrimSpace(latest.WorkdirPath); value != "" {
+		merged.WorkdirPath = value
 	}
 	if value := strings.TrimSpace(latest.ReasoningStoredEffort); value != "" {
 		merged.ReasoningStoredEffort = value

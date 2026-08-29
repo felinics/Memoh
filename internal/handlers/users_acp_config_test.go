@@ -22,11 +22,12 @@ import (
 
 func TestPrepareACPWorkspaceConfigWritesCodexAPIKeyConfig(t *testing.T) {
 	client, recorder := newUsersACPConfigBridgeClient(t)
+	workspaceProvider := &usersACPConfigWorkspace{
+		backend: bridge.WorkspaceBackendContainer,
+		client:  client,
+	}
 	handler := &UsersHandler{
-		acpWorkspace: &usersACPConfigWorkspace{
-			backend: bridge.WorkspaceBackendContainer,
-			client:  client,
-		},
+		acpWorkspace: workspaceProvider,
 	}
 
 	err := handler.prepareACPWorkspaceConfig(context.Background(), bots.Bot{
@@ -49,6 +50,8 @@ func TestPrepareACPWorkspaceConfigWritesCodexAPIKeyConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareACPWorkspaceConfig() error = %v", err)
 	}
+	assertWorkspaceTargetsNative(t, "WorkspaceInfo", workspaceProvider.workspaceInfoTargetsSnapshot())
+	assertWorkspaceTargetsNative(t, "MCPClient", workspaceProvider.mcpClientTargetsSnapshot())
 
 	writes := recorder.writes()
 	if len(writes) != 2 {
@@ -396,13 +399,20 @@ func TestPrepareACPWorkspaceConfigWritesHermesManagedConfig(t *testing.T) {
 }
 
 type usersACPConfigWorkspace struct {
+	mu             sync.Mutex
 	backend        string
 	defaultWorkDir string
 	client         *bridge.Client
 	mcpErr         error
+
+	workspaceInfoTargets []string
+	mcpClientTargets     []string
 }
 
-func (w *usersACPConfigWorkspace) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+func (w *usersACPConfigWorkspace) WorkspaceInfo(ctx context.Context, _ string) (bridge.WorkspaceInfo, error) {
+	w.mu.Lock()
+	w.workspaceInfoTargets = append(w.workspaceInfoTargets, workspace.WorkspaceTargetFromContext(ctx))
+	w.mu.Unlock()
 	defaultWorkDir := w.defaultWorkDir
 	if defaultWorkDir == "" {
 		defaultWorkDir = "/data"
@@ -410,11 +420,38 @@ func (w *usersACPConfigWorkspace) WorkspaceInfo(context.Context, string) (bridge
 	return bridge.WorkspaceInfo{Backend: w.backend, DefaultWorkDir: defaultWorkDir}, nil
 }
 
-func (w *usersACPConfigWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
+func (w *usersACPConfigWorkspace) MCPClient(ctx context.Context, _ string) (*bridge.Client, error) {
+	w.mu.Lock()
+	w.mcpClientTargets = append(w.mcpClientTargets, workspace.WorkspaceTargetFromContext(ctx))
+	w.mu.Unlock()
 	if w.mcpErr != nil {
 		return nil, w.mcpErr
 	}
 	return w.client, nil
+}
+
+func (w *usersACPConfigWorkspace) workspaceInfoTargetsSnapshot() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.workspaceInfoTargets...)
+}
+
+func (w *usersACPConfigWorkspace) mcpClientTargetsSnapshot() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.mcpClientTargets...)
+}
+
+func assertWorkspaceTargetsNative(t *testing.T, operation string, targets []string) {
+	t.Helper()
+	if len(targets) == 0 {
+		t.Fatalf("%s was not called", operation)
+	}
+	for _, target := range targets {
+		if target != workspace.WorkspaceTargetNative {
+			t.Fatalf("%s workspace target = %q, want %q", operation, target, workspace.WorkspaceTargetNative)
+		}
+	}
 }
 
 func (*usersACPConfigWorkspace) SetupBotContainerWithProgress(context.Context, string, workspace.ContainerSetupProgress) error {

@@ -29,10 +29,12 @@
     "typecheck:node": "pnpm run prepare:runtime && tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
-    "test:release": "vitest run src/shared/updates.test.ts src/main/external-links.test.ts && node --test scripts/build-env.test.mjs",
+    "test:release": "vitest run src/shared/updates.test.ts src/main/external-links.test.ts && node --test scripts/build-env.test.mjs scripts/acp-packaging.test.mjs",
     "icons": "node scripts/build-icons.mjs"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.66.0",
+    "@agentclientprotocol/codex-acp": "1.2.0",
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/inter": "^5.2.8",

@@ -10,6 +10,8 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/settings"
@@ -34,11 +36,16 @@ type workspaceTargetSettings interface {
 	UpsertBot(ctx context.Context, botID string, req settings.UpsertRequest) (settings.Settings, error)
 }
 
+type workspaceTargetRuntimeCloser interface {
+	CloseBotWorkspaceTargetRuntimes(botID, targetID string) error
+}
+
 type BotRemoteRuntimeHandler struct {
 	log        *slog.Logger
 	service    botRemoteRuntimeService
 	workspaces workspaceTargetManager
 	settings   workspaceTargetSettings
+	runtimes   workspaceTargetRuntimeCloser
 	bots       *bots.Service
 	accounts   *accounts.Service
 }
@@ -50,6 +57,7 @@ func NewBotRemoteRuntimeHandler(
 	settingsService *settings.Service,
 	botService *bots.Service,
 	accountService *accounts.Service,
+	acpPool *acpagent.SessionPool,
 ) *BotRemoteRuntimeHandler {
 	if log == nil {
 		log = slog.Default()
@@ -59,6 +67,7 @@ func NewBotRemoteRuntimeHandler(
 		service:    service,
 		workspaces: manager,
 		settings:   settingsService,
+		runtimes:   acpPool,
 		bots:       botService,
 		accounts:   accountService,
 	}
@@ -127,19 +136,34 @@ func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} apperror.Problem
 // @Router /bots/{bot_id}/workspace-targets/{target_id} [delete].
 func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(c.Param("target_id")) == workspace.WorkspaceTargetNative {
+	targetID := strings.TrimSpace(c.Param("target_id"))
+	if targetID == workspace.WorkspaceTargetNative {
 		return echo.NewHTTPError(http.StatusBadRequest, "native workspace target cannot be deleted")
 	}
-	if err := h.service.DeleteMount(c.Request().Context(), botID, c.Param("target_id")); err != nil {
+	if err := h.service.DeleteMount(c.Request().Context(), botID, targetID); err != nil {
 		return workspaceTargetHTTPError(h.log, err)
 	}
+	h.closeDeletedTargetRuntimes(botID, targetID)
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *BotRemoteRuntimeHandler) closeDeletedTargetRuntimes(botID, targetID string) {
+	if h == nil || h.runtimes == nil {
+		return
+	}
+	if err := h.runtimes.CloseBotWorkspaceTargetRuntimes(botID, targetID); err != nil {
+		h.log.Warn("failed to close ACP runtimes for deleted workspace target",
+			slog.Any("error", err),
+			slog.String("bot_id", botID),
+			slog.String("workspace_target_id", targetID))
+	}
 }
 
 // SetPrimary godoc
@@ -276,6 +300,8 @@ func workspaceTargetHTTPError(log *slog.Logger, err error) error {
 		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
 		errors.Is(err, db.ErrNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "workspace target not found")
+	case errors.Is(err, workspace.ErrWorkspaceTargetInUse):
+		return apperror.New(apperror.CodeWorkspaceTargetInUse, nil)
 	case errors.Is(err, workspace.ErrRemoteRuntimeRevoked),
 		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
 		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):

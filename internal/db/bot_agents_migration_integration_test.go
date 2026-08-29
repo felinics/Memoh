@@ -18,7 +18,9 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		dsn := teamMigrationDSN(t)
 		pool := freshMigratedDB(t)
 
-		stepDown(t, dsn, 1)
+		// 0142 follows the Bot Agent migration, so cross both migrations to
+		// inspect and seed the 0140 schema.
+		stepDown(t, dsn, 2)
 		assertBotAgentsSchema(t, ctx, pool, false)
 
 		const (
@@ -113,6 +115,7 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		stepUp(t, dsn, 1)
 		assertBotAgentsSchema(t, ctx, pool, true)
 		assertBotAgentConstraintsValidated(t, ctx, pool, false)
+		stepUp(t, dsn, 1)
 	})
 
 	t.Run("canonical init contains final Bot Agent schema", func(t *testing.T) {

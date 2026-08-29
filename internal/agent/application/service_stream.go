@@ -174,7 +174,13 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			errCh <- err
 			return
 		}
-		if ok, err := s.isACPAgentSession(ctx, streamReq); err != nil {
+		streamCtx, preparedReq, prepareErr := s.prepareWorkspaceRequest(ctx, streamReq)
+		if prepareErr != nil {
+			errCh <- prepareErr
+			return
+		}
+		streamReq = preparedReq
+		if ok, err := s.isACPAgentSession(streamCtx, streamReq); err != nil {
 			s.logger.Error("StreamChat: ACP session check failed",
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("session_id", streamReq.ThreadID),
@@ -183,19 +189,9 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			errCh <- err
 			return
 		} else if ok {
-			if err := rejectACPWorkspaceTarget(streamReq); err != nil {
-				errCh <- err
-				return
-			}
-			s.streamACPAgentChunks(ctx, streamReq, chunkCh, errCh)
+			s.streamACPAgentChunks(streamCtx, streamReq, chunkCh, errCh)
 			return
 		}
-		streamCtx, preparedReq, prepareErr := s.prepareWorkspaceRequest(ctx, streamReq)
-		if prepareErr != nil {
-			errCh <- prepareErr
-			return
-		}
-		streamReq = preparedReq
 
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
@@ -479,6 +475,11 @@ func (s *Service) streamChatWSResultWithHooks(
 	if err := s.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
 		return nil, err
 	}
+	var prepareErr error
+	ctx, req, prepareErr = s.prepareWorkspaceRequest(ctx, req)
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
 	if ok, err := s.isACPAgentSession(ctx, req); err != nil {
 		s.logger.Error("StreamChatWS: ACP session check failed",
 			slog.String("bot_id", req.BotID),
@@ -487,9 +488,6 @@ func (s *Service) streamChatWSResultWithHooks(
 		)
 		return nil, err
 	} else if ok {
-		if err := rejectACPWorkspaceTarget(req); err != nil {
-			return nil, err
-		}
 		// Hooks currently mean retry/edit turn replacement. ACP runtimes have
 		// no rewind primitive, so running the turn would leave their in-process
 		// context inconsistent with the visible history.
@@ -497,11 +495,6 @@ func (s *Service) streamChatWSResultWithHooks(
 			return nil, apperror.New(apperror.CodeACPTurnReplacementUnsupported, nil)
 		}
 		return nil, s.streamACPAgentWS(ctx, req, eventCh, abortCh)
-	}
-	var prepareErr error
-	ctx, req, prepareErr = s.prepareWorkspaceRequest(ctx, req)
-	if prepareErr != nil {
-		return nil, prepareErr
 	}
 
 	if preflight != nil {

@@ -106,7 +106,8 @@
   "computerConnect": {
     "title": "连接电脑",
     "commandLabel": "连接命令",
-    "commandDescription": "在要连接的电脑上运行，保持进程运行。",
+    "commandDescription": "需要 macOS 或 Linux，以及 Node.js 22+。在要连接的电脑上运行这条命令，并保持进程运行。",
+    "trustNote": "已连接电脑会在本地运行 Agent。Remote ACP 只通过 Memoh 转发适配器进程数据流，不由 Memoh 配置 Codex 或 Claude Code。命令中含有私密的 Memoh 连接密钥；断开电脑后，该密钥会立即失效。",
     "waiting": "等待电脑连接…",
     "finish": "完成"
   },
@@ -193,6 +194,8 @@
     },
     "workspace": {
       "unreachable": "暂时无法连接工作区，请稍后重试。",
+      "target_in_use": "这台电脑仍被文件夹使用，无法断开连接。",
+      "read_permission_required": "使用这台已连接电脑前，请让 Bot 所有者为你授予文件读取权限。",
       "image_incompatible": "工作区镜像与当前版本不兼容，请基于最新 Memoh Workspace 镜像重建后重试。",
       "template_bootstrap_failed": "工作区文件初始化失败，请尝试重建工作区。",
       "display_prepare_failed": "显示环境准备失败，请稍后重试。"
@@ -1041,6 +1044,8 @@
       "agentAuthInvalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
       "noWorkspaceExec": "你没有执行该 Bot 工作区命令的权限。",
       "runtimeOwnerMissing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
+      "remoteOSUnsupported": "已连接电脑上的 Agent 目前仅支持 macOS 和 Linux。",
+      "remoteAdapterMissing": "这台电脑缺少所需的 Agent 适配器或本地 CLI。请更新 Memoh Desktop，或断开连接后使用“电脑”页面中的最新命令重新连接。",
       "discussUnsupported": "这个外部 Agent 无法在讨论模式中运行。",
       "groupChatUnsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
       "projectModeInvalid": "外部 Agent 的项目模式无效。",

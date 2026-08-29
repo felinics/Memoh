@@ -26,7 +26,18 @@ func TestParseHandshakeMetadataUnicodeAndCanonicalCapabilities(t *testing.T) {
 		"arch":           "arm64",
 		"client_version": "1.2.3",
 		"workspace_base": "/Users/张三/项目",
-		"capabilities":   []string{"exec", "fs", "host_fs", "exec", "workspace_scope", "tunnel_v9"},
+		"capabilities": []string{
+			"exec",
+			"fs",
+			"host_fs",
+			"exec",
+			" ACP_CODEX ",
+			"acp_codex",
+			"ACP_CLAUDE_CODE",
+			"acp_claude_code",
+			"workspace_scope",
+			"tunnel_v9",
+		},
 	})
 
 	info, err := ParseHandshakeMetadata(encoded)
@@ -36,8 +47,8 @@ func TestParseHandshakeMetadataUnicodeAndCanonicalCapabilities(t *testing.T) {
 	if info.Hostname != "工作站.local" || info.WorkspaceBase != "/Users/张三/项目" {
 		t.Fatalf("unicode metadata changed: %#v", info)
 	}
-	if got := strings.Join(info.Capabilities, ","); got != "exec,fs,host_fs" {
-		t.Fatalf("capabilities = %q, want exec,fs,host_fs (unknown capability must be dropped, not rejected)", got)
+	if got := strings.Join(info.Capabilities, ","); got != "acp_claude_code,acp_codex,exec,fs,host_fs" {
+		t.Fatalf("capabilities = %q, want canonical ACP and workspace capabilities (unknown capability must be dropped, not rejected)", got)
 	}
 }
 

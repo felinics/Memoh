@@ -49,10 +49,11 @@ type Profile struct {
 	ForceHTTPMCPServer bool
 	// RuntimeStorage is the internal allowlist and environment contract that
 	// separates durable configuration/credentials from process-local state.
-	RuntimeStorage    RuntimeStoragePolicy
-	ManagedFields     []ManagedField
-	SupportedBackends []string
-	SetupModes        []string
+	RuntimeStorage      RuntimeStoragePolicy
+	ManagedFields       []ManagedField
+	SupportedBackends   []string
+	BackendCapabilities map[string]string
+	SetupModes          []string
 }
 
 // LaunchPolicy declares how an ACP profile resolves its process command. A
@@ -233,7 +234,10 @@ func genericACPProfile() Profile {
 				Help:        "Optional process arguments, one argument per line.",
 			},
 		},
-		SupportedBackends: []string{"container"},
+		SupportedBackends: []string{"container", "remote"},
+		BackendCapabilities: map[string]string{
+			"remote": "acp_codex",
+		},
 		// api_key is an internal managed-mode marker here; generic ACP has no
 		// authentication UI of its own and only needs Memoh-managed launch data.
 		SetupModes: []string{setupModeAPIKey},
@@ -265,7 +269,10 @@ func codexProfile() Profile {
 				Help:        "Optional Codex provider base URL.",
 			},
 		},
-		SupportedBackends: []string{"container"},
+		SupportedBackends: []string{"container", "remote"},
+		BackendCapabilities: map[string]string{
+			"remote": "acp_codex",
+		},
 		// OAuth first: signing in with a ChatGPT account is the path we want
 		// users to reach for; the API key stays available behind it.
 		SetupModes: []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},
@@ -315,7 +322,10 @@ func claudeCodeProfile() Profile {
 				Help:        "Used by OAuth setup to authenticate Claude Code.",
 			},
 		},
-		SupportedBackends: []string{"container"},
+		SupportedBackends: []string{"container", "remote"},
+		BackendCapabilities: map[string]string{
+			"remote": "acp_claude_code",
+		},
 		// OAuth first, same reasoning as Codex: the Claude account sign-in is
 		// the primary path, the API key is the fallback.
 		SetupModes: []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},

@@ -14,6 +14,10 @@ type WorkspaceInfo struct {
 	OS              string
 	DefaultWorkDir  string
 	ACPToolsHTTPURL string
+	Capabilities    []string
+	TargetID        string
+	TargetKind      string
+	TargetName      string
 }
 
 type WorkspaceInfoProvider interface {

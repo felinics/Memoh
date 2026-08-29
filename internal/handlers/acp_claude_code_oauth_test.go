@@ -149,3 +149,13 @@ func TestUpsertClaudeCodeOAuthMetadataStoresBotScopedToken(t *testing.T) {
 		t.Fatalf("original metadata was mutated")
 	}
 }
+
+func TestACPClaudeCodeEnsureManagedWorkspaceUsesNativeTarget(t *testing.T) {
+	workspaceProvider := &usersACPConfigWorkspace{}
+	handler := &ACPClaudeCodeOAuthHandler{acpWorkspace: workspaceProvider}
+
+	if err := handler.ensureManagedWorkspace(context.Background(), "bot-1"); err != nil {
+		t.Fatalf("ensureManagedWorkspace() error = %v", err)
+	}
+	assertWorkspaceTargetsNative(t, "Claude Code WorkspaceInfo", workspaceProvider.workspaceInfoTargetsSnapshot())
+}

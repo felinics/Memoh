@@ -47,6 +47,7 @@ type WorkspaceBackend string
 
 const (
 	WorkspaceBackendContainer WorkspaceBackend = "container"
+	WorkspaceBackendRemote    WorkspaceBackend = "remote"
 )
 
 type SetupMode string
@@ -80,6 +81,7 @@ type bridgeProcess struct {
 	lifecycleCtx context.Context
 	env          []string
 	toolEnv      []string
+	cleanEnv     bool
 	unsetEnv     []string
 	lease        *runtimeLease
 	logger       *slog.Logger
@@ -90,6 +92,16 @@ type bridgeProcess struct {
 	finalizeOnce sync.Once
 	finalizeDone chan struct{}
 	finalizeErr  error
+}
+
+// Done closes when the adapter process or its transport exits.
+func (p *bridgeProcess) Done() <-chan struct{} {
+	if p == nil {
+		closed := make(chan struct{})
+		close(closed)
+		return closed
+	}
+	return p.done
 }
 
 func startBridgeProcess(ctx context.Context, client *bridge.Client, command string, args []string, workDir string, timeout time.Duration, opts processOptions) (*bridgeProcess, error) {
@@ -112,11 +124,26 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		timeoutSeconds = int32(DefaultRunTimeout.Seconds())
 	}
 
-	lease, err := prepareRuntimeLease(ctx, client, opts)
-	if err != nil {
-		return nil, err
+	var lease *runtimeLease
+	var env, toolEnv, unsetEnv []string
+	runtimeOpts := opts
+	if opts.Backend == WorkspaceBackendRemote {
+		// A connected computer owns provider authentication and agent state.
+		runtimeOpts.Env = nil
+		runtimeOpts.CleanEnv = false
+		runtimeOpts.UnsetEnv = nil
+	} else {
+		var err error
+		lease, err = prepareRuntimeLease(ctx, client, opts)
+		if err != nil {
+			return nil, err
+		}
+		env = lease.agentEnv
+		toolEnv = lease.toolEnv
+		unsetEnv = lease.unsetEnv
+		runtimeOpts.UnsetEnv = unsetEnv
 	}
-	if opts.Resume != nil {
+	if opts.Resume != nil && lease != nil {
 		// Materialize the database checkpoint before the adapter (and any
 		// child app-server it launches) can scan its process-local home.
 		if err := lease.restoreSessionState(ctx, opts.Resume); err != nil {
@@ -126,15 +153,18 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 			return nil, fmt.Errorf("restore ACP session state: %w", err)
 		}
 	}
-	env := lease.agentEnv
-	runtimeOpts := opts
-	runtimeOpts.UnsetEnv = lease.unsetEnv
-
-	resolvedCommand, err := resolveCommand(ctx, client, command, workDir, env, runtimeOpts)
-	if err != nil {
+	cleanupLease := func() {
+		if lease == nil {
+			return
+		}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = lease.finalize(cleanupCtx, false)
+	}
+
+	resolvedCommand, err := resolveCommand(ctx, client, command, workDir, env, runtimeOpts)
+	if err != nil {
+		cleanupLease()
 		return nil, err
 	}
 
@@ -145,9 +175,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		UnsetEnv: runtimeOpts.UnsetEnv,
 	})
 	if err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = lease.finalize(cleanupCtx, false)
+		cleanupLease()
 		return nil, err
 	}
 
@@ -161,8 +189,9 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		done:         make(chan struct{}),
 		lifecycleCtx: ctx,
 		env:          append([]string(nil), env...),
-		toolEnv:      append([]string(nil), lease.toolEnv...),
-		unsetEnv:     append([]string(nil), lease.unsetEnv...),
+		toolEnv:      append([]string(nil), toolEnv...),
+		cleanEnv:     runtimeOpts.CleanEnv,
+		unsetEnv:     append([]string(nil), unsetEnv...),
 		lease:        lease,
 		logger:       opts.Logger,
 		finalizeDone: make(chan struct{}),
@@ -237,7 +266,7 @@ func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir
 		if resolved != "" || err != nil {
 			return resolved, err
 		}
-		return "", commandNotAvailableError(command, lastResult, requiresPinnedToolkitAdapter(opts.AgentID))
+		return "", commandNotAvailableError(command, lastResult, opts.Backend, requiresPinnedToolkitAdapter(opts.AgentID))
 	}
 
 	deadline := time.Now().Add(commandResolveWindow)
@@ -261,7 +290,7 @@ func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir
 			return resolved, nil
 		}
 	}
-	return "", commandNotAvailableError(command, lastResult, requiresPinnedToolkitAdapter(opts.AgentID))
+	return "", commandNotAvailableError(command, lastResult, opts.Backend, requiresPinnedToolkitAdapter(opts.AgentID))
 }
 
 func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts processOptions) (string, *bridge.ExecResult, error) {
@@ -285,7 +314,7 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 	// the Memoh toolkit. A same-named binary earlier on PATH may use a different
 	// transcript layout or omit the Claude flush/receipt contract, so built-in
 	// resumable profiles must never silently execute it.
-	if requiresPinnedToolkitAdapter(opts.AgentID) {
+	if opts.Backend != WorkspaceBackendRemote && requiresPinnedToolkitAdapter(opts.AgentID) {
 		toolkitCommand := containerToolkitBin + "/" + command
 		toolkitResult, err := checkCommand(ctx, client, "test -x "+escapeShellArg(toolkitCommand), workDir, env, opts)
 		if err != nil {
@@ -303,6 +332,9 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 	}
 	if result.ExitCode == 0 {
 		return command, result, nil
+	}
+	if opts.Backend == WorkspaceBackendRemote {
+		return "", result, nil
 	}
 	toolkitCommand := containerToolkitBin + "/" + command
 	toolkitResult, err := checkCommand(ctx, client, "test -x "+escapeShellArg(toolkitCommand), workDir, env, opts)
@@ -324,7 +356,7 @@ func checkCommand(ctx context.Context, client *bridge.Client, check, workDir str
 	})
 }
 
-func commandNotAvailableError(command string, result *bridge.ExecResult, pinned bool) error {
+func commandNotAvailableError(command string, result *bridge.ExecResult, backend WorkspaceBackend, pinned bool) error {
 	detail := ""
 	if result != nil {
 		detail = strings.TrimSpace(result.Stderr)
@@ -334,6 +366,9 @@ func commandNotAvailableError(command string, result *bridge.ExecResult, pinned 
 	}
 	if detail != "" {
 		detail = ": " + detail
+	}
+	if backend == WorkspaceBackendRemote {
+		return fmt.Errorf("ACP command %q is not available on the connected computer%s; reconnect it with the Remote ACP adapter package installed", command, detail)
 	}
 	if pinned {
 		// Resumable agents deliberately never fall back to PATH, so pointing
@@ -476,6 +511,9 @@ func (p *bridgeProcess) finalizeAfterExit(parent context.Context) {
 	}
 	p.finalizeOnce.Do(func() {
 		defer close(p.finalizeDone)
+		if p.lease == nil {
+			return
+		}
 		p.stateMu.Lock()
 		commit := p.activated
 		p.stateMu.Unlock()

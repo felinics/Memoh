@@ -84,15 +84,45 @@ export const useWorkdirsStore = defineStore('workdirs', () => {
     workingWorkdirByBot.value = next
   }
 
-  // sessionWorkdirIdFor answers "which workdir should this new session bind
-  // to". ACP sessions can only run in native-workspace workdirs (the runtime
-  // cannot reach a remote computer yet), so a remote working workdir is
-  // skipped rather than producing a session the backend would reject.
-  function sessionWorkdirIdFor(botId: string | null | undefined, opts: { acp?: boolean } = {}): string {
-    const workdir = workingWorkdirFor(botId)
-    if (!workdir?.id) return ''
-    if (opts.acp && workdir.target_kind === 'remote') return ''
-    return workdir.id
+  // Before the list loads, retain the persisted ID conservatively. A raw
+  // Folder selection must suppress ACP prewarm instead of briefly looking like
+  // "no Folder" and starting a runtime against Primary. Once loaded, validate
+  // the ID so an archived/deleted Folder degrades to no binding.
+  function sessionWorkdirIdFor(botId: string | null | undefined): string {
+    const bid = (botId ?? '').trim()
+    if (!bid) return ''
+    const workdirId = workingWorkdirByBot.value[bid]?.trim() ?? ''
+    if (!workdirId || !loadedBots.has(bid)) return workdirId
+    const workdir = workdirById(bid, workdirId)
+    return workdir && !workdir.archived ? workdirId : ''
+  }
+
+  // The draft Folder binding with its target kind and path. Kind stays empty
+  // until the authoritative list confirms it, so callers treating only an
+  // explicit "native" as safe-to-prewarm degrade conservatively while the
+  // list loads or when the Folder is unknown.
+  function sessionWorkdirBindingFor(
+    botId: string | null | undefined,
+  ): { id: string, kind: string, path: string } {
+    const bid = (botId ?? '').trim()
+    const id = sessionWorkdirIdFor(bid)
+    if (!id || !loadedBots.has(bid)) return { id, kind: '', path: '' }
+    const workdir = workdirById(bid, id)
+    return {
+      id,
+      kind: (workdir?.target_kind ?? '').trim(),
+      path: (workdir?.path ?? '').trim(),
+    }
+  }
+
+  // Session creation waits for the authoritative list before committing its
+  // immutable Folder binding. A load failure rejects creation rather than
+  // silently creating an unbound Session on Primary.
+  async function resolveSessionWorkdirIdFor(botId: string | null | undefined): Promise<string> {
+    const bid = (botId ?? '').trim()
+    if (!bid || !sessionWorkdirIdFor(bid)) return ''
+    await ensureWorkdirs(bid)
+    return sessionWorkdirIdFor(bid)
   }
 
   return {
@@ -105,5 +135,7 @@ export const useWorkdirsStore = defineStore('workdirs', () => {
     workingWorkdirFor,
     setWorkingWorkdir,
     sessionWorkdirIdFor,
+    sessionWorkdirBindingFor,
+    resolveSessionWorkdirIdFor,
   }
 })

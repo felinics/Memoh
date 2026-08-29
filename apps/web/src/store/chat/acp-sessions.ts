@@ -46,10 +46,11 @@ export interface ACPSessionDeps {
   isDraftCreationActive: (target: ChatViewTarget) => boolean
   beginDraftCreation: (target: ChatViewTarget) => void
   endDraftCreation: (target: ChatViewTarget) => void
-  // Resolves the bot's working workdir for a new session ('' = no binding).
-  // ACP sessions can only bind native-workspace workdirs, so the resolver is
-  // told which runtime the session will use.
-  draftWorkdirIdFor: (botId: string, opts: { acp: boolean }) => string
+  // The synchronous value conservatively retains a persisted selection so ACP
+  // prewarm can be suppressed while the list loads. Creation uses the async
+  // resolver to validate the immutable binding first.
+  draftWorkdirBindingFor: (botId: string) => { id: string, kind: string, path: string }
+  resolveDraftWorkdirIdFor: (botId: string) => Promise<string>
 }
 
 function normalizedACPInput(input: ACPAgentSessionInput): ACPAgentSessionInput {
@@ -66,13 +67,13 @@ export function createACPSessions(deps: ACPSessionDeps) {
   async function createACPSessionRecord(
     botId: string,
     input: ACPAgentSessionInput,
+    workdirId: string,
   ): Promise<SessionSummary> {
     const id = botId.trim()
     if (!id) throw new Error('Bot not ready')
     const metadata = acpSessionMetadata(input)
     const runtimeId = input.runtimeId?.trim() ?? ''
     const sessionMode = input.sessionMode === 'discuss' ? 'discuss' : 'chat'
-    const workdirId = deps.draftWorkdirIdFor(id, { acp: true })
     return createSession(id, {
       botAgentId: input.botAgentId,
       title: input.title ?? '',
@@ -91,6 +92,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
     draft: ChatViewTarget,
     stagedInput: ACPAgentSessionInput,
     stagedRuntimeId: string,
+    droppedRuntimeId: string,
     generation: number,
   ) {
     if (generation !== deps.userScopeGeneration()) return
@@ -103,7 +105,10 @@ export function createACPSessions(deps: ACPSessionDeps) {
       deps.removeSessionFromList(created.id)
     }
 
-    deps.forgetDraftStage(draft)
+    // A staged runtime that was not handed to the session must be closed, not
+    // merely forgotten — otherwise it idles server-side until the reaper.
+    if (droppedRuntimeId) deps.discardDraftStage(draft)
+    else deps.forgetDraftStage(draft)
     deps.rememberDraftStage(draft, {
       botId: draft.botId,
       input: normalizedACPInput({ ...stagedInput, runtimeId: undefined }),
@@ -124,8 +129,22 @@ export function createACPSessions(deps: ACPSessionDeps) {
     const draft = deps.targetDraftForACP(target)
     const generation = deps.userScopeGeneration()
     const stagedBeforeCreate = deps.pendingACPStateFor(draft)
-    const runtimeId = input.runtimeId?.trim() ?? ''
-    const created = await createACPSessionRecord(draft.botId, input)
+    const workdirId = await deps.resolveDraftWorkdirIdFor(draft.botId)
+    // A native Folder shares Primary's workspace, so a runtime prewarmed on
+    // the Folder's path is reusable — the backend still refuses the bind if
+    // the paths disagree. Any other binding may target a different computer:
+    // never hand it a prewarmed Primary runtime.
+    const binding = workdirId ? deps.draftWorkdirBindingFor(draft.botId) : null
+    const reusableFolderRuntime = !!binding
+      && binding.id === workdirId
+      && binding.kind === 'native'
+      && !!binding.path
+      && (input.projectPath ?? '').trim() === binding.path
+    const runtimeId = workdirId && !reusableFolderRuntime ? '' : input.runtimeId?.trim() ?? ''
+    const created = await createACPSessionRecord(draft.botId, {
+      ...input,
+      runtimeId: runtimeId || undefined,
+    }, workdirId)
     if (
       generation !== deps.userScopeGeneration()
       || (deps.currentBotId.value ?? '').trim() !== draft.botId
@@ -135,6 +154,9 @@ export function createACPSessions(deps: ACPSessionDeps) {
         draft,
         stagedBeforeCreate?.input ?? input,
         runtimeId,
+        stagedBeforeCreate?.runtimeId && stagedBeforeCreate.runtimeId !== runtimeId
+          ? stagedBeforeCreate.runtimeId
+          : '',
         generation,
       )
       const error = new Error('Chat scope changed during ACP Session creation')
@@ -263,7 +285,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
       }
 
       const generation = deps.userScopeGeneration()
-      const workdirId = deps.draftWorkdirIdFor(target.botId, { acp: false })
+      const workdirId = await deps.resolveDraftWorkdirIdFor(target.botId)
       const created = await createSession(target.botId, {
         workdirId: workdirId || undefined,
       })

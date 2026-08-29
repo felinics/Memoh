@@ -124,3 +124,29 @@ func TestMergePreservesRuntimeLifecycle(t *testing.T) {
 		t.Fatalf("runtime lifecycle = context:%v guard:%v", merged.RunContext, merged.RuntimeGuard != nil)
 	}
 }
+
+func TestMergePreservesWorkspaceBinding(t *testing.T) {
+	base := Session{
+		WorkspaceTargetID:   "old-target",
+		WorkspaceTargetKind: "native",
+		WorkspaceTargetName: "Server Workspace",
+		WorkdirPath:         "/data/old",
+	}
+	merged := Merge(base, Session{
+		WorkspaceTargetID:   " remote-target ",
+		WorkspaceTargetKind: " remote ",
+		WorkspaceTargetName: " Office Mac ",
+		WorkdirPath:         " /Users/alice/project ",
+	})
+
+	if merged.WorkspaceTargetID != "remote-target" ||
+		merged.WorkspaceTargetKind != "remote" ||
+		merged.WorkspaceTargetName != "Office Mac" ||
+		merged.WorkdirPath != "/Users/alice/project" {
+		t.Fatalf("workspace binding = %#v", merged)
+	}
+	kept := Merge(base, Session{})
+	if kept.WorkspaceTargetID != "old-target" || kept.WorkdirPath != "/data/old" {
+		t.Fatalf("empty overlay dropped binding = %#v", kept)
+	}
+}

@@ -98,6 +98,23 @@ func TestMCPSessionRoundTripPreservesReasoningIntent(t *testing.T) {
 	}
 }
 
+func TestSessionFromMCPPreservesWorkspaceBinding(t *testing.T) {
+	session := sessionFromMCP(mcp.ToolSessionContext{
+		BotID:               "bot-1",
+		WorkspaceTargetID:   "target-1",
+		WorkspaceTargetKind: "remote",
+		WorkspaceTargetName: "Office Mac",
+		WorkdirPath:         "/Users/alice/project",
+	})
+
+	if session.WorkspaceTargetID != "target-1" ||
+		session.WorkspaceTargetKind != "remote" ||
+		session.WorkspaceTargetName != "Office Mac" ||
+		session.WorkdirPath != "/Users/alice/project" {
+		t.Fatalf("workspace binding = %#v", session)
+	}
+}
+
 func TestNativeToolSourceAllowlistIgnoresUnknownNames(t *testing.T) {
 	provider := &nativeSourceTestProvider{
 		tools: []sdk.Tool{{
@@ -376,6 +393,7 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 		RunID:             "run-1",
 		ToolCallID:        "mcp-http-call-1",
 		ChannelIdentityID: "user-1",
+		WorkspaceTargetID: "target-1",
 		CurrentPlatform:   "web",
 		ReplyTarget:       "reply-1",
 		ConversationType:  "private",
@@ -391,6 +409,9 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 	}
 	if approval.created.ToolCallID != "mcp-http-call-1" {
 		t.Fatalf("approval tool_call_id = %q, want existing MCP tool call id", approval.created.ToolCallID)
+	}
+	if approval.created.WorkspaceTargetID != "target-1" {
+		t.Fatalf("approval workspace target = %q, want session target", approval.created.WorkspaceTargetID)
 	}
 	if len(toolEvents.events) != 2 {
 		t.Fatalf("tool events = %d, want pending and approved approval events", len(toolEvents.events))

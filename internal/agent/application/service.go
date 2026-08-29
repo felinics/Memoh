@@ -682,24 +682,18 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	if err := s.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
 		return ChatResponse{}, err
 	}
-	if isACP, err := s.isACPAgentSession(ctx, req); err != nil {
+	var err error
+	ctx, req, err = s.prepareWorkspaceRequest(ctx, req)
+	if err != nil {
 		return ChatResponse{}, err
-	} else if isACP {
-		if err := rejectACPWorkspaceTarget(req); err != nil {
-			return ChatResponse{}, err
-		}
-	} else {
-		var err error
-		ctx, req, err = s.prepareWorkspaceRequest(ctx, req)
-		if err != nil {
-			return ChatResponse{}, err
-		}
+	}
+	if _, err := s.isACPAgentSession(ctx, req); err != nil {
+		return ChatResponse{}, err
 	}
 
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
-	var err error
 	if !req.UserMessagePersisted {
 		req, err = s.applyUserMessageHook(ctx, req)
 		if err != nil {

@@ -17,6 +17,8 @@ const (
 	CodeAgentAuthInvalid      = "acp_agent_auth_invalid"
 	CodeNoWorkspaceExec       = "no_workspace_exec"
 	CodeRuntimeOwnerMissing   = "acp_runtime_owner_missing"
+	CodeRemoteOSUnsupported   = "acp_remote_os_unsupported"
+	CodeRemoteAdapterMissing  = "acp_remote_adapter_missing"
 	CodeDiscussUnsupported    = "acp_discuss_unsupported"
 	CodeGroupChatUnsupported  = "group_chat_acp_unsupported"
 	CodeProjectModeInvalid    = "acp_project_mode_invalid"

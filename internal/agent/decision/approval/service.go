@@ -100,7 +100,11 @@ func (s *Service) policyEvaluation(ctx context.Context, input CreatePendingInput
 		if !ok {
 			return Evaluation{}, errors.New("workspace tool input must be an object")
 		}
-		target, err := s.targets.ResolveWorkspaceTargetPolicy(ctx, input.BotID, readString(args, "target_id"))
+		targetID := readString(args, "target_id")
+		if targetID == "" {
+			targetID = strings.TrimSpace(input.WorkspaceTargetID)
+		}
+		target, err := s.targets.ResolveWorkspaceTargetPolicy(ctx, input.BotID, targetID)
 		if err != nil {
 			return Evaluation{}, err
 		}

@@ -3,10 +3,78 @@ import { describe, expect, it } from 'vitest'
 
 import {
   assertSafeEnvironmentName,
+  detectRuntimeCapabilities,
+  guardedEnvironment,
   inheritedEnvironment,
 } from '../src/core/guards'
 
 describe('runtime guards', () => {
+  it('advertises ACP adapters found on the narrowed POSIX PATH', async () => {
+    const probed: string[] = []
+    const capabilities = await detectRuntimeCapabilities({
+      PATH: '/safe/bin:relative:/other/bin:/safe/bin',
+    }, 'linux', async candidate => {
+      probed.push(candidate)
+      return candidate === '/safe/bin/codex-acp'
+        || candidate === '/other/bin/claude-agent-acp'
+    })
+
+    expect(capabilities).toEqual([
+      'fs',
+      'exec',
+      'host_fs',
+      'acp_codex',
+      'acp_claude_code',
+    ])
+    expect(probed).not.toContain('relative/codex-acp')
+    expect(probed).not.toContain('relative/claude-agent-acp')
+  })
+
+  it('does not advertise missing ACP adapters or probe them on Windows', async () => {
+    const missing = await detectRuntimeCapabilities({ PATH: '/safe/bin' }, 'darwin', async () => false)
+    expect(missing).toEqual(['fs', 'exec', 'host_fs'])
+
+    let probes = 0
+    const windows = await detectRuntimeCapabilities({
+      Path: String.raw`C:\Tools;C:\Windows`,
+      PATHEXT: '.COM;.EXE;.BAT;.CMD',
+    }, 'win32', async () => {
+      probes++
+      return true
+    })
+    expect(windows).toEqual(['fs', 'exec', 'host_fs'])
+    expect(probes).toBe(0)
+  })
+
+  it('uses trusted adapter availability instead of ambient PATH for configured aliases', async () => {
+    const probed: string[] = []
+    const capabilities = await detectRuntimeCapabilities(
+      { PATH: '/ambient/bin' },
+      'linux',
+      async candidate => {
+        probed.push(candidate)
+        return true
+      },
+      {
+        configuredAdapters: ['codex-acp', 'claude-agent-acp'],
+        availableAdapters: ['codex-acp'],
+      },
+    )
+
+    expect(capabilities).toContain('acp_codex')
+    expect(capabilities).not.toContain('acp_claude_code')
+    expect(probed).toEqual([])
+  })
+
+  it('keeps a Runtime-owned executable path in clean and unset environments', () => {
+    if (process.platform === 'win32') return
+    expect(guardedEnvironment([], {
+      clean: true,
+      unset: ['PATH'],
+      trustedExecutableDirectories: ['/private/runtime-shims'],
+    })).toEqual({ PATH: '/private/runtime-shims' })
+  })
+
   it.each([
     'LD_PRELOAD',
     'DYLD_INSERT_LIBRARIES',
@@ -21,6 +89,12 @@ describe('runtime guards', () => {
     'PATHEXT',
     'IFS',
     'MEMOH_RUNTIME_KEY',
+    'ELECTRON_RUN_AS_NODE',
+    'CODEX_PATH',
+    'CLAUDE_CODE_EXECUTABLE',
+    'NODE_PATH',
+    'NODE_DEBUG',
+    'ELECTRON_NO_ATTACH_CONSOLE',
   ])(
     'rejects dangerous environment variable %s',
     name => {

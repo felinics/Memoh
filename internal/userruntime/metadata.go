@@ -13,11 +13,13 @@ import (
 )
 
 const (
-	RuntimeMetadataHeader = "X-Memoh-Runtime-Metadata"
-	maxMetadataBytes      = 8 * 1024
-	CapabilityFS          = "fs"
-	CapabilityExec        = "exec"
-	CapabilityHostFS      = "host_fs"
+	RuntimeMetadataHeader   = "X-Memoh-Runtime-Metadata"
+	maxMetadataBytes        = 8 * 1024
+	CapabilityFS            = "fs"
+	CapabilityExec          = "exec"
+	CapabilityHostFS        = "host_fs"
+	CapabilityACPCodex      = "acp_codex"
+	CapabilityACPClaudeCode = "acp_claude_code"
 )
 
 var (
@@ -114,7 +116,7 @@ func validateHandshakeInfo(info *HandshakeInfo) error {
 	for _, capability := range info.Capabilities {
 		capability = strings.ToLower(strings.TrimSpace(capability))
 		switch capability {
-		case CapabilityFS, CapabilityExec, CapabilityHostFS:
+		case CapabilityFS, CapabilityExec, CapabilityHostFS, CapabilityACPCodex, CapabilityACPClaudeCode:
 		default:
 			// A newer client may declare capabilities this server predates.
 			// Drop them instead of rejecting: routing only ever consults the

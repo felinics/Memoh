@@ -7,7 +7,15 @@ import WebSocket from 'ws'
 import { normalizeRuntimeTeamId, validateConfig, type RuntimeClientConfig } from './config.js'
 import { bridgeWebSocketToGrpc } from './pipe/grpc-websocket'
 import { grpcMessageLimit, startRuntimeGrpcServer } from './service'
-import { runtimeCapabilities } from './core/guards'
+import {
+  runtimeCapabilities,
+  type RuntimeCapability,
+} from './core/guards'
+import {
+  cleanupStaleTrustedACPLaunchers,
+  normalizeTrustedACPLaunchers,
+  type TrustedACPLaunchers,
+} from './core/acp-launchers.js'
 import { runtimeClientVersion } from './version'
 
 export const runtimeProtocolGrpc = 'memoh.runtime.v1.grpc'
@@ -26,7 +34,7 @@ export interface RuntimeHandshakeMetadataV1 {
   arch: string
   client_version: string
   workspace_base: string
-  capabilities: Array<'fs' | 'exec' | 'host_fs'>
+  capabilities: RuntimeCapability[]
 }
 
 export interface RuntimeHandshakeHeaders {
@@ -36,11 +44,21 @@ export interface RuntimeHandshakeHeaders {
   'X-Team-ID'?: string
 }
 
+/**
+ * Trusted launchers may be given as a value or as a provider. A provider is
+ * re-resolved on every connection attempt, so hosts like Desktop can pick up
+ * a CLI the user installed after the session started without a restart.
+ */
+export type TrustedACPLaunchersSource =
+  | TrustedACPLaunchers
+  | (() => Promise<TrustedACPLaunchers | undefined> | TrustedACPLaunchers | undefined)
+
 export interface RuntimeSessionOptions {
   version?: string
   random?: () => number
   onStatus?: (status: RuntimeSessionStatus, error?: string) => void
   warn?: (message: string) => void
+  trustedACPLaunchers?: TrustedACPLaunchersSource
 }
 
 export type RuntimeSessionStatus = 'connecting' | 'connected' | 'disconnected' | 'stopped'
@@ -82,6 +100,7 @@ export function createHandshakeMetadata(
     os: platform() as RuntimeHandshakeMetadataV1['os'],
     arch: arch(),
   },
+  capabilities: readonly RuntimeCapability[] = runtimeCapabilities(),
 ): RuntimeHandshakeMetadataV1 {
   if (!['darwin', 'linux', 'win32'].includes(machine.os)) {
     throw new Error(`unsupported runtime operating system: ${machine.os}`)
@@ -101,7 +120,7 @@ export function createHandshakeMetadata(
     arch: requiredMetadataString(machine.arch, 'arch', 64),
     client_version: requiredMetadataString(version, 'client_version', 128),
     workspace_base: workspace,
-    capabilities: runtimeCapabilities(),
+    capabilities: [...capabilities],
   }
 }
 
@@ -134,6 +153,7 @@ export class RuntimeSession {
   private readonly random: () => number
   private readonly onStatus: ((status: RuntimeSessionStatus, error?: string) => void) | undefined
   private readonly warn: ((message: string) => void) | undefined
+  private readonly trustedACPLaunchers: TrustedACPLaunchersSource | undefined
   private stopped = false
   private activeController: AbortController | undefined
 
@@ -146,6 +166,9 @@ export class RuntimeSession {
     this.random = options.random ?? Math.random
     this.onStatus = options.onStatus
     this.warn = options.warn
+    this.trustedACPLaunchers = typeof options.trustedACPLaunchers === 'function'
+      ? options.trustedACPLaunchers
+      : normalizeTrustedACPLaunchers(options.trustedACPLaunchers)
   }
 
   async start(signal?: AbortSignal): Promise<void> {
@@ -163,6 +186,7 @@ export class RuntimeSession {
       const url = runtimeConnectUrl(this.config.serverUrl)
       assertSecureRuntimeUrl(url, this.config.insecureLocalhost)
       const workspaceBase = await realpath(this.config.workspaceBase)
+      await cleanupStaleTrustedACPLaunchers()
       let retry = 1_000
       let lastError: string | undefined
 
@@ -198,6 +222,21 @@ export class RuntimeSession {
     this.activeController?.abort()
   }
 
+  private async resolveTrustedACPLaunchers(): Promise<TrustedACPLaunchers | undefined> {
+    if (typeof this.trustedACPLaunchers !== 'function') {
+      return this.trustedACPLaunchers
+    }
+    try {
+      return normalizeTrustedACPLaunchers(await this.trustedACPLaunchers())
+    } catch (error) {
+      // A broken discovery must not take down the whole computer connection.
+      // Explicitly disabling both aliases also blocks ambient PATH fallback,
+      // so a failed probe cannot silently widen what the server may launch.
+      this.warn?.(`trusted ACP launcher discovery failed: ${error instanceof Error ? error.message : String(error)}`)
+      return { 'codex-acp': false, 'claude-agent-acp': false }
+    }
+  }
+
   private async runConnection(url: URL, workspaceBase: string, signal?: AbortSignal): Promise<void> {
     let grpc: Awaited<ReturnType<typeof startRuntimeGrpcServer>> | undefined
     let websocket: WebSocket | undefined
@@ -206,8 +245,9 @@ export class RuntimeSession {
       grpc = await startRuntimeGrpcServer({
         workspaceBase,
         warn: this.warn,
+        trustedACPLaunchers: await this.resolveTrustedACPLaunchers(),
       })
-      const metadata = createHandshakeMetadata(workspaceBase, this.version)
+      const metadata = createHandshakeMetadata(workspaceBase, this.version, undefined, grpc.capabilities)
       const headers = handshakeHeaders(this.config, this.version, metadata)
       const websocketHeaders: Record<string, string> = {
         Authorization: headers.Authorization,

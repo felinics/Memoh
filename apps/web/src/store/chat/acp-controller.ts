@@ -36,7 +36,8 @@ export function createACPController(deps: {
   removeSessionFromList: (sessionId: string) => void
   ensureBot: () => Promise<string | null>
   knownSession: (sessionId: string) => SessionSummary | null | undefined
-  draftWorkdirIdFor: (botId: string, opts: { acp: boolean }) => string
+  draftWorkdirBindingFor: (botId: string) => { id: string, kind: string, path: string }
+  resolveDraftWorkdirIdFor: (botId: string) => Promise<string>
 }) {
   const runtimeRegistry = createACPRuntimeRegistry({
     currentBotId: deps.currentBotId,
@@ -85,6 +86,19 @@ export function createACPController(deps: {
       draftViewCommandVersions.delete(deps.draftCreationKey(target))
     },
     resetWorkspaceTargetSelection: deps.resetWorkspaceTargetSelection,
+    // A native Folder shares the workspace every chat already uses, so the
+    // draft may prewarm there (on the Folder's path) and keep the model and
+    // reasoning pickers live. A remote Folder — or one whose kind is not yet
+    // confirmed — must not start anything before session creation commits the
+    // immutable binding on the selected computer.
+    shouldPrewarmDraftACP: (target) => {
+      const binding = deps.draftWorkdirBindingFor(target.botId)
+      return !binding.id || binding.kind === 'native'
+    },
+    draftProjectPathFor: (target) => {
+      const binding = deps.draftWorkdirBindingFor(target.botId)
+      return binding.id && binding.kind === 'native' ? binding.path : ''
+    },
   })
   const defaults = createACPDefaults({
     currentBotId: deps.currentBotId,
@@ -106,7 +120,7 @@ export function createACPController(deps: {
     userScopeGeneration: deps.userScopeGeneration,
     normalizeTarget: deps.normalizeTarget,
     targetDraftForACP: orchestration.targetDraftForACP,
-    pendingACPStateFor: orchestration.pendingACPStateFor,
+    pendingACPStateFor: orchestration.pendingACPStateForSession,
     isFocusedTarget: deps.isFocusedTarget,
     upsertSession: deps.upsertSession,
     rememberSession: deps.rememberSession,
@@ -130,7 +144,8 @@ export function createACPController(deps: {
     endDraftCreation: target => {
       deps.draftSessionCreations.delete(deps.draftCreationKey(target))
     },
-    draftWorkdirIdFor: deps.draftWorkdirIdFor,
+    draftWorkdirBindingFor: deps.draftWorkdirBindingFor,
+    resolveDraftWorkdirIdFor: deps.resolveDraftWorkdirIdFor,
   })
 
   const draftViewRequested = ref<{

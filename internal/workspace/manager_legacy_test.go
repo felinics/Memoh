@@ -44,11 +44,16 @@ type legacyRouteTestService struct {
 
 type workspaceInfoProviderTestService struct {
 	legacyRouteTestService
-	info bridge.WorkspaceInfo
+	info   bridge.WorkspaceInfo
+	client *bridge.Client
 }
 
 func (s *workspaceInfoProviderTestService) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
 	return s.info, nil
+}
+
+func (s *workspaceInfoProviderTestService) MCPClient(context.Context, string) (*bridge.Client, error) {
+	return s.client, nil
 }
 
 func (s *legacyRouteTestService) PullImage(_ context.Context, ref string, _ *ctr.PullImageOptions) (ctr.ImageInfo, error) {
@@ -366,10 +371,13 @@ func TestStartWithImageDoesNotRecreateExistingContainer(t *testing.T) {
 }
 
 func TestWorkspaceInfoAddsACPToolsEndpointForProviderContainer(t *testing.T) {
+	client, _ := newRemoteScopeTestClient(t)
 	svc := &workspaceInfoProviderTestService{
+		client: client,
 		info: bridge.WorkspaceInfo{
 			Backend:        bridge.WorkspaceBackendContainer,
 			DefaultWorkDir: "/data",
+			Capabilities:   []string{"native_capability"},
 		},
 	}
 	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{DataRoot: t.TempDir()})
@@ -380,6 +388,21 @@ func TestWorkspaceInfoAddsACPToolsEndpointForProviderContainer(t *testing.T) {
 	}
 	if info.ACPToolsHTTPURL != ACPToolsProxyHTTPURL {
 		t.Fatalf("ACPToolsHTTPURL = %q", info.ACPToolsHTTPURL)
+	}
+	if got := strings.Join(info.Capabilities, ","); got != "native_capability" {
+		t.Fatalf("native provider capabilities = %q, want native_capability", got)
+	}
+	if info.TargetID != WorkspaceTargetNative || info.TargetKind != WorkspaceTargetNative || info.TargetName != "Server Workspace" {
+		t.Fatalf("native WorkspaceInfo target identity = %#v", info)
+	}
+
+	target, err := m.ResolveWorkspaceTarget(context.Background(), "bot-1", WorkspaceTargetNative)
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceTarget native: %v", err)
+	}
+	if target.TargetID != WorkspaceTargetNative || target.Kind != WorkspaceTargetNative || target.Name != "Server Workspace" ||
+		target.Info.TargetID != target.TargetID || target.Info.TargetKind != target.Kind || target.Info.TargetName != target.Name {
+		t.Fatalf("resolved native target identity = %#v", target)
 	}
 }
 

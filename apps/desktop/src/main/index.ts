@@ -24,6 +24,7 @@ import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
 import { macWindowChromeOptions } from './window-chrome'
 import { maybeSelfInstallMacOS } from './self-install'
+import { discoverBundledACPLaunchers } from './acp-adapters'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
 import { isTrustedRendererUrl } from './renderer-trust'
 import { normalizeExternalUrl, resolveNavigationGuardAction } from './external-links'
@@ -634,11 +635,25 @@ app.whenReady().then(async () => {
     attachExternalLinkGuards(window.webContents)
   })
 
+  // A provider instead of a one-shot value: the runtime re-resolves it on
+  // every connection attempt, so a CLI installed after launch is picked up on
+  // the next reconnect or re-configure without restarting the app.
+  const trustedACPLaunchers = () => discoverBundledACPLaunchers({
+    platform: process.platform,
+    electronExecutable: process.execPath,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    isPackaged: app.isPackaged,
+    homeDirectory: homedir(),
+    pathValue: process.env.PATH,
+  })
+
   remoteRuntimeManager = new DesktopRemoteRuntimeManager({
     configPath: join(app.getPath('userData'), 'remote-runtime.json'),
     currentServerUrl: getDesktopApiBaseUrl,
     workspaceBase: homedir(),
     deviceName: hostname(),
+    trustedACPLaunchers,
     encryption: {
       isAvailable: () => safeStorage.isEncryptionAvailable(),
       encrypt: value => safeStorage.encryptString(value),

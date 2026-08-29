@@ -9,10 +9,12 @@ menus, keyboard integration, cache invalidation, preload IPC, and the renderer
 bootstrap.
 
 Desktop does not start a local server, package database files, embed Qdrant, or
-install a companion CLI. It may embed the `@memohai/runtime` SDK so the Electron
-main process can connect this computer to the hosted server as a trusted Remote
-Runtime. Use `MEMOH_DESKTOP_BASE_URL` to point the app at the target server. The
-default dev target is `http://localhost:18080`.
+install a companion CLI. It embeds the `@memohai/runtime` SDK plus exact
+JavaScript-only ACP adapters so the Electron main process can connect this
+computer to the hosted server as a trusted Remote Runtime. Native Codex and
+Claude Code executables are user-installed and are never redistributed in the
+Desktop package. Use `MEMOH_DESKTOP_BASE_URL` to point the app at the target
+server. The default dev target is `http://localhost:18080`.
 
 ## Tech Stack
 
@@ -95,6 +97,7 @@ source aliases just to silence type errors.
 - cache invalidation broadcast
 - renderer `/api` proxy target via `MEMOH_DESKTOP_BASE_URL`
 - encrypted Remote Runtime configuration and `RuntimeSession` lifecycle
+- fixed ACP adapter discovery and local Codex/Claude CLI selection
 
 The preload bridge is the only renderer API surface for Electron/main-process
 behavior. Keep it small and typed in both `src/preload/index.ts` and
@@ -123,6 +126,13 @@ user-chosen Runtime display name; server URL, workspace base, OS device name,
 localhost policy, filesystem paths, and commands are owned by Main.
 Do not add IPC for local database auth, project-folder picking, server lifecycle,
 arbitrary filesystem/command access, or CLI installation.
+
+`src/main/acp-adapters.ts` is the only Desktop adapter resolver. It passes
+fixed Main-owned absolute paths to `RuntimeSession`, never to IPC. Both aliases
+must be present: a descriptor when a local CLI is found, or `false`
+to suppress ambient PATH fallback. macOS and Linux are supported; Windows must
+keep both aliases disabled. Desktop and Runtime launch the local process but do
+not own provider authentication or local Agent configuration.
 
 ## Renderer
 
@@ -156,6 +166,14 @@ by Main. Build the Runtime package before Desktop and keep `bridge.proto`
 unpacked for the gRPC loader. Do not add server binaries, installed CLI
 binaries, database files, provider templates, container runtimes, Qdrant, or
 media runtimes to Desktop packaging.
+
+Remote ACP packaging pins `@agentclientprotocol/codex-acp` and
+`@agentclientprotocol/claude-agent-acp` exactly and leaves their JavaScript
+dependency graph inside `app.asar`. The two optional platform-native agent
+package families must remain excluded: users supply their own Codex and Claude
+Code CLIs. Keep the `runAsNode` fuse enabled, the packaged Electron/ASAR smoke
+hook green, adapter LICENSE files present, and `resources/THIRD_PARTY_NOTICES.md`
+current.
 
 `scripts/build.mjs` owns build-time environment loading and signing setup.
 Process/CI values override `apps/desktop/.env`; it always passes

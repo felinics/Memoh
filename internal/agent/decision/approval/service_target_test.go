@@ -35,6 +35,7 @@ func TestEvaluatePolicyUsesTargetConfigAndPinsCanonicalTarget(t *testing.T) {
 		BotID:             "bot-1",
 		ToolName:          "write",
 		ToolInput:         input,
+		WorkspaceTargetID: "session-target",
 		WorkspaceTargeted: true,
 	})
 	if err != nil {
@@ -54,6 +55,44 @@ func TestEvaluatePolicyUsesTargetConfigAndPinsCanonicalTarget(t *testing.T) {
 	}
 	if got := *evaluation.ExecutionLocation; got.TargetID != "canonical-target" || got.Kind != "remote" || got.Name != "Office Mac" {
 		t.Fatalf("execution location = %#v", got)
+	}
+}
+
+func TestEvaluatePolicyUsesSessionTargetWhenExplicitTargetIsOmitted(t *testing.T) {
+	resolver := &targetPolicyResolverStub{policy: WorkspaceTargetPolicy{
+		TargetID: "canonical-session-target",
+		Kind:     "remote",
+		Name:     "Office Mac",
+		Config: PolicyConfig{
+			Enabled: true,
+			Exec:    ExecPolicy{Mode: PolicyModeAsk},
+		},
+	}}
+	service := NewService(nil, nil, nil)
+	service.SetWorkspaceTargetPolicyResolver(resolver)
+	input := map[string]any{"command": "make test", "target_id": " "}
+
+	evaluation, err := service.EvaluatePolicy(context.Background(), CreatePendingInput{
+		BotID:             "bot-1",
+		ToolName:          "exec",
+		ToolInput:         input,
+		WorkspaceTargetID: " session-target ",
+		WorkspaceTargeted: true,
+	})
+	if err != nil {
+		t.Fatalf("EvaluatePolicy() error = %v", err)
+	}
+	if evaluation.Decision != DecisionNeedsApproval {
+		t.Fatalf("decision = %q, want %q", evaluation.Decision, DecisionNeedsApproval)
+	}
+	if resolver.requested != "session-target" {
+		t.Fatalf("resolver target = %q, want session target", resolver.requested)
+	}
+	if got := input["target_id"]; got != "canonical-session-target" {
+		t.Fatalf("canonical target_id = %#v", got)
+	}
+	if evaluation.ExecutionLocation == nil || evaluation.ExecutionLocation.TargetID != "canonical-session-target" {
+		t.Fatalf("execution location = %#v", evaluation.ExecutionLocation)
 	}
 }
 

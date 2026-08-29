@@ -20,6 +20,9 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type ACPRuntimeHandler struct {
@@ -27,6 +30,8 @@ type ACPRuntimeHandler struct {
 	sessionService *session.Service
 	botService     *bots.Service
 	accountService *accounts.Service
+	workdirs       acpRuntimeWorkdirResolver
+	workspaces     acpRuntimeWorkspaceInfoProvider
 }
 
 type acpRuntimePool interface {
@@ -41,6 +46,14 @@ type acpRuntimePool interface {
 	SetRuntimeReasoning(ctx context.Context, botID, runtimeID, effort string) (acpagent.RuntimeStatus, error)
 	SetRuntimeMode(ctx context.Context, botID, runtimeID, modeID string) (acpagent.RuntimeStatus, error)
 	CloseRuntime(botID, runtimeID string) error
+}
+
+type acpRuntimeWorkdirResolver interface {
+	ResolveForSession(ctx context.Context, botID, workdirID string) (workdir.Resolved, error)
+}
+
+type acpRuntimeWorkspaceInfoProvider interface {
+	WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error)
 }
 
 type acpRuntimeCreateRequest struct {
@@ -64,13 +77,28 @@ func NewACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *session.Se
 	return newACPRuntimeHandler(pool, sessionService, botService, accountService)
 }
 
-func newACPRuntimeHandler(pool acpRuntimePool, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service) *ACPRuntimeHandler {
+func NewACPRuntimeHandlerWithWorkspaceAccess(pool *acpagent.SessionPool, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service, workdirs *workdir.Service, workspaces *workspace.Manager) *ACPRuntimeHandler {
+	handler := newACPRuntimeHandler(pool, sessionService, botService, accountService, workdirs)
+	handler.SetWorkspaceInfoProvider(workspaces)
+	return handler
+}
+
+func newACPRuntimeHandler(pool acpRuntimePool, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service, workdirResolvers ...acpRuntimeWorkdirResolver) *ACPRuntimeHandler {
+	var workdirs acpRuntimeWorkdirResolver
+	if len(workdirResolvers) > 0 {
+		workdirs = workdirResolvers[0]
+	}
 	return &ACPRuntimeHandler{
 		pool:           pool,
 		sessionService: sessionService,
 		botService:     botService,
 		accountService: accountService,
+		workdirs:       workdirs,
 	}
+}
+
+func (h *ACPRuntimeHandler) SetWorkspaceInfoProvider(provider acpRuntimeWorkspaceInfoProvider) {
+	h.workspaces = provider
 }
 
 func (h *ACPRuntimeHandler) Register(e *echo.Echo) {
@@ -124,6 +152,9 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 	if projectPath == "" {
 		projectPath = session.DefaultACPProjectPath
 	}
+	if err := h.requirePrimaryWorkspaceRead(c, channelIdentityID, bot.ID); err != nil {
+		return err
+	}
 	status, err := h.pool.CreateRuntime(c.Request().Context(), acpagent.CreateRuntimeInput{
 		BotID:                 bot.ID,
 		AgentID:               agentID,
@@ -153,12 +184,17 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp-runtimes/{runtime_id} [get].
 func (h *ACPRuntimeHandler) GetRuntimeByID(c echo.Context) error {
-	_, _, status, err := h.authorizedRuntimeByID(c)
+	bot, _, status, err := h.authorizedRuntimeByID(c)
 	if err != nil {
 		if errors.Is(err, acpagent.ErrRuntimeNotFound) {
 			return runtimePoolError(err)
 		}
 		return acpRuntimeHTTPError(err)
+	}
+	// A remote runtime's project_path is an absolute path on the connected
+	// computer; reading it crosses the same boundary the Set endpoints gate.
+	if err := h.requireRemoteRuntimeRead(c, bot.ID, status); err != nil {
+		return err
 	}
 	return c.JSON(http.StatusOK, status)
 }
@@ -179,12 +215,15 @@ func (h *ACPRuntimeHandler) GetRuntimeByID(c echo.Context) error {
 // @Failure 502 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp-runtimes/{runtime_id}/model [patch].
 func (h *ACPRuntimeHandler) SetRuntimeModel(c echo.Context) error {
-	bot, runtimeID, _, err := h.authorizedRuntimeByID(c)
+	bot, runtimeID, runtimeStatus, err := h.authorizedRuntimeByID(c)
 	if err != nil {
 		if errors.Is(err, acpagent.ErrRuntimeNotFound) {
 			return runtimePoolError(err)
 		}
 		return acpRuntimeHTTPError(err)
+	}
+	if err := h.requireRemoteRuntimeRead(c, bot.ID, runtimeStatus); err != nil {
+		return err
 	}
 	var req acpRuntimeModelRequest
 	if err := c.Bind(&req); err != nil {
@@ -212,12 +251,15 @@ func (h *ACPRuntimeHandler) SetRuntimeModel(c echo.Context) error {
 // @Failure 502 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning [patch].
 func (h *ACPRuntimeHandler) SetRuntimeReasoning(c echo.Context) error {
-	bot, runtimeID, _, err := h.authorizedRuntimeByID(c)
+	bot, runtimeID, runtimeStatus, err := h.authorizedRuntimeByID(c)
 	if err != nil {
 		if errors.Is(err, acpagent.ErrRuntimeNotFound) {
 			return runtimePoolError(err)
 		}
 		return acpRuntimeHTTPError(err)
+	}
+	if err := h.requireRemoteRuntimeRead(c, bot.ID, runtimeStatus); err != nil {
+		return err
 	}
 	var req acpRuntimeReasoningRequest
 	if err := c.Bind(&req); err != nil {
@@ -246,12 +288,15 @@ func (h *ACPRuntimeHandler) SetRuntimeReasoning(c echo.Context) error {
 // @Failure 502 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp-runtimes/{runtime_id}/mode [patch].
 func (h *ACPRuntimeHandler) SetRuntimeMode(c echo.Context) error {
-	bot, runtimeID, _, err := h.authorizedRuntimeByID(c)
+	bot, runtimeID, runtimeStatus, err := h.authorizedRuntimeByID(c)
 	if err != nil {
 		if errors.Is(err, acpagent.ErrRuntimeNotFound) {
 			return runtimePoolError(err)
 		}
 		return acpRuntimeHTTPError(err)
+	}
+	if err := h.requireRemoteRuntimeRead(c, bot.ID, runtimeStatus); err != nil {
+		return err
 	}
 	var req acpRuntimeModeRequest
 	if err := c.Bind(&req); err != nil {
@@ -313,8 +358,11 @@ func (h *ACPRuntimeHandler) CloseRuntime(c echo.Context) error {
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/acp-runtime [get].
 func (h *ACPRuntimeHandler) GetRuntime(c echo.Context) error {
-	_, sessionID, sess, err := h.authorizedACPSession(c)
+	bot, sessionID, sess, err := h.authorizedACPSession(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requireRemoteSessionWorkdirRead(c, bot.ID, sess); err != nil {
 		return err
 	}
 	acpMeta := acpRuntimeSessionMetadata(sess)
@@ -338,6 +386,9 @@ func (h *ACPRuntimeHandler) GetRuntime(c echo.Context) error {
 func (h *ACPRuntimeHandler) EnsureRuntime(c echo.Context) error {
 	bot, sessionID, sess, err := h.authorizedACPSession(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requireRemoteSessionWorkdirRead(c, bot.ID, sess); err != nil {
 		return err
 	}
 	botID := bot.ID
@@ -379,6 +430,9 @@ func (h *ACPRuntimeHandler) EnsureRuntime(c echo.Context) error {
 func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 	bot, sessionID, sess, err := h.authorizedACPSession(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requireRemoteSessionWorkdirRead(c, bot.ID, sess); err != nil {
 		return err
 	}
 	botID := bot.ID
@@ -430,6 +484,9 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.requireRemoteSessionWorkdirRead(c, bot.ID, sess); err != nil {
+		return err
+	}
 	botID := bot.ID
 	var req acpRuntimeReasoningRequest
 	if err := c.Bind(&req); err != nil {
@@ -478,6 +535,11 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 func (h *ACPRuntimeHandler) SetMode(c echo.Context) error {
 	bot, sessionID, sess, err := h.authorizedACPSession(c)
 	if err != nil {
+		return err
+	}
+	// SetMode cold-starts a runtime on the session's target like Ensure does,
+	// so it crosses the same remote permission boundary.
+	if err := h.requireRemoteSessionWorkdirRead(c, bot.ID, sess); err != nil {
 		return err
 	}
 	var req acpRuntimeModeRequest
@@ -645,6 +707,96 @@ func (h *ACPRuntimeHandler) authorizedACPSession(c echo.Context) (bots.Bot, stri
 		return bots.Bot{}, "", session.Thread{}, err
 	}
 	return bot, sessionID, sess, nil
+}
+
+// requireRemoteSessionWorkdirRead gates session-scoped runtime endpoints on
+// workspace_read whenever the session's effective execution target is a
+// connected computer. A folder-bound session pins its own target; a session
+// without a folder inherits the bot's Primary workspace, so that target is
+// checked instead — otherwise a workdir-less ACP session on a remote-Primary
+// bot would reach the owner's computer with only chat permission.
+func (h *ACPRuntimeHandler) requireRemoteSessionWorkdirRead(c echo.Context, botID string, sess session.Thread) error {
+	workdirID := strings.TrimSpace(sess.WorkdirID)
+	if workdirID == "" {
+		channelIdentityID, err := RequireChannelIdentityID(c)
+		if err != nil {
+			return err
+		}
+		return h.requirePrimaryWorkspaceRead(c, channelIdentityID, botID)
+	}
+	if h.workdirs == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workdir service not configured")
+	}
+	bound, err := h.workdirs.ResolveForSession(c.Request().Context(), botID, workdirID)
+	if err != nil {
+		return workdirHTTPError(nil, err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(bound.Kind), workdir.TargetKindRemote) {
+		return nil
+	}
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	permissions, err := h.resolveCurrentUserPermissions(c, channelIdentityID, botID)
+	if err != nil {
+		return err
+	}
+	return requireRemoteWorkdirReadPermission(bound.Kind, permissions)
+}
+
+func (h *ACPRuntimeHandler) requirePrimaryWorkspaceRead(c echo.Context, channelIdentityID, botID string) error {
+	if h.workspaces == nil {
+		// The legacy constructor is retained for embedders and unit tests that
+		// have no remote-workspace surface. Production wires workspace access.
+		return nil
+	}
+	info, err := h.workspaces.WorkspaceInfo(c.Request().Context(), botID)
+	if err != nil {
+		return workdirHTTPError(nil, err)
+	}
+	targetKind := strings.TrimSpace(info.TargetKind)
+	if targetKind == "" && strings.EqualFold(strings.TrimSpace(info.Backend), bridge.WorkspaceBackendRemote) {
+		targetKind = workspace.WorkspaceTargetRemote
+	}
+	if !strings.EqualFold(targetKind, workspace.WorkspaceTargetRemote) {
+		return nil
+	}
+	permissions, err := h.resolveCurrentUserPermissions(c, channelIdentityID, botID)
+	if err != nil {
+		return err
+	}
+	return requireRemoteWorkdirReadPermission(targetKind, permissions)
+}
+
+func (h *ACPRuntimeHandler) requireRemoteRuntimeRead(c echo.Context, botID string, status acpagent.RuntimeStatus) error {
+	if !strings.EqualFold(strings.TrimSpace(status.WorkspaceTargetKind), workspace.WorkspaceTargetRemote) {
+		return nil
+	}
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	permissions, err := h.resolveCurrentUserPermissions(c, channelIdentityID, botID)
+	if err != nil {
+		return err
+	}
+	return requireRemoteWorkdirReadPermission(status.WorkspaceTargetKind, permissions)
+}
+
+func (h *ACPRuntimeHandler) resolveCurrentUserPermissions(c echo.Context, channelIdentityID, botID string) ([]string, error) {
+	if h.botService == nil || h.accountService == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+	}
+	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return perms, nil
 }
 
 func (h *ACPRuntimeHandler) authorizedRuntimeControlBot(c echo.Context, actorID, botID, runtimeOwnerID string) (bots.Bot, error) {

@@ -64,6 +64,26 @@ installers. Clone the repository and run the platform build command above, or
 use a downstream distribution workflow that signs and publishes the generated
 files.
 
+### Remote ACP adapters
+
+On macOS and Linux, Desktop can expose this computer as a Remote ACP Runtime.
+The package includes exact JavaScript adapters (`codex-acp` 1.2.0 and
+`claude-agent-acp` 0.66.0), executed with Electron's bundled Node.js 24. It does
+not require a system Node/npm installation and does not redistribute either
+provider's native CLI. Desktop discovers an independently installed `codex` or
+`claude` executable and gives it to Runtime through a Main-process-only typed
+descriptor. Windows does not advertise these bundled adapters in the first
+release.
+
+Adapter and native-agent paths stay in Electron Main and are never exposed to
+the renderer or sent in the Runtime handshake. Remote ACP does not copy or
+manage Codex/Claude credentials or configuration; the local tools own their own
+setup.
+
+Every package build runs an unpacked-app smoke test with the packaged Electron:
+it checks Node.js 22+, exact adapter versions, and absence of optional native
+agent packages.
+
 ### Build environment
 
 | Variable | Purpose | GitHub setting |

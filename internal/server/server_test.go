@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -14,6 +15,9 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/config"
+	apphandlers "github.com/felinics/memoh/internal/handlers"
+	mcpgw "github.com/felinics/memoh/internal/mcp"
 )
 
 func TestShouldSkipJWT_ChannelWebhookPaths(t *testing.T) {
@@ -60,6 +64,52 @@ func TestShouldLimitPublicRequestBody(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("path=%q want=%v got=%v", tc.path, tc.want, got)
 		}
+	}
+}
+
+func TestShouldLimitRuntimeToolsRequestBody(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", nil)
+	req.Header.Set(mcpgw.ToolHeaderRuntimeID, "runtime-1")
+	req.Header.Set(mcpgw.ToolHeaderRuntimeToken, "token-1")
+	if !shouldLimitRequestBody(req) {
+		t.Fatal("complete runtime tool credential must enable the public request body limit")
+	}
+
+	req.Header.Del(mcpgw.ToolHeaderRuntimeToken)
+	if shouldLimitRequestBody(req) {
+		t.Fatal("ordinary authenticated tools request must preserve its existing body-limit behavior")
+	}
+}
+
+func TestShouldSkipJWTRequestForExactRuntimeToolsCredential(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		id     string
+		token  string
+		want   bool
+	}{
+		{name: "exact", method: http.MethodPost, path: "/bots/bot-1/tools", id: "runtime-1", token: "token-1", want: true},
+		{name: "missing token", method: http.MethodPost, path: "/bots/bot-1/tools", id: "runtime-1"},
+		{name: "missing runtime", method: http.MethodPost, path: "/bots/bot-1/tools", token: "token-1"},
+		{name: "get", method: http.MethodGet, path: "/bots/bot-1/tools", id: "runtime-1", token: "token-1"},
+		{name: "trailing slash", method: http.MethodPost, path: "/bots/bot-1/tools/", id: "runtime-1", token: "token-1"},
+		{name: "nested", method: http.MethodPost, path: "/api/bots/bot-1/tools", id: "runtime-1", token: "token-1"},
+		{name: "empty bot", method: http.MethodPost, path: "/bots//tools", id: "runtime-1", token: "token-1"},
+		{name: "ordinary tools request", method: http.MethodPost, path: "/bots/bot-1/tools"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req.Header.Set(mcpgw.ToolHeaderRuntimeID, tt.id)
+			req.Header.Set(mcpgw.ToolHeaderRuntimeToken, tt.token)
+			if got := shouldSkipJWTRequest(req); got != tt.want {
+				t.Fatalf("shouldSkipJWTRequest() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -184,6 +234,138 @@ func TestShouldSkipJWTOnlyForRuntimeConnectEndpoint(t *testing.T) {
 		if shouldSkipJWT(path) {
 			t.Fatalf("path=%q unexpectedly skips JWT", path)
 		}
+	}
+}
+
+type runtimeMCPRouteOnly struct {
+	handler *apphandlers.ContainerdHandler
+}
+
+func (h runtimeMCPRouteOnly) Register(e *echo.Echo) {
+	e.POST("/bots/:bot_id/tools", h.handler.HandleMCPTools)
+}
+
+type runtimeMCPResolver struct {
+	session mcpgw.ToolSessionContext
+	calls   int
+}
+
+func (r *runtimeMCPResolver) ResolveRuntimeToolContext(botID, runtimeID, toolToken string) (mcpgw.ToolSessionContext, bool) {
+	r.calls++
+	if botID != r.session.BotID || runtimeID != r.session.RuntimeID || toolToken != r.session.RuntimeToken {
+		return mcpgw.ToolSessionContext{}, false
+	}
+	return r.session, true
+}
+
+type runtimeMCPToolSource struct {
+	lastSession mcpgw.ToolSessionContext
+}
+
+func (s *runtimeMCPToolSource) ListTools(_ context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
+	s.lastSession = session
+	return []mcpgw.ToolDescriptor{{
+		Name:        "runtime_probe",
+		Description: "runtime authentication integration probe",
+		InputSchema: map[string]any{"type": "object"},
+	}}, nil
+}
+
+func (s *runtimeMCPToolSource) CallTool(_ context.Context, session mcpgw.ToolSessionContext, _ string, _ map[string]any) (map[string]any, error) {
+	s.lastSession = session
+	return mcpgw.BuildToolSuccessResult(map[string]any{"ok": true}), nil
+}
+
+func TestRuntimeCredentialAuthenticatesExactMCPRouteWithoutUserJWT(t *testing.T) {
+	log := slog.New(slog.DiscardHandler)
+	trusted := mcpgw.ToolSessionContext{
+		BotID:         "bot-1",
+		ChatID:        "trusted-chat",
+		RuntimeID:     "runtime-1",
+		RuntimeToken:  "runtime-token-1",
+		SessionID:     "trusted-session",
+		RuntimeActive: true,
+	}
+	resolver := &runtimeMCPResolver{session: trusted}
+	source := &runtimeMCPToolSource{}
+	handler := apphandlers.NewContainerdHandler(log, nil, config.WorkspaceConfig{}, "", nil, nil, nil)
+	handler.SetToolGatewayService(mcpgw.NewToolGatewayService(log, []mcpgw.ToolSource{source}))
+	handler.SetACPRuntimeResolver(resolver)
+	server := NewServer(log, ":0", "test-secret", runtimeMCPRouteOnly{handler: handler})
+
+	request := func(method, path, runtimeID, runtimeToken string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"tools/list"}`))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		req.Header.Set(echo.HeaderAccept, echo.MIMEApplicationJSON)
+		req.Header.Set(mcpgw.ToolHeaderRuntimeID, runtimeID)
+		req.Header.Set(mcpgw.ToolHeaderRuntimeToken, runtimeToken)
+		rec := httptest.NewRecorder()
+		server.echo.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := request(http.MethodPost, "/bots/bot-1/tools", trusted.RuntimeID, trusted.RuntimeToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid runtime MCP status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("runtime resolver calls = %d, want 1", resolver.calls)
+	}
+	if source.lastSession.BotID != trusted.BotID || source.lastSession.RuntimeID != trusted.RuntimeID ||
+		source.lastSession.SessionID != trusted.SessionID || !source.lastSession.RuntimeActive {
+		t.Fatalf("MCP source received untrusted context: %#v", source.lastSession)
+	}
+
+	rec = request(http.MethodPost, "/bots/bot-1/tools", trusted.RuntimeID, "wrong-token")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("invalid runtime MCP status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(echo.HeaderContentType); got != "application/problem+json" {
+		t.Fatalf("invalid runtime MCP content type = %q", got)
+	}
+	var problem apperror.Problem
+	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("decode invalid runtime MCP problem: %v", err)
+	}
+	if problem.Code != string(apperror.CodeACPRuntimeNotFound) || problem.RequestID == "" {
+		t.Fatalf("invalid runtime MCP problem = %#v", problem)
+	}
+
+	resolverCalls := resolver.calls
+	oversizedReq := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", strings.NewReader(strings.Repeat("x", 2<<20)))
+	oversizedReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	oversizedReq.Header.Set(mcpgw.ToolHeaderRuntimeID, trusted.RuntimeID)
+	oversizedReq.Header.Set(mcpgw.ToolHeaderRuntimeToken, trusted.RuntimeToken)
+	oversizedRec := httptest.NewRecorder()
+	server.echo.ServeHTTP(oversizedRec, oversizedReq)
+	if oversizedRec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized runtime MCP status = %d, want %d", oversizedRec.Code, http.StatusRequestEntityTooLarge)
+	}
+	if resolver.calls != resolverCalls {
+		t.Fatalf("oversized runtime request reached resolver: calls = %d, want %d", resolver.calls, resolverCalls)
+	}
+
+	for _, test := range []struct {
+		name   string
+		method string
+		path   string
+		id     string
+		token  string
+	}{
+		{name: "ordinary request", method: http.MethodPost, path: "/bots/bot-1/tools"},
+		{name: "partial credential", method: http.MethodPost, path: "/bots/bot-1/tools", id: trusted.RuntimeID},
+		{name: "wrong method", method: http.MethodGet, path: "/bots/bot-1/tools", id: trusted.RuntimeID, token: trusted.RuntimeToken},
+		{name: "non-exact path", method: http.MethodPost, path: "/bots/bot-1/tools/extra", id: trusted.RuntimeID, token: trusted.RuntimeToken},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			unauthorized := request(test.method, test.path, test.id, test.token)
+			if unauthorized.Code < http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s; request bypassed user JWT", unauthorized.Code, unauthorized.Body.String())
+			}
+		})
+	}
+	if resolver.calls != resolverCalls {
+		t.Fatalf("non-runtime requests reached runtime resolver: calls = %d, want %d", resolver.calls, resolverCalls)
 	}
 }
 

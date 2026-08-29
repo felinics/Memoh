@@ -179,6 +179,39 @@ func TestStartBridgeProcessHermesManagedPassesCleanEnvControls(t *testing.T) {
 	}
 }
 
+func TestStartBridgeProcessRemoteDoesNotStageOrInjectManagedState(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	proc, err := startBridgeProcess(context.Background(), client, "codex-acp", nil, "/Users/alice/project", time.Minute, processOptions{
+		Backend:   WorkspaceBackendRemote,
+		BotID:     "bot-remote",
+		AgentID:   "codex",
+		SetupMode: SetupModeAPIKey,
+		Env:       []string{"OPENAI_API_KEY=server-managed", "HOME=/server/home"},
+		CleanEnv:  true,
+		UnsetEnv:  []string{"PATH", "HOME"},
+	})
+	if err != nil {
+		t.Fatalf("startBridgeProcess() error = %v", err)
+	}
+	if len(proc.toolEnv) != 0 || proc.cleanEnv || len(proc.unsetEnv) != 0 {
+		t.Fatalf("remote terminal controls = env %#v clean %t unset %#v", proc.toolEnv, proc.cleanEnv, proc.unsetEnv)
+	}
+	server.waitForRecordWithTimeout(t, int32(time.Minute.Seconds()), 2*time.Second)
+	if err := proc.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	record, ok := findRecordWithTimeout(server.records(), int32(time.Minute.Seconds()))
+	if !ok {
+		t.Fatalf("missing process exec record: %#v", server.records())
+	}
+	if len(record.Env) != 0 || record.CleanEnv || len(record.UnsetEnv) != 0 {
+		t.Fatalf("remote exec received Server-managed environment controls: %#v", record)
+	}
+	if writes := server.writes(); len(writes) != 0 {
+		t.Fatalf("remote exec staged workspace state: %#v", writes)
+	}
+}
+
 func TestCreateTerminalFiltersBlockedHermesEnv(t *testing.T) {
 	client, server := newRecordingBridgeClient(t)
 	manager := newTerminalManager(

@@ -12304,6 +12304,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete a Remote Runtime workspace target
       tags:
       - workspace-targets

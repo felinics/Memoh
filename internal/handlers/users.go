@@ -37,6 +37,10 @@ type acpWorkspaceConfigProvider interface {
 	WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error)
 }
 
+func nativeACPWorkspaceContext(ctx context.Context) context.Context {
+	return workspace.WithWorkspaceTarget(ctx, workspace.WorkspaceTargetNative)
+}
+
 type botCreateWorkspace interface {
 	acpWorkspaceConfigProvider
 	SetupBotContainerWithProgress(ctx context.Context, botID string, progress workspace.ContainerSetupProgress) error
@@ -1000,6 +1004,7 @@ func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.B
 	if len(targets) == 0 {
 		return nil
 	}
+	ctx = nativeACPWorkspaceContext(ctx)
 	workspaceInfo, err := h.acpWorkspace.WorkspaceInfo(ctx, bot.ID)
 	if err != nil {
 		return err

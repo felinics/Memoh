@@ -289,7 +289,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if preflightGateway == nil {
 		preflightGateway = req.ToolGateway
 	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, req.CleanEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
+	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, proc.cleanEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
 	callbacks.userInput = req.UserInput
 	callbacks.logger = r.logger
 	conn := newClientConnection(callbacks, proc, proc)
@@ -691,6 +691,14 @@ func (s *Session) ProjectPath() string {
 		return ""
 	}
 	return s.projectPath
+}
+
+// Done closes when the owned ACP process or its bridge transport exits.
+func (s *Session) Done() (<-chan struct{}, bool) {
+	if s == nil || s.proc == nil {
+		return nil, false
+	}
+	return s.proc.Done(), true
 }
 
 // SnapshotSessionState captures the adapter-native JSONL files needed to

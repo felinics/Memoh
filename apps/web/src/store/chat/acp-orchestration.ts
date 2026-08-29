@@ -18,6 +18,11 @@ export interface ACPOrchestrationDeps {
   invalidateDraftCommand: (target: ChatViewTarget) => void
   forgetDraftCommand: (target: ChatViewTarget) => void
   resetWorkspaceTargetSelection: (target: ChatViewTarget) => void
+  shouldPrewarmDraftACP: (target: ChatViewTarget) => boolean
+  // The project path the draft's Folder binding dictates ('' when the draft
+  // has no Folder or the Folder must not prewarm). A prewarmed runtime is
+  // only reusable when it was created on this exact path.
+  draftProjectPathFor?: (target: ChatViewTarget) => string
 }
 
 function draftStageKey(botId: string, viewId: string) {
@@ -39,6 +44,7 @@ export function createACPOrchestration(deps: ACPOrchestrationDeps) {
     setPendingACPModel: setFocusedPendingACPModel,
     setPendingACPMode: setFocusedPendingACPMode,
     setPendingACPReasoning: setFocusedPendingACPReasoning,
+    discardPendingACPRuntime: discardFocusedPendingACPRuntime,
     detachPendingACPSession,
     restorePendingACPSession,
     releasePendingACPSession,
@@ -212,10 +218,29 @@ export function createACPOrchestration(deps: ACPOrchestrationDeps) {
     if (options.clearPendingACP !== false) forgetDraftStage(draft)
   }
 
+  // A Folder binding dictates the runtime's project path. Re-staging with the
+  // Folder's path changes the staging identity, so a runtime warmed on
+  // another path is closed instead of being silently reused for the Folder.
+  function alignFocusedDraftProjectPath(draft: ChatViewTarget) {
+    const folderPath = deps.draftProjectPathFor?.(draft) ?? ''
+    if (!folderPath) return
+    const pending = pendingACPSessionInput.value
+    if (!pending || (pending.projectPath ?? '').trim() === folderPath) return
+    // Deliberately marks the selection explicit (stageACPSession's default):
+    // the Folder-derived path must not be overwritten by the default-ACP
+    // re-stage watcher, which would oscillate with this alignment forever.
+    stageFocusedACPSession({ ...pending, projectPath: folderPath })
+  }
+
   async function ensurePendingACPRuntime(target?: ChatViewTarget) {
     const draft = targetDraft(target)
     activateDraftStage(draft)
     try {
+      if (!deps.shouldPrewarmDraftACP(draft)) {
+        discardFocusedPendingACPRuntime()
+        return undefined
+      }
+      alignFocusedDraftProjectPath(draft)
       return await ensureFocusedPendingACPRuntime()
     } finally {
       syncLiveDraftStage()
@@ -227,6 +252,11 @@ export function createACPOrchestration(deps: ACPOrchestrationDeps) {
     deps.invalidateDraftCommand(draft)
     activateDraftStage(draft)
     try {
+      if (!deps.shouldPrewarmDraftACP(draft)) {
+        discardFocusedPendingACPRuntime()
+        return undefined
+      }
+      alignFocusedDraftProjectPath(draft)
       return await setFocusedPendingACPModel(modelId)
     } finally {
       syncLiveDraftStage()
@@ -238,6 +268,11 @@ export function createACPOrchestration(deps: ACPOrchestrationDeps) {
     deps.invalidateDraftCommand(draft)
     activateDraftStage(draft)
     try {
+      if (!deps.shouldPrewarmDraftACP(draft)) {
+        discardFocusedPendingACPRuntime()
+        return undefined
+      }
+      alignFocusedDraftProjectPath(draft)
       return await setFocusedPendingACPReasoning(effort)
     } finally {
       syncLiveDraftStage()
@@ -249,6 +284,14 @@ export function createACPOrchestration(deps: ACPOrchestrationDeps) {
     deps.invalidateDraftCommand(draft)
     activateDraftStage(draft)
     try {
+      // Same suppression as ensure/model/reasoning: /permission on a pending
+      // draft must not resurrect or mutate a Primary runtime for a draft
+      // whose Folder pins another computer.
+      if (!deps.shouldPrewarmDraftACP(draft)) {
+        discardFocusedPendingACPRuntime()
+        return undefined
+      }
+      alignFocusedDraftProjectPath(draft)
       return await setFocusedPendingACPMode(modeId)
     } finally {
       syncLiveDraftStage()
@@ -265,6 +308,17 @@ export function createACPOrchestration(deps: ACPOrchestrationDeps) {
       && state.metadata.acp_project_mode === metadata.acp_project_mode
   }
 
+  function pendingACPStateForSession(target: ChatViewTarget) {
+    const draft = targetDraft(target)
+    const state = pendingACPStateFor(draft)
+    if (!state || deps.shouldPrewarmDraftACP(draft)) return state
+
+    activateDraftStage(draft)
+    discardFocusedPendingACPRuntime()
+    syncLiveDraftStage()
+    return pendingACPStateFor(draft)
+  }
+
   function reset() {
     draftStages.value = {}
     liveDraft = null
@@ -277,6 +331,7 @@ export function createACPOrchestration(deps: ACPOrchestrationDeps) {
     pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring,
     pendingACPStateFor,
+    pendingACPStateForSession,
     targetDraftForACP: targetDraft,
     stageACPSession,
     stageDefaultACPSession,

@@ -14,6 +14,9 @@
           <p class="text-sm text-foreground">
             {{ t('computerConnect.commandDescription') }}
           </p>
+          <p class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            {{ t('computerConnect.trustNote') }}
+          </p>
           <!-- Same surface as the chat code block: white card + one hairline,
                not the beige muted-soft fill. -->
           <div class="relative mt-2.5 min-w-0 overflow-hidden rounded-lg border border-border-soft bg-card">

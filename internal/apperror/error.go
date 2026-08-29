@@ -25,6 +25,8 @@ const (
 	CodeContextBudgetUnsatisfied         Code = "context.budget_unsatisfied"
 	CodeContextProtectedOverflow         Code = "context.protected_overflow"
 	CodeWorkspaceUnreachable             Code = "workspace.unreachable"
+	CodeWorkspaceReadPermissionRequired  Code = "workspace.read_permission_required"
+	CodeWorkspaceTargetInUse             Code = "workspace.target_in_use"
 	CodeWorkspaceImageIncompatible       Code = "workspace.image_incompatible"
 	CodeWorkspaceTemplateBootstrapFailed Code = "workspace.template_bootstrap_failed"
 	CodeWorkspaceDisplayPrepareFailed    Code = "workspace.display_prepare_failed"
@@ -162,6 +164,14 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The workspace could not be reached.",
+	},
+	CodeWorkspaceReadPermissionRequired: {
+		HTTPStatus: http.StatusForbidden,
+		Detail:     "Ask the bot owner for file-read access before using this connected computer.",
+	},
+	CodeWorkspaceTargetInUse: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This computer is still used by a folder and cannot be disconnected.",
 	},
 	CodeWorkspaceImageIncompatible: {
 		HTTPStatus: http.StatusUnprocessableEntity,

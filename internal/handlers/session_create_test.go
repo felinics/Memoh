@@ -316,9 +316,9 @@ func (*recordingRuntimeBinder) BeginSessionHistoryReset(ctx context.Context, _, 
 	return ctx, func() {}, nil
 }
 
-func (b *recordingRuntimeBinder) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+func (b *recordingRuntimeBinder) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, workspaceTargetID, runtimeOwnerAccountID string) error {
 	b.bindCtx = ctx
-	b.bindArgs = []string{botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID}
+	b.bindArgs = []string{botID, runtimeID, sessionID, agentID, projectPath, workspaceTargetID, runtimeOwnerAccountID}
 	return b.bindErr
 }
 
@@ -350,7 +350,7 @@ func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
 	if err := callCreateSessionRequest(handler, botID, req); err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	want := []string{botID, "rt_warm", "22222222-2222-2222-2222-222222222222", "codex", session.DefaultACPProjectPath, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}
+	want := []string{botID, "rt_warm", "22222222-2222-2222-2222-222222222222", "codex", session.DefaultACPProjectPath, "", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}
 	if len(binder.bindArgs) != len(want) {
 		t.Fatalf("bind args = %#v, want %#v", binder.bindArgs, want)
 	}

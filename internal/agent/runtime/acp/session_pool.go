@@ -10,10 +10,13 @@ package acp
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +34,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -144,11 +148,14 @@ type botGetter interface {
 // SessionDescriptor contains the minimal persisted session metadata required
 // to launch an ACP runtime. The Chat domain supplies it through an adapter.
 type SessionDescriptor struct {
-	BotID           string
-	SessionType     string
-	Metadata        map[string]any
-	RuntimeMetadata map[string]any
-	IsACP           bool
+	BotID               string
+	SessionType         string
+	Metadata            map[string]any
+	RuntimeMetadata     map[string]any
+	WorkspaceTargetID   string
+	WorkspaceTargetKind string
+	WorkdirPath         string
+	IsACP               bool
 }
 
 // SessionDescriptorReader resolves runtime metadata without exposing Chat
@@ -176,7 +183,10 @@ type runtimeHandle struct {
 	runtimeConfigEpoch    RuntimeConfigEpoch
 	// ownerCtx is a value-only context retained for detached runtime cleanup.
 	// Its cancellation and deadline do not describe request liveness.
-	ownerCtx context.Context
+	ownerCtx            context.Context
+	workspaceTargetID   string
+	workspaceTargetKind string
+	workspaceTargetName string
 
 	// op serializes operations (start, prompt, runtime config, bind, close).
 	op sync.Mutex
@@ -245,6 +255,9 @@ type PromptInput struct {
 	ContextURI            string
 	ContextMarkdown       string
 	RuntimeOwnerAccountID string
+	WorkspaceTargetID     string
+	WorkspaceTargetKind   string
+	WorkspaceTargetName   string
 	ForceFreshRuntime     bool
 	Sink                  client.EventSink
 	RuntimeGuard          func(context.Context) error
@@ -281,6 +294,8 @@ type RuntimeStatus struct {
 	AgentID               string                        `json:"agent_id,omitempty"`
 	ProjectPath           string                        `json:"project_path,omitempty"`
 	RuntimeOwnerAccountID string                        `json:"-"`
+	WorkspaceTargetID     string                        `json:"-"`
+	WorkspaceTargetKind   string                        `json:"-"`
 	State                 string                        `json:"state"`
 	ACPSession            string                        `json:"acp_session_id,omitempty"`
 	Models                *client.ModelState            `json:"models,omitempty"`
@@ -420,6 +435,10 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 	if runtimeOwnerAccountID == "" {
 		return RuntimeStatus{}, runtimeOwnerMissingError()
 	}
+	_, _, _, _, workspaceInfo, err := p.resolveAgentSetup(ctx, botID, agentID)
+	if err != nil {
+		return RuntimeStatus{}, err
+	}
 
 	p.reapIdle(time.Now()) //nolint:contextcheck // reaper uses each handle's owner context.
 
@@ -431,13 +450,13 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 		projectPath:           projectPath,
 		runtimeOwnerAccountID: runtimeOwnerAccountID,
 		ownerCtx:              context.WithoutCancel(ctx),
+		workspaceTargetID:     strings.TrimSpace(workspaceInfo.TargetID),
+		workspaceTargetKind:   strings.TrimSpace(workspaceInfo.TargetKind),
+		workspaceTargetName:   strings.TrimSpace(workspaceInfo.TargetName),
 		status:                stateStarting,
 		lastActive:            time.Now(),
 	}
-	var (
-		victims []*runtimeHandle
-		err     error
-	)
+	var victims []*runtimeHandle
 	for {
 		p.mu.Lock()
 		resetDone := p.historyResetBots[botID]
@@ -522,7 +541,7 @@ func (p *SessionPool) unboundBudgetLocked(botID string) ([]*runtimeHandle, error
 // session's prompts reuse the warm process. Returns ErrRuntimeBindRejected
 // when the runtime cannot serve this session; callers fall back to a cold
 // start and must not treat that as fatal.
-func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, workspaceTargetID, runtimeOwnerAccountID string) error {
 	if ctx == nil {
 		return errors.New("runtime bind context is required")
 	}
@@ -557,6 +576,7 @@ func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, session
 		normalizedAgent = acpprofile.AgentCodexID
 	}
 	projectPath = strings.TrimSpace(projectPath)
+	workspaceTargetID = strings.TrimSpace(workspaceTargetID)
 
 	// Waits out an in-flight model change on the runtime.
 	h.op.Lock()
@@ -568,9 +588,10 @@ func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, session
 
 	h.state.Lock()
 	epochMatches := h.runtimeConfigEpoch.Bot == actualEpoch.Bot
+	targetMatches := workspaceTargetID == "" || h.workspaceTargetID == workspaceTargetID
 	ok := !h.closed && h.session != nil && h.boundSession == "" &&
 		h.agentID == normalizedAgent && h.projectPath == projectPath &&
-		h.runtimeOwnerAccountID == runtimeOwnerAccountID &&
+		targetMatches && h.runtimeOwnerAccountID == runtimeOwnerAccountID &&
 		epochMatches
 	if ok {
 		// Publish the binding on the handle before indexing it. A reset that
@@ -778,13 +799,16 @@ func (p *SessionPool) ResolveRuntimeToolContext(botID, runtimeID, toolToken stri
 	if err != nil {
 		return mcp.ToolSessionContext{}, false
 	}
-	if strings.TrimSpace(h.toolToken) == "" || strings.TrimSpace(toolToken) != h.toolToken {
+	expectedToken := strings.TrimSpace(h.toolToken)
+	providedToken := strings.TrimSpace(toolToken)
+	if expectedToken == "" || subtle.ConstantTimeCompare([]byte(providedToken), []byte(expectedToken)) != 1 {
 		return mcp.ToolSessionContext{}, false
 	}
 	h.state.Lock()
 	closed := h.closed
+	sess := h.session
 	h.state.Unlock()
-	if closed {
+	if closed || sessionProcessExited(sess) {
 		return mcp.ToolSessionContext{}, false
 	}
 	return h.toolContext(), true
@@ -806,9 +830,19 @@ func (p *SessionPool) prepareInput(ctx context.Context, input PromptInput) (Prom
 	if strings.TrimSpace(resolved.BotID) == "" {
 		return PromptInput{}, errors.New("bot_id is required")
 	}
-	if _, _, _, _, _, err := p.resolveAgentSetup(ctx, resolved.BotID, resolved.AgentID); err != nil {
+	setupCtx := contextWithWorkspaceTarget(ctx, resolved.WorkspaceTargetID)
+	_, _, _, _, workspaceInfo, err := p.resolveAgentSetup(setupCtx, resolved.BotID, resolved.AgentID)
+	if err != nil {
 		return PromptInput{}, err
 	}
+	requestedTargetID := strings.TrimSpace(resolved.WorkspaceTargetID)
+	actualTargetID := strings.TrimSpace(workspaceInfo.TargetID)
+	if requestedTargetID != "" && requestedTargetID != actualTargetID {
+		return PromptInput{}, fmt.Errorf("resolved workspace target %q does not match requested target %q", actualTargetID, requestedTargetID)
+	}
+	resolved.WorkspaceTargetID = actualTargetID
+	resolved.WorkspaceTargetKind = strings.TrimSpace(workspaceInfo.TargetKind)
+	resolved.WorkspaceTargetName = strings.TrimSpace(workspaceInfo.TargetName)
 	return resolved, nil
 }
 
@@ -1423,6 +1457,9 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 	if identityErr != nil {
 		return nil, identityErr
 	}
+	workspaceTargetID := strings.TrimSpace(input.WorkspaceTargetID)
+	workspaceTargetKind := strings.TrimSpace(input.WorkspaceTargetKind)
+	workspaceTargetName := strings.TrimSpace(input.WorkspaceTargetName)
 
 	for attempt := 0; attempt < 3; {
 		p.mu.Lock()
@@ -1470,6 +1507,9 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 				runtimeOwnerAccountID: runtimeOwnerAccountID,
 				ownerCtx:              context.WithoutCancel(ctx),
 				disableSessionState:   input.disableSessionState,
+				workspaceTargetID:     workspaceTargetID,
+				workspaceTargetKind:   workspaceTargetKind,
+				workspaceTargetName:   workspaceTargetName,
 				status:                stateStarting,
 				lastActive:            time.Now(),
 				boundSession:          sessionID,
@@ -1499,16 +1539,19 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 		h.state.Lock()
 		matches := h.agentID == agentID && h.projectPath == projectPath &&
 			h.runtimeOwnerAccountID == runtimeOwnerAccountID &&
-			h.disableSessionState == input.disableSessionState
+			h.disableSessionState == input.disableSessionState &&
+			h.workspaceTargetID == workspaceTargetID
 		closed := h.closed
 		starting := h.session == nil
+		sess := h.session
+		exited := sessionProcessExited(sess)
 		if matches && !closed {
 			// Resolving counts as activity: a session whose UI keeps the
 			// runtime ensured (without prompting) must not be idle-reaped.
 			h.lastActive = time.Now()
 		}
 		h.state.Unlock()
-		if matches && !closed {
+		if matches && !closed && !exited {
 			if starting {
 				// A concurrent startRuntime still owns h.op and has not
 				// published nativeHead/epoch yet; comparing the zero values
@@ -1536,6 +1579,22 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 	return nil, errors.New("ACP runtime is restarting, retry the request")
 }
 
+func sessionProcessExited(sess *client.Session) bool {
+	if sess == nil {
+		return false
+	}
+	done, observable := sess.Done()
+	if !observable {
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
+}
+
 type startOptions struct {
 	ToolHTTPURL string
 	Sink        client.EventSink
@@ -1547,6 +1606,7 @@ type startOptions struct {
 //
 //nolint:contextcheck // startup failure cleanup uses the handle owner context.
 func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts startOptions) error {
+	ctx = contextWithWorkspaceTarget(ctx, h.workspaceTargetID)
 	startCtx, cancelStart := context.WithCancel(ctx)
 	defer cancelStart()
 	h.state.Lock()
@@ -1593,27 +1653,33 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		return fail(fmt.Errorf("resolve ACP launch command: %w", err))
 	}
 	supportsSessionState := len(profile.RuntimeStorage.SessionRoots) > 0
+	if targetID := strings.TrimSpace(workspaceInfo.TargetID); h.workspaceTargetID != "" && targetID != "" && h.workspaceTargetID != targetID {
+		return fail(errors.New("workspace target changed while starting ACP runtime"))
+	}
 	resolved, err := client.ResolveSessionContext(client.SessionContextInput{
-		AgentID:     h.agentID,
-		SetupMode:   mode,
-		Backend:     workspaceInfo.Backend,
-		ProjectPath: h.projectPath,
+		AgentID:        h.agentID,
+		SetupMode:      mode,
+		Backend:        workspaceInfo.Backend,
+		OS:             workspaceInfo.OS,
+		DefaultWorkDir: workspaceInfo.DefaultWorkDir,
+		ProjectPath:    h.projectPath,
 	})
 	if err != nil {
 		return fail(fmt.Errorf("resolve ACP session context: %w", err))
 	}
-	if err := p.reconcileManagedACPConfig(startCtx, h.botID, profile, setup, mode, resolved, runtimeSyncGuard); err != nil {
-		return fail(fmt.Errorf("prepare %s managed config: %w", profile.DisplayName, err))
-	}
-	// Managed env (Claude Code BYOK tokens) is injected for every session.
-	// managedProcessEnv returns nil for self mode and for Codex, which is
-	// configured via CODEX_HOME files instead of env.
 	var env []string
-	env, err = managedProcessEnv(profile, setup.Managed, mode)
-	if err != nil {
-		return fail(err)
+	var cleanEnv bool
+	var unsetEnv []string
+	if resolved.Backend != client.WorkspaceBackendRemote {
+		if err := p.reconcileManagedACPConfig(startCtx, h.botID, profile, setup, mode, resolved, runtimeSyncGuard); err != nil {
+			return fail(fmt.Errorf("prepare %s managed config: %w", profile.DisplayName, err))
+		}
+		env, err = managedProcessEnv(profile, setup.Managed, mode)
+		if err != nil {
+			return fail(err)
+		}
+		cleanEnv, unsetEnv = managedEnvControls(profile, mode, resolved.Backend)
 	}
-	cleanEnv, unsetEnv := managedEnvControls(profile, mode, resolved.Backend)
 
 	toolHTTPURL, err := p.resolveToolHTTPURL(opts.ToolHTTPURL, workspaceInfo)
 	if err != nil {
@@ -1855,6 +1921,8 @@ func (*SessionPool) statusOf(h *runtimeHandle) RuntimeStatus {
 		AgentID:               h.agentID,
 		ProjectPath:           h.projectPath,
 		RuntimeOwnerAccountID: h.runtimeOwnerAccountID,
+		WorkspaceTargetID:     h.workspaceTargetID,
+		WorkspaceTargetKind:   h.workspaceTargetKind,
 		State:                 h.status,
 		DefaultModelID:        h.defaultModelID,
 	}
@@ -2451,6 +2519,41 @@ func (p *SessionPool) CloseBotAgentRuntimes(botID, agentID string) error {
 	return firstErr
 }
 
+// CloseBotWorkspaceTargetRuntimes tears down every runtime pinned to one
+// workspace target. Target deletion is rejected while a workdir still refers
+// to it, but an unbound prewarm may otherwise survive after the target record
+// is removed and keep running commands on a computer the user disconnected.
+func (p *SessionPool) CloseBotWorkspaceTargetRuntimes(botID, targetID string) error {
+	if p == nil {
+		return nil
+	}
+	botID = strings.TrimSpace(botID)
+	targetID = strings.TrimSpace(targetID)
+	if botID == "" || targetID == "" {
+		return nil
+	}
+	p.mu.RLock()
+	handles := make([]*runtimeHandle, 0)
+	for _, h := range p.runtimes {
+		if h == nil || h.botID != botID || h.workspaceTargetID != targetID {
+			continue
+		}
+		handles = append(handles, h)
+	}
+	p.mu.RUnlock()
+
+	var firstErr error
+	for _, h := range handles {
+		// Like bot/agent reconfiguration, target removal must not wait for an
+		// active prompt or approval. Teardown closes the process first and lets
+		// the operation holder unwind through the closed handle.
+		if err := p.teardown(h); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 func (p *SessionPool) reapIdle(now time.Time) int {
 	if p == nil {
 		return 0
@@ -2522,7 +2625,21 @@ func (p *SessionPool) resolveSessionMetadata(ctx context.Context, input PromptIn
 	if ownerID := metadataString(sess.Metadata, "runtime_owner_account_id"); ownerID != "" {
 		input.RuntimeOwnerAccountID = ownerID
 	}
+	if targetID := strings.TrimSpace(sess.WorkspaceTargetID); targetID != "" {
+		input.WorkspaceTargetID = targetID
+		input.WorkspaceTargetKind = strings.TrimSpace(sess.WorkspaceTargetKind)
+	}
+	if workdirPath := strings.TrimSpace(sess.WorkdirPath); workdirPath != "" {
+		input.ProjectPath = workdirPath
+	}
 	return input, nil
+}
+
+func contextWithWorkspaceTarget(ctx context.Context, targetID string) context.Context {
+	if targetID = strings.TrimSpace(targetID); targetID != "" {
+		return workspace.WithWorkspaceTarget(ctx, targetID)
+	}
+	return ctx
 }
 
 func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID string) (bots.Bot, acpprofile.Profile, acpprofile.AgentSetup, client.SetupMode, bridge.WorkspaceInfo, error) {
@@ -2566,7 +2683,8 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 		// api_key to preserve the original validation behaviour.
 		mode = client.SetupModeAPIKey
 	}
-	if !profileSupportsSetupMode(profile, mode) {
+	isRemote := strings.EqualFold(strings.TrimSpace(workspaceInfo.Backend), bridge.WorkspaceBackendRemote)
+	if !isRemote && !profileSupportsSetupMode(profile, mode) {
 		reason := fmt.Sprintf("does not support setup mode %q", mode)
 		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
 			feedback.CodeAgentNotConfigured,
@@ -2588,7 +2706,32 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 			map[string]string{"agent_id": agentID, "workspace_backend": workspaceInfo.Backend},
 		)
 	}
-	if mode != client.SetupModeSelf {
+	if isRemote {
+		osName := strings.ToLower(strings.TrimSpace(workspaceInfo.OS))
+		if osName != "darwin" && osName != "linux" {
+			reason := fmt.Sprintf("does not support remote operating system %q", workspaceInfo.OS)
+			return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
+				feedback.CodeRemoteOSUnsupported,
+				reason,
+				http.StatusBadRequest,
+				"chat.acp.remoteOSUnsupported",
+				fmt.Sprintf("%s %s", profile.DisplayName, reason),
+				map[string]string{"agent_id": agentID, "workspace_backend": bridge.WorkspaceBackendRemote},
+			)
+		}
+		if required := profileBackendCapability(profile, bridge.WorkspaceBackendRemote); required != "" && !hasWorkspaceCapability(workspaceInfo.Capabilities, required) {
+			reason := fmt.Sprintf("requires connected-computer capability %q", required)
+			return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
+				feedback.CodeRemoteAdapterMissing,
+				reason,
+				http.StatusBadRequest,
+				"chat.acp.remoteAdapterMissing",
+				fmt.Sprintf("%s %s", profile.DisplayName, reason),
+				map[string]string{"agent_id": agentID, "workspace_backend": bridge.WorkspaceBackendRemote},
+			)
+		}
+	}
+	if !isRemote && mode != client.SetupModeSelf {
 		if err := validateManagedFields(profile, setup.Managed, mode); err != nil {
 			return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
 				feedback.CodeAgentNotConfigured,
@@ -2627,11 +2770,15 @@ func validateManagedFields(profile acpprofile.Profile, managed map[string]string
 // re-configuration.
 func (h *runtimeHandle) stableToolIdentity() client.ToolSessionContext {
 	return client.ToolSessionContext{
-		BotID:        h.botID,
-		ChatID:       h.botID,
-		RuntimeID:    h.id,
-		RuntimeToken: h.toolToken,
-		SessionType:  sessionmode.ACPAgent,
+		BotID:               h.botID,
+		ChatID:              h.botID,
+		RuntimeID:           h.id,
+		RuntimeToken:        h.toolToken,
+		SessionType:         sessionmode.ACPAgent,
+		WorkspaceTargetID:   h.workspaceTargetID,
+		WorkspaceTargetKind: h.workspaceTargetKind,
+		WorkspaceTargetName: h.workspaceTargetName,
+		WorkdirPath:         h.projectPath,
 	}
 }
 
@@ -2642,12 +2789,16 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 	h.state.Lock()
 	defer h.state.Unlock()
 	ctx := mcp.ToolSessionContext{
-		BotID:            h.botID,
-		ChatID:           h.botID,
-		RuntimeID:        h.id,
-		SessionID:        h.boundSession,
-		SessionType:      sessionmode.ACPAgent,
-		CanListUserInput: true,
+		BotID:               h.botID,
+		ChatID:              h.botID,
+		RuntimeID:           h.id,
+		SessionID:           h.boundSession,
+		SessionType:         sessionmode.ACPAgent,
+		WorkspaceTargetID:   h.workspaceTargetID,
+		WorkspaceTargetKind: h.workspaceTargetKind,
+		WorkspaceTargetName: h.workspaceTargetName,
+		WorkdirPath:         h.projectPath,
+		CanListUserInput:    true,
 	}
 	if h.active == nil {
 		return ctx
@@ -2706,18 +2857,22 @@ func (h *runtimeHandle) setStatus(status string) {
 func toolSessionContext(ctx context.Context, input PromptInput, h *runtimeHandle) client.ToolSessionContext {
 	fence, _ := runtimefence.FromContext(ctx)
 	return client.ToolSessionContext{
-		BotID:             h.botID,
-		ChatID:            firstNonEmpty(input.ChatID, h.botID),
-		RuntimeID:         h.id,
-		SessionID:         strings.TrimSpace(input.SessionID),
-		RunID:             strings.TrimSpace(input.RunID),
-		SessionType:       firstNonEmpty(input.SessionType, sessionmode.ACPAgent),
-		RouteID:           input.RouteID,
-		ChannelIdentityID: input.ChannelIdentityID,
-		SessionToken:      input.SessionToken,
-		CurrentPlatform:   input.CurrentPlatform,
-		ReplyTarget:       input.ReplyTarget,
-		ConversationType:  input.ConversationType,
+		BotID:               h.botID,
+		ChatID:              firstNonEmpty(input.ChatID, h.botID),
+		RuntimeID:           h.id,
+		SessionID:           strings.TrimSpace(input.SessionID),
+		RunID:               strings.TrimSpace(input.RunID),
+		SessionType:         firstNonEmpty(input.SessionType, sessionmode.ACPAgent),
+		RouteID:             input.RouteID,
+		ChannelIdentityID:   input.ChannelIdentityID,
+		SessionToken:        input.SessionToken,
+		CurrentPlatform:     input.CurrentPlatform,
+		ReplyTarget:         input.ReplyTarget,
+		ConversationType:    input.ConversationType,
+		WorkspaceTargetID:   h.workspaceTargetID,
+		WorkspaceTargetKind: h.workspaceTargetKind,
+		WorkspaceTargetName: h.workspaceTargetName,
+		WorkdirPath:         h.projectPath,
 		// PromptInput.ReasoningEffort is the current turn's explicit selection.
 		// The bot-stored fallback is loaded by SpawnProvider when this ACP tool
 		// context does not already carry one.
@@ -2766,7 +2921,30 @@ func (p *SessionPool) resolveToolHTTPURL(inputURL string, workspaceInfo bridge.W
 	if backend == "" || backend == bridge.WorkspaceBackendContainer {
 		return strings.TrimSpace(workspaceInfo.ACPToolsHTTPURL), nil
 	}
-	return strings.TrimSpace(inputURL), nil
+	raw := strings.TrimSpace(inputURL)
+	if raw == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(raw)
+	allowedScheme := parsed != nil &&
+		(parsed.Scheme == "https" || (parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname())))
+	if err != nil || !allowedScheme || strings.TrimSpace(parsed.Host) == "" || parsed.User != nil {
+		return "", errors.New("remote ACP Memoh tools URL must be an absolute HTTPS URL without embedded credentials (plain HTTP is allowed only for loopback development)")
+	}
+	return parsed.String(), nil
+}
+
+// isLoopbackHost reports whether the URL host is the local machine. A
+// loopback tools URL only ever works when the connected computer is the
+// server host itself — the local development flow — so plain HTTP is
+// acceptable there and rejected everywhere else.
+func isLoopbackHost(hostname string) bool {
+	host := strings.Trim(strings.TrimSpace(hostname), "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // toolHTTPHandler serves the runtime's MCP tool requests. Identity comes
@@ -2783,7 +2961,7 @@ func (p *SessionPool) toolHTTPHandler(h *runtimeHandle) http.Handler {
 }
 
 func (p *SessionPool) reconcileManagedACPConfig(ctx context.Context, botID string, profile acpprofile.Profile, setup acpprofile.AgentSetup, mode client.SetupMode, resolved client.ResolvedSessionContext, guard client.RuntimeSyncGuard) error {
-	if mode == client.SetupModeSelf {
+	if resolved.Backend == client.WorkspaceBackendRemote || mode == client.SetupModeSelf {
 		return nil
 	}
 	runner, hasWorkspaceClient := p.runner.(workspaceClientRunner)
@@ -2959,6 +3137,28 @@ func profileSupportsBackend(profile acpprofile.Profile, backend string) bool {
 	}
 	for _, supported := range profile.SupportedBackends {
 		if strings.EqualFold(strings.TrimSpace(supported), normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+func profileBackendCapability(profile acpprofile.Profile, backend string) string {
+	for configuredBackend, capability := range profile.BackendCapabilities {
+		if strings.EqualFold(strings.TrimSpace(configuredBackend), strings.TrimSpace(backend)) {
+			return strings.ToLower(strings.TrimSpace(capability))
+		}
+	}
+	return ""
+}
+
+func hasWorkspaceCapability(capabilities []string, required string) bool {
+	required = strings.ToLower(strings.TrimSpace(required))
+	if required == "" {
+		return true
+	}
+	for _, capability := range capabilities {
+		if strings.ToLower(strings.TrimSpace(capability)) == required {
 			return true
 		}
 	}

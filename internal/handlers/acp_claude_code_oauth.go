@@ -262,6 +262,7 @@ func (h *ACPClaudeCodeOAuthHandler) requireBotAccess(c echo.Context) (bots.Bot, 
 func (h *ACPClaudeCodeOAuthHandler) ensureManagedWorkspace(ctx context.Context, botID string) error {
 	// The OAuth token is persisted in bot metadata and injected via
 	// CLAUDE_CODE_OAUTH_TOKEN when the workspace session starts.
+	ctx = nativeACPWorkspaceContext(ctx)
 	if _, err := h.acpWorkspace.WorkspaceInfo(ctx, botID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

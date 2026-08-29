@@ -22,6 +22,9 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type acpRuntimeQueries struct {
@@ -32,32 +35,39 @@ type acpRuntimeQueries struct {
 }
 
 type fakeACPRuntimePool struct {
-	status             acpagent.RuntimeStatus
-	statusErr          error
-	ensureInput        acpagent.PromptInput
-	setModelInput      acpagent.PromptInput
-	setModelID         string
-	setModelContextErr error
-	setReasoningInput  acpagent.PromptInput
-	setReasoningEffort string
-	setReasoningCtxErr error
-	createInput        acpagent.CreateRuntimeInput
-	createErr          error
-	statusBotID        string
-	statusRuntimeID    string
-	modelBotID         string
-	modelRuntimeID     string
-	modelID            string
-	reasoningBotID     string
-	reasoningRuntimeID string
-	reasoningEffort    string
-	modeBotID          string
-	modeRuntimeID      string
-	modeID             string
-	modeContextErr     error
-	closedBotID        string
-	closedRuntimeID    string
-	closeErr           error
+	status                   acpagent.RuntimeStatus
+	statusErr                error
+	ensureCalls              int
+	ensureInput              acpagent.PromptInput
+	setModelCalls            int
+	setModelInput            acpagent.PromptInput
+	setModelID               string
+	setModelContextErr       error
+	setReasoningCalls        int
+	setReasoningInput        acpagent.PromptInput
+	setReasoningEffort       string
+	setReasoningCtxErr       error
+	createCalls              int
+	createInput              acpagent.CreateRuntimeInput
+	createErr                error
+	statusCalls              int
+	statusBotID              string
+	statusRuntimeID          string
+	setRuntimeModelCalls     int
+	modelBotID               string
+	modelRuntimeID           string
+	modelID                  string
+	setRuntimeReasoningCalls int
+	reasoningBotID           string
+	reasoningRuntimeID       string
+	reasoningEffort          string
+	modeBotID                string
+	modeRuntimeID            string
+	modeID                   string
+	modeContextErr           error
+	closedBotID              string
+	closedRuntimeID          string
+	closeErr                 error
 }
 
 func (*fakeACPRuntimePool) RuntimeStatus(sessionID, agentID, projectPath string) acpagent.RuntimeStatus {
@@ -70,11 +80,13 @@ func (*fakeACPRuntimePool) RuntimeStatus(sessionID, agentID, projectPath string)
 }
 
 func (p *fakeACPRuntimePool) Ensure(_ context.Context, input acpagent.PromptInput) (acpagent.RuntimeStatus, error) {
+	p.ensureCalls++
 	p.ensureInput = input
 	return p.status, nil
 }
 
 func (p *fakeACPRuntimePool) SetModel(ctx context.Context, input acpagent.PromptInput, modelID string) (acpagent.RuntimeStatus, error) {
+	p.setModelCalls++
 	p.setModelInput = input
 	p.setModelID = modelID
 	p.setModelContextErr = ctx.Err()
@@ -82,6 +94,7 @@ func (p *fakeACPRuntimePool) SetModel(ctx context.Context, input acpagent.Prompt
 }
 
 func (p *fakeACPRuntimePool) SetReasoning(ctx context.Context, input acpagent.PromptInput, effort string) (acpagent.RuntimeStatus, error) {
+	p.setReasoningCalls++
 	p.setReasoningInput = input
 	p.setReasoningEffort = effort
 	p.setReasoningCtxErr = ctx.Err()
@@ -93,17 +106,20 @@ func (p *fakeACPRuntimePool) SetMode(_ context.Context, _ acpagent.PromptInput, 
 }
 
 func (p *fakeACPRuntimePool) CreateRuntime(_ context.Context, input acpagent.CreateRuntimeInput) (acpagent.RuntimeStatus, error) {
+	p.createCalls++
 	p.createInput = input
 	return p.status, p.createErr
 }
 
 func (p *fakeACPRuntimePool) RuntimeStatusByID(botID, runtimeID string) (acpagent.RuntimeStatus, error) {
+	p.statusCalls++
 	p.statusBotID = botID
 	p.statusRuntimeID = runtimeID
 	return p.status, p.statusErr
 }
 
 func (p *fakeACPRuntimePool) SetRuntimeModel(_ context.Context, botID, runtimeID, modelID string) (acpagent.RuntimeStatus, error) {
+	p.setRuntimeModelCalls++
 	p.modelBotID = botID
 	p.modelRuntimeID = runtimeID
 	p.modelID = modelID
@@ -111,6 +127,7 @@ func (p *fakeACPRuntimePool) SetRuntimeModel(_ context.Context, botID, runtimeID
 }
 
 func (p *fakeACPRuntimePool) SetRuntimeReasoning(_ context.Context, botID, runtimeID, effort string) (acpagent.RuntimeStatus, error) {
+	p.setRuntimeReasoningCalls++
 	p.reasoningBotID = botID
 	p.reasoningRuntimeID = runtimeID
 	p.reasoningEffort = effort
@@ -129,6 +146,44 @@ func (p *fakeACPRuntimePool) CloseRuntime(botID, runtimeID string) error {
 	p.closedBotID = botID
 	p.closedRuntimeID = runtimeID
 	return p.closeErr
+}
+
+type fakeACPRuntimeWorkdirResolver struct {
+	resolved  workdir.Resolved
+	err       error
+	calls     int
+	botID     string
+	workdirID string
+}
+
+// nativeWorkspaceInfo installs a native-Primary workspace provider so
+// workdir-less session endpoints pass the remote gate without permissions.
+func installNativeWorkspaceInfo(h *ACPRuntimeHandler) {
+	h.SetWorkspaceInfoProvider(&fakeACPRuntimeWorkspaceInfoProvider{info: bridge.WorkspaceInfo{
+		Backend:    bridge.WorkspaceBackendContainer,
+		TargetID:   workspace.WorkspaceTargetNative,
+		TargetKind: workspace.WorkspaceTargetNative,
+	}})
+}
+
+type fakeACPRuntimeWorkspaceInfoProvider struct {
+	info  bridge.WorkspaceInfo
+	err   error
+	calls int
+	botID string
+}
+
+func (p *fakeACPRuntimeWorkspaceInfoProvider) WorkspaceInfo(_ context.Context, botID string) (bridge.WorkspaceInfo, error) {
+	p.calls++
+	p.botID = botID
+	return p.info, p.err
+}
+
+func (r *fakeACPRuntimeWorkdirResolver) ResolveForSession(_ context.Context, botID, workdirID string) (workdir.Resolved, error) {
+	r.calls++
+	r.botID = botID
+	r.workdirID = workdirID
+	return r.resolved, r.err
 }
 
 func (q acpRuntimeQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -170,6 +225,7 @@ func TestACPRuntimeHandlerReturnsIdleStatus(t *testing.T) {
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
+	installNativeWorkspaceInfo(handler)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
@@ -245,7 +301,7 @@ func TestACPRuntimeHandlerEnsureStartsRuntimeAndReturnsModels(t *testing.T) {
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
-
+	installNativeWorkspaceInfo(handler)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
 	req.Header.Set("Authorization", "Bearer token-1")
@@ -321,6 +377,57 @@ func TestACPRuntimeHandlerEnsureRejectsMissingRuntimeOwner(t *testing.T) {
 	}
 }
 
+func TestACPRuntimeEnsureRequiresWorkspaceReadForWorkdirLessSessionOnRemotePrimary(t *testing.T) {
+	const (
+		botID     = "11111111-1111-1111-1111-111111111111"
+		sessionID = "44444444-4444-4444-4444-444444444444"
+		actorID   = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	)
+	queries := acpRuntimeQueries{
+		bot:         testBotRow(botID, acpEnabledBotMetadata()),
+		permissions: []byte(`["workspace_exec"]`),
+		session: sqlc.BotSession{
+			ID:    testUUID(sessionID),
+			BotID: testUUID(botID),
+			Type:  session.TypeACPAgent,
+			Title: "Codex",
+			RuntimeMetadata: testJSON(map[string]any{
+				"acp_agent_id":             acpprofile.AgentCodexID,
+				"project_path":             "/data/app",
+				"runtime_owner_account_id": actorID,
+			}),
+		},
+	}
+	pool := &fakeACPRuntimePool{status: acpagent.RuntimeStatus{SessionID: sessionID, State: "idle"}}
+	handler := newACPRuntimeHandler(
+		pool,
+		session.NewService(nil, queries, nil),
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("user"),
+	)
+	handler.SetWorkspaceInfoProvider(&fakeACPRuntimeWorkspaceInfoProvider{info: bridge.WorkspaceInfo{
+		Backend:    bridge.WorkspaceBackendRemote,
+		TargetID:   "44444444-4444-4444-8444-444444444444",
+		TargetKind: workspace.WorkspaceTargetRemote,
+	}})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, actorID)
+	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime")
+	ctx.SetParamNames("bot_id", "session_id")
+	ctx.SetParamValues(botID, sessionID)
+
+	err := handler.EnsureRuntime(ctx)
+	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceReadPermissionRequired {
+		t.Fatalf("EnsureRuntime code = %q, want %q (error %v)", got, apperror.CodeWorkspaceReadPermissionRequired, err)
+	}
+	if pool.ensureCalls != 0 {
+		t.Fatalf("pool.Ensure calls = %d, want 0", pool.ensureCalls)
+	}
+}
+
 func TestACPRuntimeHandlerEnsureAllowsWorkspaceExecMember(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	sessionID := "77777777-7777-7777-7777-777777777777"
@@ -348,6 +455,7 @@ func TestACPRuntimeHandlerEnsureAllowsWorkspaceExecMember(t *testing.T) {
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
 	)
+	installNativeWorkspaceInfo(handler)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
@@ -362,6 +470,109 @@ func TestACPRuntimeHandlerEnsureAllowsWorkspaceExecMember(t *testing.T) {
 	}
 	if pool.ensureInput.BotID != botID {
 		t.Fatalf("pool input = %#v", pool.ensureInput)
+	}
+}
+
+func TestACPRuntimeSessionControlsRequireWorkspaceReadForRemoteWorkdir(t *testing.T) {
+	const (
+		botID     = "11111111-1111-1111-1111-111111111111"
+		sessionID = "22222222-2222-2222-2222-222222222222"
+		workdirID = "33333333-3333-4333-8333-333333333333"
+		actorID   = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	)
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		call   func(*ACPRuntimeHandler, echo.Context) error
+	}{
+		{
+			name:   "ensure runtime",
+			method: http.MethodPost,
+			path:   "/bots/:bot_id/sessions/:session_id/acp-runtime",
+			call:   (*ACPRuntimeHandler).EnsureRuntime,
+		},
+		{
+			name:   "set model",
+			method: http.MethodPatch,
+			path:   "/bots/:bot_id/sessions/:session_id/acp-runtime/model",
+			body:   `{"model_id":"gpt-5.1-codex"}`,
+			call:   (*ACPRuntimeHandler).SetModel,
+		},
+		{
+			name:   "set reasoning",
+			method: http.MethodPatch,
+			path:   "/bots/:bot_id/sessions/:session_id/acp-runtime/reasoning",
+			body:   `{"reasoning_effort":"high"}`,
+			call:   (*ACPRuntimeHandler).SetReasoning,
+		},
+		{
+			name:   "set mode",
+			method: http.MethodPatch,
+			path:   "/bots/:bot_id/sessions/:session_id/acp-runtime/mode",
+			body:   `{"mode_id":"acceptEdits"}`,
+			call:   (*ACPRuntimeHandler).SetMode,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := acpRuntimeQueries{
+				bot: testBotRow(botID, acpEnabledBotMetadata()),
+				session: sqlc.BotSession{
+					ID:        testUUID(sessionID),
+					BotID:     testUUID(botID),
+					WorkdirID: testUUID(workdirID),
+					Type:      session.TypeACPAgent,
+					Title:     "Codex",
+					RuntimeMetadata: testJSON(map[string]any{
+						"acp_agent_id":             acpprofile.AgentCodexID,
+						"project_path":             "/Users/alice/project",
+						"runtime_owner_account_id": actorID,
+					}),
+				},
+				permissions: []byte(`["workspace_exec"]`),
+			}
+			pool := &fakeACPRuntimePool{}
+			workdirs := &fakeACPRuntimeWorkdirResolver{resolved: workdir.Resolved{
+				WorkdirID: workdirID,
+				TargetID:  "44444444-4444-4444-8444-444444444444",
+				Kind:      workdir.TargetKindRemote,
+				WorkDir:   "/Users/alice/project",
+			}}
+			handler := newACPRuntimeHandler(
+				pool,
+				session.NewService(nil, queries, nil),
+				bots.NewService(nil, queries),
+				newTestAdminAccountService("user"),
+				workdirs,
+			)
+
+			e := echo.New()
+			req := httptest.NewRequest(tc.method, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", strings.NewReader(tc.body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			ctx := testAuthContext(e, req, rec, actorID)
+			ctx.SetPath(tc.path)
+			ctx.SetParamNames("bot_id", "session_id")
+			ctx.SetParamValues(botID, sessionID)
+
+			err := tc.call(handler, ctx)
+			if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceReadPermissionRequired {
+				t.Fatalf("control code = %q, want %q (error %v)", got, apperror.CodeWorkspaceReadPermissionRequired, err)
+			}
+			problem, ok := apperror.ProblemFrom(err, "req-control")
+			if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeWorkspaceReadPermissionRequired) {
+				t.Fatalf("control problem = %#v, recognized = %v", problem, ok)
+			}
+			if workdirs.calls != 1 || workdirs.botID != botID || workdirs.workdirID != workdirID {
+				t.Fatalf("workdir resolution = calls %d, bot %q, workdir %q", workdirs.calls, workdirs.botID, workdirs.workdirID)
+			}
+			if pool.ensureCalls != 0 || pool.setModelCalls != 0 || pool.setReasoningCalls != 0 {
+				t.Fatalf("pool calls = ensure %d, model %d, reasoning %d; want zero", pool.ensureCalls, pool.setModelCalls, pool.setReasoningCalls)
+			}
+		})
 	}
 }
 
@@ -468,6 +679,7 @@ func TestACPRuntimeHandlerSetModel(t *testing.T) {
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
+	installNativeWorkspaceInfo(handler)
 
 	e := echo.New()
 	req := httptest.NewRequest(
@@ -547,6 +759,7 @@ func TestACPRuntimeHandlerSetReasoning(t *testing.T) {
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
+	installNativeWorkspaceInfo(handler)
 
 	e := echo.New()
 	req := httptest.NewRequest(
@@ -621,6 +834,10 @@ func TestACPRuntimeHandlerCreateRuntime(t *testing.T) {
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
+	handler.SetWorkspaceInfoProvider(&fakeACPRuntimeWorkspaceInfoProvider{info: bridge.WorkspaceInfo{
+		TargetID:   workspace.WorkspaceTargetNative,
+		TargetKind: workspace.WorkspaceTargetNative,
+	}})
 
 	e := echo.New()
 	req := httptest.NewRequest(
@@ -657,6 +874,150 @@ func TestACPRuntimeHandlerCreateRuntime(t *testing.T) {
 	}
 	if got["runtime_id"] != "rt_warm" || got["default_model_id"] != "gpt-5.1-codex" {
 		t.Fatalf("CreateRuntime response = %#v", got)
+	}
+}
+
+func TestACPRuntimeCreateRequiresWorkspaceReadOnlyForRemotePrimary(t *testing.T) {
+	const (
+		botID   = "11111111-1111-1111-1111-111111111111"
+		actorID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	)
+	tests := []struct {
+		name        string
+		targetKind  string
+		wantDenied  bool
+		wantCreates int
+	}{
+		{name: "remote primary", targetKind: workspace.WorkspaceTargetRemote, wantDenied: true},
+		{name: "native primary", targetKind: workspace.WorkspaceTargetNative, wantCreates: 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := acpRuntimeQueries{
+				bot:         testBotRow(botID, acpEnabledBotMetadata()),
+				permissions: []byte(`["workspace_exec"]`),
+			}
+			pool := &fakeACPRuntimePool{status: acpagent.RuntimeStatus{RuntimeID: "rt_warm", State: "idle"}}
+			handler := newACPRuntimeHandler(
+				pool,
+				session.NewService(nil, queries, nil),
+				bots.NewService(nil, queries),
+				newTestAdminAccountService("user"),
+			)
+			workspaceInfo := &fakeACPRuntimeWorkspaceInfoProvider{info: bridge.WorkspaceInfo{
+				Backend:    bridge.WorkspaceBackendContainer,
+				TargetID:   workspace.WorkspaceTargetNative,
+				TargetKind: tc.targetKind,
+			}}
+			if tc.targetKind == workspace.WorkspaceTargetRemote {
+				workspaceInfo.info.Backend = bridge.WorkspaceBackendRemote
+				workspaceInfo.info.TargetID = "44444444-4444-4444-8444-444444444444"
+			}
+			handler.SetWorkspaceInfoProvider(workspaceInfo)
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/acp-runtimes", bytes.NewBufferString(`{"acp_agent_id":"codex"}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			ctx := testAuthContext(e, req, rec, actorID)
+			ctx.SetPath("/bots/:bot_id/acp-runtimes")
+			ctx.SetParamNames("bot_id")
+			ctx.SetParamValues(botID)
+
+			err := handler.CreateRuntime(ctx)
+			if tc.wantDenied {
+				if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceReadPermissionRequired {
+					t.Fatalf("CreateRuntime code = %q, want %q (error %v)", got, apperror.CodeWorkspaceReadPermissionRequired, err)
+				}
+				problem, ok := apperror.ProblemFrom(err, "req-prewarm")
+				if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeWorkspaceReadPermissionRequired) {
+					t.Fatalf("CreateRuntime problem = %#v, recognized = %v", problem, ok)
+				}
+			} else if err != nil {
+				t.Fatalf("CreateRuntime native primary error = %v", err)
+			}
+			if workspaceInfo.calls != 1 || workspaceInfo.botID != botID {
+				t.Fatalf("WorkspaceInfo calls = %d, bot %q", workspaceInfo.calls, workspaceInfo.botID)
+			}
+			if pool.createCalls != tc.wantCreates {
+				t.Fatalf("CreateRuntime pool calls = %d, want %d", pool.createCalls, tc.wantCreates)
+			}
+		})
+	}
+}
+
+func TestACPRuntimeByIDControlsRequireWorkspaceReadForRemoteRuntime(t *testing.T) {
+	const (
+		botID   = "11111111-1111-1111-1111-111111111111"
+		actorID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	)
+	tests := []struct {
+		name string
+		path string
+		body string
+		call func(*ACPRuntimeHandler, echo.Context) error
+	}{
+		{
+			name: "set model",
+			path: "/bots/:bot_id/acp-runtimes/:runtime_id/model",
+			body: `{"model_id":"gpt-5.1-codex-high"}`,
+			call: (*ACPRuntimeHandler).SetRuntimeModel,
+		},
+		{
+			name: "set reasoning",
+			path: "/bots/:bot_id/acp-runtimes/:runtime_id/reasoning",
+			body: `{"reasoning_effort":"high"}`,
+			call: (*ACPRuntimeHandler).SetRuntimeReasoning,
+		},
+		{
+			name: "set mode",
+			path: "/bots/:bot_id/acp-runtimes/:runtime_id/mode",
+			body: `{"mode_id":"acceptEdits"}`,
+			call: (*ACPRuntimeHandler).SetRuntimeMode,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := acpRuntimeQueries{
+				bot:         testBotRow(botID, acpEnabledBotMetadata()),
+				permissions: []byte(`["workspace_exec"]`),
+			}
+			pool := &fakeACPRuntimePool{status: acpagent.RuntimeStatus{
+				RuntimeID:             "rt_remote",
+				RuntimeOwnerAccountID: actorID,
+				WorkspaceTargetID:     "44444444-4444-4444-8444-444444444444",
+				WorkspaceTargetKind:   workspace.WorkspaceTargetRemote,
+				State:                 "idle",
+			}}
+			handler := newACPRuntimeHandler(
+				pool,
+				session.NewService(nil, queries, nil),
+				bots.NewService(nil, queries),
+				newTestAdminAccountService("user"),
+			)
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPatch, "/bots/"+botID+"/acp-runtimes/rt_remote", strings.NewReader(tc.body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			ctx := testAuthContext(e, req, rec, actorID)
+			ctx.SetPath(tc.path)
+			ctx.SetParamNames("bot_id", "runtime_id")
+			ctx.SetParamValues(botID, "rt_remote")
+
+			err := tc.call(handler, ctx)
+			if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceReadPermissionRequired {
+				t.Fatalf("control code = %q, want %q (error %v)", got, apperror.CodeWorkspaceReadPermissionRequired, err)
+			}
+			if pool.statusCalls != 1 {
+				t.Fatalf("status calls = %d, want 1", pool.statusCalls)
+			}
+			if pool.setRuntimeModelCalls != 0 || pool.setRuntimeReasoningCalls != 0 {
+				t.Fatalf("runtime setter calls = model %d, reasoning %d; want zero", pool.setRuntimeModelCalls, pool.setRuntimeReasoningCalls)
+			}
+		})
 	}
 }
 
@@ -750,6 +1111,10 @@ func TestACPRuntimeHandlerCreateRuntimeMapsCapToTooManyRequests(t *testing.T) {
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
+	handler.SetWorkspaceInfoProvider(&fakeACPRuntimeWorkspaceInfoProvider{info: bridge.WorkspaceInfo{
+		TargetID:   workspace.WorkspaceTargetNative,
+		TargetKind: workspace.WorkspaceTargetNative,
+	}})
 
 	e := echo.New()
 	req := httptest.NewRequest(
@@ -783,6 +1148,10 @@ func TestACPRuntimeHandlerCreateRuntimeRedactsStartFailure(t *testing.T) {
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
+	handler.SetWorkspaceInfoProvider(&fakeACPRuntimeWorkspaceInfoProvider{info: bridge.WorkspaceInfo{
+		TargetID:   workspace.WorkspaceTargetNative,
+		TargetKind: workspace.WorkspaceTargetNative,
+	}})
 
 	e := echo.New()
 	req := httptest.NewRequest(

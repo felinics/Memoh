@@ -9,6 +9,7 @@ import {
   type RuntimeClientConfig,
   type RuntimeSessionOptions,
   type RuntimeSessionStatus,
+  type TrustedACPLaunchersSource,
 } from '@memohai/runtime'
 
 import type {
@@ -50,6 +51,7 @@ export interface DesktopRemoteRuntimeManagerOptions {
   workspaceBase: string
   deviceName: string
   encryption: RuntimeEncryption
+  trustedACPLaunchers?: TrustedACPLaunchersSource
   createSession?: RuntimeSessionFactory
   warn?: (message: string, error?: unknown) => void
 }
@@ -236,6 +238,7 @@ export class DesktopRemoteRuntimeManager {
       {
         onStatus: (status, error) => this.handleSessionStatus(token, runtimeId, key, status, error),
         warn: message => this.options.warn?.(message),
+        trustedACPLaunchers: this.options.trustedACPLaunchers,
       },
     )
     return { session, token }

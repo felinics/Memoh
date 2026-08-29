@@ -15,8 +15,8 @@ import type { ACPAgentSessionInput } from './types'
 
 // Pending-ACP session staging — the state machine behind the "draft composer
 // pointed at an ACP agent" flow: staging an agent before any session exists,
-// warming a runtime for it, switching its model or reasoning effort, and handing the warm runtime
-// over to the real session on first send.
+// optionally warming a runtime for it, switching its model or reasoning effort,
+// and handing a compatible warm runtime over to the real session on first send.
 //
 // This factory calls transports directly (createACPRuntime / closeACPRuntime /
 // setACPRuntimeModelByID) — an exception to the "factories don't touch
@@ -386,6 +386,21 @@ export function createACPStaging(deps: ACPStagingDeps) {
     pendingACPBotId.value = ''
   }
 
+  // A bound workdir must cold-start after the session has been immutably bound
+  // to its target and path. Keep the staged Agent choice, but invalidate and
+  // close any runtime that was warmed against the previous Primary target.
+  function discardPendingACPRuntime() {
+    const runtimeId = pendingACPRuntimeId.value
+    const creating = pendingACPCreating.value || pendingACPCreateRequest !== null
+    if (!runtimeId && !creating) return
+    const botId = pendingACPBotId.value
+    nextPendingACPGeneration()
+    pendingACPConfigRequestVersion += 1
+    clearPendingACPCreateTracking()
+    pendingACPRuntimeId.value = ''
+    closeStagedRuntime(botId, runtimeId)
+  }
+
   // Detaches the staged ACP session without closing its warm runtime, so the
   // first send can bind the runtime to the real session.
   function detachPendingACPSession(): DetachedACPSession | null {
@@ -450,6 +465,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
     setPendingACPModel,
     setPendingACPMode,
     setPendingACPReasoning,
+    discardPendingACPRuntime,
     clearPendingACPSession,
     detachPendingACPSession,
     restorePendingACPSession,

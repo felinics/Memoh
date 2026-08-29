@@ -1,7 +1,25 @@
+import packageMetadata from '../../../package.json' with { type: 'json' }
+
 export interface RuntimeCommandCredential {
   key?: string
   team_id?: string
 }
+
+// Memoh releases all workspace packages at one version. Deriving this pin
+// keeps the generated command on the Runtime artifact built from the same
+// source as the Server capability contract.
+const runtimePackage = `@memohai/runtime@${packageMetadata.version}`
+
+// The adapter pins must match the versions Desktop bundles
+// (apps/desktop/package.json) — the Server capability contract assumes one
+// adapter version per release. command.test.ts cross-asserts them.
+export const pinnedACPAdapterVersions = Object.freeze({
+  '@agentclientprotocol/codex-acp': '1.2.0',
+  '@agentclientprotocol/claude-agent-acp': '0.66.0',
+})
+
+const codexACPPackage = `@agentclientprotocol/codex-acp@${pinnedACPAdapterVersions['@agentclientprotocol/codex-acp']}`
+const claudeAgentACPPackage = `@agentclientprotocol/claude-agent-acp@${pinnedACPAdapterVersions['@agentclientprotocol/claude-agent-acp']}`
 
 export function buildRuntimeConnectCommand(
   serverUrl: string,
@@ -10,23 +28,36 @@ export function buildRuntimeConnectCommand(
   const key = credential?.key?.trim()
   if (!key) return ''
 
-  const args = [
-    'npx',
-    '--yes',
-    '@memohai/runtime',
+  const runtimeArgs = [
+    'memoh-runtime',
     '--server',
-    serverUrl,
+    quoteShellWord(serverUrl),
     '--key',
-    key,
+    quoteShellWord(key),
   ]
   const teamId = credential?.team_id?.trim()
   if (teamId) {
-    args.push('--team-id', teamId)
+    runtimeArgs.push('--team-id', quoteShellWord(teamId))
   }
   if (isInsecureLocalhost(serverUrl)) {
-    args.push('--insecure-localhost')
+    runtimeArgs.push('--insecure-localhost')
   }
-  return args.join(' ')
+
+  return [
+    'npx',
+    '--yes',
+    `--package=${runtimePackage}`,
+    `--package=${codexACPPackage}`,
+    `--package=${claudeAgentACPPackage}`,
+    '--',
+    ...runtimeArgs,
+  ].join(' ')
+}
+
+function quoteShellWord(value: string): string {
+  const quote = '\''
+  const escapedQuote = `${quote}\\${quote}${quote}`
+  return `${quote}${value.replaceAll(quote, escapedQuote)}${quote}`
 }
 
 function isInsecureLocalhost(serverUrl: string): boolean {

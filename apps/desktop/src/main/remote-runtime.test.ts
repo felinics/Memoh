@@ -34,7 +34,14 @@ describe('DesktopRemoteRuntimeManager', () => {
     })
 
     const restoredFactory = vi.fn<RuntimeSessionFactory>(() => resolvedSession())
-    const restored = fixture.manager({ createSession: restoredFactory })
+    const trustedACPLaunchers = {
+      'codex-acp': false,
+      'claude-agent-acp': false,
+    } as const
+    const restored = fixture.manager({
+      createSession: restoredFactory,
+      trustedACPLaunchers,
+    })
     const state = await restored.restore()
 
     expect(state).toMatchObject({
@@ -52,7 +59,10 @@ describe('DesktopRemoteRuntimeManager', () => {
         workspaceBase: fixture.workspaceBase,
         insecureLocalhost: true,
       },
-      expect.objectContaining({ onStatus: expect.any(Function) }),
+      expect.objectContaining({
+        onStatus: expect.any(Function),
+        trustedACPLaunchers,
+      }),
     )
   })
 

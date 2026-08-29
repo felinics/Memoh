@@ -97,7 +97,7 @@ describe('provider test connection states', () => {
     const providerForm = (await import('./provider-form.vue')).default
     const root = document.createElement('div')
     document.body.append(root)
-     
+
     const app = createApp(providerForm, {
       provider: {
         id: 'provider-id',

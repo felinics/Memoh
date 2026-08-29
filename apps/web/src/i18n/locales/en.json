@@ -106,7 +106,8 @@
   "computerConnect": {
     "title": "Connect computer",
     "commandLabel": "Connection command",
-    "commandDescription": "Run it on the computer you want to connect, and keep it running.",
+    "commandDescription": "Requires macOS or Linux with Node.js 22+. Run it on the computer you want to connect, and keep it running.",
+    "trustNote": "The connected computer runs Agents locally. For Remote ACP, Memoh forwards the adapter process streams and does not configure Codex or Claude Code. The command contains a private Memoh connection key that stops working when you disconnect the computer.",
     "waiting": "Waiting for the computer to connect…",
     "finish": "Done"
   },
@@ -193,6 +194,8 @@
     },
     "workspace": {
       "unreachable": "The workspace could not be reached.",
+      "target_in_use": "This computer is still used by a folder and cannot be disconnected.",
+      "read_permission_required": "Ask the bot owner for file-read access before using this connected computer.",
       "image_incompatible": "This workspace image is incompatible. Rebuild it from the current Memoh workspace image and try again.",
       "template_bootstrap_failed": "The workspace files could not be initialized. Please try rebuilding the workspace.",
       "display_prepare_failed": "Display preparation failed."
@@ -1041,6 +1044,8 @@
       "agentAuthInvalid": "External agent authentication is invalid. Update the agent setup and try again.",
       "noWorkspaceExec": "You do not have permission to run workspace commands for this bot.",
       "runtimeOwnerMissing": "This external-agent session has no runtime owner. Start a new session to continue.",
+      "remoteOSUnsupported": "Connected-computer Agents currently support macOS and Linux only.",
+      "remoteAdapterMissing": "This computer does not have the required Agent adapter or local CLI. Update Memoh Desktop, or disconnect it and reconnect with the latest command from the Computers page.",
       "discussUnsupported": "This external agent cannot run in discuss mode.",
       "groupChatUnsupported": "Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex.",
       "projectModeInvalid": "The external agent project mode is invalid.",

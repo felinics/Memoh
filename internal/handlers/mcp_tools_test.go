@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/felinics/memoh/internal/apperror"
 	mcpgw "github.com/felinics/memoh/internal/mcp"
 )
 
@@ -109,6 +110,12 @@ func (r mcpToolsRuntimeResolver) ResolveRuntimeToolContext(botID, runtimeID, too
 		return mcpgw.ToolSessionContext{}, false
 	}
 	return r.session, r.ok
+}
+
+type mismatchedMCPToolsRuntimeResolver struct{}
+
+func (mismatchedMCPToolsRuntimeResolver) ResolveRuntimeToolContext(_, _, _ string) (mcpgw.ToolSessionContext, bool) {
+	return mcpgw.ToolSessionContext{BotID: "other-bot", RuntimeID: "other-runtime"}, true
 }
 
 func TestHandleMCPToolsWithGatewayAcceptCompatibility(t *testing.T) {
@@ -257,9 +264,41 @@ func TestHandleMCPToolsRuntimeIDRequiresRuntimeToolToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("runtime tool request without token should fail")
 	}
-	httpErr := &echo.HTTPError{}
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("runtime tool request without token error = %v, want 404", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeACPRuntimeNotFound {
+		t.Fatalf("runtime tool request without token error = %v, code = %q", err, got)
+	}
+}
+
+func TestHandleMCPToolsRuntimeCredentialFailsBeforeGatewayAvailability(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", nil)
+	req.Header.Set(mcpgw.ToolHeaderRuntimeID, "runtime-1")
+	req.Header.Set(mcpgw.ToolHeaderRuntimeToken, "wrong-token")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("bot_id")
+	c.SetParamValues("bot-1")
+
+	err := (&ContainerdHandler{}).HandleMCPTools(c)
+	if got := apperror.CodeOf(err); got != apperror.CodeACPRuntimeNotFound {
+		t.Fatalf("invalid runtime credential error = %v, code = %q", err, got)
+	}
+}
+
+func TestHandleMCPToolsRejectsMismatchedResolvedRuntimeIdentity(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", nil)
+	req.Header.Set(mcpgw.ToolHeaderRuntimeID, "runtime-1")
+	req.Header.Set(mcpgw.ToolHeaderRuntimeToken, "runtime-token-1")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("bot_id")
+	c.SetParamValues("bot-1")
+
+	handler := &ContainerdHandler{acpRuntimes: mismatchedMCPToolsRuntimeResolver{}}
+	err := handler.HandleMCPTools(c)
+	if got := apperror.CodeOf(err); got != apperror.CodeACPRuntimeNotFound {
+		t.Fatalf("mismatched runtime identity error = %v, code = %q", err, got)
 	}
 }
 

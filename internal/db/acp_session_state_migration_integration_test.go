@@ -19,10 +19,11 @@ func TestACPSessionStateMigrationAndCanonicalSchema(t *testing.T) {
 		assertACPSessionStateSchema(t, ctx, pool, true)
 		assertACPSessionRunCandidateIndex(t, ctx, pool, true, true)
 
-		// 0141 adds Bot Agents, 0140 removes Heartbeat, and 0139 is the reset
-		// fence. Crossing 0138 removes the ACP tables and detaches the constraint
-		// while preserving 0137's standalone index.
-		stepDown(t, dsn, 4)
+		// 0142 changes the workdir FK, 0141 adds Bot Agents, 0140 removes
+		// Heartbeat, and 0139 is the reset fence. Crossing 0138 removes the ACP
+		// tables and detaches the constraint while preserving 0137's standalone
+		// index.
+		stepDown(t, dsn, 5)
 		assertACPSessionStateSchema(t, ctx, pool, false)
 		assertACPSessionRunCandidateIndex(t, ctx, pool, true, false)
 
@@ -33,7 +34,7 @@ func TestACPSessionStateMigrationAndCanonicalSchema(t *testing.T) {
 		stepUp(t, dsn, 1)
 		assertACPSessionRunCandidateIndex(t, ctx, pool, true, false)
 
-		stepUp(t, dsn, 4)
+		stepUp(t, dsn, 5)
 		assertACPSessionStateSchema(t, ctx, pool, true)
 		assertACPSessionRunCandidateIndex(t, ctx, pool, true, true)
 	})
@@ -121,7 +122,7 @@ func assertACPSessionStateSchema(t *testing.T, ctx context.Context, pool *pgxpoo
 	}
 	if !want {
 		if states || lines || publications || candidateKey != "" || runFK != "" || linesFK != "" || publicationRunFK != "" {
-			t.Fatalf("ACP schema survived 0135 down: states=%t lines=%t publications=%t candidate=%q runFK=%q linesFK=%q publicationFK=%q",
+			t.Fatalf("ACP schema survived 0138 down: states=%t lines=%t publications=%t candidate=%q runFK=%q linesFK=%q publicationFK=%q",
 				states, lines, publications, candidateKey, runFK, linesFK, publicationRunFK)
 		}
 		return

@@ -298,7 +298,8 @@ export const useChatStore = defineStore('chat', () => {
     removeSessionFromList,
     ensureBot,
     knownSession: knownSessionSummary,
-    draftWorkdirIdFor: (botId, opts) => workdirsStore.sessionWorkdirIdFor(botId, opts),
+    draftWorkdirBindingFor: botId => workdirsStore.sessionWorkdirBindingFor(botId),
+    resolveDraftWorkdirIdFor: botId => workdirsStore.resolveSessionWorkdirIdFor(botId),
   })
   const {
     acpRuntimeStatuses, acpRuntimePending, acpRuntimeKey, clearACPRuntimeStatus, ensureACPRuntime,

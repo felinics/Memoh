@@ -916,6 +916,7 @@ func (c *clientCallbacks) requireToolApproval(ctx context.Context, toolCallID, t
 		}
 		return c.cancelApprovalOnAbort(ctx, req, reason)
 	}
+	_, workspaceTargeted := toolapproval.OperationForTool(toolName)
 	ctx = runtimefence.WithContext(ctx, session.RuntimeFence)
 	return toolapproval.RunFlow(ctx, c.approval, toolapproval.FlowRequest{
 		Input: toolapproval.CreatePendingInput{
@@ -923,6 +924,7 @@ func (c *clientCallbacks) requireToolApproval(ctx context.Context, toolCallID, t
 			SessionID:                    session.SessionID,
 			RouteID:                      session.RouteID,
 			ChannelIdentityID:            session.ChannelIdentityID,
+			WorkspaceTargetID:            session.WorkspaceTargetID,
 			RequestedByChannelIdentityID: session.ChannelIdentityID,
 			ToolCallID:                   toolCallID,
 			ToolName:                     toolName,
@@ -932,6 +934,7 @@ func (c *clientCallbacks) requireToolApproval(ctx context.Context, toolCallID, t
 			SourcePlatform:               session.CurrentPlatform,
 			ReplyTarget:                  session.ReplyTarget,
 			ConversationType:             session.ConversationType,
+			WorkspaceTargeted:            workspaceTargeted,
 		},
 		Interactive:    strings.TrimSpace(session.RunID) != "",
 		RegisterWaiter: c.approval.RegisterWaiter,

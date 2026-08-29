@@ -46,6 +46,22 @@ func TestProblemFromUsesCatalogAndDoesNotExposeCause(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReadPermissionRequiredProblem(t *testing.T) {
+	problem, ok := ProblemFrom(New(CodeWorkspaceReadPermissionRequired, nil), "req-read")
+	if !ok {
+		t.Fatal("ProblemFrom() did not recognize workspace read permission error")
+	}
+	if problem.Status != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", problem.Status, http.StatusForbidden)
+	}
+	if problem.Type != "urn:memoh:error:workspace.read_permission_required" {
+		t.Fatalf("type = %q", problem.Type)
+	}
+	if problem.Detail != "Ask the bot owner for file-read access before using this connected computer." {
+		t.Fatalf("detail = %q", problem.Detail)
+	}
+}
+
 func TestPublicFromIsSharedByTransportAdapters(t *testing.T) {
 	err := New(CodeBotNameTaken, map[string]string{"field": "name"})
 	public, ok := PublicFrom(err, "req-public")

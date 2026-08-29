@@ -13,8 +13,10 @@ import type {
 } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
 import { AUTH_SESSION_CLEARED_EVENT } from '@/lib/auth-session'
+import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import { useChatSelectionStore } from './chat-selection'
 import { useChatStore } from './chat-list'
+import { useWorkdirsStore } from './workdirs'
 
 const api = vi.hoisted(() => ({
   createSession: vi.fn(),
@@ -49,6 +51,10 @@ const sdk = vi.hoisted(() => ({
   getBotsByBotIdSettings: vi.fn(),
 }))
 
+const workdirsApi = vi.hoisted(() => ({
+  fetchWorkdirs: vi.fn(),
+}))
+
 vi.hoisted(() => {
   for (const name of ['localStorage', 'sessionStorage']) {
     Object.defineProperty(globalThis, name, {
@@ -64,6 +70,10 @@ vi.hoisted(() => {
 })
 
 vi.mock('@/composables/api/useChat', () => api)
+vi.mock('@/composables/api/useWorkdirs', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/composables/api/useWorkdirs')>()
+  return { ...original, fetchWorkdirs: workdirsApi.fetchWorkdirs }
+})
 vi.mock('@memohai/sdk', () => ({ getBotsByBotIdSettings: sdk.getBotsByBotIdSettings }))
 vi.mock('vue-sonner', () => ({ toast }))
 vi.mock('@felinic/ui', async (importOriginal) => {
@@ -397,6 +407,7 @@ beforeEach(() => {
     api.fetchMessagesUI.mockResolvedValue([])
     api.executeQuickAction.mockResolvedValue(null)
     api.fetchSafeSkillCatalog.mockResolvedValue([])
+    workdirsApi.fetchWorkdirs.mockResolvedValue([])
     sdk.getBotsByBotIdSettings.mockResolvedValue({ data: { chat_runtime: 'model' } })
     api.streamBotSessionsActivityEvents.mockImplementation((_botId: string, signal: AbortSignal, onEvent: (event: BotSessionActivityEvent) => void) => new Promise<void>((resolve) => {
       h.sessionsActivityHandler = onEvent
@@ -1524,6 +1535,120 @@ describe('chat-list store', () => {
         text: 'hello codex',
         model_id: 'gpt-5.1-codex-high',
       })
+    })
+
+  it.each([
+    {
+      targetKind: 'native' as const,
+      workdirId: 'native-workdir',
+      name: 'Native project',
+      path: '/data/project',
+      workspaceTargetId: 'native',
+    },
+    {
+      targetKind: 'remote' as const,
+      workdirId: 'remote-workdir',
+      name: 'Laptop project',
+      path: '/Users/example/project',
+      workspaceTargetId: 'runtime-1',
+    },
+  ])('cold-starts a staged ACP agent after binding a $targetKind workdir', async ({
+    targetKind,
+    workdirId,
+    name,
+    path,
+    workspaceTargetId,
+  }) => {
+      h.sendUpdates = [runtime.completed]
+      const selectedWorkdir: BotWorkdir = {
+        id: workdirId,
+        bot_id: 'bot-1',
+        name,
+        path,
+        target_kind: targetKind,
+        workspace_target_id: workspaceTargetId,
+      }
+      const workdirsLoad = deferred<BotWorkdir[]>()
+      workdirsApi.fetchWorkdirs.mockReturnValueOnce(workdirsLoad.promise)
+      api.createSession.mockResolvedValueOnce({
+        id: 'bound-acp-session',
+        bot_id: 'bot-1',
+        title: '',
+        type: 'acp_agent',
+        workdir_id: workdirId,
+        metadata: {
+          acp_agent_id: 'codex',
+          project_path: path,
+          acp_project_mode: 'project',
+        },
+      })
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const workdirs = useWorkdirsStore()
+      // This mirrors a Folder ID restored from localStorage before the list
+      // request has completed.
+      workdirs.setWorkingWorkdir('bot-1', workdirId)
+      store.stageACPSession({ agentId: 'codex' })
+
+      await expect(store.ensurePendingACPRuntime()).resolves.toBeUndefined()
+      expect(api.createACPRuntime).not.toHaveBeenCalled()
+      expect(store.pendingACPRuntimeId).toBe('')
+
+      const sending = store.sendMessage('run in the selected folder')
+      await flushPromises()
+
+      expect(workdirsApi.fetchWorkdirs).toHaveBeenCalledWith('bot-1')
+      expect(api.createSession).not.toHaveBeenCalled()
+
+      workdirsLoad.resolve([selectedWorkdir])
+      const result = await sending
+
+      expect(result.ok).toBe(true)
+      const createInput = api.createSession.mock.calls.at(-1)?.[1]
+      expect(createInput).toMatchObject({
+        type: 'chat',
+        sessionMode: 'chat',
+        runtimeType: 'acp_agent',
+        workdirId,
+      })
+      expect(createInput?.acpRuntimeId).toBeUndefined()
+      expect(api.createACPRuntime).not.toHaveBeenCalled()
+      expect(api.ensureACPRuntime).not.toHaveBeenCalled()
+      expect(h.sentWSMessages[0]).toMatchObject({
+        session_id: 'bound-acp-session',
+        text: 'run in the selected folder',
+      })
+    })
+
+  it('discards a Primary warm runtime before a native-folder-bound first send', async () => {
+      h.sendUpdates = [runtime.completed]
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      store.stageACPSession({ agentId: 'codex' })
+      await store.ensurePendingACPRuntime()
+      expect(store.pendingACPRuntimeId).toBe('rt_warm')
+
+      const workdirs = useWorkdirsStore()
+      workdirsApi.fetchWorkdirs.mockResolvedValueOnce([{
+        id: 'native-workdir',
+        bot_id: 'bot-1',
+        name: 'Native project',
+        path: '/data/project',
+        target_kind: 'native',
+        workspace_target_id: 'native',
+      }])
+      workdirs.setWorkingWorkdir('bot-1', 'native-workdir')
+
+      const result = await store.sendMessage('use the selected folder')
+
+      expect(result.ok).toBe(true)
+      expect(api.closeACPRuntime).toHaveBeenCalledWith('bot-1', 'rt_warm')
+      expect(api.createACPRuntime).toHaveBeenCalledTimes(1)
+      const createInput = api.createSession.mock.calls.at(-1)?.[1]
+      expect(createInput?.workdirId).toBe('native-workdir')
+      expect(createInput?.acpRuntimeId).toBeUndefined()
     })
 
   it('refreshes a staged runtime instead of reusing a stale capability snapshot', async () => {

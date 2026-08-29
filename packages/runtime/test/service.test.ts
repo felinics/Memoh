@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -144,6 +144,12 @@ process.exitCode = 7
 
     await expect(exec({ command: 'echo ok', work_dir: '/data', env: ['PATH=/tmp'] }))
       .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
+    await expect(exec({ command: 'echo ok', work_dir: '/data', env: ['ELECTRON_RUN_AS_NODE=1'] }))
+      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
+    await expect(exec({ command: 'echo ok', work_dir: '/data', env: ['CODEX_PATH=/tmp/codex'] }))
+      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
+    await expect(exec({ command: 'echo ok', work_dir: '/data', env: ['CLAUDE_CODE_EXECUTABLE=/tmp/claude'] }))
+      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
     await expect(exec({ command: 'echo ok', work_dir: '/data', pty: true }))
       .rejects.toMatchObject({ code: status.UNIMPLEMENTED })
 
@@ -154,6 +160,90 @@ process.exitCode = 7
     if (process.platform !== 'win32') {
       expect(timedOut.at(-1)?.exit_code).toBe(137)
     }
+  })
+
+  it('keeps concurrent bidirectional Exec streams independent', async () => {
+    const echoScript = await writeNodeFixture('stream-echo.cjs', `
+const [label, delay] = process.argv.slice(2)
+let input = ''
+process.stdin.setEncoding('utf8')
+process.stdin.on('data', chunk => { input += chunk })
+process.stdin.on('end', () => {
+  setTimeout(() => process.stdout.write(label + ':' + input), Number(delay))
+})
+`)
+
+    const [first, second] = await Promise.all([
+      execWithStdin({
+        command: nodeScriptCommand(echoScript, 'first', '30'),
+        work_dir: '/data',
+      }, ['alpha', '-one']),
+      execWithStdin({
+        command: nodeScriptCommand(echoScript, 'second', '0'),
+        work_dir: '/data',
+      }, ['beta', '-two']),
+    ])
+
+    expect(stdout(first)).toBe('first:alpha-one')
+    expect(stdout(second)).toBe('second:beta-two')
+    expect(first.at(-1)).toMatchObject({ stream: 2, exit_code: 0 })
+    expect(second.at(-1)).toMatchObject({ stream: 2, exit_code: 0 })
+  })
+
+  it('launches a fixed ACP shim through the Runtime-owned PATH', async () => {
+    if (process.platform === 'win32') return
+    client.close()
+    await transport.close()
+    await running.close()
+
+    const entry = await writeNodeFixture('trusted-codex-entry.cjs', `
+process.stdout.write(JSON.stringify({
+  argv: process.argv.slice(2),
+  electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE,
+  codexPath: process.env.CODEX_PATH,
+  claudePath: process.env.CLAUDE_CODE_EXECUTABLE,
+}))
+`)
+    const codex = join(root, 'trusted-codex')
+    await writeFile(codex, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+    await chmod(codex, 0o700)
+    running = await startRuntimeGrpcServer({
+      workspaceBase: root,
+      warn: () => undefined,
+      trustedACPLaunchers: {
+        'codex-acp': {
+          nodeExecutable: process.execPath,
+          adapterEntry: entry,
+          codexExecutable: codex,
+        },
+      },
+    })
+    transport = await createGrpcWebSocketTestHarness(running)
+    const ClientConstructor = loadTestClientConstructor()
+    client = new ClientConstructor(
+      transport.target,
+      credentials.createInsecure(),
+      {
+        'grpc.max_receive_message_length': grpcMessageLimit,
+        'grpc.max_send_message_length': grpcMessageLimit,
+      },
+    )
+
+    expect(running.capabilities).toContain('acp_codex')
+    const output = await exec({
+      command: 'command -v codex-acp && codex-acp \'argument from server\'',
+      work_dir: '/data',
+      clean_env: true,
+      unset_env: ['PATH'],
+    })
+    const lines = stdout(output).trim().split('\n')
+    expect(lines[0]).toMatch(/memoh-runtime-acp-.+\/codex-acp$/)
+    expect(lines[0]).not.toContain(process.execPath)
+    expect(lines[0]).not.toContain(entry)
+    expect(JSON.parse(lines[1])).toEqual({
+      argv: ['argument from server'],
+      codexPath: codex,
+    })
   })
 
   it('terminates connection-owned process trees on server close', async () => {
@@ -188,6 +278,7 @@ setInterval(() => {}, 1_000)
     expect(processExists(pid)).toBe(false)
     stream.cancel()
   })
+
 
   it('uses the home directory by default and allows host paths outside it', async () => {
     const cwdScript = await writeNodeFixture('cwd.cjs', 'process.stdout.write(process.cwd())\n')
@@ -263,6 +354,21 @@ function exec(first: ExecInput, metadata = new Metadata()): Promise<ExecOutput[]
   const frames: ExecOutput[] = []
   stream.on('data', frame => frames.push(frame))
   stream.write(first)
+  stream.end()
+  return new Promise((resolve, reject) => {
+    stream.once('end', () => resolve(frames))
+    stream.once('error', reject)
+  })
+}
+
+function execWithStdin(first: ExecInput, chunks: string[]): Promise<ExecOutput[]> {
+  const stream = client.Exec(new Metadata())
+  const frames: ExecOutput[] = []
+  stream.on('data', frame => frames.push(frame))
+  stream.write(first)
+  for (const chunk of chunks) {
+    stream.write({ stdin_data: Buffer.from(chunk) })
+  }
   stream.end()
   return new Promise((resolve, reject) => {
     stream.once('end', () => resolve(frames))

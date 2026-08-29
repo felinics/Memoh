@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -14,10 +15,34 @@ import (
 type workspaceRequestTargetService struct{}
 
 func (workspaceRequestTargetService) ResolveWorkspaceTarget(_ context.Context, _ string, targetID string) (workspace.ResolvedWorkspaceTarget, error) {
+	targetID = strings.TrimSpace(targetID)
+	if targetID == "" || targetID == workspace.WorkspaceTargetNative {
+		return workspace.ResolvedWorkspaceTarget{
+			TargetID: workspace.WorkspaceTargetNative,
+			Kind:     workspace.WorkspaceTargetNative,
+			Name:     "Server Workspace",
+		}, nil
+	}
 	return workspace.ResolvedWorkspaceTarget{
-		TargetID: strings.TrimSpace(targetID),
+		TargetID: targetID,
 		Kind:     workspace.WorkspaceTargetRemote,
 		Name:     "Computer B",
+	}, nil
+}
+
+// workspaceRequestRemotePrimaryService models a bot whose Primary workspace is
+// a connected computer: ambient resolution (no requested target) lands remote.
+type workspaceRequestRemotePrimaryService struct{}
+
+func (workspaceRequestRemotePrimaryService) ResolveWorkspaceTarget(_ context.Context, _ string, targetID string) (workspace.ResolvedWorkspaceTarget, error) {
+	id := strings.TrimSpace(targetID)
+	if id == "" {
+		id = "computer-primary"
+	}
+	return workspace.ResolvedWorkspaceTarget{
+		TargetID: id,
+		Kind:     workspace.WorkspaceTargetRemote,
+		Name:     "Primary Computer",
 	}, nil
 }
 
@@ -31,7 +56,7 @@ func TestPrepareWorkspaceRequestRequiresWorkspaceRead(t *testing.T) {
 	base := ChatRequest{BotID: "bot-1", WorkspaceTargetID: "computer-b"}
 
 	resolver := &Service{workspaceTargets: workspaceRequestTargetService{}}
-	if _, _, err := resolver.prepareWorkspaceRequest(t.Context(), base); err == nil || !strings.Contains(err.Error(), "user id") {
+	if _, _, err := resolver.prepareWorkspaceRequest(t.Context(), base); !errors.Is(err, ErrWorkspaceTargetNeedsActor) {
 		t.Fatalf("missing user error = %v", err)
 	}
 
@@ -305,4 +330,44 @@ func assertGovernedWorkspaceRuns(t *testing.T, retained []historyfrag.HistoryRec
 		current = target.TargetID
 	}
 	_ = current
+}
+
+func TestPrepareWorkspaceRequestAmbientRemotePrimaryRequiresWorkspaceRead(t *testing.T) {
+	// No workdir binding and no explicit target: the turn still lands on the
+	// bot's remote Primary computer, so it crosses the same permission
+	// boundary as an explicit selection.
+	req := ChatRequest{BotID: "bot-1", ThreadID: "s1", UserID: "user-1"}
+
+	denied := &Service{
+		workspaceTargets: workspaceRequestRemotePrimaryService{},
+		botPermissions:   workspaceRequestPermission(false),
+	}
+	if _, _, err := denied.prepareWorkspaceRequest(t.Context(), req); err == nil || !strings.Contains(err.Error(), "workspace_read") {
+		t.Fatalf("denied error = %v, want workspace_read denial", err)
+	}
+
+	allowed := &Service{
+		workspaceTargets: workspaceRequestRemotePrimaryService{},
+		botPermissions:   workspaceRequestPermission(true),
+	}
+	_, got, err := allowed.prepareWorkspaceRequest(t.Context(), req)
+	if err != nil {
+		t.Fatalf("allowed error = %v", err)
+	}
+	if got.WorkspaceTargetID != "computer-primary" {
+		t.Fatalf("WorkspaceTargetID = %q, want computer-primary", got.WorkspaceTargetID)
+	}
+}
+
+func TestPrepareWorkspaceRequestAmbientNativePrimaryStaysUngated(t *testing.T) {
+	// Plain chat on a native-Primary bot must not demand workspace_read.
+	// botPermissions is deliberately nil: any check would error loudly.
+	service := &Service{workspaceTargets: workspaceRequestTargetService{}}
+	_, got, err := service.prepareWorkspaceRequest(t.Context(), ChatRequest{BotID: "bot-1", ThreadID: "s1"})
+	if err != nil {
+		t.Fatalf("prepare error = %v", err)
+	}
+	if got.WorkspaceTargetID != workspace.WorkspaceTargetNative {
+		t.Fatalf("WorkspaceTargetID = %q, want native", got.WorkspaceTargetID)
+	}
 }

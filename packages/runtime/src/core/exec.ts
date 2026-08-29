@@ -31,6 +31,7 @@ export class WorkspaceExecService {
     private readonly paths: ExecPathResolver,
     private readonly children: ExecChildSupervisor,
     private readonly acceptingRPCs: () => boolean = () => true,
+    private readonly trustedExecutableDirectories: readonly string[] = [],
   ) {}
 
   exec(call: ServerDuplexStream<ExecInput, ExecOutput>): void {
@@ -39,6 +40,11 @@ export class WorkspaceExecService {
     let cancelled = false
     let terminalSent = false
     let child: ChildProcessWithoutNullStreams | undefined
+    // stdin frames must reach the child in arrival order. Everything queues
+    // until start() has flushed the queue; only then do writes go direct.
+    // Writing directly as soon as `child` exists would let frames arriving in
+    // the async spawn window overtake the queued first-message bytes.
+    let stdinReady = false
     const queuedInput: Buffer[] = []
     const admissionActive = () => this.acceptingRPCs() && !cancelled && !call.cancelled && !call.destroyed
 
@@ -65,7 +71,12 @@ export class WorkspaceExecService {
         call.emit('error', error)
         return
       }
-      child?.stdin.end()
+      // Before the flush point, start() observes inputEnded via
+      // shouldEndInput() and ends stdin after flushing the queue; ending it
+      // here would drop the still-queued bytes.
+      if (stdinReady) {
+        child?.stdin.end()
+      }
     })
     call.on('data', (message: ExecInput) => {
       if (first) {
@@ -86,6 +97,7 @@ export class WorkspaceExecService {
               void this.children.terminate(spawned)
             }
           },
+          () => { stdinReady = true },
         )
           .catch(error => {
             if (admissionActive()) {
@@ -97,7 +109,7 @@ export class WorkspaceExecService {
       }
       if (message.stdin_data?.length) {
         const data = Buffer.from(message.stdin_data)
-        if (child) {
+        if (child && stdinReady) {
           child.stdin.write(data)
         } else {
           queuedInput.push(data)
@@ -114,6 +126,7 @@ export class WorkspaceExecService {
     markTerminalSent: () => void,
     admissionActive: () => boolean,
     onSpawn: (child: ChildProcessWithoutNullStreams) => void,
+    onStdinReady: () => void,
   ): Promise<ChildProcessWithoutNullStreams> {
     assertExecAdmissionActive(call, admissionActive)
     if (request.pty) {
@@ -135,6 +148,7 @@ export class WorkspaceExecService {
     const environment = guardedEnvironment(request.env, {
       clean: request.clean_env,
       unset: request.unset_env,
+      trustedExecutableDirectories: this.trustedExecutableDirectories,
     })
 
     assertExecAdmissionActive(call, admissionActive)
@@ -178,9 +192,12 @@ export class WorkspaceExecService {
       throw rpcError(status.CANCELLED, 'exec was cancelled before process admission completed')
     }
 
+    // Flush and hand over stdin in one synchronous block: no data event can
+    // interleave between the queue drain and the switch to direct writes.
     for (const data of queuedInput.splice(0)) {
       child.stdin.write(data)
     }
+    onStdinReady()
     if (shouldEndInput()) {
       child.stdin.end()
     }

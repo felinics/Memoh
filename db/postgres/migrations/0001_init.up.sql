@@ -2490,8 +2490,9 @@ CREATE TABLE IF NOT EXISTS public.bot_workdirs (
     bot_id             UUID        NOT NULL,
     name               TEXT        NOT NULL,
     target_kind        TEXT        NOT NULL,
-    -- Non-null exactly when target_kind = 'remote'. Unbinding the remote
-    -- runtime cascades here, which is what removes its workdirs.
+    -- Non-null exactly when target_kind = 'remote'. A live or archived
+    -- workdir keeps the remote binding pinned so existing sessions cannot
+    -- silently lose their workspace target when a computer is disconnected.
     remote_binding_id  UUID,
     path               TEXT        NOT NULL,
     created_by_user_id UUID,
@@ -2513,7 +2514,7 @@ CREATE TABLE IF NOT EXISTS public.bot_workdirs (
         REFERENCES public.bots(team_id, id) ON DELETE CASCADE,
     CONSTRAINT bot_workdirs_remote_binding_fkey
         FOREIGN KEY (team_id, remote_binding_id)
-        REFERENCES public.bot_remote_runtime_bindings(team_id, id) ON DELETE CASCADE
+        REFERENCES public.bot_remote_runtime_bindings(team_id, id) ON DELETE RESTRICT
 );
 
 -- One live workdir per directory per target. Native rows carry a NULL

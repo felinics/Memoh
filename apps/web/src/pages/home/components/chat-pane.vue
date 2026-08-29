@@ -1299,12 +1299,7 @@ watch(() => currentBotId.value, (botId) => {
 const activeSessionWorkdirId = computed(() => (activeSession.value?.workdir_id ?? '').trim())
 const draftWorkingFolder = computed(() => {
   if (activeSession.value || !currentBotId.value) return null
-  const workdir = workdirsStore.workingWorkdirFor(currentBotId.value)
-  if (!workdir) return null
-  // ACP sessions can only bind native-workspace workdirs; a remote working
-  // workdir is skipped at creation, so don't pretend it applies here.
-  if (activeUsesACPComposer.value && workdir.target_kind === 'remote') return null
-  return workdir
+  return workdirsStore.workingWorkdirFor(currentBotId.value)
 })
 const composerFolderLocked = computed(() => (
   !!activeSessionWorkdirId.value || !!draftWorkingFolder.value
@@ -1316,12 +1311,8 @@ const composerFolderName = computed(() => {
   }
   return draftWorkingFolder.value?.name?.trim() || t('chat.folderUnavailable')
 })
-// Folders a draft may bind to. ACP runs only in the native workspace, so a
-// remote folder is left out rather than offered as a choice that binds nothing.
 const selectableFolders = computed(() => {
-  const folders = workdirsStore.workdirsFor(currentBotId.value).filter(folder => !folder.archived && !!folder.id)
-  if (activeUsesACPComposer.value) return folders.filter(folder => folder.target_kind !== 'remote')
-  return folders
+  return workdirsStore.workdirsFor(currentBotId.value).filter(folder => !folder.archived && !!folder.id)
 })
 // The picker only makes sense before the session exists; an empty folder list
 // falls through to the locked entry (or to nothing at all).

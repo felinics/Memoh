@@ -185,7 +185,8 @@ func TestManagerWorkspaceTargetOverridePrecedenceAndConcurrentIsolation(t *testi
 	if err != nil {
 		t.Fatalf("WorkspaceInfo request override: %v", err)
 	}
-	if info.Backend != "remote" || info.OS != "win32" || info.DefaultWorkDir != `C:\Users\alice\workspaces` {
+	if info.Backend != "remote" || info.OS != "win32" || info.DefaultWorkDir != `C:\Users\alice\workspaces` ||
+		info.TargetID != remoteTestTargetID2 || info.TargetKind != WorkspaceTargetRemote || info.TargetName != "Request PC" {
 		t.Fatalf("request WorkspaceInfo = %#v", info)
 	}
 	client, err := manager.MCPClient(requestCtx, remoteTestBotID)
@@ -210,9 +211,11 @@ func TestManagerWorkspaceTargetOverridePrecedenceAndConcurrentIsolation(t *testi
 			defer wg.Done()
 			ctx := WithWorkspaceTarget(context.Background(), remoteTestTargetID)
 			wantOS := "darwin"
+			wantTargetID := remoteTestTargetID
 			if index%2 == 1 {
 				ctx = WithWorkspaceTarget(context.Background(), remoteTestTargetID2)
 				wantOS = "win32"
+				wantTargetID = remoteTestTargetID2
 			}
 			<-start
 			for range 50 {
@@ -223,6 +226,10 @@ func TestManagerWorkspaceTargetOverridePrecedenceAndConcurrentIsolation(t *testi
 				}
 				if info.OS != wantOS {
 					errs <- fmt.Errorf("worker %d OS = %q, want %q", index, info.OS, wantOS)
+					return
+				}
+				if info.TargetID != wantTargetID {
+					errs <- fmt.Errorf("worker %d target = %q, want %q", index, info.TargetID, wantTargetID)
 					return
 				}
 			}
