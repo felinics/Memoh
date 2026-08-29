@@ -84,7 +84,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ContentBlock, ThinkingBlock as ThinkingBlockType, ToolCallBlock as ToolCallBlockType } from '@/store/chat-list'
-import { getToolDisplay, isGuiTool } from './tool-call-registry'
+import { SUMMARY_BUCKET_ORDER, getToolDisplay, isGuiTool, toolBucket } from './tool-call-registry'
 import ToolCallInline from './tool-call-inline.vue'
 import ThinkingBlock from './thinking-block.vue'
 import CollapseSection from './collapse-section.vue'
@@ -168,21 +168,8 @@ function labelFor(tool: ToolCallBlockType): string {
 }
 
 // Collapsed summary: a single tool keeps its subject; multiple tools fall back
-// to category counts ("Read 3 files · Edited 2 files").
-const BROWSE_TOOLS = new Set([
-  'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
-  'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
-  'list_schedule', 'get_schedule', 'list_skills',
-])
-const RUN_TOOLS = new Set(['exec'])
-const EDIT_TOOLS = new Set(['write', 'edit'])
-
-function bucket(name: string): 'browse' | 'edit' | 'run' | 'other' {
-  if (BROWSE_TOOLS.has(name)) return 'browse'
-  if (EDIT_TOOLS.has(name)) return 'edit'
-  if (RUN_TOOLS.has(name)) return 'run'
-  return 'other'
-}
+// to category counts ("Read 3 files · Edited 2 files"). The buckets live in the
+// registry so this header and the per-row display share one tool catalog.
 
 // Where a browser navigation went, by host — the one piece of a browsing run
 // worth surfacing in the collapsed header ("Browsed example.com").
@@ -211,15 +198,14 @@ const aggregateLabel = computed(() => {
     if (hosts.length > 1) return t('chat.process.browsedSites', { count: hosts.length })
     return t('chat.process.steps', { count: tools.length })
   }
-  const acc = { browse: 0, edit: 0, run: 0 }
+  const acc = new Map<string, number>()
   for (const tool of tools) {
-    const b = bucket(tool.toolName)
-    if (b !== 'other') acc[b] += 1
+    const b = toolBucket(tool.toolName)
+    if (b !== 'other') acc.set(b, (acc.get(b) ?? 0) + 1)
   }
-  const segments: string[] = []
-  if (acc.browse) segments.push(t('chat.process.browse', { count: acc.browse }))
-  if (acc.edit) segments.push(t('chat.process.edit', { count: acc.edit }))
-  if (acc.run) segments.push(t('chat.process.run', { count: acc.run }))
+  const segments = SUMMARY_BUCKET_ORDER
+    .filter(b => acc.has(b))
+    .map(b => t(`chat.process.${b}`, { count: acc.get(b)! }))
   return segments.length ? segments.join(' · ') : t('chat.process.steps', { count: tools.length })
 })
 
