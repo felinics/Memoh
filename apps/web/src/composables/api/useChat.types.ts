@@ -501,6 +501,13 @@ export type UIRuntimeEvent =
   | UIRuntimeDeltaEvent
   | UIRuntimeDroppedEvent
 
+// Bot-scoped workspace fs-change push. paths lists touched absolute paths;
+// null means unknown scope (full refresh).
+export interface UIFsChangedEvent {
+  type: 'fs_changed'
+  paths: string[] | null
+}
+
 export type UIStreamEvent =
   | UIStreamRunAcceptedEvent
   | UIStreamRunRejectedEvent
@@ -508,6 +515,7 @@ export type UIStreamEvent =
   | UIStreamSessionCreatedEvent
   | UIRuntimeEvent
   | UIControlAckEvent
+  | UIFsChangedEvent
   | CommandEventResponse
 
 export type UIStreamEventHandler = (event: UIStreamEvent) => void

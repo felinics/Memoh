@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { InlineLoadingRow } from '@felinic/ui'
 import { sortDirsFirst } from './utils'
+import { createSequentialLoader, nodeNeedsRefresh } from './freshness'
 import { FileTreeKey } from './file-tree-context'
 import FileTreeNode from './file-tree-node.vue'
 
@@ -15,18 +16,24 @@ const nodes = ref<HandlersFsFileInfo[]>([])
 const loading = ref(false)
 const loaded = ref(false)
 
-async function load() {
-  loading.value = true
+// Background reloads keep the previous listing on failure; foreground loads
+// keep the original toast-and-empty behavior via ctx.listDirectory.
+const loader = createSequentialLoader(async (background) => {
+  if (!background) loading.value = true
   try {
-    nodes.value = sortDirsFirst(await ctx!.listDirectory(ctx!.rootPath))
+    nodes.value = sortDirsFirst(await ctx!.listDirectory(ctx!.rootPath, { background }))
     loaded.value = true
+  } catch {
+    // background refresh failed — keep what we have
   } finally {
-    loading.value = false
+    if (!background) loading.value = false
   }
-}
+})
 
-onMounted(load)
-watch(() => ctx!.refreshKey.value, load)
+onMounted(() => loader.request(false))
+watch(() => ctx!.refreshSignal.value, (signal) => {
+  if (nodeNeedsRefresh(ctx!.rootPath, signal)) loader.request(signal.background)
+})
 </script>
 
 <template>

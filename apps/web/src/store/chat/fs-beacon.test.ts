@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { createFsChangeBeacon } from './fs-beacon'
+import { applyFsChangedPaths, createFsChangeBeacon } from './fs-beacon'
 import type { UIMessage } from '@/composables/api/useChat'
 
 function toolMessage(overrides: Partial<Record<string, unknown>> = {}): UIMessage {
@@ -129,5 +129,37 @@ describe('fs-change beacon', () => {
     vi.advanceTimersByTime(300)
     expect(beacon.fsChangedAt.value).toBe(0)
     expect(beacon.lastFsChange.value).toBeNull()
+  })
+})
+
+describe('applyFsChangedPaths', () => {
+  function record() {
+    const marks: (string | undefined)[] = []
+    const mark = (path?: string | null) => { marks.push(path ?? undefined) }
+    return { marks, mark }
+  }
+
+  it('marks each path from a server fs_changed event', () => {
+    const { marks, mark } = record()
+    applyFsChangedPaths(mark, ['/data/a.txt', '/data/b.txt'])
+    expect(marks).toEqual(['/data/a.txt', '/data/b.txt'])
+  })
+
+  it('marks a wildcard for a null payload', () => {
+    const { marks, mark } = record()
+    applyFsChangedPaths(mark, null)
+    expect(marks).toEqual([undefined])
+  })
+
+  it('marks a wildcard for an undefined payload', () => {
+    const { marks, mark } = record()
+    applyFsChangedPaths(mark, undefined)
+    expect(marks).toEqual([undefined])
+  })
+
+  it('ignores an empty payload', () => {
+    const { marks, mark } = record()
+    applyFsChangedPaths(mark, [])
+    expect(marks).toEqual([])
   })
 })

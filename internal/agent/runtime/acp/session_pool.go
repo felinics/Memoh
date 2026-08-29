@@ -100,6 +100,7 @@ type SessionPool struct {
 	contexts       *mcp.ToolSessionContextStore
 	approval       client.ToolApprovalService
 	userInput      sessionUserInputService
+	fsChangeNotify func(botID string, paths []string)
 	timeout        time.Duration
 
 	mu        sync.RWMutex
@@ -289,6 +290,12 @@ type RuntimeStatus struct {
 	AvailableCommands     []client.AvailableCommandInfo `json:"available_commands,omitempty"`
 	DefaultModelID        string                        `json:"default_model_id,omitempty"`
 } // @name acpagent.RuntimeStatus
+
+// SetFSChangeNotifier configures the callback invoked with the touched paths
+// after every successful fs-mutating ACP tool completion.
+func (p *SessionPool) SetFSChangeNotifier(notify func(botID string, paths []string)) {
+	p.fsChangeNotify = notify
+}
 
 func NewSessionPool(log *slog.Logger, runner *client.Runner, botService *bots.Service, sessionServices ...SessionDescriptorReader) *SessionPool {
 	var sessionService SessionDescriptorReader
@@ -920,7 +927,14 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		return client.PromptResult{}, false, fmt.Errorf("%w: %w", ErrRuntimeConfigUpdateFailed, err)
 	}
 
-	toolSink := newPromptToolEventSink(input.Sink, input.ToolOutputLimit)
+	promptSink := input.Sink
+	if p.fsChangeNotify != nil {
+		promptBotID := strings.TrimSpace(input.BotID)
+		promptSink = newFSChangeEventSink(promptSink, func(paths []string) {
+			p.fsChangeNotify(promptBotID, paths)
+		})
+	}
+	toolSink := newPromptToolEventSink(promptSink, input.ToolOutputLimit)
 	unregisterToolSink := p.registerToolEventSink(input, toolSink)
 	defer unregisterToolSink()
 

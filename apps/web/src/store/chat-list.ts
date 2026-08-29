@@ -216,6 +216,7 @@ export const useChatStore = defineStore('chat', () => {
     assistantStreams,
     sessionList,
     chatViews,
+    markFsChanged,
     bumpProjectionVersion: () => { runtimeProjectionVersion.value += 1 },
     normalizeTarget: normalizedChatViewTarget,
     promoteDraftView: promoteDraftChatView,
@@ -578,6 +579,14 @@ export const useChatStore = defineStore('chat', () => {
     restoreTailFromOptimistic,
   })
 
+  // Reports the files pane's expanded dirs for server-side fs watch scoping.
+  // Guarded to the current bot so it can't spawn sockets for other bots.
+  function setFsWatchDirs(botId: string, dirs: string[]) {
+    const bid = botId.trim()
+    if (!bid || bid !== (currentBotId.value ?? '').trim()) return
+    sendWebSocketMessage(bid, { type: 'fs_watch', dirs })
+  }
+
   return {
     messages, chatView, bindChatView, setChatViewVisible, unbindChatView,
     focusChatView, promoteDraftChatView, chatTargetFor,
@@ -603,7 +612,8 @@ export const useChatStore = defineStore('chat', () => {
     overrideModelId, overrideReasoningEffort,
     startupSendFailure, startupSendFailureFor,
     commandEvent, commandEventForScope, rememberCommandEvent, showCommandError,
-    fsChangedAt, markFsChanged, affectsPath, fsEventForPath,
+    fsChangedAt, lastFsChange: fsBeacon.lastFsChange, markFsChanged, affectsPath, fsEventForPath,
+    setFsWatchDirs,
     initialize, initializeWithRecovery, refreshBots, selectBot, selectSession, createNewSession,
     selectDraft, userSentInSession, draftViewRequested, applyDraftViewRequest,
     forkedSessionRequested, guiToolUseRequested, deletedSession,

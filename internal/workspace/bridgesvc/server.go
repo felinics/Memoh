@@ -56,6 +56,7 @@ type Server struct {
 	dataMount         string
 	allowHostAbsolute bool
 	reverseHTTP       *ReverseHTTPBroker
+	watches           sharedWatcher
 }
 
 func New(opts Options) *Server {

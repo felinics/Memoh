@@ -1,5 +1,6 @@
 import type { InjectionKey, Ref } from 'vue'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
+import type { TreeRefreshSignal } from './freshness'
 
 // Shared state + callbacks for the Explorer tree, provided by files-pane (which
 // owns the API calls, dialogs and selection) and consumed by the recursive
@@ -10,15 +11,21 @@ export interface FileTreeContext {
   // both plain refs and computed refs.
   canWrite: Readonly<Ref<boolean>>
   selectionMode: Readonly<Ref<boolean>>
-  // Bumped to force every expanded folder to refetch its children (manual
-  // refresh, or the agent mutating the workspace).
-  refreshKey: Readonly<Ref<number>>
+  // Bumped when expanded folders should refetch their children (manual
+  // refresh, fs-change events, turn-gated fallback ticks). dirs narrows the
+  // refetch to the named directories; background keeps failures silent.
+  refreshSignal: Readonly<Ref<TreeRefreshSignal>>
   // Path the tree should expand to and reveal (deep-link from openFilesAt).
   revealPath: Readonly<Ref<string | null>>
   // Path of the file currently open in the active editor tab (highlighted).
   activePath: Readonly<Ref<string | null>>
   rootPath: string
-  listDirectory: (path: string) => Promise<HandlersFsFileInfo[]>
+  // Foreground calls toast on failure and resolve to an empty listing;
+  // background calls throw so callers can keep the previous listing.
+  listDirectory: (path: string, opts?: { background?: boolean }) => Promise<HandlersFsFileInfo[]>
+  // Nodes report folder expansion so the pane can scope server-side fs
+  // watches to what is actually open.
+  setDirExpanded: (path: string, expanded: boolean) => void
   isSelected: (path: string) => boolean
   toggleSelect: (entry: HandlersFsFileInfo, selected: boolean) => void
   openFile: (entry: HandlersFsFileInfo) => void

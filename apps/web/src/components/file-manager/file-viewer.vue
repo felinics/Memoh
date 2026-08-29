@@ -2,6 +2,7 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, useId, watch } from 'vue'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
+import { createFreshnessTicker } from '@/composables/freshness-ticker'
 import { isFileSaveEligible } from './file-save-command'
 import {
   canApplyExternalReload,
@@ -38,8 +39,6 @@ const props = defineProps<{
   file: HandlersFsFileInfo
   readonly?: boolean
 }>()
-
-const EXTERNAL_FILE_POLL_MS = 2_000
 
 const emit = defineEmits<{
   saved: []
@@ -80,7 +79,6 @@ const compareStale = ref(false)
 let compareController: AbortController | null = null
 const observedExternalRevision = ref('')
 const imageMetadataFingerprint = ref('')
-let externalPollTimer: ReturnType<typeof setInterval> | null = null
 let externalPollController: AbortController | null = null
 let externalPollingActive = false
 // Stable ids so the chip buttons can aria-describedby the relevant inline
@@ -106,7 +104,7 @@ const isImage = computed(() => isImageFile(filename.value))
 const isDirty = computed(() => content.value !== originalContent.value)
 
 const chatStore = useChatStore()
-const { fsChangedAt, currentBotId, bots } = storeToRefs(chatStore)
+const { fsChangedAt, currentBotId, bots, streamingSessionId } = storeToRefs(chatStore)
 const botName = computed(() => {
   const bot = bots.value.find(b => b.id === props.botId)
   return bot?.display_name || bot?.name || null
@@ -300,25 +298,22 @@ async function pollExternalFile() {
   }
 }
 
-function startExternalFilePoll() {
-  if (!externalPollingActive || externalPollTimer !== null) return
-  externalPollTimer = window.setInterval(() => {
-    void pollExternalFile()
-  }, EXTERNAL_FILE_POLL_MS)
-}
+// External-change detection is event-driven (fsChangedAt); this ticker only
+// covers turn-active windows where writes can land without an event, plus a
+// catch-up check when the viewer regains attention.
+const freshnessTicker = createFreshnessTicker({
+  eligible: () => externalPollingActive && isDocumentVisible(),
+  turnActive: () => streamingSessionId.value !== null,
+  tick: () => { void pollExternalFile() },
+})
 
 function stopExternalFilePoll() {
-  if (externalPollTimer !== null) {
-    window.clearInterval(externalPollTimer)
-    externalPollTimer = null
-  }
   externalPollController?.abort()
   externalPollController = null
 }
 
 function handleVisibilityChange() {
-  if (!externalPollingActive) return
-  if (isDocumentVisible()) void pollExternalFile()
+  freshnessTicker.evaluate()
 }
 
 async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
@@ -713,21 +708,24 @@ useKeyboardCommand(appKeyboardCommands.saveActiveFile, () => {
   return true
 })
 
+watch(streamingSessionId, () => freshnessTicker.evaluate())
+
 onMounted(() => {
   externalPollingActive = true
   nowTickInterval = setInterval(() => { nowTick.value = Date.now() }, 60_000)
   document.addEventListener('visibilitychange', handleVisibilityChange)
-  startExternalFilePoll()
+  freshnessTicker.evaluate()
 })
 
 onActivated(() => {
   externalPollingActive = true
-  startExternalFilePoll()
+  freshnessTicker.evaluate()
   void pollExternalFile()
 })
 
 onDeactivated(() => {
   externalPollingActive = false
+  freshnessTicker.evaluate()
   stopExternalFilePoll()
 })
 
@@ -736,6 +734,7 @@ onBeforeUnmount(() => {
   if (nowTickInterval) clearInterval(nowTickInterval)
   nowTickInterval = null
   document.removeEventListener('visibilitychange', handleVisibilityChange)
+  freshnessTicker.stop()
   stopExternalFilePoll()
   activeReadController?.abort()
   compareController?.abort()

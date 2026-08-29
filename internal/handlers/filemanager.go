@@ -702,6 +702,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 		return fsHTTPError(err)
 	}
 
+	h.publishFSChange(botID, containerPath)
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true, Revision: fsContentRevision(contentBytes)})
 }
 
@@ -755,6 +756,7 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 		return fsHTTPError(err)
 	}
 
+	h.publishFSChange(botID, containerPath)
 	return c.JSON(http.StatusOK, FSUploadResponse{
 		Path: containerPath,
 		Size: written,
@@ -801,6 +803,7 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 		return fsHTTPError(err)
 	}
 
+	h.publishFSChange(botID, containerPath)
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
 }
 
@@ -849,6 +852,7 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 		return fsHTTPError(err)
 	}
 
+	h.publishFSChange(botID, containerPath)
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
 }
 
@@ -897,6 +901,7 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 		return fsHTTPError(err)
 	}
 
+	h.publishFSChange(botID, oldPath, newPath)
 	return c.JSON(http.StatusOK, fsOpResponse{OK: true})
 }
 
@@ -976,6 +981,7 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 		_ = client.DeleteFile(ctx, destination, true)
 		return err
 	}
+	h.publishFSChange(botID, destination)
 	return c.JSON(http.StatusOK, resp)
 }
 

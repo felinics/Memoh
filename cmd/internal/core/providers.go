@@ -61,6 +61,7 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	emailpkg "github.com/felinics/memoh/internal/email"
 	"github.com/felinics/memoh/internal/fetchproviders"
+	"github.com/felinics/memoh/internal/fsevent"
 	"github.com/felinics/memoh/internal/handlers"
 	hookspkg "github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/logger"
@@ -120,6 +121,14 @@ func provideNetworkController(service ctr.Service, rc *boot.RuntimeConfig, netwo
 	ctrl := netctl.NewController(runtime, networkService, registry)
 	networkService.SetController(ctrl)
 	return ctrl
+}
+
+func provideFSEventHub() *fsevent.Hub {
+	return fsevent.NewHub(fsevent.DefaultWindow)
+}
+
+func provideFSWatchService(log *slog.Logger, manager *workspace.Manager, hub *fsevent.Hub) *workspace.FSWatchService {
+	return workspace.NewFSWatchService(log, manager, hub.Publish)
 }
 
 func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
@@ -502,8 +511,9 @@ func agentLoopReselectModeFromConfig(log *slog.Logger, cfg config.AgentConfig) n
 	return native.LoopReselectMode(mode)
 }
 
-func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, providers []agenttools.ToolProvider) {
+func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, providers []agenttools.ToolProvider, fsEventHub *fsevent.Hub) {
 	a.SetToolProviders(providers)
+	a.SetFSChangeNotifier(fsEventHub.Publish)
 	for _, p := range providers {
 		if cp, ok := p.(*agenttools.ContainerProvider); ok {
 			cp.SetHookService(hookService)
@@ -539,9 +549,10 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager, fsEventHub *fsevent.Hub) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, acpsessionadapter.NewSource(sessionService))
 	pool.SetSessionRuntime(sessionRuntime)
+	pool.SetFSChangeNotifier(fsEventHub.Publish)
 	pool.SetSessionStateStore(acpsessionadapter.NewStateStore(queries))
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
@@ -618,9 +629,10 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, fsEventHub *fsevent.Hub) *handlers.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
+	h.SetFSEventHub(fsEventHub)
 	return h
 }
 

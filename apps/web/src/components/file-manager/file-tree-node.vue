@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDark } from '@vueuse/core'
 import {
@@ -24,6 +24,7 @@ import {
 } from '@felinic/ui'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { isArchiveFile, sortDirsFirst } from './utils'
+import { nodeNeedsRefresh } from './freshness'
 import { resolveFileIcon } from './file-icon'
 import { FileTreeKey } from './file-tree-context'
 import {
@@ -60,24 +61,49 @@ const isArchive = computed(() => isArchiveFile(props.entry.name))
 // Seti type glyph by name/extension (color tracks the active theme).
 const fileIcon = computed(() => resolveFileIcon(props.entry.name ?? '', isDark.value))
 
-const { expanded, loaded, spinnerVisible, expand, toggle, reload } = useTreeDisclosure(async () => {
+const disclosure = useTreeDisclosure(async (background) => {
   if (!props.entry.isDir || !path.value) return false
-  children.value = sortDirsFirst(await tree.listDirectory(path.value))
-  return true
+  try {
+    children.value = sortDirsFirst(await tree.listDirectory(path.value, { background }))
+    return true
+  } catch {
+    // background refresh failed — keep what we have
+    return false
+  }
 })
+const { expanded, loaded, spinnerVisible, reload } = disclosure
+
+async function expand() {
+  if (path.value) tree.setDirExpanded(path.value, true)
+  await disclosure.expand()
+}
+
+function collapse() {
+  expanded.value = false
+  if (path.value) tree.setDirExpanded(path.value, false)
+}
 
 function onRowClick() {
   if (selectionMode.value && path.value) {
     tree.toggleSelect(props.entry, !selected.value)
     return
   }
-  if (props.entry.isDir) toggle()
-  else tree.openFile(props.entry)
+  if (props.entry.isDir) {
+    if (expanded.value) collapse()
+    else void expand()
+  } else {
+    tree.openFile(props.entry)
+  }
 }
 
-// Re-fetch an expanded folder's children when the workspace changes.
-watch(() => tree.refreshKey.value, () => {
-  if (expanded.value) void reload()
+onBeforeUnmount(() => {
+  if (expanded.value && path.value) tree.setDirExpanded(path.value, false)
+})
+
+// Re-fetch an expanded folder's children when the workspace changes; a
+// path-scoped signal skips folders outside the touched directories.
+watch(() => tree.refreshSignal.value, (signal) => {
+  if (expanded.value && nodeNeedsRefresh(path.value, signal)) void reload(signal.background)
 })
 
 // Reveal (deep-link): expand the chain of ancestor folders leading to the

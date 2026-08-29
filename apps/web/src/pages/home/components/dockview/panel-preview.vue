@@ -43,6 +43,7 @@ import { getBotsByBotIdContainerFsRead } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isMarkdownFile, isHtmlFile } from '@/components/file-manager/utils'
 import { useChatStore } from '@/store/chat-list'
+import { createFreshnessTicker } from '@/composables/freshness-ticker'
 import { usePanelVisible } from './use-panel-visible'
 import PanelBreadcrumb from './panel-breadcrumb.vue'
 import DockPanelFrame from './panel-frame.vue'
@@ -60,8 +61,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const chatStore = useChatStore()
-const { currentBotId, fsChangedAt } = storeToRefs(chatStore)
-const PREVIEW_POLL_MS = 2_000
+const { currentBotId, fsChangedAt, streamingSessionId } = storeToRefs(chatStore)
 
 const visible = usePanelVisible(props.params.api)
 const filePath = computed(() => props.params.params.filePath ?? '')
@@ -82,7 +82,6 @@ const loaded = ref(false)
 // One in-flight load at a time; a new load aborts the old one so stale
 // fast-fire responses can't clobber newer content.
 let activeLoadController: AbortController | null = null
-let previewPollTimer: ReturnType<typeof setInterval> | null = null
 
 function isDocumentVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible'
@@ -118,13 +117,18 @@ async function load(options: { notifyOnError?: boolean } = {}) {
   }
 }
 
-function pollPreview() {
-  if (!visible.value || !loaded.value || loading.value || !isDocumentVisible()) return
-  void load({ notifyOnError: false })
-}
+// Preview refresh is event-driven (fsChangedAt); the ticker only covers
+// turn-active windows plus one catch-up load when the panel regains attention.
+const freshnessTicker = createFreshnessTicker({
+  eligible: () => visible.value && loaded.value && isDocumentVisible(),
+  turnActive: () => streamingSessionId.value !== null,
+  tick: () => {
+    if (!loading.value) void load({ notifyOnError: false })
+  },
+})
 
 function handleVisibilityChange() {
-  if (visible.value && isDocumentVisible()) void load({ notifyOnError: false })
+  freshnessTicker.evaluate()
 }
 
 // Load when the panel first becomes visible / its target changes, and refresh
@@ -145,17 +149,16 @@ watch(fsChangedAt, () => {
   void load()
 })
 
+watch([visible, loaded, streamingSessionId], () => freshnessTicker.evaluate())
+
 onMounted(() => {
   document.addEventListener('visibilitychange', handleVisibilityChange)
-  previewPollTimer = window.setInterval(pollPreview, PREVIEW_POLL_MS)
+  freshnessTicker.evaluate()
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
-  if (previewPollTimer !== null) {
-    window.clearInterval(previewPollTimer)
-    previewPollTimer = null
-  }
+  freshnessTicker.stop()
   activeLoadController?.abort()
 })
 </script>

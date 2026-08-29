@@ -4,6 +4,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isGuiToolName } from '@/utils/gui-tools'
 import { createInvocationId } from '../chat-list.normalize'
 import { provisionalSessionTitle } from '../chat-list.utils'
+import { applyFsChangedPaths } from './fs-beacon'
 import type { createAssistantStreamRegistry } from './assistant-streams'
 import type { createChatDecisions } from './decisions'
 import type { createChatRealtimeController } from './realtime'
@@ -42,6 +43,7 @@ export interface RuntimeIntegrationDeps {
   realtime: Realtime
   sessionList: SessionList
   chatViews: ChatViews
+  markFsChanged: (path?: string | null) => void
   bumpProjectionVersion: () => void
   normalizeTarget: (target?: Partial<ChatViewTarget>) => ChatViewTarget
   promoteDraftView: (target: ChatViewTarget, sessionId: string) => {
@@ -167,6 +169,12 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
   ) {
     if (event.type === 'control_ack') {
       deps.decisions.handleControlAck(event)
+      return
+    }
+    if (event.type === 'fs_changed') {
+      // The socket is scoped to the current bot, and the beacon drops batches
+      // whose bot changed mid-debounce, so no extra bot filter is needed here.
+      applyFsChangedPaths(deps.markFsChanged, event.paths)
       return
     }
     if (event.type === 'session_created') {

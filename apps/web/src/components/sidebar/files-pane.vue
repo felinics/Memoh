@@ -370,6 +370,8 @@ import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { joinPath, parentPath } from '@/components/file-manager/utils'
+import { createFsWatchReporter, dirsFromChangedPaths, type TreeRefreshSignal } from '@/components/file-manager/freshness'
+import { createFreshnessTicker } from '@/composables/freshness-ticker'
 import FileTree from '@/components/file-manager/file-tree.vue'
 import SidebarPanelHeader from './panel-header.vue'
 import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
@@ -391,19 +393,17 @@ const props = withDefaults(defineProps<{
   active: true,
 })
 
-const FILE_TREE_POLL_MS = 2_000
-
 const { t } = useI18n()
 const workspaceTabs = useWorkspaceTabsStore()
 const chatStore = useChatStore()
 const { activeId } = storeToRefs(workspaceTabs)
-const { fsChangedAt } = storeToRefs(chatStore)
+const { fsChangedAt, currentBotId, streamingSessionId } = storeToRefs(chatStore)
 const canWrite = computed(() => props.canWrite)
 
 const rootPath = '/data'
 
 // Tree state shared with FileTree / FileTreeNode via provide.
-const refreshKey = ref(0)
+const refreshSignal = ref<TreeRefreshSignal>({ seq: 0, dirs: null, background: false })
 const revealPath = ref<string | null>(null)
 const activePath = computed(() => {
   const id = activeId.value
@@ -493,10 +493,11 @@ function downloadBlob(blob: Blob, filename: string) {
 // List a single directory's entries (with a short retry for transient workspace
 // errors). Used by the tree per folder; failures surface as a toast and an empty
 // folder rather than breaking the whole tree.
-async function listDirectory(path: string): Promise<HandlersFsFileInfo[]> {
+async function listDirectory(path: string, retry = true): Promise<HandlersFsFileInfo[]> {
   if (!props.botId) return []
   let lastError: unknown
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const attempts = retry ? 3 : 1
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       const { data } = await getBotsByBotIdContainerFsList({
         path: { bot_id: props.botId },
@@ -506,7 +507,7 @@ async function listDirectory(path: string): Promise<HandlersFsFileInfo[]> {
       return data.entries ?? []
     } catch (error) {
       lastError = error
-      if (attempt < 2 && isTransientWorkspaceError(error)) {
+      if (attempt < attempts - 1 && isTransientWorkspaceError(error)) {
         await wait(500 * (attempt + 1))
         continue
       }
@@ -516,7 +517,10 @@ async function listDirectory(path: string): Promise<HandlersFsFileInfo[]> {
   throw lastError
 }
 
-async function safeListDirectory(path: string): Promise<HandlersFsFileInfo[]> {
+// Background (passive-refresh) calls skip the retry ladder and throw so the
+// tree keeps its previous listing; a passive failure must never toast.
+async function paneListDirectory(path: string, opts: { background?: boolean } = {}): Promise<HandlersFsFileInfo[]> {
+  if (opts.background) return listDirectory(path, false)
   try {
     return await listDirectory(path)
   } catch (error) {
@@ -525,8 +529,12 @@ async function safeListDirectory(path: string): Promise<HandlersFsFileInfo[]> {
   }
 }
 
-function reload() {
-  refreshKey.value++
+function reload(options: { dirs?: string[] | null, background?: boolean } = {}) {
+  refreshSignal.value = {
+    seq: refreshSignal.value.seq + 1,
+    dirs: options.dirs ?? null,
+    background: options.background ?? false,
+  }
 }
 
 // User-driven mutations call this to refresh the local tree AND tell the chat
@@ -538,35 +546,49 @@ function reloadAndBroadcast() {
   chatStore.markFsChanged()
 }
 
-let treePollTimer: ReturnType<typeof setInterval> | null = null
-
 function isDocumentVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible'
 }
 
-function pollTree() {
-  if (!props.botId || !props.active || !isDocumentVisible()) return
-  reload()
+// Passive freshness: no standing poll. fs-change events drive refreshes; the
+// ticker only covers the window where changes can happen without an event
+// (a turn streaming for this bot, e.g. mid-exec writes), plus one catch-up
+// tick when the pane regains attention.
+const freshnessTicker = createFreshnessTicker({
+  eligible: () => !!props.botId && props.active && isDocumentVisible(),
+  turnActive: () => currentBotId.value === props.botId && streamingSessionId.value !== null,
+  tick: () => reload({ background: true }),
+})
+
+// The server scopes bridge fs watches to the pane's expanded directories.
+// Watch lifetime equals attention: an inactive or hidden pane reports an
+// empty set so idle workspaces carry no watches.
+const expandedDirs = ref<Set<string>>(new Set())
+
+function setDirExpanded(path: string, isExpanded: boolean) {
+  const next = new Set(expandedDirs.value)
+  if (isExpanded) next.add(path)
+  else next.delete(path)
+  expandedDirs.value = next
 }
 
-function startTreePoll() {
-  if (treePollTimer !== null || !props.botId || !props.active) return
-  treePollTimer = window.setInterval(pollTree, FILE_TREE_POLL_MS)
-}
+const fsWatchReporter = createFsWatchReporter({
+  send: (dirs) => {
+    if (props.botId) chatStore.setFsWatchDirs(props.botId, dirs)
+  },
+})
 
-function stopTreePoll() {
-  if (treePollTimer === null) return
-  window.clearInterval(treePollTimer)
-  treePollTimer = null
+function reportWatchDirs() {
+  if (!props.botId || !props.active || !isDocumentVisible() || props.botId !== currentBotId.value) {
+    fsWatchReporter.update([])
+    return
+  }
+  fsWatchReporter.update([rootPath, ...expandedDirs.value])
 }
 
 function handleVisibilityChange() {
-  if (!props.active || !isDocumentVisible()) {
-    stopTreePoll()
-    return
-  }
-  reload()
-  startTreePoll()
+  freshnessTicker.evaluate()
+  reportWatchDirs()
 }
 
 // Reveal a path in the tree (expand its ancestors + scroll into view). Used by
@@ -1171,11 +1193,12 @@ function requestUpload(entry: HandlersFsFileInfo) {
 provide(FileTreeKey, {
   canWrite,
   selectionMode,
-  refreshKey,
+  refreshSignal,
   revealPath,
   activePath,
   rootPath,
-  listDirectory: safeListDirectory,
+  listDirectory: paneListDirectory,
+  setDirExpanded,
   isSelected,
   toggleSelect: toggleSelection,
   openFile: handleOpenFile,
@@ -1194,34 +1217,42 @@ watch(() => props.botId, () => {
   selectedEntries.value = new Map()
   selectionMode.value = false
   revealPath.value = null
+  expandedDirs.value = new Set()
   reload()
 }, { immediate: true })
 
 // Auto-refresh listing when the chat agent runs a fs-mutating tool (write/edit/apply_patch/exec).
 // Stay on the local reload() — calling reloadAndBroadcast here would re-bump
-// fsChangedAt and the watcher would loop on itself.
+// fsChangedAt and the watcher would loop on itself. Path-scoped batches only
+// refetch the touched parent directories.
 watch(fsChangedAt, () => {
   if (!props.botId) return
-  reload()
+  const change = chatStore.lastFsChange
+  const paths = change?.paths ? [...change.paths] : null
+  reload({ dirs: dirsFromChangedPaths(paths), background: true })
 })
 
-watch(() => [props.botId, props.active] as const, ([botId, active]) => {
-  if (botId && active && isDocumentVisible()) {
-    reload()
-    startTreePoll()
-  } else {
-    stopTreePoll()
-  }
-}, { immediate: true })
+watch(
+  () => [props.botId, props.active, currentBotId.value, streamingSessionId.value] as const,
+  () => freshnessTicker.evaluate(),
+)
+
+watch(
+  () => [props.botId, props.active, currentBotId.value, expandedDirs.value] as const,
+  () => reportWatchDirs(),
+)
 
 onMounted(() => {
   document.addEventListener('visibilitychange', handleVisibilityChange)
-  if (props.active && isDocumentVisible()) startTreePoll()
+  freshnessTicker.evaluate()
+  reportWatchDirs()
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
-  stopTreePoll()
+  freshnessTicker.stop()
+  fsWatchReporter.stop()
+  if (props.botId) chatStore.setFsWatchDirs(props.botId, [])
 })
 
 defineExpose({

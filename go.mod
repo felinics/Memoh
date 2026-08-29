@@ -22,6 +22,7 @@ require (
 	github.com/felinics/connect-it/sdk/go v0.1.1-0.20260829153217-0dcd18de667d
 	github.com/felinics/dingtalk-stream-sdk-go v0.0.0-20260829152622-ce4b7ea674a5
 	github.com/felinics/twilight v0.6.1-0.20260829152448-3e7b6144320c
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-ego/gse v1.0.2
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -103,7 +104,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/emersion/go-message v0.18.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.22.4 // indirect

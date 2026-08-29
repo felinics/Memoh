@@ -23,6 +23,19 @@ service ContainerService {
   rpc ReadRawNoFollow(ReadRawNoFollowRequest) returns (stream DataChunk);
   rpc WriteRawNoFollow(stream WriteRawNoFollowChunk) returns (WriteRawResponse);
   rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+  // WatchDir streams coalesced change batches for one directory
+  // (non-recursive). The stream ends when the watch fails or the caller
+  // cancels; the watched directory disappearing surfaces as a final batch
+  // naming the directory itself, then stream end.
+  rpc WatchDir(WatchDirRequest) returns (stream WatchDirEvent);
+}
+
+message WatchDirRequest {
+  string path = 1;
+}
+
+message WatchDirEvent {
+  repeated string paths = 1;
 }
 
 message ReadFileRequest {

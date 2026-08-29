@@ -28,6 +28,7 @@ import (
 type Agent struct {
 	client             *sdk.Client
 	toolProviders      []tools.ToolProvider
+	fsChangeNotify     func(botID string, paths []string)
 	bridgeProvider     bridge.Provider
 	hookService        *hooks.Service
 	logger             *slog.Logger
@@ -212,6 +213,12 @@ func (a *Agent) Limits() Limits {
 // This allows breaking dependency cycles in the DI graph.
 func (a *Agent) SetToolProviders(providers []tools.ToolProvider) {
 	a.toolProviders = providers
+}
+
+// SetFSChangeNotifier configures the callback invoked with the touched paths
+// after every successful fs-mutating native tool execution.
+func (a *Agent) SetFSChangeNotifier(notify func(botID string, paths []string)) {
+	a.fsChangeNotify = notify
 }
 
 // Stream runs the agent in streaming mode, emitting events to the returned channel.
@@ -1598,6 +1605,12 @@ func (a *Agent) assembleTools(
 			texts = append(texts, section.text)
 		}
 		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
+	}
+	if a.fsChangeNotify != nil {
+		botID := cfg.Identity.BotID
+		allTools = tools.WrapFSChangeNotify(allTools, func(paths []string) {
+			a.fsChangeNotify(botID, paths)
+		})
 	}
 	return allTools, usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
 }

@@ -37,6 +37,23 @@ export interface FsChangeBeaconDeps {
   sessionId: Ref<string | null>
 }
 
+// Routes a server-pushed fs_changed payload into the beacon: null/undefined
+// is a wildcard ("something changed, scope unknown"), a non-empty list marks
+// each touched path, and an empty list is a no-op (the server never sends
+// one; treat it as noise rather than a full refresh).
+export function applyFsChangedPaths(
+  markFsChanged: (path?: string | null) => void,
+  paths: readonly string[] | null | undefined,
+) {
+  if (paths == null) {
+    markFsChanged()
+    return
+  }
+  for (const path of paths) {
+    markFsChanged(path)
+  }
+}
+
 export function createFsChangeBeacon({ currentBotId, sessionId }: FsChangeBeaconDeps) {
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings

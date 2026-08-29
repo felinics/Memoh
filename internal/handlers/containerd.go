@@ -21,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/config"
 	ctr "github.com/felinics/memoh/internal/container"
 	displaypkg "github.com/felinics/memoh/internal/display"
+	"github.com/felinics/memoh/internal/fsevent"
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/policy"
@@ -42,6 +43,21 @@ type ContainerdHandler struct {
 	policyService    *policy.Service
 	displayService   *displaypkg.Service
 	browserSessions  *browserSessionStore
+	fsEventHub       *fsevent.Hub
+}
+
+// SetFSEventHub configures the per-bot workspace fs-change hub notified after
+// successful fs mutations, so other viewers of the same bot refresh without
+// polling.
+func (h *ContainerdHandler) SetFSEventHub(hub *fsevent.Hub) {
+	h.fsEventHub = hub
+}
+
+func (h *ContainerdHandler) publishFSChange(botID string, paths ...string) {
+	if h.fsEventHub == nil {
+		return
+	}
+	h.fsEventHub.Publish(botID, paths)
 }
 
 type ContainerGPURequest struct {

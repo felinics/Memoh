@@ -85,6 +85,10 @@ export type WSClientMessage =
       type: 'runtime_unsubscribe'
       session_id: string
     }
+  | {
+      type: 'fs_watch'
+      dirs: string[]
+    }
 
 function reliableRequestKey(message: WSClientMessage): string {
   switch (message.type) {
@@ -96,6 +100,11 @@ function reliableRequestKey(message: WSClientMessage): string {
     case 'tool_approval_response':
     case 'user_input_response':
       return `control:${message.control_id.trim()}`
+    // fs_watch is a replaceable subscription: the constant key keeps only the
+    // latest set pending, and — never being acknowledged — it is re-sent on
+    // every reconnect so a fresh server connection learns the watched dirs.
+    case 'fs_watch':
+      return 'fswatch'
     default:
       return ''
   }
@@ -243,6 +252,7 @@ export function connectWebSocket(
           && eventType !== 'runtime_delta'
           && eventType !== 'runtime_dropped'
           && eventType !== 'control_ack'
+          && eventType !== 'fs_changed'
         ) {
           return
         }
