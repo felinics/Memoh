@@ -189,6 +189,7 @@
         :profile="selectedProfile"
         :form="form"
         :agent="selectedAgent"
+        :credential-store="profileData?.credential_store_configured === true"
         @commit="persistACPForm"
       />
     </section>

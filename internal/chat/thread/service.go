@@ -1716,7 +1716,11 @@ func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, querie
 	if requireLegacyEnabled && !validation.Enabled {
 		return fmt.Errorf("%w: %s", ErrACPAgentNotEnabled, agentID)
 	}
-	if validation.MissingManagedFieldID != "" {
+	if requireLegacyEnabled && validation.MissingManagedFieldID != "" {
+		// Persisted Bot Agent sessions (requireLegacyEnabled=false) keep their
+		// secrets in the encrypted credential store, which scrubs them out of
+		// bot metadata; the handler preflight is credential-aware and the
+		// runtime start re-validates with the credential applied.
 		return fmt.Errorf("%w: %s missing %s", ErrACPAgentNotConfigured, agentID, validation.MissingManagedFieldID)
 	}
 	return nil

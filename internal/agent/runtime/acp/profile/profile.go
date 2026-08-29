@@ -88,6 +88,9 @@ type PublicProfile struct {
 
 type ProfilesResponse struct {
 	Items []PublicProfile `json:"items"`
+	// CredentialStoreConfigured reports whether the server can hold encrypted
+	// Agent credentials; the UI falls back to legacy metadata editing when not.
+	CredentialStoreConfigured bool `json:"credential_store_configured"`
 } // @name acpprofile.ProfilesResponse
 
 type AgentSetup struct {

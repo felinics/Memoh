@@ -17,7 +17,7 @@ func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/acp/profiles", nil)
 	rec := httptest.NewRecorder()
 
-	if err := NewACPHandler().ListProfiles(e.NewContext(req, rec)); err != nil {
+	if err := NewACPHandler(nil).ListProfiles(e.NewContext(req, rec)); err != nil {
 		t.Fatalf("ListProfiles() error = %v", err)
 	}
 	if rec.Code != http.StatusOK {

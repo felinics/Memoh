@@ -38,7 +38,7 @@
         <!-- API key 授权：一个实例一份密钥。已连接时显示状态行 + 更换/断开；
              未连接时只有一个输入框和保存。OAuth 类 profile 的账号区在下方
              Account section，与 providers 页同形。 -->
-        <FormStack v-if="agent.setup_mode === 'api_key'">
+        <FormStack v-if="agent.setup_mode === 'api_key' && credentialUIEnabled">
           <SettingsRow
             v-if="attachedCredential"
             :label="attachedCredential.label || $t('bots.settings.agentCredentialConnected')"
@@ -305,6 +305,7 @@ const props = defineProps<{
   profile: AcpprofilePublicProfile
   form: ACPForm
   agent?: BotagentsBotAgent
+  credentialStore?: boolean
   pendingSelfConfirm?: boolean
 }>()
 
@@ -348,11 +349,13 @@ const isCodex = computed(() => isCodexAgent(props.profile.id))
 const isClaude = computed(() => isClaudeCodeAgent(props.profile.id))
 const isHermes = computed(() => normalizeACPAgentID(props.profile.id) === 'hermes')
 const botAgentId = computed(() => props.agent?.id ?? '')
+// 服务端未配置加密 key 时回退 legacy metadata 编辑，凭据 UI 整体隐藏。
+const credentialUIEnabled = computed(() => props.credentialStore === true && !!botAgentId.value)
 const credentialQueryKey = computed(() => ['agent-credential', props.botId, botAgentId.value] as const)
 const { data: attachedCredential } = useQuery({
   key: () => credentialQueryKey.value,
   query: async () => {
-    if (!botAgentId.value) return null
+    if (!credentialUIEnabled.value) return null
     const { data, response } = await getBotsByBotIdAgentsByIdCredential({
       path: { bot_id: props.botId, id: botAgentId.value },
     })
@@ -420,7 +423,7 @@ const selfModeHint = computed(() => isHermes.value
 const CREDENTIAL_OWNED_FIELDS = new Set(['api_key', 'oauth_token'])
 const visibleManagedFields = computed(() => {
   const fields = filterSettingsVisibleManagedFields(props.profile, agent.value.managed, agent.value.setup_mode)
-  if (!botAgentId.value) return fields
+  if (!credentialUIEnabled.value) return fields
   return fields.filter(field => !CREDENTIAL_OWNED_FIELDS.has(normalizeACPAgentID(field.id)))
 })
 

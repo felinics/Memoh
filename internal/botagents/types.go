@@ -10,15 +10,18 @@ const (
 // BotAgent is a user-managed Agent entry attached to a bot. Native is the
 // built-in fallback and is intentionally represented by the absence of a row.
 type BotAgent struct {
-	ID        string         `json:"id"`
-	BotID     string         `json:"bot_id"`
-	Name      string         `json:"name"`
-	Runtime   string         `json:"runtime"`
-	Enabled   bool           `json:"enabled"`
-	Metadata  map[string]any `json:"metadata"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt *time.Time     `json:"deleted_at,omitempty"`
+	ID      string `json:"id"`
+	BotID   string `json:"bot_id"`
+	Name    string `json:"name"`
+	Runtime string `json:"runtime"`
+	Enabled bool   `json:"enabled"`
+	// AgentCredentialID points at the encrypted credential this instance uses;
+	// empty means not connected (legacy metadata path).
+	AgentCredentialID string         `json:"agent_credential_id,omitempty"`
+	Metadata          map[string]any `json:"metadata"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	DeletedAt         *time.Time     `json:"deleted_at,omitempty"`
 }
 
 type CreateRequest struct {

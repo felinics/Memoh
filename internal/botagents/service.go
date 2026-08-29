@@ -319,6 +319,12 @@ func ValidateConfiguration(agent BotAgent, botMetadata map[string]any) error {
 	}
 	setup := acpprofile.ParseAgentSetup(botMetadata, descriptor.Provider)
 	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+		// An attached encrypted credential satisfies the secret requirement:
+		// the store scrubs api_key/oauth_token out of bot metadata on save, so
+		// the metadata-only preflight would reject every connected Agent.
+		if agent.AgentCredentialID != "" {
+			return nil
+		}
 		return &ConfigurationError{Field: field.ID}
 	}
 	return nil
@@ -376,6 +382,9 @@ func fromRow(row sqlc.BotAgent) (BotAgent, error) {
 		Metadata:  metadata,
 		CreatedAt: db.TimeFromPg(row.CreatedAt),
 		UpdatedAt: db.TimeFromPg(row.UpdatedAt),
+	}
+	if row.AgentCredentialID.Valid {
+		item.AgentCredentialID = row.AgentCredentialID.String()
 	}
 	if row.DeletedAt.Valid {
 		deletedAt := row.DeletedAt.Time

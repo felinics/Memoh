@@ -15802,6 +15802,10 @@ const docTemplate = `{
         "acpprofile.ProfilesResponse": {
             "type": "object",
             "properties": {
+                "credential_store_configured": {
+                    "description": "CredentialStoreConfigured reports whether the server can hold encrypted\nAgent credentials; the UI falls back to legacy metadata editing when not.",
+                    "type": "boolean"
+                },
                 "items": {
                     "type": "array",
                     "items": {
@@ -16650,6 +16654,10 @@ const docTemplate = `{
         "botagents.BotAgent": {
             "type": "object",
             "properties": {
+                "agent_credential_id": {
+                    "description": "AgentCredentialID points at the encrypted credential this instance uses;\nempty means not connected (legacy metadata path).",
+                    "type": "string"
+                },
                 "bot_id": {
                     "type": "string"
                 },

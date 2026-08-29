@@ -210,6 +210,11 @@ export type AcpprofileManagedField = {
 };
 
 export type AcpprofileProfilesResponse = {
+    /**
+     * CredentialStoreConfigured reports whether the server can hold encrypted
+     * Agent credentials; the UI falls back to legacy metadata editing when not.
+     */
+    credential_store_configured?: boolean;
     items?: Array<AcpprofilePublicProfile>;
 };
 
@@ -554,6 +559,11 @@ export type AudioVoiceInfo = {
 };
 
 export type BotagentsBotAgent = {
+    /**
+     * AgentCredentialID points at the encrypted credential this instance uses;
+     * empty means not connected (legacy metadata path).
+     */
+    agent_credential_id?: string;
     bot_id?: string;
     created_at?: string;
     deleted_at?: string;

@@ -4602,7 +4602,9 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 			map[string]string{"agent_id": agentID},
 		)
 	}
-	if field := setup.MissingManagedField; field != nil {
+	if field := setup.MissingManagedField; field != nil && strings.TrimSpace(spec.BotAgentID) == "" {
+		// Persisted Bot Agent sessions carry their secret in the encrypted
+		// credential store; only the legacy metadata path is checked here.
 		return acpfeedback.New(
 			acpfeedback.CodeAgentNotConfigured,
 			"missing_managed_field",
