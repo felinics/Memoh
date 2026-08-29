@@ -512,3 +512,46 @@ func TestRuntimeLeaseRejectsPreplantedCacheSymlink(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceScopedStorageMode(t *testing.T) {
+	const instance = "b0000000-0000-4000-8000-000000000001"
+	codexProfile, ok := acpprofile.Lookup("codex")
+	if !ok {
+		t.Fatal("codex profile missing")
+	}
+	codexOAuth, ok := codexProfile.RuntimeStorage.Modes["oauth"]
+	if !ok {
+		t.Fatal("codex oauth storage mode missing")
+	}
+	remapped, err := instanceScopedStorageMode("codex", "oauth", instance, codexOAuth)
+	if err != nil {
+		t.Fatalf("instanceScopedStorageMode() error = %v", err)
+	}
+	for _, artifact := range remapped.Artifacts {
+		if !strings.HasPrefix(artifact.PersistentPath, ".codex/agents/"+instance+"/") {
+			t.Fatalf("artifact %q not instance-scoped", artifact.PersistentPath)
+		}
+	}
+	// The shared source of the remap must be untouched.
+	for _, artifact := range codexOAuth.Artifacts {
+		if strings.Contains(artifact.PersistentPath, instance) {
+			t.Fatalf("original artifact mutated: %q", artifact.PersistentPath)
+		}
+	}
+	// Self-managed mode keeps the user's shared ~/.codex tree.
+	selfMode := codexProfile.RuntimeStorage.Modes["self"]
+	same, err := instanceScopedStorageMode("codex", "self", instance, selfMode)
+	if err != nil {
+		t.Fatalf("self mode error = %v", err)
+	}
+	if len(same.Artifacts) > 0 && !strings.HasPrefix(same.Artifacts[0].PersistentPath, ".codex/") {
+		t.Fatalf("self mode artifact remapped: %q", same.Artifacts[0].PersistentPath)
+	}
+	if strings.Contains(same.Artifacts[1].PersistentPath, instance) {
+		t.Fatal("self mode must not be instance-scoped")
+	}
+	// A non-UUID instance id must refuse to build a path.
+	if _, err := instanceScopedStorageMode("codex", "oauth", "../escape", codexOAuth); err == nil {
+		t.Fatal("path-unsafe instance id accepted")
+	}
+}

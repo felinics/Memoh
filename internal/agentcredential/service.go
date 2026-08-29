@@ -91,7 +91,7 @@ func (s *Service) ResolveForBotAgent(ctx context.Context, botID, botAgentID stri
 	if err != nil {
 		return ResolvedCredential{}, err
 	}
-	return ResolvedCredential{PublicCredential: publicFromJoinRow(row), Secret: secret}, nil
+	return ResolvedCredential{PublicCredential: publicFromJoinRow(row), AgentProvider: row.AgentProvider, Secret: secret}, nil
 }
 
 // AttachToBotAgent encrypts a new secret, points the Bot Agent instance at it,

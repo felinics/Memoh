@@ -318,17 +318,34 @@ func ValidateConfiguration(agent BotAgent, botMetadata map[string]any) error {
 		return ErrInvalidMetadata
 	}
 	setup := acpprofile.ParseAgentSetup(botMetadata, descriptor.Provider)
-	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
-		// An attached encrypted credential satisfies the secret requirement:
+	if agent.AgentCredentialID != "" {
+		// An attached encrypted credential supplies the secret fields only —
 		// the store scrubs api_key/oauth_token out of bot metadata on save, so
 		// the metadata-only preflight would reject every connected Agent.
-		if agent.AgentCredentialID != "" {
-			return nil
+		// Non-secret required fields (e.g. the Hermes provider/model) must
+		// still come from metadata, so stub the secrets and re-run the check
+		// instead of skipping it.
+		managed := make(map[string]string, len(setup.Managed)+2)
+		for key, value := range setup.Managed {
+			managed[key] = value
 		}
+		for _, secretField := range []string{"api_key", "oauth_token"} {
+			if strings.TrimSpace(managed[secretField]) == "" {
+				managed[secretField] = credentialSuppliedPlaceholder
+			}
+		}
+		setup.Managed = managed
+	}
+	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
 		return &ConfigurationError{Field: field.ID}
 	}
 	return nil
 }
+
+// credentialSuppliedPlaceholder marks a secret satisfied by the encrypted
+// credential store during preflight; it never reaches a runtime, which
+// receives the decrypted value via applyAgentCredential instead.
+const credentialSuppliedPlaceholder = "credential-store" //nolint:gosec // Preflight marker, not a credential value.
 
 func normalizeDescriptor(runtime string, metadata map[string]any) (string, map[string]any, error) {
 	runtime = strings.ToLower(strings.TrimSpace(runtime))

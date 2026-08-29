@@ -100,6 +100,11 @@ func prepareRuntimeLeaseUnguarded(ctx context.Context, client *bridge.Client, op
 	if !ok {
 		return nil, fmt.Errorf("ACP profile %q has no runtime storage policy for setup mode %q", profile.ID, modeName)
 	}
+	if remapped, err := instanceScopedStorageMode(profile.ID, modeName, opts.BotAgentID, storageMode); err != nil {
+		return nil, err
+	} else {
+		storageMode = remapped
+	}
 	agentID := acpprofile.NormalizeAgentID(profile.ID)
 	if !safeRuntimeAgentID(agentID) {
 		return nil, fmt.Errorf("ACP profile %q has an unsafe runtime directory name", profile.ID)
@@ -859,4 +864,29 @@ func versionOf(data []byte, exists bool) runtimeFileVersion {
 		return runtimeFileVersion{}
 	}
 	return runtimeFileVersion{exists: true, hash: sha256.Sum256(data)}
+}
+
+// instanceScopedStorageMode remaps Codex durable artifact paths into the Bot
+// Agent instance's own directory for managed (api_key/oauth) runtimes, so two
+// instances holding different accounts never share an auth.json: the live
+// RuntimeSyncCodexAuth write-back and the credential-rotation import both
+// stay within the instance that owns the token. Self-managed mode keeps the
+// shared ~/.codex tree the user maintains by hand.
+func instanceScopedStorageMode(profileID, modeName, botAgentID string, mode acpprofile.RuntimeStorageMode) (acpprofile.RuntimeStorageMode, error) {
+	if !isCodexAgent(profileID) || modeName == string(SetupModeSelf) || strings.TrimSpace(botAgentID) == "" {
+		return mode, nil
+	}
+	instanceRel, err := codexInstanceRelDir(botAgentID)
+	if err != nil {
+		return acpprofile.RuntimeStorageMode{}, err
+	}
+	remapped := mode
+	remapped.Artifacts = make([]acpprofile.RuntimeArtifact, len(mode.Artifacts))
+	for i, artifact := range mode.Artifacts {
+		if rest, ok := strings.CutPrefix(artifact.PersistentPath, ".codex/"); ok {
+			artifact.PersistentPath = path.Join(instanceRel, rest)
+		}
+		remapped.Artifacts[i] = artifact
+	}
+	return remapped, nil
 }

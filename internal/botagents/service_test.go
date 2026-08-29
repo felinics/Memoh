@@ -226,3 +226,32 @@ func testRow(enabled bool) sqlc.BotAgent {
 func testUUID(value string) pgtype.UUID {
 	return pgtype.UUID{Bytes: uuid.MustParse(value), Valid: true}
 }
+
+func TestValidateConfigurationCredentialSuppliesOnlySecrets(t *testing.T) {
+	hermes := BotAgent{
+		ID:                "a0000000-0000-4000-8000-000000000001",
+		Runtime:           RuntimeACP,
+		Metadata:          map[string]any{"provider": "hermes"},
+		AgentCredentialID: "c0000000-0000-4000-8000-000000000001",
+	}
+	// Hermes api_key mode with a credential attached: the secret is satisfied,
+	// but the required model field must still come from metadata.
+	incomplete := map[string]any{"acp": map[string]any{"agents": map[string]any{"hermes": map[string]any{
+		"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"provider": "gemini"},
+	}}}}
+	var configErr *ConfigurationError
+	if err := ValidateConfiguration(hermes, incomplete); !errors.As(err, &configErr) || configErr.Field != "model" {
+		t.Fatalf("ValidateConfiguration(missing model) = %v, want ConfigurationError{model}", err)
+	}
+	complete := map[string]any{"acp": map[string]any{"agents": map[string]any{"hermes": map[string]any{
+		"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"provider": "gemini", "model": "gemini-3.5-flash"},
+	}}}}
+	if err := ValidateConfiguration(hermes, complete); err != nil {
+		t.Fatalf("ValidateConfiguration(credential supplies api_key) = %v, want nil", err)
+	}
+	// Without a credential the secret requirement stays enforced.
+	hermes.AgentCredentialID = ""
+	if err := ValidateConfiguration(hermes, complete); !errors.As(err, &configErr) || configErr.Field != "api_key" {
+		t.Fatalf("ValidateConfiguration(no credential) = %v, want ConfigurationError{api_key}", err)
+	}
+}

@@ -74,6 +74,27 @@ type CodexManagedConfig struct {
 	Mode    SetupMode
 	Managed map[string]string
 	OAuth   *CodexOAuthCredentials
+	// ConfigDir overrides the shared durable CODEX_HOME for one Bot Agent
+	// instance. Empty keeps the legacy shared directory.
+	ConfigDir string
+}
+
+func codexConfigDir(cfg CodexManagedConfig) string {
+	if dir := strings.TrimSpace(cfg.ConfigDir); dir != "" {
+		return dir
+	}
+	return CodexManagedConfigDir
+}
+
+func ensureCodexConfigDir(ctx context.Context, client *bridge.Client, cfg CodexManagedConfig) error {
+	dir := strings.TrimSpace(cfg.ConfigDir)
+	if dir == "" {
+		return nil
+	}
+	if err := client.Mkdir(ctx, dir); err != nil {
+		return fmt.Errorf("create Codex instance config directory: %w", err)
+	}
+	return nil
 }
 
 type CodexOAuthCredentials struct {
@@ -103,10 +124,14 @@ func WriteCodexManagedConfigWithAuth(ctx context.Context, client *bridge.Client,
 	if err != nil {
 		return fmt.Errorf("render Codex config: %w", err)
 	}
-	if err := client.WriteFile(ctx, path.Join(CodexManagedConfigDir, "auth.json"), auth); err != nil {
+	if err := ensureCodexConfigDir(ctx, client, cfg); err != nil {
+		return err
+	}
+	configDir := codexConfigDir(cfg)
+	if err := client.WriteFile(ctx, path.Join(configDir, "auth.json"), auth); err != nil {
 		return fmt.Errorf("write Codex auth: %w", err)
 	}
-	if err := client.WriteFile(ctx, path.Join(CodexManagedConfigDir, "config.toml"), content); err != nil {
+	if err := client.WriteFile(ctx, path.Join(configDir, "config.toml"), content); err != nil {
 		return fmt.Errorf("write Codex config: %w", err)
 	}
 	return nil
@@ -185,7 +210,10 @@ func WriteCodexManagedConfigFile(ctx context.Context, client *bridge.Client, cfg
 	if err != nil {
 		return fmt.Errorf("render Codex config: %w", err)
 	}
-	if err := client.WriteFile(ctx, path.Join(CodexManagedConfigDir, "config.toml"), content); err != nil {
+	if err := ensureCodexConfigDir(ctx, client, cfg); err != nil {
+		return err
+	}
+	if err := client.WriteFile(ctx, path.Join(codexConfigDir(cfg), "config.toml"), content); err != nil {
 		return fmt.Errorf("write Codex config: %w", err)
 	}
 	return nil

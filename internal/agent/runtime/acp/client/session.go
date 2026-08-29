@@ -260,6 +260,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
 		Backend:          backend,
 		BotID:            req.BotID,
+		BotAgentID:       resolvedBotAgentID(req.Resolved),
 		AgentID:          req.AgentID,
 		SetupMode:        req.SetupMode,
 		Resume:           req.Resume,

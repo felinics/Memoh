@@ -60,6 +60,7 @@ const (
 type processOptions struct {
 	Backend          WorkspaceBackend
 	BotID            string
+	BotAgentID       string
 	AgentID          string
 	SetupMode        SetupMode
 	Resume           *SessionStateSnapshot

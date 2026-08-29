@@ -76,9 +76,10 @@ func WriteManagedACPConfig(ctx context.Context, req ManagedACPConfigRequest, get
 			return err
 		}
 		cfg := CodexManagedConfig{
-			Mode:    mode,
-			Managed: req.Setup.Managed,
-			OAuth:   req.CodexOAuth,
+			Mode:      mode,
+			Managed:   req.Setup.Managed,
+			OAuth:     req.CodexOAuth,
+			ConfigDir: resolvedCodexDurableDir(&req.Resolved),
 		}
 		if mode == SetupModeOAuth {
 			if req.CodexOAuth != nil {

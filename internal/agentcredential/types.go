@@ -45,5 +45,9 @@ type CreateRequest struct {
 
 type ResolvedCredential struct {
 	PublicCredential
-	Secret map[string]string
+	// AgentProvider is the ACP profile id of the Bot Agent instance this
+	// credential is attached to; runtime starts must match it against the
+	// profile they are about to launch.
+	AgentProvider string
+	Secret        map[string]string
 }

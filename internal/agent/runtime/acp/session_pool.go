@@ -1623,6 +1623,12 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		case resolveErr != nil:
 			return fail(resolveErr)
 		default:
+			// The probe API accepts acp_agent_id and bot_agent_id
+			// independently; a mismatched pair must not launch one profile
+			// with a credential attached to another instance's profile.
+			if acpprofile.NormalizeAgentID(resolvedCredential.AgentProvider) != h.agentID {
+				return fail(agentcredential.ErrIncompatible)
+			}
 			setup, mode, codexOAuth, err = applyAgentCredential(profile, setup, resolvedCredential)
 			if err != nil {
 				return fail(err)
@@ -1640,6 +1646,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	supportsSessionState := len(profile.RuntimeStorage.SessionRoots) > 0
 	resolved, err := client.ResolveSessionContext(client.SessionContextInput{
 		AgentID:     h.agentID,
+		BotAgentID:  h.botAgentID,
 		SetupMode:   mode,
 		Backend:     workspaceInfo.Backend,
 		ProjectPath: h.projectPath,
@@ -1648,7 +1655,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		return fail(fmt.Errorf("resolve ACP session context: %w", err))
 	}
 	if codexOAuth != nil {
-		codexOAuth = p.reconcileCodexOAuthRotation(startCtx, h, resolvedCredential, codexOAuth)
+		codexOAuth = p.reconcileCodexOAuthRotation(startCtx, h, resolved, resolvedCredential, codexOAuth)
 	}
 	if err := p.reconcileManagedACPConfig(startCtx, h.botID, profile, setup, mode, resolved, runtimeSyncGuard, codexOAuth); err != nil {
 		return fail(fmt.Errorf("prepare %s managed config: %w", profile.DisplayName, err))
@@ -2911,7 +2918,7 @@ func (p *SessionPool) runtimeSyncGuard(botID string, expectedBotEpoch int64) cli
 // the next start would overwrite that newer token with the stale database copy
 // and break the refresh chain. A different account_id means the user switched
 // credentials, so the database still wins.
-func (p *SessionPool) reconcileCodexOAuthRotation(ctx context.Context, h *runtimeHandle, credential agentcredential.ResolvedCredential, fromStore *client.CodexOAuthCredentials) *client.CodexOAuthCredentials {
+func (p *SessionPool) reconcileCodexOAuthRotation(ctx context.Context, h *runtimeHandle, resolved client.ResolvedSessionContext, credential agentcredential.ResolvedCredential, fromStore *client.CodexOAuthCredentials) *client.CodexOAuthCredentials {
 	if fromStore == nil || p.credentials == nil || credential.ID == "" {
 		return fromStore
 	}
@@ -2923,7 +2930,11 @@ func (p *SessionPool) reconcileCodexOAuthRotation(ctx context.Context, h *runtim
 	if err != nil {
 		return fromStore
 	}
-	onDisk, err := client.ReadCodexOAuthCredentials(ctx, bridgeClient, client.CodexManagedConfigDir)
+	durableDir := strings.TrimSpace(resolved.CodexDurableDir)
+	if durableDir == "" {
+		durableDir = client.CodexManagedConfigDir
+	}
+	onDisk, err := client.ReadCodexOAuthCredentials(ctx, bridgeClient, durableDir)
 	if err != nil {
 		return fromStore
 	}
