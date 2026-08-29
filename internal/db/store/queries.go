@@ -26,19 +26,14 @@ type HistoryTurn struct {
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
-	BindBotAgentCredential(ctx context.Context, arg dbsqlc.BindBotAgentCredentialParams) (dbsqlc.BotAgentCredential, error)
-	ClearBotAgentCredentialDefault(ctx context.Context, arg dbsqlc.ClearBotAgentCredentialDefaultParams) error
 	CreateAgentCredential(ctx context.Context, arg dbsqlc.CreateAgentCredentialParams) (dbsqlc.AgentCredential, error)
 	GetAgentCredential(ctx context.Context, id pgtype.UUID) (dbsqlc.AgentCredential, error)
 	GetBotAgentCredential(ctx context.Context, arg dbsqlc.GetBotAgentCredentialParams) (dbsqlc.GetBotAgentCredentialRow, error)
-	GetDefaultBotAgentCredential(ctx context.Context, arg dbsqlc.GetDefaultBotAgentCredentialParams) (dbsqlc.GetDefaultBotAgentCredentialRow, error)
-	ListAgentCredentialsByOwner(ctx context.Context, ownerUserID pgtype.UUID) ([]dbsqlc.AgentCredential, error)
-	ListAgentCredentialBindings(ctx context.Context, credentialID pgtype.UUID) ([]dbsqlc.ListAgentCredentialBindingsRow, error)
-	ListBotAgentCredentials(ctx context.Context, arg dbsqlc.ListBotAgentCredentialsParams) ([]dbsqlc.ListBotAgentCredentialsRow, error)
-	RevokeAgentCredential(ctx context.Context, arg dbsqlc.RevokeAgentCredentialParams) (dbsqlc.AgentCredential, error)
-	SetBotAgentCredentialDefault(ctx context.Context, arg dbsqlc.SetBotAgentCredentialDefaultParams) (dbsqlc.BotAgentCredential, error)
-	UnbindBotAgentCredential(ctx context.Context, arg dbsqlc.UnbindBotAgentCredentialParams) (int64, error)
-	UpdateAgentCredentialLabel(ctx context.Context, arg dbsqlc.UpdateAgentCredentialLabelParams) (dbsqlc.AgentCredential, error)
+	SetBotAgentCredential(ctx context.Context, arg dbsqlc.SetBotAgentCredentialParams) (pgtype.UUID, error)
+	ClearBotAgentCredential(ctx context.Context, arg dbsqlc.ClearBotAgentCredentialParams) (pgtype.UUID, error)
+	CountBotAgentCredentialRefs(ctx context.Context, agentCredentialID pgtype.UUID) (int64, error)
+	GetBotAgentProvider(ctx context.Context, arg dbsqlc.GetBotAgentProviderParams) (string, error)
+	RevokeAgentCredentialByID(ctx context.Context, id pgtype.UUID) (dbsqlc.AgentCredential, error)
 	UpdateAgentCredentialPayloadCAS(ctx context.Context, arg dbsqlc.UpdateAgentCredentialPayloadCASParams) (dbsqlc.AgentCredential, error)
 	AcquireProviderTemplateSyncLock(ctx context.Context) error
 	ApproveToolApprovalRequest(ctx context.Context, arg dbsqlc.ApproveToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)

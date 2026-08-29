@@ -62,6 +62,7 @@ type ACPClaudeCodeOAuthHandler struct {
 	tokenURL       string
 	httpClient     *http.Client
 	credentials    *agentcredential.Service
+	agentRuntimes  agentRuntimeCloser
 
 	mu     sync.Mutex
 	states map[string]acpClaudeCodeOAuthState
@@ -71,6 +72,10 @@ func (h *ACPClaudeCodeOAuthHandler) SetCredentialService(service *agentcredentia
 	h.credentials = service
 }
 
+func (h *ACPClaudeCodeOAuthHandler) SetAgentRuntimeCloser(closer agentRuntimeCloser) {
+	h.agentRuntimes = closer
+}
+
 type oauthRuntimeResetService interface {
 	BeginBotHistoryReset(ctx context.Context, botID string) (resetCtx context.Context, release func(), err error)
 }
@@ -78,6 +83,7 @@ type oauthRuntimeResetService interface {
 type acpClaudeCodeOAuthState struct {
 	State             string
 	BotID             string
+	BotAgentID        string
 	ChannelIdentityID string
 	CodeVerifier      string
 	ExpiresAt         time.Time
@@ -117,6 +123,7 @@ func (h *ACPClaudeCodeOAuthHandler) Register(e *echo.Echo) {
 // @Summary Start Claude Code ACP OAuth authorization
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
+// @Param bot_agent_id query string false "Bot Agent ID (required with the encrypted credential store)"
 // @Success 200 {object} ACPClaudeCodeOAuthAuthorizeResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -125,6 +132,10 @@ func (h *ACPClaudeCodeOAuthHandler) Authorize(c echo.Context) error {
 	bot, channelIdentityID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
+	}
+	botAgentID := strings.TrimSpace(c.QueryParam("bot_agent_id"))
+	if h.credentials != nil && h.credentials.Configured() && botAgentID == "" {
+		return apperror.Wrap(apperror.CodeAgentCredentialRequestInvalid, errors.New("bot_agent_id is required"), nil)
 	}
 	if h.acpWorkspace == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "workspace manager is not configured")
@@ -148,6 +159,7 @@ func (h *ACPClaudeCodeOAuthHandler) Authorize(c echo.Context) error {
 	h.states[state] = acpClaudeCodeOAuthState{
 		State:             state,
 		BotID:             bot.ID,
+		BotAgentID:        botAgentID,
 		ChannelIdentityID: channelIdentityID,
 		CodeVerifier:      codeVerifier,
 		ExpiresAt:         time.Now().Add(acpClaudeCodeOAuthStateTTL),
@@ -209,7 +221,7 @@ func (h *ACPClaudeCodeOAuthHandler) Exchange(c echo.Context) error {
 	if token == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "oauth token response did not include an access token")
 	}
-	if err := h.saveOAuthToken(c.Request().Context(), bot, channelIdentityID, token); err != nil {
+	if err := h.saveOAuthToken(c.Request().Context(), bot, oauthState.BotAgentID, channelIdentityID, token); err != nil {
 		if apperror.CodeOf(err) != "" {
 			return err
 		}
@@ -222,6 +234,7 @@ func (h *ACPClaudeCodeOAuthHandler) Exchange(c echo.Context) error {
 // @Summary Get Claude Code ACP OAuth status
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
+// @Param bot_agent_id query string false "Bot Agent ID"
 // @Success 200 {object} ACPClaudeCodeOAuthStatus
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -235,17 +248,19 @@ func (h *ACPClaudeCodeOAuthHandler) Status(c echo.Context) error {
 		Configured: (h.credentials != nil && h.credentials.Configured()) || h.acpWorkspace != nil,
 		HasToken:   false,
 	}
-	if h.credentials != nil {
-		items, listErr := h.credentials.ListBindings(c.Request().Context(), bot.ID, acpprofile.AgentClaudeCodeID)
-		if listErr != nil {
-			return mapAgentCredentialError(listErr)
+	if h.credentials != nil && h.credentials.Configured() {
+		botAgentID := strings.TrimSpace(c.QueryParam("bot_agent_id"))
+		if botAgentID == "" {
+			return c.JSON(http.StatusOK, status)
 		}
-		for _, item := range items {
-			if item.IsDefault && !item.Revoked && item.AuthKind == agentcredential.AuthKindClaudeCodeOAuth {
-				status.HasToken = true
-				break
-			}
+		item, credErr := h.credentials.GetForBotAgent(c.Request().Context(), bot.ID, botAgentID)
+		if errors.Is(credErr, agentcredential.ErrNotFound) {
+			return c.JSON(http.StatusOK, status)
 		}
+		if credErr != nil {
+			return mapAgentCredentialError(credErr)
+		}
+		status.HasToken = !item.Revoked && item.AuthKind == agentcredential.AuthKindClaudeCodeOAuth
 		return c.JSON(http.StatusOK, status)
 	}
 	status.HasToken = claudeCodeOAuthTokenConfigured(bot.Metadata)
@@ -288,17 +303,21 @@ func (h *ACPClaudeCodeOAuthHandler) ensureManagedWorkspace(ctx context.Context, 
 	return nil
 }
 
-func (h *ACPClaudeCodeOAuthHandler) saveOAuthToken(ctx context.Context, bot bots.Bot, ownerUserID, token string) error {
-	if h.credentials != nil {
-		item, err := h.credentials.Create(ctx, ownerUserID, agentcredential.CreateRequest{
-			Provider: agentcredential.ProviderAnthropic, AuthKind: agentcredential.AuthKindClaudeCodeOAuth,
-			Label: "Claude Code", Secret: map[string]string{"oauth_token": strings.TrimSpace(token)},
-		})
-		if err != nil {
-			return err
+func (h *ACPClaudeCodeOAuthHandler) saveOAuthToken(ctx context.Context, bot bots.Bot, botAgentID, ownerUserID, token string) error {
+	if h.credentials != nil && h.credentials.Configured() {
+		if strings.TrimSpace(botAgentID) == "" {
+			return apperror.Wrap(apperror.CodeAgentCredentialRequestInvalid, errors.New("bot_agent_id is required"), nil)
 		}
-		_, err = h.credentials.Bind(ctx, ownerUserID, bot.ID, acpprofile.AgentClaudeCodeID, item.ID, true)
-		return err
+		if _, err := h.credentials.AttachToBotAgent(ctx, ownerUserID, bot.ID, botAgentID, agentcredential.CreateRequest{
+			Provider: agentcredential.ProviderAnthropic, AuthKind: agentcredential.AuthKindClaudeCodeOAuth,
+			Secret: map[string]string{"oauth_token": strings.TrimSpace(token)},
+		}); err != nil {
+			return mapAgentCredentialError(err)
+		}
+		if h.agentRuntimes != nil {
+			_ = h.agentRuntimes.CloseBotAgentInstanceRuntimes(bot.ID, botAgentID)
+		}
+		return nil
 	}
 	if h.botService == nil {
 		return errors.New("bot service is not configured")

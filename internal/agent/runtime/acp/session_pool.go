@@ -147,6 +147,7 @@ type botGetter interface {
 // to launch an ACP runtime. The Chat domain supplies it through an adapter.
 type SessionDescriptor struct {
 	BotID           string
+	BotAgentID      string
 	SessionType     string
 	Metadata        map[string]any
 	RuntimeMetadata map[string]any
@@ -171,6 +172,7 @@ type runtimeHandle struct {
 	projectPath           string
 	cwd                   string
 	runtimeOwnerAccountID string
+	botAgentID            string
 	credentialID          string
 	credentialVersion     int64
 	disableSessionState   bool
@@ -228,7 +230,7 @@ type PromptInput struct {
 	SessionType              string
 	RouteID                  string
 	AgentID                  string
-	CredentialID             string
+	BotAgentID               string
 	ProjectPath              string
 	ModelID                  string
 	ReasoningEffort          string
@@ -272,7 +274,7 @@ var ErrAgentCommandUnavailable = client.ErrAgentCommandUnavailable
 type CreateRuntimeInput struct {
 	BotID                 string
 	AgentID               string
-	CredentialID          string
+	BotAgentID            string
 	ProjectPath           string
 	RuntimeOwnerAccountID string
 	ToolHTTPURL           string
@@ -285,6 +287,7 @@ type RuntimeStatus struct {
 	RuntimeID             string                        `json:"runtime_id,omitempty"`
 	SessionID             string                        `json:"session_id,omitempty"`
 	AgentID               string                        `json:"agent_id,omitempty"`
+	BotAgentID            string                        `json:"bot_agent_id,omitempty"`
 	CredentialID          string                        `json:"agent_credential_id,omitempty"`
 	ProjectPath           string                        `json:"project_path,omitempty"`
 	RuntimeOwnerAccountID string                        `json:"-"`
@@ -443,7 +446,7 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 		toolToken:             newRuntimeToolToken(),
 		botID:                 botID,
 		agentID:               agentID,
-		credentialID:          strings.TrimSpace(input.CredentialID),
+		botAgentID:            strings.TrimSpace(input.BotAgentID),
 		projectPath:           projectPath,
 		runtimeOwnerAccountID: runtimeOwnerAccountID,
 		ownerCtx:              context.WithoutCancel(ctx),
@@ -538,7 +541,7 @@ func (p *SessionPool) unboundBudgetLocked(botID string) ([]*runtimeHandle, error
 // session's prompts reuse the warm process. Returns ErrRuntimeBindRejected
 // when the runtime cannot serve this session; callers fall back to a cold
 // start and must not treat that as fatal.
-func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, botAgentID, projectPath, runtimeOwnerAccountID string) error {
 	if ctx == nil {
 		return errors.New("runtime bind context is required")
 	}
@@ -587,6 +590,7 @@ func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, session
 	ok := !h.closed && h.session != nil && h.boundSession == "" &&
 		h.agentID == normalizedAgent && h.projectPath == projectPath &&
 		h.runtimeOwnerAccountID == runtimeOwnerAccountID &&
+		h.botAgentID == strings.TrimSpace(botAgentID) &&
 		epochMatches
 	if ok {
 		// Publish the binding on the handle before indexing it. A reset that
@@ -1415,6 +1419,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 			return err
 		}
 		input.BotID = resolved.BotID
+		input.BotAgentID = resolved.BotAgentID
 		input.AgentID = resolved.AgentID
 		input.ProjectPath = resolved.ProjectPath
 		input.RuntimeOwnerAccountID = resolved.RuntimeOwnerAccountID
@@ -1482,7 +1487,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 				toolToken:             newRuntimeToolToken(),
 				botID:                 input.BotID,
 				agentID:               agentID,
-				credentialID:          strings.TrimSpace(input.CredentialID),
+				botAgentID:            strings.TrimSpace(input.BotAgentID),
 				projectPath:           projectPath,
 				runtimeOwnerAccountID: runtimeOwnerAccountID,
 				ownerCtx:              context.WithoutCancel(ctx),
@@ -1514,10 +1519,10 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 			return nil, ErrRuntimeNotFound
 		}
 		h.state.Lock()
-		credentialMatches := strings.TrimSpace(input.CredentialID) == "" || h.credentialID == strings.TrimSpace(input.CredentialID)
 		matches := h.agentID == agentID && h.projectPath == projectPath &&
 			h.runtimeOwnerAccountID == runtimeOwnerAccountID &&
-			h.disableSessionState == input.disableSessionState && credentialMatches
+			h.disableSessionState == input.disableSessionState &&
+			h.botAgentID == strings.TrimSpace(input.BotAgentID)
 		closed := h.closed
 		starting := h.session == nil
 		if matches && !closed {
@@ -1608,23 +1613,25 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	}
 	var codexOAuth *client.CodexOAuthCredentials
 	var resolvedCredential agentcredential.ResolvedCredential
-	if mode != client.SetupModeSelf && p.credentials != nil && p.credentials.Configured() {
-		if strings.TrimSpace(h.credentialID) == "" {
-			resolvedCredential, err = p.credentials.ResolveDefault(startCtx, h.botID, h.agentID)
-		} else {
-			resolvedCredential, err = p.credentials.Resolve(startCtx, h.botID, h.agentID, h.credentialID)
+	if mode != client.SetupModeSelf && p.credentials != nil && p.credentials.Configured() && h.botAgentID != "" {
+		var resolveErr error
+		resolvedCredential, resolveErr = p.credentials.ResolveForBotAgent(startCtx, h.botID, h.botAgentID)
+		switch {
+		case errors.Is(resolveErr, agentcredential.ErrNotFound):
+			// Agent not connected yet: run on whatever the legacy bot
+			// metadata still provides instead of failing the start.
+		case resolveErr != nil:
+			return fail(resolveErr)
+		default:
+			setup, mode, codexOAuth, err = applyAgentCredential(profile, setup, resolvedCredential)
+			if err != nil {
+				return fail(err)
+			}
+			h.state.Lock()
+			h.credentialID = resolvedCredential.ID
+			h.credentialVersion = resolvedCredential.CredentialVersion
+			h.state.Unlock()
 		}
-		if err != nil {
-			return fail(err)
-		}
-		setup, mode, codexOAuth, err = applyAgentCredential(profile, setup, resolvedCredential)
-		if err != nil {
-			return fail(err)
-		}
-		h.state.Lock()
-		h.credentialID = resolvedCredential.ID
-		h.credentialVersion = resolvedCredential.CredentialVersion
-		h.state.Unlock()
 	}
 	command, arguments, err := acpprofile.ResolveLaunch(profile, setup)
 	if err != nil {
@@ -1894,6 +1901,7 @@ func (*SessionPool) statusOf(h *runtimeHandle) RuntimeStatus {
 		RuntimeID:             h.id,
 		SessionID:             h.boundSession,
 		AgentID:               h.agentID,
+		BotAgentID:            h.botAgentID,
 		CredentialID:          h.credentialID,
 		ProjectPath:           h.projectPath,
 		RuntimeOwnerAccountID: h.runtimeOwnerAccountID,
@@ -2457,6 +2465,37 @@ func (p *SessionPool) CloseAll() {
 	}
 }
 
+// CloseBotAgentInstanceRuntimes tears down every runtime bound to one Bot
+// Agent instance, e.g. after its credential changed. Sibling instances of the
+// same provider and legacy sessions (no instance binding) stay untouched.
+func (p *SessionPool) CloseBotAgentInstanceRuntimes(botID, botAgentID string) error {
+	if p == nil {
+		return nil
+	}
+	botID = strings.TrimSpace(botID)
+	botAgentID = strings.TrimSpace(botAgentID)
+	if botID == "" || botAgentID == "" {
+		return nil
+	}
+	p.mu.RLock()
+	handles := make([]*runtimeHandle, 0)
+	for _, h := range p.runtimes {
+		if h == nil || h.botID != botID || h.botAgentID != botAgentID {
+			continue
+		}
+		handles = append(handles, h)
+	}
+	p.mu.RUnlock()
+
+	var firstErr error
+	for _, h := range handles {
+		if err := p.teardown(h); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 func (p *SessionPool) CloseBotAgentRuntimes(botID, agentID string) error {
 	if p == nil {
 		return nil
@@ -2544,12 +2583,13 @@ func (p *SessionPool) resolveSessionMetadata(ctx context.Context, input PromptIn
 		input.BotID = sess.BotID
 	}
 	input.SessionType = sess.SessionType
+	input.BotAgentID = strings.TrimSpace(sess.BotAgentID)
 	if sess.Metadata == nil {
 		sess.Metadata = map[string]any{}
 	}
 	runtimeMeta := sess.RuntimeMetadata
 	if len(runtimeMeta) > 0 {
-		for _, key := range []string{"acp_agent_id", "project_path", "acp_project_mode", "runtime_owner_account_id", "agent_credential_id"} {
+		for _, key := range []string{"acp_agent_id", "project_path", "acp_project_mode", "runtime_owner_account_id"} {
 			if value, ok := runtimeMeta[key]; ok {
 				sess.Metadata[key] = value
 			}

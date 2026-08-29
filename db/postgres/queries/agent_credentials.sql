@@ -1,118 +1,93 @@
 -- name: CreateAgentCredential :one
 INSERT INTO agent_credentials (
-  owner_user_id, provider, auth_kind, label, encrypted_payload,
-  encryption_nonce, key_version, account_metadata, expires_at
-)
-VALUES (
-  sqlc.arg(owner_user_id), sqlc.arg(provider), sqlc.arg(auth_kind), sqlc.arg(label),
-  sqlc.arg(encrypted_payload), sqlc.arg(encryption_nonce), sqlc.arg(key_version),
-  sqlc.arg(account_metadata), sqlc.narg(expires_at)
+    owner_user_id, provider, auth_kind, label,
+    encrypted_payload, encryption_nonce, key_version,
+    account_metadata, expires_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7,
+    $8, $9
 )
 RETURNING *;
 
 -- name: GetAgentCredential :one
 SELECT * FROM agent_credentials
-WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id);
-
--- name: ListAgentCredentialsByOwner :many
-SELECT * FROM agent_credentials
-WHERE team_id = public.memoh_current_team_id()
-  AND owner_user_id = sqlc.arg(owner_user_id)
-ORDER BY created_at DESC, id DESC;
-
--- name: UpdateAgentCredentialLabel :one
-UPDATE agent_credentials
-SET label = sqlc.arg(label), updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND id = sqlc.arg(id)
-  AND owner_user_id = sqlc.arg(owner_user_id)
-RETURNING *;
-
--- name: RevokeAgentCredential :one
-UPDATE agent_credentials
-SET revoked_at = COALESCE(revoked_at, now()),
-    credential_version = credential_version + 1,
-    updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND id = sqlc.arg(id)
-  AND owner_user_id = sqlc.arg(owner_user_id)
-RETURNING *;
+WHERE id = $1 AND team_id = public.memoh_current_team_id();
 
 -- name: UpdateAgentCredentialPayloadCAS :one
 UPDATE agent_credentials
-SET encrypted_payload = sqlc.arg(encrypted_payload),
-    encryption_nonce = sqlc.arg(encryption_nonce),
-    key_version = sqlc.arg(key_version),
-    account_metadata = sqlc.arg(account_metadata),
-    expires_at = sqlc.narg(expires_at),
+SET encrypted_payload = $1,
+    encryption_nonce = $2,
+    key_version = $3,
+    account_metadata = $4,
+    expires_at = $5,
     credential_version = credential_version + 1,
     updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND id = sqlc.arg(id)
+WHERE id = $6
+  AND team_id = public.memoh_current_team_id()
   AND credential_version = sqlc.arg(expected_version)
   AND revoked_at IS NULL
 RETURNING *;
 
--- name: BindBotAgentCredential :one
-INSERT INTO bot_agent_credentials (bot_id, agent_id, credential_id, is_default)
-VALUES (sqlc.arg(bot_id), sqlc.arg(agent_id), sqlc.arg(credential_id), false)
-ON CONFLICT (team_id, bot_id, agent_id, credential_id) DO UPDATE SET updated_at = now()
+-- name: RevokeAgentCredentialByID :one
+UPDATE agent_credentials
+SET revoked_at = now(),
+    credential_version = credential_version + 1,
+    updated_at = now()
+WHERE id = $1
+  AND team_id = public.memoh_current_team_id()
+  AND revoked_at IS NULL
 RETURNING *;
 
--- name: ClearBotAgentCredentialDefault :exec
-UPDATE bot_agent_credentials
-SET is_default = false, updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = sqlc.arg(bot_id)
-  AND agent_id = sqlc.arg(agent_id)
-  AND is_default;
-
--- name: SetBotAgentCredentialDefault :one
-UPDATE bot_agent_credentials
-SET is_default = true, updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = sqlc.arg(bot_id)
-  AND agent_id = sqlc.arg(agent_id)
-  AND credential_id = sqlc.arg(credential_id)
-RETURNING *;
-
--- name: UnbindBotAgentCredential :execrows
-DELETE FROM bot_agent_credentials
-WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = sqlc.arg(bot_id)
-  AND agent_id = sqlc.arg(agent_id)
-  AND credential_id = sqlc.arg(credential_id);
-
--- name: ListBotAgentCredentials :many
-SELECT c.*, b.is_default, b.created_at AS binding_created_at, b.updated_at AS binding_updated_at
-FROM bot_agent_credentials b
-JOIN agent_credentials c ON c.team_id = b.team_id AND c.id = b.credential_id
-WHERE b.team_id = public.memoh_current_team_id()
-  AND b.bot_id = sqlc.arg(bot_id)
-  AND b.agent_id = sqlc.arg(agent_id)
-ORDER BY b.is_default DESC, b.created_at ASC, c.id ASC;
+-- name: CountBotAgentCredentialRefs :one
+SELECT count(*) FROM bot_agents
+WHERE agent_credential_id = $1
+  AND team_id = public.memoh_current_team_id()
+  AND deleted_at IS NULL;
 
 -- name: GetBotAgentCredential :one
-SELECT c.*, b.is_default, b.created_at AS binding_created_at, b.updated_at AS binding_updated_at
-FROM bot_agent_credentials b
-JOIN agent_credentials c ON c.team_id = b.team_id AND c.id = b.credential_id
-WHERE b.team_id = public.memoh_current_team_id()
-  AND b.bot_id = sqlc.arg(bot_id)
-  AND b.agent_id = sqlc.arg(agent_id)
-  AND b.credential_id = sqlc.arg(credential_id);
+SELECT c.*, (a.metadata->>'provider')::text AS agent_provider
+FROM bot_agents a
+JOIN agent_credentials c
+  ON c.team_id = a.team_id AND c.id = a.agent_credential_id
+WHERE a.bot_id = $1
+  AND a.id = sqlc.arg(bot_agent_id)
+  AND a.team_id = public.memoh_current_team_id()
+  AND a.deleted_at IS NULL;
 
--- name: GetDefaultBotAgentCredential :one
-SELECT c.*, b.is_default, b.created_at AS binding_created_at, b.updated_at AS binding_updated_at
-FROM bot_agent_credentials b
-JOIN agent_credentials c ON c.team_id = b.team_id AND c.id = b.credential_id
-WHERE b.team_id = public.memoh_current_team_id()
-  AND b.bot_id = sqlc.arg(bot_id)
-  AND b.agent_id = sqlc.arg(agent_id)
-  AND b.is_default;
+-- name: SetBotAgentCredential :one
+UPDATE bot_agents
+SET agent_credential_id = sqlc.arg(credential_id),
+    updated_at = now()
+WHERE bot_agents.bot_id = $1
+  AND bot_agents.id = sqlc.arg(bot_agent_id)
+  AND bot_agents.team_id = public.memoh_current_team_id()
+  AND bot_agents.deleted_at IS NULL
+RETURNING (
+    SELECT prev.agent_credential_id
+    FROM bot_agents prev
+    WHERE prev.id = bot_agents.id
+) AS previous_credential_id;
 
--- name: ListAgentCredentialBindings :many
-SELECT bot_id, agent_id
-FROM bot_agent_credentials
-WHERE team_id = public.memoh_current_team_id()
-  AND credential_id = sqlc.arg(credential_id)
-ORDER BY bot_id, agent_id;
+-- name: ClearBotAgentCredential :one
+UPDATE bot_agents
+SET agent_credential_id = NULL,
+    updated_at = now()
+WHERE bot_agents.bot_id = $1
+  AND bot_agents.id = sqlc.arg(bot_agent_id)
+  AND bot_agents.team_id = public.memoh_current_team_id()
+  AND bot_agents.deleted_at IS NULL
+  AND bot_agents.agent_credential_id IS NOT NULL
+RETURNING (
+    SELECT prev.agent_credential_id
+    FROM bot_agents prev
+    WHERE prev.id = bot_agents.id
+) AS previous_credential_id;
+
+-- name: GetBotAgentProvider :one
+SELECT (metadata->>'provider')::text AS provider
+FROM bot_agents
+WHERE bot_id = $1
+  AND id = sqlc.arg(bot_agent_id)
+  AND team_id = public.memoh_current_team_id()
+  AND deleted_at IS NULL;

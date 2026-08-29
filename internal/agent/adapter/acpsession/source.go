@@ -32,6 +32,7 @@ func (s *Source) Get(ctx context.Context, sessionID string) (acp.SessionDescript
 	}
 	return acp.SessionDescriptor{
 		BotID:           item.BotID,
+		BotAgentID:      item.BotAgentID,
 		SessionType:     item.Type,
 		Metadata:        item.Metadata,
 		RuntimeMetadata: item.RuntimeMetadata,

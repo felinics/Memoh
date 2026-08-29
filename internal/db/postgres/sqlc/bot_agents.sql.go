@@ -42,7 +42,7 @@ VALUES (
   $4,
   $5
 )
-RETURNING team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at
+RETURNING team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at, agent_credential_id
 `
 
 type CreateBotAgentParams struct {
@@ -73,12 +73,13 @@ func (q *Queries) CreateBotAgent(ctx context.Context, arg CreateBotAgentParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.AgentCredentialID,
 	)
 	return i, err
 }
 
 const findActiveBotAgentByRuntimeProvider = `-- name: FindActiveBotAgentByRuntimeProvider :one
-SELECT team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at
+SELECT team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at, agent_credential_id
 FROM bot_agents
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -110,12 +111,13 @@ func (q *Queries) FindActiveBotAgentByRuntimeProvider(ctx context.Context, arg F
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.AgentCredentialID,
 	)
 	return i, err
 }
 
 const getActiveBotAgentByID = `-- name: GetActiveBotAgentByID :one
-SELECT team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at
+SELECT team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at, agent_credential_id
 FROM bot_agents
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -143,12 +145,13 @@ func (q *Queries) GetActiveBotAgentByID(ctx context.Context, arg GetActiveBotAge
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.AgentCredentialID,
 	)
 	return i, err
 }
 
 const getBotAgentByID = `-- name: GetBotAgentByID :one
-SELECT team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at
+SELECT team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at, agent_credential_id
 FROM bot_agents
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -174,12 +177,13 @@ func (q *Queries) GetBotAgentByID(ctx context.Context, arg GetBotAgentByIDParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.AgentCredentialID,
 	)
 	return i, err
 }
 
 const listBotAgents = `-- name: ListBotAgents :many
-SELECT team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at
+SELECT team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at, agent_credential_id
 FROM bot_agents
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -207,6 +211,7 @@ func (q *Queries) ListBotAgents(ctx context.Context, botID pgtype.UUID) ([]BotAg
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.AgentCredentialID,
 		); err != nil {
 			return nil, err
 		}
@@ -249,7 +254,7 @@ WHERE bot_agents.team_id = public.memoh_current_team_id()
       AND bots.id = $1
       AND bots.default_bot_agent_id = bot_agents.id
   )
-RETURNING team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at
+RETURNING team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at, agent_credential_id
 `
 
 type SoftDeleteBotAgentParams struct {
@@ -271,6 +276,7 @@ func (q *Queries) SoftDeleteBotAgent(ctx context.Context, arg SoftDeleteBotAgent
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.AgentCredentialID,
 	)
 	return i, err
 }
@@ -294,7 +300,7 @@ WHERE bot_agents.team_id = public.memoh_current_team_id()
         AND bots.default_bot_agent_id = bot_agents.id
     )
   )
-RETURNING team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at
+RETURNING team_id, id, bot_id, name, runtime, enabled, metadata, created_at, updated_at, deleted_at, agent_credential_id
 `
 
 type UpdateBotAgentParams struct {
@@ -323,6 +329,7 @@ func (q *Queries) UpdateBotAgent(ctx context.Context, arg UpdateBotAgentParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.AgentCredentialID,
 	)
 	return i, err
 }

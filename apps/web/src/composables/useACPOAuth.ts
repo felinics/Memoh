@@ -57,7 +57,11 @@ export interface ACPCodexOAuthDeviceSession {
  * device code works from any surface, so keeping both only offered users a way
  * to pick the one that fails.
  */
-export function useACPOAuth(getBotId: () => string) {
+export function useACPOAuth(getBotId: () => string, getBotAgentId?: () => string) {
+  const botAgentQuery = () => {
+    const id = getBotAgentId?.() ?? ''
+    return id ? { bot_agent_id: id } : undefined
+  }
   const codexStatus = ref<ACPCodexOAuthStatus | null>(null)
   const codexStatusBotId = ref('')
   const codexStatusLoading = ref(false)
@@ -110,6 +114,7 @@ export function useACPOAuth(getBotId: () => string) {
     try {
       const { data } = await getBotsByBotIdAcpCodexOauthStatus({
         path: { bot_id: botId },
+        query: botAgentQuery(),
         throwOnError: true,
       })
       if (botId !== getBotId()) return codexStatus.value
@@ -136,6 +141,7 @@ export function useACPOAuth(getBotId: () => string) {
     try {
       const { data } = await getBotsByBotIdAcpClaudeCodeOauthStatus({
         path: { bot_id: botId },
+        query: botAgentQuery(),
         throwOnError: true,
       })
       if (botId !== getBotId()) return claudeStatus.value
@@ -288,6 +294,7 @@ export function useACPOAuth(getBotId: () => string) {
     try {
       const { data } = await postBotsByBotIdAcpCodexOauthDeviceAuthorize({
         path: { bot_id: botId },
+        query: botAgentQuery(),
         throwOnError: true,
       })
       if (botId !== getBotId()) return false
@@ -334,6 +341,7 @@ export function useACPOAuth(getBotId: () => string) {
     try {
       const { data } = await getBotsByBotIdAcpClaudeCodeOauthAuthorize({
         path: { bot_id: botId },
+        query: botAgentQuery(),
         throwOnError: true,
       })
       if (!data?.auth_url || !data.session_id) throw new Error('authorize failed')

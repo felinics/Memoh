@@ -245,8 +245,10 @@ func provideSettingsService(
 	return service
 }
 
-func provideBotAgentsService(log *slog.Logger, queries dbstore.Queries) *botagents.Service {
-	return botagents.NewService(log, queries)
+func provideBotAgentsService(log *slog.Logger, queries dbstore.Queries, credentialService *agentcredential.Service) *botagents.Service {
+	service := botagents.NewService(log, queries)
+	service.SetCredentialReleaser(credentialService)
+	return service
 }
 
 // provideWikiStore wires the PostgreSQL memory wiki store. Returns a pointer
@@ -452,8 +454,8 @@ func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec 
 		// The thread service derives the ACP runtime owner from
 		// CreatedByUserID and applies project-path defaults; the workdir
 		// override below wins when a workdir is bound.
-		input.Metadata = map[string]any{"acp_agent_id": spec.ACPAgentID, "agent_credential_id": spec.AgentCredentialID}
-		input.RuntimeMetadata = map[string]any{"acp_agent_id": spec.ACPAgentID, "agent_credential_id": spec.AgentCredentialID}
+		input.Metadata = map[string]any{"acp_agent_id": spec.ACPAgentID}
+		input.RuntimeMetadata = map[string]any{"acp_agent_id": spec.ACPAgentID}
 	}
 	if strings.TrimSpace(spec.WorkdirID) != "" {
 		if a.workdirs == nil {
@@ -801,6 +803,7 @@ func provideACPCodexOAuthHandler(providersService *providers.Service, botService
 	handler := handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
 	handler.SetRuntimeResetService(acpPool)
 	handler.SetCredentialService(credentialService)
+	handler.SetAgentRuntimeCloser(acpPool)
 	return handler
 }
 
@@ -808,6 +811,7 @@ func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *
 	handler := handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
 	handler.SetRuntimeResetService(acpPool)
 	handler.SetCredentialService(credentialService)
+	handler.SetAgentRuntimeCloser(acpPool)
 	return handler
 }
 

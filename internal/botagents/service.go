@@ -54,8 +54,23 @@ type transactionalQueries interface {
 }
 
 type Service struct {
-	queries queries
-	logger  *slog.Logger
+	queries  queries
+	logger   *slog.Logger
+	releaser credentialReleaser
+}
+
+// credentialReleaser revokes a credential that lost its referencing Agent row,
+// once nothing else points at it. Optional so tests and embedders without the
+// encrypted store skip cleanup.
+type credentialReleaser interface {
+	ReleaseCredential(ctx context.Context, credentialID string) error
+}
+
+// SetCredentialReleaser enables orphan-credential cleanup on Agent deletion.
+func (s *Service) SetCredentialReleaser(releaser credentialReleaser) {
+	if s != nil {
+		s.releaser = releaser
+	}
 }
 
 func NewService(log *slog.Logger, q queries) *Service {
@@ -229,9 +244,13 @@ func (s *Service) Delete(ctx context.Context, botID, id string) error {
 	if err != nil {
 		return ErrNotFound
 	}
-	return s.withBotMutationLock(ctx, pgBotID, func(q queries) error {
-		_, deleteErr := q.SoftDeleteBotAgent(ctx, sqlc.SoftDeleteBotAgentParams{BotID: pgBotID, ID: pgID})
+	var orphanedCredential string
+	err = s.withBotMutationLock(ctx, pgBotID, func(q queries) error {
+		row, deleteErr := q.SoftDeleteBotAgent(ctx, sqlc.SoftDeleteBotAgentParams{BotID: pgBotID, ID: pgID})
 		if !errors.Is(deleteErr, pgx.ErrNoRows) {
+			if deleteErr == nil && row.AgentCredentialID.Valid {
+				orphanedCredential = row.AgentCredentialID.String()
+			}
 			return deleteErr
 		}
 		isDefault, checkErr := q.BotAgentIsDefault(ctx, sqlc.BotAgentIsDefaultParams{BotID: pgBotID, ID: pgID})
@@ -243,6 +262,18 @@ func (s *Service) Delete(ctx context.Context, botID, id string) error {
 		}
 		return ErrNotFound
 	})
+	if err != nil {
+		return err
+	}
+	if orphanedCredential != "" && s.releaser != nil {
+		// Best-effort cleanup: the Agent row is already gone (deleted_at set),
+		// so the reference count excludes it and the credential revokes unless
+		// another Agent still uses it.
+		if releaseErr := s.releaser.ReleaseCredential(ctx, orphanedCredential); releaseErr != nil {
+			s.logger.Warn("release credential of deleted bot agent failed", slog.String("credential_id", orphanedCredential), slog.Any("error", releaseErr))
+		}
+	}
+	return nil
 }
 
 // withBotMutationLock serializes Agent availability changes with default-Agent

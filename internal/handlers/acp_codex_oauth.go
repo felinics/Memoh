@@ -16,7 +16,6 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/agentcredential"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
@@ -60,6 +59,7 @@ type ACPCodexOAuthHandler struct {
 	callbackURL    string
 	logger         *slog.Logger
 	credentials    *agentcredential.Service
+	agentRuntimes  agentRuntimeCloser
 
 	mu             sync.Mutex
 	states         map[string]acpCodexOAuthState
@@ -70,8 +70,19 @@ func (h *ACPCodexOAuthHandler) SetCredentialService(service *agentcredential.Ser
 	h.credentials = service
 }
 
+// agentRuntimeCloser tears down one Bot Agent instance's warm runtimes after
+// its credential changes.
+type agentRuntimeCloser interface {
+	CloseBotAgentInstanceRuntimes(botID, botAgentID string) error
+}
+
+func (h *ACPCodexOAuthHandler) SetAgentRuntimeCloser(closer agentRuntimeCloser) {
+	h.agentRuntimes = closer
+}
+
 type acpCodexOAuthState struct {
 	BotID             string
+	BotAgentID        string
 	ChannelIdentityID string
 	CodeVerifier      string
 	ExpiresAt         time.Time
@@ -112,12 +123,17 @@ func (*ACPCodexOAuthHandler) HandlesCallbackState(state string) bool {
 // @Summary Start Codex ACP OAuth authorization
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
+// @Param bot_agent_id query string false "Bot Agent ID (required with the encrypted credential store)"
 // @Success 200 {object} ACPCodexOAuthAuthorizeResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Router /bots/{bot_id}/acp/codex/oauth/authorize [get].
 func (h *ACPCodexOAuthHandler) Authorize(c echo.Context) error {
 	botID, channelIdentityID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	botAgentID, err := h.requireBotAgentParam(c)
 	if err != nil {
 		return err
 	}
@@ -147,6 +163,7 @@ func (h *ACPCodexOAuthHandler) Authorize(c echo.Context) error {
 	h.pruneExpiredLocked(time.Now())
 	h.states[state] = acpCodexOAuthState{
 		BotID:             botID,
+		BotAgentID:        botAgentID,
 		ChannelIdentityID: channelIdentityID,
 		CodeVerifier:      codeVerifier,
 		ExpiresAt:         time.Now().Add(acpCodexOAuthStateTTL),
@@ -160,6 +177,7 @@ func (h *ACPCodexOAuthHandler) Authorize(c echo.Context) error {
 // @Summary Get Codex ACP OAuth status
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
+// @Param bot_agent_id query string false "Bot Agent ID"
 // @Success 200 {object} ACPCodexOAuthStatus
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -176,18 +194,22 @@ func (h *ACPCodexOAuthHandler) Status(c echo.Context) error {
 	if !status.Configured {
 		return c.JSON(http.StatusOK, status)
 	}
-	if h.credentials != nil {
-		items, listErr := h.credentials.ListBindings(c.Request().Context(), botID, acpprofile.AgentCodexID)
-		if listErr != nil {
-			return mapAgentCredentialError(listErr)
+	if h.credentials != nil && h.credentials.Configured() {
+		botAgentID := strings.TrimSpace(c.QueryParam("bot_agent_id"))
+		if botAgentID == "" {
+			return c.JSON(http.StatusOK, status)
 		}
-		for _, item := range items {
-			if item.IsDefault && !item.Revoked && item.AuthKind == agentcredential.AuthKindOpenAICodexOAuth {
-				status.HasToken = true
-				if value, ok := item.AccountMetadata["account_id"].(string); ok {
-					status.AccountID = value
-				}
-				break
+		item, credErr := h.credentials.GetForBotAgent(c.Request().Context(), botID, botAgentID)
+		if errors.Is(credErr, agentcredential.ErrNotFound) {
+			return c.JSON(http.StatusOK, status)
+		}
+		if credErr != nil {
+			return mapAgentCredentialError(credErr)
+		}
+		if !item.Revoked && item.AuthKind == agentcredential.AuthKindOpenAICodexOAuth {
+			status.HasToken = true
+			if value, ok := item.AccountMetadata["account_id"].(string); ok {
+				status.AccountID = value
 			}
 		}
 		return c.JSON(http.StatusOK, status)
@@ -241,7 +263,7 @@ func (h *ACPCodexOAuthHandler) Callback(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if err := h.writeCodexOAuthAuth(c.Request().Context(), oauthState.BotID, oauthState.ChannelIdentityID, creds); err != nil {
+	if err := h.writeCodexOAuthAuth(c.Request().Context(), oauthState.BotID, oauthState.BotAgentID, oauthState.ChannelIdentityID, creds); err != nil {
 		if apperror.CodeOf(err) != "" {
 			return err
 		}
@@ -264,6 +286,19 @@ func (h *ACPCodexOAuthHandler) Callback(c echo.Context) error {
   </body>
 </html>`))
 	return c.HTML(http.StatusOK, executeHTMLTemplate(page, map[string]string{"BotID": oauthState.BotID}))
+}
+
+// requireBotAgentParam reads the target Agent instance. Required whenever the
+// encrypted credential store is active; the legacy workspace path ignores it.
+func (h *ACPCodexOAuthHandler) requireBotAgentParam(c echo.Context) (string, error) {
+	botAgentID := strings.TrimSpace(c.QueryParam("bot_agent_id"))
+	if botAgentID == "" {
+		botAgentID = strings.TrimSpace(c.Param("bot_agent_id"))
+	}
+	if h.credentials != nil && h.credentials.Configured() && botAgentID == "" {
+		return "", apperror.Wrap(apperror.CodeAgentCredentialRequestInvalid, errors.New("bot_agent_id is required"), nil)
+	}
+	return botAgentID, nil
 }
 
 func (h *ACPCodexOAuthHandler) requireBotAccess(c echo.Context) (string, string, error) {
@@ -291,20 +326,23 @@ func (h *ACPCodexOAuthHandler) ensureManagedWorkspace(ctx context.Context, botID
 	return nil
 }
 
-func (h *ACPCodexOAuthHandler) writeCodexOAuthAuth(ctx context.Context, botID, ownerUserID string, creds providers.OpenAICodexOAuthCredentials) error {
-	if h.credentials != nil {
+func (h *ACPCodexOAuthHandler) writeCodexOAuthAuth(ctx context.Context, botID, botAgentID, ownerUserID string, creds providers.OpenAICodexOAuthCredentials) error {
+	if h.credentials != nil && h.credentials.Configured() {
+		if strings.TrimSpace(botAgentID) == "" {
+			return apperror.Wrap(apperror.CodeAgentCredentialRequestInvalid, errors.New("bot_agent_id is required"), nil)
+		}
 		metadata := map[string]any{"account_id": creds.AccountID, "last_refresh": time.Now().UTC().Format(time.RFC3339Nano)}
-		item, err := h.credentials.Create(ctx, ownerUserID, agentcredential.CreateRequest{
+		if _, err := h.credentials.AttachToBotAgent(ctx, ownerUserID, botID, botAgentID, agentcredential.CreateRequest{
 			Provider: agentcredential.ProviderOpenAI, AuthKind: agentcredential.AuthKindOpenAICodexOAuth,
-			Label:           "ChatGPT " + creds.AccountID,
 			Secret:          map[string]string{"access_token": creds.AccessToken, "id_token": creds.IDToken, "refresh_token": creds.RefreshToken, "account_id": creds.AccountID},
 			AccountMetadata: metadata, ExpiresAt: &creds.ExpiresAt,
-		})
-		if err != nil {
-			return err
+		}); err != nil {
+			return mapAgentCredentialError(err)
 		}
-		_, err = h.credentials.Bind(ctx, ownerUserID, botID, acpprofile.AgentCodexID, item.ID, true)
-		return err
+		if h.agentRuntimes != nil {
+			_ = h.agentRuntimes.CloseBotAgentInstanceRuntimes(botID, botAgentID)
+		}
+		return nil
 	}
 	if h.acpWorkspace == nil {
 		return errors.New("workspace manager is not configured")

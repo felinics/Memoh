@@ -15,7 +15,6 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
 	"github.com/memohai/memoh/internal/agentcredential"
 	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/botagents"
@@ -48,7 +47,7 @@ type sessionWorkdirService interface {
 // warm agent process and binding a session to a runtime.
 type acpSessionRuntimeService interface {
 	CloseSession(sessionID string) error
-	BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error
+	BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, botAgentID, projectPath, runtimeOwnerAccountID string) error
 }
 
 // sessionResetService is the runtime-agnostic history reset boundary. It is a
@@ -238,13 +237,12 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		req.Metadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(req.Metadata, req.RuntimeMetadata))
 		req.RuntimeMetadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(req.RuntimeMetadata, req.Metadata))
 		if botAgentID == "" {
-			if err := h.ensureAgentCredential(c.Request().Context(), bot, req.Metadata); err != nil {
+			if err := validateACPCreate(bot, req.Metadata); err != nil {
 				return err
 			}
 		} else if sessionMetadataString(req.Metadata, "project_path") == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, session.ErrACPProjectPathMissing.Error())
 		}
-		req.RuntimeMetadata["agent_credential_id"] = req.Metadata["agent_credential_id"]
 	}
 	createInput := session.CreateInput{
 		BotID:           bot.ID,
@@ -277,6 +275,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 			runtimeID,
 			sess.ID,
 			sessionMetadataString(sess.Metadata, "acp_agent_id"),
+			sess.BotAgentID,
 			sessionMetadataString(sess.Metadata, "project_path"),
 			sessionMetadataString(sess.Metadata, "runtime_owner_account_id"),
 		); bindErr != nil {
@@ -805,11 +804,10 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		}
 		if targetRuntime == session.RuntimeACPAgent {
 			if targetBotAgentID == "" {
-				if err := h.ensureAgentCredential(c.Request().Context(), bot, targetMetadata); err != nil {
+				if err := validateACPCreate(bot, targetMetadata); err != nil {
 					return err
 				}
 			}
-			targetRuntimeMetadata["agent_credential_id"] = targetMetadata["agent_credential_id"]
 		} else if session.IsACPRuntime(existing) || req.Type != nil || req.RuntimeType != nil || req.RuntimeMetadata != nil {
 			targetMetadata = stripACPMetadata(targetMetadata)
 			targetRuntimeMetadata = map[string]any{}
@@ -1079,40 +1077,6 @@ func validateACPCreate(bot bots.Bot, metadata map[string]any) error {
 	if err := acpAgentSetupHTTPError(bot.Metadata, agentID); err != nil {
 		return err
 	}
-	return nil
-}
-
-func (h *SessionHandler) ensureAgentCredential(ctx context.Context, bot bots.Bot, metadata map[string]any) error {
-	agentID := sessionMetadataString(metadata, "acp_agent_id")
-	if agentID == "" || sessionMetadataString(metadata, "project_path") == "" {
-		return validateACPCreate(bot, metadata)
-	}
-	setup := acpprofile.ParseAgentSetup(bot.Metadata, agentID)
-	if setup.Mode == "self" {
-		if err := validateACPCreate(bot, metadata); err != nil {
-			return err
-		}
-		delete(metadata, "agent_credential_id")
-		return nil
-	}
-	if h.credentials == nil {
-		return mapAgentCredentialError(agentcredential.ErrEncryptionUnavailable)
-	}
-	if !setup.Enabled {
-		return echo.NewHTTPError(http.StatusBadRequest, "ACP agent is not enabled")
-	}
-	credentialID := sessionMetadataString(metadata, "agent_credential_id")
-	var resolved agentcredential.ResolvedCredential
-	var err error
-	if credentialID == "" {
-		resolved, err = h.credentials.ResolveDefault(ctx, bot.ID, agentID)
-	} else {
-		resolved, err = h.credentials.Resolve(ctx, bot.ID, agentID, credentialID)
-	}
-	if err != nil {
-		return mapAgentCredentialError(err)
-	}
-	metadata["agent_credential_id"] = resolved.ID
 	return nil
 }
 

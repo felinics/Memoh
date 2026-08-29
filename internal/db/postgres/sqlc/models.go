@@ -126,26 +126,17 @@ type BotAclRule struct {
 }
 
 type BotAgent struct {
-	TeamID    pgtype.UUID        `json:"team_id"`
-	ID        pgtype.UUID        `json:"id"`
-	BotID     pgtype.UUID        `json:"bot_id"`
-	Name      string             `json:"name"`
-	Runtime   string             `json:"runtime"`
-	Enabled   bool               `json:"enabled"`
-	Metadata  []byte             `json:"metadata"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
-}
-
-type BotAgentCredential struct {
-	TeamID       pgtype.UUID        `json:"team_id"`
-	BotID        pgtype.UUID        `json:"bot_id"`
-	AgentID      string             `json:"agent_id"`
-	CredentialID pgtype.UUID        `json:"credential_id"`
-	IsDefault    bool               `json:"is_default"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID            pgtype.UUID        `json:"team_id"`
+	ID                pgtype.UUID        `json:"id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	Name              string             `json:"name"`
+	Runtime           string             `json:"runtime"`
+	Enabled           bool               `json:"enabled"`
+	Metadata          []byte             `json:"metadata"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	AgentCredentialID pgtype.UUID        `json:"agent_credential_id"`
 }
 
 type BotChannelAdmin struct {
@@ -712,28 +703,27 @@ type ProviderOauthToken struct {
 }
 
 type Schedule struct {
-	ID                pgtype.UUID        `json:"id"`
-	Name              string             `json:"name"`
-	Description       string             `json:"description"`
-	Pattern           string             `json:"pattern"`
-	MaxCalls          pgtype.Int4        `json:"max_calls"`
-	CurrentCalls      int32              `json:"current_calls"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	Enabled           bool               `json:"enabled"`
-	Command           string             `json:"command"`
-	BotID             pgtype.UUID        `json:"bot_id"`
-	RunTarget         string             `json:"run_target"`
-	TargetSessionID   pgtype.UUID        `json:"target_session_id"`
-	RuntimeType       pgtype.Text        `json:"runtime_type"`
-	BotAgentID        pgtype.UUID        `json:"bot_agent_id"`
-	AcpAgentID        pgtype.Text        `json:"acp_agent_id"`
-	ModelID           pgtype.UUID        `json:"model_id"`
-	AcpModelID        pgtype.Text        `json:"acp_model_id"`
-	ReasoningEffort   pgtype.Text        `json:"reasoning_effort"`
-	WorkdirID         pgtype.UUID        `json:"workdir_id"`
-	TeamID            pgtype.UUID        `json:"team_id"`
-	AgentCredentialID pgtype.UUID        `json:"agent_credential_id"`
+	ID              pgtype.UUID        `json:"id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	Pattern         string             `json:"pattern"`
+	MaxCalls        pgtype.Int4        `json:"max_calls"`
+	CurrentCalls    int32              `json:"current_calls"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Enabled         bool               `json:"enabled"`
+	Command         string             `json:"command"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	RunTarget       string             `json:"run_target"`
+	TargetSessionID pgtype.UUID        `json:"target_session_id"`
+	RuntimeType     pgtype.Text        `json:"runtime_type"`
+	BotAgentID      pgtype.UUID        `json:"bot_agent_id"`
+	AcpAgentID      pgtype.Text        `json:"acp_agent_id"`
+	ModelID         pgtype.UUID        `json:"model_id"`
+	AcpModelID      pgtype.Text        `json:"acp_model_id"`
+	ReasoningEffort pgtype.Text        `json:"reasoning_effort"`
+	WorkdirID       pgtype.UUID        `json:"workdir_id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
 }
 
 type ScheduleLog struct {

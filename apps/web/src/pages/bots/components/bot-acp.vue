@@ -188,6 +188,7 @@
         :bot-id="botId"
         :profile="selectedProfile"
         :form="form"
+        :agent="selectedAgent"
         @commit="persistACPForm"
       />
     </section>

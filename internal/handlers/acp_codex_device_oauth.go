@@ -54,6 +54,7 @@ type ACPCodexOAuthDeviceStatusResponse struct {
 type acpCodexDeviceAuthSession struct {
 	SessionID         string
 	BotID             string
+	BotAgentID        string
 	ChannelIdentityID string
 	DeviceAuthID      string
 	UserCode          string
@@ -75,6 +76,7 @@ type acpCodexDeviceAuthSession struct {
 // @Summary Start Codex ACP device code authorization
 // @Tags acp
 // @Param bot_id path string true "Bot ID"
+// @Param bot_agent_id query string false "Bot Agent ID (required with the encrypted credential store)"
 // @Success 200 {object} ACPCodexOAuthDeviceAuthorizeResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -83,6 +85,10 @@ type acpCodexDeviceAuthSession struct {
 // @Router /bots/{bot_id}/acp/codex/oauth/device/authorize [post].
 func (h *ACPCodexOAuthHandler) AuthorizeDevice(c echo.Context) error {
 	botID, channelIdentityID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	botAgentID, err := h.requireBotAgentParam(c)
 	if err != nil {
 		return err
 	}
@@ -118,6 +124,7 @@ func (h *ACPCodexOAuthHandler) AuthorizeDevice(c echo.Context) error {
 	session := &acpCodexDeviceAuthSession{
 		SessionID:         sessionID,
 		BotID:             botID,
+		BotAgentID:        botAgentID,
 		ChannelIdentityID: channelIdentityID,
 		DeviceAuthID:      deviceAuthID,
 		UserCode:          userCode,
@@ -211,7 +218,7 @@ func (h *ACPCodexOAuthHandler) PollDevice(c echo.Context) error {
 		return c.JSON(http.StatusOK, deviceStatusResponse(updated))
 	}
 	defer writeCancel()
-	writeErr := h.writeCodexOAuthAuth(writeCtx, botID, channelIdentityID, creds)
+	writeErr := h.writeCodexOAuthAuth(writeCtx, botID, session.BotAgentID, channelIdentityID, creds)
 	updated := h.finishDeviceAuthWrite(sessionID, generation, creds.AccountID, writeErr, time.Now().UTC())
 	return c.JSON(http.StatusOK, deviceStatusResponse(updated))
 }

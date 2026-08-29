@@ -14,15 +14,14 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 )
 
-type agentCredentialRuntimeCloser interface {
-	CloseBotAgentRuntimes(botID, agentID string) error
-}
-
+// AgentCredentialHandler manages the single credential attached to a Bot
+// Agent instance. There is no credential picking: PUT replaces, DELETE
+// disconnects, GET reports the redacted state.
 type AgentCredentialHandler struct {
 	service        *agentcredential.Service
 	botService     *bots.Service
 	accountService *accounts.Service
-	runtimes       agentCredentialRuntimeCloser
+	runtimes       *acpagent.SessionPool
 }
 
 func NewAgentCredentialHandler(service *agentcredential.Service, botService *bots.Service, accountService *accounts.Service, runtimes *acpagent.SessionPool) *AgentCredentialHandler {
@@ -30,241 +29,134 @@ func NewAgentCredentialHandler(service *agentcredential.Service, botService *bot
 }
 
 func (h *AgentCredentialHandler) Register(e *echo.Echo) {
-	e.GET("/agent-credentials", h.ListOwned)
-	e.POST("/agent-credentials", h.Create)
-	e.PATCH("/agent-credentials/:credential_id", h.Update)
-	e.DELETE("/agent-credentials/:credential_id", h.Revoke)
-
-	group := e.Group("/bots/:bot_id/agents/:agent_id/credentials")
-	group.GET("", h.ListBindings)
-	group.POST("", h.Bind)
-	group.PUT("/default", h.SetDefault)
-	group.DELETE("/:credential_id", h.Unbind)
+	group := e.Group("/bots/:bot_id/agents/:id/credential")
+	group.GET("", h.Get)
+	group.PUT("", h.Put)
+	group.DELETE("", h.Delete)
 }
 
-// ListOwned godoc
-// @Summary List owned Agent credentials
-// @Tags agent-credentials
-// @Success 200 {object} agentcredential.CredentialList
-// @Failure 400 {object} apperror.Problem
-// @Router /agent-credentials [get].
-func (h *AgentCredentialHandler) ListOwned(c echo.Context) error {
-	actorID, err := RequireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	items, err := h.service.ListOwned(c.Request().Context(), actorID)
-	if err != nil {
-		return mapAgentCredentialError(err)
-	}
-	return c.JSON(http.StatusOK, agentcredential.CredentialList{Items: items})
+type agentCredentialPutRequest struct {
+	AuthKind string            `json:"auth_kind"`
+	Secret   map[string]string `json:"secret"`
 }
 
-// Create godoc
-// @Summary Create an encrypted Agent credential
-// @Tags agent-credentials
-// @Param payload body agentcredential.CreateRequest true "Credential"
-// @Success 201 {object} agentcredential.PublicCredential
-// @Failure 400 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
-// @Router /agent-credentials [post].
-func (h *AgentCredentialHandler) Create(c echo.Context) error {
-	actorID, err := RequireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	var req agentcredential.CreateRequest
-	if err := c.Bind(&req); err != nil {
-		return apperror.Wrap(apperror.CodeAgentCredentialRequestInvalid, err, nil)
-	}
-	item, err := h.service.Create(c.Request().Context(), actorID, req)
-	if err != nil {
-		return mapAgentCredentialError(err)
-	}
-	return c.JSON(http.StatusCreated, item)
-}
-
-// Update godoc
-// @Summary Rename an Agent credential
-// @Tags agent-credentials
-// @Param credential_id path string true "Credential ID"
-// @Param payload body agentcredential.UpdateRequest true "Update"
-// @Success 200 {object} agentcredential.PublicCredential
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Router /agent-credentials/{credential_id} [patch].
-func (h *AgentCredentialHandler) Update(c echo.Context) error {
-	actorID, err := RequireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	var req agentcredential.UpdateRequest
-	if err := c.Bind(&req); err != nil {
-		return apperror.Wrap(apperror.CodeAgentCredentialRequestInvalid, err, nil)
-	}
-	item, err := h.service.UpdateLabel(c.Request().Context(), actorID, c.Param("credential_id"), req.Label)
-	if err != nil {
-		return mapAgentCredentialError(err)
-	}
-	return c.JSON(http.StatusOK, item)
-}
-
-// Revoke godoc
-// @Summary Revoke an Agent credential
-// @Tags agent-credentials
-// @Param credential_id path string true "Credential ID"
-// @Success 200 {object} agentcredential.PublicCredential
-// @Failure 404 {object} apperror.Problem
-// @Router /agent-credentials/{credential_id} [delete].
-func (h *AgentCredentialHandler) Revoke(c echo.Context) error {
-	actorID, err := RequireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	targets, err := h.service.BindingTargets(c.Request().Context(), c.Param("credential_id"))
-	if err != nil {
-		return mapAgentCredentialError(err)
-	}
-	item, err := h.service.Revoke(c.Request().Context(), actorID, c.Param("credential_id"))
-	if err != nil {
-		return mapAgentCredentialError(err)
-	}
-	for _, target := range targets {
-		h.closeRuntimes(target.BotID, target.AgentID)
-	}
-	return c.JSON(http.StatusOK, item)
-}
-
-// ListBindings godoc
-// @Summary List credentials bound to a Bot Agent
+// Get godoc
+// @Summary Get the credential attached to a Bot Agent
 // @Tags agent-credentials
 // @Param bot_id path string true "Bot ID"
-// @Param agent_id path string true "Agent ID"
-// @Success 200 {object} agentcredential.CredentialList
-// @Failure 403 {object} apperror.Problem
-// @Router /bots/{bot_id}/agents/{agent_id}/credentials [get].
-func (h *AgentCredentialHandler) ListBindings(c echo.Context) error {
-	botID, agentID, _, err := h.requireBotManage(c)
+// @Param id path string true "Bot Agent ID"
+// @Success 200 {object} agentcredential.PublicCredential
+// @Failure 404 {object} apperror.Problem
+// @Router /bots/{bot_id}/agents/{id}/credential [get].
+func (h *AgentCredentialHandler) Get(c echo.Context) error {
+	botID, botAgentID, err := h.requireBotManage(c)
 	if err != nil {
 		return err
 	}
-	items, err := h.service.ListBindings(c.Request().Context(), botID, agentID)
+	credential, err := h.service.GetForBotAgent(c.Request().Context(), botID, botAgentID)
 	if err != nil {
 		return mapAgentCredentialError(err)
 	}
-	return c.JSON(http.StatusOK, agentcredential.CredentialList{Items: items})
+	return c.JSON(http.StatusOK, credential)
 }
 
-// Bind godoc
-// @Summary Bind a credential to a Bot Agent
+// Put godoc
+// @Summary Attach a credential to a Bot Agent, replacing any previous one
+// @Description Creates an encrypted credential from the submitted secret and
+// points the Agent instance at it. The replaced credential is revoked once no
+// other instance references it. The Agent's warm runtimes are shut down so the
+// next session starts with the new credential.
 // @Tags agent-credentials
 // @Param bot_id path string true "Bot ID"
-// @Param agent_id path string true "Agent ID"
-// @Param payload body agentcredential.BindRequest true "Binding"
-// @Success 201 {object} agentcredential.PublicCredential
+// @Param id path string true "Bot Agent ID"
+// @Param payload body agentCredentialPutRequest true "Secret"
+// @Success 200 {object} agentcredential.PublicCredential
+// @Failure 400 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
-// @Router /bots/{bot_id}/agents/{agent_id}/credentials [post].
-func (h *AgentCredentialHandler) Bind(c echo.Context) error {
-	botID, agentID, actorID, err := h.requireBotManage(c)
+// @Failure 503 {object} apperror.Problem
+// @Router /bots/{bot_id}/agents/{id}/credential [put].
+func (h *AgentCredentialHandler) Put(c echo.Context) error {
+	botID, botAgentID, err := h.requireBotManage(c)
 	if err != nil {
 		return err
 	}
-	var req agentcredential.BindRequest
-	if err := c.Bind(&req); err != nil {
-		return apperror.Wrap(apperror.CodeAgentCredentialRequestInvalid, err, nil)
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
 	}
-	item, err := h.service.Bind(c.Request().Context(), actorID, botID, agentID, req.CredentialID, req.MakeDefault)
+	var req agentCredentialPutRequest
+	if err := c.Bind(&req); err != nil {
+		return apperror.New(apperror.CodeAgentCredentialRequestInvalid, nil)
+	}
+	credential, err := h.service.AttachToBotAgent(c.Request().Context(), channelIdentityID, botID, botAgentID, agentcredential.CreateRequest{
+		Provider: agentcredential.ProviderForAuthKind(req.AuthKind),
+		AuthKind: req.AuthKind,
+		Secret:   req.Secret,
+	})
 	if err != nil {
 		return mapAgentCredentialError(err)
 	}
-	h.closeRuntimes(botID, agentID)
-	return c.JSON(http.StatusCreated, item)
+	h.closeRuntimes(botID, botAgentID)
+	return c.JSON(http.StatusOK, credential)
 }
 
-// SetDefault godoc
-// @Summary Set the default credential for a Bot Agent
+// Delete godoc
+// @Summary Disconnect a Bot Agent's credential
 // @Tags agent-credentials
 // @Param bot_id path string true "Bot ID"
-// @Param agent_id path string true "Agent ID"
-// @Param payload body agentcredential.SetDefaultRequest true "Default credential"
+// @Param id path string true "Bot Agent ID"
 // @Success 204
 // @Failure 404 {object} apperror.Problem
-// @Router /bots/{bot_id}/agents/{agent_id}/credentials/default [put].
-func (h *AgentCredentialHandler) SetDefault(c echo.Context) error {
-	botID, agentID, _, err := h.requireBotManage(c)
+// @Router /bots/{bot_id}/agents/{id}/credential [delete].
+func (h *AgentCredentialHandler) Delete(c echo.Context) error {
+	botID, botAgentID, err := h.requireBotManage(c)
 	if err != nil {
 		return err
 	}
-	var req agentcredential.SetDefaultRequest
-	if err := c.Bind(&req); err != nil {
-		return apperror.Wrap(apperror.CodeAgentCredentialRequestInvalid, err, nil)
-	}
-	if err := h.service.SetDefault(c.Request().Context(), botID, agentID, req.CredentialID); err != nil {
+	if err := h.service.DetachFromBotAgent(c.Request().Context(), botID, botAgentID); err != nil {
 		return mapAgentCredentialError(err)
 	}
-	h.closeRuntimes(botID, agentID)
+	h.closeRuntimes(botID, botAgentID)
 	return c.NoContent(http.StatusNoContent)
 }
 
-// Unbind godoc
-// @Summary Unbind a credential from a Bot Agent
-// @Tags agent-credentials
-// @Param bot_id path string true "Bot ID"
-// @Param agent_id path string true "Agent ID"
-// @Param credential_id path string true "Credential ID"
-// @Success 204
-// @Failure 404 {object} apperror.Problem
-// @Router /bots/{bot_id}/agents/{agent_id}/credentials/{credential_id} [delete].
-func (h *AgentCredentialHandler) Unbind(c echo.Context) error {
-	botID, agentID, _, err := h.requireBotManage(c)
+func (h *AgentCredentialHandler) requireBotManage(c echo.Context) (string, string, error) {
+	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
-		return err
-	}
-	if err := h.service.Unbind(c.Request().Context(), botID, agentID, c.Param("credential_id")); err != nil {
-		return mapAgentCredentialError(err)
-	}
-	h.closeRuntimes(botID, agentID)
-	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *AgentCredentialHandler) requireBotManage(c echo.Context) (string, string, string, error) {
-	actorID, err := RequireChannelIdentityID(c)
-	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
-	agentID := strings.ToLower(strings.TrimSpace(c.Param("agent_id")))
-	if botID == "" || agentID == "" {
-		return "", "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id and agent_id are required")
+	botAgentID := strings.TrimSpace(c.Param("id"))
+	if botID == "" || botAgentID == "" {
+		return "", "", apperror.New(apperror.CodeAgentCredentialNotFound, nil)
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
-		return "", "", "", err
+	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionManage); err != nil {
+		return "", "", err
 	}
-	return botID, agentID, actorID, nil
+	return botID, botAgentID, nil
 }
 
-func (h *AgentCredentialHandler) closeRuntimes(botID, agentID string) {
-	if h.runtimes != nil {
-		_ = h.runtimes.CloseBotAgentRuntimes(botID, agentID)
+func (h *AgentCredentialHandler) closeRuntimes(botID, botAgentID string) {
+	if h.runtimes == nil {
+		return
 	}
+	_ = h.runtimes.CloseBotAgentInstanceRuntimes(botID, botAgentID)
 }
 
 func mapAgentCredentialError(err error) error {
 	switch {
 	case errors.Is(err, agentcredential.ErrNotFound):
-		return apperror.New(apperror.CodeAgentCredentialNotFound, nil)
-	case errors.Is(err, agentcredential.ErrForbidden):
-		return apperror.New(apperror.CodeAgentCredentialForbidden, nil)
+		return apperror.Wrap(apperror.CodeAgentCredentialNotFound, err, nil)
+	case errors.Is(err, agentcredential.ErrInvalidRequest):
+		return apperror.Wrap(apperror.CodeAgentCredentialRequestInvalid, err, nil)
 	case errors.Is(err, agentcredential.ErrIncompatible):
-		return apperror.New(apperror.CodeAgentCredentialIncompatible, nil)
+		return apperror.Wrap(apperror.CodeAgentCredentialIncompatible, err, nil)
 	case errors.Is(err, agentcredential.ErrRevoked):
-		return apperror.New(apperror.CodeAgentCredentialRevoked, nil)
+		return apperror.Wrap(apperror.CodeAgentCredentialRevoked, err, nil)
 	case errors.Is(err, agentcredential.ErrEncryptionUnavailable):
 		return apperror.Wrap(apperror.CodeAgentCredentialEncryptionUnavailable, err, nil)
-	case errors.Is(err, agentcredential.ErrInvalidRequest):
-		return apperror.New(apperror.CodeAgentCredentialRequestInvalid, nil)
 	default:
-		return apperror.Wrap(apperror.CodeAgentCredentialMaterializationFailed, err, nil)
+		return err
 	}
 }

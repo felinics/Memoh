@@ -1,3 +1,11 @@
+// Package agentcredential stores Agent credentials encrypted at rest.
+//
+// A credential belongs to a team and is referenced by at most one Bot Agent
+// instance via bot_agents.agent_credential_id (enforced by product flow, not
+// schema). Attach replaces an Agent's credential atomically and revokes the
+// replaced row once nothing references it; runtime resolution walks
+// session → bot_agent → credential and decrypts only while preparing the
+// Agent process configuration.
 package agentcredential
 
 import (
@@ -25,7 +33,6 @@ import (
 
 var (
 	ErrNotFound              = errors.New("agent credential not found")
-	ErrForbidden             = errors.New("agent credential forbidden")
 	ErrIncompatible          = errors.New("agent credential is incompatible with the agent")
 	ErrRevoked               = errors.New("agent credential is revoked")
 	ErrEncryptionUnavailable = errors.New("agent credential encryption is unavailable")
@@ -53,7 +60,45 @@ func NewService(queries dbstore.Queries, cfg config.Config) *Service {
 
 func (s *Service) Configured() bool { return s != nil && s.aead != nil && s.queries != nil }
 
-func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateRequest) (PublicCredential, error) {
+// GetForBotAgent returns the redacted credential currently attached to a Bot
+// Agent instance, or ErrNotFound when the Agent is not connected.
+func (s *Service) GetForBotAgent(ctx context.Context, botID, botAgentID string) (PublicCredential, error) {
+	row, err := s.botAgentRow(ctx, botID, botAgentID)
+	if err != nil {
+		return PublicCredential{}, err
+	}
+	return publicFromJoinRow(row), nil
+}
+
+// ResolveForBotAgent decrypts the credential attached to a Bot Agent instance
+// for runtime use. ErrNotFound means the Agent has no credential; callers fall
+// back to the legacy bot-metadata configuration in that case.
+func (s *Service) ResolveForBotAgent(ctx context.Context, botID, botAgentID string) (ResolvedCredential, error) {
+	if !s.Configured() {
+		return ResolvedCredential{}, ErrEncryptionUnavailable
+	}
+	row, err := s.botAgentRow(ctx, botID, botAgentID)
+	if err != nil {
+		return ResolvedCredential{}, err
+	}
+	if row.RevokedAt.Valid {
+		return ResolvedCredential{}, ErrRevoked
+	}
+	if !Compatible(row.AgentProvider, row.AuthKind) {
+		return ResolvedCredential{}, ErrIncompatible
+	}
+	secret, err := s.decrypt(row.EncryptedPayload, row.EncryptionNonce, row.KeyVersion)
+	if err != nil {
+		return ResolvedCredential{}, err
+	}
+	return ResolvedCredential{PublicCredential: publicFromJoinRow(row), Secret: secret}, nil
+}
+
+// AttachToBotAgent encrypts a new secret, points the Bot Agent instance at it,
+// and revokes the replaced credential once no other instance references it.
+// The instance's provider is read inside the transaction and gates auth-kind
+// compatibility, so a wrong-profile attach can never link.
+func (s *Service) AttachToBotAgent(ctx context.Context, ownerUserID, botID, botAgentID string, req CreateRequest) (PublicCredential, error) {
 	if !s.Configured() {
 		return PublicCredential{}, ErrEncryptionUnavailable
 	}
@@ -61,252 +106,104 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateRequ
 	if err != nil {
 		return PublicCredential{}, fmt.Errorf("%w: owner_user_id", ErrInvalidRequest)
 	}
+	botUUID, agentUUID, err := parseTwoIDs(botID, botAgentID)
+	if err != nil {
+		return PublicCredential{}, ErrInvalidRequest
+	}
 	req.Provider = normalize(req.Provider)
 	req.AuthKind = normalize(req.AuthKind)
 	req.Label = strings.TrimSpace(req.Label)
-	if req.Label == "" || !validProviderKind(req.Provider, req.AuthKind) || !validSecret(req.AuthKind, req.Secret) {
+	if req.Label == "" {
+		req.Label = defaultLabel(req.AuthKind, req.AccountMetadata)
+	}
+	if !validProviderKind(req.Provider, req.AuthKind) || !validSecret(req.AuthKind, req.Secret) {
 		return PublicCredential{}, ErrInvalidRequest
 	}
 	ciphertext, nonce, err := s.encrypt(req.Secret)
 	if err != nil {
 		return PublicCredential{}, err
 	}
-	metadata, err := json.Marshal(nonNilMap(req.AccountMetadata))
+	meta, err := json.Marshal(nonNilMap(req.AccountMetadata))
 	if err != nil {
 		return PublicCredential{}, fmt.Errorf("%w: account_metadata", ErrInvalidRequest)
 	}
-	row, err := s.queries.CreateAgentCredential(ctx, dbsqlc.CreateAgentCredentialParams{
-		OwnerUserID: ownerID, Provider: req.Provider, AuthKind: req.AuthKind, Label: req.Label,
-		EncryptedPayload: ciphertext, EncryptionNonce: nonce, KeyVersion: 1,
-		AccountMetadata: metadata, ExpiresAt: timestamptz(req.ExpiresAt),
-	})
-	if err != nil {
+
+	var created dbsqlc.AgentCredential
+	attach := func(q dbstore.Queries) error {
+		agentProvider, providerErr := q.GetBotAgentProvider(ctx, dbsqlc.GetBotAgentProviderParams{BotID: botUUID, BotAgentID: agentUUID})
+		if errors.Is(providerErr, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if providerErr != nil {
+			return providerErr
+		}
+		if !Compatible(agentProvider, req.AuthKind) {
+			return ErrIncompatible
+		}
+		row, createErr := q.CreateAgentCredential(ctx, dbsqlc.CreateAgentCredentialParams{
+			OwnerUserID: ownerID, Provider: req.Provider, AuthKind: req.AuthKind, Label: req.Label,
+			EncryptedPayload: ciphertext, EncryptionNonce: nonce, KeyVersion: 1,
+			AccountMetadata: meta, ExpiresAt: timestamptz(req.ExpiresAt),
+		})
+		if createErr != nil {
+			return createErr
+		}
+		previous, setErr := q.SetBotAgentCredential(ctx, dbsqlc.SetBotAgentCredentialParams{
+			BotID: botUUID, BotAgentID: agentUUID, CredentialID: row.ID,
+		})
+		if errors.Is(setErr, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if setErr != nil {
+			return setErr
+		}
+		created = row
+		return revokeIfOrphan(ctx, q, previous)
+	}
+	if err := s.inTx(ctx, attach); err != nil {
 		return PublicCredential{}, err
 	}
-	return publicFromRow(row, false), nil
+	return publicFromRow(created), nil
 }
 
-func (s *Service) ListOwned(ctx context.Context, ownerUserID string) ([]PublicCredential, error) {
-	id, err := db.ParseUUID(ownerUserID)
+// DetachFromBotAgent disconnects the instance and revokes the credential once
+// nothing references it. ErrNotFound covers both a missing Agent and an Agent
+// that was never connected.
+func (s *Service) DetachFromBotAgent(ctx context.Context, botID, botAgentID string) error {
+	botUUID, agentUUID, err := parseTwoIDs(botID, botAgentID)
 	if err != nil {
-		return nil, ErrInvalidRequest
+		return ErrInvalidRequest
 	}
-	rows, err := s.queries.ListAgentCredentialsByOwner(ctx, id)
-	if err != nil {
-		return nil, err
+	detach := func(q dbstore.Queries) error {
+		previous, clearErr := q.ClearBotAgentCredential(ctx, dbsqlc.ClearBotAgentCredentialParams{
+			BotID: botUUID, BotAgentID: agentUUID,
+		})
+		if errors.Is(clearErr, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if clearErr != nil {
+			return clearErr
+		}
+		return revokeIfOrphan(ctx, q, previous)
 	}
-	out := make([]PublicCredential, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, publicFromRow(row, false))
-	}
-	return out, nil
+	return s.inTx(ctx, detach)
 }
 
-func (s *Service) UpdateLabel(ctx context.Context, ownerUserID, credentialID, label string) (PublicCredential, error) {
-	ownerID, credID, err := parseTwoIDs(ownerUserID, credentialID)
-	if err != nil || strings.TrimSpace(label) == "" {
-		return PublicCredential{}, ErrInvalidRequest
+// ReleaseCredential revokes a credential that lost its referencing Bot Agent
+// row through deletion, once nothing else points at it.
+func (s *Service) ReleaseCredential(ctx context.Context, credentialID string) error {
+	if s == nil || s.queries == nil {
+		return nil
 	}
-	row, err := s.queries.UpdateAgentCredentialLabel(ctx, dbsqlc.UpdateAgentCredentialLabelParams{Label: strings.TrimSpace(label), ID: credID, OwnerUserID: ownerID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return PublicCredential{}, ErrNotFound
-	}
-	if err != nil {
-		return PublicCredential{}, err
-	}
-	return publicFromRow(row, false), nil
-}
-
-func (s *Service) Revoke(ctx context.Context, ownerUserID, credentialID string) (PublicCredential, error) {
-	ownerID, credID, err := parseTwoIDs(ownerUserID, credentialID)
-	if err != nil {
-		return PublicCredential{}, ErrInvalidRequest
-	}
-	row, err := s.queries.RevokeAgentCredential(ctx, dbsqlc.RevokeAgentCredentialParams{ID: credID, OwnerUserID: ownerID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return PublicCredential{}, ErrNotFound
-	}
-	if err != nil {
-		return PublicCredential{}, err
-	}
-	return publicFromRow(row, false), nil
-}
-
-func (s *Service) BindingTargets(ctx context.Context, credentialID string) ([]BindingTarget, error) {
 	id, err := db.ParseUUID(credentialID)
 	if err != nil {
-		return nil, ErrInvalidRequest
-	}
-	rows, err := s.queries.ListAgentCredentialBindings(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]BindingTarget, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, BindingTarget{BotID: row.BotID.String(), AgentID: row.AgentID})
-	}
-	return out, nil
-}
-
-func (s *Service) Bind(ctx context.Context, ownerUserID, botID, agentID, credentialID string, makeDefault bool) (PublicCredential, error) {
-	ownerID, credID, err := parseTwoIDs(ownerUserID, credentialID)
-	if err != nil {
-		return PublicCredential{}, ErrInvalidRequest
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return PublicCredential{}, ErrInvalidRequest
-	}
-	agentID = acpprofile.NormalizeAgentID(agentID)
-	row, err := s.queries.GetAgentCredential(ctx, credID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return PublicCredential{}, ErrNotFound
-	}
-	if err != nil {
-		return PublicCredential{}, err
-	}
-	if row.OwnerUserID != ownerID {
-		return PublicCredential{}, ErrForbidden
-	}
-	if row.RevokedAt.Valid {
-		return PublicCredential{}, ErrRevoked
-	}
-	if !Compatible(agentID, row.AuthKind) {
-		return PublicCredential{}, ErrIncompatible
-	}
-	if _, err := s.queries.BindBotAgentCredential(ctx, dbsqlc.BindBotAgentCredentialParams{BotID: botUUID, AgentID: agentID, CredentialID: credID}); err != nil {
-		return PublicCredential{}, err
-	}
-	if makeDefault {
-		if err := s.SetDefault(ctx, botID, agentID, credentialID); err != nil {
-			return PublicCredential{}, err
-		}
-	}
-	return publicFromRow(row, makeDefault), nil
-}
-
-func (s *Service) SetDefault(ctx context.Context, botID, agentID, credentialID string) error {
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
 		return ErrInvalidRequest
 	}
-	credID, err := db.ParseUUID(credentialID)
-	if err != nil {
-		return ErrInvalidRequest
-	}
-	agentID = acpprofile.NormalizeAgentID(agentID)
-	setDefault := func(q dbstore.Queries) error {
-		if _, err := q.GetBotAgentCredential(ctx, dbsqlc.GetBotAgentCredentialParams{BotID: botUUID, AgentID: agentID, CredentialID: credID}); errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		} else if err != nil {
-			return err
-		}
-		if err := q.ClearBotAgentCredentialDefault(ctx, dbsqlc.ClearBotAgentCredentialDefaultParams{BotID: botUUID, AgentID: agentID}); err != nil {
-			return err
-		}
-		_, err := q.SetBotAgentCredentialDefault(ctx, dbsqlc.SetBotAgentCredentialDefaultParams{BotID: botUUID, AgentID: agentID, CredentialID: credID})
-		return err
-	}
-	if tx, ok := s.queries.(interface {
-		InTx(context.Context, func(dbstore.Queries) error) error
-	}); ok {
-		return tx.InTx(ctx, setDefault)
-	}
-	return setDefault(s.queries)
+	return revokeIfOrphan(ctx, s.queries, id)
 }
 
-func (s *Service) Unbind(ctx context.Context, botID, agentID, credentialID string) error {
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return ErrInvalidRequest
-	}
-	credID, err := db.ParseUUID(credentialID)
-	if err != nil {
-		return ErrInvalidRequest
-	}
-	rows, err := s.queries.UnbindBotAgentCredential(ctx, dbsqlc.UnbindBotAgentCredentialParams{BotID: botUUID, AgentID: acpprofile.NormalizeAgentID(agentID), CredentialID: credID})
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *Service) ListBindings(ctx context.Context, botID, agentID string) ([]PublicCredential, error) {
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return nil, ErrInvalidRequest
-	}
-	rows, err := s.queries.ListBotAgentCredentials(ctx, dbsqlc.ListBotAgentCredentialsParams{BotID: botUUID, AgentID: acpprofile.NormalizeAgentID(agentID)})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]PublicCredential, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, publicFromBinding(row))
-	}
-	return out, nil
-}
-
-func (s *Service) Resolve(ctx context.Context, botID, agentID, credentialID string) (ResolvedCredential, error) {
-	if !s.Configured() {
-		return ResolvedCredential{}, ErrEncryptionUnavailable
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return ResolvedCredential{}, ErrInvalidRequest
-	}
-	credID, err := db.ParseUUID(credentialID)
-	if err != nil {
-		return ResolvedCredential{}, ErrInvalidRequest
-	}
-	row, err := s.queries.GetBotAgentCredential(ctx, dbsqlc.GetBotAgentCredentialParams{BotID: botUUID, AgentID: acpprofile.NormalizeAgentID(agentID), CredentialID: credID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ResolvedCredential{}, ErrNotFound
-	}
-	if err != nil {
-		return ResolvedCredential{}, err
-	}
-	if row.RevokedAt.Valid {
-		return ResolvedCredential{}, ErrRevoked
-	}
-	if !Compatible(agentID, row.AuthKind) {
-		return ResolvedCredential{}, ErrIncompatible
-	}
-	secret, err := s.decrypt(row.EncryptedPayload, row.EncryptionNonce, row.KeyVersion)
-	if err != nil {
-		return ResolvedCredential{}, err
-	}
-	return ResolvedCredential{PublicCredential: publicFromGetBinding(row), Secret: secret}, nil
-}
-
-func (s *Service) ResolveDefault(ctx context.Context, botID, agentID string) (ResolvedCredential, error) {
-	if !s.Configured() {
-		return ResolvedCredential{}, ErrEncryptionUnavailable
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return ResolvedCredential{}, ErrInvalidRequest
-	}
-	row, err := s.queries.GetDefaultBotAgentCredential(ctx, dbsqlc.GetDefaultBotAgentCredentialParams{BotID: botUUID, AgentID: acpprofile.NormalizeAgentID(agentID)})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ResolvedCredential{}, ErrNotFound
-	}
-	if err != nil {
-		return ResolvedCredential{}, err
-	}
-	if row.RevokedAt.Valid {
-		return ResolvedCredential{}, ErrRevoked
-	}
-	secret, err := s.decrypt(row.EncryptedPayload, row.EncryptionNonce, row.KeyVersion)
-	if err != nil {
-		return ResolvedCredential{}, err
-	}
-	return ResolvedCredential{PublicCredential: publicFromDefaultBinding(row), Secret: secret}, nil
-}
-
+// UpdateSecretCAS persists a rotated secret guarded by credential_version so a
+// concurrent rotation (or revoke) loses cleanly instead of overwriting.
 func (s *Service) UpdateSecretCAS(ctx context.Context, credentialID string, expectedVersion int64, secret map[string]string, accountMetadata map[string]any, expiresAt *time.Time) (PublicCredential, error) {
 	if !s.Configured() {
 		return PublicCredential{}, ErrEncryptionUnavailable
@@ -333,9 +230,10 @@ func (s *Service) UpdateSecretCAS(ctx context.Context, credentialID string, expe
 	if err != nil {
 		return PublicCredential{}, err
 	}
-	return publicFromRow(row, false), nil
+	return publicFromRow(row), nil
 }
 
+// Compatible reports whether an auth kind can drive the given ACP profile.
 func Compatible(agentID, authKind string) bool {
 	switch acpprofile.NormalizeAgentID(agentID) {
 	case acpprofile.AgentCodexID:
@@ -347,6 +245,44 @@ func Compatible(agentID, authKind string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *Service) botAgentRow(ctx context.Context, botID, botAgentID string) (dbsqlc.GetBotAgentCredentialRow, error) {
+	botUUID, agentUUID, err := parseTwoIDs(botID, botAgentID)
+	if err != nil {
+		return dbsqlc.GetBotAgentCredentialRow{}, ErrInvalidRequest
+	}
+	row, err := s.queries.GetBotAgentCredential(ctx, dbsqlc.GetBotAgentCredentialParams{BotID: botUUID, BotAgentID: agentUUID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return dbsqlc.GetBotAgentCredentialRow{}, ErrNotFound
+	}
+	return row, err
+}
+
+func (s *Service) inTx(ctx context.Context, fn func(dbstore.Queries) error) error {
+	if tx, ok := s.queries.(interface {
+		InTx(context.Context, func(dbstore.Queries) error) error
+	}); ok {
+		return tx.InTx(ctx, fn)
+	}
+	return fn(s.queries)
+}
+
+func revokeIfOrphan(ctx context.Context, q dbstore.Queries, credentialID pgtype.UUID) error {
+	if !credentialID.Valid {
+		return nil
+	}
+	refs, err := q.CountBotAgentCredentialRefs(ctx, credentialID)
+	if err != nil {
+		return err
+	}
+	if refs > 0 {
+		return nil
+	}
+	if _, err := q.RevokeAgentCredentialByID(ctx, credentialID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) encrypt(secret map[string]string) ([]byte, []byte, error) {
@@ -376,6 +312,13 @@ func (s *Service) decrypt(ciphertext, nonce []byte, keyVersion int32) (map[strin
 	return secret, nil
 }
 
+// ProviderForAuthKind maps an auth kind to its provider so API callers only
+// submit the kind.
+func ProviderForAuthKind(kind string) string {
+	want := map[string]string{AuthKindOpenAIAPIKey: ProviderOpenAI, AuthKindOpenAICodexOAuth: ProviderOpenAI, AuthKindAnthropicAPIKey: ProviderAnthropic, AuthKindClaudeCodeOAuth: ProviderAnthropic, AuthKindGoogleAPIKey: ProviderGoogle, AuthKindOpenRouterAPIKey: ProviderOpenRouter}
+	return want[normalize(kind)]
+}
+
 func validProviderKind(provider, kind string) bool {
 	want := map[string]string{AuthKindOpenAIAPIKey: ProviderOpenAI, AuthKindOpenAICodexOAuth: ProviderOpenAI, AuthKindAnthropicAPIKey: ProviderAnthropic, AuthKindClaudeCodeOAuth: ProviderAnthropic, AuthKindGoogleAPIKey: ProviderGoogle, AuthKindOpenRouterAPIKey: ProviderOpenRouter}
 	return want[kind] == provider
@@ -396,7 +339,23 @@ func validSecret(kind string, secret map[string]string) bool {
 	}
 	return true
 }
+
+func defaultLabel(kind string, meta map[string]any) string {
+	switch kind {
+	case AuthKindOpenAICodexOAuth:
+		if account, ok := meta["account_id"].(string); ok && account != "" {
+			return "ChatGPT " + account
+		}
+		return "ChatGPT"
+	case AuthKindClaudeCodeOAuth:
+		return "Claude Code"
+	default:
+		return "API key"
+	}
+}
+
 func normalize(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
+
 func nonNilMap(v map[string]any) map[string]any {
 	if v == nil {
 		return map[string]any{}
@@ -428,32 +387,19 @@ func metadata(raw []byte) map[string]any {
 	return out
 }
 
-func publicFromRow(row dbsqlc.AgentCredential, isDefault bool) PublicCredential {
-	var expires *time.Time
-	if row.ExpiresAt.Valid {
-		t := row.ExpiresAt.Time
-		expires = &t
-	}
-	return PublicCredential{ID: row.ID.String(), OwnerUserID: row.OwnerUserID.String(), Provider: row.Provider, AuthKind: row.AuthKind, Label: row.Label, AccountMetadata: metadata(row.AccountMetadata), ExpiresAt: expires, CredentialVersion: row.CredentialVersion, Revoked: row.RevokedAt.Valid, IsDefault: isDefault, CreatedAt: db.TimeFromPg(row.CreatedAt), UpdatedAt: db.TimeFromPg(row.UpdatedAt)}
+func publicFromRow(row dbsqlc.AgentCredential) PublicCredential {
+	return publicFromFields(row.ID, row.OwnerUserID, row.Provider, row.AuthKind, row.Label, row.AccountMetadata, row.ExpiresAt, row.CredentialVersion, row.RevokedAt, row.CreatedAt, row.UpdatedAt)
 }
 
-func publicFromBinding(row dbsqlc.ListBotAgentCredentialsRow) PublicCredential {
-	return publicFromFields(row.ID, row.OwnerUserID, row.Provider, row.AuthKind, row.Label, row.AccountMetadata, row.ExpiresAt, row.CredentialVersion, row.RevokedAt, row.IsDefault, row.CreatedAt, row.UpdatedAt)
+func publicFromJoinRow(row dbsqlc.GetBotAgentCredentialRow) PublicCredential {
+	return publicFromFields(row.ID, row.OwnerUserID, row.Provider, row.AuthKind, row.Label, row.AccountMetadata, row.ExpiresAt, row.CredentialVersion, row.RevokedAt, row.CreatedAt, row.UpdatedAt)
 }
 
-func publicFromGetBinding(row dbsqlc.GetBotAgentCredentialRow) PublicCredential {
-	return publicFromFields(row.ID, row.OwnerUserID, row.Provider, row.AuthKind, row.Label, row.AccountMetadata, row.ExpiresAt, row.CredentialVersion, row.RevokedAt, row.IsDefault, row.CreatedAt, row.UpdatedAt)
-}
-
-func publicFromDefaultBinding(row dbsqlc.GetDefaultBotAgentCredentialRow) PublicCredential {
-	return publicFromFields(row.ID, row.OwnerUserID, row.Provider, row.AuthKind, row.Label, row.AccountMetadata, row.ExpiresAt, row.CredentialVersion, row.RevokedAt, row.IsDefault, row.CreatedAt, row.UpdatedAt)
-}
-
-func publicFromFields(id, owner pgtype.UUID, provider, kind, label string, meta []byte, exp pgtype.Timestamptz, version int64, revoked pgtype.Timestamptz, def bool, created, updated pgtype.Timestamptz) PublicCredential {
+func publicFromFields(id, owner pgtype.UUID, provider, kind, label string, meta []byte, exp pgtype.Timestamptz, version int64, revoked pgtype.Timestamptz, created, updated pgtype.Timestamptz) PublicCredential {
 	var expires *time.Time
 	if exp.Valid {
 		t := exp.Time
 		expires = &t
 	}
-	return PublicCredential{ID: id.String(), OwnerUserID: owner.String(), Provider: provider, AuthKind: kind, Label: label, AccountMetadata: metadata(meta), ExpiresAt: expires, CredentialVersion: version, Revoked: revoked.Valid, IsDefault: def, CreatedAt: db.TimeFromPg(created), UpdatedAt: db.TimeFromPg(updated)}
+	return PublicCredential{ID: id.String(), OwnerUserID: owner.String(), Provider: provider, AuthKind: kind, Label: label, AccountMetadata: metadata(meta), ExpiresAt: expires, CredentialVersion: version, Revoked: revoked.Valid, CreatedAt: db.TimeFromPg(created), UpdatedAt: db.TimeFromPg(updated)}
 }

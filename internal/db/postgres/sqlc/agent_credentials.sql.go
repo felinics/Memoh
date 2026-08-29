@@ -11,62 +11,57 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const bindBotAgentCredential = `-- name: BindBotAgentCredential :one
-INSERT INTO bot_agent_credentials (bot_id, agent_id, credential_id, is_default)
-VALUES ($1, $2, $3, false)
-ON CONFLICT (team_id, bot_id, agent_id, credential_id) DO UPDATE SET updated_at = now()
-RETURNING team_id, bot_id, agent_id, credential_id, is_default, created_at, updated_at
+const clearBotAgentCredential = `-- name: ClearBotAgentCredential :one
+UPDATE bot_agents
+SET agent_credential_id = NULL,
+    updated_at = now()
+WHERE bot_agents.bot_id = $1
+  AND bot_agents.id = $2
+  AND bot_agents.team_id = public.memoh_current_team_id()
+  AND bot_agents.deleted_at IS NULL
+  AND bot_agents.agent_credential_id IS NOT NULL
+RETURNING (
+    SELECT prev.agent_credential_id
+    FROM bot_agents prev
+    WHERE prev.id = bot_agents.id
+) AS previous_credential_id
 `
 
-type BindBotAgentCredentialParams struct {
-	BotID        pgtype.UUID `json:"bot_id"`
-	AgentID      string      `json:"agent_id"`
-	CredentialID pgtype.UUID `json:"credential_id"`
+type ClearBotAgentCredentialParams struct {
+	BotID      pgtype.UUID `json:"bot_id"`
+	BotAgentID pgtype.UUID `json:"bot_agent_id"`
 }
 
-func (q *Queries) BindBotAgentCredential(ctx context.Context, arg BindBotAgentCredentialParams) (BotAgentCredential, error) {
-	row := q.db.QueryRow(ctx, bindBotAgentCredential, arg.BotID, arg.AgentID, arg.CredentialID)
-	var i BotAgentCredential
-	err := row.Scan(
-		&i.TeamID,
-		&i.BotID,
-		&i.AgentID,
-		&i.CredentialID,
-		&i.IsDefault,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+func (q *Queries) ClearBotAgentCredential(ctx context.Context, arg ClearBotAgentCredentialParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, clearBotAgentCredential, arg.BotID, arg.BotAgentID)
+	var previous_credential_id pgtype.UUID
+	err := row.Scan(&previous_credential_id)
+	return previous_credential_id, err
 }
 
-const clearBotAgentCredentialDefault = `-- name: ClearBotAgentCredentialDefault :exec
-UPDATE bot_agent_credentials
-SET is_default = false, updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $1
-  AND agent_id = $2
-  AND is_default
+const countBotAgentCredentialRefs = `-- name: CountBotAgentCredentialRefs :one
+SELECT count(*) FROM bot_agents
+WHERE agent_credential_id = $1
+  AND team_id = public.memoh_current_team_id()
+  AND deleted_at IS NULL
 `
 
-type ClearBotAgentCredentialDefaultParams struct {
-	BotID   pgtype.UUID `json:"bot_id"`
-	AgentID string      `json:"agent_id"`
-}
-
-func (q *Queries) ClearBotAgentCredentialDefault(ctx context.Context, arg ClearBotAgentCredentialDefaultParams) error {
-	_, err := q.db.Exec(ctx, clearBotAgentCredentialDefault, arg.BotID, arg.AgentID)
-	return err
+func (q *Queries) CountBotAgentCredentialRefs(ctx context.Context, agentCredentialID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countBotAgentCredentialRefs, agentCredentialID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createAgentCredential = `-- name: CreateAgentCredential :one
 INSERT INTO agent_credentials (
-  owner_user_id, provider, auth_kind, label, encrypted_payload,
-  encryption_nonce, key_version, account_metadata, expires_at
-)
-VALUES (
-  $1, $2, $3, $4,
-  $5, $6, $7,
-  $8, $9
+    owner_user_id, provider, auth_kind, label,
+    encrypted_payload, encryption_nonce, key_version,
+    account_metadata, expires_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7,
+    $8, $9
 )
 RETURNING id, team_id, owner_user_id, provider, auth_kind, label, encrypted_payload, encryption_nonce, key_version, account_metadata, expires_at, credential_version, revoked_at, created_at, updated_at
 `
@@ -118,7 +113,7 @@ func (q *Queries) CreateAgentCredential(ctx context.Context, arg CreateAgentCred
 
 const getAgentCredential = `-- name: GetAgentCredential :one
 SELECT id, team_id, owner_user_id, provider, auth_kind, label, encrypted_payload, encryption_nonce, key_version, account_metadata, expires_at, credential_version, revoked_at, created_at, updated_at FROM agent_credentials
-WHERE team_id = public.memoh_current_team_id() AND id = $1
+WHERE id = $1 AND team_id = public.memoh_current_team_id()
 `
 
 func (q *Queries) GetAgentCredential(ctx context.Context, id pgtype.UUID) (AgentCredential, error) {
@@ -145,19 +140,19 @@ func (q *Queries) GetAgentCredential(ctx context.Context, id pgtype.UUID) (Agent
 }
 
 const getBotAgentCredential = `-- name: GetBotAgentCredential :one
-SELECT c.id, c.team_id, c.owner_user_id, c.provider, c.auth_kind, c.label, c.encrypted_payload, c.encryption_nonce, c.key_version, c.account_metadata, c.expires_at, c.credential_version, c.revoked_at, c.created_at, c.updated_at, b.is_default, b.created_at AS binding_created_at, b.updated_at AS binding_updated_at
-FROM bot_agent_credentials b
-JOIN agent_credentials c ON c.team_id = b.team_id AND c.id = b.credential_id
-WHERE b.team_id = public.memoh_current_team_id()
-  AND b.bot_id = $1
-  AND b.agent_id = $2
-  AND b.credential_id = $3
+SELECT c.id, c.team_id, c.owner_user_id, c.provider, c.auth_kind, c.label, c.encrypted_payload, c.encryption_nonce, c.key_version, c.account_metadata, c.expires_at, c.credential_version, c.revoked_at, c.created_at, c.updated_at, (a.metadata->>'provider')::text AS agent_provider
+FROM bot_agents a
+JOIN agent_credentials c
+  ON c.team_id = a.team_id AND c.id = a.agent_credential_id
+WHERE a.bot_id = $1
+  AND a.id = $2
+  AND a.team_id = public.memoh_current_team_id()
+  AND a.deleted_at IS NULL
 `
 
 type GetBotAgentCredentialParams struct {
-	BotID        pgtype.UUID `json:"bot_id"`
-	AgentID      string      `json:"agent_id"`
-	CredentialID pgtype.UUID `json:"credential_id"`
+	BotID      pgtype.UUID `json:"bot_id"`
+	BotAgentID pgtype.UUID `json:"bot_agent_id"`
 }
 
 type GetBotAgentCredentialRow struct {
@@ -176,13 +171,11 @@ type GetBotAgentCredentialRow struct {
 	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	IsDefault         bool               `json:"is_default"`
-	BindingCreatedAt  pgtype.Timestamptz `json:"binding_created_at"`
-	BindingUpdatedAt  pgtype.Timestamptz `json:"binding_updated_at"`
+	AgentProvider     string             `json:"agent_provider"`
 }
 
 func (q *Queries) GetBotAgentCredential(ctx context.Context, arg GetBotAgentCredentialParams) (GetBotAgentCredentialRow, error) {
-	row := q.db.QueryRow(ctx, getBotAgentCredential, arg.BotID, arg.AgentID, arg.CredentialID)
+	row := q.db.QueryRow(ctx, getBotAgentCredential, arg.BotID, arg.BotAgentID)
 	var i GetBotAgentCredentialRow
 	err := row.Scan(
 		&i.ID,
@@ -200,244 +193,45 @@ func (q *Queries) GetBotAgentCredential(ctx context.Context, arg GetBotAgentCred
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.IsDefault,
-		&i.BindingCreatedAt,
-		&i.BindingUpdatedAt,
+		&i.AgentProvider,
 	)
 	return i, err
 }
 
-const getDefaultBotAgentCredential = `-- name: GetDefaultBotAgentCredential :one
-SELECT c.id, c.team_id, c.owner_user_id, c.provider, c.auth_kind, c.label, c.encrypted_payload, c.encryption_nonce, c.key_version, c.account_metadata, c.expires_at, c.credential_version, c.revoked_at, c.created_at, c.updated_at, b.is_default, b.created_at AS binding_created_at, b.updated_at AS binding_updated_at
-FROM bot_agent_credentials b
-JOIN agent_credentials c ON c.team_id = b.team_id AND c.id = b.credential_id
-WHERE b.team_id = public.memoh_current_team_id()
-  AND b.bot_id = $1
-  AND b.agent_id = $2
-  AND b.is_default
+const getBotAgentProvider = `-- name: GetBotAgentProvider :one
+SELECT (metadata->>'provider')::text AS provider
+FROM bot_agents
+WHERE bot_id = $1
+  AND id = $2
+  AND team_id = public.memoh_current_team_id()
+  AND deleted_at IS NULL
 `
 
-type GetDefaultBotAgentCredentialParams struct {
-	BotID   pgtype.UUID `json:"bot_id"`
-	AgentID string      `json:"agent_id"`
+type GetBotAgentProviderParams struct {
+	BotID      pgtype.UUID `json:"bot_id"`
+	BotAgentID pgtype.UUID `json:"bot_agent_id"`
 }
 
-type GetDefaultBotAgentCredentialRow struct {
-	ID                pgtype.UUID        `json:"id"`
-	TeamID            pgtype.UUID        `json:"team_id"`
-	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
-	Provider          string             `json:"provider"`
-	AuthKind          string             `json:"auth_kind"`
-	Label             string             `json:"label"`
-	EncryptedPayload  []byte             `json:"encrypted_payload"`
-	EncryptionNonce   []byte             `json:"encryption_nonce"`
-	KeyVersion        int32              `json:"key_version"`
-	AccountMetadata   []byte             `json:"account_metadata"`
-	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
-	CredentialVersion int64              `json:"credential_version"`
-	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	IsDefault         bool               `json:"is_default"`
-	BindingCreatedAt  pgtype.Timestamptz `json:"binding_created_at"`
-	BindingUpdatedAt  pgtype.Timestamptz `json:"binding_updated_at"`
+func (q *Queries) GetBotAgentProvider(ctx context.Context, arg GetBotAgentProviderParams) (string, error) {
+	row := q.db.QueryRow(ctx, getBotAgentProvider, arg.BotID, arg.BotAgentID)
+	var provider string
+	err := row.Scan(&provider)
+	return provider, err
 }
 
-func (q *Queries) GetDefaultBotAgentCredential(ctx context.Context, arg GetDefaultBotAgentCredentialParams) (GetDefaultBotAgentCredentialRow, error) {
-	row := q.db.QueryRow(ctx, getDefaultBotAgentCredential, arg.BotID, arg.AgentID)
-	var i GetDefaultBotAgentCredentialRow
-	err := row.Scan(
-		&i.ID,
-		&i.TeamID,
-		&i.OwnerUserID,
-		&i.Provider,
-		&i.AuthKind,
-		&i.Label,
-		&i.EncryptedPayload,
-		&i.EncryptionNonce,
-		&i.KeyVersion,
-		&i.AccountMetadata,
-		&i.ExpiresAt,
-		&i.CredentialVersion,
-		&i.RevokedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.IsDefault,
-		&i.BindingCreatedAt,
-		&i.BindingUpdatedAt,
-	)
-	return i, err
-}
-
-const listAgentCredentialBindings = `-- name: ListAgentCredentialBindings :many
-SELECT bot_id, agent_id
-FROM bot_agent_credentials
-WHERE team_id = public.memoh_current_team_id()
-  AND credential_id = $1
-ORDER BY bot_id, agent_id
-`
-
-type ListAgentCredentialBindingsRow struct {
-	BotID   pgtype.UUID `json:"bot_id"`
-	AgentID string      `json:"agent_id"`
-}
-
-func (q *Queries) ListAgentCredentialBindings(ctx context.Context, credentialID pgtype.UUID) ([]ListAgentCredentialBindingsRow, error) {
-	rows, err := q.db.Query(ctx, listAgentCredentialBindings, credentialID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListAgentCredentialBindingsRow
-	for rows.Next() {
-		var i ListAgentCredentialBindingsRow
-		if err := rows.Scan(&i.BotID, &i.AgentID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAgentCredentialsByOwner = `-- name: ListAgentCredentialsByOwner :many
-SELECT id, team_id, owner_user_id, provider, auth_kind, label, encrypted_payload, encryption_nonce, key_version, account_metadata, expires_at, credential_version, revoked_at, created_at, updated_at FROM agent_credentials
-WHERE team_id = public.memoh_current_team_id()
-  AND owner_user_id = $1
-ORDER BY created_at DESC, id DESC
-`
-
-func (q *Queries) ListAgentCredentialsByOwner(ctx context.Context, ownerUserID pgtype.UUID) ([]AgentCredential, error) {
-	rows, err := q.db.Query(ctx, listAgentCredentialsByOwner, ownerUserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AgentCredential
-	for rows.Next() {
-		var i AgentCredential
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.OwnerUserID,
-			&i.Provider,
-			&i.AuthKind,
-			&i.Label,
-			&i.EncryptedPayload,
-			&i.EncryptionNonce,
-			&i.KeyVersion,
-			&i.AccountMetadata,
-			&i.ExpiresAt,
-			&i.CredentialVersion,
-			&i.RevokedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listBotAgentCredentials = `-- name: ListBotAgentCredentials :many
-SELECT c.id, c.team_id, c.owner_user_id, c.provider, c.auth_kind, c.label, c.encrypted_payload, c.encryption_nonce, c.key_version, c.account_metadata, c.expires_at, c.credential_version, c.revoked_at, c.created_at, c.updated_at, b.is_default, b.created_at AS binding_created_at, b.updated_at AS binding_updated_at
-FROM bot_agent_credentials b
-JOIN agent_credentials c ON c.team_id = b.team_id AND c.id = b.credential_id
-WHERE b.team_id = public.memoh_current_team_id()
-  AND b.bot_id = $1
-  AND b.agent_id = $2
-ORDER BY b.is_default DESC, b.created_at ASC, c.id ASC
-`
-
-type ListBotAgentCredentialsParams struct {
-	BotID   pgtype.UUID `json:"bot_id"`
-	AgentID string      `json:"agent_id"`
-}
-
-type ListBotAgentCredentialsRow struct {
-	ID                pgtype.UUID        `json:"id"`
-	TeamID            pgtype.UUID        `json:"team_id"`
-	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
-	Provider          string             `json:"provider"`
-	AuthKind          string             `json:"auth_kind"`
-	Label             string             `json:"label"`
-	EncryptedPayload  []byte             `json:"encrypted_payload"`
-	EncryptionNonce   []byte             `json:"encryption_nonce"`
-	KeyVersion        int32              `json:"key_version"`
-	AccountMetadata   []byte             `json:"account_metadata"`
-	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
-	CredentialVersion int64              `json:"credential_version"`
-	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	IsDefault         bool               `json:"is_default"`
-	BindingCreatedAt  pgtype.Timestamptz `json:"binding_created_at"`
-	BindingUpdatedAt  pgtype.Timestamptz `json:"binding_updated_at"`
-}
-
-func (q *Queries) ListBotAgentCredentials(ctx context.Context, arg ListBotAgentCredentialsParams) ([]ListBotAgentCredentialsRow, error) {
-	rows, err := q.db.Query(ctx, listBotAgentCredentials, arg.BotID, arg.AgentID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListBotAgentCredentialsRow
-	for rows.Next() {
-		var i ListBotAgentCredentialsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.TeamID,
-			&i.OwnerUserID,
-			&i.Provider,
-			&i.AuthKind,
-			&i.Label,
-			&i.EncryptedPayload,
-			&i.EncryptionNonce,
-			&i.KeyVersion,
-			&i.AccountMetadata,
-			&i.ExpiresAt,
-			&i.CredentialVersion,
-			&i.RevokedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.IsDefault,
-			&i.BindingCreatedAt,
-			&i.BindingUpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const revokeAgentCredential = `-- name: RevokeAgentCredential :one
+const revokeAgentCredentialByID = `-- name: RevokeAgentCredentialByID :one
 UPDATE agent_credentials
-SET revoked_at = COALESCE(revoked_at, now()),
+SET revoked_at = now(),
     credential_version = credential_version + 1,
     updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND id = $1
-  AND owner_user_id = $2
+WHERE id = $1
+  AND team_id = public.memoh_current_team_id()
+  AND revoked_at IS NULL
 RETURNING id, team_id, owner_user_id, provider, auth_kind, label, encrypted_payload, encryption_nonce, key_version, account_metadata, expires_at, credential_version, revoked_at, created_at, updated_at
 `
 
-type RevokeAgentCredentialParams struct {
-	ID          pgtype.UUID `json:"id"`
-	OwnerUserID pgtype.UUID `json:"owner_user_id"`
-}
-
-func (q *Queries) RevokeAgentCredential(ctx context.Context, arg RevokeAgentCredentialParams) (AgentCredential, error) {
-	row := q.db.QueryRow(ctx, revokeAgentCredential, arg.ID, arg.OwnerUserID)
+func (q *Queries) RevokeAgentCredentialByID(ctx context.Context, id pgtype.UUID) (AgentCredential, error) {
+	row := q.db.QueryRow(ctx, revokeAgentCredentialByID, id)
 	var i AgentCredential
 	err := row.Scan(
 		&i.ID,
@@ -459,95 +253,32 @@ func (q *Queries) RevokeAgentCredential(ctx context.Context, arg RevokeAgentCred
 	return i, err
 }
 
-const setBotAgentCredentialDefault = `-- name: SetBotAgentCredentialDefault :one
-UPDATE bot_agent_credentials
-SET is_default = true, updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $1
-  AND agent_id = $2
-  AND credential_id = $3
-RETURNING team_id, bot_id, agent_id, credential_id, is_default, created_at, updated_at
+const setBotAgentCredential = `-- name: SetBotAgentCredential :one
+UPDATE bot_agents
+SET agent_credential_id = $2,
+    updated_at = now()
+WHERE bot_agents.bot_id = $1
+  AND bot_agents.id = $3
+  AND bot_agents.team_id = public.memoh_current_team_id()
+  AND bot_agents.deleted_at IS NULL
+RETURNING (
+    SELECT prev.agent_credential_id
+    FROM bot_agents prev
+    WHERE prev.id = bot_agents.id
+) AS previous_credential_id
 `
 
-type SetBotAgentCredentialDefaultParams struct {
+type SetBotAgentCredentialParams struct {
 	BotID        pgtype.UUID `json:"bot_id"`
-	AgentID      string      `json:"agent_id"`
 	CredentialID pgtype.UUID `json:"credential_id"`
+	BotAgentID   pgtype.UUID `json:"bot_agent_id"`
 }
 
-func (q *Queries) SetBotAgentCredentialDefault(ctx context.Context, arg SetBotAgentCredentialDefaultParams) (BotAgentCredential, error) {
-	row := q.db.QueryRow(ctx, setBotAgentCredentialDefault, arg.BotID, arg.AgentID, arg.CredentialID)
-	var i BotAgentCredential
-	err := row.Scan(
-		&i.TeamID,
-		&i.BotID,
-		&i.AgentID,
-		&i.CredentialID,
-		&i.IsDefault,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const unbindBotAgentCredential = `-- name: UnbindBotAgentCredential :execrows
-DELETE FROM bot_agent_credentials
-WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $1
-  AND agent_id = $2
-  AND credential_id = $3
-`
-
-type UnbindBotAgentCredentialParams struct {
-	BotID        pgtype.UUID `json:"bot_id"`
-	AgentID      string      `json:"agent_id"`
-	CredentialID pgtype.UUID `json:"credential_id"`
-}
-
-func (q *Queries) UnbindBotAgentCredential(ctx context.Context, arg UnbindBotAgentCredentialParams) (int64, error) {
-	result, err := q.db.Exec(ctx, unbindBotAgentCredential, arg.BotID, arg.AgentID, arg.CredentialID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const updateAgentCredentialLabel = `-- name: UpdateAgentCredentialLabel :one
-UPDATE agent_credentials
-SET label = $1, updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND id = $2
-  AND owner_user_id = $3
-RETURNING id, team_id, owner_user_id, provider, auth_kind, label, encrypted_payload, encryption_nonce, key_version, account_metadata, expires_at, credential_version, revoked_at, created_at, updated_at
-`
-
-type UpdateAgentCredentialLabelParams struct {
-	Label       string      `json:"label"`
-	ID          pgtype.UUID `json:"id"`
-	OwnerUserID pgtype.UUID `json:"owner_user_id"`
-}
-
-func (q *Queries) UpdateAgentCredentialLabel(ctx context.Context, arg UpdateAgentCredentialLabelParams) (AgentCredential, error) {
-	row := q.db.QueryRow(ctx, updateAgentCredentialLabel, arg.Label, arg.ID, arg.OwnerUserID)
-	var i AgentCredential
-	err := row.Scan(
-		&i.ID,
-		&i.TeamID,
-		&i.OwnerUserID,
-		&i.Provider,
-		&i.AuthKind,
-		&i.Label,
-		&i.EncryptedPayload,
-		&i.EncryptionNonce,
-		&i.KeyVersion,
-		&i.AccountMetadata,
-		&i.ExpiresAt,
-		&i.CredentialVersion,
-		&i.RevokedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+func (q *Queries) SetBotAgentCredential(ctx context.Context, arg SetBotAgentCredentialParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, setBotAgentCredential, arg.BotID, arg.CredentialID, arg.BotAgentID)
+	var previous_credential_id pgtype.UUID
+	err := row.Scan(&previous_credential_id)
+	return previous_credential_id, err
 }
 
 const updateAgentCredentialPayloadCAS = `-- name: UpdateAgentCredentialPayloadCAS :one
@@ -559,8 +290,8 @@ SET encrypted_payload = $1,
     expires_at = $5,
     credential_version = credential_version + 1,
     updated_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND id = $6
+WHERE id = $6
+  AND team_id = public.memoh_current_team_id()
   AND credential_version = $7
   AND revoked_at IS NULL
 RETURNING id, team_id, owner_user_id, provider, auth_kind, label, encrypted_payload, encryption_nonce, key_version, account_metadata, expires_at, credential_version, revoked_at, created_at, updated_at

@@ -106,7 +106,7 @@ const {
   cancelCodexDeviceAuthorization,
   authorizeClaude,
   exchangeClaude,
-} = useACPOAuth(() => oauthBotId.value)
+} = useACPOAuth(() => oauthBotId.value, () => oauthBotAgentId.value)
 
 onMounted(() => {
   if (oauthResume) enterOAuthPhase(oauthResume.botId)

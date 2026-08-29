@@ -316,7 +316,7 @@ func (*recordingRuntimeBinder) BeginSessionHistoryReset(ctx context.Context, _, 
 	return ctx, func() {}, nil
 }
 
-func (b *recordingRuntimeBinder) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+func (b *recordingRuntimeBinder) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, _, projectPath, runtimeOwnerAccountID string) error {
 	b.bindCtx = ctx
 	b.bindArgs = []string{botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID}
 	return b.bindErr

@@ -852,8 +852,8 @@
       "generic": "ツール",
       "approve": "許可する",
       "reject": "拒否する",
-    "pendingApproval": "承認待ち",
-    "executionLocation": "実行場所",
+      "pendingApproval": "承認待ち",
+      "executionLocation": "実行場所",
       "pendingUserInput": "入力を待っています",
       "userInputSubmitted": "答えた",
       "userInputCanceled": "キャンセル",
@@ -1736,27 +1736,27 @@
       "resetDefaults": "デフォルトにリセット",
       "confirmReset": "すべてのツール承認ルールをデフォルト状態に戻しますか?",
       "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
-    "title": "ツール呼び出しの承認",
-    "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。",
-    "loading": "承認ルールを読み込んでいます...",
-    "loadFailed": "Tool の承認設定を読み込めませんでした",
+      "title": "ツール呼び出しの承認",
+      "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。",
+      "loading": "承認ルールを読み込んでいます...",
+      "loadFailed": "Tool の承認設定を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
-    "saveFailed": "Tool の承認設定を保存できませんでした",
-    "enabled": "Tool の承認",
-    "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
-    "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
-    "target": {
-      "title": "承認対象",
-      "label": "Workspace またはコンピューター",
-      "description": "ルールは選択した Workspace またはコンピューターにのみ適用されます。"
-    },
-    "modes": {
-      "allow": "許可",
-      "ask": "確認",
-      "deny": "拒否"
+      "saveFailed": "Tool の承認設定を保存できませんでした",
+      "enabled": "Tool の承認",
+      "enabledDescription": "この場所では許可、確認、拒否のルールが適用されます。",
+      "disabledDescription": "ファイルとコマンドの Tool は直接実行されます。保存済みのモードとルールは保持されます。",
+      "target": {
+        "title": "承認対象",
+        "label": "Workspace またはコンピューター",
+        "description": "ルールは選択した Workspace またはコンピューターにのみ適用されます。"
       },
-    "rules": {
-      "title": "ツールルール",
+      "modes": {
+        "allow": "許可",
+        "ask": "確認",
+        "deny": "拒否"
+      },
+      "rules": {
+        "title": "ツールルール",
         "reset": "推奨設定にリセット"
       },
       "behavior": {
@@ -1772,15 +1772,15 @@
         "pathsTitle": "常にレビューを要求",
         "commandsTitle": "常にレビューを要求"
       },
-    "toolNames": {
-      "read": "ファイル読み取り",
-      "write": "ファイル書き込み",
-      "exec": "シェルコマンド"
-    },
-    "tools": {
-      "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
-      "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
-      "exec": "Workspace 内でシェルコマンドを実行する"
+      "toolNames": {
+        "read": "ファイル読み取り",
+        "write": "ファイル書き込み",
+        "exec": "シェルコマンド"
+      },
+      "tools": {
+        "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
+        "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
+        "exec": "Workspace 内でシェルコマンドを実行する"
       },
       "toolDisabledHint": "この操作では現在、承認は要求されていません。以下のルールは、スイッチを有効にした後に適用されます。",
       "bypass": "バイパス (許可リスト)",
@@ -2574,14 +2574,6 @@
       "acpSetupChatGPT": "チャットGPT",
       "acpSetupClaude": "クロード",
       "acpSetupSelf": "自己管理",
-      "agentCredential": "アカウント",
-      "agentCredentialPlaceholder": "Agent アカウントを選択",
-      "agentCredentialLabel": "アカウント名",
-      "agentCredentialLabelPlaceholder": "識別しやすい名前を入力してください",
-      "agentCredentialSecret": "API Key",
-      "agentCredentialSecretPlaceholder": "API Keyを入力してください",
-      "agentCredentialSave": "アカウントを保存",
-      "agentCredentialSaved": "Agent アカウントを保存しました",
       "acpAuthType": "認証",
       "acpAuthApiKey": "APIキー",
       "acpAuthChatGPT": "ChatGPTアカウント",
@@ -2684,7 +2676,15 @@
       "save": "設定の保存",
       "dangerZone": "危険な操作",
       "deleteBotDescription": "このBotを削除すると元に戻すことはできません。慎重に作業を進めてください。",
-      "deleteBot": "Botの削除"
+      "deleteBot": "Botの削除",
+      "agentCredentialSecret": "API キー",
+      "agentCredentialSecretPlaceholder": "API キーを入力",
+      "agentCredentialSave": "保存",
+      "agentCredentialReplace": "キーを差し替える",
+      "agentCredentialSaved": "API キーを保存しました",
+      "agentCredentialConnected": "API キー接続済み",
+      "agentCredentialConnectedHint": "この Agent は専用のキーを使用します。新しいキーを保存すると置き換えられます。",
+      "agentCredentialDisconnect": "切断"
     },
     "access": {
       "title": "アクセス制御",

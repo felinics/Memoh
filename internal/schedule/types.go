@@ -41,8 +41,6 @@ type ExecutionConfig struct {
 	BotAgentID string `json:"bot_agent_id,omitempty"`
 	// ACPAgentID names the ACP agent when RuntimeType is acp_agent.
 	ACPAgentID string `json:"acp_agent_id,omitempty"`
-	// AgentCredentialID pins the credential used by a new Agent session.
-	AgentCredentialID string `json:"agent_credential_id,omitempty"`
 	// ModelID is a native model UUID override (models.id).
 	ModelID string `json:"model_id,omitempty"`
 	// ACPModelID is an agent-reported model identifier override for ACP

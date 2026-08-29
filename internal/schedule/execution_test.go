@@ -242,7 +242,7 @@ func TestNormalizeExecutionNewSessionRules(t *testing.T) {
 		t.Fatalf("unexpected normalized exec: %+v", disabled)
 	}
 
-	exec, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{RuntimeType: RuntimeACPAgent, ACPAgentID: "codex", AgentCredentialID: execTestCredentialID, ACPModelID: "gpt-5-codex", ReasoningEffort: "anything-agent-defined"})
+	exec, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{RuntimeType: RuntimeACPAgent, ACPAgentID: "codex", ACPModelID: "gpt-5-codex", ReasoningEffort: "anything-agent-defined"})
 	if err != nil {
 		t.Fatalf("normalizeExecution() error = %v", err)
 	}
@@ -316,7 +316,7 @@ func TestNormalizeExecutionWorkdirRules(t *testing.T) {
 	t.Run("acp runtime rejects remote workdir", func(t *testing.T) {
 		svc := newExecutionService(t, &executionQueries{}, remote)
 		_, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{
-			RuntimeType: RuntimeACPAgent, ACPAgentID: "codex", AgentCredentialID: execTestCredentialID, WorkdirID: execTestWorkdirID,
+			RuntimeType: RuntimeACPAgent, ACPAgentID: "codex", WorkdirID: execTestWorkdirID,
 		})
 		if err == nil || !strings.Contains(err.Error(), "remote") {
 			t.Fatalf("error = %v, want remote workdir rejection", err)

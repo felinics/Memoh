@@ -32,140 +32,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/agent-credentials": {
-            "get": {
-                "tags": [
-                    "agent-credentials"
-                ],
-                "summary": "List owned Agent credentials",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.CredentialList"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "tags": [
-                    "agent-credentials"
-                ],
-                "summary": "Create an encrypted Agent credential",
-                "parameters": [
-                    {
-                        "description": "Credential",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.CreateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.PublicCredential"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/agent-credentials/{credential_id}": {
-            "delete": {
-                "tags": [
-                    "agent-credentials"
-                ],
-                "summary": "Revoke an Agent credential",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Credential ID",
-                        "name": "credential_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.PublicCredential"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            },
-            "patch": {
-                "tags": [
-                    "agent-credentials"
-                ],
-                "summary": "Rename an Agent credential",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Credential ID",
-                        "name": "credential_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Update",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.UpdateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.PublicCredential"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
         "/auth/login": {
             "post": {
                 "description": "Validate user credentials and issue a JWT",
@@ -1404,6 +1270,12 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID (required with the encrypted credential store)",
+                        "name": "bot_agent_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1487,6 +1359,12 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "bot_agent_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1524,6 +1402,12 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID (required with the encrypted credential store)",
+                        "name": "bot_agent_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1561,6 +1445,12 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID (required with the encrypted credential store)",
+                        "name": "bot_agent_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1726,6 +1616,12 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "bot_agent_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1835,181 +1731,6 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/agents/{agent_id}/credentials": {
-            "get": {
-                "tags": [
-                    "agent-credentials"
-                ],
-                "summary": "List credentials bound to a Bot Agent",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Agent ID",
-                        "name": "agent_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.CredentialList"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "tags": [
-                    "agent-credentials"
-                ],
-                "summary": "Bind a credential to a Bot Agent",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Agent ID",
-                        "name": "agent_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Binding",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.BindRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.PublicCredential"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/agents/{agent_id}/credentials/default": {
-            "put": {
-                "tags": [
-                    "agent-credentials"
-                ],
-                "summary": "Set the default credential for a Bot Agent",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Agent ID",
-                        "name": "agent_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Default credential",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.SetDefaultRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/agents/{agent_id}/credentials/{credential_id}": {
-            "delete": {
-                "tags": [
-                    "agent-credentials"
-                ],
-                "summary": "Unbind a credential from a Bot Agent",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Agent ID",
-                        "name": "agent_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Credential ID",
-                        "name": "credential_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "404": {
-                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -2174,6 +1895,141 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/credential": {
+            "get": {
+                "tags": [
+                    "agent-credentials"
+                ],
+                "summary": "Get the credential attached to a Bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/agentcredential.PublicCredential"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Creates an encrypted credential from the submitted secret and",
+                "tags": [
+                    "agent-credentials"
+                ],
+                "summary": "Attach a credential to a Bot Agent, replacing any previous one",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Secret",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.agentCredentialPutRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/agentcredential.PublicCredential"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "agent-credentials"
+                ],
+                "summary": "Disconnect a Bot Agent's credential",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -15781,6 +15637,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/acpclient.AvailableCommandInfo"
                     }
                 },
+                "bot_agent_id": {
+                    "type": "string"
+                },
                 "default_model_id": {
                     "type": "string"
                 },
@@ -16361,55 +16220,6 @@ const docTemplate = `{
                 }
             }
         },
-        "agentcredential.BindRequest": {
-            "type": "object",
-            "properties": {
-                "credential_id": {
-                    "type": "string"
-                },
-                "make_default": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "agentcredential.CreateRequest": {
-            "type": "object",
-            "properties": {
-                "account_metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "auth_kind": {
-                    "type": "string"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "label": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "secret": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "agentcredential.CredentialList": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/agentcredential.PublicCredential"
-                    }
-                }
-            }
-        },
         "agentcredential.PublicCredential": {
             "type": "object",
             "properties": {
@@ -16432,9 +16242,6 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "is_default": {
-                    "type": "boolean"
-                },
                 "label": {
                     "type": "string"
                 },
@@ -16448,22 +16255,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "agentcredential.SetDefaultRequest": {
-            "type": "object",
-            "properties": {
-                "credential_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "agentcredential.UpdateRequest": {
-            "type": "object",
-            "properties": {
-                "label": {
                     "type": "string"
                 }
             }
@@ -21755,7 +21546,7 @@ const docTemplate = `{
                 "acp_agent_id": {
                     "type": "string"
                 },
-                "agent_credential_id": {
+                "bot_agent_id": {
                     "type": "string"
                 },
                 "project_path": {
@@ -21787,6 +21578,20 @@ const docTemplate = `{
             "properties": {
                 "reasoning_effort": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.agentCredentialPutRequest": {
+            "type": "object",
+            "properties": {
+                "auth_kind": {
+                    "type": "string"
+                },
+                "secret": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -23245,10 +23050,6 @@ const docTemplate = `{
                     "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
                     "type": "string"
                 },
-                "agent_credential_id": {
-                    "description": "AgentCredentialID pins the credential used by a new Agent session.",
-                    "type": "string"
-                },
                 "bot_agent_id": {
                     "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
                     "type": "string"
@@ -23306,10 +23107,6 @@ const docTemplate = `{
                 },
                 "acp_model_id": {
                     "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
-                    "type": "string"
-                },
-                "agent_credential_id": {
-                    "description": "AgentCredentialID pins the credential used by a new Agent session.",
                     "type": "string"
                 },
                 "bot_agent_id": {
@@ -23420,10 +23217,6 @@ const docTemplate = `{
                 },
                 "acp_model_id": {
                     "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
-                    "type": "string"
-                },
-                "agent_credential_id": {
-                    "description": "AgentCredentialID pins the credential used by a new Agent session.",
                     "type": "string"
                 },
                 "bot_agent_id": {

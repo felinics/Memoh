@@ -239,6 +239,8 @@ definitions:
         items:
           $ref: '#/definitions/acpclient.AvailableCommandInfo'
         type: array
+      bot_agent_id:
+        type: string
       default_model_id:
         type: string
       models:
@@ -626,38 +628,6 @@ definitions:
       total_text_bytes:
         type: integer
     type: object
-  agentcredential.BindRequest:
-    properties:
-      credential_id:
-        type: string
-      make_default:
-        type: boolean
-    type: object
-  agentcredential.CreateRequest:
-    properties:
-      account_metadata:
-        additionalProperties: {}
-        type: object
-      auth_kind:
-        type: string
-      expires_at:
-        type: string
-      label:
-        type: string
-      provider:
-        type: string
-      secret:
-        additionalProperties:
-          type: string
-        type: object
-    type: object
-  agentcredential.CredentialList:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/agentcredential.PublicCredential'
-        type: array
-    type: object
   agentcredential.PublicCredential:
     properties:
       account_metadata:
@@ -673,8 +643,6 @@ definitions:
         type: string
       id:
         type: string
-      is_default:
-        type: boolean
       label:
         type: string
       owner_user_id:
@@ -684,16 +652,6 @@ definitions:
       revoked:
         type: boolean
       updated_at:
-        type: string
-    type: object
-  agentcredential.SetDefaultRequest:
-    properties:
-      credential_id:
-        type: string
-    type: object
-  agentcredential.UpdateRequest:
-    properties:
-      label:
         type: string
     type: object
   apperror.Problem:
@@ -4284,7 +4242,7 @@ definitions:
     properties:
       acp_agent_id:
         type: string
-      agent_credential_id:
+      bot_agent_id:
         type: string
       project_path:
         type: string
@@ -4305,6 +4263,15 @@ definitions:
     properties:
       reasoning_effort:
         type: string
+    type: object
+  handlers.agentCredentialPutRequest:
+    properties:
+      auth_kind:
+        type: string
+      secret:
+        additionalProperties:
+          type: string
+        type: object
     type: object
   handlers.browserSessionCreateRequest:
     properties:
@@ -5320,9 +5287,6 @@ definitions:
           ACPModelID is an agent-reported model identifier override for ACP
           runs (e.g. a Codex model id). Mutually exclusive with ModelID.
         type: string
-      agent_credential_id:
-        description: AgentCredentialID pins the credential used by a new Agent session.
-        type: string
       bot_agent_id:
         description: |-
           BotAgentID selects one persisted BotAgent for a new session. Empty means
@@ -5374,9 +5338,6 @@ definitions:
         description: |-
           ACPModelID is an agent-reported model identifier override for ACP
           runs (e.g. a Codex model id). Mutually exclusive with ModelID.
-        type: string
-      agent_credential_id:
-        description: AgentCredentialID pins the credential used by a new Agent session.
         type: string
       bot_agent_id:
         description: |-
@@ -5462,9 +5423,6 @@ definitions:
         description: |-
           ACPModelID is an agent-reported model identifier override for ACP
           runs (e.g. a Codex model id). Mutually exclusive with ModelID.
-        type: string
-      agent_credential_id:
-        description: AgentCredentialID pins the credential used by a new Agent session.
         type: string
       bot_agent_id:
         description: |-
@@ -6284,93 +6242,6 @@ paths:
       summary: List ACP profiles
       tags:
       - acp
-  /agent-credentials:
-    get:
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/agentcredential.CredentialList'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: List owned Agent credentials
-      tags:
-      - agent-credentials
-    post:
-      parameters:
-      - description: Credential
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/agentcredential.CreateRequest'
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/agentcredential.PublicCredential'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Create an encrypted Agent credential
-      tags:
-      - agent-credentials
-  /agent-credentials/{credential_id}:
-    delete:
-      parameters:
-      - description: Credential ID
-        in: path
-        name: credential_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/agentcredential.PublicCredential'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Revoke an Agent credential
-      tags:
-      - agent-credentials
-    patch:
-      parameters:
-      - description: Credential ID
-        in: path
-        name: credential_id
-        required: true
-        type: string
-      - description: Update
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/agentcredential.UpdateRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/agentcredential.PublicCredential'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Rename an Agent credential
-      tags:
-      - agent-credentials
   /auth/login:
     post:
       description: Validate user credentials and issue a JWT
@@ -7072,6 +6943,10 @@ paths:
         name: bot_id
         required: true
         type: string
+      - description: Bot Agent ID (required with the encrypted credential store)
+        in: query
+        name: bot_agent_id
+        type: string
       responses:
         "200":
           description: OK
@@ -7126,6 +7001,10 @@ paths:
         name: bot_id
         required: true
         type: string
+      - description: Bot Agent ID
+        in: query
+        name: bot_agent_id
+        type: string
       responses:
         "200":
           description: OK
@@ -7150,6 +7029,10 @@ paths:
         name: bot_id
         required: true
         type: string
+      - description: Bot Agent ID (required with the encrypted credential store)
+        in: query
+        name: bot_agent_id
+        type: string
       responses:
         "200":
           description: OK
@@ -7173,6 +7056,10 @@ paths:
         in: path
         name: bot_id
         required: true
+        type: string
+      - description: Bot Agent ID (required with the encrypted credential store)
+        in: query
+        name: bot_agent_id
         type: string
       responses:
         "200":
@@ -7282,6 +7169,10 @@ paths:
         name: bot_id
         required: true
         type: string
+      - description: Bot Agent ID
+        in: query
+        name: bot_agent_id
+        type: string
       responses:
         "200":
           description: OK
@@ -7359,122 +7250,6 @@ paths:
       summary: Add an Agent to a bot
       tags:
       - bot-agents
-  /bots/{bot_id}/agents/{agent_id}/credentials:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Agent ID
-        in: path
-        name: agent_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/agentcredential.CredentialList'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: List credentials bound to a Bot Agent
-      tags:
-      - agent-credentials
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Agent ID
-        in: path
-        name: agent_id
-        required: true
-        type: string
-      - description: Binding
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/agentcredential.BindRequest'
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/agentcredential.PublicCredential'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "422":
-          description: Unprocessable Entity
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Bind a credential to a Bot Agent
-      tags:
-      - agent-credentials
-  /bots/{bot_id}/agents/{agent_id}/credentials/{credential_id}:
-    delete:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Agent ID
-        in: path
-        name: agent_id
-        required: true
-        type: string
-      - description: Credential ID
-        in: path
-        name: credential_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Unbind a credential from a Bot Agent
-      tags:
-      - agent-credentials
-  /bots/{bot_id}/agents/{agent_id}/credentials/default:
-    put:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Agent ID
-        in: path
-        name: agent_id
-        required: true
-        type: string
-      - description: Default credential
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/agentcredential.SetDefaultRequest'
-      responses:
-        "204":
-          description: No Content
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Set the default credential for a Bot Agent
-      tags:
-      - agent-credentials
   /bots/{bot_id}/agents/{id}:
     delete:
       description: Soft-delete an Agent while preserving existing session bindings
@@ -7585,6 +7360,96 @@ paths:
       summary: Update a bot Agent
       tags:
       - bot-agents
+  /bots/{bot_id}/agents/{id}/credential:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Disconnect a Bot Agent's credential
+      tags:
+      - agent-credentials
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.PublicCredential'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get the credential attached to a Bot Agent
+      tags:
+      - agent-credentials
+    put:
+      description: Creates an encrypted credential from the submitted secret and
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Secret
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.agentCredentialPutRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.PublicCredential'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Attach a credential to a Bot Agent, replacing any previous one
+      tags:
+      - agent-credentials
   /bots/{bot_id}/backup/export:
     post:
       consumes:

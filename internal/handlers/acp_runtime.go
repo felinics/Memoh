@@ -44,9 +44,9 @@ type acpRuntimePool interface {
 }
 
 type acpRuntimeCreateRequest struct {
-	AgentID      string `json:"acp_agent_id"`
-	CredentialID string `json:"agent_credential_id,omitempty"`
-	ProjectPath  string `json:"project_path,omitempty"`
+	AgentID     string `json:"acp_agent_id"`
+	BotAgentID  string `json:"bot_agent_id,omitempty"`
+	ProjectPath string `json:"project_path,omitempty"`
 }
 
 type acpRuntimeModelRequest struct {
@@ -128,7 +128,7 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 	status, err := h.pool.CreateRuntime(c.Request().Context(), acpagent.CreateRuntimeInput{
 		BotID:                 bot.ID,
 		AgentID:               agentID,
-		CredentialID:          strings.TrimSpace(req.CredentialID),
+		BotAgentID:            strings.TrimSpace(req.BotAgentID),
 		ProjectPath:           projectPath,
 		RuntimeOwnerAccountID: channelIdentityID,
 		ToolHTTPURL:           buildACPMCPToolsURL(c, bot.ID),
