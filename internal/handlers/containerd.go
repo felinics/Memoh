@@ -274,7 +274,7 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg config.WorkspaceConfig, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg config.WorkspaceConfig, containerBackend string, displayService *displaypkg.Service, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
 	h := &ContainerdHandler{
 		manager:          manager,
 		cfg:              cfg,
@@ -286,7 +286,7 @@ func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg conf
 		policyService:    policyService,
 		browserSessions:  newBrowserSessionStore(browserSessionIdleTTL),
 	}
-	h.displayService = displaypkg.NewService(h.logger, manager)
+	h.displayService = displayService
 	return h
 }
 

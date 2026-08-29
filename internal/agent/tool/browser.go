@@ -51,16 +51,12 @@ type BrowserProvider struct {
 	dataRoot   string
 }
 
-func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, containers bridge.Provider, displayWorkspace displaypkg.Workspace, dataRoot string) *BrowserProvider {
+func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, containers bridge.Provider, displaySvc *displaypkg.Service, dataRoot string) *BrowserProvider {
 	if log == nil {
 		log = slog.Default()
 	}
 	if strings.TrimSpace(dataRoot) == "" {
 		dataRoot = "/data"
-	}
-	var displaySvc *displaypkg.Service
-	if displayWorkspace != nil {
-		displaySvc = displaypkg.NewService(log, displayWorkspace)
 	}
 	return &BrowserProvider{
 		logger:     log.With(slog.String("tool", "browser")),

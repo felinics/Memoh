@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 )
 
 func TestReadRTCSettings(t *testing.T) {
+	clearRTCSettingsEnv(t)
 	t.Setenv(rtcUDPPortMinEnv, "30000")
 	t.Setenv(rtcUDPPortMaxEnv, "30100")
 	t.Setenv(rtcNATIPsEnv, "127.0.0.1, 10.0.0.10")
@@ -30,6 +33,65 @@ func TestReadRTCSettings(t *testing.T) {
 	if len(cfg.NATIPs) != 2 || cfg.NATIPs[0] != "127.0.0.1" || cfg.NATIPs[1] != "10.0.0.10" {
 		t.Fatalf("unexpected NAT IPs: %#v", cfg.NATIPs)
 	}
+}
+
+func TestReadRTCSettingsSinglePort(t *testing.T) {
+	clearRTCSettingsEnv(t)
+	t.Setenv(rtcUDPPortEnv, "30000")
+
+	cfg, err := readRTCSettings(nil)
+	if err != nil {
+		t.Fatalf("readRTCSettings returned error: %v", err)
+	}
+	if cfg.UDPPort != 30000 {
+		t.Fatalf("UDPPort = %d, want 30000", cfg.UDPPort)
+	}
+	if cfg.UDPPortMin != 0 || cfg.UDPPortMax != 0 {
+		t.Fatalf("legacy UDP range must be empty in single-port mode: %d-%d", cfg.UDPPortMin, cfg.UDPPortMax)
+	}
+}
+
+func TestReadRTCSettingsRejectsSinglePortWithLegacyRange(t *testing.T) {
+	clearRTCSettingsEnv(t)
+	t.Setenv(rtcUDPPortEnv, "30000")
+	t.Setenv(rtcUDPPortMinEnv, "30000")
+	t.Setenv(rtcUDPPortMaxEnv, "30100")
+
+	if _, err := readRTCSettings(nil); err == nil {
+		t.Fatal("expected single port combined with a legacy range to fail")
+	}
+}
+
+func TestWebRTCAPIReusesSingleUDPPortAcrossPeerConnections(t *testing.T) {
+	clearRTCSettingsEnv(t)
+	port := availableUDPPort(t)
+	t.Setenv(rtcUDPPortEnv, strconv.Itoa(port))
+
+	service := NewService(nil, nil)
+	t.Cleanup(func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close display service: %v", err)
+		}
+	})
+	if err := service.Start(); err != nil {
+		t.Fatalf("start display service: %v", err)
+	}
+
+	firstAPI, _, err := service.newWebRTCAPI(&webrtc.MediaEngine{}, nil)
+	if err != nil {
+		t.Fatalf("create first WebRTC API: %v", err)
+	}
+	firstPeer := newGatheringPeer(t, firstAPI)
+	defer func() { _ = firstPeer.Close() }()
+	assertCandidatePort(t, firstPeer.LocalDescription().SDP, port)
+
+	secondAPI, _, err := service.newWebRTCAPI(&webrtc.MediaEngine{}, nil)
+	if err != nil {
+		t.Fatalf("create second WebRTC API: %v", err)
+	}
+	secondPeer := newGatheringPeer(t, secondAPI)
+	defer func() { _ = secondPeer.Close() }()
+	assertCandidatePort(t, secondPeer.LocalDescription().SDP, port)
 }
 
 func TestIsSocketReadyRequiresListener(t *testing.T) {
@@ -53,6 +115,7 @@ func TestIsSocketReadyRequiresListener(t *testing.T) {
 }
 
 func TestReadRTCSettingsRejectsPartialPortRange(t *testing.T) {
+	clearRTCSettingsEnv(t)
 	t.Setenv(rtcUDPPortMinEnv, "30000")
 
 	if _, err := readRTCSettings(nil); err == nil {
@@ -61,6 +124,7 @@ func TestReadRTCSettingsRejectsPartialPortRange(t *testing.T) {
 }
 
 func TestReadRTCSettingsRejectsInvalidNATIP(t *testing.T) {
+	clearRTCSettingsEnv(t)
 	t.Setenv(rtcNATIPsEnv, "localhost")
 
 	if _, err := readRTCSettings(nil); err == nil {
@@ -69,12 +133,89 @@ func TestReadRTCSettingsRejectsInvalidNATIP(t *testing.T) {
 }
 
 func TestReadRTCSettingsUsesInferredNATIPs(t *testing.T) {
+	clearRTCSettingsEnv(t)
 	cfg, err := readRTCSettings([]string{"100.123.2.67", "10.0.0.2"})
 	if err != nil {
 		t.Fatalf("readRTCSettings returned error: %v", err)
 	}
 	if len(cfg.NATIPs) != 2 || cfg.NATIPs[0] != "100.123.2.67" || cfg.NATIPs[1] != "10.0.0.2" {
 		t.Fatalf("unexpected inferred NAT IPs: %#v", cfg.NATIPs)
+	}
+}
+
+func clearRTCSettingsEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(rtcUDPPortEnv, "")
+	t.Setenv(rtcUDPPortMinEnv, "")
+	t.Setenv(rtcUDPPortMaxEnv, "")
+	t.Setenv(rtcNATIPsEnv, "")
+}
+
+func availableUDPPort(t *testing.T) int {
+	t.Helper()
+	conn, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve UDP port: %v", err)
+	}
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+	if err := conn.Close(); err != nil {
+		t.Fatalf("release UDP port: %v", err)
+	}
+	return port
+}
+
+func newGatheringPeer(t *testing.T, api *webrtc.API) *webrtc.PeerConnection {
+	t.Helper()
+	peer, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatalf("create peer connection: %v", err)
+	}
+	if _, err := peer.CreateDataChannel("probe", nil); err != nil {
+		_ = peer.Close()
+		t.Fatalf("create data channel: %v", err)
+	}
+	offer, err := peer.CreateOffer(nil)
+	if err != nil {
+		_ = peer.Close()
+		t.Fatalf("create offer: %v", err)
+	}
+	gatherDone := webrtc.GatheringCompletePromise(peer)
+	if err := peer.SetLocalDescription(offer); err != nil {
+		_ = peer.Close()
+		t.Fatalf("set local description: %v", err)
+	}
+	select {
+	case <-gatherDone:
+	case <-time.After(5 * time.Second):
+		_ = peer.Close()
+		t.Fatal("ICE gathering did not complete")
+	}
+	if peer.LocalDescription() == nil {
+		_ = peer.Close()
+		t.Fatal("local description unavailable after ICE gathering")
+	}
+	return peer
+}
+
+func assertCandidatePort(t *testing.T, rawSDP string, want int) {
+	t.Helper()
+	matched := false
+	for _, line := range strings.Split(rawSDP, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 8 || !strings.HasPrefix(fields[0], "a=candidate:") || !strings.EqualFold(fields[2], "udp") || fields[6] != "typ" || fields[7] != "host" {
+			continue
+		}
+		got, err := strconv.Atoi(fields[5])
+		if err != nil {
+			t.Fatalf("parse candidate port %q: %v", fields[5], err)
+		}
+		if got != want {
+			t.Fatalf("host candidate port = %d, want shared UDP port %d", got, want)
+		}
+		matched = true
+	}
+	if !matched {
+		t.Fatalf("SDP contains no UDP host candidate:\n%s", rawSDP)
 	}
 }
 

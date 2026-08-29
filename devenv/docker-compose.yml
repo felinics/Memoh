@@ -148,8 +148,7 @@ services:
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
       no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,web,migrate,deps,connect-it,webhook-tunnel,memoh-dev-postgres,memoh-dev-pgvector,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps,memoh-dev-connect-it,memoh-dev-webhook-tunnel"
-      MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
-      MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
+      MEMOH_DISPLAY_WEBRTC_UDP_PORT: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT:-30000}"
     volumes:
       - ..:/workspace
       - go_mod_cache:/go/pkg/mod
@@ -164,7 +163,7 @@ services:
     ports:
       - "${MEMOH_DEV_SERVER_PORT:-18080}:8080"
       - "${MEMOH_DEV_OAUTH_PORT:-1455}:8080"
-      - "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}:${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}/udp"
+      - "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT:-30000}:${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT:-30000}/udp"
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1"]
       interval: 5s

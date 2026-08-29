@@ -59,6 +59,7 @@ import (
 	pgvectordb "github.com/felinics/memoh/internal/db/pgvector"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	displaypkg "github.com/felinics/memoh/internal/display"
 	emailpkg "github.com/felinics/memoh/internal/email"
 	"github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/handlers"
@@ -618,9 +619,22 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
+func provideDisplayService(lc fx.Lifecycle, log *slog.Logger, manager *workspace.Manager) *displaypkg.Service {
+	service := displaypkg.NewService(log, manager)
+	lc.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			return service.Start()
+		},
+		OnStop: func(context.Context) error {
+			return service.Close()
+		},
+	})
+	return service
+}
+
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, displayService *displaypkg.Service, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
-	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
+	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, displayService, botService, accountService, policyService)
 	return h
 }
 
@@ -709,7 +723,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -728,7 +742,7 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
 		agenttools.NewBackgroundProvider(log, bgManager),
-		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, manager, config.DefaultDataMount),
+		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, displayService, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailRuntime),
 		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),

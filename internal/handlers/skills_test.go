@@ -34,6 +34,7 @@ import (
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	displaypkg "github.com/felinics/memoh/internal/display"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -636,6 +637,7 @@ func newSkillsTestEnvWithMetadata(t *testing.T, metadata map[string]any) *skills
 		manager,
 		cfg,
 		"",
+		displaypkg.NewService(slog.Default(), manager),
 		bots.NewService(slog.Default(), queries),
 		accounts.NewService(slog.Default(), accountStore),
 		nil,
