@@ -287,7 +287,7 @@ import {
   acpAgentIcon,
   ensureACPAgentForm,
   ensureHermesManagedDefaults,
-  findMissingRequiredManagedField,
+  findMissingRequiredManagedFieldWithCredential,
   isACPAgent,
   isClaudeCodeAgent,
   isCodexAgent,
@@ -433,7 +433,7 @@ const oauthSectionVisible = computed(() =>
 )
 
 function commitForm() {
-  if (agent.value.enabled && findMissingRequiredManagedField(props.profile, agent.value.managed, agent.value.setup_mode)) {
+  if (agent.value.enabled && findMissingRequiredManagedFieldWithCredential(props.profile, agent.value.managed, agent.value.setup_mode, !!(attachedCredential.value || props.agent?.agent_credential_id))) {
     return
   }
   emit('commit')

@@ -208,6 +208,7 @@ const botAgents = ref<BotagentsBotAgent[]>([])
 
 interface ACPCatalog {
   agentId: string
+  botAgentId: string
   models: AcpclientModelInfo[]
   efforts: AcpclientReasoningEffortInfo[]
   currentEffort: string
@@ -265,6 +266,13 @@ const acpAgentInPlay = computed(() => {
 const activeAgentID = computed(() => {
   if (props.form.runTarget === 'new_session') return props.form.acpAgentId
   return selectedSessionAgentID.value
+})
+
+// Two instances of the same provider can hold different accounts, so the
+// catalog identity must include the instance, not just the provider.
+const activeBotAgentID = computed(() => {
+  if (props.form.runTarget === 'new_session') return props.form.botAgentId
+  return ''
 })
 
 const runTargetModel = computed({
@@ -487,18 +495,20 @@ watch([acpReasoningOptions, acpAgentInPlay] as const, ([options, inPlay]) => {
 // ACP agent's model and effort lists exist — reads them, and closes it.
 async function loadACPCatalog(agentID: string) {
   if (!agentID || !props.botId) return
-  if (acpCatalog.value?.agentId === agentID) return
+  const botAgentID = activeBotAgentID.value
+  if (acpCatalog.value?.agentId === agentID && acpCatalog.value?.botAgentId === botAgentID) return
   acpCatalogLoading.value = true
   acpCatalogError.value = null
   acpCatalog.value = null
   try {
     const { data } = await postBotsByBotIdAcpRuntimes({
       path: { bot_id: props.botId },
-      body: { acp_agent_id: agentID, bot_agent_id: props.form.botAgentId || undefined },
+      body: { acp_agent_id: agentID, bot_agent_id: botAgentID || undefined },
       throwOnError: true,
     })
     acpCatalog.value = {
       agentId: agentID,
+      botAgentId: botAgentID,
       models: data.models?.available_models ?? [],
       efforts: data.reasoning?.available_efforts ?? [],
       currentEffort: data.reasoning?.current_effort ?? '',
@@ -515,7 +525,7 @@ async function loadACPCatalog(agentID: string) {
   }
 }
 
-watch(activeAgentID, (agentID) => {
+watch([activeAgentID, activeBotAgentID], ([agentID]) => {
   if (agentID && acpAgentInPlay.value) {
     void loadACPCatalog(agentID)
   }

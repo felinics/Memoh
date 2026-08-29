@@ -1716,14 +1716,25 @@ func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, querie
 	if requireLegacyEnabled && !validation.Enabled {
 		return fmt.Errorf("%w: %s", ErrACPAgentNotEnabled, agentID)
 	}
-	if requireLegacyEnabled && validation.MissingManagedFieldID != "" {
+	if validation.MissingManagedFieldID != "" && (requireLegacyEnabled || !credentialOwnedManagedFieldID(validation.MissingManagedFieldID)) {
 		// Persisted Bot Agent sessions (requireLegacyEnabled=false) keep their
-		// secrets in the encrypted credential store, which scrubs them out of
-		// bot metadata; the handler preflight is credential-aware and the
-		// runtime start re-validates with the credential applied.
+		// secrets in the encrypted credential store, so only api_key and
+		// oauth_token defer to it; missing non-secret configuration still
+		// rejects at creation instead of failing on the first turn.
 		return fmt.Errorf("%w: %s missing %s", ErrACPAgentNotConfigured, agentID, validation.MissingManagedFieldID)
 	}
 	return nil
+}
+
+// credentialOwnedManagedFieldID reports whether the encrypted credential
+// store supplies this managed field for instance-bound sessions.
+func credentialOwnedManagedFieldID(fieldID string) bool {
+	switch strings.ToLower(strings.TrimSpace(fieldID)) {
+	case "api_key", "oauth_token":
+		return true
+	default:
+		return false
+	}
 }
 
 func metadataString(meta map[string]any, key string) string {

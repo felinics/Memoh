@@ -487,3 +487,15 @@ describe('withEnabledACPAgentMetadataIfConfigured', () => {
     })
   })
 })
+
+import { findMissingRequiredManagedFieldWithCredential } from './metadata'
+
+describe('findMissingRequiredManagedFieldWithCredential', () => {
+  it('lets an attached credential satisfy secret fields only', () => {
+    expect(findMissingRequiredManagedFieldWithCredential(claudeCodeProfile, {}, 'api_key', true)).toBeNull()
+    expect(findMissingRequiredManagedFieldWithCredential(claudeCodeProfile, {}, 'api_key', false)?.id).toBe('api_key')
+    expect(findMissingRequiredManagedFieldWithCredential(hermesProfile, {
+      provider: 'gemini',
+    }, 'api_key', true)?.id).toBe('model')
+  })
+})

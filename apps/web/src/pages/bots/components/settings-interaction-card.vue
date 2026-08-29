@@ -98,7 +98,7 @@ import { useI18n } from 'vue-i18n'
 import ModelSelect from './model-select.vue'
 import { reconcileStoredEffort } from './reasoning-effort'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, findMissingRequiredManagedFieldWithCredential, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { botAgentIcon, botAgentName, botAgentProvider } from '@/utils/bot-agent'
 
 type InteractionSettingsForm = SettingsSettings & {
@@ -128,7 +128,7 @@ function isAgentConfigured(agent: BotagentsBotAgent): boolean {
   const profile = props.acpProfiles.find(item => normalizeACPAgentID(item.id) === provider)
   if (!profile || !isACPAgentEnabled(props.botMetadata, provider)) return false
   const config = readACPAgentConfig(props.botMetadata, provider)
-  return !config.setupModeSet || findMissingRequiredManagedField(profile, config.managed, config.setupMode) === null
+  return !config.setupModeSet || findMissingRequiredManagedFieldWithCredential(profile, config.managed, config.setupMode, !!agent.agent_credential_id) === null
 }
 
 const selectableAgents = computed(() => props.botAgents.filter(agent =>

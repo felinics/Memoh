@@ -4602,9 +4602,11 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 			map[string]string{"agent_id": agentID},
 		)
 	}
-	if field := setup.MissingManagedField; field != nil && strings.TrimSpace(spec.BotAgentID) == "" {
+	if field := setup.MissingManagedField; field != nil && (strings.TrimSpace(spec.BotAgentID) == "" || !credentialOwnedManagedField(field.ID)) {
 		// Persisted Bot Agent sessions carry their secret in the encrypted
-		// credential store; only the legacy metadata path is checked here.
+		// credential store, so only the secret fields defer to it; missing
+		// non-secret configuration (e.g. the Hermes provider/model) still
+		// rejects here instead of failing on the first turn.
 		return acpfeedback.New(
 			acpfeedback.CodeAgentNotConfigured,
 			"missing_managed_field",
@@ -4615,6 +4617,17 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 		)
 	}
 	return nil
+}
+
+// credentialOwnedManagedField reports whether the encrypted credential store
+// supplies this managed field for instance-bound sessions.
+func credentialOwnedManagedField(fieldID string) bool {
+	switch strings.ToLower(strings.TrimSpace(fieldID)) {
+	case "api_key", "oauth_token":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *ChannelInboundProcessor) requireWorkspaceExecForACP(ctx context.Context, identity InboundIdentity) error {

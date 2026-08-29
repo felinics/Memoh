@@ -111,6 +111,29 @@ export function findMissingRequiredACPField(value: ACPForm, profiles: Acpprofile
   return null
 }
 
+const CREDENTIAL_SECRET_FIELD_IDS = ['api_key', 'oauth_token']
+
+/**
+ * Managed-field preflight that lets an attached encrypted credential satisfy
+ * the secret fields only. The store scrubs api_key/oauth_token out of bot
+ * metadata on save, so metadata-only checks would report every connected
+ * Agent as unconfigured; non-secret required fields (e.g. the Hermes
+ * provider/model) must still come from metadata.
+ */
+export function findMissingRequiredManagedFieldWithCredential(
+  profile: AcpprofilePublicProfile | null | undefined,
+  managed: Record<string, unknown>,
+  setupMode: string,
+  credentialAttached: boolean,
+): AcpprofileManagedField | null {
+  if (!credentialAttached) return findMissingRequiredManagedField(profile, managed, setupMode)
+  const stubbed: Record<string, unknown> = { ...managed }
+  for (const id of CREDENTIAL_SECRET_FIELD_IDS) {
+    if (!String(stubbed[id] ?? '').trim()) stubbed[id] = 'credential-store'
+  }
+  return findMissingRequiredManagedField(profile, stubbed, setupMode)
+}
+
 export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile | null | undefined, managed: Record<string, unknown>, setupMode: string): AcpprofileManagedField | null {
   const mode = normalizeSetupMode(setupMode, managed)
   if (!profile) return null

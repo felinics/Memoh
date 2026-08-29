@@ -87,8 +87,8 @@ vi.mock('@/utils/acp', async () => {
   return {
     ACP_DEFAULT_PROJECT_MODE: 'project',
     ACP_DEFAULT_PROJECT_PATH: '/data',
-    findMissingRequiredManagedField: (_profile: unknown, managed: Record<string, unknown>, setupMode: string) =>
-      setupMode === 'self' || String(managed.api_key ?? '').trim() ? null : { id: 'api_key' },
+    findMissingRequiredManagedFieldWithCredential: (_profile: unknown, managed: Record<string, unknown>, setupMode: string, credentialAttached: boolean) =>
+      setupMode === 'self' || credentialAttached || String(managed.api_key ?? '').trim() ? null : { id: 'api_key' },
     isACPAgentEnabled: (metadata: Record<string, unknown> | undefined, provider: string) => {
       const acp = metadata?.acp as { agents?: Record<string, { enabled?: boolean }> } | undefined
       return acp?.agents?.[provider]?.enabled === true

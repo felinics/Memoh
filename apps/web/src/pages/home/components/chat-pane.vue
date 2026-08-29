@@ -925,7 +925,7 @@ import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, findMissingRequiredManagedField, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, findMissingRequiredManagedFieldWithCredential, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { botAgentIcon, botAgentName, botAgentProvider } from '@/utils/bot-agent'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
@@ -2050,7 +2050,7 @@ const defaultACPAvailability = computed<DefaultACPAvailability>(() => {
   const profile = acpProfiles.value.find(item => normalizeACPAgentID(item.id) === agentId)
   if (!profile) return { input: null, messageKey: 'chat.defaultACPAgentUnavailable', loading: false }
   const config = readACPAgentConfig(currentBotMetadata.value, agentId)
-  if (config.setupModeSet && findMissingRequiredManagedField(profile, config.managed, config.setupMode)) {
+  if (config.setupModeSet && findMissingRequiredManagedFieldWithCredential(profile, config.managed, config.setupMode, !!agent.agent_credential_id)) {
     return { input: null, messageKey: 'chat.defaultACPAgentNotConfigured', loading: false }
   }
   return {
