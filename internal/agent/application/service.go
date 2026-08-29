@@ -32,6 +32,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	sessionqueue "github.com/felinics/memoh/internal/agent/runtime/session/queue"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	turnpkg "github.com/felinics/memoh/internal/agent/turn"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
@@ -153,6 +154,9 @@ type Service struct {
 	contextLifecycleCandidates        map[contextLifecycleCandidateKey]contextLifecycleCandidate
 	publishTurnEvent                  func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
 	turnHooks                         *turnRuntimeHooks
+	queueCoordinator                  sessionqueue.Coordinator
+	queueStore                        queueRuntimeStore
+	sessionManager                    *sessionruntime.Manager
 }
 
 // NewService creates an application service backed by the native agent.
@@ -197,7 +201,7 @@ func NewService(
 		Timeout:   10 * time.Minute,
 	}
 
-	return &Service{
+	service := &Service{
 		agent:                  a,
 		modelsService:          modelsService,
 		queries:                queries,
@@ -212,6 +216,15 @@ func NewService(
 		clockLocation:          clockLocation,
 		logger:                 log.With(slog.String("service", "agent/application")),
 	}
+	if queries != nil {
+		service.queueStore = sessionqueue.NewPostgresStore(queries)
+	}
+	if txer, ok := queries.(interface {
+		InTx(context.Context, func(dbstore.Queries) error) error
+	}); ok {
+		service.queueCoordinator = sessionqueue.NewPostgresCoordinator(queries, txer.InTx)
+	}
+	return service
 }
 
 // SetContextAbsoluteMaxTokens sets the server-wide context admission cap
@@ -716,9 +729,12 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	cfg := rc.runConfig
+	cfg.StepIndexOffset = req.StepIndexOffset
 	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
 	if stepCommitter != nil {
 		cfg.OnStepCommitted = stepCommitter.commit
+		cfg.ContinueAfterFinal = &stepCommitter.continueAfterFinal
+		cfg.NextModelInputs = &stepCommitter.nextModelInputs
 	}
 	cfg = s.prepareRunConfig(ctx, cfg)
 	terminal := s.contextLifecycleTerminal(ctx, cfg)

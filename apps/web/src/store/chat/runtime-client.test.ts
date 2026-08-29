@@ -204,4 +204,53 @@ describe('runtime client', () => {
     frames[1]!()
     expect(onProjection).toHaveBeenCalledTimes(3)
   })
+
+  it('flushes continuation admission before the first model delta', () => {
+    const sent: WSClientMessage[] = []
+    const onProjection = vi.fn()
+    const frames: Array<() => void> = []
+    const client = createRuntimeClient({
+      send: message => sent.push(message),
+      onProjection,
+      scheduleFrame: callback => frames.push(callback),
+    })
+    client.subscribe('session-1')
+    client.onConnected()
+    client.handleEvent(snapshot())
+
+    client.handleEvent({
+      ...delta(4),
+      delta: {
+        current_run_view: {
+          run_id: 'continuation-run',
+          turn_id: 'continuation-turn',
+          status: 'running',
+          generation: 'generation-1',
+          started_at: '2026-07-27T08:00:00.000Z',
+          updated_at: '2026-07-27T08:00:00.000Z',
+          messages: [],
+          request_user_turn: {
+            turn_id: 'continuation-turn',
+            role: 'user',
+            text: 'continue this task',
+            timestamp: '2026-07-27T08:00:00.000Z',
+          },
+        },
+      },
+    })
+
+    expect(onProjection).toHaveBeenCalledTimes(2)
+    expect(onProjection.mock.calls[1]![1].current.transcript.turns.map(turn => turn.role)).toEqual([
+      'user',
+      'assistant',
+    ])
+    expect(frames).toHaveLength(0)
+
+    client.handleEvent({
+      ...delta(5),
+      delta: { message_appends: [{ id: 0, type: 'text', content: 'done' }] },
+    })
+    expect(onProjection).toHaveBeenCalledTimes(2)
+    expect(frames).toHaveLength(1)
+  })
 })

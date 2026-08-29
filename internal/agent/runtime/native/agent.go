@@ -467,6 +467,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	opts = append(opts, a.onStepOption(streamCtx, cfg, nil))
 	var nextDurableStep int
 	onStepCommitted := func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+		stepIndex += cfg.StepIndexOffset
 		if cfg.OnStepCommitted != nil {
 			if err := cfg.OnStepCommitted(ctx, stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)); err != nil {
 				return err
@@ -522,7 +523,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		}
 	}
 
-	sendEvent(ctx, ch, StreamEvent{Type: EventAgentStart})
+	if !cfg.SuppressAgentStart {
+		sendEvent(ctx, ch, StreamEvent{Type: EventAgentStart})
+	}
 
 	var allText strings.Builder
 	var interruptedStep interruptedStepCapture
@@ -872,6 +875,26 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			cfg.InjectedRecorder,
 		)
 	}
+	// A final response can still discover a steer item at the commit
+	// boundary. Re-open the same run with the committed transcript so the
+	// steer becomes the next model input instead of being stranded after the
+	// terminal event.
+	if streamClosed && !aborted && streamResult != nil && cfg.ContinueAfterFinal != nil && cfg.ContinueAfterFinal.Swap(false) {
+		cfg.Messages = append(append([]sdk.Message(nil), cfg.Messages...), streamResult.Messages...)
+		if cfg.NextModelInputs != nil {
+			cfg.Messages = append(cfg.Messages, (*cfg.NextModelInputs)...)
+			*cfg.NextModelInputs = nil
+		}
+		cfg.StepIndexOffset += len(streamResult.Steps)
+		cfg.SuppressAgentStart = true
+		// The completed invocation must stop its emitters before the continuation
+		// starts; the continuation gets a fresh child context from the original
+		// run context so closing the old stream does not cancel it.
+		cancel(context.Canceled)
+		eventGate.close()
+		a.runStream(ctx, cfg, ch)
+		return
+	}
 	// Stop secondary producers before delivering the terminal event. The stream
 	// context cancellation also unblocks an emitter already waiting on ch.
 	cancel(context.Canceled)
@@ -1034,6 +1057,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	)
 	if cfg.OnStepCommitted != nil {
 		opts = append(opts, sdk.WithOnStepCommitted(func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+			stepIndex += cfg.StepIndexOffset
 			return cfg.OnStepCommitted(ctx, stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata))
 		}))
 	}
@@ -1082,6 +1106,22 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		finalMessages = readMediaState.mergeMessages(genResult.Steps, finalMessages, -1)
 	}
 	finalMessages = toolExecutionMetadata.annotate(finalMessages)
+	if cfg.ContinueAfterFinal != nil && cfg.ContinueAfterFinal.Swap(false) && len(genResult.Steps) > 0 {
+		cfg.Messages = append(append([]sdk.Message(nil), cfg.Messages...), finalMessages...)
+		if cfg.NextModelInputs != nil {
+			cfg.Messages = append(cfg.Messages, (*cfg.NextModelInputs)...)
+			*cfg.NextModelInputs = nil
+		}
+		cfg.StepIndexOffset += len(genResult.Steps)
+		cfg.SuppressAgentStart = true
+		next, nextErr := a.runGenerate(genCtx, cfg)
+		if nextErr != nil {
+			return nil, nextErr
+		}
+		next.Messages = append(finalMessages, next.Messages...)
+		next.Text = strings.TrimSpace(strings.Join([]string{genResult.Text, next.Text}, "\n"))
+		return next, nil
+	}
 	return &GenerateResult{
 		Messages:    finalMessages,
 		Text:        genResult.Text,

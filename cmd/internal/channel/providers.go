@@ -241,7 +241,6 @@ func provideChannelRouter(
 	processor.SetACLService(aclService)
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
-	processor.SetDispatcher(inbound.NewRouteDispatcher(log))
 	processor.SetSpeechService(audioService, &settingsSpeechModelResolver{settings: settingsService})
 	processor.SetTranscriptionService(audioService, &settingsTranscriptionModelResolver{settings: settingsService})
 	processor.SetIMDisplayOptions(&settingsIMDisplayOptions{settings: settingsService})

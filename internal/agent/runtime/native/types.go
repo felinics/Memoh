@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -193,6 +194,15 @@ type RunConfig struct {
 	Skills            []SkillEntry
 	LoopDetection     LoopDetectionConfig
 	Retry             RetryConfig
+	// StepIndexOffset lets an application-owned continuation of the same run
+	// keep durable step indexes monotonic when the SDK invocation is restarted
+	// after a final step accepted a steer item.
+	StepIndexOffset int
+	// ContinueAfterFinal is set by the durable coordinator when a final model
+	// step found steer input. Native runtime uses it to reopen the same run.
+	ContinueAfterFinal *atomic.Bool
+	NextModelInputs    *[]sdk.Message
+	SuppressAgentStart bool
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier

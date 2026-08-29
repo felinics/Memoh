@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 const (
@@ -201,6 +203,38 @@ type AgentStep struct {
 
 type AgentStepPersister interface {
 	PersistAgentStep(ctx context.Context, step AgentStep) ([]Message, error)
+}
+
+// AgentStepTxPersister appends a step using a transaction already owned by a
+// higher-level coordinator. Implementations must not open or commit a second
+// transaction. This is intentionally separate from AgentStepPersister so
+// legacy callers cannot accidentally bypass their normal transaction wrapper.
+type AgentStepTxPersister interface {
+	PersistAgentStepTx(ctx context.Context, queries dbstore.Queries, step AgentStep) ([]Message, error)
+}
+
+// AgentStepPublisher emits the normal post-commit message notifications for a
+// step persisted inside a coordinator-owned transaction. It must only be
+// called after that outer transaction has committed.
+type AgentStepPublisher interface {
+	PublishAgentStep(messages []Message)
+}
+
+// AgentReplacementTxPersister persists the hidden step deltas produced by a
+// retry/edit run and publishes the replacement history inside a transaction
+// owned by the session queue coordinator. Hidden deltas must not become the
+// visible turn until FinalizeAgentReplacementTx is called at the true final
+// boundary (after the coordinator has ruled out an eligible steer).
+type AgentReplacementTxPersister interface {
+	PersistAgentReplacementStepTx(ctx context.Context, queries dbstore.Queries, step AgentStep) ([]Message, error)
+	FinalizeAgentReplacementTx(
+		ctx context.Context,
+		queries dbstore.Queries,
+		sessionID string,
+		replacement TurnReplacement,
+		requestMessageID string,
+		assistantMessageID string,
+	) error
 }
 
 // Service defines message read/write behavior.

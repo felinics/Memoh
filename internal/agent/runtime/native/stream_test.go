@@ -6,6 +6,8 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,6 +103,59 @@ func TestAgentStreamObservesReasoningEndBeforeStepCommit(t *testing.T) {
 	if !commitSawReasoningEnd {
 		t.Fatalf("step commit ran before reasoning_end observation: %#v", observed)
 	}
+}
+
+func TestAgentStreamReopensAfterFinalSteer(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	var secondInput atomic.Bool
+	var continueAfter atomic.Bool
+	nextInputs := []sdk.Message{}
+	provider := agentStreamTestProvider(func(_ context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+		call := calls.Add(1)
+		if call == 2 {
+			for _, message := range params.Messages {
+				if strings.Contains(messageContentText(message), "change direction") {
+					secondInput.Store(true)
+				}
+			}
+		}
+		return closedAgentTestStream(&sdk.StartPart{}, &sdk.StartStepPart{}, &sdk.TextDeltaPart{ID: "text", Text: "answer"}, &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}, &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}), nil
+	})
+	a := New(Deps{})
+	var commits int
+	events := a.Stream(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages: []sdk.Message{sdk.UserMessage("hello")}, Identity: SessionContext{BotID: "bot-1"},
+		ContinueAfterFinal: &continueAfter, NextModelInputs: &nextInputs,
+		OnStepCommitted: func(_ context.Context, _ int, _ *sdk.StepResult) error {
+			commits++
+			if commits == 1 {
+				nextInputs = []sdk.Message{sdk.UserMessage("change direction")}
+				continueAfter.Store(true)
+			}
+			return nil
+		},
+	})
+	var terminal int
+	for event := range events {
+		if event.IsTerminal() {
+			terminal++
+		}
+	}
+	if calls.Load() != 2 || !secondInput.Load() || terminal != 1 {
+		t.Fatalf("calls=%d second_input=%v terminal=%d", calls.Load(), secondInput.Load(), terminal)
+	}
+}
+
+func messageContentText(message sdk.Message) string {
+	var out strings.Builder
+	for _, part := range message.Content {
+		if text, ok := part.(sdk.TextPart); ok {
+			out.WriteString(text.Text)
+		}
+	}
+	return out.String()
 }
 
 // TestAgentStreamEmitsToolCallInputStartThenStart asserts that a tool call

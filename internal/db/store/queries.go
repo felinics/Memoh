@@ -26,6 +26,44 @@ type HistoryTurn struct {
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
+	LockSessionForQueueAdmission(ctx context.Context, arg dbsqlc.LockSessionForQueueAdmissionParams) (pgtype.UUID, error)
+	LockSessionForQueueMutation(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error)
+	FinalizeSessionRun(ctx context.Context, arg dbsqlc.FinalizeSessionRunParams) (dbsqlc.SessionRun, error)
+	CreateContinuationFromFollowUp(ctx context.Context, arg dbsqlc.CreateContinuationFromFollowUpParams) (dbsqlc.CreateContinuationFromFollowUpRow, error)
+	CreateSessionQueueStepCommit(ctx context.Context, arg dbsqlc.CreateSessionQueueStepCommitParams) (dbsqlc.SessionQueueStepCommit, error)
+	GetSessionQueueStepCommit(ctx context.Context, arg dbsqlc.GetSessionQueueStepCommitParams) (dbsqlc.SessionQueueStepCommit, error)
+	NextSessionQueueStepIndex(ctx context.Context, runID pgtype.UUID) (int64, error)
+	GetContinuationRunForParent(ctx context.Context, parentRunID pgtype.UUID) (dbsqlc.SessionRun, error)
+	GetFollowUpQueueItem(ctx context.Context, itemID pgtype.UUID) (dbsqlc.SessionFollowUpQueue, error)
+	GetSteerQueueItem(ctx context.Context, itemID pgtype.UUID) (dbsqlc.SessionSteerQueue, error)
+	GetClaimedSteerQueueItemForRun(ctx context.Context, runID pgtype.UUID) (dbsqlc.SessionSteerQueue, error)
+	UpdateAcceptedSteerQueueItemPayload(ctx context.Context, arg dbsqlc.UpdateAcceptedSteerQueueItemPayloadParams) (dbsqlc.SessionSteerQueue, error)
+	UpdateAcceptedFollowUpQueueItemPayload(ctx context.Context, arg dbsqlc.UpdateAcceptedFollowUpQueueItemPayloadParams) (dbsqlc.SessionFollowUpQueue, error)
+	CancelAcceptedSteerQueueItem(ctx context.Context, arg dbsqlc.CancelAcceptedSteerQueueItemParams) (dbsqlc.SessionSteerQueue, error)
+	CancelAcceptedFollowUpQueueItem(ctx context.Context, arg dbsqlc.CancelAcceptedFollowUpQueueItemParams) (dbsqlc.SessionFollowUpQueue, error)
+	GetFollowUpQueueItemByInvocation(ctx context.Context, arg dbsqlc.GetFollowUpQueueItemByInvocationParams) (dbsqlc.SessionFollowUpQueue, error)
+	GetSteerQueueItemByInvocation(ctx context.Context, arg dbsqlc.GetSteerQueueItemByInvocationParams) (dbsqlc.SessionSteerQueue, error)
+	EnqueueFollowUpQueueItem(ctx context.Context, arg dbsqlc.EnqueueFollowUpQueueItemParams) (dbsqlc.SessionFollowUpQueue, error)
+	EnqueueSteerQueueItem(ctx context.Context, arg dbsqlc.EnqueueSteerQueueItemParams) (dbsqlc.SessionSteerQueue, error)
+	ApplyFollowUpQueueItem(ctx context.Context, arg dbsqlc.ApplyFollowUpQueueItemParams) (dbsqlc.SessionFollowUpQueue, error)
+	ApplySteerQueueItem(ctx context.Context, arg dbsqlc.ApplySteerQueueItemParams) (dbsqlc.SessionSteerQueue, error)
+	AcquireContinuationRun(ctx context.Context, arg dbsqlc.AcquireContinuationRunParams) (dbsqlc.SessionRun, error)
+	AcquireQueuedRun(ctx context.Context, arg dbsqlc.AcquireQueuedRunParams) (dbsqlc.SessionRun, error)
+	AssignFollowUpQueueItem(ctx context.Context, arg dbsqlc.AssignFollowUpQueueItemParams) (dbsqlc.SessionFollowUpQueue, error)
+	ClaimAssignedFollowUpQueueItem(ctx context.Context, arg dbsqlc.ClaimAssignedFollowUpQueueItemParams) (dbsqlc.SessionFollowUpQueue, error)
+	ClaimSteerQueueItem(ctx context.Context, arg dbsqlc.ClaimSteerQueueItemParams) (dbsqlc.SessionSteerQueue, error)
+	ReclaimAssignedFollowUpQueueItem(ctx context.Context, arg dbsqlc.ReclaimAssignedFollowUpQueueItemParams) (dbsqlc.SessionFollowUpQueue, error)
+	ReclaimSteerQueueItem(ctx context.Context, arg dbsqlc.ReclaimSteerQueueItemParams) (dbsqlc.SessionSteerQueue, error)
+	ListPendingFollowUpQueue(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.SessionFollowUpQueue, error)
+	ListPendingSteerQueue(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.SessionSteerQueue, error)
+	LockSessionRunForAgentStepCommit(ctx context.Context, arg dbsqlc.LockSessionRunForAgentStepCommitParams) (pgtype.UUID, error)
+	UpdateAcceptedFollowUpQueuePosition(ctx context.Context, arg dbsqlc.UpdateAcceptedFollowUpQueuePositionParams) (int64, error)
+	UpdateAcceptedSteerQueuePosition(ctx context.Context, arg dbsqlc.UpdateAcceptedSteerQueuePositionParams) (int64, error)
+	ListOwnerlessContinuationRuns(ctx context.Context, batchSize int32) ([]dbsqlc.SessionRun, error)
+	RejectFollowUpForContinuation(ctx context.Context, runID pgtype.UUID) error
+	RejectUnassignedFollowUpsForRun(ctx context.Context, runID pgtype.UUID) error
+	RejectUnassignedFollowUpsForSession(ctx context.Context, sessionID pgtype.UUID) error
+	RejectSteerItemsForRun(ctx context.Context, runID pgtype.UUID) error
 	AcquireProviderTemplateSyncLock(ctx context.Context) error
 	ApproveToolApprovalRequest(ctx context.Context, arg dbsqlc.ApproveToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
 	BumpBotRuntimeConfigEpoch(ctx context.Context, botID pgtype.UUID) (int64, error)

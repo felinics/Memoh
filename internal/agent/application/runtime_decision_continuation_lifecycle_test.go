@@ -41,6 +41,7 @@ func TestRuntimeOwnedDecisionContinuationsRetainLifecycleWithoutAssistantMetadat
 					},
 					UserInputResponseInput{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID},
 					lifecycleTestRunID,
+					sessionruntime.RunHandle{},
 					lifecycle,
 					nil,
 				)
@@ -57,6 +58,7 @@ func TestRuntimeOwnedDecisionContinuationsRetainLifecycleWithoutAssistantMetadat
 					},
 					ToolApprovalResponseInput{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID},
 					lifecycleTestRunID,
+					sessionruntime.RunHandle{},
 					lifecycle,
 					nil,
 				)

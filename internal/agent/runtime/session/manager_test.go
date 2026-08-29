@@ -4002,6 +4002,55 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterAbortContract(t *testing.T, 
 	}
 }
 
+func TestRuntimeManagerWaitRunReleaseBlocksUntilActiveSlotIsReleased(t *testing.T) {
+	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-wait-release")
+	const (
+		sessionID = "session-wait-release"
+		runID     = "run-wait-release"
+	)
+	if err := manager.StartRun(context.Background(), testBotID, sessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, sessionID, runID)
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	waited := make(chan error, 1)
+	go func() {
+		waited <- manager.WaitRunRelease(waitCtx, testBotID, sessionID, runID)
+	}()
+	select {
+	case err := <-waited:
+		t.Fatalf("wait returned before active run release: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	if err := manager.FinishRun(context.Background(), handle, RunStatusCompleted, ""); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	select {
+	case err := <-waited:
+		if err != nil {
+			t.Fatalf("wait for release: %v", err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("wait did not observe the released run")
+	}
+}
+
+func TestRuntimeManagerStartExistingRunRejectsForeignOwner(t *testing.T) {
+	manager := testRuntimeManager(t, NewMemoryBackend(), "local-owner")
+	_, err := manager.StartExistingRun(
+		context.Background(),
+		RunHandle{BotID: testBotID, SessionID: testSessionID, RunID: testRunID, OwnerID: "foreign-owner", FencingToken: 1},
+		func(context.Context, RunHandle) (RunAdmissionView, error) { return RunAdmissionView{}, nil },
+		func(error) {}, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1),
+	)
+	if !errors.Is(err, ErrRunOwnershipLost) {
+		t.Fatalf("foreign owner start = %v, want ErrRunOwnershipLost", err)
+	}
+}
+
 func TestRuntimeManagerPublishesStableStreamErrorCode(t *testing.T) {
 	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-coded-error")
 	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {

@@ -416,10 +416,26 @@ export interface RuntimeCurrentRunView {
   updated_at: string
   messages: UIMessage[]
   request_user_turn?: UIUserTurn
+  // Ordered inputs already admitted into this run. The first entry is the
+  // request turn when present; later entries are applied durable steers.
+  user_turns?: UIUserTurn[]
+  // Durable steer claims projected at their exact live assistant-message
+  // boundary. Claimed entries are provisional; applied entries reference the
+  // settled history turn that replaces them.
+  steer_turns?: RuntimeSteerTurnView[]
   error_code?: string
   error?: string
   steer?: RuntimeSteerState
   operation?: RuntimeRunOperation
+}
+
+export interface RuntimeSteerTurnView {
+  item_id: string
+  status: 'claimed' | 'applied'
+  text: string
+  turn_id?: string
+  after_message_id: number
+  timestamp: string
 }
 
 export interface RuntimeSnapshot {
@@ -456,6 +472,9 @@ export interface RuntimeProgressAppend {
 export interface RuntimeDelta {
   current_run_view?: RuntimeCurrentRunView
   run?: RuntimeCurrentRunPatch
+  user_turn_upserts?: UIUserTurn[]
+  steer_turn_upserts?: RuntimeSteerTurnView[]
+  steer_turn_removals?: string[]
   message_appends?: RuntimeMessageAppend[]
   progress_appends?: RuntimeProgressAppend[]
   message_upserts?: UIMessage[]

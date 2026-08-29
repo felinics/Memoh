@@ -48,19 +48,20 @@ func runHandleForCommand(cmd Command) RunHandle {
 // DecisionContinuationContext detaches the model continuation from the short
 // command acknowledgement deadline while keeping it tied to the run owner's
 // lifecycle and persistence fence.
-func (m *Manager) DecisionContinuationContext(cmd Command) (context.Context, context.CancelFunc, error) {
+func (m *Manager) DecisionContinuationContext(cmd Command) (context.Context, context.CancelFunc, RunHandle, error) {
 	ctrl := m.localControlForScope(cmd.BotID, cmd.SessionID, cmd.RunID)
 	if ctrl == nil || ctrl.generation != strings.TrimSpace(cmd.Generation) || !ctrl.commandsActive() {
-		return nil, func() {}, ErrCommandTargetNotActive
+		return nil, func() {}, RunHandle{}, ErrCommandTargetNotActive
 	}
 	// The acknowledgement request ends before the continuation. Only the run
 	// lifecycle owns this context, so no transport cancellation is attached.
 	ctx, cancel := ctrl.commandContext(context.Background())
-	if err := m.ValidateRunOwnership(ctx, runHandleForCommand(cmd)); err != nil {
+	handle := ctrl.handle()
+	if err := m.ValidateRunOwnership(ctx, handle); err != nil {
 		cancel()
-		return nil, func() {}, err
+		return nil, func() {}, RunHandle{}, err
 	}
-	return ctx, cancel, nil
+	return ctx, cancel, handle, nil
 }
 
 // WaitDecisionContinuationReady holds the resumed model call until the stream

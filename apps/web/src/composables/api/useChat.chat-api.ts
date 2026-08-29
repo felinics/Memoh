@@ -16,6 +16,17 @@ import {
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeMode,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeModel,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoning,
+  getBotsByBotIdSessionsBySessionIdSteerQueue,
+  getBotsByBotIdSessionsBySessionIdFollowUpQueue,
+  postBotsByBotIdSessionsBySessionIdSteerQueue,
+  postBotsByBotIdSessionsBySessionIdFollowUpQueue,
+  postBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteer,
+  putBotsByBotIdSessionsBySessionIdSteerQueueReorder,
+  putBotsByBotIdSessionsBySessionIdFollowUpQueueReorder,
+  patchBotsByBotIdSessionsBySessionIdSteerQueueByItemId,
+  patchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemId,
+  deleteBotsByBotIdSessionsBySessionIdSteerQueueByItemId,
+  deleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemId,
 } from '@memohai/sdk'
 import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 import type { Bot, SessionSummary } from './useChat.types'
@@ -40,6 +51,103 @@ export interface CreateSessionOptions {
 export interface CreateACPRuntimeOptions {
   agentId: string
   projectPath?: string
+}
+
+export interface SessionQueueItem {
+  item_id?: string
+  status?: string
+  position?: number
+  text?: string
+}
+
+export interface SessionQueueResponse {
+  items?: SessionQueueItem[]
+}
+
+export function queueItemText(item: SessionQueueItem): string {
+  return item.text ?? ''
+}
+
+const queuePath = (botId: string, sessionId: string) => ({ bot_id: botId.trim(), session_id: sessionId.trim() })
+
+export async function fetchSteerQueue(botId: string, sessionId: string): Promise<SessionQueueItem[]> {
+  const { data } = await getBotsByBotIdSessionsBySessionIdSteerQueue({ path: queuePath(botId, sessionId), throwOnError: true })
+  return (data as SessionQueueResponse | undefined)?.items ?? []
+}
+
+export async function enqueueSteerQueue(botId: string, sessionId: string, text: string, invocationId = crypto.randomUUID()): Promise<SessionQueueItem> {
+  const { data } = await postBotsByBotIdSessionsBySessionIdSteerQueue({
+    path: queuePath(botId, sessionId),
+    body: { invocation_id: invocationId, text },
+    throwOnError: true,
+  })
+  return data as SessionQueueItem
+}
+
+export async function fetchFollowUpQueue(botId: string, sessionId: string): Promise<SessionQueueItem[]> {
+  const { data } = await getBotsByBotIdSessionsBySessionIdFollowUpQueue({ path: queuePath(botId, sessionId), throwOnError: true })
+  return (data as SessionQueueResponse | undefined)?.items ?? []
+}
+
+export async function enqueueFollowUpQueue(botId: string, sessionId: string, text: string, invocationId = crypto.randomUUID()): Promise<SessionQueueItem> {
+  const { data } = await postBotsByBotIdSessionsBySessionIdFollowUpQueue({
+    path: queuePath(botId, sessionId),
+    body: { invocation_id: invocationId, text },
+    throwOnError: true,
+  })
+  return data as SessionQueueItem
+}
+
+export async function promoteFollowUpQueueItemToSteer(botId: string, sessionId: string, itemId: string): Promise<SessionQueueItem> {
+  const { data } = await postBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteer({
+    path: { ...queuePath(botId, sessionId), item_id: itemId.trim() },
+    throwOnError: true,
+  })
+  return data as SessionQueueItem
+}
+
+export async function updateSteerQueueItem(botId: string, sessionId: string, itemId: string, text: string): Promise<SessionQueueItem> {
+  const { data } = await patchBotsByBotIdSessionsBySessionIdSteerQueueByItemId({
+    path: { ...queuePath(botId, sessionId), item_id: itemId.trim() },
+    body: { text },
+    throwOnError: true,
+  })
+  return data as SessionQueueItem
+}
+
+export async function updateFollowUpQueueItem(botId: string, sessionId: string, itemId: string, text: string): Promise<SessionQueueItem> {
+  const { data } = await patchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemId({
+    path: { ...queuePath(botId, sessionId), item_id: itemId.trim() },
+    body: { text },
+    throwOnError: true,
+  })
+  return data as SessionQueueItem
+}
+
+export async function deleteSteerQueueItem(botId: string, sessionId: string, itemId: string): Promise<void> {
+  await deleteBotsByBotIdSessionsBySessionIdSteerQueueByItemId({ path: { ...queuePath(botId, sessionId), item_id: itemId.trim() }, throwOnError: true })
+}
+
+export async function deleteFollowUpQueueItem(botId: string, sessionId: string, itemId: string): Promise<void> {
+  await deleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemId({ path: { ...queuePath(botId, sessionId), item_id: itemId.trim() }, throwOnError: true })
+}
+
+export async function reorderSteerQueue(botId: string, sessionId: string, itemId: string, beforeId: string): Promise<SessionQueueItem[]> {
+  const { data } = await putBotsByBotIdSessionsBySessionIdSteerQueueReorder({
+    path: queuePath(botId, sessionId),
+    body: { item: { item_id: itemId }, before: { item_id: beforeId } },
+    throwOnError: true,
+  })
+  return (data as SessionQueueResponse | undefined)?.items ?? []
+}
+
+export async function reorderFollowUpQueue(botId: string, sessionId: string, itemId: string, beforeId: string): Promise<SessionQueueItem[]> {
+  const { data } = await putBotsByBotIdSessionsBySessionIdFollowUpQueueReorder({
+    path: queuePath(botId, sessionId),
+    body: { item: { item_id: itemId }, before: { item_id: beforeId } },
+    throwOnError: true,
+  })
+  return (data as SessionQueueResponse | undefined)?.items ?? []
 }
 
 export async function fetchBots(): Promise<Bot[]> {

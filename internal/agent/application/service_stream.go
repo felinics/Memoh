@@ -229,11 +229,16 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		go s.maybeGenerateSessionTitle(context.WithoutCancel(streamCtx), streamReq, streamReq.RawQuery)
 
 		cfg := rc.runConfig
+		cfg.StepIndexOffset = streamReq.StepIndexOffset
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = s.canDeliverUserInputStream()
 		reasoningTiming := newReasoningTimingTracker(nil)
 		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
 		configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+		if stepCommitter != nil {
+			cfg.ContinueAfterFinal = &stepCommitter.continueAfterFinal
+			cfg.NextModelInputs = &stepCommitter.nextModelInputs
+		}
 		cfg = s.prepareRunConfig(streamCtx, cfg)
 		terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 		var lifecycleCause error
@@ -317,6 +322,11 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			data, err := json.Marshal(publicAgentStreamEvent(event))
 			if err != nil {
 				continue
+			}
+			if streamReq.PublishRuntimeEvents && s.publishTurnEvent != nil {
+				if publishErr := s.publishTurnEvent(streamCtx, streamReq.RunHandle, event); publishErr != nil {
+					s.logger.Warn("continuation runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
+				}
 			}
 			if event.IsTerminal() && len(event.Messages) > 0 {
 				if snap, ok := extractTerminalSnapshot(data); ok {
@@ -549,11 +559,16 @@ func (s *Service) streamChatWSResultWithHooks(
 	}()
 
 	cfg := rc.runConfig
+	cfg.StepIndexOffset = req.StepIndexOffset
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
 	reasoningTiming := newReasoningTimingTracker(nil)
 	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+	if stepCommitter != nil {
+		cfg.ContinueAfterFinal = &stepCommitter.continueAfterFinal
+		cfg.NextModelInputs = &stepCommitter.nextModelInputs
+	}
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 	terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 	var lifecycleCause error
@@ -674,7 +689,7 @@ func (s *Service) streamChatWSResultWithHooks(
 			}
 		}
 
-		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
+		if event.IsTerminal() && postPersist != nil && stepCommitter == nil && !postPersistApplied {
 			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 				lifecycleCause = err
 				lifecycleDeferred = false
@@ -756,7 +771,7 @@ func (s *Service) streamChatWSResultWithHooks(
 		}
 	}
 
-	if postPersist != nil && !postPersistApplied {
+	if postPersist != nil && stepCommitter == nil && !postPersistApplied {
 		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 			lifecycleCause = err
 			lifecycleDeferred = false

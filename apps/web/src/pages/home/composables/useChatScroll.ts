@@ -245,7 +245,8 @@ export interface UseChatScrollOptions {
  *
  * ─── chat-pane contract ───────────────────────────────────────────────────
  * chat-pane owns the DOM refs and drives this composable through:
- *   scrollToBottom (jump button) · scrollToMessage (reply refs) · pinAfterSend
+ *   scrollToBottom (jump button) · scrollToMessage (reply refs) · pinAfterSend /
+ *   pinAfterSteer (live queue boundary)
  *   (on send) · suppressAutoScrollForPrepend (top sentinel) · markEscaped +
  *   startScrollTween + findMessageElement + getElementAbsoluteTop (scroll rail)
  *   · onMessageActive (per message-item) · onActivatedRestoreScroll /
@@ -477,7 +478,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // applies it when the new prompt renders (tryApplyPin). Streaming then grows
   // below the fold without moving the view — follow re-engages only when the
   // user scrolls back down to the bottom.
-  function pinAfterSend(): () => void {
+  function armPin(anchorId: string | null): () => void {
     const attemptId = ++pinAttemptId
     const previousFollowEnabled = followEnabled
     const previousPinPending = pinPending
@@ -489,7 +490,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
     followEnabled = false
     pinPending = true
-    pinAnchorId = lastUserMessage()?.id ?? null
+    pinAnchorId = anchorId ?? lastUserMessage()?.id ?? null
     // Arm only — do NOT clear / set reserves here.
     //
     // sendMessage pushes the optimistic user turn only after several awaits
@@ -542,6 +543,23 @@ export function useChatScroll(options: UseChatScrollOptions) {
         })
       })
     }
+  }
+
+  function pinAfterSend(): () => void {
+    return armPin(lastUserMessage()?.id ?? null)
+  }
+
+  // A steer is projected into the transcript before this method is called.
+  // Its prompt is therefore already the newest user message; the anchor must
+  // be supplied explicitly so tryApplyPin waits for that prompt rather than
+  // treating the steer itself as the old turn.
+  function pinAfterSteer(anchorId: string): () => void {
+    const rollback = armPin(anchorId.trim() || null)
+    void nextTick(() => {
+      if (!pinPending) return
+      onContentChanged()
+    })
+    return rollback
   }
 
   function startScrollTween(
@@ -1184,6 +1202,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     markEscaped,
     followBottom,
     pinAfterSend,
+    pinAfterSteer,
 
     // lifecycle hooks — call sites live in chat-pane.vue's own onActivated/onDeactivated
     onActivatedRestoreScroll,

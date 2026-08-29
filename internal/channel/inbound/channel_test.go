@@ -869,7 +869,7 @@ func TestChannelInboundProcessorNativeUserInputBypassesTextFallback(t *testing.T
 	}
 }
 
-func TestChannelInboundProcessorModeCommandBypassesTextFallback(t *testing.T) {
+func TestChannelInboundProcessorRemovedModeCommandIsRejected(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "route-1"}}
 	gateway := &fakeChatGateway{resp: fakeChatResponse{Messages: []turn.ModelMessage{{Role: "assistant", Content: turn.NewTextContent("normal reply")}}}}
@@ -881,11 +881,15 @@ func TestChannelInboundProcessorModeCommandBypassesTextFallback(t *testing.T) {
 		Message: channel.Message{Text: "/btw side question"}, Sender: channel.Identity{SubjectID: "ext-1"},
 		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
 	}
-	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: msg.Channel}, msg, &fakeReplySender{}); err != nil {
+	sender := &fakeReplySender{}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: msg.Channel}, msg, sender); err != nil {
 		t.Fatalf("HandleInbound() error = %v", err)
 	}
 	if gateway.advanceCalls != 0 {
-		t.Fatalf("mode command advanced user input %d times", gateway.advanceCalls)
+		t.Fatalf("removed command advanced user input %d times", gateway.advanceCalls)
+	}
+	if len(sender.sent) != 1 || !strings.Contains(strings.ToLower(sender.sent[0].Message.PlainText()), "unknown") {
+		t.Fatalf("removed command response = %+v", sender.sent)
 	}
 }
 
@@ -1721,7 +1725,7 @@ func TestChannelInboundProcessorRejectsDirectSkillBeforeAutoDiscussSession(t *te
 	}
 }
 
-func TestChannelInboundProcessorRejectsDirectSkillBeforeActiveStreamInjection(t *testing.T) {
+func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-active"}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-skill-use-active", RouteID: "route-skill-use-active"}}
@@ -1729,9 +1733,6 @@ func TestChannelInboundProcessorRejectsDirectSkillBeforeActiveStreamInjection(t 
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
 	processor.SetACLService(&fakeChatACL{allowed: true})
 	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
-	dispatcher := NewRouteDispatcher(slog.Default())
-	dispatcher.MarkActive("route-skill-use-active")
-	processor.SetDispatcher(dispatcher)
 	sender := &fakeReplySender{}
 
 	msg := channel.InboundMessage{
@@ -1759,12 +1760,12 @@ func TestChannelInboundProcessorRejectsDirectSkillBeforeActiveStreamInjection(t 
 	if len(chatSvc.persistedIn) != 0 {
 		t.Fatalf("skill slash should not persist before active-stream reject, got %+v", chatSvc.persistedIn)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "not supported") {
-		t.Fatalf("expected unsupported skill slash reply, got %+v", sender.sent)
+	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "not available") {
+		t.Fatalf("expected unavailable skill slash reply, got %+v", sender.sent)
 	}
 }
 
-func TestChannelInboundProcessorRejectsDirectSkillDuringContinuationStream(t *testing.T) {
+func TestChannelInboundProcessorDoesNotUseRouteLocalContinuationLock(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
 		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-continuation"},
 		linkedUserIDs:   map[string][]string{"channelIdentity-skill-use-continuation": {"user-1"}},
@@ -1778,7 +1779,6 @@ func TestChannelInboundProcessorRejectsDirectSkillDuringContinuationStream(t *te
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
 	processor.SetACLService(&fakeChatACL{allowed: true})
 	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
-	processor.SetDispatcher(NewRouteDispatcher(slog.Default()))
 	skillResolver := &fakeRequestedSkillResolver{items: []skillset.ResolvedSkill{{Name: "alpha", Content: "alpha skill content"}}}
 	processor.SetRequestedSkillResolver(skillResolver)
 	sender := &fakeReplySender{}
@@ -1811,18 +1811,15 @@ func TestChannelInboundProcessorRejectsDirectSkillDuringContinuationStream(t *te
 	if err := <-done; err != nil {
 		t.Fatalf("respond HandleInbound() error = %v", err)
 	}
-	if skillResolver.calls != 0 {
-		t.Fatalf("skill resolver calls = %d, want 0 during active continuation", skillResolver.calls)
+	if skillResolver.calls != 1 {
+		t.Fatalf("skill resolver calls = %d, want 1 without route-local dispatcher", skillResolver.calls)
 	}
-	if gateway.gotReq.BotID != "" {
-		t.Fatalf("ordinary chat should not run during active continuation, got request %#v", gateway.gotReq)
-	}
-	if len(sender.sent) == 0 || !strings.Contains(sender.sent[0].Message.PlainText(), "not supported") {
-		t.Fatalf("expected unsupported skill slash reply, got %+v", sender.sent)
+	if gateway.gotReq.BotID != "bot-1" || gateway.gotReq.UserMessageKind != turn.UserMessageKindSkillActivation {
+		t.Fatalf("durable admission should receive the skill turn, got request %#v", gateway.gotReq)
 	}
 }
 
-func TestChannelInboundProcessorDirectSkillStartsStreamWithDispatcherInjectCh(t *testing.T) {
+func TestChannelInboundProcessorDirectSkillStartsStream(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-dispatch"}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-skill-use-dispatch", RouteID: "route-skill-use-dispatch"}}
@@ -1830,7 +1827,6 @@ func TestChannelInboundProcessorDirectSkillStartsStreamWithDispatcherInjectCh(t 
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
 	processor.SetACLService(&fakeChatACL{allowed: true})
 	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
-	processor.SetDispatcher(NewRouteDispatcher(slog.Default()))
 	skillResolver := &fakeRequestedSkillResolver{items: []skillset.ResolvedSkill{{
 		Name:       "alpha",
 		Content:    "alpha skill content",

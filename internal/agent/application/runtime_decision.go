@@ -214,7 +214,7 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 	if s == nil || s.decisionRuntime == nil {
 		return errors.New("runtime decision handler is not configured")
 	}
-	runCtx, runCancel, err := s.decisionRuntime.DecisionContinuationContext(command)
+	runCtx, runCancel, runHandle, err := s.decisionRuntime.DecisionContinuationContext(command)
 	if err != nil {
 		return err
 	}
@@ -242,6 +242,7 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			return err
 		}
 		committed.runID = command.RunID
+		committed.runHandle = runHandle
 		s.publishCommittedRuntimeDecision(runCtx, command, native.StreamEvent{
 			Type:        native.EventUserInputRequest,
 			ToolName:    committed.request.ToolName,
@@ -286,6 +287,7 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			return err
 		}
 		committed.runID = command.RunID
+		committed.runHandle = runHandle
 		s.publishCommittedRuntimeDecision(runCtx, command, native.StreamEvent{
 			Type:       native.EventToolApprovalRequest,
 			ToolName:   committed.request.ToolName,
@@ -349,6 +351,7 @@ func (s *Service) continueRuntimeDecision(
 		Generation: command.Generation,
 	}
 	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
+		s.logRuntimeDecisionContinuationFailure(command, err)
 		s.recoverContextLifecycleFromAssistantMetadata(ctx, command.RunID, command.BotID, command.SessionID, err)
 		s.finishRuntimeDecision(ctx, handle, err)
 		return
@@ -404,6 +407,7 @@ func (s *Service) continueRuntimeDecision(
 		lifecycleDeferred = false
 	}
 	if runErr != nil {
+		s.logRuntimeDecisionContinuationFailure(command, lifecycleCause)
 		s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
 		s.finishRuntimeDecision(ctx, handle, runErr)
 		return
@@ -413,7 +417,29 @@ func (s *Service) continueRuntimeDecision(
 		return
 	}
 	s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
+	s.logRuntimeDecisionContinuationFailure(command, lifecycleCause)
 	s.finishRuntimeDecision(ctx, handle, lifecycleCause)
+}
+
+// logRuntimeDecisionContinuationFailure records the private provider,
+// persistence, or ownership cause after a durably answered decision resumes a
+// run. The websocket and session ledger deliberately retain only the stable
+// public error code; without this log an operator cannot distinguish those
+// failure classes from the generic agent.response_interrupted response.
+func (s *Service) logRuntimeDecisionContinuationFailure(command sessionruntime.Command, cause error) {
+	if s == nil || s.logger == nil || cause == nil {
+		return
+	}
+	privateCause := apperror.CauseOf(cause)
+	if privateCause == nil {
+		privateCause = cause
+	}
+	s.logger.Error("runtime decision continuation failed",
+		slog.Any("error", privateCause),
+		slog.String("run_id", command.RunID),
+		slog.String("decision_id", command.TargetID),
+		slog.String("command_type", command.Type),
+	)
 }
 
 func firstLifecycleCause(causes ...error) error {

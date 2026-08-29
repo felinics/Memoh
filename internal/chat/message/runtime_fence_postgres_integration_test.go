@@ -17,6 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/db/dbtest"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -243,6 +244,82 @@ func TestPostgresRuntimeFenceAgentStepCompleteAndInterruptedWrites(t *testing.T)
 	}
 	if _, err := service.PersistAgentStep(owner, step); !errors.Is(err, ErrAgentStepNotWritable) {
 		t.Fatalf("post-finalize interrupted step error = %v, want ErrAgentStepNotWritable", err)
+	}
+}
+
+// Named for the ^TestPostgresRuntimeFence filter used by the durable runtime
+// CI job. This covers the retry/edit persistence port consumed by the queue
+// coordinator: step deltas stay hidden until the true final boundary publishes
+// the replacement.
+func TestPostgresRuntimeFenceAgentReplacementStepsFinalizeVisibility(t *testing.T) {
+	ctx := context.Background()
+	pool := openRuntimeFencePostgresPool(t, ctx)
+	botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
+	queries := dbsqlc.New(pool)
+	storeQueries := postgresstore.NewQueriesWithPool(pool, queries)
+	service := NewService(nil, storeQueries)
+
+	user, err := service.Persist(ctx, PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "user",
+		Content: []byte(`{"role":"user","content":"original request"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist original user: %v", err)
+	}
+	oldAssistant, err := service.Persist(ctx, PersistInput{
+		BotID: botID.String(), SessionID: sessionID.String(), Role: "assistant",
+		Content: []byte(`{"role":"assistant","content":"original answer"}`), TurnRequestMessageID: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("persist original assistant: %v", err)
+	}
+	oldTurn, err := service.GetVisibleTurnByMessage(ctx, sessionID.String(), oldAssistant.ID)
+	if err != nil {
+		t.Fatalf("load original turn: %v", err)
+	}
+
+	token := acquireRuntimeFenceToken(t, ctx, queries, botID, sessionID)
+	runID, replacementTurnID := uuid.New(), uuid.NewString()
+	replacementPosition := oldTurn.Position
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO session_runs
+		(run_id, bot_id, session_id, invocation_id, turn_id, turn_position, state,
+		 input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation)
+		VALUES ($1, $2, $3, $4, $5, $6, 'running', '{}'::jsonb, 'replacement-test', 'test-owner', $7, now(), 'test')`,
+		runID, botID, sessionID, uuid.NewString(), replacementTurnID, replacementPosition, token); err != nil {
+		t.Fatalf("create replacement run: %v", err)
+	}
+	owner := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: botID.String(), SessionID: sessionID.String(), Token: token})
+	step := AgentStep{RunID: runID.String(), Messages: []PersistInput{{
+		BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), Role: "assistant",
+		Content:              []byte(`{"role":"assistant","content":"replacement answer"}`),
+		TurnRequestMessageID: user.ID, SkipHistoryTurn: true,
+	}}}
+	var hidden []Message
+	if err := storeQueries.InTx(owner, func(txq dbstore.Queries) error {
+		var persistErr error
+		hidden, persistErr = service.PersistAgentReplacementStepTx(owner, txq, step)
+		return persistErr
+	}); err != nil {
+		t.Fatalf("persist hidden replacement step: %v", err)
+	}
+	visible, err := service.ListBySession(ctx, sessionID.String())
+	if err != nil || len(visible) != 2 || visible[1].ID != oldAssistant.ID {
+		t.Fatalf("visible history before finalization = %#v, %v", visible, err)
+	}
+
+	replacement := TurnReplacement{
+		OldTurnID: oldTurn.ID, ReplacementTurnID: replacementTurnID,
+		ReplacementTurnPosition: &replacementPosition, RequestMessageID: user.ID, Reason: "retry",
+	}
+	if err := storeQueries.InTx(owner, func(txq dbstore.Queries) error {
+		return service.FinalizeAgentReplacementTx(owner, txq, sessionID.String(), replacement, user.ID, hidden[0].ID)
+	}); err != nil {
+		t.Fatalf("finalize replacement history: %v", err)
+	}
+	visible, err = service.ListBySession(ctx, sessionID.String())
+	if err != nil || len(visible) != 2 || visible[0].ID != user.ID || visible[1].ID != hidden[0].ID {
+		t.Fatalf("visible history after finalization = %#v, %v", visible, err)
 	}
 }
 

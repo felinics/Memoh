@@ -57,6 +57,8 @@ type Manager struct {
 	decisionStore          DecisionStore
 	terminalObserver       func(context.Context, TerminalRun)
 	terminalReconciler     func(context.Context) error
+	continuationRecoverer  func(context.Context) error
+	queueRunRecoverer      func(context.Context, LeaseCandidate) (bool, error)
 	historyResetHandler    HistoryResetHandler
 	pendingCommands        map[string]map[*commandWaiter]struct{}
 	inflightCommandTargets map[string]struct{}
@@ -90,6 +92,7 @@ type runControl struct {
 	botID             string
 	sessionID         string
 	runID             string
+	ownerID           string
 	turnID            string
 	generation        string
 	fencingToken      int64
@@ -153,7 +156,7 @@ func (c *runControl) handle() RunHandle {
 	if c == nil {
 		return RunHandle{}
 	}
-	return RunHandle{BotID: c.botID, SessionID: c.sessionID, RunID: c.runID, TurnID: c.turnID, Generation: c.generation, FencingToken: c.fencingToken}
+	return RunHandle{BotID: c.botID, SessionID: c.sessionID, RunID: c.runID, OwnerID: c.ownerID, TurnID: c.turnID, Generation: c.generation, FencingToken: c.fencingToken}
 }
 
 func (c *runControl) beginDecisionWait() {
@@ -357,6 +360,28 @@ func (m *Manager) SetTerminalReconciler(reconciler func(context.Context) error) 
 	m.mu.Unlock()
 }
 
+// SetContinuationRecoverer installs the application-owned ownerless
+// continuation scan used by the session reaper.
+func (m *Manager) SetContinuationRecoverer(recoverer func(context.Context) error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.continuationRecoverer = recoverer
+	m.mu.Unlock()
+}
+
+// SetQueueRunRecoverer installs the application-owned recovery for a running
+// session whose durable queue claim survived an owner lease expiry.
+func (m *Manager) SetQueueRunRecoverer(recoverer func(context.Context, LeaseCandidate) (bool, error)) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.queueRunRecoverer = recoverer
+	m.mu.Unlock()
+}
+
 func (m *Manager) observeTerminalRun(ctx context.Context, run TerminalRun) {
 	if m == nil || run.RunID == "" {
 		return
@@ -512,6 +537,12 @@ func (m *Manager) startReaper(ctx context.Context) error {
 	reaper.SetWaitingDecisionRecoverer(m.recoverWaitingDecision)
 	reaper.SetTerminalObserver(m.observeTerminalRun)
 	reaper.SetTerminalReconciler(m.reconcileTerminalRuns)
+	m.mu.Lock()
+	continuationRecoverer := m.continuationRecoverer
+	queueRunRecoverer := m.queueRunRecoverer
+	m.mu.Unlock()
+	reaper.SetContinuationRecoverer(continuationRecoverer)
+	reaper.SetQueueRunRecoverer(queueRunRecoverer)
 	if err := reaper.Start(ctx); err != nil {
 		return err
 	}
@@ -605,6 +636,90 @@ func (m *Manager) StartRunHandle(ctx context.Context, botID, sessionID, runID st
 	return m.StartRunWithAdmissionBuilderHandle(ctx, botID, sessionID, runID, func(context.Context, RunHandle) (RunAdmissionView, error) {
 		return RunAdmissionView{}, nil
 	}, abortCh, cancel, injectCh)
+}
+
+// StartExistingRun claims an already-created durable run (currently used for
+// ownerless follow-up continuations). The caller must have conditionally
+// acquired the run's database owner/fencing token first; this method only
+// establishes the local runtime control and distributed projection.
+func (m *Manager) StartExistingRun(ctx context.Context, handle RunHandle, builder func(context.Context, RunHandle) (RunAdmissionView, error), ownershipCancel context.CancelCauseFunc, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- turn.InjectMessage) (RunHandle, error) {
+	if handle.BotID == "" || handle.SessionID == "" || handle.RunID == "" || handle.FencingToken <= 0 {
+		return RunHandle{}, errors.New("existing run handle is incomplete")
+	}
+	if strings.TrimSpace(handle.OwnerID) == "" || strings.TrimSpace(handle.OwnerID) != m.ownerID {
+		return RunHandle{}, ErrRunOwnershipLost
+	}
+	result, _, err := m.startRun(ctx, runStart{
+		botID: handle.BotID, sessionID: handle.SessionID, runID: handle.RunID,
+		fencingToken: handle.FencingToken, turnID: handle.TurnID,
+		builder: builder, ownershipCancel: ownershipCancel,
+		abortCh: abortCh, cancel: cancel, injectCh: injectCh,
+	})
+	return result, err
+}
+
+// WaitRunRelease waits until the named run no longer occupies the session's
+// authoritative live slot. Queue continuations use this after their database
+// handoff commits: the durable parent may already be terminal while its final
+// runtime event and local control are still being released.
+func (m *Manager) WaitRunRelease(ctx context.Context, botID, sessionID, runID string) error {
+	if m == nil || m.backend == nil {
+		return ErrManagerClosed
+	}
+	botID = strings.TrimSpace(botID)
+	sessionID = strings.TrimSpace(sessionID)
+	runID = strings.TrimSpace(runID)
+	if botID == "" || sessionID == "" || runID == "" {
+		return errors.New("bot_id, session_id, and run_id are required")
+	}
+	sub, err := m.Subscribe(ctx, botID, sessionID)
+	if err != nil {
+		return err
+	}
+	defer sub.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-sub.C:
+			if !ok {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return ErrManagerClosed
+			}
+			snapshot := event.Snapshot
+			if snapshot == nil {
+				currentSnapshot, err := m.Snapshot(ctx, botID, sessionID)
+				if err != nil {
+					return err
+				}
+				snapshot = &currentSnapshot
+			}
+			current := snapshot.CurrentRunView
+			if current == nil || current.RunID != runID || !isActiveRunStatus(current.Status) {
+				return nil
+			}
+		}
+	}
+}
+
+// OwnerID returns this manager's stable execution-owner identity.
+func (m *Manager) OwnerID() string {
+	if m == nil {
+		return ""
+	}
+	return m.ownerID
+}
+
+// LivenessGeneration returns the current live-backend incarnation for
+// application-owned recovery code. It is read-only; ownership still changes
+// only through the durable fenced claim.
+func (m *Manager) LivenessGeneration(ctx context.Context) (string, error) {
+	if m == nil {
+		return "", ErrManagerClosed
+	}
+	return m.livenessGeneration(ctx)
 }
 
 // StartRunWithAdmissionBuilderHandle reserves the cross-server run before
@@ -711,7 +826,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 	ctx = admissionCtx
 
 	runGeneration := m.newGeneration()
-	handle := RunHandle{BotID: botID, SessionID: sessionID, RunID: runID, TurnID: start.turnID, Generation: runGeneration, FencingToken: start.fencingToken}
+	handle := RunHandle{BotID: botID, SessionID: sessionID, RunID: runID, OwnerID: m.ownerID, TurnID: start.turnID, Generation: runGeneration, FencingToken: start.fencingToken}
 	if handle.FencingToken > 0 {
 		ctx = runtimefence.WithContext(ctx, runtimefence.Fence{
 			BotID:     handle.BotID,
@@ -724,6 +839,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		botID:           botID,
 		sessionID:       sessionID,
 		runID:           runID,
+		ownerID:         m.ownerID,
 		turnID:          start.turnID,
 		generation:      runGeneration,
 		fencingToken:    start.fencingToken,
@@ -928,6 +1044,12 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		run.Status = RunStatusRunning
 		run.RequestUserTurn = admission.RequestUserTurn
 		run.Operation = admission.Operation
+		switch {
+		case admission.RequestUserTurn != nil:
+			run.UserTurns = []chatview.UITurn{*admission.RequestUserTurn}
+		case admission.Operation != nil && admission.Operation.ReplacementUserTurn != nil:
+			run.UserTurns = []chatview.UITurn{*admission.Operation.ReplacementUserTurn}
+		}
 		run.UpdatedAt = now
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {

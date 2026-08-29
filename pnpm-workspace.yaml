@@ -5,6 +5,7 @@ packages:
 allowBuilds:
   electron-winstaller: true
   esbuild: true
+  protobufjs: set this to true or false
   sharp: true
   vue-demi: true
 

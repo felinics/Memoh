@@ -733,26 +733,74 @@ type SearchProvider struct {
 	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
+type SessionFollowUpQueue struct {
+	ItemID              pgtype.UUID        `json:"item_id"`
+	TeamID              pgtype.UUID        `json:"team_id"`
+	BotID               pgtype.UUID        `json:"bot_id"`
+	SessionID           pgtype.UUID        `json:"session_id"`
+	EnqueuedDuringRunID pgtype.UUID        `json:"enqueued_during_run_id"`
+	AssignedRunID       pgtype.UUID        `json:"assigned_run_id"`
+	InvocationID        string             `json:"invocation_id"`
+	Payload             []byte             `json:"payload"`
+	Status              string             `json:"status"`
+	Position            int64              `json:"position"`
+	ClaimRunID          pgtype.UUID        `json:"claim_run_id"`
+	ClaimOwnerID        pgtype.Text        `json:"claim_owner_id"`
+	ClaimFencingToken   pgtype.Int8        `json:"claim_fencing_token"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SessionQueueStepCommit struct {
+	TeamID            pgtype.UUID        `json:"team_id"`
+	RunID             pgtype.UUID        `json:"run_id"`
+	StepIndex         int64              `json:"step_index"`
+	CommitHash        string             `json:"commit_hash"`
+	Action            string             `json:"action"`
+	SteerItemID       pgtype.UUID        `json:"steer_item_id"`
+	FollowUpItemID    pgtype.UUID        `json:"follow_up_item_id"`
+	ContinuationRunID pgtype.UUID        `json:"continuation_run_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type SessionRun struct {
-	RunID            pgtype.UUID        `json:"run_id"`
-	TeamID           pgtype.UUID        `json:"team_id"`
-	BotID            pgtype.UUID        `json:"bot_id"`
-	SessionID        pgtype.UUID        `json:"session_id"`
-	InvocationID     string             `json:"invocation_id"`
-	TurnID           pgtype.UUID        `json:"turn_id"`
-	TurnPosition     int64              `json:"turn_position"`
-	State            string             `json:"state"`
-	InputJson        []byte             `json:"input_json"`
-	InputFingerprint string             `json:"input_fingerprint"`
-	OwnerID          pgtype.Text        `json:"owner_id"`
-	FencingToken     int64              `json:"fencing_token"`
-	OwnerSince       pgtype.Timestamptz `json:"owner_since"`
-	LiveGeneration   pgtype.Text        `json:"live_generation"`
-	AbortRequestedAt pgtype.Timestamptz `json:"abort_requested_at"`
-	ErrorCode        pgtype.Text        `json:"error_code"`
-	ErrorMessage     pgtype.Text        `json:"error_message"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	RunID                pgtype.UUID        `json:"run_id"`
+	TeamID               pgtype.UUID        `json:"team_id"`
+	BotID                pgtype.UUID        `json:"bot_id"`
+	SessionID            pgtype.UUID        `json:"session_id"`
+	InvocationID         string             `json:"invocation_id"`
+	TurnID               pgtype.UUID        `json:"turn_id"`
+	TurnPosition         int64              `json:"turn_position"`
+	State                string             `json:"state"`
+	InputJson            []byte             `json:"input_json"`
+	InputFingerprint     string             `json:"input_fingerprint"`
+	OwnerID              pgtype.Text        `json:"owner_id"`
+	FencingToken         int64              `json:"fencing_token"`
+	OwnerSince           pgtype.Timestamptz `json:"owner_since"`
+	LiveGeneration       pgtype.Text        `json:"live_generation"`
+	SourceFollowUpItemID pgtype.UUID        `json:"source_follow_up_item_id"`
+	AbortRequestedAt     pgtype.Timestamptz `json:"abort_requested_at"`
+	ErrorCode            pgtype.Text        `json:"error_code"`
+	ErrorMessage         pgtype.Text        `json:"error_message"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SessionSteerQueue struct {
+	ItemID            pgtype.UUID        `json:"item_id"`
+	TeamID            pgtype.UUID        `json:"team_id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	SessionID         pgtype.UUID        `json:"session_id"`
+	TargetRunID       pgtype.UUID        `json:"target_run_id"`
+	InvocationID      string             `json:"invocation_id"`
+	Payload           []byte             `json:"payload"`
+	Status            string             `json:"status"`
+	Position          int64              `json:"position"`
+	ClaimRunID        pgtype.UUID        `json:"claim_run_id"`
+	ClaimOwnerID      pgtype.Text        `json:"claim_owner_id"`
+	ClaimFencingToken pgtype.Int8        `json:"claim_fencing_token"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Snapshot struct {

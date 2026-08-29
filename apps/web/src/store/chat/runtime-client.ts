@@ -112,22 +112,25 @@ export function createRuntimeClient({ send, onProjection, scheduleFrame }: Runti
   const pendingDeltaBatches = new Map<string, PendingDeltaBatch>()
   let flushScheduled = false
 
-  function flushDeltaBatches() {
-    const batches = [...pendingDeltaBatches.entries()]
-    pendingDeltaBatches.clear()
-    for (const [sid, batch] of batches) {
-      if (!subscriptions.has(sid)) continue
-      const current: RuntimeProjectionState = {
-        ...batch.base,
-        sessionId: sid,
-        epoch: batch.epoch,
-        seq: batch.seq,
-        currentRunView: batch.currentRunView,
-        transcript: projectRuntimeTranscript(batch.currentRunView),
-      }
-      projections.set(sid, current)
-      onProjection(sid, { previous: batch.base, current, event: batch.lastEvent })
+  function flushDeltaBatch(sid: string) {
+    const batch = pendingDeltaBatches.get(sid)
+    if (!batch) return
+    pendingDeltaBatches.delete(sid)
+    if (!subscriptions.has(sid)) return
+    const current: RuntimeProjectionState = {
+      ...batch.base,
+      sessionId: sid,
+      epoch: batch.epoch,
+      seq: batch.seq,
+      currentRunView: batch.currentRunView,
+      transcript: projectRuntimeTranscript(batch.currentRunView),
     }
+    projections.set(sid, current)
+    onProjection(sid, { previous: batch.base, current, event: batch.lastEvent })
+  }
+
+  function flushDeltaBatches() {
+    for (const sid of pendingDeltaBatches.keys()) flushDeltaBatch(sid)
   }
 
   function scheduleDeltaFlush() {
@@ -187,6 +190,16 @@ export function createRuntimeClient({ send, onProjection, scheduleFrame }: Runti
       seq: event.seq,
       lastEvent: event,
     })
+    // Queue input admission is a render boundary. A continuation's follow-up
+    // prompt is carried in request_user_turn; steers and persisted queue turns
+    // arrive as upserts. All must be visible before any model output delta,
+    // even when the model responds within the same animation frame.
+    if (event.delta.current_run_view?.request_user_turn
+      || (event.delta.user_turn_upserts?.length ?? 0) > 0
+      || (event.delta.steer_turn_upserts?.length ?? 0) > 0) {
+      flushDeltaBatch(sid)
+      return
+    }
     scheduleDeltaFlush()
   }
 
