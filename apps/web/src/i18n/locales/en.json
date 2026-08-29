@@ -2635,6 +2635,8 @@
       "acpClaudeOAuthCodeRequired": "Paste the Claude authorization code.",
       "acpClaudeOAuthExchange": "Save Token",
       "acpClaudeOAuthExchangeFailed": "Failed to save Claude token",
+      "acpCredentialTestHint": "Verify the saved API key against the provider endpoint.",
+      "acpCredentialTestOk": "Credentials verified · {latency}ms",
       "acpSelfModeHint": "Uses the Agent you've already configured inside the workspace runtime (e.g. an existing login).",
       "acpHermesSelfModeHint": "Uses the Hermes profile already configured in this workspace. Use API Key setup for Memoh-managed bot credentials.",
       "acpHermesSelfModeConfirm": "Use self-managed Hermes",

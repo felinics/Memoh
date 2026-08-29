@@ -313,7 +313,12 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	}
 
 	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
+	return TestSDKProvider(ctx, sdkProvider), nil
+}
 
+// TestSDKProvider probes an already-constructed SDK provider using the same
+// model-list semantics as Service.Test.
+func TestSDKProvider(ctx context.Context, sdkProvider sdk.Provider) TestResponse {
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
 	message := providerTestMessage(result)
@@ -325,7 +330,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Reachable: false,
 			LatencyMs: time.Since(start).Milliseconds(),
 			Message:   message,
-		}, nil
+		}
 	case sdk.ProviderStatusUnhealthy:
 		if strings.Contains(result.Message, "authentication failed") {
 			return TestResponse{
@@ -333,22 +338,45 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 				Reachable: true,
 				LatencyMs: time.Since(start).Milliseconds(),
 				Message:   message,
-			}, nil
+			}
 		}
 		return TestResponse{
 			Status:    TestStatusUnverified,
 			Reachable: true,
 			LatencyMs: time.Since(start).Milliseconds(),
 			Message:   message,
-		}, nil
+		}
 	default:
 		return TestResponse{
 			Status:    TestStatusOK,
 			Reachable: true,
 			LatencyMs: time.Since(start).Milliseconds(),
 			Message:   result.Message,
-		}, nil
+		}
 	}
+}
+
+// TestSDKCredentials verifies credentials more strictly than the provider UI
+// probe. Some compatible endpoints expose the model list without requiring
+// authentication, so a synthetic model request is used only to surface an
+// authentication failure; model-not-found and other availability errors do
+// not invalidate an otherwise reachable credential endpoint.
+func TestSDKCredentials(ctx context.Context, sdkProvider sdk.Provider) TestResponse {
+	start := time.Now()
+	resp := TestSDKProvider(ctx, sdkProvider)
+	if resp.Status != TestStatusOK {
+		return resp
+	}
+	if _, err := sdkProvider.TestModel(ctx, "__ping__"); err != nil && strings.Contains(err.Error(), "authentication failed") {
+		return TestResponse{
+			Status:    TestStatusAuthError,
+			Reachable: true,
+			LatencyMs: time.Since(start).Milliseconds(),
+			Message:   err.Error(),
+		}
+	}
+	resp.LatencyMs = time.Since(start).Milliseconds()
+	return resp
 }
 
 // errorDetailer is implemented by transport errors that can expand into a

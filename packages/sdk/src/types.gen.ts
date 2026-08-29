@@ -4624,6 +4624,44 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses = {
 
 export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses];
 
+export type PostBotsByBotIdAcpAgentsByAgentIdCredentialsTestData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * ACP agent ID
+         */
+        agent_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp/agents/{agent_id}/credentials/test';
+};
+
+export type PostBotsByBotIdAcpAgentsByAgentIdCredentialsTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdAcpAgentsByAgentIdCredentialsTestError = PostBotsByBotIdAcpAgentsByAgentIdCredentialsTestErrors[keyof PostBotsByBotIdAcpAgentsByAgentIdCredentialsTestErrors];
+
+export type PostBotsByBotIdAcpAgentsByAgentIdCredentialsTestResponses = {
+    /**
+     * OK
+     */
+    200: ProvidersTestResponse;
+};
+
+export type PostBotsByBotIdAcpAgentsByAgentIdCredentialsTestResponse = PostBotsByBotIdAcpAgentsByAgentIdCredentialsTestResponses[keyof PostBotsByBotIdAcpAgentsByAgentIdCredentialsTestResponses];
+
 export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeData = {
     body?: never;
     path: {

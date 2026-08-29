@@ -2635,6 +2635,8 @@
       "acpClaudeOAuthCodeRequired": "请粘贴 Claude 授权码。",
       "acpClaudeOAuthExchange": "保存 Token",
       "acpClaudeOAuthExchangeFailed": "保存 Claude Token 失败",
+      "acpCredentialTestHint": "验证已保存的 API Key 能否连通上游端点。",
+      "acpCredentialTestOk": "验证通过 · {latency}ms",
       "acpSelfModeHint": "该模式直接使用工作区运行环境里你已配置好的 Agent（例如已登录的凭据）。",
       "acpHermesSelfModeHint": "该模式直接使用当前工作区里已配置好的 Hermes Profile。如需由 Memoh 管理 Bot 凭据，请使用 API Key 配置。",
       "acpHermesSelfModeConfirm": "使用自行配置的 Hermes",

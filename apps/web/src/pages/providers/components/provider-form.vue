@@ -368,6 +368,7 @@ import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, DeviceCodePanel, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { formatProbeError } from '@/utils/probe-error'
 import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 
 const { t } = useI18n()
@@ -432,26 +433,8 @@ const cacheDescription = computed(() =>
     : t('provider.promptCache.description'),
 )
 
-function truncateError(text: string): string {
-  const max = 220
-  return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text
-}
-
-// The probe detail can embed the raw upstream response inside `[body: …]`. When
-// a Base URL points at a website instead of an API the body is a full HTML page;
-// its visible text is page prose ("Example Domain … Learn more"), never an
-// actionable API error — and stripping tags leaves dead, unclickable text. Drop
-// HTML bodies entirely and keep only the status head; non-HTML bodies (real
-// JSON API errors) are still shown.
 function formatTestError(raw: string | undefined): string {
-  const text = (raw ?? '').trim()
-  if (!text) return t('provider.unreachable')
-  const bodyStart = text.indexOf('[body:')
-  if (bodyStart === -1) return truncateError(text)
-  const head = text.slice(0, bodyStart).trim()
-  const body = text.slice(bodyStart + '[body:'.length).replace(/\]\s*$/, '').trim()
-  if (/<!doctype|<\/?[a-z][^>]*>/i.test(body)) return truncateError(head)
-  return truncateError(body ? `${head} · ${body}` : head)
+  return formatProbeError(raw, t('provider.unreachable'))
 }
 
 async function runTest() {

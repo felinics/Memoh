@@ -6894,6 +6894,37 @@ paths:
       summary: Set an ACP runtime's reasoning effort
       tags:
       - acp
+  /bots/{bot_id}/acp/agents/{agent_id}/credentials/test:
+    post:
+      description: Probe the provider endpoint behind an ACP agent's API key setup
+        to verify reachability and authentication without starting the agent
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: ACP agent ID
+        in: path
+        name: agent_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/providers.TestResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Test ACP agent managed API key credentials
+      tags:
+      - acp
   /bots/{bot_id}/acp/claude-code/oauth/authorize:
     get:
       parameters:

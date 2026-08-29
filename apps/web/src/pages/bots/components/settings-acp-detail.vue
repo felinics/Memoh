@@ -35,6 +35,29 @@
           @field-commit="commitForm"
         />
 
+        <div
+          v-if="credentialTestVisible"
+          class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p
+            class="min-w-0 flex-1 break-words text-sm"
+            :class="credentialTestError ? 'text-destructive' : 'text-muted-foreground'"
+          >
+            {{ credentialTestText }}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            :disabled="!credentialTestReady"
+            :loading="testingCredentials"
+            @click="runCredentialTest"
+          >
+            {{ $t('provider.testConnection') }}
+          </Button>
+        </div>
+
         <p
           v-else-if="agent.setup_mode === 'self'"
           class="break-words text-sm text-muted-foreground"
@@ -234,7 +257,9 @@ import {
 } from '@felinic/ui'
 import { KeyRound } from 'lucide-vue-next'
 import {
+  postBotsByBotIdAcpAgentsByAgentIdCredentialsTest,
   type AcpprofilePublicProfile,
+  type ProvidersTestResponse,
 } from '@memohai/sdk'
 import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useAcpSetupModeItems } from '@/composables/useAcpSetupModeItems'
@@ -252,6 +277,8 @@ import {
   type ACPForm,
 } from '@/utils/acp'
 import { filterSettingsVisibleManagedFields } from '@/utils/acp/setup-fields'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { formatProbeError } from '@/utils/probe-error'
 import AcpManagedFields from './acp-managed-fields.vue'
 
 const props = defineProps<{
@@ -308,6 +335,47 @@ const selfModeHint = computed(() => isHermes.value
 const visibleManagedFields = computed(() =>
   filterSettingsVisibleManagedFields(props.profile, agent.value.managed, agent.value.setup_mode),
 )
+
+const testingCredentials = ref(false)
+const credentialTestResult = ref<ProvidersTestResponse | null>(null)
+const credentialTestError = ref('')
+const credentialTestVisible = computed(() =>
+  (isCodex.value || isClaude.value) && agent.value.setup_mode === 'api_key',
+)
+const credentialTestReady = computed(() => !!agent.value.managed.api_key?.trim())
+const credentialTestText = computed(() => {
+  if (credentialTestError.value) return credentialTestError.value
+  if (credentialTestResult.value?.status === 'ok') {
+    return t('bots.settings.acpCredentialTestOk', { latency: credentialTestResult.value.latency_ms ?? 0 })
+  }
+  return t('bots.settings.acpCredentialTestHint')
+})
+
+async function runCredentialTest() {
+  if (!credentialTestReady.value || testingCredentials.value) return
+  testingCredentials.value = true
+  credentialTestResult.value = null
+  credentialTestError.value = ''
+  try {
+    const { data } = await postBotsByBotIdAcpAgentsByAgentIdCredentialsTest({
+      path: { bot_id: props.botId, agent_id: props.profile.id },
+      throwOnError: true,
+    })
+    credentialTestResult.value = data ?? null
+    if (data?.status !== 'ok') {
+      credentialTestError.value = formatProbeError(data?.message, t('provider.unreachable'))
+    }
+  } catch (err: unknown) {
+    credentialTestError.value = resolveApiErrorMessage(err, t('provider.testFailed'))
+  } finally {
+    testingCredentials.value = false
+  }
+}
+
+watch([() => props.botId, () => props.profile.id, () => agent.value.setup_mode], () => {
+  credentialTestResult.value = null
+  credentialTestError.value = ''
+})
 
 // 只有走托管 OAuth 的两个 agent、且当前就在 OAuth 模式时,账号卡片才有存在意义。
 const oauthSectionVisible = computed(() =>
