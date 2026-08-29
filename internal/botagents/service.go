@@ -54,9 +54,10 @@ type transactionalQueries interface {
 }
 
 type Service struct {
-	queries  queries
-	logger   *slog.Logger
-	releaser credentialReleaser
+	queries              queries
+	logger               *slog.Logger
+	releaser             credentialReleaser
+	credentialStoreReady func() bool
 }
 
 // credentialReleaser revokes a credential that lost its referencing Agent row,
@@ -71,6 +72,27 @@ func (s *Service) SetCredentialReleaser(releaser credentialReleaser) {
 	if s != nil {
 		s.releaser = releaser
 	}
+}
+
+// SetCredentialStoreProbe reports whether the encrypted credential store can
+// decrypt at runtime. Preflight only lets an attached credential satisfy
+// secret fields while that holds: after a restart without the encryption key
+// the metadata secrets are already scrubbed, and passing preflight would just
+// move the failure to the first runtime start.
+func (s *Service) SetCredentialStoreProbe(probe func() bool) {
+	if s != nil {
+		s.credentialStoreReady = probe
+	}
+}
+
+func (s *Service) storeReady() bool {
+	return s != nil && s.credentialStoreReady != nil && s.credentialStoreReady()
+}
+
+// ValidateConfiguration is the credential-store-aware preflight; see the
+// package-level ValidateConfigurationWithStore for the pure form.
+func (s *Service) ValidateConfiguration(agent BotAgent, botMetadata map[string]any) error {
+	return ValidateConfigurationWithStore(agent, botMetadata, s.storeReady())
 }
 
 func NewService(log *slog.Logger, q queries) *Service {
@@ -302,10 +324,11 @@ func DescriptorFor(agent BotAgent) (Descriptor, error) {
 	return Descriptor{BotAgentID: agent.ID, Runtime: runtime, Provider: provider}, nil
 }
 
-// ValidateConfiguration validates the shared per-provider bot metadata without
-// consulting the legacy metadata enabled flag. BotAgent.Enabled is now the
-// availability source of truth.
-func ValidateConfiguration(agent BotAgent, botMetadata map[string]any) error {
+// ValidateConfigurationWithStore validates the shared per-provider bot
+// metadata without consulting the legacy metadata enabled flag.
+// BotAgent.Enabled is the availability source of truth. credentialStoreReady
+// gates whether an attached credential may satisfy the secret fields.
+func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, credentialStoreReady bool) error {
 	descriptor, err := DescriptorFor(agent)
 	if err != nil {
 		return err
@@ -318,7 +341,7 @@ func ValidateConfiguration(agent BotAgent, botMetadata map[string]any) error {
 		return ErrInvalidMetadata
 	}
 	setup := acpprofile.ParseAgentSetup(botMetadata, descriptor.Provider)
-	if agent.AgentCredentialID != "" {
+	if agent.AgentCredentialID != "" && credentialStoreReady {
 		// An attached encrypted credential supplies the secret fields only —
 		// the store scrubs api_key/oauth_token out of bot metadata on save, so
 		// the metadata-only preflight would reject every connected Agent.

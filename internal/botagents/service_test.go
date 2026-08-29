@@ -240,18 +240,25 @@ func TestValidateConfigurationCredentialSuppliesOnlySecrets(t *testing.T) {
 		"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"provider": "gemini"},
 	}}}}
 	var configErr *ConfigurationError
-	if err := ValidateConfiguration(hermes, incomplete); !errors.As(err, &configErr) || configErr.Field != "model" {
+	if err := ValidateConfigurationWithStore(hermes, incomplete, true); !errors.As(err, &configErr) || configErr.Field != "model" {
 		t.Fatalf("ValidateConfiguration(missing model) = %v, want ConfigurationError{model}", err)
 	}
 	complete := map[string]any{"acp": map[string]any{"agents": map[string]any{"hermes": map[string]any{
 		"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"provider": "gemini", "model": "gemini-3.5-flash"},
 	}}}}
-	if err := ValidateConfiguration(hermes, complete); err != nil {
+	if err := ValidateConfigurationWithStore(hermes, complete, true); err != nil {
 		t.Fatalf("ValidateConfiguration(credential supplies api_key) = %v, want nil", err)
 	}
 	// Without a credential the secret requirement stays enforced.
 	hermes.AgentCredentialID = ""
-	if err := ValidateConfiguration(hermes, complete); !errors.As(err, &configErr) || configErr.Field != "api_key" {
+	if err := ValidateConfigurationWithStore(hermes, complete, true); !errors.As(err, &configErr) || configErr.Field != "api_key" {
 		t.Fatalf("ValidateConfiguration(no credential) = %v, want ConfigurationError{api_key}", err)
+	}
+	// An attached credential cannot satisfy anything while the store cannot
+	// decrypt (e.g. the encryption key was removed): the runtime would fail
+	// on the missing secret, so preflight must fail first.
+	hermes.AgentCredentialID = "c0000000-0000-4000-8000-000000000001"
+	if err := ValidateConfigurationWithStore(hermes, complete, false); !errors.As(err, &configErr) || configErr.Field != "api_key" {
+		t.Fatalf("ValidateConfiguration(store unavailable) = %v, want ConfigurationError{api_key}", err)
 	}
 }

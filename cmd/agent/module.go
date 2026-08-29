@@ -88,7 +88,7 @@ func commonOptions() fx.Option {
 			provideServerHandler(handlers.NewBotRemoteRuntimeHandler),
 			provideServerHandler(handlers.NewWorkdirHandler),
 			provideServerHandler(handlers.NewACPHandler),
-			provideServerHandler(handlers.NewACPRuntimeHandler),
+			provideServerHandler(provideACPRuntimeHandler),
 			provideServerHandler(handlers.NewAgentCredentialHandler),
 			provideServerHandler(handlers.NewSwaggerHandler),
 			provideServerHandler(handlers.NewProvidersHandler),

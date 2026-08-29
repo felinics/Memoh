@@ -210,7 +210,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 			}
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
 		}
-		if configErr := botagents.ValidateConfiguration(agent, bot.Metadata); configErr != nil {
+		if configErr := h.botAgents.ValidateConfiguration(agent, bot.Metadata); configErr != nil {
 			if publicErr := botAgentHTTPError(configErr); publicErr != nil {
 				return publicErr
 			}
@@ -756,7 +756,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
 			}
-			if configErr := botagents.ValidateConfiguration(agent, bot.Metadata); configErr != nil {
+			if configErr := h.botAgents.ValidateConfiguration(agent, bot.Metadata); configErr != nil {
 				if publicErr := botAgentHTTPError(configErr); publicErr != nil {
 					return publicErr
 				}
@@ -1074,7 +1074,7 @@ func validateACPCreate(bot bots.Bot, metadata map[string]any) error {
 	if sessionMetadataString(metadata, "project_path") == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, session.ErrACPProjectPathMissing.Error())
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, agentID); err != nil {
+	if err := acpAgentSetupHTTPError(bot.Metadata, agentID, false); err != nil {
 		return err
 	}
 	return nil

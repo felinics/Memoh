@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -59,7 +60,11 @@ func acpNoWorkspaceExecFeedback(reason, message string) *acpfeedback.Error {
 	)
 }
 
-func acpAgentSetupHTTPError(metadata map[string]any, agentID string) error {
+// acpAgentSetupHTTPError validates the agent's managed setup from bot
+// metadata. credentialAttached lets an encrypted instance credential satisfy
+// the secret fields (api_key/oauth_token) only; non-secret required fields
+// must still come from metadata.
+func acpAgentSetupHTTPError(metadata map[string]any, agentID string, credentialAttached bool) error {
 	profile, ok := acpprofile.Lookup(agentID)
 	if !ok {
 		feedback := acpfeedback.New(
@@ -83,6 +88,18 @@ func acpAgentSetupHTTPError(metadata map[string]any, agentID string) error {
 			map[string]string{"agent_id": agentID},
 		)
 		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+	}
+	if credentialAttached {
+		managed := make(map[string]string, len(setup.Managed)+2)
+		for key, value := range setup.Managed {
+			managed[key] = value
+		}
+		for _, secretField := range []string{"api_key", "oauth_token"} {
+			if strings.TrimSpace(managed[secretField]) == "" {
+				managed[secretField] = "credential-store" //nolint:gosec // Preflight marker, not a credential value.
+			}
+		}
+		setup.Managed = managed
 	}
 	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
 		feedback := acpfeedback.New(

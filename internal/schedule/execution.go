@@ -160,7 +160,7 @@ func (s *Service) resolveBotAgentExecution(ctx context.Context, botID string, ex
 			return ExecutionConfig{}, err
 		}
 	}
-	if err := botagents.ValidateConfiguration(agent, metadata); err != nil {
+	if err := s.botAgents.ValidateConfiguration(agent, metadata); err != nil {
 		return ExecutionConfig{}, err
 	}
 	descriptor, err := botagents.DescriptorFor(agent)

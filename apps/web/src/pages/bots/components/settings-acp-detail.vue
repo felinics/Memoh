@@ -323,6 +323,9 @@ const claudeOAuthCode = ref('')
 const { setupModeItems } = useAcpSetupModeItems(() => props.profile)
 const credentialSecret = ref('')
 const savingCredential = ref(false)
+// PUT 刚成功、异步查询还没回填时，commitForm 的守卫需要立刻知道凭据已挂上，
+// 否则 self→api_key 的模式切换永远提交不出去（服务端一直停留在 self）。
+const credentialJustAttached = ref(false)
 const {
   codexStatus: codexOAuthStatus,
   codexStatusLoading: codexOAuthStatusLoading,
@@ -386,7 +389,12 @@ async function saveAPIKeyCredential() {
       throwOnError: true,
     })
     credentialSecret.value = ''
+    credentialJustAttached.value = true
+    // 持久化当前的 setup_mode（此前因缺密钥被守卫拦下），并刷新实例状态，
+    // 否则服务端仍是 self，运行时会跳过凭据解析。
+    commitForm()
     await queryCache.invalidateQueries({ key: credentialQueryKey.value })
+    await queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
     toast.success(t('bots.settings.agentCredentialSaved'))
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
@@ -398,6 +406,7 @@ async function saveAPIKeyCredential() {
 async function disconnectCredential() {
   if (!botAgentId.value) return
   savingCredential.value = true
+  credentialJustAttached.value = false
   try {
     await deleteBotsByBotIdAgentsByIdCredential({
       path: { bot_id: props.botId, id: botAgentId.value },
@@ -433,7 +442,8 @@ const oauthSectionVisible = computed(() =>
 )
 
 function commitForm() {
-  if (agent.value.enabled && findMissingRequiredManagedFieldWithCredential(props.profile, agent.value.managed, agent.value.setup_mode, !!(attachedCredential.value || props.agent?.agent_credential_id))) {
+  const credentialAttached = credentialJustAttached.value || !!(attachedCredential.value || props.agent?.agent_credential_id)
+  if (agent.value.enabled && findMissingRequiredManagedFieldWithCredential(props.profile, agent.value.managed, agent.value.setup_mode, credentialAttached)) {
     return
   }
   emit('commit')
