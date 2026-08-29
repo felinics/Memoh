@@ -18,7 +18,9 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		dsn := teamMigrationDSN(t)
 		pool := freshMigratedDB(t)
 
-		stepDown(t, dsn, 1)
+		// Cross everything from 0141 up so later migrations (0142 Agent
+		// credentials, ...) never silently shrink the descent.
+		stepDown(t, dsn, countMigrationsFrom(t, "0141_bot_agents.up.sql"))
 		assertBotAgentsSchema(t, ctx, pool, false)
 
 		const (

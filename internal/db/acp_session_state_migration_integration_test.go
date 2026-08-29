@@ -19,10 +19,11 @@ func TestACPSessionStateMigrationAndCanonicalSchema(t *testing.T) {
 		assertACPSessionStateSchema(t, ctx, pool, true)
 		assertACPSessionRunCandidateIndex(t, ctx, pool, true, true)
 
-		// 0141 adds Bot Agents, 0140 removes Heartbeat, and 0139 is the reset
-		// fence. Crossing 0138 removes the ACP tables and detaches the constraint
-		// while preserving 0137's standalone index.
-		stepDown(t, dsn, 4)
+		// Crossing 0138 removes the ACP tables and detaches the constraint
+		// while preserving 0137's standalone index. Count from 0138 so later
+		// migrations never silently shrink the descent.
+		acpStateSteps := countMigrationsFrom(t, "0138_acp_session_state.up.sql")
+		stepDown(t, dsn, acpStateSteps)
 		assertACPSessionStateSchema(t, ctx, pool, false)
 		assertACPSessionRunCandidateIndex(t, ctx, pool, true, false)
 
@@ -33,7 +34,7 @@ func TestACPSessionStateMigrationAndCanonicalSchema(t *testing.T) {
 		stepUp(t, dsn, 1)
 		assertACPSessionRunCandidateIndex(t, ctx, pool, true, false)
 
-		stepUp(t, dsn, 4)
+		stepUp(t, dsn, acpStateSteps)
 		assertACPSessionStateSchema(t, ctx, pool, true)
 		assertACPSessionRunCandidateIndex(t, ctx, pool, true, true)
 	})
