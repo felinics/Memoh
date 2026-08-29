@@ -59,7 +59,9 @@ depends = [
 
 [tasks.sqlc-generate]
 description = "Generate SQL code"
-run = "sqlc generate"
+# Pinned to the same invocation CI uses; a locally installed sqlc of another
+# version silently rewrites every generated file's version stamp.
+run = "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate"
 
 [tasks.grpc-generate]
 description = "Generate internal gRPC protocol code"
